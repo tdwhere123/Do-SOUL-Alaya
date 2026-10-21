@@ -1,7 +1,7 @@
 import {
   canonicalJson, type RequestBudget, type SourceSemanticAccessPolicy, type SourceSemanticAccessSignal,
   type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticResourceLedger,
-  type SourceSemanticPreviewExtents
+  type SourceSemanticPreviewExtents, SourceSemanticAccessProfileSchema, type SourceSemanticAccessProfile
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
@@ -11,14 +11,21 @@ const SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT = "empty-interpretation-reserve-v
 
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string; access_hint?: string;
-  budget: RequestBudget; policy: SourceSemanticAccessPolicy; source_preview_extents?: SourceSemanticPreviewExtents;
-  contract?: "source-semantic-access-v2";
-}>): string {
+  budget: RequestBudget; source_preview_extents?: SourceSemanticPreviewExtents;
+}> & ({ policy: SourceSemanticAccessPolicy; contract?: "source-semantic-access-v2"; candidate_profile?: never }
+  | { candidate_profile: SourceSemanticAccessProfile; policy?: never; contract?: never })): string {
+  // Capture new profile material before validation without adding copies to the legacy path.
+  if (Object.hasOwn(input, "candidate_profile")) input = structuredClone(input);
+  const candidate = input.candidate_profile === undefined ? undefined : SourceSemanticAccessProfileSchema.parse(input.candidate_profile);
+  if (candidate !== undefined && (input.policy !== undefined || input.contract !== undefined)) {
+    throw new CoreError("VALIDATION", "candidate profile cannot accompany a legacy access policy or contract");
+  }
   return `sha256:${fieldContractSha256(canonicalJson({ original_query: input.original_query,
-    query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy,
+    query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget,
+    ...(candidate === undefined ? { policy: input.policy } : { candidate_profile: candidate }),
     ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     ...(input.source_preview_extents === undefined ? {} : { source_preview_extents: input.source_preview_extents }),
-    resource_contract: input.contract === "source-semantic-access-v2" ? "original-first-navigation-v3" :
+    resource_contract: candidate !== undefined || input.contract === "source-semantic-access-v2" ? "original-first-navigation-v3" :
       SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
 }
 

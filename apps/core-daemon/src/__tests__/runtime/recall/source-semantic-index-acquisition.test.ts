@@ -84,6 +84,8 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
     if (prepared.operation !== "prepare_query") throw new Error("MCP preparation expected");
     expect(prepared.query_handle).toBeDefined();
     expect(prepared.access?.contract).toBe("source-semantic-access-v2");
+    expect(prepared.access?.phases[0]).toBe(2);
+    expect(prepared.access?.phases[2][0]).toBe(1);
     expect(SourceSemanticAccessReceiptSchema.safeParse(prepared.access).success).toBe(true);
     expect(SourceSemanticExecutionSchema.safeParse(prepared.execution).success).toBe(true);
     expect(sourceSemanticAccessPhases(prepared.access!).acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
@@ -96,6 +98,8 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
       query_handle: prepared.query_handle, semantic_correspondences: [], budget: QUERY_BUDGET,
       output_byte_limit: 1_000_000, authorized_scopes: SCOPES });
     if (leased.operation !== "recall") throw new Error("MCP recall expected");
+    expect(leased.protocol_version).toBe(8);
+    expect(leased.index?.result_version).toBe("source-semantic-library-v6");
     expect(leased.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
     expect(leased.discovery?.access?.phases[2]).toEqual(prepared.access?.phases[2]);
     expect(sourceSemanticExecutionPhases(leased.execution).acquisition).toMatchObject({ status: "not_run" });

@@ -3,7 +3,7 @@ import { sourceSemanticLibraryRequestIdentity } from "../../../recall/runtime/so
 import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "../../../recall/conditional-field/query/source-semantic-query-admission.js";
 import { BUDGET, CLOCK, ORIGINAL, correspondenceFor, query, source } from "./source-semantic-proof-fixture.js";
 
-type Request = Parameters<typeof sourceSemanticLibraryRequestIdentity>[0];
+type Request = Extract<Parameters<typeof sourceSemanticLibraryRequestIdentity>[0], { access_policy: string }>;
 const semantics = query();
 const request: Request = {
   workspace_id: "workspace", as_of: CLOCK, authorized_scopes: ["project", "global_core"],

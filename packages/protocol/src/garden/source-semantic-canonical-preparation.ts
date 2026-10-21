@@ -3,29 +3,32 @@ import { sourceSemanticAccessPhasesWithCaptures, sourceSemanticCanonicalPhaseCap
   type sourceSemanticAccessPhases } from "./source-semantic-phase-codec.js";
 import type { SourceSemanticQueryPreparation, SourceSemanticAcquisitionPhase } from "./source-semantic-phase-semantics.js";
 import type { SourceSemanticAccessPhases, SourceSemanticCompactPreparation,
-  SourceSemanticCompactAcquisition } from "./source-semantic-phase-wire.js";
+  SourceSemanticReadableAccessPhases } from "./source-semantic-phase-wire.js";
+import type { SourceSemanticProfiledAcquisitionPhase } from "./source-semantic-access-profile.js";
 import type { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 
 type ChargeMeter = Pick<SourceSemanticResourceLedger, "charge">;
 type PhaseMeter = Pick<SourceSemanticResourceLedger, "charge" | "retain">;
 type BorrowPreparation = (expected: SourceSemanticCompactPreparation) => SourceSemanticQueryPreparation | undefined;
-type BorrowAcquisition = (expected: SourceSemanticCompactAcquisition) => SourceSemanticAcquisitionPhase | undefined;
+type Acquisition<P extends SourceSemanticReadableAccessPhases> = P extends SourceSemanticAccessPhases
+  ? SourceSemanticAcquisitionPhase : SourceSemanticProfiledAcquisitionPhase;
+type BorrowAcquisition<P extends SourceSemanticReadableAccessPhases> = (expected: P[2]) => Acquisition<P> | undefined;
 
 /** Exported internal-consumer source API. No wire, retained lease or digest authority. */
-export interface PreparedSourceSemanticCanonicalSubtrees {
-  accessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter: PhaseMeter): ReturnType<typeof sourceSemanticAccessPhases>;
+export interface PreparedSourceSemanticCanonicalSubtrees<P extends SourceSemanticReadableAccessPhases = SourceSemanticAccessPhases> {
+  accessPhases(access: Readonly<{ phases: P }>, meter: PhaseMeter): Omit<ReturnType<typeof sourceSemanticAccessPhases>, "acquisition"> & { acquisition: Acquisition<P> };
   quote(value: unknown, execution: ChargeMeter, planner: ChargeMeter): Iterable<number>;
   chunks(value: unknown, meter: ChargeMeter): Iterable<string>;
   close(): void;
 }
 
-class RequestCanonicalPhases implements PreparedSourceSemanticCanonicalSubtrees {
+class RequestCanonicalPhases<P extends SourceSemanticReadableAccessPhases> implements PreparedSourceSemanticCanonicalSubtrees<P> {
   private preparation?: SourceSemanticQueryPreparation;
-  private acquisition?: SourceSemanticAcquisitionPhase;
+  private acquisition?: Acquisition<P>;
   private canonical?: CanonicalJsonSubtrees;
   constructor(private compactPreparation: SourceSemanticCompactPreparation | undefined,
-    private compactAcquisition: SourceSemanticCompactAcquisition | undefined,
-    private borrowPreparation: BorrowPreparation | undefined, private borrowAcquisition: BorrowAcquisition | undefined,
+    private compactAcquisition: P[2] | undefined,
+    private borrowPreparation: BorrowPreparation | undefined, private borrowAcquisition: BorrowAcquisition<P> | undefined,
     planner: ChargeMeter) {
     // Eight reference/state slots at most. Cross-owner references are not copied trees.
     planner.charge(1, 128, "source phase canonical request record");
@@ -37,7 +40,7 @@ class RequestCanonicalPhases implements PreparedSourceSemanticCanonicalSubtrees 
     } catch (error) { this.close(); throw error; }
   }
 
-  accessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter: PhaseMeter) {
+  accessPhases(access: Readonly<{ phases: P }>, meter: PhaseMeter): ReturnType<PreparedSourceSemanticCanonicalSubtrees<P>["accessPhases"]> {
     this.assertOpen();
     meter.charge(10, 0, "source phase request binding identity checks");
     if (access.phases[1] !== this.compactPreparation || access.phases[2] !== this.compactAcquisition ||
@@ -47,7 +50,9 @@ class RequestCanonicalPhases implements PreparedSourceSemanticCanonicalSubtrees 
       // Never replace a quoted plan by a heavier, unquoted expansion at binding.
       throw new TypeError("source phase canonical preparation binding changed");
     }
-    return sourceSemanticAccessPhasesWithCaptures(access, meter, this.preparation, this.acquisition);
+    // P binds the compact discriminator to its captured semantic family above.
+    return sourceSemanticAccessPhasesWithCaptures(access, meter, this.preparation, this.acquisition) as
+      ReturnType<PreparedSourceSemanticCanonicalSubtrees<P>["accessPhases"]>;
   }
 
   quote(value: unknown, execution: ChargeMeter, planner: ChargeMeter): Iterable<number> {
@@ -75,9 +80,9 @@ class RequestCanonicalPhases implements PreparedSourceSemanticCanonicalSubtrees 
 /** Named daemon consumers must lend only actual capture/compact pairs from the codec
  * callbacks. Missing ownership or non-equivalent normal form uses ordinary expansion.
  * Plans own no meter and are sealed only by a completely consumed quotation. */
-export function prepareSourceSemanticCanonicalSubtreesForRequest(phases: SourceSemanticAccessPhases,
-  borrowPreparation: BorrowPreparation, borrowAcquisition: BorrowAcquisition,
-  planner: ChargeMeter): PreparedSourceSemanticCanonicalSubtrees {
+export function prepareSourceSemanticCanonicalSubtreesForRequest<P extends SourceSemanticReadableAccessPhases>(phases: P,
+  borrowPreparation: BorrowPreparation, borrowAcquisition: BorrowAcquisition<P>,
+  planner: ChargeMeter): PreparedSourceSemanticCanonicalSubtrees<P> {
   // Entry frame and post-census bridge slots. The request owner charges the two
   // earlier slots and the actual acquisition-borrower allocation at its call site.
   planner.charge(1, 64 + 6 * 8, "source phase canonical request bridge");

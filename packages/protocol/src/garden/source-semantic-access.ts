@@ -2,7 +2,8 @@ import { z } from "zod";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 
-import { SourceSemanticAccessPhasesSchema } from "./source-semantic-phase-wire.js";
+import { SourceSemanticAccessPhasesSchema, SourceSemanticProfiledAccessPhasesSchema } from "./source-semantic-phase-wire.js";
+import { SourceSemanticAccessProfileSchema, SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT, sourceSemanticAcquisitionMatchesProfile } from "./source-semantic-access-profile.js";
 export { SourceSemanticQueryPreparationSchema, SourceSemanticAcquisitionSchema, SourceSemanticAcquisitionPhaseSchema,
   sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation } from "./source-semantic-phase-semantics.js";
 export type { SourceSemanticQueryPreparation, SourceSemanticAcquisitionPhase } from "./source-semantic-phase-semantics.js";
@@ -51,7 +52,7 @@ export const SourceSemanticAccessSignalSchema = z.object({
 }).strict().readonly();
 
 /** Access scores are local lexical observations, never assertion or proof grades. Array order is the frozen access order. */
-export const SourceSemanticAccessReceiptSchema = z.object({
+const AccessReceipt = z.object({
   // Invariant §25: v2 required phase/provenance fields are a protocol major. Historic v1 is rejected,
   // never upgraded with missing-field defaults. Retained readers may remove that rejection at archive retirement.
   contract: z.literal("source-semantic-access-v2", {
@@ -83,7 +84,9 @@ export const SourceSemanticAccessReceiptSchema = z.object({
   unvisited_sources: z.boolean(),
   unvisited_interpretations: z.boolean(),
   stopping_reasons: z.array(SourceSemanticAccessStoppingReasonSchema).max(5).readonly()
-}).strict().readonly().superRefine((access, ctx) => {
+}).strict();
+type AccessTrace = Omit<z.infer<typeof AccessReceipt>, "contract" | "phases" | "policy">;
+function refineAccessTrace(access: AccessTrace, ctx: z.RefinementCtx): void {
   for (const source of access.source_candidates) {
     const extent = access.source_preview_extents?.find(row => row.source_id === source.source_id);
     if (access.source_preview_extents !== undefined &&
@@ -105,7 +108,20 @@ export const SourceSemanticAccessReceiptSchema = z.object({
       || access.trace.interpretation_offset + access.interpretation_candidates.length > access.observed_interpretation_count)) {
     ctx.addIssue({ code: "custom", message: "access preparation offsets exceed its observed pool" });
   }
+}
+export const SourceSemanticAccessReceiptSchema = AccessReceipt.readonly().superRefine(refineAccessTrace);
+/** Separate candidate family. The ordinary producer and public request remain on access v2. */
+export const SourceSemanticProfiledAccessReceiptSchema = AccessReceipt.omit({ contract: true, phases: true, policy: true }).extend({
+  contract: z.literal(SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT), phases: SourceSemanticProfiledAccessPhasesSchema,
+  profile: SourceSemanticAccessProfileSchema
+}).strict().readonly().superRefine(refineAccessTrace).superRefine((value, ctx) => {
+  const body = value.phases[2][2];
+  if (!sourceSemanticAcquisitionMatchesProfile(value.profile,
+    { policy: body[0], channels: body[1], declared_allowance: body[2] })) {
+    ctx.addIssue({ code: "custom", message: "access profile and acquisition declaration disagree" });
+  }
 });
+export type SourceSemanticProfiledAccessReceipt = z.infer<typeof SourceSemanticProfiledAccessReceiptSchema>;
 
 export type SourceSemanticAccessPolicy = z.infer<typeof SourceSemanticAccessPolicySchema>;
 export type SourceSemanticAccessSignal = z.infer<typeof SourceSemanticAccessSignalSchema>;

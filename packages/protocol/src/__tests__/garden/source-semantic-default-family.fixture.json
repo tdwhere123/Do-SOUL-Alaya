@@ -1,0 +1,41 @@
+{
+  "access": {
+    "contract": "source-semantic-access-v2",
+    "phases": [2, [1, ["controlled_or_scoped_access"], [0, 3, 0, null, 0]], [1, ["controlled_or_scoped_access"], [1, 0, [0, 0, 0], [0, 0], null, 2]], null],
+    "policy": "canonical-v1",
+    "input_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pool_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "observed_source_count": 0,
+    "observed_interpretation_count": 0,
+    "source_candidates": [],
+    "interpretation_candidates": [],
+    "trace": { "kind": "preparation_page", "source_offset": 0, "interpretation_offset": 0, "omitted_source_count": 0, "omitted_interpretation_count": 0 },
+    "unvisited_sources": false,
+    "unvisited_interpretations": false,
+    "stopping_reasons": []
+  },
+  "execution": [2, [1, ["controlled_or_scoped_access"], [0, 3, 0, null, 0]], [1, ["controlled_or_scoped_access"], [1, 0, [0, 0, 0], [0, 0], null, 2]]],
+  "library": {
+    "delivery_id": "delivery",
+    "request_identity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "query_semantics_status": { "status": "unavailable", "reason": "absent" },
+    "protocol_version": 8,
+    "total_count": 0,
+    "index": {
+      "schema_version": 1,
+      "query_id": "query",
+      "snapshot_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "result_version": "source-semantic-library-v6",
+      "entries": [],
+      "completeness": { "schema_version": 1, "logical_index": "complete", "observed_coverage": "complete", "transport": "complete", "payload": "complete", "representation": "complete" },
+      "continuation": null,
+      "representation": { "schema_version": 1, "policy": "construct_index_then_page_then_payload", "page_budget": 5, "identity_tie_break": "serialization" },
+      "page_purpose": "membership"
+    },
+    "page_purpose": "membership",
+    "discovery": { "eligible_source_count": 0, "visited_source_pages": 1, "visited_source_interpretation_pages": 1, "visited_source_interpretation_descriptors": 0, "candidate_prefix": [], "examined_source_interpretation_ids": [], "unexamined_source_interpretation_count": 0, "omitted_duplicate_bindings": 0, "examination_cap": 32, "open_residuals": false, "truncated": false },
+    "order": { "enumeration_policy": "evidence_support", "tie_policy": "canonical_identity", "occupancy": "source_gold_root_identity", "occupancy_prefix": 5, "page_budget": 5 },
+    "slot_qualifiers": [],
+    "source_disclosures": {}
+  }
+}

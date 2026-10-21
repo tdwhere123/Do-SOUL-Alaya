@@ -319,6 +319,21 @@ export type {
   SourceSemanticLibraryDiscovery, SourceSemanticLibraryOrder, SourceSemanticLibrarySlotQualifier
 } from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
+export { SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT, SOURCE_SEMANTIC_PROFILED_LIBRARY_RESULT_VERSION,
+  SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION, SourceSemanticEffectiveOrderSchema,
+  SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema, SourceSemanticAcquisitionAllowanceSchema,
+  SourceSemanticAccessProfileSchema, SourceSemanticNominationOccurrenceSchema, SourceSemanticProfiledAcquisitionResultSchema,
+  SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticProfiledExecutionPhasesSchema }
+  from "./garden/source-semantic-access-profile.js";
+export type { SourceSemanticAccessProfile, SourceSemanticProfiledAcquisitionPhase, SourceSemanticProfiledExecutionPhases }
+  from "./garden/source-semantic-access-profile.js";
+export { SourceSemanticProfiledLibraryContinuationSchema, SourceSemanticProfiledLibraryDeliverySchema }
+  from "./garden/source-semantic-profiled-library.js";
+export type { SourceSemanticProfiledLibraryDelivery } from "./garden/source-semantic-profiled-library.js";
+export { SourceSemanticProfiledCompactAcquisitionSchema, SourceSemanticProfiledAccessPhasesSchema,
+  SourceSemanticProfiledExecutionSchema } from "./garden/source-semantic-phase-wire.js";
+export type { SourceSemanticProfiledCompactAcquisition, SourceSemanticProfiledAccessPhases,
+  SourceSemanticProfiledExecution } from "./garden/source-semantic-phase-wire.js";
 export {
   SourceSemanticUndeliveredConclusionSchema, sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
 } from "./garden/source-semantic-reason-delivery.js";

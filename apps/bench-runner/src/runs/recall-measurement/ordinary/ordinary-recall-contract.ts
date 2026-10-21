@@ -9,7 +9,7 @@ import { isAuthorityRevision } from "../../extraction/authority/receipt.js";
 export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v1";
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
-export const RepresentationAwareRecallProtocolVersionSchema = z.enum(["18.0.0", "18.1.0", "19.0.0", "19.1.0"]);
+export const RepresentationAwareRecallProtocolVersionSchema = z.enum(["18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"]);
 export const OrdinaryRecallProtocolVersionSchema = z.enum([
   "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options
 ]);

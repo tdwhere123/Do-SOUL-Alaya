@@ -15,6 +15,20 @@ schema export helpers. It must not depend on other workspace packages.
 - `src/soul/mcp-types.ts` contains MCP tool input/output schemas.
 - `src/engine/` contains conversation engine protocol types.
 
+## Source access compatibility
+
+Protocol 20.0.0 is the explicitly versioned Source access migration major under
+[handbook invariant §25](../../docs/handbook/invariants.md). The new schemas and
+Core identity material are unwired foundations, not a default cutover. The current
+MCP/worker request and response producers still use access v2 / acquisition 1 /
+expanded execution v3 / library v6 / protocol 8. Separate profiled schemas admit
+access v3 / acquisition 2 / expanded execution v4 / library v7 / protocol 9; both
+retain outer phase/execution tuple 2. Do not dispatch by the outer version alone.
+Old schemas serve the current default until accepted cutover, not arbitrary past
+decoding. No public policy enum values or gateway tool contracts changed.
+Details and remaining bridge obligations are in the
+[handbook migration](../../docs/handbook/recall.md#versioned-source-access-foundation).
+
 ## EventLog compatibility
 
 Protocol 19.1.0 is an additive minor under [handbook invariant §25](../../docs/handbook/invariants.md).

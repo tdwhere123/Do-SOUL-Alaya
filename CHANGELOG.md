@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 19.1.0, engine gateway 2.0.0
+## Unreleased — protocol 20.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,7 +17,20 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
-Protocol 19.1.0 adds the conflict-edge deletion audit type and expands the
+Protocol 20.0.0 declares the separately versioned Source access/profile migration
+as a **major** under handbook invariant §25. Access v3, compact acquisition 2,
+expanded execution v4 and library v7 / protocol 9 have independent, correlated
+schema admission and owner-bound input/request identities. These foundations are
+unwired: no public/private request, worker propagation, acquisition, ordering or
+delivery producer selects them. Public request policies and default access v2,
+compact acquisition 1, expanded execution v3 and library v6 / protocol 8 retain
+their exact meanings and bytes. Old schemas serve the current default until an
+independently accepted, explicitly authorized cutover; this is not a generic
+historical decoder. Candidate prefix evidence is not full pool membership;
+producer witness/pool binding remains later work. App/root and gateway versions
+are unchanged. See [the migration contract](docs/handbook/recall.md#versioned-source-access-foundation).
+
+Protocol 19.1.0 added the conflict-edge deletion audit type and expands the
 EventLog payload envelope to an independent 8,388,608 serialized-character
 budget. This is a **minor**, additive protocol change under handbook invariant
 §25, not a release; app/root packages and engine gateway versions are unchanged.
@@ -29,7 +42,7 @@ See [Protocol compatibility](packages/protocol/README.md#eventlog-compatibility)
 
 Protocol 19.0.0 and engine gateway 2.0.0 declared the Source acquisition,
 phase-accounting, and SourceDisclosure compact-wire **major** under handbook
-invariant §25. Protocol is now `19.1.0`; gateway remains `2.0.0`.
+invariant §25. Protocol is now `20.0.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 

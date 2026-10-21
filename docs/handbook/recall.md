@@ -965,6 +965,67 @@ or replace utterance attribution.
 
 ## Opt-in open source semantics
 
+### Versioned source access foundation
+
+Protocol 20.0.0 declares the authorized Source access migration major under
+invariant §25. This is an **unwired schema/identity foundation**, not an executable
+candidate, default change, benefit result or release. Public MCP/worker requests
+retain exactly `query-conditioned-v1` / `canonical-v1`; no comparison labels enter
+that enum. Public response producers remain on the unchanged default family:
+
+| Surface | Current default and its named reader | Separate profiled candidate schema |
+| --- | --- | --- |
+| Access receipt | v2, current preparation/library producers | v3 |
+| Acquisition tuple | literal 1, original-first prefix semantics | literal 2, explicit acquisition policy |
+| Access/execution envelope | literal 2 | literal 2, nested-version dispatch required |
+| Expanded execution | v3 | v4 |
+| Library result/protocol | v6 / 8 | v7 / 9, correlated with candidate access/execution |
+
+The default's bytes, canonical preimages and input/library identities stay
+unchanged. Its expanded receipt does not claim grouped acquisition. Old schemas
+remain for that real default consumer until independently accepted cutover, not as
+a generic past-version decoder. Separate candidate library admission cannot
+cross-admit default access, nested acquisition or result versions. A
+`native_reasoning_only` execution describes the current request's work; retained
+candidate acquisition provenance remains in discovery independently.
+
+`SourceSemanticAccessProfileSchema` owns the initial explicit resolved profile:
+contract/result family, effective order, acquisition policy, channels and declared
+allowance. Core's existing `sourceSemanticAccessInputIdentity` and
+`sourceSemanticLibraryRequestIdentity` bind this separate material without
+redefining legacy preimages. Null is invalid. The profile is not public ingress;
+public access policy cannot accompany it. Bound-call omission/inheritance/equal
+profile/conflict normalization is later lifecycle work, not implemented here.
+
+Candidate acquisition projects at most 16 retained **occurrences**, not roots,
+with explicit prefix omissions. Attempt, retained occurrence, distinct root,
+duplicate, denial, unknown, nomination-limit and pre-/post-start refusal counts
+remain separate. Four bounded lanes distinguish absent, disabled, measured-empty,
+unavailable and captured-page progress. Native source identity, view, route and
+rank are factual; omitted, unavailable and available hit/window positions remain
+distinct, and missing lexical ranges are never invented. Captured-page exhaustion
+is not corpus exhaustion. Declared allowance remains distinct from actual funded
+phase allowance; an executed phase cannot silently downgrade it. The shared
+128-attempt / 4096-inspected-window ceilings and resource obligations are unchanged.
+Packing, expansion, resource readers, canonical capture and quotation dispatch the
+nested version before touching version-specific slots at their existing owners.
+
+No private ingress, worker propagation, acquisition/group/refill bridge, runtime
+native ordering, selection or delivery producer uses these schemas. Full retained
+producer witness and the existing access-pool preimage extension remain later
+bridge obligations: a prefix/count projection cannot reconstruct membership or
+sign a pool digest. The later proof must change occurrence/root 17 while holding
+the prefix, counts and observed pool fixed, and show changed pool/library snapshot
+identities. Native ordering must use actual captured catalog positions, preserve
+descriptor order within a record and retain `non_total` when positions are absent.
+No budget inflation or index regeneration is authorized by this code-only change.
+
+The ordinary public-capture reader explicitly admits Protocol 19 and 20's unchanged
+conditional-field source-only contract using its current compact disclosure reader;
+neither is routed through the Protocol 14–18 named-object archive adapter.
+
+### Current source-semantics implementation
+
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
 Garden v1. Protocol 13.1.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
@@ -1910,8 +1971,10 @@ The retained ordinary public-capture reader
 admits a selected, trusted local `ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
 episode and call reservations, physical MCP request/reply transcript, trusted
 handler context, source snapshot, first-exposure receipts and closed process.
-The current Protocol 17.0.0 reader accepts producer packages 14.1.0, 15.0.0,
-16.0.0 and 17.0.0 with `conditional-field-source-only-v1` semantics. The
+The current Protocol 20.0.0 reader explicitly accepts producer packages 14.1.0,
+15.0.0, 16.0.0, 17.0.0, 18.0.0, 18.1.0, 19.0.0, 19.1.0 and 20.0.0 with
+`conditional-field-source-only-v1` semantics. Protocol 19/20 retain compact
+disclosure admission, separately from the Protocol 14–18 archive adapter. The
 semantic-library capacity and query-schema changes leave this public source-only contract
 unchanged. Producer provenance
 remains immutable and separate from the current

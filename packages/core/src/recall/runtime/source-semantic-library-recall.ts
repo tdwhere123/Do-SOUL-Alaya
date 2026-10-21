@@ -9,7 +9,7 @@ import {
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
   type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
-  verifySourceSemanticLibraryDelivery
+  verifySourceSemanticLibraryDelivery, SourceSemanticAccessProfileSchema, type SourceSemanticAccessProfile
 } from "@do-soul/alaya-protocol";
 import { libraryPageOrder } from "../conditional-field/index/completion-target.js";
 import { sortIndexEntries } from "./index-continuation.js";
@@ -31,10 +31,20 @@ export function sourceSemanticLibraryRequestIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; query_semantics_status: SourceSemanticQueryStatus;
   source_id?: string; access_hint?: string;
   semantic_correspondences: readonly SourceSemanticCorrespondence[];
-  budget: RequestBudget; output_byte_limit: number; access_policy: SourceSemanticAccessPolicy;
-}>): string {
-  const { access_hint, ...request } = input;
-  return `sha256:${fieldContractSha256(canonicalJson({ ...request,
+  budget: RequestBudget; output_byte_limit: number;
+}> & ({ access_policy: SourceSemanticAccessPolicy; candidate_profile?: never }
+  | { candidate_profile: SourceSemanticAccessProfile; access_policy?: never })): string {
+  // Capture new profile material before validation without adding copies to the legacy path.
+  if (Object.hasOwn(input, "candidate_profile")) input = structuredClone(input);
+  const { access_hint, candidate_profile, ...request } = input;
+  const candidate = candidate_profile === undefined ? undefined : SourceSemanticAccessProfileSchema.parse(candidate_profile);
+  if (candidate !== undefined && input.access_policy !== undefined) {
+    throw new CoreError("VALIDATION", "candidate profile cannot accompany a public access policy");
+  }
+  // Omitted public policy is not candidate material, even when an adapter owns an undefined key.
+  const { access_policy: _accessPolicy, ...profiledRequest } = candidate === undefined ? {} : request;
+  return `sha256:${fieldContractSha256(canonicalJson({ ...(candidate === undefined ? request : profiledRequest),
+    ...(candidate === undefined ? {} : { candidate_profile: candidate }),
     ...(access_hint === undefined ? {} : { access_hint }), query_semantics: input.query_semantics ?? null,
     source_id: input.source_id ?? null,
     authorized_scopes: input.authorized_scopes === null ? null : [...input.authorized_scopes].sort()

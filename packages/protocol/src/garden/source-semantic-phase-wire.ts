@@ -3,6 +3,9 @@ import { NonNegativeIntSchema as N } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
 import { SourceSemanticQueryWindowSchema, SourceSemanticVectorBindingSchema } from "./source-semantic-phase-semantics.js";
+import { SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema,
+  SourceSemanticAcquisitionAllowanceSchema, SourceSemanticProfiledAcquisitionResultSchema,
+  refineSourceSemanticProfiledAcquisition } from "./source-semantic-access-profile.js";
 
 // Codes are stable across phase envelope versions; v2 binds original-first routes.
 export const PHASE_CODES = {
@@ -134,4 +137,32 @@ const ExecutionShape = z.union([z.literal("native_reasoning_only"),
 export type SourceSemanticExecution = z.output<typeof ExecutionShape>;
 export type SourceSemanticExecutionInput = z.input<typeof ExecutionShape>;
 export const SourceSemanticExecutionSchema: z.ZodType<SourceSemanticExecution, SourceSemanticExecutionInput> = ExecutionShape;
+/** The new control tuple encodes policy explicitly. Bounded result evidence is retained
+ * directly: unlike literal 1 it is a lossy occurrence prefix, never full membership. */
+const ProfiledBody = z.tuple([SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema,
+  SourceSemanticAcquisitionAllowanceSchema, C3, NullableRef, SourceSemanticAcquisitionAllowanceSchema,
+  z.tuple([N, N]).readonly(), SourceSemanticProfiledAcquisitionResultSchema.nullable(), C3]).readonly();
+const ProfiledAcquisition = z.tuple([z.literal(2), Strings, ProfiledBody]).readonly()
+  .superRefine(([, table, body], ctx) => {
+    reference({ table, ctx }, body[4]);
+    if (body[4] !== null && body[4] >= table.length) return;
+    refineSourceSemanticProfiledAcquisition({ policy: body[0], channels: body[1], declared_allowance: body[2],
+      status: PHASE_CODES.acquisition[body[3]], reason: body[4] === null ? null : table[body[4]]!, allowance: body[5],
+      budget: { work_units: body[6][0], memory_bytes: body[6][1] }, result: body[7], accounting: PHASE_CODES.accounting[body[8]] }, ctx);
+  });
+export type SourceSemanticProfiledCompactAcquisition = z.output<typeof ProfiledAcquisition>;
+export const SourceSemanticProfiledCompactAcquisitionSchema: z.ZodType<SourceSemanticProfiledCompactAcquisition> = ProfiledAcquisition;
+const ProfiledAccessPhases = z.tuple([z.literal(2), SourceSemanticCompactPreparationSchema,
+  SourceSemanticProfiledCompactAcquisitionSchema, Resources.nullable()]).readonly();
+export type SourceSemanticProfiledAccessPhases = z.output<typeof ProfiledAccessPhases>;
+export const SourceSemanticProfiledAccessPhasesSchema: z.ZodType<SourceSemanticProfiledAccessPhases> = ProfiledAccessPhases;
+const ProfiledExecution = z.union([z.literal("native_reasoning_only"),
+  z.tuple([z.literal(2), SourceSemanticCompactPreparationSchema, SourceSemanticProfiledCompactAcquisitionSchema]).readonly()]);
+export type SourceSemanticProfiledExecution = z.output<typeof ProfiledExecution>;
+export const SourceSemanticProfiledExecutionSchema: z.ZodType<SourceSemanticProfiledExecution> = ProfiledExecution;
+/** Bounded tooling readers, not a general historical decoder or live request family. */
+export type SourceSemanticReadableAcquisition = SourceSemanticCompactAcquisition | SourceSemanticProfiledCompactAcquisition;
+export type SourceSemanticReadableAccessPhases = SourceSemanticAccessPhases | SourceSemanticProfiledAccessPhases;
+export type SourceSemanticReadableExecution = "native_reasoning_only" |
+  readonly [2, SourceSemanticCompactPreparation, SourceSemanticReadableAcquisition];
 export type CompactLimitation = z.infer<typeof Limitation>;

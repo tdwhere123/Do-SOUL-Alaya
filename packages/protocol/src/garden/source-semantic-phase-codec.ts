@@ -8,6 +8,11 @@ import { PHASE_CODES as C, type SourceSemanticCompactPreparation, type SourceSem
   type SourceSemanticAccessPhases, type SourceSemanticExecution, type CompactAcquisitionResult,
   type CompactLimitation } from "./source-semantic-phase-wire.js";
 import { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
+import { SourceSemanticProfiledAcquisitionPhaseSchema, type SourceSemanticProfiledAcquisitionPhase,
+  type SourceSemanticProfiledExecutionPhases } from "./source-semantic-access-profile.js";
+import type { SourceSemanticProfiledCompactAcquisition, SourceSemanticProfiledExecution,
+  SourceSemanticProfiledAccessPhases, SourceSemanticReadableAcquisition, SourceSemanticReadableExecution,
+  SourceSemanticReadableAccessPhases } from "./source-semantic-phase-wire.js";
 import { AlayaError } from "../shared/alaya-error.js";
 
 type Meter = Pick<SourceSemanticResourceLedger, "charge" | "retain">;
@@ -24,8 +29,23 @@ export function captureSourceSemanticQueryPreparation(value: unknown, meter?: Me
   return captured(SourceSemanticResourceLedger.capture(value, value => SourceSemanticQueryPreparationSchema.parse(value),
     "source phase semantic preparation capture", meter), meter);
 }
-export function captureSourceSemanticAcquisition(value: unknown, meter?: Meter): SourceSemanticAcquisitionPhase {
-  return captured(SourceSemanticResourceLedger.capture(value, value => SourceSemanticAcquisitionPhaseSchema.parse(value),
+type AcquisitionPhase = SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase;
+function requireLegacyAcquisition(value: SourceSemanticReadableAcquisition): asserts value is SourceSemanticCompactAcquisition {
+  if (value[0] !== 1) throw new AlayaError("VALIDATION", "unsupported source acquisition version");
+}
+function parseAcquisition(value: unknown): AcquisitionPhase {
+  // Capture first. Dispatch never validates one object and then reads a mutable caller reference.
+  // Inspect only the own-key discriminator before capture, not caller-authored field values.
+  // Keep the default's established Zod capture path and allocation unchanged.
+  return value !== null && typeof value === "object" && Object.hasOwn(value, "declared_allowance")
+    ? SourceSemanticProfiledAcquisitionPhaseSchema.parse(structuredClone(value)) : SourceSemanticAcquisitionPhaseSchema.parse(value);
+}
+export function captureSourceSemanticAcquisition(value: SourceSemanticProfiledAcquisitionPhase, meter?: Meter): SourceSemanticProfiledAcquisitionPhase;
+export function captureSourceSemanticAcquisition<T extends Readonly<{ policy: "source-index-interleaved-prefix.v1";
+  declared_allowance?: never }>>(value: T, meter?: Meter): SourceSemanticAcquisitionPhase;
+export function captureSourceSemanticAcquisition(value: unknown, meter?: Meter): AcquisitionPhase;
+export function captureSourceSemanticAcquisition(value: unknown, meter?: Meter): AcquisitionPhase {
+  return captured(SourceSemanticResourceLedger.capture(value, parseAcquisition,
     "source phase semantic acquisition capture", meter), meter);
 }
 
@@ -56,12 +76,13 @@ export function capturePackSourceSemanticAcquisitionForRequest(value: unknown, m
 /** Package-internal normal-form rule owned by this codec, not a caller assertion.
  * Expansion omits root supplemental when slot 3 is absent; nested retained leaves
  * (including their own undefined fields) are not reconstructed or normalized. */
-export function sourceSemanticCanonicalPhaseCapture<T extends SourceSemanticQueryPreparation | SourceSemanticAcquisitionPhase>(
-  compact: SourceSemanticCompactPreparation | SourceSemanticCompactAcquisition, capture: T | undefined,
+export function sourceSemanticCanonicalPhaseCapture<T extends SourceSemanticQueryPreparation | AcquisitionPhase>(
+  compact: SourceSemanticCompactPreparation | SourceSemanticReadableAcquisition, capture: T | undefined,
   meter: Pick<Meter, "charge">): T | undefined {
   meter.charge(2, 0, "source phase canonical capture eligibility");
   if (capture === undefined) return undefined;
-  if (compact[3] !== undefined) return capture;
+  if (compact[0] === 2 && !("declared_allowance" in capture)) return undefined;
+  if (compact[0] === 1 && compact[3] !== undefined) return capture;
   meter.charge(1, 0, "source phase canonical supplemental key check");
   return Object.hasOwn(capture, "supplemental") ? undefined : capture;
 }
@@ -160,13 +181,15 @@ function packResult(value: SourceSemanticAcquisition, strings: LocalStrings): Co
       input.status === "available" ? [0, strings.ref(input.profile_id), strings.ref(input.input_digest)] : [1, strings.ref(input.reason)]],
     strings.limitations(value.limitations)];
 }
-export function packSourceSemanticAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): SourceSemanticCompactAcquisition {
-  // The expanded copy is transient: validation owns its containers, and the packed
-  // retention below owns every string/leaf that survives. No semantic copy escapes.
+export function packSourceSemanticAcquisition(value: SourceSemanticProfiledAcquisitionPhase, meter?: Meter): SourceSemanticProfiledCompactAcquisition;
+export function packSourceSemanticAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): SourceSemanticCompactAcquisition;
+export function packSourceSemanticAcquisition(value: AcquisitionPhase, meter?: Meter): SourceSemanticReadableAcquisition;
+export function packSourceSemanticAcquisition(value: AcquisitionPhase, meter?: Meter): SourceSemanticReadableAcquisition {
+  // The expanded copy is transient; packed retention owns every surviving leaf.
   const owned = CAPTURED.has(value) ? value : SourceSemanticResourceLedger.capture(value,
-    value => SourceSemanticAcquisitionPhaseSchema.parse(value), "source phase acquisition packing capture", meter, "packing_intermediate");
+    parseAcquisition, "source phase acquisition packing capture", meter, "packing_intermediate");
   traverse(owned, meter, "source phase acquisition packing traversal");
-  const packed = packAcquisition(owned, meter);
+  const packed = "declared_allowance" in owned ? packProfiledAcquisition(owned, meter) : packAcquisition(owned, meter);
   meter?.retain(packed, "source phase packed acquisition allocation", "immutable");
   return packed;
 }
@@ -180,6 +203,14 @@ function packAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): 
   const route = value.supplemental?.[0];
   const hint = route === undefined ? undefined : packAcquisition(route, meter);
   return hint === undefined ? primary : [...primary, [hint as NonNullable<SourceSemanticCompactAcquisition[3]>[0]]];
+}
+
+function packProfiledAcquisition(value: SourceSemanticProfiledAcquisitionPhase, meter?: Meter): SourceSemanticProfiledCompactAcquisition {
+  const strings = new LocalStrings(meter);
+  return [2, strings.table, [value.policy, value.channels, value.declared_allowance,
+    strings.code(C.acquisition, value.status) as 0 | 1 | 2, strings.nullable(value.reason), value.allowance,
+    [value.budget.work_units, value.budget.memory_bytes], value.result,
+    strings.code(C.accounting, value.accounting) as 0 | 1 | 2]];
 }
 
 class LocalReader {
@@ -233,8 +264,20 @@ function expandResult(value: CompactAcquisitionResult, strings: LocalReader): So
       input: input[0] === 0 ? { status: "available", profile_id: strings.ref(input[1]), input_digest: strings.ref(input[2]) }
         : { status: "unavailable", reason: strings.ref(input[1]) } }, limitations: strings.limitations(value[8]) };
 }
-function expandAcquisition(value: SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticAcquisitionPhase {
+function expandAcquisition(value: SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticAcquisitionPhase;
+function expandAcquisition(value: SourceSemanticProfiledCompactAcquisition, meter?: Meter): SourceSemanticProfiledAcquisitionPhase;
+function expandAcquisition(value: SourceSemanticReadableAcquisition, meter?: Meter): AcquisitionPhase;
+function expandAcquisition(value: SourceSemanticReadableAcquisition, meter?: Meter): AcquisitionPhase {
   traverse(value, meter, "source phase acquisition expansion traversal");
+  if (value[0] === 2) {
+    const strings = new LocalReader(value[1], meter), body = value[2];
+    const phase: SourceSemanticProfiledAcquisitionPhase = { policy: body[0], channels: body[1], declared_allowance: body[2],
+      status: C.acquisition[body[3]], reason: strings.nullable(body[4]), allowance: body[5],
+      budget: { work_units: body[6][0], memory_bytes: body[6][1] }, result: body[7], accounting: C.accounting[body[8]] };
+    meter?.retain(phase, "source phase expanded acquisition allocation");
+    return phase;
+  }
+  requireLegacyAcquisition(value);
   const strings = new LocalReader(value[1], meter), body = value[2];
   const phase: SourceSemanticAcquisitionPhase = { policy: POLICY, status: C.acquisition[body[0]], reason: strings.nullable(body[1]),
     allowance: { max_attempts: body[2][0], max_roots: body[2][1], max_vector_windows: body[2][2] },
@@ -254,14 +297,17 @@ function compactPreparation(value: SourceSemanticQueryPreparation | SourceSemant
   return Array.isArray(value) ? value as SourceSemanticCompactPreparation
     : packSourceSemanticQueryPreparation(value as SourceSemanticQueryPreparation, meter);
 }
-function compactAcquisition(value: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticCompactAcquisition {
-  return Array.isArray(value) ? value as SourceSemanticCompactAcquisition
-    : packSourceSemanticAcquisition(value as SourceSemanticAcquisitionPhase, meter);
+function compactAcquisition(value: AcquisitionPhase | SourceSemanticReadableAcquisition, meter?: Meter): SourceSemanticReadableAcquisition {
+  return Array.isArray(value) ? value as SourceSemanticReadableAcquisition
+    : packSourceSemanticAcquisition(value as AcquisitionPhase, meter);
 }
 
 /** Exact checked-slot equality: native-only is never inferred from generation-attempt count alone. */
-export function isNativeReasoningOnlyExecution(value: SourceSemanticExecution, meter?: Meter): boolean {
+export function isNativeReasoningOnlyExecution(value: SourceSemanticReadableExecution, meter?: Meter): boolean {
   if (value === "native_reasoning_only") return true;
+  // Candidate provenance cannot collapse to a literal that loses its contract family.
+  if (value[2][0] === 2) return false;
+  requireLegacyAcquisition(value[2]);
   if (value[1][3] !== undefined || value[2][3] !== undefined) return false;
   const p = value[1][2], a = value[2][2];
   meter?.charge(32, 0, "source phase canonical native equality");
@@ -271,8 +317,14 @@ export function isNativeReasoningOnlyExecution(value: SourceSemanticExecution, m
   return preparation && a[0] === 1 && a[1] !== null && value[2][1][a[1]] === "operation_does_not_acquire"
     && a[2][0] === 0 && a[2][1] === 0 && a[2][2] === 0 && a[3][0] === 0 && a[3][1] === 0 && a[4] === null && a[5] === 2;
 }
+export function sourceSemanticExecution(preparation: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation | undefined,
+  acquisition: SourceSemanticProfiledAcquisitionPhase | SourceSemanticProfiledCompactAcquisition, meter?: Meter): SourceSemanticProfiledExecution;
 export function sourceSemanticExecution(preparation?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation,
-  acquisition?: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticExecution {
+  acquisition?: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticExecution;
+export function sourceSemanticExecution(preparation: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation | undefined,
+  acquisition: AcquisitionPhase | SourceSemanticReadableAcquisition, meter?: Meter): SourceSemanticReadableExecution;
+export function sourceSemanticExecution(preparation?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation,
+  acquisition?: AcquisitionPhase | SourceSemanticReadableAcquisition, meter?: Meter): SourceSemanticReadableExecution {
   if (preparation === undefined && acquisition === undefined) return "native_reasoning_only";
   // Defaults are authored by the semantic constructors, not untrusted ingress.
   const value = [2, preparation === undefined
@@ -284,22 +336,35 @@ export function sourceSemanticExecution(preparation?: SourceSemanticQueryPrepara
   return isNativeReasoningOnlyExecution(value, meter) ? "native_reasoning_only" : value;
 }
 /** Explicit tooling/read authority; budgeted callers must pass their own meter. */
-export function sourceSemanticExecutionPhases(value: SourceSemanticExecution, meter?: Meter): ExecutionPhases {
+export function sourceSemanticExecutionPhases(value: SourceSemanticExecution, meter?: Meter): ExecutionPhases;
+export function sourceSemanticExecutionPhases(value: SourceSemanticProfiledExecution, meter?: Meter): ExecutionPhases | SourceSemanticProfiledExecutionPhases;
+export function sourceSemanticExecutionPhases(value: SourceSemanticReadableExecution, meter?: Meter): ExecutionPhases | SourceSemanticProfiledExecutionPhases;
+export function sourceSemanticExecutionPhases(value: SourceSemanticReadableExecution, meter?: Meter): ExecutionPhases | SourceSemanticProfiledExecutionPhases {
   if (value === "native_reasoning_only") {
     const phases = nativePhases(); meter?.retain(phases, "source phase native execution expansion"); return phases;
   }
   meter?.charge(5, 64 + 4 * 8 + 4 * 24 + 4 * (8 + 28 + 17 + 11), "source phase expanded execution framing");
-  return { contract: "source-semantic-execution-v3", semantic_generation_attempts: 0,
-    query_preparation: expandPreparation(value[1], meter), acquisition: expandAcquisition(value[2], meter) };
+  const query_preparation = expandPreparation(value[1], meter);
+  return value[2][0] === 2 ? { contract: "source-semantic-execution-v4", semantic_generation_attempts: 0,
+    query_preparation, acquisition: expandAcquisition(value[2], meter) }
+    : { contract: "source-semantic-execution-v3", semantic_generation_attempts: 0,
+      query_preparation, acquisition: expandAcquisition(value[2], meter) };
 }
-export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter) {
+type AccessExpansion<A> = Readonly<{ preparation: SourceSemanticQueryPreparation; acquisition: A; phase_accounting: SourceSemanticPhaseAccounting }>;
+export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter): AccessExpansion<SourceSemanticAcquisitionPhase>;
+export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticProfiledAccessPhases }>, meter?: Meter): AccessExpansion<SourceSemanticProfiledAcquisitionPhase>;
+export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticReadableAccessPhases }>, meter?: Meter): AccessExpansion<AcquisitionPhase>;
+export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticReadableAccessPhases }>, meter?: Meter): AccessExpansion<AcquisitionPhase> {
   return sourceSemanticAccessPhasesWithCaptures(access, meter);
 }
 
 /** Package-internal adapter seam; public decoding always expands both phases. */
 export function sourceSemanticAccessPhasesWithCaptures(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter,
-  preparation?: SourceSemanticQueryPreparation, acquisition?: SourceSemanticAcquisitionPhase): Readonly<{
-    preparation: SourceSemanticQueryPreparation; acquisition: SourceSemanticAcquisitionPhase; phase_accounting: SourceSemanticPhaseAccounting }> {
+  preparation?: SourceSemanticQueryPreparation, acquisition?: SourceSemanticAcquisitionPhase): AccessExpansion<SourceSemanticAcquisitionPhase>;
+export function sourceSemanticAccessPhasesWithCaptures(access: Readonly<{ phases: SourceSemanticReadableAccessPhases }>, meter?: Meter,
+  preparation?: SourceSemanticQueryPreparation, acquisition?: AcquisitionPhase): AccessExpansion<AcquisitionPhase>;
+export function sourceSemanticAccessPhasesWithCaptures(access: Readonly<{ phases: SourceSemanticReadableAccessPhases }>, meter?: Meter,
+  preparation?: SourceSemanticQueryPreparation, acquisition?: AcquisitionPhase): AccessExpansion<AcquisitionPhase> {
   meter?.charge(5, 64 + 3 * 8 + 3 * 24 + 4 * (11 + 11 + 16), "source phase expanded access framing");
   const observation = access.phases[3];
   const phase_accounting: SourceSemanticPhaseAccounting = { observation: observation === null ? null : {
@@ -310,7 +375,7 @@ export function sourceSemanticAccessPhasesWithCaptures(access: Readonly<{ phases
     acquisition: acquisition ?? expandAcquisition(access.phases[2], meter), phase_accounting };
 }
 /** Narrow readers preserve null without allocating or expanding complete phases. */
-export function sourceSemanticExecutionExternalAttempts(value: SourceSemanticExecution): number | null {
+export function sourceSemanticExecutionExternalAttempts(value: SourceSemanticReadableExecution): number | null {
   if (value === "native_reasoning_only") return 0;
   const preparation = value[1], primary = preparation[2][0] === 0 ? 0 : preparation[2][8];
   const hint = preparation[3]?.[0][2], supplemental = hint === undefined || hint[0] === 0 ? 0 : hint[8];
@@ -321,8 +386,17 @@ export function sourceSemanticPreparationReason(value: SourceSemanticCompactPrep
   return value[2][2] === null ? null : value[1][value[2][2]]!;
 }
 const ZERO_RESOURCES = [0, 0, 0] as const;
-export function sourceSemanticAcquisitionResources(value: SourceSemanticCompactAcquisition, meter?: Meter): readonly [number, number, number] | null {
+export function sourceSemanticAcquisitionResources(value: SourceSemanticReadableAcquisition, meter?: Meter): readonly [number, number, number] | null {
   meter?.charge(5, 0, "source phase acquisition resource slots");
+  if (value[0] === 2) {
+    const body = value[2];
+    if (body[8] === 1) return null;
+    const result = body[7];
+    if (result === null) return body[3] === 1 && body[8] === 2 ? ZERO_RESOURCES : null;
+    meter?.charge(3, 24, "source phase resource tuple");
+    return [result.resources.work, result.resources.memory_bytes, result.resources.native_bytes];
+  }
+  requireLegacyAcquisition(value);
   const resources = (route: SourceSemanticCompactAcquisition): readonly [number, number, number] | null =>
     route[2][5] === 1 ? null : route[2][4]?.[4] ?? (route[2][0] === 1 && route[2][5] === 2 ? ZERO_RESOURCES : null);
   const primary = resources(value), hint = value[3]?.[0];
