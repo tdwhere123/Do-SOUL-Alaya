@@ -14,6 +14,10 @@ export type ObservationReadStatus = "whole" | "partial" | "attempted" | "none" |
 export type ObservationStagePosition = Readonly<{ stage: ObservationStage; reason: string }>;
 type Events = readonly ObservationEvent[];
 type EventReference = Pick<ObservationEvent, "session_id" | "request_id" | "call_kind" | "event_position">;
+/** Present event metadata rejected by its native schema, not a producer limitation or causal failure. */
+export type ObservationDiagnosticIssue = Readonly<{
+  field: "lexical_rank" | "vector_rank" | "resource_refusal"; reference: EventReference;
+}>;
 const VECTOR_INSPECTION_DETAIL_UNAVAILABLE = "vector_inspection_detail_unavailable";
 type Nomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
 type ResourceRefusal = NonNullable<SourceSemanticAcquisitionPhase["result"]>["resource_refusals"][number];
@@ -35,6 +39,8 @@ export type ObservationNativeRoute = Readonly<{
   position: EventReference | null; invocation_position: number;
   acquisition_status: SourceSemanticAcquisitionPhase["status"] | null;
   completion: string | null; reason: string | null; navigation_digest: string | null;
+  /** Null means no valid captured rank, never valid-empty. Diagnostic issues distinguish corrupt
+   * captures from missing evidence, independently of valid ranks supplied by another event or receipt. */
   lexical_ranks: Nomination["lexical"] | null; vector: Nomination["vector"];
   /** The native lexical nomination has no row/window byte bounds. */
   lexical_window: null;
@@ -45,7 +51,8 @@ export type ObservationNativeRoute = Readonly<{
     disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
       | "stale" | "native_unknown" | "resource_refused" | "rejected";
     admission: Readonly<{ status: string; reason: string; phase?: string }> | null;
-    /** Producer-owned refusal. Null when this attempt recorded none; not native admission. */
+    /** Valid producer-owned refusal, not native admission. Null has no valid refusal fact;
+     * a matching diagnostic issue distinguishes malformed-present metadata from no recorded refusal. */
     resource_refusal: ResourceRefusal | null;
     reference: EventReference;
     merge_target: SourceEvidenceTarget | null;
@@ -58,6 +65,8 @@ export type ObservationRouteFact = Readonly<{
   /** Native positions are zero-based. Access order is the policy's ordered pool, not read chronology. */
   access_positions: readonly number[]; union_positions: readonly number[];
   event_references: readonly EventReference[];
+  /** Decoder faults remain independent of causal stage unknowns and valid native facts. */
+  diagnostic_issues: readonly ObservationDiagnosticIssue[];
   /** Returned body bytes only; metadata, requests and later accounting cannot create these. */
   read_intervals: readonly ObservationReadInterval[];
   /** Retained/analyzed prefixes and verified reuse, not another physical read. */
@@ -85,6 +94,8 @@ export type ObservationMessageFacts = Readonly<{
   access_positions: readonly number[]; read_intervals: readonly ObservationReadInterval[];
   coverage_intervals: readonly ObservationReadInterval[]; packages: ObservationPackageFacts;
   routes: readonly ObservationRouteFact[];
+  /** Route-scoped decoder faults do not move this message's first causal blockage. */
+  diagnostic_issues: readonly (ObservationDiagnosticIssue & Readonly<{ route: string }>)[];
   /** Shared scorer evidence for this exact mapped gold message. A missing or repeated scorer row
    * stays unknown; aggregate any/all never substitutes for a per-message fact. */
   visibility: Readonly<{
@@ -98,8 +109,8 @@ export type ObservationMessageFacts = Readonly<{
   unknowns: readonly ObservationStagePosition[];
 }>;
 type MutableRoute = {
-  -readonly [Key in keyof Omit<ObservationRouteFact, "first_failure" | "first_unknown" | "unknowns">]: ObservationRouteFact[Key];
-} & { unknowns: ObservationStagePosition[] };
+  -readonly [Key in keyof Omit<ObservationRouteFact, "first_failure" | "first_unknown" | "unknowns" | "diagnostic_issues">]: ObservationRouteFact[Key];
+} & { unknowns: ObservationStagePosition[]; diagnostic_issues: ObservationDiagnosticIssue[] };
 const STAGES: readonly ObservationStage[] = ["eligibility", "nomination", "access_read", "package", "delivery"];
 
 /** Parse the actual producer envelope: hint phases live under original.supplemental. */
@@ -190,7 +201,9 @@ export function observationMessageFacts(span: AnswerTurnSpan, input: Observation
       source_discovery_open: finite.pool?.union.source_discovery_open ?? null,
       interpretation_discovery_open: finite.pool?.union.interpretation_discovery_open ?? null, full_universe: "not_established" },
     access_positions: readRoutes.flatMap(fact => fact.access_positions), read_intervals: readIntervals,
-    coverage_intervals: coverage, packages, routes: finished, visibility, first_failure: earliestPosition(failures),
+    coverage_intervals: coverage, packages, routes: finished,
+    diagnostic_issues: finished.flatMap(fact => fact.diagnostic_issues.map(issue => ({ route: fact.route, ...issue }))),
+    visibility, first_failure: earliestPosition(failures),
     first_unknown: earliestPosition(unknowns), unknowns };
 }
 
@@ -249,9 +262,20 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
         : row.data.kind === "vector_ranked" || row.data.kind === "vector_inspected");
       fact.event_references = [...(position === null ? [] : [position]),
         ...attempts.map(row => row.position), ...rankEvents.map(row => row.position)];
-      const lexicalRanks = matching.flatMap(row => row.data.kind === "lexical_candidate" ? lexicalRankFrom(row.data) : []);
-      const vectorRank = matching.reduce<Nomination["vector"]>((found, row) => found ?? (row.data.kind === "vector_ranked"
-        ? vectorRankFrom(row.data) : null), null);
+      const lexicalRanks: Nomination["lexical"][number][] = [];
+      let vectorRank: Nomination["vector"] = null;
+      // Validate every captured rank, even after a valid event or receipt already supplied proof.
+      for (const row of rankEvents) {
+        if (row.data.kind === "lexical_candidate") {
+          const parsed = lexicalRankFrom(row.data);
+          if (parsed.success) lexicalRanks.push(parsed.data);
+          else fact.diagnostic_issues.push({ field: "lexical_rank", reference: row.position });
+        } else if (row.data.kind === "vector_ranked") {
+          const parsed = vectorRankFrom(row.data);
+          if (parsed.success) vectorRank ??= parsed.data;
+          else fact.diagnostic_issues.push({ field: "vector_rank", reference: row.position });
+        }
+      }
       const receiptLexical = channel === "lexical" && (nomination?.lexical.length ?? 0) > 0 ? nomination!.lexical : null;
       const omittedLexical = channel === "lexical" && joined.frames.some(row =>
         (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_lexical_candidate`] ?? 0) > 0);
@@ -263,7 +287,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
         vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])],
-        attempts: nominationAttempts(attempts) };
+        attempts: nominationAttempts(attempts, fact.diagnostic_issues) };
       const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
       if (!retained && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
@@ -281,8 +305,8 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
     });
   });
 }
-function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference }[]):
-  ObservationNativeRoute["attempts"] {
+function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference }[],
+  issues: ObservationDiagnosticIssue[]): ObservationNativeRoute["attempts"] {
   const facts: NonNullable<ObservationNativeRoute["attempts"]>[number][] = [];
   for (const row of rows) {
     const value = row.data.disposition;
@@ -297,7 +321,9 @@ function nominationAttempts(rows: readonly { data: Record<string, unknown>; posi
       ? { status, reason, ...(status === "resource_limited" && typeof admission.phase === "string"
         ? { phase: admission.phase } : {}) } : null;
     const parsed = SourceEvidenceTargetSchema.safeParse(row.data.merge_target);
-    facts.push({ disposition: value, admission: captured, resource_refusal: resourceRefusalFrom(row.data),
+    const refusal = resourceRefusalFrom(row.data);
+    if (refusal !== null && !refusal.success) issues.push({ field: "resource_refusal", reference: row.position });
+    facts.push({ disposition: value, admission: captured, resource_refusal: refusal?.success ? refusal.data : null,
       reference: row.position, merge_target: parsed.success ? parsed.data : null });
   }
   return facts.length === 0 ? null : facts;
@@ -315,17 +341,15 @@ function mergeLexicalRanks(events: Nomination["lexical"], receipt: Nomination["l
   }
   return ranks.length > 0 ? ranks : null;
 }
-function resourceRefusalFrom(data: Record<string, unknown>): ResourceRefusal | null {
-  const parsed = resourceRefusalSchema.safeParse(data.resource_refusal);
-  return parsed.success ? parsed.data : null;
+function resourceRefusalFrom(data: Record<string, unknown>) {
+  // Missing/null is the producer's legitimate no-refusal representation, not a parse failure.
+  return data.resource_refusal == null ? null : resourceRefusalSchema.safeParse(data.resource_refusal);
 }
-function lexicalRankFrom(data: Record<string, unknown>): Nomination["lexical"] {
-  const parsed = lexicalRankSchema.safeParse({ rank: data.rank, lane: data.lane, lane_rank: data.lane_rank, bm25: data.bm25 });
-  return parsed.success ? [parsed.data] : [];
+function lexicalRankFrom(data: Record<string, unknown>) {
+  return lexicalRankSchema.safeParse({ rank: data.rank, lane: data.lane, lane_rank: data.lane_rank, bm25: data.bm25 });
 }
-function vectorRankFrom(data: Record<string, unknown>): Nomination["vector"] {
-  const parsed = vectorRankSchema.safeParse({ rank: data.rank, cosine: data.cosine, window: data.window });
-  return parsed.success ? parsed.data : null;
+function vectorRankFrom(data: Record<string, unknown>) {
+  return vectorRankSchema.safeParse({ rank: data.rank, cosine: data.cosine, window: data.window });
 }
 
 /** Returned extents are captured before retention/scoring may fail. Completion and policy-order
@@ -442,7 +466,7 @@ function packageRoutes(events: Events, facts: ObservationPackageFacts, complete:
 function route(name: string): MutableRoute {
   return { route: name, eligibility: "not_run", nomination: "unknown", access_read: "unknown", package: "not_run",
     delivery: "not_run", native: null, access_positions: [], union_positions: [], event_references: [],
-    read_intervals: [], coverage_intervals: [], unknowns: [] };
+    read_intervals: [], coverage_intervals: [], unknowns: [], diagnostic_issues: [] };
 }
 function finalizeRoute(value: MutableRoute): ObservationRouteFact {
   const readReached = value.nomination === "passed" && (value.route.startsWith("read:") || value.route === "access_order");

@@ -90,9 +90,17 @@ it("does not project schema-invalid index rank, window or refusal metadata as na
     const named = row.kind === "lexical_candidate" ? "index:original:lexical" : "index:original:vector";
     const fact = route(attribution, named), native = fact?.native;
     const payload = capturedData(admitted)[0] ?? {};
+    const field = row.kind === "vector_ranked" ? "vector_rank"
+      : row.kind === "lexical_candidate" ? "lexical_rank" : "resource_refusal";
+    expect(fact, row.label).toMatchObject({ diagnostic_issues: [{ field,
+      reference: { request_id: 40 + index, event_position: 0 } }] });
+    expect(attribution.messages[0], row.label).toMatchObject({ diagnostic_issues: [{ route: named, field,
+      reference: { request_id: 40 + index, event_position: 0 } }] });
+    expect(native?.limitations, row.label).toEqual([]);
     if (row.kind === "vector_ranked") {
       expect(vectorRankSchema.safeParse({ rank: payload.rank, cosine: payload.cosine, window: payload.window }).success,
         row.label).toBe(false);
+      expect(fact?.nomination, row.label).toBe("unknown");
       expect(native?.vector, row.label).toBeNull();
       expect(JSON.stringify(native?.vector), row.label).not.toContain(INVALID_DIGEST);
       expect(JSON.stringify(native?.vector), row.label).not.toContain(SHORT_DIGEST);
@@ -101,6 +109,7 @@ it("does not project schema-invalid index rank, window or refusal metadata as na
     } else if (row.kind === "lexical_candidate") {
       expect(lexicalRankSchema.safeParse({ rank: payload.rank, lane: payload.lane, lane_rank: payload.lane_rank,
         bm25: payload.bm25 }).success, row.label).toBe(false);
+      expect(fact?.nomination, row.label).toBe("unknown");
       expect(native?.lexical_ranks, row.label).toBeNull();
       expect(fact?.unknowns.some(value => value.reason === "lexical_rank_unavailable"), row.label).toBe(true);
     } else {
@@ -130,6 +139,8 @@ it("keeps schema-valid lexical, vector window and refusal facts after observer J
   expect(route(attribution, "index:original:lexical")?.native).toMatchObject({ lexical_ranks: [lexical] });
   expect(route(attribution, "index:original:vector")?.native).toMatchObject({
     vector, attempts: [{ disposition: "resource_refused", resource_refusal: refusal }] });
+  expect(attribution.messages[0]).toMatchObject({ diagnostic_issues: [] });
+  expect(attribution.messages[0]?.routes.every(row => row.diagnostic_issues.length === 0)).toBe(true);
   expect(attribution.layer).toBe("U");
 });
 
@@ -147,8 +158,14 @@ it("keeps an independent valid vector when a malformed diagnostic is captured fi
     .toBe(false);
   expect(vectorRankSchema.safeParse({ rank: events[1]?.rank, cosine: events[1]?.cosine, window: events[1]?.window }).success)
     .toBe(true);
-  const native = route(attribution, "index:original:vector")?.native;
-  expect(native?.vector).toEqual(vector);
-  expect(JSON.stringify(native?.vector)).not.toContain(INVALID_DIGEST);
+  const fact = route(attribution, "index:original:vector");
+  expect(fact?.native?.vector).toEqual(vector);
+  expect(JSON.stringify(fact?.native?.vector)).not.toContain(INVALID_DIGEST);
+  expect(fact).toMatchObject({ diagnostic_issues: [{ field: "vector_rank",
+    reference: { request_id: 9, event_position: 0 } }] });
+  expect(fact?.unknowns.some(value => value.reason === "vector_rank_unavailable")).toBe(false);
+  expect(fact?.event_references.map(value => value.event_position)).toEqual([0, 1]);
+  expect(attribution.messages[0]).toMatchObject({ diagnostic_issues: [{ route: "index:original:vector",
+    field: "vector_rank", reference: { request_id: 9, event_position: 0 } }] });
   expect(attribution.layer).toBe("U");
 });

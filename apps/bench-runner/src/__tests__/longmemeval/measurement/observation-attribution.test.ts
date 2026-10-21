@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
 import { sourceIndexTarget, type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
 import type { SourceSemanticObservation } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-observation.js";
 import type { SourceSemanticNativeFacts } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-provenance.js";
@@ -410,6 +416,70 @@ describe("observation attribution", () => {
     expect(hintVector).toMatchObject({ nomination: "failed", native: {
       attempts: [{ disposition: "nomination_limit", admission: null }] } });
     expect(result.messages[0]?.routes.find(row => row.route === "index:hint:lexical")?.native?.attempts).toBeNull();
+  });
+
+  it.each(["lexical", "vector"] as const)("keeps invalid %s diagnostics beside valid receipt and event proof without moving causal progress back", channel => {
+    const { continuation, prepared, recalled, continued } = chain();
+    const receipt = nativePhase()!.result!.nominations[0]!;
+    const valid = channel === "lexical" ? { kind: "lexical_candidate", ...receipt.lexical[0]!, rank: 4, lane_rank: 2 }
+      : { kind: "vector_ranked", ...receipt.vector! };
+    const invalid = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original", target: target(unit()), ...valid, rank: -1 } };
+    const validEvent = { ...invalid, data: { ...invalid.data, ...valid } };
+    const unrelated = { ...invalid, data: { ...invalid.data, target: target(unit("root-b")) } };
+    const frames = [{ ...prepared, observation: { ...prepared.observation,
+      events: [...prepared.observation.events, invalid, validEvent, invalid, unrelated] } }, recalled, continued];
+    const result = attributed({ call: continuation, frames });
+    const message = result.messages[0]!, name = `index:original:${channel}`;
+    const route = message.routes.find(row => row.route === name)!;
+    const issues = [4, 6].map(event_position => ({ field: `${channel}_rank`,
+      reference: { session_id: "session", request_id: 3, call_kind: "prepare_query", event_position } }));
+    expect(route).toMatchObject({ nomination: "passed", diagnostic_issues: issues, first_unknown: null });
+    expect(channel === "lexical" ? route.native?.lexical_ranks : route.native?.vector)
+      .toEqual(channel === "lexical" ? [{ rank: 4, lane: "unicode61", lane_rank: 2, bm25: -3.5 }, ...receipt.lexical]
+        : receipt.vector);
+    expect(route.event_references.map(value => value.event_position)).toEqual([0, 4, 5, 6]);
+    expect(route.native?.limitations).toEqual([]);
+    expect(message).toMatchObject({ candidate: "present", read: "whole", first_unknown: null,
+      first_failure: { stage: "delivery" }, diagnostic_issues: issues.map(issue => ({ route: name, ...issue })) });
+    expect(message.unknowns).toEqual([]);
+    expect(message.routes.filter(row => row.route !== name).every(row => row.diagnostic_issues.length === 0)).toBe(true);
+    expect(result.layer).toBe("L4");
+    expect(attributed({ call: continuation, frames, visibility: visibility(gold(), "hit") }).layer).toBe("H");
+  });
+
+  it("distinguishes malformed refusals from missing, null and valid refusal facts without inventing admission", () => {
+    const { prepared, recalled, continued, continuation } = chain();
+    const refusal = { stage: "nomination", phase: "source nomination retention" };
+    const payloads = [{}, { resource_refusal: null }, { resource_refusal: { ...refusal, stage: "scoring" } },
+      { resource_refusal: refusal }];
+    const attempts = payloads.map(extra => ({ kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original", kind: "nomination_attempt", channel: "vector", target: target(unit()),
+      disposition: "resource_refused", ...extra } }));
+    const result = attributed({ call: continuation, frames: [{ ...prepared, observation: { ...prepared.observation,
+      events: [...prepared.observation.events, ...attempts] } }, recalled, continued] });
+    const message = result.messages[0]!, route = message.routes.find(row => row.route === "index:original:vector")!;
+    expect(route.native?.attempts?.map(attempt => attempt.resource_refusal)).toEqual([null, null, null, refusal]);
+    expect(route.native?.attempts?.every(attempt => attempt.admission === null)).toBe(true);
+    expect(route).toMatchObject({ nomination: "passed", first_unknown: null, diagnostic_issues: [{
+      field: "resource_refusal", reference: { request_id: 3, event_position: 6 } }] });
+    expect(message).toMatchObject({ first_unknown: null, first_failure: { stage: "delivery" }, diagnostic_issues: [{
+      route: "index:original:vector", field: "resource_refusal", reference: { request_id: 3, event_position: 6 } }] });
+    expect(route.event_references.map(value => value.event_position)).toEqual([0, 4, 5, 6, 7]);
+    expect(route.native?.limitations).toEqual([]);
+    expect(result.layer).toBe("L4");
+  });
+
+  it("leaves unavailable rank metadata unknown instead of diagnosing absent events as corrupt or empty", () => {
+    const result = attributed({ frames: [captured()] });
+    for (const channel of ["lexical", "vector"] as const) {
+      const route = result.messages[0]!.routes.find(row => row.route === `index:original:${channel}`)!;
+      expect(route).toMatchObject({ nomination: "unknown", diagnostic_issues: [],
+        native: { lexical_ranks: null, vector: null, attempts: null } });
+      expect(route.unknowns).toContainEqual({ stage: "nomination", reason: `${channel}_rank_unavailable` });
+    }
+    expect(result.messages[0]).toMatchObject({ diagnostic_issues: [] });
+    expect(result.layer).toBe("L2");
   });
 
   it("conserves the exclusive question partition while opportunity bounds overlap independently", () => {
