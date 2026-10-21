@@ -5,6 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
+import type { SourceSemanticObservation } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
 import { SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticRetainedNominationWitnessSchema,
   sourceSemanticRetainedWitnessMatchesPhase, type SourceSemanticAccessProfile } from "@do-soul/alaya-protocol";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
@@ -56,9 +57,10 @@ it("attributes beyond-prefix nominations from the SQLite/built-worker witness af
         target: { ...beyond.source.target, root_kind: "source_record" as const }, start: 0, end: 1 }] };
     const call: ObservationCallScope = { kind: "prepare_query", request_id: frame.request_id,
       session_id: frame.facts!.binding!.session_id, query_key: "synthetic", snapshot_id: null, workspace_id: WS, as_of: CLOCK };
-    const result = attributeObservation({ question_id: "synthetic", k: 5, call, frames: [{ call, observation: frame }],
-      frozen_index: null, admitted_roots: new Map(), admitted_roots_complete: false, answer_gold: answer,
+    const project = (observation: SourceSemanticObservation) => attributeObservation({ question_id: "synthetic", k: 5, call,
+      frames: [{ call, observation }], frozen_index: null, admitted_roots: new Map(), admitted_roots_complete: false, answer_gold: answer,
       visibility: scoreConsumerMessageVisibility({ gold: answer, pages: [] }) });
+    const result = project(frame);
     for (const view of ["original", "hint"] as const) for (const channel of ["lexical", "vector"] as const) {
       const fact = result.messages[0]!.routes.find(row => row.route === `index:${view}:${channel}`)!;
       const retained = witness.filter(row => row.source.root_key === beyond.source.root_key && row.view === view && row.route.kind === channel);
@@ -76,5 +78,23 @@ it("attributes beyond-prefix nominations from the SQLite/built-worker witness af
     }
     expect(result.messages[0]).toMatchObject({ eligibility: "unknown", visibility: { delivery: "unknown" },
       finite_union: { full_universe: "not_established" } });
+    // Labelled synthetic post-capture faults: not natural input or a measured retrieval claim.
+    for (const facts of [undefined, { ...frame.facts!, binding: null }, { ...frame.facts!,
+      binding: { ...frame.facts!.binding!, session_id: "foreign" } }]) {
+      const unbound = project({ ...frame, facts });
+      expect(unbound.observation).toMatchObject({ complete: false, progress_complete: false, finite_union_complete: false });
+      for (const route of unbound.messages[0]!.routes.filter(row => row.route.startsWith("index:"))) {
+        expect(route).toMatchObject({ nomination: "unknown", first_failure: null, native: { lexical_ranks: null,
+          vector: null, retained_occurrences: null, occurrence_evidence: "unavailable", completion: null, attempts: null } });
+      }
+    }
+    const partial = project({ ...frame, facts: { ...frame.facts!, complete: false, issues: ["synthetic_detail_omitted"] },
+      status: "overflow", dropped_events: 1 });
+    expect(partial.observation.progress_complete).toBe(false);
+    for (const route of partial.messages[0]!.routes.filter(row => row.route.startsWith("index:"))) {
+      const original = result.messages[0]!.routes.find(row => row.route === route.route)!;
+      expect(route.nomination).toBe("passed");
+      expect(route.native).toEqual(original.native);
+    }
   });
 }, 60000);

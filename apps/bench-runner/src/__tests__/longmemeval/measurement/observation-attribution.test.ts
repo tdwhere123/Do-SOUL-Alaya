@@ -149,6 +149,21 @@ describe("observation attribution", () => {
     expect(attributed({ frames: [captured(), foreign] }).messages[0]?.read).toBe("none");
   });
 
+  it("keeps a bound child's own proof when its ancestor is unavailable", () => {
+    const { continuation, continued } = chain();
+    const local = { ...continued, observation: { ...continued.observation, events: [routeEvent, returned(0, 30)],
+      facts: { ...continued.observation.facts!, complete: false, issues: ["synthetic_detail_omitted"] } } };
+    const result = attributed({ call: continuation, frames: [local] });
+    expect(result.observation).toMatchObject({ complete: false, progress_complete: false, snapshot_bound: true });
+    expect(result.observation.issues).toContain("native_ancestor_missing");
+    expect(result.observation.issues).toContain("native_fact:synthetic_detail_omitted");
+    expect(result.messages[0]).toMatchObject({ read: "whole", read_intervals: [{ request_id: 8, start: 0, end: 30 }] });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:original:lexical"))
+      .toMatchObject({ nomination: "passed", native: { lexical_ranks: [{ rank: 2 }] } });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:hint:vector"))
+      .toMatchObject({ nomination: "passed", native: { vector: { rank: 5, window: { start_byte: 40, end_byte: 60 } } } });
+  });
+
   it("keeps missing, historical and explicitly unknown ancestry unresolved", () => {
     const { continuation, recalled, continued } = chain();
     const missing = attributed({ call: continuation, frames: [recalled, continued] });
@@ -161,6 +176,32 @@ describe("observation attribution", () => {
     expect(attributed({ frames: [captured(), captured()] }).observation.status).toBe("ambiguous");
     const conflicting = captured([], call, facts({ ...call, session_id: "foreign" }));
     expect(attributed({ frames: [conflicting] }).observation.issues).toContain("native_call_binding_mismatch");
+  });
+
+  it.each(["facts_omitted", "binding_null"] as const)("does not promote raw progress or finite membership with %s", state => {
+    const events = [routeEvent, returned(0, 100), { kind: "union_admission", phase: "observation",
+      data: { route: "cursor", record_id: "root-a", position: 4 } }, { kind: "access_order", phase: "observation",
+      data: { sources: [{ record_id: "root-a", position: 2, read_bytes: 100, body_bytes: 100 }] } },
+    { kind: "package_candidates", phase: "selection", data: { incomplete: false,
+      packages: [{ target: target(unit()), access_position: 2, proof_count: 1 }] } },
+    { kind: "frozen_membership", phase: "selection", data: { incomplete: false, pages: [{ position: 0, targets: [target(unit())] }] } },
+    { kind: "encoded_membership", phase: "delivery", data: { results: [{ target: target(unit()), preview_bytes: 100, within_budget: true }] } }];
+    const native = facts(call, { binding: null, pool: pool([unit()]), issues: ["synthetic_native_detail_unknown"] });
+    const frame = captured(events, call, native, state === "facts_omitted" ? { facts: undefined } : {});
+    const result = attributed({ frames: [frame] });
+    expect(frame.observation.events).toEqual(events);
+    expect(result.observation).toMatchObject({ complete: false, progress_complete: false, finite_union_complete: false, snapshot_bound: false });
+    expect(result.observation.issues).toContain("native_call_binding_unavailable");
+    if (state === "binding_null") expect(result.observation.issues).toContain("native_fact:synthetic_native_detail_unknown");
+    expect(result.messages[0]).toMatchObject({ candidate: "unknown", read: "unknown", access_positions: [],
+      read_intervals: [], coverage_intervals: [], packages: { candidates: [], selected: [], encoded: [] },
+      finite_union: { pool_id: null, capture: "unknown", source_count: null, member_positions: [] },
+      first_unknown: { stage: "eligibility" } });
+    for (const route of result.messages[0]!.routes) {
+      expect(route.nomination === "passed" || route.nomination === "failed").toBe(false);
+      expect(route.native?.lexical_ranks ?? null).toBeNull();
+      expect(route.native?.vector ?? null).toBeNull();
+    }
   });
 
   it("closes the finite union independently of open discovery and a partial corpus census", () => {

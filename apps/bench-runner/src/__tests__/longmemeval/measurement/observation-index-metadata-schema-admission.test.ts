@@ -36,8 +36,11 @@ const visibility = scoreConsumerMessageVisibility({ gold: answer, pages: [{ page
   terminal_tail: { status: "unknown", reason: "native_access_or_computation_unresolved" } }] });
 
 function admit(requestId: number, events: readonly { kind: string; data: () => unknown; diagnostic?:
-  "source_index_original_vector_ranked" | "source_index_original_lexical_candidate" }[]) {
+  "source_index_original_vector_ranked" | "source_index_original_lexical_candidate" }[], captureBinding = true) {
   const observer = new SourceSemanticObserver(requestId, { max_events: 512, max_bytes: 262144 });
+  // Schema-admission controls need a native-bound call as well as valid metadata.
+  if (captureBinding) observer.context({}, () => ({ operation: "recall", workspace_id: "ws", as_of: "2026-10-20T00:00:00Z",
+    snapshot_revision: "1:0", preparation: null, index: null }));
   observer.meter(null, id => ({ id, parent: null, phase: "observation",
     initial: { work_units: 1, memory_bytes: 1 }, remaining: { work_units: 1, memory_bytes: 1 },
     spent: { work_units: 0, memory_bytes: 0 }, held: { work_units: 0, memory_bytes: 0 },
@@ -46,7 +49,7 @@ function admit(requestId: number, events: readonly { kind: string; data: () => u
   for (const event of events) observer.event(event.kind, "observation", event.data, event.diagnostic);
   const finished = observer.finish("success");
   const admitted = readSourceSemanticObservation(JSON.parse(JSON.stringify(finished)), requestId);
-  const call = { kind: "recall" as const, request_id: requestId, session_id: "session", query_key: "q",
+  const call = { kind: "recall" as const, request_id: requestId, session_id: admitted.facts?.binding?.session_id ?? "session", query_key: "q",
     snapshot_id: SNAPSHOT, workspace_id: "ws", as_of: "2026-10-20T00:00:00Z" };
   return { finished, admitted, attribution: attributeObservation({ question_id: "index-metadata", k: 5, call,
     frames: [{ call, observation: admitted }], frozen_index: null, admitted_roots: new Map(),
@@ -142,6 +145,23 @@ it("keeps schema-valid lexical, vector window and refusal facts after observer J
   expect(attribution.messages[0]).toMatchObject({ diagnostic_issues: [] });
   expect(attribution.messages[0]?.routes.every(row => row.diagnostic_issues.length === 0)).toBe(true);
   expect(attribution.layer).toBe("U");
+});
+
+it("retains valid raw legacy diagnostics without promoting an unbound rank or attempt", () => {
+  const { admitted, attribution } = admit(10, [
+    { kind: "source_index_acquisition", data: () => ({ invocation: "original", kind: "lexical_candidate", target, ...lexical }) },
+    { kind: "source_index_acquisition", data: () => ({ invocation: "original", kind: "vector_ranked", target, ...vector }) },
+    ...["admitted", "resource_refused"].map(disposition => ({ kind: "source_index_acquisition", data: () => ({
+      invocation: "original", kind: "nomination_attempt", channel: "vector", target, disposition, resource_refusal: refusal }) }))
+  ], false);
+  expect(admitted.facts?.binding).toBeNull();
+  expect(capturedData(admitted)[0]).toMatchObject(lexical);
+  expect(capturedData(admitted)[1]).toMatchObject(vector);
+  expect(capturedData(admitted)[3]?.resource_refusal).toEqual(refusal);
+  for (const name of ["index:original:lexical", "index:original:vector"]) expect(route(attribution, name))
+    .toMatchObject({ nomination: "unknown", first_failure: null, diagnostic_issues: [],
+      native: { lexical_ranks: null, vector: null, attempts: null } });
+  expect(attribution.observation.issues).toContain("native_call_binding_unavailable");
 });
 
 it("keeps an independent valid vector when a malformed diagnostic is captured first", () => {

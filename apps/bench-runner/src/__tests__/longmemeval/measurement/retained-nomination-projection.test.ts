@@ -9,7 +9,7 @@ import { sourceIndexTarget, SourceSemanticProfiledAcquisitionPhaseSchema,
   SourceSemanticRetainedNominationWitnessSchema, sourceSemanticRetainedWitnessMatchesPhase,
   type SourceSemanticNominationOccurrence, type SourceSemanticProfiledAcquisitionPhase } from "@do-soul/alaya-protocol";
 import type { SourceSemanticObservation } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-observation.js";
-import { attributeObservation, type ObservationCallScope } from "../../../runs/longmemeval-semantic/observation-attribution.js";
+import { attributeObservation, type ObservationCallScope, type ObservationCapturedFrame } from "../../../runs/longmemeval-semantic/observation-attribution.js";
 import { scoreConsumerMessageVisibility } from "../../../runs/longmemeval-semantic/message-visibility.js";
 
 const DIGEST = `sha256:${"ab".repeat(32)}`;
@@ -20,6 +20,10 @@ const window = (start: number) => ({ window_id: DIGEST, content_digest: DIGEST, 
 const views = ["original", "hint"] as const, channels = ["lexical", "vector"] as const;
 const call: ObservationCallScope = { kind: "prepare_query", request_id: 7, session_id: "session", query_key: "synthetic",
   snapshot_id: DIGEST, workspace_id: "ws", as_of: "2026-10-20T00:00:00Z" };
+const nativeFacts: NonNullable<SourceSemanticObservation["facts"]> = {
+  binding: { session_id: "session", request_id: 7, operation: "prepare_query", workspace_id: "ws",
+    as_of: call.as_of, snapshot_revision: "1:0", preparation: null, index: null },
+  pool: null, lease_reads: [], lease_issues: [], operations: [], encodings: [], complete: true, issues: [] };
 
 // Authored synthetic evidence: twenty roots in four lanes, then four duplicate-root occurrences.
 // Native ranks intentionally differ from array positions and from the other lanes' ranks.
@@ -55,24 +59,96 @@ function fixture() {
   expect(sourceSemanticRetainedWitnessMatchesPhase(witness, phase)).toBe(true);
   return { candidate_phase: phase, retained_occurrences: witness };
 }
-function project(data: unknown, index = 19, extra: Partial<SourceSemanticObservation> = {}, events: SourceSemanticObservation["events"] = []) {
+function project(data: unknown, index = 19, extra: Partial<SourceSemanticObservation> = {}, events: SourceSemanticObservation["events"] = [],
+  capture: (frame: ObservationCapturedFrame) => readonly ObservationCapturedFrame[] = frame => [frame], scope = call) {
   const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
     spans: [{ session_index: 0, message_index: 0, source_id: `source-${index}`, target: identity(index), start: 10, end: 20 }] };
   const observation: SourceSemanticObservation = { version: 1, request_id: 7, status: "observed", execution: "success",
     events: [{ kind: "source_index_routes", phase: "observation", data }, ...events],
-    facts: { binding: { session_id: "session", request_id: 7, operation: "prepare_query", workspace_id: "ws",
-      as_of: call.as_of, snapshot_revision: "1:0", preparation: null, index: null },
-      pool: null, lease_reads: [], lease_issues: [], operations: [], encodings: [], complete: true, issues: [] },
+    facts: nativeFacts,
     costs: [], meters: [], totals: { debit_work: 0, debit_bytes: 0, absorb_work: 0, absorb_bytes: 0 },
     dropped_events: 0, aggregates_complete: true, issues: [], overhead: { capture_ms: 0, event_json_bytes: 0,
       ipc_bytes: null, ipc_time: "not_measured", physical_peak_memory: "not_measured", physical_sql_work: "not_measured" }, ...extra };
-  return attributeObservation({ question_id: "synthetic", k: 5, call, frames: [{ call, observation }], frozen_index: null,
+  return attributeObservation({ question_id: "synthetic", k: 5, call: scope, frames: capture({ call: scope, observation }), frozen_index: null,
     admitted_roots: new Map(), admitted_roots_complete: false, answer_gold: answer,
     visibility: scoreConsumerMessageVisibility({ gold: answer, pages: [] }) });
 }
 function route(result: ReturnType<typeof project>, view: typeof views[number], channel: typeof channels[number]) {
   return result.messages[0]!.routes.find(row => row.route === `index:${view}:${channel}`)!;
 }
+
+it.each(["facts_omitted", "binding_null"] as const)("withholds full and prefix authority with %s while retaining diagnostics", state => {
+  const facts = state === "facts_omitted" ? undefined : { ...nativeFacts, binding: null };
+  for (const index of [0, 19]) {
+    const data = fixture();
+    const result = project({ ...data, retained_occurrences: null }, index, { facts }, [
+      { kind: "source_index_acquisition", phase: "observation", data: { invocation: "original", kind: "lexical_candidate",
+        target: source(index).target, rank: -1, lane: "unicode61", lane_rank: 1, bm25: -2 } },
+      { kind: "source_index_acquisition", phase: "observation", data: { invocation: "hint", kind: "vector_ranked",
+        target: source(index).target, rank: 3, cosine: 0.5, window: { ...window(0), window_id: "invalid" } } },
+      ...["admitted", "resource_refused"].map(disposition => ({ kind: "source_index_acquisition", phase: "observation",
+        data: { invocation: "hint", kind: "nomination_attempt", channel: "vector", target: source(index).target, disposition,
+          resource_refusal: { stage: "invalid", phase: "synthetic" } } }))
+    ]);
+    expect(result.observation).toMatchObject({ complete: false, progress_complete: false, snapshot_bound: false });
+    expect(result.observation.issues).toContain("native_call_binding_unavailable");
+    if (state === "facts_omitted") expect(result.observation.issues).toContain("native_ancestry_detail_incomplete");
+    for (const view of views) for (const channel of channels) {
+      expect(route(result, view, channel)).toMatchObject({ nomination: "unknown", first_failure: null, native: {
+        acquisition_status: null, completion: null, navigation_digest: null, lexical_ranks: null, vector: null,
+        retained_occurrences: null, occurrence_evidence: "unavailable", attempts: null } });
+      expect(route(result, view, channel).diagnostic_issues).toContainEqual(expect.objectContaining({ field: "retained_occurrences" }));
+    }
+    expect(result.messages[0]?.diagnostic_issues.map(issue => issue.field)).toEqual([
+      "retained_occurrences", "lexical_rank", "retained_occurrences", "retained_occurrences",
+      "retained_occurrences", "vector_rank", "resource_refusal", "resource_refusal"]);
+    expect(result.messages[0]?.first_unknown?.stage).toBe("eligibility");
+    // An internally consistent full witness still lacks call authority.
+    for (const view of views) for (const channel of channels) expect(route(project(data, index, { facts }), view, channel))
+      .toMatchObject({ nomination: "unknown", native: { retained_occurrences: null, lexical_ranks: null, vector: null } });
+  }
+});
+
+it.each([
+  { session_id: "foreign" }, { request_id: 8 }, { operation: "recall" as const },
+  { workspace_id: "foreign" }, { as_of: "2026-10-21T00:00:00Z" }
+])("rejects a present mismatched binding %j", mismatch => {
+  const result = project(fixture(), 19, { facts: { ...nativeFacts, binding: { ...nativeFacts.binding!, ...mismatch } } });
+  expect(result.observation.issues).toEqual(["native_call_binding_mismatch"]);
+  for (const view of views) for (const channel of channels) expect(route(result, view, channel))
+    .toMatchObject({ nomination: "unknown", native: { lexical_ranks: null, vector: null } });
+});
+
+it("does not borrow a foreign or ambiguous frame's retained authority", () => {
+  const data = fixture();
+  const foreign = project(data, 19, { facts: undefined }, [], frame => [frame, {
+    call: { ...call, query_key: "foreign", request_id: 8 }, observation: { ...frame.observation, request_id: 8,
+      facts: { ...nativeFacts, binding: { ...nativeFacts.binding!, request_id: 8 } } } }]);
+  for (const view of views) for (const channel of channels) expect(route(foreign, view, channel).nomination).toBe("unknown");
+  for (const capture of [(frame: ObservationCapturedFrame) => [frame, frame],
+    (frame: ObservationCapturedFrame) => [frame, { ...frame, call: { ...call, query_key: "foreign" } }]]) {
+    const result = project(data, 19, {}, [], capture);
+    expect(result.observation.status).toBe("ambiguous");
+    for (const view of views) for (const channel of channels) expect(route(result, view, channel).nomination).toBe("unknown");
+  }
+});
+
+it.each(["native_detail", "event_overflow", "snapshot_unsealed"] as const)("preserves bound partial proof with %s", state => {
+  const result = project(fixture(), 19, state === "native_detail" ? {
+    facts: { ...nativeFacts, complete: false, issues: ["synthetic_detail_omitted"] } }
+    : state === "event_overflow" ? { status: "overflow", dropped_events: 1, issues: ["synthetic_event_overflow"] } : {}, [],
+  frame => [frame], { ...call, snapshot_id: state === "snapshot_unsealed" ? null : call.snapshot_id });
+  for (const [viewIndex, view] of views.entries()) for (const channel of channels) {
+    expect(route(result, view, channel)).toMatchObject({ nomination: "passed", native: { occurrence_evidence: "full_retained" } });
+    expect(route(result, view, channel).native?.retained_occurrences).toHaveLength(2);
+    if (channel === "lexical") expect(route(result, view, channel).native?.lexical_ranks?.map(row => row.rank))
+      .toEqual([120 + viewIndex * 100, 121 + viewIndex * 100]);
+    else expect(route(result, view, channel).native?.vector?.rank).toBe(320 + viewIndex * 100);
+  }
+  expect(result.observation).toMatchObject({ complete: false, progress_complete: false });
+  expect(result.messages[0]?.first_unknown?.stage).toBe("eligibility");
+  if (state === "native_detail") expect(result.observation.issues).toContain("native_fact:synthetic_detail_omitted");
+});
 
 it.each(["absent", "omitted"] as const)("projects all retained lanes beyond the prefix with optional diagnostics %s", detail => {
   const data = fixture();
@@ -162,6 +238,10 @@ it("keeps valid-empty, unavailable, absent and disabled lane states distinct wit
   for (const view of views) for (const channel of channels) expect(route(projected, view, channel)).toMatchObject({
     first_failure: null, native: { occurrence_evidence: "full_retained", retained_occurrences: [], vector: null, lexical_ranks: null } });
   expect(projected.messages[0]?.finite_union.full_universe).toBe("not_established");
+  const unbound = project({ candidate_phase: phase, retained_occurrences: [] }, 19, { facts: undefined });
+  for (const view of views) for (const channel of channels) expect(route(unbound, view, channel)).toMatchObject({
+    nomination: "unknown", first_failure: null, native: { completion: null, acquisition_status: null,
+      retained_occurrences: null, occurrence_evidence: "unavailable" } });
 });
 
 it.each(["missing", "null", "invalid_rank", "invalid_window", "count_mismatch", "prefix_mismatch", "duplicate_reference"] as const)(

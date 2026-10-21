@@ -19,12 +19,14 @@ export type ObservationFrozenIndex = Readonly<{
 }>;
 export type ObservationEvent = SourceSemanticObservation["events"][number] & Readonly<{
   request_id: number; session_id: string | null; call_kind: ObservationCallScope["kind"]; event_position: number;
+  /** Native call admission, independent of capture completeness and corpus qualification. */
+  call_bound: boolean;
 }>;
 export type ObservationAncestry = Readonly<{
   target: SourceSemanticObservation | null; frames: readonly ObservationCapturedFrame[];
   events: readonly ObservationEvent[]; complete: boolean;
   /** Complete causal progress events/ancestry, independent of optional candidate/fit detail. */
-  progress_complete: boolean; snapshot_bound: boolean;
+  progress_complete: boolean; snapshot_bound: boolean; call_bound: boolean;
   status: "usable" | "missing" | "ambiguous" | "unavailable"; issues: readonly string[];
 }>;
 type Origin = NonNullable<SourceSemanticNativeFacts["pool"]>["origin"];
@@ -61,7 +63,7 @@ export function observationFrameComplete(frame: SourceSemanticObservation): bool
 export function joinObservationFrames(call: ObservationCallScope, captured: readonly ObservationCapturedFrame[]): ObservationAncestry {
   const matches = captured.filter(row => sameCall(row.call, call));
   const empty = (status: ObservationAncestry["status"], issue: string): ObservationAncestry =>
-    ({ target: null, frames: [], events: [], complete: false, progress_complete: false, snapshot_bound: false, status, issues: [issue] });
+    ({ target: null, frames: [], events: [], complete: false, progress_complete: false, snapshot_bound: false, call_bound: false, status, issues: [issue] });
   if (call.request_id === null) return empty("missing", "observation_request_unscoped");
   if (matches.length !== 1) return empty(matches.length > 1 ? "ambiguous" : "missing",
     matches.length > 1 ? "ambiguous_observation_request" : "observation_missing_for_request");
@@ -132,16 +134,19 @@ export function joinObservationFrames(call: ObservationCallScope, captured: read
   const frames = [...selected];
   const progressComplete = issues.size === 0 && frames.every(row => observationFrameComplete(row.observation));
   return { target: target.observation, frames, status: "usable", issues: [...issues],
-    snapshot_bound: bound(target) && sealedSnapshot(call.snapshot_id), progress_complete: progressComplete,
+    call_bound: bound(target), snapshot_bound: bound(target) && sealedSnapshot(call.snapshot_id), progress_complete: progressComplete,
     complete: progressComplete && frames.every(row => row.observation.diagnostics?.status !== "overflow"),
-    events: frames.flatMap(({ call: scope, observation }) => observation.events.map((event, event_position) =>
-      ({ ...event, event_position, request_id: observation.request_id, session_id: scope.session_id, call_kind: scope.kind }))) };
+    // Retain raw events for decoder diagnostics; consumers may promote only admitted facts.
+    events: frames.flatMap(frame => frame.observation.events.map((event, event_position) =>
+      ({ ...event, event_position, request_id: frame.observation.request_id, session_id: frame.call.session_id,
+        call_kind: frame.call.kind, call_bound: bound(frame) }))) };
 }
 
 /** Capture completeness describes the finite native union, not source census or legal-delivery optimum. */
 export function observedFiniteUnion(joined: ObservationAncestry): Readonly<{
   complete: boolean; pool: NonNullable<SourceSemanticNativeFacts["pool"]> | null;
 }> {
+  if (!joined.call_bound) return { pool: null, complete: false };
   const direct = joined.target?.facts?.pool;
   const origins = joined.target?.facts?.lease_reads.flatMap(read => read.pool_origin === null ? [] : [read.pool_origin]) ?? [];
   const candidates = joined.frames.flatMap(row => row.observation.facts?.pool == null ? [] : [row.observation.facts.pool])

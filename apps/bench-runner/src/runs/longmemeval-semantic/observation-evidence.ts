@@ -31,7 +31,7 @@ const resourceRefusalSchema = acquisitionResult.shape.resource_refusals.unwrap()
 type NativePhaseFact = Readonly<{ family: "legacy" | "profiled"; invocation: "original" | "hint";
   phase: SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase | null;
   retained?: readonly SourceSemanticNominationOccurrence[] | null; retained_issue?: boolean;
-  position: EventReference | null; invocation_position: number }>;
+  position: EventReference | null; invocation_position: number; call_bound: boolean }>;
 
 export type ObservationReadInterval = MessageByteInterval & Readonly<{
   provenance: "source_read" | "observation_read_complete" | "verification_reuse" | "access_order";
@@ -133,14 +133,16 @@ function nativePhases(events: Events): NativePhaseFact[] {
       const validRetained = parsed.success && retained?.success && sourceSemanticRetainedWitnessMatchesPhase(retained.data, parsed.data);
       return (["original", "hint"] as const).map((invocation, invocation_position): NativePhaseFact => ({
         family: "profiled", invocation, invocation_position, phase: parsed.success ? parsed.data : null, position: eventReference(event),
+        call_bound: event.call_bound,
         retained: validRetained ? retained.data : null, retained_issue: retained !== undefined && !validRetained
       }));
     }
     const parsed = SourceSemanticAcquisitionPhaseSchema.safeParse(data?.original);
     const original = parsed.success ? parsed.data : null;
-    return [{ family: "legacy" as const, invocation: "original" as const, phase: original, position: eventReference(event), invocation_position: 0 },
+    return [{ family: "legacy" as const, invocation: "original" as const, phase: original, position: eventReference(event),
+      invocation_position: 0, call_bound: event.call_bound },
       ...(original?.supplemental ?? []).map((phase, index) => ({ family: "legacy" as const, invocation: "hint" as const, phase,
-        position: eventReference(event), invocation_position: index + 1 }))];
+        position: eventReference(event), invocation_position: index + 1, call_bound: event.call_bound }))];
   });
 }
 
@@ -148,7 +150,7 @@ function nativePhases(events: Events): NativePhaseFact[] {
  * mapped identity and span; an absent, repeated or unknown row stays unknown. */
 export function observationMessageFacts(span: AnswerTurnSpan, input: ObservationAttributionInput,
   joined: ObservationAncestry, finite: ReturnType<typeof observedFiniteUnion>): ObservationMessageFacts {
-  const events = joined.events, complete = joined.progress_complete, poolClosed = finite.complete;
+  const events = joined.events.filter(event => event.call_bound), complete = joined.progress_complete, poolClosed = finite.complete;
   const qualification = observationIndexEligibility(span, input.call, joined, input.frozen_index);
   const admitted = joined.snapshot_bound ? findAdmitted(input.admitted_roots, input.call, span)
     : { state: "unknown" as const, root: null };
@@ -253,13 +255,17 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
     const data = recordOf(event.data);
     const invocation = data?.invocation === "hint" ? "hint" as const
       : data?.invocation === "original" ? "original" as const : null;
-    return invocation === null || data === null ? [] : [{ invocation, data, position: eventReference(event) }];
+    return invocation === null || data === null ? [] : [{ invocation, data, position: eventReference(event), call_bound: event.call_bound }];
   });
   const phases = (["original", "hint"] as const).flatMap<NativePhaseFact>(invocation => {
     const matching = observed.filter(row => row.invocation === invocation);
-    return matching.length > 0 ? matching : [{ family: "legacy", invocation, phase: null, position: null, invocation_position: 0 }];
+    return matching.length > 0 ? matching : [{ family: "legacy", invocation, phase: null, position: null, invocation_position: 0, call_bound: false }];
   });
-  return phases.flatMap(({ family, invocation, phase, position, invocation_position, retained, retained_issue }) => {
+  return phases.flatMap(({ family, invocation, phase: capturedPhase, position, invocation_position,
+    retained: capturedRetained, retained_issue, call_bound }) => {
+    // Schema consistency does not admit a native call. Keep decoding faults below even when
+    // ancestry admission withholds the phase, retained proof and optional attempt/rank facts.
+    const phase = call_bound ? capturedPhase : null, retained = call_bound ? capturedRetained : null;
     const result = phase?.result;
     const prefix = result !== null && result !== undefined && "occurrence_prefix" in result ? result.occurrence_prefix : null;
     const occurrences = (retained ?? prefix)?.filter(row => row.view === invocation && targetMatches(row.source.target, span.target)) ?? null;
@@ -274,7 +280,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       const native = candidate && invocation === "hint" ? undefined : result?.[channel];
       const matching = routeCaptures.filter(row => targetMatches(row.data.target, span.target));
       const attempts = matching.filter(row => row.data.kind === "nomination_attempt" && row.data.channel === channel);
-      const dispositions = attempts.map(row => row.data.disposition);
+      const dispositions = attempts.filter(row => row.call_bound).map(row => row.data.disposition);
       const nominated = channel === "lexical" ? (nomination?.lexical.length ?? 0) > 0 : nomination?.vector != null;
       // Profiled participation comes only from nativePhases' validated witness/prefix, independently
       // of window availability. Optional attempt diagnostics cannot override that authority.
@@ -297,12 +303,12 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       for (const row of rankEvents) {
         if (row.data.kind === "lexical_candidate") {
           const parsed = lexicalRankFrom(row.data);
-          if (parsed.success) lexicalRanks.push(parsed.data);
-          else fact.diagnostic_issues.push({ field: "lexical_rank", reference: row.position });
+          if (!parsed.success) fact.diagnostic_issues.push({ field: "lexical_rank", reference: row.position });
+          else if (row.call_bound) lexicalRanks.push(parsed.data);
         } else if (row.data.kind === "vector_ranked") {
           const parsed = vectorRankFrom(row.data);
-          if (parsed.success) vectorRank ??= parsed.data;
-          else fact.diagnostic_issues.push({ field: "vector_rank", reference: row.position });
+          if (!parsed.success) fact.diagnostic_issues.push({ field: "vector_rank", reference: row.position });
+          else if (row.call_bound) vectorRank ??= parsed.data;
         }
       }
       const receiptLexical = channel === "lexical" && (nomination?.lexical.length ?? 0) > 0 ? nomination!.lexical : null;
@@ -311,7 +317,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       fact.native = { invocation, channel, position, invocation_position, acquisition_status: phase?.status ?? null,
         completion: native?.completion ?? (lane?.availability.status === "measured_empty" ? "complete" : null), reason: native?.reason
           ?? (lane?.availability.status === "unavailable" ? lane.availability.reason : undefined) ?? phase?.reason
-          ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
+          ?? (phase === null ? position !== null && !call_bound ? "native_call_binding_unavailable" : "native_route_not_observed_or_invalid" : null),
         navigation_digest: result?.navigation_digest ?? null,
         lexical_ranks: channel === "lexical" ? mergeLexicalRanks(candidate ? [] : lexicalRanks, receiptLexical) : null,
         vector: channel === "vector" ? nomination?.vector ?? (candidate ? null : vectorRank) : null, lexical_window: null,
@@ -333,6 +339,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
         fact.unknowns.push({ stage: "nomination", reason: VECTOR_INSPECTION_DETAIL_UNAVAILABLE });
       }
       if (qualification[channel] === "unknown") fact.unknowns.push({ stage: "eligibility", reason: qualification.reason });
+      if (position !== null && !call_bound) fact.unknowns.push({ stage: "nomination", reason: "native_call_binding_unavailable" });
       if (!complete) fact.unknowns.push({ stage: "nomination", reason: "observation_incomplete" });
       return fact;
     });
@@ -349,7 +356,7 @@ function phaseNomination(phase: NativePhaseFact["phase"], span: AnswerTurnSpan,
   vector: rows.flatMap(row => row.route.kind === "vector" && row.route.window?.status === "available"
     ? [{ rank: row.route.native_rank, cosine: row.route.cosine, window: row.route.window.window }] : [])[0] ?? null };
 }
-function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference }[],
+function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference; call_bound: boolean }[],
   issues: ObservationDiagnosticIssue[]): ObservationNativeRoute["attempts"] {
   const facts: NonNullable<ObservationNativeRoute["attempts"]>[number][] = [];
   for (const row of rows) {
@@ -367,6 +374,7 @@ function nominationAttempts(rows: readonly { data: Record<string, unknown>; posi
     const parsed = SourceEvidenceTargetSchema.safeParse(row.data.merge_target);
     const refusal = resourceRefusalFrom(row.data);
     if (refusal !== null && !refusal.success) issues.push({ field: "resource_refusal", reference: row.position });
+    if (!row.call_bound) continue;
     facts.push({ disposition: value, admission: captured, resource_refusal: refusal?.success ? refusal.data : null,
       reference: row.position, merge_target: parsed.success ? parsed.data : null });
   }
