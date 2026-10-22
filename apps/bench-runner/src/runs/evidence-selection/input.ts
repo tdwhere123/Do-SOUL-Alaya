@@ -24,6 +24,8 @@ import {
   evidenceSelectionReferencePrompt, isEvidenceSelectionReferencePolicy, representEvidenceSelectionReferences,
   type EvidenceSelectionReferenceFormat, type EvidenceSelectionReferences
 } from "./source-references.js";
+import { INPUT_NAVIGATION_POLICY, INPUT_NAVIGATION_PROMPT, FormationInputSchema,
+  formationInputText, formationResponseJsonSchema } from "../source-access-diagnostic/input-condition-formation.js";
 // Input is the materialization interface used by native execution and its callers.
 export { evidenceSelectionResponseJsonSchema, interpretEvidenceSelectionDecoded,
   EVIDENCE_SELECTION_MAX_SELECTED } from "./selection-response.js";
@@ -174,6 +176,7 @@ export type EvidenceSelectionLine = Readonly<{
   requestDigest: string;
   transportProvenance: ExtractionTransportProvenance;
   referenceOutput?: Readonly<{ format: EvidenceSelectionReferenceFormat; references: EvidenceSelectionReferences }>;
+  inputNavigation?: z.infer<typeof FormationInputSchema>;
 }>;
 
 export function parseEvidenceSelectionWorkset(value: unknown): EvidenceSelectionWorkset {
@@ -193,6 +196,15 @@ export function materializeEvidenceSelectionLines(
 ): readonly EvidenceSelectionLine[] {
   selectionRequestProfile(workset.request_profile);
   const policy = selectionRequestPolicy(workset);
+  if (policy === INPUT_NAVIGATION_POLICY) {
+    return workset.items.map(item => {
+      WorksetItemSchema.parse(item);
+      if (item.sources.length !== 0) throw new AlayaError("VALIDATION", "input navigation cannot receive sources");
+      const metadata = z.object({ reference_clock: z.string().datetime() }).strict().parse(item.metadata);
+      const inputNavigation = FormationInputSchema.parse({ question: item.original_question, ...metadata });
+      return { ...bindLine(workset, item, formationResponseJsonSchema(), maxOutputTokens, formationInputText(inputNavigation)), inputNavigation };
+    });
+  }
   if (isEvidenceSelectionReferencePolicy(policy)) {
     const formats: EvidenceSelectionReferenceFormat[] = policy === EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY
       ? ["witness", "literal"] : [policy === EVIDENCE_SELECTION_SOURCE_REFERENCE_LITERAL_POLICY ? "literal" : "witness"];
@@ -344,6 +356,7 @@ function selectionRequestPolicy(
 ): string | undefined {
   const requestPolicy = workset.request_policy;
   if (requestPolicy === undefined) return undefined;
+  if (requestPolicy === INPUT_NAVIGATION_POLICY) return requestPolicy;
   if (isEvidenceSelectionReferencePolicy(requestPolicy)) return requestPolicy;
   if (requestPolicy === EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY) return requestPolicy;
   if (requestPolicy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY) return requestPolicy;
@@ -363,6 +376,7 @@ function selectionRequestPolicy(
 }
 
 function evidenceSelectionSystemPrompt(workset: EvidenceSelectionWorkset): string {
+  if (workset.request_policy === INPUT_NAVIGATION_POLICY) return INPUT_NAVIGATION_PROMPT;
   if (selectionRequestPolicy(workset) === undefined) {
     return SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT;
   }

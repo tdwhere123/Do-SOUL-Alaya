@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { INPUT_NAVIGATION_POLICY } from "../source-access-diagnostic/input-condition-formation.js";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
@@ -79,10 +80,16 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
   cacheRoot: string;
   authority: EvidenceSelectionAuthority;
   config: CompileSeedExtractionConfig;
+  /** Private monotonic phase deadline, never part of request/cache identity. */
+  phaseDeadlineMs?: number;
   extractor?: ReturnType<typeof createSemanticProviderHttpExtractor>;
   /** Called after a key's execution returns, before reserving any following key. */
   continueAfterResult?: (key: string) => boolean;
 }>) {
+  const started = performance.now();
+  // Authorization, transport construction, persistence and readback must share this capture.
+  // Readonly types do not prevent the caller from mutating an object while readiness awaits.
+  input = { ...input, workset: structuredClone(input.workset), config: structuredClone(input.config) };
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifyEvidenceSelectionAuthority(input.authority);
   assertEvidenceSelectionExecutionRoot(authority.execution_scope, input.cacheRoot);
@@ -93,16 +100,32 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
   const maxOutputTokens = authority.limits.max_output_tokens;
   const lines = materializeEvidenceSelectionLines(input.workset, maxOutputTokens);
   assertAuthorizedSelectionRequest(input, lines, maxOutputTokens);
+  const inputNavigation = input.workset.request_policy === INPUT_NAVIGATION_POLICY;
+  if (inputNavigation && (lines.length > 8 || authority.limits.maximum_attempts > 8 || maxOutputTokens > 8192
+    || lines.some(line => line.inputByteUpper > 16 * 1024)
+    || input.workset.model !== "step-3.5-flash-2603" || input.workset.provider_url !== "https://api.stepfun.com/v1"
+    || input.workset.request_profile !== "step-3.5-2603-low-json-schema-v1"
+    || authority.price.estimated_upper_usd > 0.25 * authority.price.quote_basis!.policy_usd_per_cny)) {
+    throw new AlayaError("CONFLICT", "input navigation exceeds its finite Step task bounds");
+  }
+  const phaseDeadlineMs = inputNavigation
+    ? Math.min(input.phaseDeadlineMs ?? Infinity, started + 45 * 60_000) : input.phaseDeadlineMs;
+  if (phaseDeadlineMs !== undefined) {
+    if (!Number.isFinite(phaseDeadlineMs)) throw new AlayaError("VALIDATION", "invalid provider phase deadline");
+    input = { ...input, phaseDeadlineMs };
+  }
   const authorized = new Set(authority.keys);
   const dispatch: EvidenceSelectionLine[] = [];
   const retainedLines: EvidenceSelectionLine[] = [];
-  let cacheHits = 0;
+  let cacheHits = 0, stoppedByRetainedNavigation = false;
   for (const line of lines) {
     const existing = readEvidenceSelectionAttemptState(
       input.cacheRoot, line.key, evidenceSelectionLookup(input.workset, line, maxOutputTokens)
     ).shard;
     if (existing !== undefined) {
       replayCachedSelectionShard(line, existing, input.workset.request_profile);
+      if (inputNavigation && (!hasAdmittedSelectionOutcome(existing) || existing.usage === undefined
+        || existing.usage.inputTokens > line.inputByteUpper)) stoppedByRetainedNavigation = true;
       cacheHits += 1;
       if (authorized.has(line.key)) retainedLines.push(line);
       continue;
@@ -132,16 +155,25 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
         throw new EvidenceSelectionIdentityError(`retained selection has unresolved attempt evidence: ${line.key}`);
       }
     }
+    // A settled decline/failure is not a cache hit that authorizes later keys on re-entry.
+    if (stoppedByRetainedNavigation) return summarize(input, cacheHits, 0, 0);
     const extractor = dispatch.length === 0 ? undefined : input.extractor ??
       createSemanticProviderHttpExtractor(input.config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
     let newlyAdmitted = 0, attempts = 0;
     for (const line of dispatch) {
+      if (phaseDeadlineMs !== undefined && phaseDeadlineMs - performance.now() < 1) break;
       assertAttemptInputWithinReceiptLimit(line.inputByteUpper, authority.price.maximum_input_tokens_per_attempt);
       const filled = await executeProviderRequestLine(
         dispatchContext(input, lines, ledger, lease, extractor!), toProviderLine(line)
       );
       attempts += filled.attempts;
       if (filled.admitted) newlyAdmitted += 1;
+      if (inputNavigation) {
+        const retained = readEvidenceSelectionAttemptState(input.cacheRoot, line.key,
+          evidenceSelectionLookup(input.workset, line, maxOutputTokens));
+        if (!filled.admitted || filled.classified !== "interpreted" || retained.status !== "settled"
+          || retained.shard?.usage === undefined || retained.shard.usage.inputTokens > line.inputByteUpper) break;
+      }
       if (input.continueAfterResult !== undefined && !input.continueAfterResult(line.key)) break;
     }
     return summarize(input, cacheHits, newlyAdmitted, attempts);
@@ -340,6 +372,7 @@ function dispatchContext(
     extractor,
     config: input.config,
     suppliedExtractor: input.extractor !== undefined,
+    ...(input.phaseDeadlineMs === undefined ? {} : { phaseDeadlineMs: input.phaseDeadlineMs }),
     assertScope: () => {
       assertEvidenceSelectionExecutionRoot(input.authority.execution_scope, input.cacheRoot, writeLease);
     }

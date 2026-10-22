@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { admitInputFormation, INPUT_NAVIGATION_POLICY, type FormationAdmissionState } from "../source-access-diagnostic/input-condition-formation.js";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import type { ProviderRequestAttemptClass } from "../provider-request/execution.js";
 import type { EvidenceSelectionIdentity, EvidenceSelectionLine, EvidenceSelectionSource } from "./input.js";
@@ -55,7 +56,7 @@ export type EvidenceSelectionBoundEntry = Readonly<{
   identity: EvidenceSelectionIdentity;
 }>;
 
-export type EvidenceSelectionOutcome =
+export type EvidenceSelectionOutcome = { readonly formation_state?: FormationAdmissionState } & (
   | {
       readonly status: "interpreted";
       readonly selected: readonly EvidenceSelectionBoundEntry[];
@@ -64,7 +65,7 @@ export type EvidenceSelectionOutcome =
   | { readonly status: "abstained"; readonly unresolved: readonly string[] }
   | { readonly status: "invalid"; readonly reason: EvidenceSelectionFailureReason }
   | { readonly status: "incomplete"; readonly reason: "noncomplete" }
-  | { readonly status: "transport_failure"; readonly failure?: unknown };
+  | { readonly status: "transport_failure"; readonly failure?: unknown });
 
 export function evidenceSelectionResponseJsonSchema(): object {
   return {
@@ -120,6 +121,17 @@ export function interpretEvidenceSelectionDecoded(
 } {
   if (!isCompleteSemanticFinish(requestProfile, decoded.finishReason)) {
     return { classified: "incomplete", admitted: false, outcome: { status: "incomplete", reason: "noncomplete" } };
+  }
+  if (line.inputNavigation !== undefined) {
+    const formation = admitInputFormation({ task: INPUT_NAVIGATION_POLICY, input: line.inputNavigation,
+      state: "complete", raw_json: decoded.rawJson, provenance: line.key, reason: null }, line.inputNavigation);
+    if (formation.available) return { classified: "interpreted", admitted: true,
+      outcome: { status: "interpreted", selected: [], unresolved: formation.unresolved, formation_state: formation.state } };
+    return formation.state === "rejected" || formation.state === "malformed"
+      ? { classified: "terminal", admitted: false, outcome: { status: "invalid",
+        reason: formation.state === "malformed" ? "malformed_json" : "invalid_shape", formation_state: formation.state } }
+      : { classified: "abstained", admitted: false, outcome: { status: "abstained",
+        unresolved: formation.unresolved, formation_state: formation.state } };
   }
   let parsed: unknown;
   try { parsed = JSON.parse(decoded.rawJson); }

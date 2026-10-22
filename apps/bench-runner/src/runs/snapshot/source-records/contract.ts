@@ -10,6 +10,7 @@ import { AlayaError, IsoDatetimeStringSchema, SourceRecordIdentitySchema, Addres
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { readRegularFileNoFollow, hashRegularFileNoFollow, sha256Buffer } from "../bound-file.js";
 import { atomicWriteJson } from "../materialize.js";
+import { describeLongMemEvalSessionTime } from "../../../datasets/longmemeval/ingestion/source-time.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "../../selection/question-runtime-identity.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -35,6 +36,9 @@ const MessageSchema = z.object({
   session_index: z.number().int().nonnegative(), round_index: z.number().int().nonnegative(),
   message_id: z.string().min(1), message_index: z.number().int().nonnegative(),
   source_observed_at: IsoDatetimeStringSchema,
+  // Absent on historical v2 sidecars: normalized timestamps alone do not recover precision.
+  source_observation: z.object({ contract: z.literal("longmemeval-session-observation.v1"),
+    raw_date: z.string().min(1) }).strict().optional(),
   role: z.enum(["user", "assistant"]), content_state: z.enum(["empty", "retained"]),
   predecessor: SourceRecordIdentitySchema.optional(),
   record: SourceRecordIdentitySchema, spans: z.array(AddressableSourceSpanSchema).readonly()
@@ -191,9 +195,20 @@ function verifyPersonaPredecessor(message: SourceRecordsMessage): void {
 function messageValidator(header: z.infer<typeof HeaderSchema>): (input: unknown) => SourceRecordsMessage {
   const questions = new Set(header.dataset.question_ids);
   const occurrences = new Set<string>();
+  const sessions = new Map<string, string>();
   return (input) => {
     const message = MessageSchema.parse(input);
     const { record } = message;
+    if (message.source_observation !== undefined &&
+        describeLongMemEvalSessionTime(message.source_observation.raw_date).normalized !== message.source_observed_at) {
+      throw new AlayaError("CONFLICT", "source_records observation normalization conflict");
+    }
+    const sessionKey = JSON.stringify([message.question_id, message.session_index]);
+    const sessionValue = JSON.stringify([message.session_id, message.source_observed_at, message.source_observation]);
+    if (sessions.has(sessionKey) && sessions.get(sessionKey) !== sessionValue) {
+      throw new AlayaError("CONFLICT", "source_records session observation conflict");
+    }
+    sessions.set(sessionKey, sessionValue);
     const occurrence = JSON.stringify([message.question_id, message.session_index, message.message_index]);
     if (!questions.has(message.question_id) || occurrences.has(occurrence) ||
         record.workspace_id !== buildLongMemEvalQuestionRuntimeIdentity(message.question_id).workspaceId ||

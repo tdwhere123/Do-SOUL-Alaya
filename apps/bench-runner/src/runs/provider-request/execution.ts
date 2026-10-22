@@ -80,6 +80,8 @@ export type ProviderRequestDispatchContext = ProviderRequestPhysicalContext & Re
   extractor: BenchSignalExtractor;
   config: CompileSeedExtractionConfig;
   suppliedExtractor: boolean;
+  /** Absolute performance.now() deadline shared by readiness and physical attempts. */
+  phaseDeadlineMs?: number;
   assertScope: () => void;
 }>;
 
@@ -94,7 +96,7 @@ type ReplayProgress =
 
 export const PROVIDER_REQUEST_TIMEOUT_POLICY = "output-token-cap-with-interactive-floor-v1" as const;
 
-/** Same deadline value for transport readiness and, separately, one physical request. */
+/** Legacy per-operation timeout when no enclosing phase deadline is supplied. */
 export function providerRequestTimeout(maxOutputTokens: number) {
   return { policy: PROVIDER_REQUEST_TIMEOUT_POLICY,
     timeout_ms: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS) };
@@ -109,7 +111,11 @@ export async function executeProviderRequestLine(
   }
   let used = replayed.attempts;
   const attemptLimit = context.maximumAttemptsPerKey;
-  const timeoutMs = providerRequestTimeout(context.maxOutputTokens).timeout_ms;
+  const timeoutCeilingMs = providerRequestTimeout(context.maxOutputTokens).timeout_ms;
+  const phaseSignal = context.phaseDeadlineMs === undefined ? undefined
+    : AbortSignal.timeout(Math.ceil(remainingProviderPhaseMs(context.phaseDeadlineMs)));
+  const remainingTimeout = () => context.phaseDeadlineMs === undefined ? timeoutCeilingMs
+    : Math.min(timeoutCeilingMs, Math.floor(remainingProviderPhaseMs(context.phaseDeadlineMs)));
   while (used < attemptLimit) {
     if (remainingProviderRequestSlots(context.ledger) <= 0) {
       return { classified: "retryable", admitted: false, attempts: used };
@@ -118,8 +124,11 @@ export async function executeProviderRequestLine(
       throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
     }
     context.assertScope();
-    await context.extractor.assertTransportReady?.(undefined, timeoutMs);
+    await context.extractor.assertTransportReady?.(phaseSignal, remainingTimeout());
     context.assertScope();
+    phaseSignal?.throwIfAborted();
+    // Readiness may consume the entire phase (or ignore cancellation). Never reserve afterward.
+    const timeoutMs = remainingTimeout();
     const ordinal = context.ledger.reserveAttemptOrdinal(line.key);
     used += 1;
     const lastAttempt = isFinalReservedProviderRequestAttempt(context.ledger, line.key, ordinal, attemptLimit);
@@ -128,6 +137,7 @@ export async function executeProviderRequestLine(
       extracted = await context.extractor.extract({
         systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
         timeoutMs,
+        ...(phaseSignal === undefined ? {} : { abortSignal: phaseSignal }),
         maxOutputTokens: context.maxOutputTokens,
         outputTokenField: isChatSemanticRequestProfile(context.config.requestProfile)
           ? "max_tokens" : "maxOutputTokens",
@@ -159,6 +169,14 @@ export async function executeProviderRequestLine(
     }
   }
   return { classified: "terminal", admitted: false, attempts: used };
+}
+
+function remainingProviderPhaseMs(deadlineMs: number): number {
+  const remaining = deadlineMs - performance.now();
+  if (!Number.isFinite(remaining) || remaining < 1) {
+    throw new AlayaError("UNAVAILABLE", "provider phase deadline exhausted");
+  }
+  return remaining;
 }
 
 export function replayExistingProviderRequestRaws(

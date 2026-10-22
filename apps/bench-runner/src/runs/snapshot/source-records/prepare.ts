@@ -12,7 +12,7 @@ import { LongMemEvalPersonaSuccessorSchema, type LongMemEvalPersonaSuccessor } f
   "../../../datasets/longmemeval/ingestion/task-persona.js";
 import { loadDatasetWindowWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { buildLongMemEvalRoundMessages, pairSessionIntoRounds, type LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
-import { requireLongMemEvalTimestamp } from "../../../datasets/longmemeval/ingestion/source-time.js";
+import { assertLongMemEvalTimeline, requireLongMemEvalTimestamp } from "../../../datasets/longmemeval/ingestion/source-time.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "../../selection/question-runtime-identity.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
@@ -52,6 +52,8 @@ export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsIn
   const loaded = await loadDatasetWindowWithIdentity("longmemeval_s", {
     dataDir: input.dataDir, pinnedMetaRoot: input.pinnedMetaRoot, offset: input.offset, limit: input.limit
   });
+  // Reject surplus/missing dates as well as malformed values before any durable effects.
+  loaded.questions.forEach(assertLongMemEvalTimeline);
   const dataset = SourceRecordsDatasetSchema.parse({ variant: "longmemeval_s", sha256: loaded.sha256,
     offset: input.offset, limit: input.limit, question_ids: loaded.questions.map((q) => q.question_id) });
   const successor = input.personaSuccessor === undefined ? undefined : preparePersonaSuccessor(input.personaSuccessor,
@@ -142,6 +144,8 @@ async function importMessages(daemon: BenchDaemonHandle, questions: readonly Lon
             writer.append({ question_id: question.question_id, session_id: sessionId,
               session_index: sessionIndex, round_index: roundIndex, message_id: message.message_id,
               message_index: messageIndex, source_observed_at: sourceObservedAt,
+              source_observation: { contract: "longmemeval-session-observation.v1",
+                raw_date: question.haystack_dates[sessionIndex]! },
               ...(predecessor === undefined ? {} : { predecessor }),
               role: message.role, content_state: message.content.length === 0 ? "empty" : "retained", ...admitted });
           }

@@ -29,6 +29,21 @@ export function requireLongMemEvalTimestamp(value: string | undefined): string {
   return normalized;
 }
 
+/** Normalization supplies a comparison coordinate, not evidence of a timezone or
+ * per-message/event precision absent from the original session date. */
+export function describeLongMemEvalSessionTime(raw: string) {
+  const normalized = requireLongMemEvalTimestamp(raw);
+  const match = SOURCE_DATE_PATTERN.exec(raw.trim());
+  return {
+    raw, normalized, level: "session" as const,
+    provenance: "longmemeval.haystack_dates" as const,
+    precision: match === null ? "millisecond" as const : match[4] === undefined ? "day" as const
+      : match[6] === undefined ? "minute" as const : "second" as const,
+    timezone: match === null ? "explicit_utc" as const : "unspecified" as const,
+    normalization: "utc_coordinate_not_event_time" as const
+  };
+}
+
 export function assertLongMemEvalTimeline(input: {
   readonly haystack_sessions: readonly unknown[];
   readonly haystack_session_ids: readonly string[];
