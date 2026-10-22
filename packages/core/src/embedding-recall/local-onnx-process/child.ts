@@ -86,7 +86,8 @@ async function runChildRequest(
   if (request.op === "embed_source") {
     const binding = sourceBindings.get(request.binding_id ?? "");
     if (!binding || request.profile_id !== binding.profile_id) throw new CoreError("CONFLICT", "stale or mismatched Source binding");
-    const inputs = captureSourceEmbeddingInputs(request.inputs ?? []);
+    if (request.inputs === undefined) throw new CoreError("VALIDATION", "missing Source embedding inputs");
+    const inputs = captureSourceEmbeddingInputs(request.inputs);
     const results = await binding.embedInputs(inputs, { timeoutMs: request.timeoutMs ?? 120_000, profile_id: request.profile_id });
     return { id: request.id, ok: true, sourceResults: encodeLocalOnnxSourceResults(results),
       sourceBinding: { status: "ready", binding_id: request.binding_id!, profile: binding.profile, profile_id: binding.profile_id } };

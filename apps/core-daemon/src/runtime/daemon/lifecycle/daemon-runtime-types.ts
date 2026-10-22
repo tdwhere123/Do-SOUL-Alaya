@@ -52,7 +52,8 @@ export interface AlayaDaemonRuntime {
   readonly services: AlayaDaemonRuntimeServices;
   startBackgroundServices(): void;
   /** One bounded normal Source producer pass, without scheduling Garden or future mutation. */
-  runSourceIndexPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
+  runSourceIndexPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
+    representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
   // Runs only the requested workspace's BULK_ENRICH worker loop, leaving the

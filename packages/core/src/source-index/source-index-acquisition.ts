@@ -183,7 +183,8 @@ export class SourceIndexAcquisition {
         config_id: selection.config_id, profile_id: selection.profile_id, profile } };
       signal.throwIfAborted();
       receipt = { ...receipt, binding_work: "unknown", external_api_attempts: null };
-      const binding = await bind({ window_bytes: profile.window_bytes, max_input_tokens: profile.max_input_tokens });
+      const binding = await bind({ window_bytes: profile.window_bytes, max_input_tokens: profile.max_input_tokens,
+        ...(profile.representation === undefined ? {} : { representation: profile.representation }) });
       // Binding may not support cancellation. Discard anything arriving after the inherited deadline.
       signal.throwIfAborted();
       if (remainingMs() <= 0) return unavailable("preparation_deadline");
@@ -196,7 +197,7 @@ export class SourceIndexAcquisition {
       const method = actual.provider_kind === "local_onnx" ? "local_inference" : "external_api";
       receipt = { ...receipt, method, submitted_inputs: 1, execution_work: "unknown",
         external_api_attempts: method === "local_inference" ? 0 : null };
-      const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation }]);
+      const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation, role: "query" }]);
       const observed = validateSourceEmbeddingResults(inputs, await embed(inputs, {
         profile_id: profileId, signal, timeoutMs: Math.max(1, remainingMs())
       }), actual)[0]!;

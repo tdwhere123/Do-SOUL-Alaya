@@ -84,7 +84,7 @@ describe("Source captured-root backfill through SQLite with a controlled runtime
       resources: { work: 32, native_accounting: "complete", sql_internal_work: "unknown", model_inputs_submitted: 2,
         model_input_bytes_submitted: 15, token_count_observed: 4, inputs_without_token_count: 0, model_execution_work: "unknown" } });
     expect(binding.embedInputs.mock.calls.map(([inputs]) => inputs)).toEqual(
-      expected.map(({ input_id, text }) => [{ input_id, text }]));
+      expected.map(({ input_id, text }) => [{ input_id, text, role: "passage" }]));
     expect(environment.database.connection.prepare(`SELECT ordinal,start_byte,end_byte,body,window_id
       FROM source_index_windows ORDER BY ordinal`).all()).toEqual(expected.map(({ text, input_id, ...window }) =>
       ({ ...window, body: text, window_id: input_id })));

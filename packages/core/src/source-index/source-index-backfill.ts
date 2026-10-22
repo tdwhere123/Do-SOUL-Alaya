@@ -117,7 +117,7 @@ class CapturedRootStep {
 
   private async infer(binding: Extract<CapturedInput["binding"], { status: "ready" }>, window: SourceIndexWindow,
     bytes: number, signal: AbortSignal): Promise<SourceEmbeddingResult> {
-    const inputs = captureSourceEmbeddingInputs([{ input_id: window.window_id, text: window.text }]);
+    const inputs = captureSourceEmbeddingInputs([{ input_id: window.window_id, text: window.text, role: "passage" }]);
     // Submitted costs are retained even on synchronous throw, invalid evidence, timeout or lost transport.
     // Tokenization/inference may already have happened; lack of runtime evidence is never zero work.
     const results = await interruptible(() => {

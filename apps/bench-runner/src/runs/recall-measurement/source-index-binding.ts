@@ -79,7 +79,9 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
   }).passthrough().parse(report);
   if (retained.snapshot_path !== config.snapshot_path || retained.snapshot_sha256 !== config.snapshot_sha256 ||
       retained.workspace_id !== config.workspace_id || canonicalJson(retained.execution) !== canonicalJson({
-        cache_root: binding.cache_root, model_id: binding.model_id }) ||
+        cache_root: binding.cache_root, model_id: binding.model_id,
+        ...(binding.representation === undefined ? {} : { representation: binding.representation }) }) ||
+      canonicalJson(binding.representation ?? null) !== canonicalJson(binding.index.configuration.profile.representation ?? null) ||
       canonicalJson(retained.index) !== canonicalJson(binding.index) || !observed.complete ||
       retained.setup.binding.profile_id !== binding.index.profile_id ||
       canonicalJson(retained.setup.binding.profile) !== canonicalJson(binding.index.configuration.profile) ||
@@ -232,7 +234,7 @@ async function prepareLiveSourceIndex(input: {
   const { live, config, execution, allowance, filename, root, expired, started, consume } = input;
   if (live.runtime.runSourceIndexPass === undefined) throw new AlayaError("UNAVAILABLE", "Source producer preparation is unwired");
   const before = inspectSemanticChainSourceIndex(filename, config.workspace_id, config.budget);
-  const run = await runBoundedSourceIndexPasses(live, allowance, filename, config.workspace_id, root, expired);
+  const run = await runBoundedSourceIndexPasses(live, allowance, filename, config.workspace_id, root, expired, execution.representation);
   refuseBenchWorkAfterCancel();
   const failure = (reason: string): SourceIndexPreparationFailure => ({ config: null, report: {
     contract: "semantic-chain-source-preparation-failure-v1", execution, reason,
@@ -245,6 +247,7 @@ async function prepareLiveSourceIndex(input: {
   const usable = (observed: ReturnType<typeof inspectSemanticChainSourceIndex>) =>
     observed.complete && observed.index !== null && binding.profile_id === observed.index.profile_id &&
     binding.profile.provider_kind === "local_onnx" && binding.profile.model_id === execution.model_id &&
+    canonicalJson(binding.profile.representation ?? null) === canonicalJson(execution.representation ?? null) &&
     canonicalJson(binding.profile) === canonicalJson(observed.index.configuration.profile);
   const candidate = inspectSemanticChainSourceIndex(filename, config.workspace_id, config.budget);
   if (!usable(candidate)) return failure(candidate.complete ? "source_profile_mismatch" : "source_index_incomplete");
@@ -351,7 +354,8 @@ function idleSetupReceipt(reason: "setup_pass_exhausted" | "setup_allowance_exha
 }
 
 async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance: CapturedAllowance,
-  filename: string, workspace: string, root: string, expired: () => boolean): Promise<SourceIndexSetupRun> {
+  filename: string, workspace: string, root: string, expired: () => boolean,
+  representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation): Promise<SourceIndexSetupRun> {
   const run = daemon.runtime.runSourceIndexPass!;
   let leftover = allowance.leftover === undefined ? undefined : { ...allowance.leftover };
   let last: SourceIndexSetupReceipt | undefined;
@@ -378,7 +382,7 @@ async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance:
       const before = observe(index + 1, "before");
       if (expired()) { stop_reason = "setup_soft_deadline"; break; }
       // The retained capture is never passed to a collaborator that could mutate it.
-      const pass = structuredClone(await run(remaining === undefined ? undefined : { ...remaining }));
+      const pass = structuredClone(await run(remaining === undefined ? undefined : { ...remaining }, representation));
       last = pass;
       resources.work += pass.resources.work;
       resources.native_bytes += pass.resources.native_bytes;

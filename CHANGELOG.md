@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 20.0.0, engine gateway 2.0.0
+## Unreleased — protocol 20.1.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,14 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 20.1.0 adds optional paired-prefix Source representation descriptors
+and explicit query/passage roles under invariant §25 (minor, additive). Core's
+existing embedding contract accepts the descriptor and attests paired preparation.
+Omission preserves raw profile IDs, raw vectors and source bytes. Paired profiles
+require explicit roles and separate index generations; no automatic reindex,
+model download, model-support expansion or default switch is included. App/Core
+remain on the unreleased app version; Protocol owns the versioned profile schema.
 
 Protocol 20.0.0 declares the separately versioned Source access/profile migration
 as a **major** under handbook invariant §25. Access v3, compact acquisition 2,
@@ -44,7 +52,7 @@ See [Protocol compatibility](packages/protocol/README.md#eventlog-compatibility)
 
 Protocol 19.0.0 and engine gateway 2.0.0 declared the Source acquisition,
 phase-accounting, and SourceDisclosure compact-wire **major** under handbook
-invariant §25. Protocol is now `20.0.0`; gateway remains `2.0.0`.
+invariant §25. Protocol is now `20.1.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 

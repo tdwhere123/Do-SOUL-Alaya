@@ -1,3 +1,4 @@
+import { canonicalJson } from "@do-soul/alaya-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { CoreError } from "../../shared/errors.js";
 import { existsSync } from "node:fs";
@@ -11,7 +12,7 @@ import {
 import { decodeLocalOnnxIpcVectors, decodeLocalOnnxSourceResults } from "./vectors.js";
 import { createEmbeddingDeadline } from "../local-onnx-inference-budget.js";
 import {
-  captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, sourceEmbeddingRefusals,
+  captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, captureSourceEmbeddingBindingOptions, sourceEmbeddingRefusals,
   type SourceEmbeddingBinding, type SourceEmbeddingBindingOptions, type SourceEmbeddingBindingResult
 } from "../source-embedding-runtime.js";
 
@@ -130,7 +131,7 @@ export class LocalOnnxEmbeddingIpcSession {
   }
 
   public async bindSourceEmbedding(options: SourceEmbeddingBindingOptions): Promise<SourceEmbeddingBindingResult> {
-    const captured = structuredClone(options);
+    const captured = captureSourceEmbeddingBindingOptions(options);
     const deadline = createEmbeddingDeadline(60_000);
     try {
       const response = await this.request("bind_source", undefined, deadline.signal, undefined, { bindingOptions: captured });
@@ -146,6 +147,7 @@ export class LocalOnnxEmbeddingIpcSession {
       const profile = captureSourceEmbeddingProfile(binding.profile, binding.profile_id);
       if (profile.model_id !== this.modelId || profile.provider_kind !== "local_onnx" || profile.dimensions !== 384 ||
           profile.window_bytes !== captured.window_bytes ||
+          canonicalJson(profile.representation ?? null) !== canonicalJson(captured.representation ?? null) ||
           (captured.max_input_tokens !== undefined && profile.max_input_tokens > captured.max_input_tokens)) {
         throw new CoreError("OBLIGATION_VIOLATION", "Child Source profile configuration mismatch");
       }

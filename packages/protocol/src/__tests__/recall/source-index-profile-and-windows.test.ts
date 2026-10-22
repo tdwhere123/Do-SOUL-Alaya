@@ -133,6 +133,30 @@ function validation(pattern: RegExp) {
 }
 
 describe("source index profile and configuration identity", () => {
+  it("preserves the historical raw ID and binds both literal prefixes without changing source intervals", () => {
+    expect(sourceIndexProfileId(PROFILE, sha256)).toBe("sha256:ebe5f725287ea665c488678e0ffe1cf518d00d7516de917ac5eb6625c3bf9039");
+    const representation = { kind: "paired-prefix.v1" as const, query_prefix: "query: ", passage_prefix: "passage: " };
+    const paired = SourceIndexProfileSchema.parse({ ...PROFILE, representation });
+    const pairedId = sourceIndexProfileId(paired, sha256);
+    expect(pairedId).not.toBe(sourceIndexProfileId(PROFILE, sha256));
+    expect(Object.isFrozen(paired.representation)).toBe(true);
+    for (const field of ["query_prefix", "passage_prefix"] as const) {
+      expect(sourceIndexProfileId({ ...paired, representation: { ...representation, [field]: representation[field] + " " } }, sha256))
+        .not.toBe(pairedId);
+    }
+    representation.query_prefix = "mutated";
+    expect(sourceIndexProfileId(paired, sha256)).toBe(pairedId);
+    const input = { source: indexedSource(MIXED_BODY), body: MIXED_BODY };
+    const raw = prepareSourceIndexDocument({ ...input, profile: PROFILE }, sha256);
+    const transformed = prepareSourceIndexDocument({ ...input, profile: paired }, sha256);
+    expect(transformed.source).toEqual(raw.source);
+    expect(transformed.windows.map(({ window_id: _id, ...window }) => window))
+      .toEqual(raw.windows.map(({ window_id: _id, ...window }) => window));
+    expect(transformed.windows[0]!.window_id).not.toBe(raw.windows[0]!.window_id);
+    for (const invalid of [null, {}, { ...representation, kind: "unknown" }, { ...representation, query_prefix: "\uD800" }]) {
+      expect(SourceIndexProfileSchema.safeParse({ ...PROFILE, representation: invalid }).success).toBe(false);
+    }
+  });
   it("hashes every declared profile and configuration field and ignores property order", () => {
     const parsedProfile = SourceIndexProfileSchema.parse(PROFILE);
     expect(Object.keys(parsedProfile).sort()).toEqual([...PROFILE_IDENTITY_FIELDS].sort());

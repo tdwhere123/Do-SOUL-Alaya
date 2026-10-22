@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
 import { CoreError } from "../shared/errors.js";
 import {
-  SourceIndexProfileSchema, hashContentDigest, sourceIndexProfileId,
-  type SourceIndexProfile
+  SourceIndexProfileSchema, SourceEmbeddingRepresentationSchema, SourceEmbeddingRoleSchema,
+  hashContentDigest, sourceIndexProfileId,
+  type SourceIndexProfile, type SourceEmbeddingRepresentation, type SourceEmbeddingRole
 } from "@do-soul/alaya-protocol";
 
 /** Private runtime evidence; not a second Source profile or durable index authority. */
-export interface SourceEmbeddingInput { readonly input_id: string; readonly text: string }
+export interface SourceEmbeddingInput {
+  readonly input_id: string; readonly text: string;
+  /** Required by paired representations; omission retains legacy raw-input compatibility only. */
+  readonly role?: SourceEmbeddingRole;
+}
 export interface SourceEmbeddingOptions {
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
@@ -16,9 +21,12 @@ export interface SourceEmbeddingBindingOptions {
   readonly window_bytes: number;
   /** May lower, never raise, the loaded model/tokenizer limit. */
   readonly max_input_tokens?: number;
+  readonly representation?: SourceEmbeddingRepresentation;
 }
 export type SourceEmbeddingResult = Readonly<{
   input_id: string; input_digest: string;
+  /** Paired successes attest preparation as well as the unchanged original input. */
+  role?: SourceEmbeddingRole; prepared_input_digest?: string;
 }> & (Readonly<{
   status: "embedded"; vector: Float32Array; token_count: number; truncated: false;
 }> | Readonly<{
@@ -40,19 +48,48 @@ export const SOURCE_EMBEDDING_MAX_BATCH_INPUTS = 64;
 
 /** Capture before the first await, including strings used by both inference and digesting. */
 export function captureSourceEmbeddingInputs(inputs: readonly SourceEmbeddingInput[]): readonly SourceEmbeddingInput[] {
+  if (!Array.isArray(inputs)) throw new CoreError("VALIDATION", "Source embedding inputs must be an array");
   if (inputs.length > SOURCE_EMBEDDING_MAX_BATCH_INPUTS) {
     throw new CoreError("VALIDATION", `Source embedding batch exceeds ${SOURCE_EMBEDDING_MAX_BATCH_INPUTS} inputs`);
   }
   let bytes = 0;
-  const captured = Array.from(inputs, input => {
+  const captured = Array.from(inputs, value => {
+    const input = { ...value };
     if (typeof input.input_id !== "string" || input.input_id.length > 2048 || typeof input.text !== "string") {
       throw new CoreError("VALIDATION", "Invalid Source embedding input");
     }
     bytes += Buffer.byteLength(input.text, "utf8");
-    return Object.freeze({ input_id: input.input_id, text: input.text });
+    if (input.role !== undefined && !SourceEmbeddingRoleSchema.safeParse(input.role).success) {
+      throw new CoreError("VALIDATION", "Invalid Source embedding role");
+    }
+    return Object.freeze({ input_id: input.input_id, text: input.text,
+      ...(input.role === undefined ? {} : { role: input.role }) });
   });
   if (bytes > 4 * 1024 * 1024) throw new CoreError("VALIDATION", "Source embedding batch exceeds 4 MiB");
   return Object.freeze(captured);
+}
+
+/** Admission before any load/wait; nested representation is copied and frozen by its authority. */
+export function captureSourceEmbeddingBindingOptions(options: SourceEmbeddingBindingOptions): SourceEmbeddingBindingOptions {
+  const captured = structuredClone(options);
+  if (!captured || typeof captured !== "object" || Array.isArray(captured) ||
+      Object.keys(captured).some(key => !["window_bytes", "max_input_tokens", "representation"].includes(key)) ||
+      !SourceIndexProfileSchema.unwrap().shape.window_bytes.safeParse(captured.window_bytes).success ||
+      (captured.max_input_tokens !== undefined && (!Number.isSafeInteger(captured.max_input_tokens) || captured.max_input_tokens < 1))) {
+    throw new CoreError("VALIDATION", "Invalid Source embedding binding options");
+  }
+  return Object.freeze({ ...captured, ...(captured.representation === undefined ? {} : {
+    representation: SourceEmbeddingRepresentationSchema.parse(captured.representation)
+  }) });
+}
+
+/** The only text-preparation policy. Source identities always continue to digest input.text. */
+export function prepareSourceEmbeddingText(input: SourceEmbeddingInput, profile: SourceIndexProfile): string {
+  if (profile.representation === undefined) return input.text;
+  if (input.role !== "query" && input.role !== "passage") {
+    throw new CoreError("VALIDATION", "source_embedding_role_required");
+  }
+  return (input.role === "query" ? profile.representation.query_prefix : profile.representation.passage_prefix) + input.text;
 }
 
 export function sourceEmbeddingRefusals(inputs: readonly SourceEmbeddingInput[], reason: string,
@@ -85,6 +122,10 @@ export function validateSourceEmbeddingResults(inputs: readonly SourceEmbeddingI
         throw new CoreError("OBLIGATION_VIOLATION", "Invalid Source embedding refusal");
       }
       return Object.freeze({ ...result });
+    }
+    if (profile.representation !== undefined && (result.role !== input.role ||
+        result.prepared_input_digest !== sourceEmbeddingInputDigest(prepareSourceEmbeddingText(input, profile)))) {
+      throw new CoreError("OBLIGATION_VIOLATION", "Source embedding preparation evidence mismatch");
     }
     if (result.status !== "embedded" || result.truncated !== false || !Number.isSafeInteger(result.token_count) ||
         result.token_count < 1 || result.token_count > profile.max_input_tokens ||

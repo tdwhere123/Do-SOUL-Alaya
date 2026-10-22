@@ -8,12 +8,24 @@ const Revision = z.string().min(1).max(256);
 export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const SOURCE_INDEX_MAX_WINDOWS = 4096;
 
+/** Explicit role; never inferred from an input id or text prefix. */
+export const SourceEmbeddingRoleSchema = z.enum(["query", "passage"]);
+export type SourceEmbeddingRole = z.infer<typeof SourceEmbeddingRoleSchema>;
+const Prefix = z.string().min(1).max(1024).refine(value => !/[\uD800-\uDFFF]/u.test(value), "prefix must be Unicode scalar text");
+/** Literal concatenation, with no trimming, rewriting, or implicit separator. */
+export const SourceEmbeddingRepresentationSchema = z.object({
+  kind: z.literal("paired-prefix.v1"), query_prefix: Prefix, passage_prefix: Prefix
+}).strict().readonly();
+export type SourceEmbeddingRepresentation = z.infer<typeof SourceEmbeddingRepresentationSchema>;
+
 /** Exact model and input semantics, not a display name or a Memory/Capsule embedding key. */
 export const SourceIndexProfileSchema = z.object({
   provider_kind: Revision, model_id: Revision, model_revision: Revision,
   artifact_digest: FieldContractDigestSchema, tokenizer_revision: Revision,
   dimensions: z.number().int().min(1).max(65536),
   preprocessing: Revision, normalization: Revision,
+  /** Absent is the historical raw-string contract, not an unknown paired transform. */
+  representation: SourceEmbeddingRepresentationSchema.optional(),
   max_input_tokens: z.number().int().min(1).max(1048576),
   windowing: z.literal("utf8-byte-windows.v1"),
   window_bytes: z.number().int().min(4).max(65536)
@@ -89,7 +101,10 @@ export type SourceIndexBackfillResult = Readonly<{
   accepted_vectors: number;
   resources: SourceIndexResources & Readonly<{
     native_accounting: "complete" | "partial"; sql_internal_work: "unknown";
-    model_inputs_submitted: number; model_input_bytes_submitted: number;
+    model_inputs_submitted: number;
+    /** Original UTF-8 bytes submitted to the embedding boundary, excluding owned prefixes/special tokens.
+     * token_count_observed includes the actual prepared prefix and special tokens. */
+    model_input_bytes_submitted: number;
     token_count_observed: number; inputs_without_token_count: number; model_execution_work: "not_run" | "unknown";
   }>;
 }>;

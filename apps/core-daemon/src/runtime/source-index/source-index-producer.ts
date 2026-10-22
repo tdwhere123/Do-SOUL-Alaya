@@ -2,6 +2,7 @@ import {
   AlayaError,
   SOURCE_INDEX_MAX_BODY_BYTES,
   SourceIndexOperationError,
+  SourceEmbeddingRepresentationSchema, type SourceEmbeddingRepresentation,
   type SourceIndexBackfillBudget,
   type SourceIndexBackfillResult,
   type SourceIndexConfiguration,
@@ -143,7 +144,9 @@ export class SourceIndexProducer {
     if (this.inFlight !== null) await this.inFlight;
   }
 
-  public async runPass(remaining?: SourceIndexProducerPassRemaining): Promise<SourceIndexProducerPassReceipt> {
+  public async runPass(remaining?: SourceIndexProducerPassRemaining, representation?: SourceEmbeddingRepresentation): Promise<SourceIndexProducerPassReceipt> {
+    const capturedRepresentation = representation === undefined ? undefined
+      : SourceEmbeddingRepresentationSchema.parse(structuredClone(representation));
     const limits = restrictPassLimits(this.limits, remaining);
     if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping && !this.started) {
       return { status: this.stopping ? "stopped" : "busy", reason: this.stopping ? "producer_stopped" : "producer_occupied",
@@ -153,7 +156,7 @@ export class SourceIndexProducer {
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
-    const work = Promise.resolve().then(() => this.executePass(limits));
+    const work = Promise.resolve().then(() => this.executePass(limits, capturedRepresentation));
     this.inFlight = work;
     try { return await work; }
     finally { if (this.inFlight === work) this.inFlight = null; }
@@ -166,7 +169,7 @@ export class SourceIndexProducer {
     return work;
   }
 
-  private async executePass(limits: SourceIndexProducerLimits): Promise<SourceIndexProducerPassReceipt> {
+  private async executePass(limits: SourceIndexProducerLimits, representation?: SourceEmbeddingRepresentation): Promise<SourceIndexProducerPassReceipt> {
     const started = performance.now();
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), this.limits.stepDeadlineMs);
@@ -175,7 +178,7 @@ export class SourceIndexProducer {
       outcome: { status: "settled", reason: "pass_complete" },
       spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0, limits };
     try {
-      await this.reconcilePass(pass);
+      await this.reconcilePass(pass, representation);
     } catch (error) {
       if (error instanceof SourceIndexOperationError) {
         pass.spent.work += error.resources.work;
@@ -192,10 +195,10 @@ export class SourceIndexProducer {
       model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
   }
 
-  private async reconcilePass(pass: Pass): Promise<void> {
+  private async reconcilePass(pass: Pass, representation?: SourceEmbeddingRepresentation): Promise<void> {
     if (pass.signal.aborted) return;
     const binding = await waitLocally(this.trackNative(() => bindIndexProfile(this.input.bindSourceEmbedding,
-      () => !pass.signal.aborted)), pass.signal);
+      () => !pass.signal.aborted, representation)), pass.signal);
     if (pass.signal.aborted) return;
     pass.binding = binding.status === "ready"
       ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
@@ -345,13 +348,15 @@ export function createSourceIndexProducer(input: SourceIndexProducerInput): Sour
   return new SourceIndexProducer(input);
 }
 
-async function bindIndexProfile(bind: SourceIndexProducerBind, eligible: () => boolean): Promise<SourceEmbeddingBindingResult> {
+async function bindIndexProfile(bind: SourceIndexProducerBind, eligible: () => boolean,
+  representation?: SourceEmbeddingRepresentation): Promise<SourceEmbeddingBindingResult> {
   if (!eligible()) return { status: "unsupported", reason: "producer_stopped" };
-  const probe = await bind({ window_bytes: SOURCE_INDEX_PROBE_WINDOW_BYTES });
+  const options = representation === undefined ? {} : { representation };
+  const probe = await bind({ ...options, window_bytes: SOURCE_INDEX_PROBE_WINDOW_BYTES });
   if (probe.status !== "ready" || !eligible()) return probe;
   const windowBytes = sourceIndexWindowBytes(probe.profile.max_input_tokens);
   if (windowBytes === probe.profile.window_bytes) return probe;
-  return await bind({ window_bytes: windowBytes, max_input_tokens: probe.profile.max_input_tokens });
+  return await bind({ ...options, window_bytes: windowBytes, max_input_tokens: probe.profile.max_input_tokens });
 }
 
 async function waitLocally<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {

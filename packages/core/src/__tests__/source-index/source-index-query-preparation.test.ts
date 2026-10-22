@@ -216,7 +216,7 @@ describe("simulated query-preparation adapters, no native inference", () => {
   it("counts a successful submission once and leaves rejected paths unsubmitted", async () => {
     const fixtureVector = new Float32Array([0.6, 0.8, 0]);
     const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[], options: { timeoutMs: number }) => {
-      expect(inputs).toEqual([{ input_id: DIGEST, text: NAVIGATION }]);
+      expect(inputs).toEqual([{ input_id: DIGEST, text: NAVIGATION, role: "query" }]);
       expect(options.timeoutMs).toBe(5_000);
       return embedded(inputs, fixtureVector);
     });

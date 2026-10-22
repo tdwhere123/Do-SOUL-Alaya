@@ -2,14 +2,19 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
 import { Tensor } from "@huggingface/transformers";
 import { sourceIndexProfileId } from "@do-soul/alaya-protocol";
 import type { LocalOnnxEmbeddingTransformersModule, LocalOnnxFeatureExtractor } from "../../embedding-recall/local-onnx-embedding-client.js";
 import { loadVerifiedLocalOnnxExtractor } from "../../embedding-recall/local-onnx-loaded-runtime.js";
 import {
-  sourceEmbeddingInputDigest,
-  sourceEmbeddingSha256
+  sourceEmbeddingInputDigest, captureSourceEmbeddingBindingOptions, validateSourceEmbeddingResults,
+  sourceEmbeddingSha256, type SourceEmbeddingBindingOptions
 } from "../../embedding-recall/source-embedding-runtime.js";
 
 const UNICODE_TEXT = "  原文🙂\r\n\u00A0";
@@ -26,6 +31,54 @@ afterEach(async () => {
 });
 
 describe("loaded local ONNX Source embedding runtime (controlled tokenizer/model seams)", () => {
+  it("binds both prefixes, prepares exactly once, and preserves raw identity evidence", async () => {
+    const seam = createControlledSeam();
+    const options: SourceEmbeddingBindingOptions = { window_bytes: 1024, representation: {
+      kind: "paired-prefix.v1", query_prefix: "Q: ", passage_prefix: "P: " } };
+    const { binding, runtime } = await loadBoundRuntime(seam, options);
+    expect(Object.isFrozen(binding.profile.representation)).toBe(true);
+    const raw = runtime.bind({ window_bytes: 1024 });
+    if (raw.status !== "ready") throw new Error("raw binding required");
+    expect(binding.profile_id).not.toBe(raw.profile_id);
+    const inputs = [{ input_id: "same", text: " raw ", role: "query" as const },
+      { input_id: "same", text: " raw ", role: "passage" as const }];
+    const rows = await binding.embedInputs(inputs, { profile_id: binding.profile_id, timeoutMs: 5000 });
+    expect(seam.tokenizerCalls.map(call => call.texts)).toEqual([["Q:  raw "], ["P:  raw "]]);
+    expect(inputs.map(row => row.text)).toEqual([" raw ", " raw "]);
+    expect(rows).toMatchObject(inputs.map((input, i) => ({ status: "embedded", role: input.role,
+      input_digest: goldenInputDigest(" raw "), prepared_input_digest: goldenInputDigest(i === 0 ? "Q:  raw " : "P:  raw ") })));
+    expect(() => validateSourceEmbeddingResults(inputs, rows.map(({ role: _role, ...row }) => row), binding.profile))
+      .toThrow(/preparation evidence/);
+    expect(() => validateSourceEmbeddingResults(inputs, rows.map(row => ({ ...row, role: "passage" })), binding.profile))
+      .toThrow(/preparation evidence/);
+    const omitted = await binding.embedInputs([{ input_id: "query", text: "raw" }], { profile_id: binding.profile_id, timeoutMs: 5000 });
+    expect(omitted).toMatchObject([{ status: "not_embedded", reason: "source_embedding_role_required", token_count: null }]);
+    expect(seam.modelCalls).toHaveLength(2);
+    expect(() => binding.embedInputs([{ input_id: "bad", text: "raw", role: "wrong" as "query" }],
+      { profile_id: binding.profile_id, timeoutMs: 5000 })).toThrow(/role/);
+  });
+
+  it("counts prefixes and special tokens before encoder execution and captures mutable role/options", async () => {
+    const seam = createControlledSeam();
+    const { runtime } = await loadRuntime(seam);
+    const options = { window_bytes: 1024, max_input_tokens: 5, representation: {
+      kind: "paired-prefix.v1" as const, query_prefix: "Q: ", passage_prefix: "P: " } };
+    const captured = captureSourceEmbeddingBindingOptions(options);
+    options.representation.query_prefix = "changed";
+    expect(captured.representation?.query_prefix).toBe("Q: ");
+    const binding = runtime.bind(captured);
+    if (binding.status !== "ready") throw new Error("paired binding required");
+    const inputs = [{ input_id: "x", text: "xx", role: "query" as "query" | "passage" }];
+    const pending = binding.embedInputs(inputs, { profile_id: binding.profile_id, timeoutMs: 5000 });
+    inputs[0]!.role = "passage"; inputs[0]!.text = "changed";
+    expect(await pending).toMatchObject([{ status: "not_embedded", reason: "input_token_limit", token_count: 7,
+      input_digest: goldenInputDigest("xx") }]);
+    expect(seam.tokenizerCalls[0]?.texts).toEqual(["Q: xx"]);
+    expect(seam.modelCalls).toEqual([]);
+    expect(() => captureSourceEmbeddingBindingOptions({ ...options, representation: null as never })).toThrow();
+    expect(() => captureSourceEmbeddingBindingOptions({ ...options, representation: { ...options.representation, kind: "unknown" as never } })).toThrow();
+  });
+
   it("passes identical prepared tensors to the model and attests raw Unicode digest with counted special tokens and no truncation", async () => {
     const seam = createControlledSeam();
     const { binding, profile } = await loadBoundRuntime(seam);
@@ -340,7 +393,7 @@ function createControlledSeam(overrides: Partial<ControlledSeam> = {}): Controll
 
 async function loadBoundRuntime(
   seam: ControlledSeam,
-  bindOptions: { window_bytes: number; max_input_tokens?: number } = { window_bytes: 1024 }
+  bindOptions: SourceEmbeddingBindingOptions = { window_bytes: 1024 }
 ) {
   const loaded = await loadRuntime(seam);
   const bindingResult = loaded.runtime.bind(bindOptions);

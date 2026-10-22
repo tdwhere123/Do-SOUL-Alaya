@@ -1797,6 +1797,18 @@ Separately, the unchanged public default's unscoped query-conditioned
 rows and inspected vector windows (`ranking: exact_over_inspected_subset`, not
 full-library nearest neighbor). This Source-index pass nominates at most 16 roots;
 canonical observation is separate, so this is not a total candidate-union ceiling.
+Source representation is bound by `SourceIndexProfileSchema` and its existing
+canonical identity. An omitted `representation` preserves historical raw-string
+semantics and IDs. Explicit `paired-prefix.v1` binds literal `query_prefix` and
+`passage_prefix` together with artifacts, tokenizer, normalization, windows and
+limits. Core's loaded Source runtime concatenates the selected prefix once before
+token counting; no trimming or truncation is permitted. Query/backfill supply
+explicit query/passage roles; missing roles refuse paired inference. Paired
+results retain the original input digest and additionally attest role and prepared
+text digest. The existing private source preparation command accepts the optional
+descriptor; it creates a distinct generation, never upgrades historical indexes.
+Production defaults, supported encoder/pooling and Memory embedding are unchanged.
+
 Query embedding is `SourceIndexAcquisition.prepareQuery` under
 `beforeSnapshotPreparation`, before the caller-owned read snapshot. The parent
 prepares original navigation first, then a distinct `access_hint` as

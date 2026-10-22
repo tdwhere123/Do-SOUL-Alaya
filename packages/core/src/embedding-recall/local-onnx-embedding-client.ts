@@ -12,7 +12,7 @@ import { CoreError } from "../shared/errors.js";
 import { loadVerifiedLocalOnnxExtractor, withLocalTransformersOfflineLoad, type LocalOnnxLoadedSourceRuntime } from "./local-onnx-loaded-runtime.js";
 import { createEmbeddingDeadline, throwIfEmbeddingCancelled, waitForEmbeddingCaller } from "./local-onnx-inference-budget.js";
 import {
-  captureSourceEmbeddingInputs, sourceEmbeddingRefusals,
+  captureSourceEmbeddingInputs, captureSourceEmbeddingBindingOptions, sourceEmbeddingRefusals,
   type SourceEmbeddingBinding, type SourceEmbeddingBindingOptions, type SourceEmbeddingBindingResult
 } from "./source-embedding-runtime.js";
 import os from "node:os";
@@ -186,7 +186,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   }
 
   public async bindSourceEmbedding(options: SourceEmbeddingBindingOptions): Promise<SourceEmbeddingBindingResult> {
-    const captured = structuredClone(options);
+    const captured = captureSourceEmbeddingBindingOptions(options);
     if (this.closed) return { status: "unsupported", reason: "runtime_closed" };
     if (this.isolated !== null) await this.ensureIsolatedReady();
     const binding = this.isolated !== null

@@ -28,7 +28,7 @@ const Binding = z.object({ configuration: SourceIndexConfigurationSchema, config
   target_count: z.number().int(), completed_count: z.number().int() }).strict();
 export const ConditionalNavigationRunSchema = z.object({
   contract: z.literal(NAVIGATION_CONTRACT), source_revision: z.string().min(1),
-  cache_root: z.string().min(1), channels: z.enum(["dual", "lexical"]).default("dual"),
+  cache_root: z.string().min(1), model_id: z.string().min(1).optional(), channels: z.enum(["dual", "lexical"]).default("dual"),
   comparison: z.object({ model: z.array(z.object({ ordinal: z.number().int().min(1).max(8), capture: FormationCaptureSchema }).strict()).max(8) }).strict().optional(),
   rows: z.array(z.object({ ordinal: z.number().int().min(1).max(8), question_id: z.string().min(1),
     snapshot: z.string().min(1), snapshot_sha256: z.string().regex(/^[a-f0-9]{64}$/u), workspace: z.string().min(1),
@@ -107,7 +107,8 @@ export async function runConditionalNavigation(value: unknown, output: string) {
       conditions: item.row.conditions, branches: item.row.branches,
       shares: Object.fromEntries(formationQueryShares(item.row.conditions, config.comparison !== undefined || item.row.structural_navigation !== undefined)) })) }))));
   const scratch = mkdtempSync(join(root, "scratch-"));
-  const client = config.channels === "dual" ? new LocalOnnxEmbeddingClient({ cacheDir: config.cache_root }) : null;
+  const client = config.channels === "dual" ? new LocalOnnxEmbeddingClient({ cacheDir: config.cache_root,
+    ...(config.model_id === undefined ? {} : { modelId: config.model_id }) }) : null;
   const memo = new Map<string, Awaited<ReturnType<typeof SourceIndexAcquisition.prepareQuery>>>();
   const rows: { ordinal: number; question_id: string; arm: string; status: string; path?: string; sha256?: string;
     single_condition_equivalent?: boolean | null; nominations?: number; windows?: number }[] = [];

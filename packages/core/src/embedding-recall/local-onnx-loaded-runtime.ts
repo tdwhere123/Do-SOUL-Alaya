@@ -10,9 +10,10 @@ import type {
 } from "./local-onnx-embedding-client.js";
 import { snapshotLocalOnnxArtifacts, type VerifiedLocalOnnxArtifacts } from "./local-onnx-artifacts.js";
 import {
-  captureSourceEmbeddingInputs, sourceEmbeddingInputDigest, sourceEmbeddingRefusals, sourceEmbeddingSha256,
+  captureSourceEmbeddingInputs, captureSourceEmbeddingBindingOptions, prepareSourceEmbeddingText,
+  sourceEmbeddingInputDigest, sourceEmbeddingRefusals, sourceEmbeddingSha256,
   validateSourceEmbeddingResults,
-  type SourceEmbeddingBinding, type SourceEmbeddingBindingOptions, type SourceEmbeddingBindingResult, type SourceEmbeddingResult
+  type SourceEmbeddingInput, type SourceEmbeddingBinding, type SourceEmbeddingBindingOptions, type SourceEmbeddingBindingResult, type SourceEmbeddingResult
 } from "./source-embedding-runtime.js";
 
 // Serialize global Transformers preflight configuration across loaded-runtime consumers.
@@ -101,13 +102,14 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
   const pending = new Set<Promise<unknown>>();
   return {
     bind: options => {
-      const captured = structuredClone(options);
+      const captured = captureSourceEmbeddingBindingOptions(options);
       if (closed) return { status: "unsupported", reason: "runtime_closed" };
       const profile = SourceIndexProfileSchema.parse({ provider_kind: "local_onnx", model_id: modelId,
         model_revision: `sha256:${artifacts.weightSha256}`, artifact_digest: `sha256:${artifacts.treeSha256}`,
         // Full tree includes tokenizer.json, tokenizer config and special token definitions.
         tokenizer_revision: `sha256:${artifacts.treeSha256}`, dimensions: 384,
-        preprocessing: `raw-string.special-tokens.no-truncation.v1;${runtimeVersion}`,
+        preprocessing: `${captured.representation === undefined ? "raw-string" : "paired-prefix"}.special-tokens.no-truncation.v1;${runtimeVersion}`,
+        ...(captured.representation === undefined ? {} : { representation: captured.representation }),
         normalization: "attention-mask-mean.l2.q8.v1", max_input_tokens: Math.min(maxTokens, captured.max_input_tokens ?? maxTokens),
         windowing: "utf8-byte-windows.v1", window_bytes: captured.window_bytes });
       const profileId = sourceIndexProfileId(profile, sourceEmbeddingSha256);
@@ -137,7 +139,7 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
 }
 
 async function embedPreparedInputs(pipeline: LoadedPipeline, meanPool: (tensor: Tensor, mask: Tensor) => Tensor,
-  inputs: readonly { readonly input_id: string; readonly text: string }[], profile: SourceIndexProfile,
+  inputs: readonly SourceEmbeddingInput[], profile: SourceIndexProfile,
   signal?: AbortSignal): Promise<readonly SourceEmbeddingResult[]> {
   const results: SourceEmbeddingResult[] = [];
   for (const input of inputs) {
@@ -145,9 +147,13 @@ async function embedPreparedInputs(pipeline: LoadedPipeline, meanPool: (tensor: 
     const evidence = { input_id: input.input_id, input_digest: sourceEmbeddingInputDigest(input.text) };
     try {
       if (signal?.aborted) throw new CoreError("CONFLICT", "cancelled", { cause: signal.reason });
-      // No application rewriting: native tokenizer normalization is bound by its artifact revision.
+      // Prepare once, before counting special tokens and enforcing the no-truncation ceiling.
+      const text = prepareSourceEmbeddingText(input, profile);
+      const preparation = profile.representation === undefined ? {} : {
+        role: input.role, prepared_input_digest: sourceEmbeddingInputDigest(text)
+      };
       // A single row avoids padding and permits over-limit refusal before any model call.
-      const prepared = pipeline.tokenizer([input.text], { padding: false, truncation: false, add_special_tokens: true });
+      const prepared = pipeline.tokenizer([text], { padding: false, truncation: false, add_special_tokens: true });
       const mask = prepared.attention_mask.tolist()[0] as readonly (number | bigint)[] | undefined;
       if (!mask || prepared.input_ids.dims.length !== 2 || prepared.attention_mask.dims.length !== 2 ||
           prepared.input_ids.dims[0] !== 1 || prepared.attention_mask.dims[0] !== 1 ||
@@ -168,7 +174,7 @@ async function embedPreparedInputs(pipeline: LoadedPipeline, meanPool: (tensor: 
         throw new CoreError("OBLIGATION_VIOLATION", "invalid_model_output");
       }
       const rows = meanPool(hidden, prepared.attention_mask).normalize(2, -1).tolist();
-      results.push(validateSourceEmbeddingResults([input], [{ ...evidence, status: "embedded",
+      results.push(validateSourceEmbeddingResults([input], [{ ...evidence, ...preparation, status: "embedded",
         vector: new Float32Array(rows[0]!), token_count: tokenCount, truncated: false }], profile)[0]!);
     } catch (error) {
       results.push({ ...evidence, status: "not_embedded", token_count: tokenCount,
