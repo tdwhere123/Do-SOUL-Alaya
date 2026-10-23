@@ -1,6 +1,6 @@
 import { solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import { orderNativeRouteAccess, type NativeRouteLane } from "@do-soul/alaya-core";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, type SourceSemanticNominationOccurrence } from "@do-soul/alaya-protocol";
 import type { StructuralNavigation, StructuralObservation } from "./structural-navigation.js";
 import { ObservationWindowSchema, observeSessionWindow, type ObservationWindow, type NavigationSourceObservation } from "./temporal-navigation.js";
 
@@ -28,6 +28,23 @@ export type NavigationInput = Readonly<{
   source_observations?: readonly NavigationSourceObservation[];
   structural?: { config: StructuralNavigation; observation: StructuralObservation };
 }>;
+
+/** Both acquisition and the frozen pilot adapter derive inventory here, never from
+ * a solved-order projection or a displayed occurrence prefix. */
+export function navigationInventory(captures: readonly { condition: string; witness: readonly SourceSemanticNominationOccurrence[] }[]) {
+  const targets = new Map<string, SourceSemanticNominationOccurrence["source"]>();
+  const occurrences: NavigationOccurrence[] = [];
+  for (const capture of captures) for (const witness of capture.witness) {
+    requireInput(witness.source.target.root_kind === "source_record", "prototype requires native source-record targets");
+    const id = witness.source.target.root_id, prior = targets.get(id);
+    requireInput(prior === undefined || canonicalJson(prior) === canonicalJson(witness.source), "conflicting native source identity");
+    targets.set(id, witness.source);
+    occurrences.push({ condition: capture.condition, channel: witness.route.kind, native_rank: witness.route.native_rank,
+      reference: `${capture.condition}:${witness.reference}`, root_key: witness.source.root_key, record_id: id });
+  }
+  const pool = [...targets.keys()].sort().map((record_id, catalog_position) => ({ record_id, catalog_position }));
+  return { targets, occurrences, pool };
+}
 
 function requireInput(test: boolean, reason: string): asserts test {
   if (!test) throw new AlayaError("VALIDATION", reason);

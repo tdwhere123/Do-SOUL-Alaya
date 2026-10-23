@@ -4,14 +4,16 @@ import { z } from "zod";
 import { AlayaError, SourceEvidenceTargetSchema, SourceSemanticNominationOccurrenceSchema, canonicalJson } from "@do-soul/alaya-protocol";
 import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
 import { scoreConsumerByteVisibility, scoreConsumerMessageVisibility } from "../longmemeval-semantic/message-visibility.js";
-import { ConditionalNavigationRunSchema, navigationFileDigest } from "./conditional-navigation-run.js";
+import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, FROZEN_DELIVERY_ARMS } from "./conditional-navigation-input.js";
+import { FrozenNominationArtifactSchema, admitFrozenQueries } from "./conditional-navigation-frozen.js";
 import { structuralNavigationStatus } from "./structural-navigation.js";
 
 const Reference = z.object({ ordinal: z.number().int(), question_id: z.string(), arm: z.string(), status: z.string(),
   path: z.string().optional(), sha256: z.string().optional() }).passthrough();
 const Receipt = z.object({ status: z.enum(["complete", "stopped"]), input_sha256: z.string(), formations_sha256: z.string(),
-  rows: z.array(Reference) }).passthrough();
+  rows: z.array(Reference), frozen_nominations: z.object({ artifact_sha256: z.string(), origin: z.unknown(), inherited_costs: z.unknown() }).optional() }).passthrough();
 const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), arm: z.string(),
+  frozen_nomination: z.object({ status: z.enum(["witnessed", "measured_empty", "unknown"]), capture_sha256: z.string() }).optional(),
   structural: z.object({
     nomination: z.object({ status: z.enum(["witnessed", "measured_empty", "unknown"]), completion: z.enum(["complete", "partial", "unknown"]),
       occurrence: z.object({ record_id: z.string(), occurrence: z.object({ reference: z.string() }).passthrough() }).passthrough().nullable() }),
@@ -38,13 +40,21 @@ function check(test: boolean, message: string): asserts test { if (!test) throw 
 
 /** All selected captures, including later rows, admit BEFORE opening the label manifest or any labels.
  * Failed/unavailable arms remain unscored, never successful original-only substitutes. */
-export function evaluateConditionalNavigation(root: string, labelManifestPath: string, output: string) {
-  check(!existsSync(output), "evaluation output must be new");
-  const receipt = Receipt.parse(readJson(join(root, "receipt.json")));
-  check(navigationFileDigest(join(root, "input.json")) === receipt.input_sha256
-    && navigationFileDigest(join(root, "formations.json")) === receipt.formations_sha256, "frozen input/formation drift");
-  const input = ConditionalNavigationRunSchema.parse(readJson(join(root, "input.json")));
-  const expectedArms = input.comparison ? ["original", "mechanical", "model"] : ["supplied"];
+function admitNavigationSelection(root: string, input: z.infer<typeof ConditionalNavigationRunSchema>, receipt: z.infer<typeof Receipt>) {
+  const expectedArms = input.frozen_nominations ? [...FROZEN_DELIVERY_ARMS] : input.comparison ? ["original", "mechanical", "model"] : ["supplied"];
+  check((input.frozen_nominations !== undefined) === (receipt.frozen_nominations !== undefined), "frozen nomination receipt drift");
+  const frozen = receipt.frozen_nominations ? (() => {
+    check(navigationFileDigest(join(root, "frozen-nominations.json")) === receipt.frozen_nominations!.artifact_sha256,
+      "frozen nomination evidence drift");
+    const artifact = FrozenNominationArtifactSchema.parse(readJson(join(root, "frozen-nominations.json")));
+    check(canonicalJson(artifact.origin) === canonicalJson(receipt.frozen_nominations!.origin)
+      && artifact.origin.receipt_sha256 === input.frozen_nominations!.receipt.sha256
+      && artifact.rows.length === input.rows.length
+      && new Set(artifact.rows.map(row => row.ordinal)).size === artifact.rows.length
+      && artifact.rows.every(item => input.rows.some(row => row.ordinal === item.ordinal && row.question_id === item.question_id)),
+    "frozen nomination origin/membership drift");
+    return artifact;
+  })() : undefined;
   check(receipt.status === "complete" ? receipt.rows.length === input.rows.length * expectedArms.length
     : receipt.rows.length <= input.rows.length * expectedArms.length, "incomplete selected capture membership");
   check(receipt.rows.every(ref => input.rows.some(row => row.ordinal === ref.ordinal && row.question_id === ref.question_id)
@@ -55,14 +65,28 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
     if (matches.length === 0) return { ref: { ordinal: row.ordinal, question_id: row.question_id, arm,
       status: "selection_not_captured" }, capture: null };
     const ref = matches[0]!;
-    if (!["complete", "structure_unknown", "structure_unobserved", "delivery_unavailable"].includes(ref.status)) { check(ref.status.startsWith("formation_"), "failed selection cannot score"); return { ref, capture: null }; }
+    if (!["complete", "structure_unknown", "structure_unobserved", "delivery_unavailable", ...(frozen ? ["nomination_unknown"] : [])].includes(ref.status)) { check(!frozen && ref.status.startsWith("formation_"), "failed selection cannot score"); return { ref, capture: null }; }
     check(ref.path !== undefined && ref.path === basename(ref.path) && ref.sha256 !== undefined, "unbound selected capture");
     check(navigationFileDigest(join(root, ref.path)) === ref.sha256, "selected capture digest drift");
     const capture = Capture.parse(readJson(join(root, ref.path)));
     check(capture.ordinal === row.ordinal && capture.question_id === row.question_id && capture.arm === arm, "selected input identity drift");
     check(new Set(capture.windows.map(window => window.target.root_id)).size === capture.windows.length, "duplicate delivered root");
     const field = capture.field_delivery;
-    check(canonicalJson(field?.policy ?? null) === canonicalJson(row.delivery_policy ?? null), "delivery policy drift");
+    check(canonicalJson(field?.policy ?? null) === canonicalJson(input.frozen_nominations ? frozenDeliveryPolicy(input, arm) : row.delivery_policy ?? null), "delivery policy drift");
+    const inherited = frozen?.rows.find(item => item.ordinal === row.ordinal);
+    if (inherited) {
+      const derived = admitFrozenQueries(row, inherited.captures);
+      check(canonicalJson(capture.captures) === canonicalJson(inherited.captures)
+        && canonicalJson(capture.solved.rows) === canonicalJson(derived.solved.rows)
+        && canonicalJson(capture.pool) === canonicalJson(derived.pool)
+        && canonicalJson(capture.occurrences) === canonicalJson(derived.occurrences)
+        && inherited.nomination === derived.nomination && capture.frozen_nomination?.status === derived.nomination
+        && capture.frozen_nomination.capture_sha256 === inherited.capture_sha256,
+      "frozen execution nomination/order drift");
+      check((ref.status === "nomination_unknown") === (derived.nomination === "unknown")
+        && canonicalJson(field?.selection.rows) === canonicalJson(derived.solved.rows.slice(0, FIELD_DELIVERY_LIMITS.slots)),
+      "frozen matched selection/status drift");
+    }
     if (field) {
       check(capture.tail.status === (capture.solved.rows.length <= capture.windows.length ? "exhausted" : "open"),
         "packed delivery tail drift");
@@ -71,7 +95,7 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
       check(field.packing.unique_utf8_bytes === capture.windows.reduce((n, w) => n + Buffer.byteLength(w.text), 0)
         && field.packing.unique_utf8_bytes <= field.policy.byte_budget, "delivery byte accounting drift");
       check((field.status === "unavailable") === (field.missing_locations.length > 0)
-        && (ref.status === "delivery_unavailable") === (field.status === "unavailable"), "delivery availability drift");
+        && (ref.status === "nomination_unknown" || (ref.status === "delivery_unavailable") === (field.status === "unavailable")), "delivery availability drift");
     }
     for (const [i, window] of capture.windows.entries()) {
       check(window.rank === i + 1 && (field?.policy.windows === "native-anchor" || window.start === 0)
@@ -88,9 +112,19 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
       if (field && i > 0) check(field.selection.rows.findIndex(s => s.record_id === capture.windows[i - 1]!.target.root_id)
         < field.selection.rows.findIndex(s => s.record_id === window.target.root_id), "delivered selection order drift");
     }
-    const unavailableStructure = admitStructuralAvailability(row, ref.status === "delivery_unavailable" ? undefined : ref.status, capture);
-    return { ref, capture: unavailableStructure || field?.status === "unavailable" ? null : capture };
+    const unavailableStructure = admitStructuralAvailability(row, ref.status === "delivery_unavailable" || ref.status === "nomination_unknown" ? undefined : ref.status, capture);
+    return { ref, capture: unavailableStructure || field?.status === "unavailable" || ref.status === "nomination_unknown" ? null : capture };
   }));
+  return { admitted, expectedArms };
+}
+
+export function evaluateConditionalNavigation(root: string, labelManifestPath: string, output: string) {
+  check(!existsSync(output), "evaluation output must be new");
+  const receipt = Receipt.parse(readJson(join(root, "receipt.json")));
+  check(navigationFileDigest(join(root, "input.json")) === receipt.input_sha256
+    && navigationFileDigest(join(root, "formations.json")) === receipt.formations_sha256, "frozen input/formation drift");
+  const input = ConditionalNavigationRunSchema.parse(readJson(join(root, "input.json")));
+  const { admitted, expectedArms } = admitNavigationSelection(root, input, receipt);
   // Nothing above this point has label access. There is no retrieval entry after it.
   const labels = z.array(z.object({ ordinal: z.number().int(), path: z.string() }).strict()).parse(readJson(labelManifestPath));
   const gold = new Map(input.rows.map(row => {
@@ -117,13 +151,14 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
       visible_utf8_bytes: capture?.windows.reduce((sum, window) => sum + Buffer.byteLength(window.text), 0) ?? null };
   });
   // Pair availability must not suppress an otherwise scorable arm's own metrics.
-  const originalAvailable = rows.every(row => row.arm !== "original" || row.visibility !== null);
+  const baseline = input.frozen_nominations ? FROZEN_DELIVERY_ARMS[0] : "original";
+  const originalAvailable = rows.every(row => row.arm !== baseline || row.visibility !== null);
   const summary = expectedArms.map(arm => {
     const selected = rows.filter(row => row.arm === arm), complete = selected.every(row => row.visibility !== null);
     const counts = complete ? Object.fromEntries(Metrics.map(metric => [metric, Object.fromEntries(["hit", "miss", "unknown"].map(status =>
       [status, selected.filter(row => row.visibility![metric].status === status).length]))])) : null;
-    const pairs = arm === "original" || arm === "supplied" || !complete || !originalAvailable ? null : Object.fromEntries(Metrics.map(metric => {
-      const outcomes = selected.map(row => [rows.find(base => base.ordinal === row.ordinal && base.arm === "original")!.visibility![metric].status,
+    const pairs = arm === baseline || arm === "supplied" || !complete || !originalAvailable ? null : Object.fromEntries(Metrics.map(metric => {
+      const outcomes = selected.map(row => [rows.find(base => base.ordinal === row.ordinal && base.arm === baseline)!.visibility![metric].status,
         row.visibility![metric].status]);
       return [metric, { gains: outcomes.filter(([a, b]) => a === "miss" && b === "hit").length,
         losses: outcomes.filter(([a, b]) => a === "hit" && b === "miss").length,

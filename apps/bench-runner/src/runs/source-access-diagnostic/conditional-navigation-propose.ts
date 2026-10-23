@@ -9,7 +9,7 @@ import { materializeEvidenceSelectionLines, parseEvidenceSelectionWorkset } from
 import { pinEvidenceSelectionAuthority, quoteEvidenceSelection } from "../evidence-selection/authority.js";
 import { openEvidenceSelectionAttemptLedger } from "../evidence-selection/attempt.js";
 import { INPUT_NAVIGATION_POLICY, FormationInputSchema, type FormationCapture } from "./input-condition-formation.js";
-import { navigationFileDigest } from "./conditional-navigation-run.js";
+import { navigationFileDigest } from "./conditional-navigation-input.js";
 
 export const NavigationProposalInputsSchema = z.object({ source_revision: z.string().min(1),
   rows: z.array(z.object({ ordinal: z.number().int().min(1).max(8), input: FormationInputSchema }).strict()).min(1).max(8) }).strict();

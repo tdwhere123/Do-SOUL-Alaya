@@ -98,7 +98,7 @@ it.each([
   const { fieldContractSha256 } = await import("@do-soul/alaya-core");
   const { sourceIndexTarget } = await import("@do-soul/alaya-protocol");
   const { default: Database } = await import("better-sqlite3");
-  const { navigationFileDigest } = await import("../../../runs/source-access-diagnostic/conditional-navigation-run.js");
+  const { navigationFileDigest } = await import("../../../runs/source-access-diagnostic/conditional-navigation-input.js");
   const root = mkdtempSync(join(tmpdir(), "conditional-navigation-"));
   try {
     const snapshot = await prepareNativeSourceRecordsSnapshot({ snapshotPath: join(root, "input.sqlite"), dataDirRoot: join(root, "publish"),

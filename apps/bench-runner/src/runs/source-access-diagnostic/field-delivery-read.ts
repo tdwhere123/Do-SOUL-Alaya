@@ -12,7 +12,8 @@ import { NAVIGATION_SOURCE_READ_ALLOWANCE, readNavigationSource, anchorAccountin
 const NAVIGATION_PREVIEW_BYTES = FIELD_DELIVERY_LIMITS.window_bytes;
 export type DeliveryReads = { ordinal: number; question_id: string; arm: string; accounting: ReadAccounting; reused_delivery_reads: number;
   anchor_accounting?: AnchorAccounting; selected_roots?: string[]; delivered_roots?: string[];
-  status?: "running" | "complete" | "failed"; capture_status?: "pending" | "published" | "failed" };
+  status?: "running" | "complete" | "failed"; capture_status?: "pending" | "published" | "failed";
+  read_ledger?: NavigationReadLedger };
 type DeliveryRow = { workspace: string; authorized_scopes: readonly string[] | null; interpretation_clock: string;
   original: string; conditions: readonly NavigationCondition[]; delivery_policy?: FieldDelivery };
 type DeliveryContext = { row: DeliveryRow; database: StorageDatabase; solved: ReturnType<typeof solveConditionalNavigation>;

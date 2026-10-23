@@ -1,50 +1,28 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { z } from "zod";
-import { AlayaError, SourceIndexConfigurationSchema, canonicalJson, sourceIndexTarget,
+import { AlayaError, canonicalJson, sourceIndexTarget,
   SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT, SOURCE_SEMANTIC_PROFILED_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION,
   type SourceIndexQueryVector } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, LocalOnnxEmbeddingClient, acquireProfiledSourceIndex, authorizeSemanticScope,
   fieldContractSha256, resolveSourceSemanticComparisonProfile } from "@do-soul/alaya-core";
 import { sourceRecordFromRow, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo, StorageDatabase } from "@do-soul/alaya-storage";
-import { solveConditionalNavigation, NAVIGATION_CONTRACT, NAVIGATION_LIMITS, type NavigationOccurrence } from "./conditional-navigation.js";
-import { INPUT_NAVIGATION_POLICY, FormationCaptureSchema, admitInputFormation, mechanicalFormation, formationQueryShares } from "./input-condition-formation.js";
+import { solveConditionalNavigation, navigationInventory, NAVIGATION_CONTRACT } from "./conditional-navigation.js";
+import { INPUT_NAVIGATION_POLICY, admitInputFormation, mechanicalFormation, formationQueryShares } from "./input-condition-formation.js";
+import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, FROZEN_DELIVERY_ARMS, type RunRow } from "./conditional-navigation-input.js";
+import { admitFrozenNominations, admitFrozenSources, frozenAdmissionAccounting, type FrozenNominations } from "./conditional-navigation-frozen.js";
 
 import { bindSourceRecordsObservation } from "../snapshot/source-records/observation-projection.js";
-import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
+import { FIELD_DELIVERY_LIMITS } from "./field-delivery.js";
 import { readFieldDelivery, type DeliveryReads } from "./field-delivery-read.js";
-import { ObservationWindowSchema, TEMPORAL_NAVIGATION_DOMAIN } from "./temporal-navigation.js";
-import { StructuralNavigationSchema, STRUCTURAL_LIMITS, observeSessionAdjacency, structuralNavigationStatus } from "./structural-navigation.js";
+import { TEMPORAL_NAVIGATION_DOMAIN } from "./temporal-navigation.js";
+import { STRUCTURAL_LIMITS, observeSessionAdjacency, structuralNavigationStatus } from "./structural-navigation.js";
 import { NAVIGATION_SOURCE_READ_ALLOWANCE, navigationReadAccounting, navigationReadLedger, navigationReadTotals,
   readNavigationSource, type ReadAccounting, type NavigationSourceRead, type NavigationReadLedger } from "./navigation-read-budget.js";
 
-const Condition = z.object({ id: z.string().min(1), object: z.string().min(1), hypothesis: z.string().min(1),
-  query: z.string().min(1).max(16384), status: z.enum(["ready", "partial", "unknown", "unsupported", "rejected"]),
-  residual: z.string().nullable(), provenance: z.string().min(1), observation_window: ObservationWindowSchema.optional() }).strict();
-const Binding = z.object({ configuration: SourceIndexConfigurationSchema, config_id: z.string(), profile_id: z.string(),
-  selection_revision: z.number().int(), generation_id: z.string(), source_epoch: z.number().int(),
-  status: z.enum(["ready", "valid_empty"]), enumeration_complete: z.literal(true),
-  target_count: z.number().int(), completed_count: z.number().int() }).strict();
-export const ConditionalNavigationRunSchema = z.object({
-  contract: z.literal(NAVIGATION_CONTRACT), source_revision: z.string().min(1),
-  cache_root: z.string().min(1), model_id: z.string().min(1).optional(), channels: z.enum(["dual", "lexical"]).default("dual"),
-  comparison: z.object({ model: z.array(z.object({ ordinal: z.number().int().min(1).max(8), capture: FormationCaptureSchema }).strict()).max(8) }).strict().optional(),
-  rows: z.array(z.object({ ordinal: z.number().int().min(1).max(8), question_id: z.string().min(1),
-    snapshot: z.string().min(1), snapshot_sha256: z.string().regex(/^[a-f0-9]{64}$/u), workspace: z.string().min(1),
-    source_records: z.object({ snapshot: z.string().min(1),
-      manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().optional(),
-    observation_domain: z.literal(TEMPORAL_NAVIGATION_DOMAIN).optional(),
-    structural_navigation: StructuralNavigationSchema.optional(),
-    delivery_policy: FieldDeliverySchema.optional(),
-    interpretation_clock: z.string().datetime(), authorized_scopes: z.array(z.string()).nullable(),
-    expected_index: Binding.nullable(), original: z.string().min(1), conditions: z.array(Condition).min(1).max(1 + NAVIGATION_LIMITS.additional_conditions),
-    branches: z.array(z.array(z.string()).min(1).max(NAVIGATION_LIMITS.additional_conditions)).max(NAVIGATION_LIMITS.branches) }).strict()).min(1).max(8)
-}).strict();
-const MAX_SCRATCH = 2 * 1024 ** 3, MAX_OUTPUT = 256 * 1024 ** 2, MAX_WALL = 3600_000;
-type RunRow = z.infer<typeof ConditionalNavigationRunSchema>["rows"][number];
+const MAX_SCRATCH = 2 * 1024 ** 3, MAX_OUTPUT = 256 * 1024 ** 2, MAX_FROZEN_OUTPUT = 32 * 1024 ** 2, MAX_WALL = 3600_000;
 type ObservationScan = {
   ordinal: number; question_id: string; arm: string; domain: RunRow["observation_domain"];
   status: "running" | "complete" | "failed"; failure: string | null; candidates: number; admitted_sources: number;
@@ -54,15 +32,12 @@ type ObservationScan = {
   artifact_inspection: ReturnType<typeof bindSourceRecordsObservation>["accounting"];
 };
 type RunMetrics = { inferenceInputs: number; peakScratch: number; acquisitions: number; acquisitionHits: number;
-  observationScans: ObservationScan[]; structuralReads: { ordinal: number; arm: string; ledger: NavigationReadLedger }[]; deliveryReads: DeliveryReads[] };
+  observationScans: ObservationScan[]; structuralReads: { ordinal: number; arm: string; ledger: NavigationReadLedger }[]; deliveryReads: DeliveryReads[];
+  frozenAdmissions: ReturnType<typeof frozenAdmissionAccounting>[] };
 type Share = ReturnType<typeof formationQueryShares> extends Map<string, infer S> ? S : never;
 function check(test: boolean, message: string): asserts test {
   if (!test) throw new AlayaError("VALIDATION", message);
 }
-export function navigationFileDigest(path: string) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
-}
-
 function formArms(config: z.infer<typeof ConditionalNavigationRunSchema>, row: RunRow) {
   solveConditionalNavigation({ ...row, occurrences: [], pool: [] });
   check(!row.conditions.some(condition => condition.observation_window) || row.observation_domain === TEMPORAL_NAVIGATION_DOMAIN,
@@ -72,6 +47,8 @@ function formArms(config: z.infer<typeof ConditionalNavigationRunSchema>, row: R
   check(!row.structural_navigation || !config.comparison, "structural comparison uses separately frozen supplied arms");
   const original = row.conditions.find(item => item.id === row.original)!;
   check(original?.status === "ready", "original query must remain independently ready");
+  if (config.frozen_nominations) return FROZEN_DELIVERY_ARMS.map(arm => ({ arm,
+    row: { ...row, delivery_policy: frozenDeliveryPolicy(config, arm) }, formation: null, available: true }));
   if (!config.comparison) return [{ arm: "supplied", row, formation: null, available: true }];
   check(row.conditions.length === 1 && row.branches.length === 0, "comparison input must be original-only");
   const input = { question: original.query, reference_clock: row.interpretation_clock };
@@ -97,6 +74,7 @@ export async function runConditionalNavigation(value: unknown, output: string) {
     && new Set(config.rows.map(row => row.question_id)).size === config.rows.length, "duplicate pilot membership");
   check(!config.comparison || new Set(config.comparison.model.map(row => row.ordinal)).size === config.comparison.model.length
     && config.comparison.model.every(item => config.rows.some(row => row.ordinal === item.ordinal)), "ambiguous model capture membership");
+  const frozen = admitFrozenNominations(config);
   const plans = config.rows.map(row => {
     check(config.channels === "lexical" || row.expected_index !== null, "dual navigation requires a prepared index binding");
     return { row, arms: formArms(config, row) };
@@ -107,13 +85,14 @@ export async function runConditionalNavigation(value: unknown, output: string) {
     arms: arms.map(item => ({ arm: item.arm, available: item.available, formation: item.formation,
       conditions: item.row.conditions, branches: item.row.branches,
       shares: Object.fromEntries(formationQueryShares(item.row.conditions, config.comparison !== undefined || item.row.structural_navigation !== undefined)) })) }))));
+  if (frozen) writeFileSync(join(root, "frozen-nominations.json"), JSON.stringify(frozen));
   const scratch = mkdtempSync(join(root, "scratch-"));
-  const client = config.channels === "dual" ? new LocalOnnxEmbeddingClient({ cacheDir: config.cache_root,
+  const client = !frozen && config.channels === "dual" ? new LocalOnnxEmbeddingClient({ cacheDir: config.cache_root,
     ...(config.model_id === undefined ? {} : { modelId: config.model_id }) }) : null;
   const memo = new Map<string, Awaited<ReturnType<typeof SourceIndexAcquisition.prepareQuery>>>();
   const rows: { ordinal: number; question_id: string; arm: string; status: string; path?: string; sha256?: string;
     single_condition_equivalent?: boolean | null; nominations?: number; windows?: number }[] = [];
-  const metrics: RunMetrics = { inferenceInputs: 0, peakScratch: 0, acquisitions: 0, acquisitionHits: 0, observationScans: [], structuralReads: [], deliveryReads: [] };
+  const metrics: RunMetrics = { inferenceInputs: 0, peakScratch: 0, acquisitions: 0, acquisitionHits: 0, observationScans: [], structuralReads: [], deliveryReads: [], frozenAdmissions: [] };
   let failure: string | null = null;
   try {
     for (const { row, arms } of plans) {
@@ -133,14 +112,19 @@ export async function runConditionalNavigation(value: unknown, output: string) {
         const state = repository.state(row.workspace), selection = "selection" in state ? state.selection : null;
         admitPreparedBinding(row, repository, state);
         const acquired = new Map<string, ReturnType<typeof acquire>>();
+        const inherited = frozen?.rows.find(item => item.ordinal === row.ordinal);
+        if (inherited) {
+          const accounting = frozenAdmissionAccounting(row.ordinal); metrics.frozenAdmissions.push(accounting);
+          connection.transaction(() => admitFrozenSources(row, inherited.captures, database, repository, accounting))();
+        }
         for (const plan of arms) {
-          const arm = plan.row, prefix = `${String(row.ordinal).padStart(3, "0")}${config.comparison ? `-${plan.arm}` : ""}`;
+          const arm = plan.row, prefix = `${String(row.ordinal).padStart(3, "0")}${config.comparison || frozen ? `-${plan.arm}` : ""}`;
           if (!plan.available) {
             rows.push({ ordinal: row.ordinal, question_id: row.question_id, arm: plan.arm, status: `formation_${plan.formation!.state}` });
             continue;
           }
           rows.push(await captureNavigationArm({ arm, name: plan.arm, prefix, root, scratch, config, started,
-            repository, database, connection, selection, memo, client, acquired, metrics, projectSourceTime }));
+            repository, database, connection, selection, memo, client, acquired, metrics, projectSourceTime, inherited }));
         }
       } finally { database.close({ optimize: false }); rmSync(filename, { force: true });
         for (const suffix of ["-wal", "-shm"]) rmSync(filename + suffix, { force: true }); }
@@ -157,14 +141,17 @@ export async function runConditionalNavigation(value: unknown, output: string) {
     rmSync(scratch, { recursive: true, force: true });
   }
   const receipt = { contract: NAVIGATION_CONTRACT, source_revision: config.source_revision,
+    ...(frozen ? { frozen_nominations: { origin: frozen.origin, inherited_costs: frozen.inherited_costs,
+      artifact_sha256: navigationFileDigest(join(root, "frozen-nominations.json")) }, frozen_admissions: metrics.frozenAdmissions } : {}),
     status: failure === null ? "complete" : "stopped", failure, rows, input_sha256: navigationFileDigest(join(root, "input.json")),
     formations_sha256: navigationFileDigest(join(root, "formations.json")),
     local_query_inputs: config.comparison ? memo.size : metrics.inferenceInputs, local_inference_inputs: metrics.inferenceInputs,
     distinct_cached_queries: memo.size, acquisitions: metrics.acquisitions, acquisition_cache_hits: metrics.acquisitionHits, external_calls: 0, index_builds: 0,
     observation_scans: metrics.observationScans, delivery_reads: metrics.deliveryReads,
     ...(metrics.structuralReads.length ? { structural_reads: metrics.structuralReads.map(read => ({ ...read, totals: navigationReadTotals(read.ledger) })) } : {}),
-    bounds: { questions: 8, local_query_inputs: config.comparison ? 56 : 32, wall_ms: MAX_WALL, scratch_bytes: MAX_SCRATCH, retained_bytes: MAX_OUTPUT },
-    allocation: config.comparison ? "original-half-remainder-even-no-refill.v1" : config.rows.some(row => row.structural_navigation !== undefined)
+    bounds: { questions: 8, local_query_inputs: frozen ? 0 : config.comparison ? 56 : 32, wall_ms: MAX_WALL,
+      scratch_bytes: MAX_SCRATCH, retained_bytes: frozen ? MAX_FROZEN_OUTPUT : MAX_OUTPUT },
+    allocation: frozen ? "frozen-membership-field-order-equal-byte-budget.v1" : config.comparison ? "original-half-remainder-even-no-refill.v1" : config.rows.some(row => row.structural_navigation !== undefined)
       ? "explicit-structural-shared-otherwise-legacy" : "legacy-per-condition",
     ...(metrics.structuralReads.length ? { structural_question_allowance: {
       acquisition_work_units: 50_000_000, shared_read_work_units: STRUCTURAL_LIMITS.work_units,
@@ -175,7 +162,7 @@ export async function runConditionalNavigation(value: unknown, output: string) {
       work_units: FIELD_DELIVERY_LIMITS.slots * NAVIGATION_SOURCE_READ_ALLOWANCE.work_units,
       native_bytes: FIELD_DELIVERY_LIMITS.slots * NAVIGATION_SOURCE_READ_ALLOWANCE.native_bytes },
     scratch_peak_bytes: metrics.peakScratch, retained_bytes_before_receipt: retainedBytes(root), wall_ms: performance.now() - started,
-    historical_replay: "not_established_missing_old_witnesses" };
+    historical_replay: frozen ? "receipt_bound_nominations_current_delivery_only" : "not_established_missing_old_witnesses" };
   writeFileSync(join(root, "receipt.json"), JSON.stringify(receipt, null, 2));
   return receipt;
 }
@@ -188,6 +175,7 @@ type ArmContext = {
   client: LocalOnnxEmbeddingClient | null; acquired: Map<string, ReturnType<typeof acquire>>;
   metrics: RunMetrics;
   projectSourceTime: ReturnType<typeof bindSourceRecordsObservation>;
+  inherited?: FrozenNominations["rows"][number];
 };
 
 /** One arm observes its allocated inputs, solves the field, then reads and freezes literal delivery. */
@@ -195,9 +183,8 @@ async function captureNavigationArm(ctx: ArmContext) {
   const { arm, name, prefix, root, scratch, started, config, repository, database, connection, selection, memo, client, acquired, metrics } = ctx;
   const shares = formationQueryShares(arm.conditions, config.comparison !== undefined || arm.structural_navigation !== undefined);
   const captures: { condition: string; preparation: unknown; phase: ReturnType<typeof acquire>["phase"];
-    witness: ReturnType<typeof acquire>["witness"]; share: Share; memoized: boolean }[] = [];
-  const occurrences: NavigationOccurrence[] = [], targets = new Map<string, ReturnType<typeof sourceIndexTarget>>();
-  for (const condition of arm.conditions) {
+    witness: ReturnType<typeof acquire>["witness"]; share?: Share; memoized?: boolean }[] = ctx.inherited ? [...ctx.inherited.captures] : [];
+  for (const condition of ctx.inherited ? [] : arm.conditions) {
     const share = shares.get(condition.id); if (!share) continue;
     check(performance.now() - started < MAX_WALL, "pilot wall limit reached");
     const key = canonicalJson([selection?.profile_id, config.channels, condition.query]);
@@ -218,18 +205,13 @@ async function captureNavigationArm(ctx: ArmContext) {
     captures.push({ condition: condition.id, preparation: prepared.receipt, phase: captured.phase, witness: captured.witness, share, memoized });
     writeFileSync(join(root, `${prefix}-observations.json`), JSON.stringify(captures));
     check(captured.phase.status === "executed" && captured.phase.accounting === "complete", "native acquisition failed or unknown");
-    for (const witness of captured.witness) {
-      check(witness.source.target.root_kind === "source_record", "prototype requires native source-record targets");
-      const id = witness.source.target.root_id; targets.set(id, witness.source);
-      occurrences.push({ condition: condition.id, channel: witness.route.kind, native_rank: witness.route.native_rank,
-        reference: `${condition.id}:${witness.reference}`, root_key: witness.source.root_key, record_id: id });
-    }
   }
-  const pool = [...targets.keys()].sort().map((record_id, catalog_position) => ({ record_id, catalog_position }));
+  const { pool, targets, occurrences } = navigationInventory(captures);
   // The optional scan is also available to a no-time control, keeping its domain
   // and source-read work matched. Every member binds before any field selection.
-  const ledger = arm.structural_navigation ? navigationReadLedger(arm.structural_navigation.max_source_reads) : undefined;
-  if (ledger) metrics.structuralReads.push({ ordinal: arm.ordinal, arm: name, ledger });
+  const ledger = arm.structural_navigation ? navigationReadLedger(arm.structural_navigation.max_source_reads)
+    : ctx.inherited ? navigationReadLedger(FIELD_DELIVERY_LIMITS.slots) : undefined;
+  if (ledger && arm.structural_navigation) metrics.structuralReads.push({ ordinal: arm.ordinal, arm: name, ledger });
   const originalNominee = arm.structural_navigation ? solveConditionalNavigation({ ...arm, pool, occurrences }).original_nominee : null;
   const originalResult = captures.find(row => row.condition === arm.original)?.phase.result;
   // An admitted-empty query is not a denied/stale nomination admission.
@@ -243,7 +225,8 @@ async function captureNavigationArm(ctx: ArmContext) {
   // Keep delivery effects even without structural opt-in, on admission failure,
   // transaction rollback, or a later capture-write failure. Scans remain separate.
   const delivery: DeliveryReads = { ordinal: arm.ordinal, question_id: arm.question_id, arm: name,
-    accounting: navigationReadAccounting(), reused_delivery_reads: 0, capture_status: "pending" };
+    accounting: navigationReadAccounting(), reused_delivery_reads: 0, capture_status: "pending",
+    ...(ctx.inherited ? { read_ledger: ledger } : {}) };
   metrics.deliveryReads.push(delivery);
   const cached = new Map<string, NavigationSourceRead>();
   const { observation, structural, solved, windows, fieldDelivery } = connection.transaction(() => {
@@ -267,18 +250,19 @@ async function captureNavigationArm(ctx: ArmContext) {
   const encoded = JSON.stringify({ ordinal: arm.ordinal, question_id: arm.question_id, arm: name, captures, occurrences, pool, solved, windows,
     ...(structural ? { structural: { ...structural, reads: ledger } } : {}),
     ...(fieldDelivery ? { field_delivery: fieldDelivery } : {}),
+    ...(ctx.inherited ? { frozen_nomination: { status: ctx.inherited.nomination, capture_sha256: ctx.inherited.capture_sha256 } } : {}),
     ...(observation === undefined ? {} : { observation: { domain: arm.observation_domain, ...observation,
       artifact_inspection: ctx.projectSourceTime.accounting, evaluations: solved.temporal_observations?.length ?? 0 } }),
     inventory: "admitted_nomination_union", interpretation_clock: arm.interpretation_clock,
     tail: { status: pool.length <= new Set(windows.map(window => window.target.root_id)).size ? "exhausted" : "open",
       reason: "closed_admitted_inventory_only" } });
-  check(Buffer.byteLength(encoded) + retainedBytes(root) < MAX_OUTPUT, "retained output limit reached");
+  check(Buffer.byteLength(encoded) + retainedBytes(root) < (ctx.inherited ? MAX_FROZEN_OUTPUT : MAX_OUTPUT), "retained output limit reached");
   const path = `${prefix}.json`;
   try { writeFileSync(join(root, path), encoded); delivery.capture_status = "published"; }
   catch (error) { delivery.capture_status = "failed"; throw error; }
-  rmSync(join(root, `${prefix}-observations.json`));
+  rmSync(join(root, `${prefix}-observations.json`), { force: true });
   return { ordinal: arm.ordinal, question_id: arm.question_id, arm: name,
-    status: fieldDelivery?.status === "unavailable" ? "delivery_unavailable"
+    status: ctx.inherited?.nomination === "unknown" ? "nomination_unknown" : fieldDelivery?.status === "unavailable" ? "delivery_unavailable"
       : structural ? structuralNavigationStatus(structural.config.mode, structural.nomination.status, structural.observation.status) : "complete", path,
     sha256: navigationFileDigest(join(root, path)), single_condition_equivalent: solved.single_condition_equivalent,
     nominations: targets.size, windows: windows.length };

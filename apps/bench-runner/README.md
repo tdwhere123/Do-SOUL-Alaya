@@ -136,6 +136,64 @@ outcome unknown; observed valid hits remain hits. The delivered-slot union is a
 diagnostic. `--arm without_semantic_correspondences` is a separate native control
 with the same snapshot, Q, clock, budget and scopes, not a compiled-leaf intervention.
 
+## Private frozen-nomination delivery
+
+The existing `src/runs/source-access-diagnostic/conditional-navigation-launch.ts`
+entry accepts an explicit `frozen_nominations` option in its
+[run configuration](src/runs/source-access-diagnostic/conditional-navigation-input.ts):
+
+```json
+{
+  "family": "conditional-navigation-pilot.v1",
+  "receipt": { "path": "/absolute/origin/receipt.json", "sha256": "64 lowercase hex digits" },
+  "byte_budget": 8192
+}
+```
+
+All other row fields must equal the receipt-bound sibling `input.json`, including
+full membership, original conditions, snapshots, raw/paired profile identities,
+clock and scopes. `source_revision` identifies the current execution; the output
+separately retains the historical origin. This named compatibility reader accepts
+only the pre-arm pilot envelope with canonical full nomination witnesses, not
+`occurrence_prefix` reconstruction or unchecked solved order. Its removal boundary
+is termination/replacement of this delivery-only comparison.
+
+Frozen mode produces `window-prefix` and `window-native-anchor` arms with the
+same field order, selected membership, ten-slot ceiling and declared byte budget.
+Both read current authorized native source bytes on a disposable SQLite copy;
+stored preview text is not a delivery input. Missing native locations make that
+arm unavailable without prefix substitution. Empty, partial and unknown nomination
+states remain distinct. Inherited preparation/acquisition evidence is retained
+separately from fresh admission/delivery costs. No model client is constructed,
+query prepared, nomination acquired or index built. Formation/model/channel
+changes, condition-cover selection and structural/temporal interventions are
+rejected, not ignored. Omission preserves existing live-acquisition defaults.
+
+After building, use the existing entry's `--config CONFIG --out NEW_ROOT` and
+separate `--evaluate ROOT --labels MANIFEST --out NEW_FILE` forms. Evaluation
+admits every selected output before opening labels and retains the full input
+denominator, unavailable/null pairs and independently scorable UNKNOWN results.
+This measures delivery applicability/bytes/visibility only, not generation value,
+model quality, answerability or whole-system effectiveness. A historical artifact's
+hash is not native schema/currentness admission or permission to execute it.
+
+The authored-only executable proof is the `frozen-nomination.test.ts` Vitest
+wrapper. Run it once (not additionally as a standalone script), under network
+isolation and the ordered verification/measurement locks:
+
+```bash
+flock /tmp/alaya-recall-native-bridge.verify.lock \
+  flock /home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/source-delivery/representation/recall-measurement.lock \
+  unshare -Urn pnpm exec vitest run --project @do-soul/alaya-bench-runner \
+  apps/bench-runner/src/__tests__/longmemeval/measurement/frozen-nomination.test.ts
+```
+
+Its pre-import guards forbid credentials, transport, model construction and fresh
+query/acquisition/index paths. It disposes authored databases and can retain gzip
+proof evidence at `ALAYA_AUTHORED_FROZEN_EVIDENCE`. Do not set
+`ALAYA_LOCAL_SOURCE_EMBEDDING_OFFLINE=1` as a substitute for these guards.
+Natural inputs and closed generation allocations require separate authorization.
+
 ## LongMemEval native measurement
 
 The maintained [configuration](src/runs/longmemeval-semantic/contract.ts) binds the
