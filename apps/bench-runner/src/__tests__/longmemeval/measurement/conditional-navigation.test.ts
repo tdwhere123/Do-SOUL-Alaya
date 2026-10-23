@@ -178,7 +178,7 @@ it.each([
       const { evaluateConditionalNavigation } = await import("../../../runs/source-access-diagnostic/conditional-navigation-evaluate.js");
       const evaluation = evaluateConditionalNavigation(join(root, name), join(root, "labels.json"), join(root, `${name}-evaluation.json`));
       expect(evaluation.rows[2]).toMatchObject({ status: `formation_${state}`, visibility: null, visible_utf8_bytes: null });
-      expect(evaluation.summary[2]).toMatchObject({ status: "unavailable", denominator: null, metrics: null, paired: null });
+      expect(evaluation.summary[2]).toMatchObject({ status: "unavailable", denominator: 1, metrics: null, paired: null });
       expect(evaluation.summary[0]).toMatchObject({ status: "scored", denominator: 1 });
     }
     const { runNavigationProposals } = await import("../../../runs/source-access-diagnostic/conditional-navigation-propose.js");
@@ -204,7 +204,12 @@ it.each([
     writeFileSync(join(root, "late.json"), JSON.stringify(late));
     expect(() => run(join(root, "late.json"), join(root, "late"))).toThrow();
     const { evaluateConditionalNavigation } = await import("../../../runs/source-access-diagnostic/conditional-navigation-evaluate.js");
-    expect(() => evaluateConditionalNavigation(join(root, "late"), join(root, "labels-must-not-be-opened"), join(root, "late-evaluation.json"))).toThrow(/complete/u);
+    writeFileSync(join(root, "late-labels.json"), JSON.stringify([1, 2].map(ordinal => ({ ordinal, path: join(root, "gold.json") }))));
+    const lateEvaluation = evaluateConditionalNavigation(join(root, "late"), join(root, "late-labels.json"), join(root, "late-evaluation.json"));
+    expect(lateEvaluation.rows[0]!.visibility).not.toBeNull();
+    expect(lateEvaluation.rows.filter(row => row.ordinal === 2).map(row => [row.status, row.visibility]))
+      .toEqual(Array.from({ length: 3 }, () => ["selection_not_captured", null]));
+    expect(lateEvaluation.summary.every(arm => arm.denominator === 2 && arm.metrics === null)).toBe(true);
     // Even a later capture's drift must fail admission before label access.
     writeFileSync(join(root, "compared/001-model.json"), "{}");
     expect(() => evaluateConditionalNavigation(join(root, "compared"), join(root, "labels-must-not-be-opened"), join(root, "drift-evaluation.json"))).toThrow(/digest drift/u);

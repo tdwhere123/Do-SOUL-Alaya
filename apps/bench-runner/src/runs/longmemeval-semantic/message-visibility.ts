@@ -1,4 +1,4 @@
-import { sourceRecallTarget } from "@do-soul/alaya-protocol";
+import { sourceGoldRootIdentity, sourceRecallTarget } from "@do-soul/alaya-protocol";
 import { sourceTargetJoinsGold, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import type { AnswerTurnGold, AnswerTurnSpan } from "./answer-spans.js";
 
@@ -157,6 +157,28 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
   // A first-page positive does not establish an observed ten-slot prefix; the terminal case is in
   // the shared gate above and any terminal delivery still proves its absent tail below.
   return result(anyAt(5), unobservedAt10 ?? anyAt(10), allAt(5), unobservedAt10 ?? allAt(10));
+}
+
+/** Evaluator-only fixed-byte page. A complete packed page closes this B comparison,
+ * not the native source inventory or a later slot prefix. Byte counts come from
+ * admitted literal UTF-8 intervals; whole-message visibility is not answerability. */
+export function scoreConsumerByteVisibility(input: {
+  gold: AnswerTurnGold | undefined; windows: readonly (ConsumerVisibilityInterval & { text: string })[];
+  byte_budget: number; unique_utf8_bytes: number; unavailableReason?: string;
+}) {
+  // This private page protocol admits one contiguous window per full source identity.
+  // Callers cannot substitute an estimated size or count the same bytes twice.
+  const roots = input.windows.map(w => sourceGoldRootIdentity({ ...w.target, kind: "source_evidence", evidence_object_id: null }));
+  const bytes = input.windows.reduce((n, w) => n + Buffer.byteLength(w.text), 0);
+  const invalid = input.unavailableReason ?? (!Number.isSafeInteger(input.byte_budget) || input.byte_budget < 0
+    || input.unique_utf8_bytes !== bytes || bytes > input.byte_budget || new Set(roots).size !== roots.length
+    || input.windows.some(w => !Number.isSafeInteger(w.start) || w.start < 0 || w.end - w.start !== Buffer.byteLength(w.text))
+    ? "invalid_byte_page" : null);
+  if (invalid) return { any_at_budget: unknown(invalid), all_at_budget: unknown(invalid) };
+  const gold = input.gold, states = (gold?.spans ?? []).map(span => spanVisible(input.windows, span, Infinity));
+  return { any_at_budget: states.some(Boolean) ? hit : gold?.complete ? miss : unknown(MAPPING_INCOMPLETE),
+    all_at_budget: !gold?.complete ? unknown(MAPPING_INCOMPLETE) : states.length === 0
+      ? unknown("no_annotated_answer_turn") : states.every(Boolean) ? hit : miss };
 }
 
 function statesAt(messages: readonly ConsumerVisibilityMessage[], k: number): readonly ConsumerVisibilityMetric[] {

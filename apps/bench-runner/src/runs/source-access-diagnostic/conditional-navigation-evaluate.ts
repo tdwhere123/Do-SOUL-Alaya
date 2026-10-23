@@ -1,14 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
-import { AlayaError, SourceEvidenceTargetSchema, canonicalJson } from "@do-soul/alaya-protocol";
-import { scoreConsumerMessageVisibility } from "../longmemeval-semantic/message-visibility.js";
+import { AlayaError, SourceEvidenceTargetSchema, SourceSemanticNominationOccurrenceSchema, canonicalJson } from "@do-soul/alaya-protocol";
+import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
+import { scoreConsumerByteVisibility, scoreConsumerMessageVisibility } from "../longmemeval-semantic/message-visibility.js";
 import { ConditionalNavigationRunSchema, navigationFileDigest } from "./conditional-navigation-run.js";
 import { structuralNavigationStatus } from "./structural-navigation.js";
 
 const Reference = z.object({ ordinal: z.number().int(), question_id: z.string(), arm: z.string(), status: z.string(),
   path: z.string().optional(), sha256: z.string().optional() }).passthrough();
-const Receipt = z.object({ status: z.literal("complete"), input_sha256: z.string(), formations_sha256: z.string(),
+const Receipt = z.object({ status: z.enum(["complete", "stopped"]), input_sha256: z.string(), formations_sha256: z.string(),
   rows: z.array(Reference) }).passthrough();
 const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), arm: z.string(),
   structural: z.object({
@@ -17,11 +18,14 @@ const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), a
     observation: z.object({ status: z.enum(["unobserved", "unknown", "observed"]),
       seed: z.object({ record_id: z.string(), prefix_bytes: z.number().int().positive() }).passthrough().nullable() }).passthrough()
   }).passthrough().optional(),
+  field_delivery: z.object({ policy: FieldDeliverySchema, status: z.enum(["complete", "unavailable"]),
+    selection: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots) }).passthrough(),
+    packing: z.object({ unique_utf8_bytes: z.number().int().nonnegative() }).passthrough(),
+    missing_locations: z.array(z.object({ record_id: z.string(), reason: z.string() })) }).passthrough().optional(),
   solved: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()) }).passthrough(),
-  captures: z.array(z.object({ condition: z.string(), witness: z.array(z.object({ reference: z.string(),
-    source: z.object({ target: SourceEvidenceTargetSchema }).passthrough() }).passthrough()) }).passthrough()),
+  captures: z.array(z.object({ condition: z.string(), witness: z.array(SourceSemanticNominationOccurrenceSchema) }).passthrough()),
   windows: z.array(z.object({ rank: z.number().int(), target: SourceEvidenceTargetSchema, start: z.number().int().nonnegative(),
-    end: z.number().int().nonnegative(), text: z.string() }).passthrough()).max(10),
+    end: z.number().int().nonnegative(), text: z.string() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots),
   tail: z.object({ status: z.enum(["exhausted", "open", "unknown"]), reason: z.string() }) }).passthrough();
 const GoldTarget = SourceEvidenceTargetSchema.unwrap().omit({ kind: true, evidence_object_id: true, span: true });
 const LabelProjection = z.object({ rows: z.array(z.object({ arm: z.string(), visibility: z.object({
@@ -41,25 +45,51 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
     && navigationFileDigest(join(root, "formations.json")) === receipt.formations_sha256, "frozen input/formation drift");
   const input = ConditionalNavigationRunSchema.parse(readJson(join(root, "input.json")));
   const expectedArms = input.comparison ? ["original", "mechanical", "model"] : ["supplied"];
-  check(receipt.rows.length === input.rows.length * expectedArms.length, "incomplete selected capture membership");
+  check(receipt.status === "complete" ? receipt.rows.length === input.rows.length * expectedArms.length
+    : receipt.rows.length <= input.rows.length * expectedArms.length, "incomplete selected capture membership");
+  check(receipt.rows.every(ref => input.rows.some(row => row.ordinal === ref.ordinal && row.question_id === ref.question_id)
+    && expectedArms.includes(ref.arm)), "unexpected selected capture membership");
   const admitted = input.rows.flatMap(row => expectedArms.map(arm => {
     const matches = receipt.rows.filter(ref => ref.ordinal === row.ordinal && ref.question_id === row.question_id && ref.arm === arm);
-    check(matches.length === 1, "ambiguous selected capture membership");
+    check(matches.length <= 1 && (matches.length === 1 || receipt.status === "stopped"), "ambiguous selected capture membership");
+    if (matches.length === 0) return { ref: { ordinal: row.ordinal, question_id: row.question_id, arm,
+      status: "selection_not_captured" }, capture: null };
     const ref = matches[0]!;
-    if (!["complete", "structure_unknown", "structure_unobserved"].includes(ref.status)) { check(ref.status.startsWith("formation_"), "failed selection cannot score"); return { ref, capture: null }; }
+    if (!["complete", "structure_unknown", "structure_unobserved", "delivery_unavailable"].includes(ref.status)) { check(ref.status.startsWith("formation_"), "failed selection cannot score"); return { ref, capture: null }; }
     check(ref.path !== undefined && ref.path === basename(ref.path) && ref.sha256 !== undefined, "unbound selected capture");
     check(navigationFileDigest(join(root, ref.path)) === ref.sha256, "selected capture digest drift");
     const capture = Capture.parse(readJson(join(root, ref.path)));
     check(capture.ordinal === row.ordinal && capture.question_id === row.question_id && capture.arm === arm, "selected input identity drift");
     check(new Set(capture.windows.map(window => window.target.root_id)).size === capture.windows.length, "duplicate delivered root");
+    const field = capture.field_delivery;
+    check(canonicalJson(field?.policy ?? null) === canonicalJson(row.delivery_policy ?? null), "delivery policy drift");
+    if (field) {
+      check(capture.tail.status === (capture.solved.rows.length <= capture.windows.length ? "exhausted" : "open"),
+        "packed delivery tail drift");
+      check(new Set(field.selection.rows.map(s => s.record_id)).size === field.selection.rows.length
+        && field.selection.rows.every(s => capture.solved.rows.some(r => r.record_id === s.record_id)), "selected root outside solved field");
+      check(field.packing.unique_utf8_bytes === capture.windows.reduce((n, w) => n + Buffer.byteLength(w.text), 0)
+        && field.packing.unique_utf8_bytes <= field.policy.byte_budget, "delivery byte accounting drift");
+      check((field.status === "unavailable") === (field.missing_locations.length > 0)
+        && (ref.status === "delivery_unavailable") === (field.status === "unavailable"), "delivery availability drift");
+    }
     for (const [i, window] of capture.windows.entries()) {
-      check(window.rank === i + 1 && window.start === 0 && Buffer.byteLength(window.text) === window.end - window.start
-        && window.target.workspace_id === row.workspace && capture.solved.rows[i]?.record_id === window.target.root_id
+      check(window.rank === i + 1 && (field?.policy.windows === "native-anchor" || window.start === 0)
+        && Buffer.byteLength(window.text) === window.end - window.start
+        && window.target.workspace_id === row.workspace && (field
+          ? field.selection.rows.some(item => item.record_id === window.target.root_id)
+          : capture.solved.rows[i]?.record_id === window.target.root_id)
         && capture.captures.some(query => query.witness.some(hit => canonicalJson(hit.source.target) === canonicalJson(window.target))),
       "selected literal window admission failed");
+      if (field?.policy.windows === "native-anchor") check(capture.captures.some(query => query.witness.some(hit =>
+        canonicalJson(hit.source.target) === canonicalJson(window.target) && hit.route.kind === "vector"
+        && hit.route.window?.status === "available" && window.start === hit.route.window.window.start_byte
+        && window.end <= hit.route.window.window.end_byte)), "delivered window lacks a bound native anchor");
+      if (field && i > 0) check(field.selection.rows.findIndex(s => s.record_id === capture.windows[i - 1]!.target.root_id)
+        < field.selection.rows.findIndex(s => s.record_id === window.target.root_id), "delivered selection order drift");
     }
-    const unavailableStructure = admitStructuralAvailability(row, ref.status, capture);
-    return { ref, capture: unavailableStructure ? null : capture };
+    const unavailableStructure = admitStructuralAvailability(row, ref.status === "delivery_unavailable" ? "complete" : ref.status, capture);
+    return { ref, capture: unavailableStructure || field?.status === "unavailable" ? null : capture };
   }));
   // Nothing above this point has label access. There is no retrieval entry after it.
   const labels = z.array(z.object({ ordinal: z.number().int(), path: z.string() }).strict()).parse(readJson(labelManifestPath));
@@ -81,13 +111,18 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
         status: "observed", reason: null, occupied_slots: capture.windows.length, complete: true,
         continuation: capture.tail.status === "exhausted" ? "none" : "present", terminal_tail: capture.tail,
         intervals: capture.windows.map(({ rank, target, start, end }) => ({ rank, target, start, end })) }] }),
+      byte_visibility: capture?.field_delivery ? scoreConsumerByteVisibility({ gold: label.value,
+        windows: capture.windows, byte_budget: capture.field_delivery.policy.byte_budget,
+        unique_utf8_bytes: capture.field_delivery.packing.unique_utf8_bytes }) : null,
       visible_utf8_bytes: capture?.windows.reduce((sum, window) => sum + Buffer.byteLength(window.text), 0) ?? null };
   });
+  // Pair availability must not suppress an otherwise scorable arm's own metrics.
+  const originalAvailable = rows.every(row => row.arm !== "original" || row.visibility !== null);
   const summary = expectedArms.map(arm => {
     const selected = rows.filter(row => row.arm === arm), complete = selected.every(row => row.visibility !== null);
     const counts = complete ? Object.fromEntries(Metrics.map(metric => [metric, Object.fromEntries(["hit", "miss", "unknown"].map(status =>
       [status, selected.filter(row => row.visibility![metric].status === status).length]))])) : null;
-    const pairs = arm === "original" || arm === "supplied" || !complete ? null : Object.fromEntries(Metrics.map(metric => {
+    const pairs = arm === "original" || arm === "supplied" || !complete || !originalAvailable ? null : Object.fromEntries(Metrics.map(metric => {
       const outcomes = selected.map(row => [rows.find(base => base.ordinal === row.ordinal && base.arm === "original")!.visibility![metric].status,
         row.visibility![metric].status]);
       return [metric, { gains: outcomes.filter(([a, b]) => a === "miss" && b === "hit").length,
@@ -95,9 +130,9 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
         unknown_pairs: outcomes.filter(([a, b]) => a === "unknown" || b === "unknown").length }];
     }));
     return { arm, status: complete ? "scored" : "unavailable",
-      denominator: complete || selected.some(row => row.status.startsWith("structure_")) ? selected.length : null, metrics: counts, paired: pairs };
+      denominator: selected.length, metrics: counts, paired: pairs };
   });
-  const result = { contract: "input-condition-formation-evaluation.v1", exposed_development_data: true,
+  const result = { contract: "conditional-navigation-evaluation.v2", exposed_development_data: true,
     receipt_sha256: navigationFileDigest(join(root, "receipt.json")), summary, rows };
   writeFileSync(output, JSON.stringify(result, null, 2), { flag: "wx" });
   return result;

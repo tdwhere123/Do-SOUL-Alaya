@@ -14,6 +14,8 @@ import { solveConditionalNavigation, NAVIGATION_CONTRACT, NAVIGATION_LIMITS, typ
 import { INPUT_NAVIGATION_POLICY, FormationCaptureSchema, admitInputFormation, mechanicalFormation, formationQueryShares } from "./input-condition-formation.js";
 
 import { bindSourceRecordsObservation } from "../snapshot/source-records/observation-projection.js";
+import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
+import { readFieldDelivery, type DeliveryReads } from "./field-delivery-read.js";
 import { ObservationWindowSchema, TEMPORAL_NAVIGATION_DOMAIN } from "./temporal-navigation.js";
 import { StructuralNavigationSchema, STRUCTURAL_LIMITS, structuralReadLedger, observeSessionAdjacency, structuralNavigationStatus,
   NAVIGATION_SOURCE_READ_ALLOWANCE, navigationReadAccounting, readNavigationSource, type ReadAccounting,
@@ -36,12 +38,12 @@ export const ConditionalNavigationRunSchema = z.object({
       manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().optional(),
     observation_domain: z.literal(TEMPORAL_NAVIGATION_DOMAIN).optional(),
     structural_navigation: StructuralNavigationSchema.optional(),
+    delivery_policy: FieldDeliverySchema.optional(),
     interpretation_clock: z.string().datetime(), authorized_scopes: z.array(z.string()).nullable(),
     expected_index: Binding.nullable(), original: z.string().min(1), conditions: z.array(Condition).min(1).max(1 + NAVIGATION_LIMITS.additional_conditions),
     branches: z.array(z.array(z.string()).min(1).max(NAVIGATION_LIMITS.additional_conditions)).max(NAVIGATION_LIMITS.branches) }).strict()).min(1).max(8)
 }).strict();
 const MAX_SCRATCH = 2 * 1024 ** 3, MAX_OUTPUT = 256 * 1024 ** 2, MAX_WALL = 3600_000;
-const PREVIEW_BYTES = 4096;
 type RunRow = z.infer<typeof ConditionalNavigationRunSchema>["rows"][number];
 type ObservationScan = {
   ordinal: number; question_id: string; arm: string; domain: RunRow["observation_domain"];
@@ -51,7 +53,6 @@ type ObservationScan = {
     seed_prefix_bytes?: number };
   artifact_inspection: ReturnType<typeof bindSourceRecordsObservation>["accounting"];
 };
-type DeliveryReads = { ordinal: number; question_id: string; arm: string; accounting: ReadAccounting; reused_delivery_reads: number };
 type RunMetrics = { inferenceInputs: number; peakScratch: number; acquisitions: number; acquisitionHits: number;
   observationScans: ObservationScan[]; structuralReads: { ordinal: number; arm: string; ledger: StructuralReadLedger }[]; deliveryReads: DeliveryReads[] };
 type Share = ReturnType<typeof formationQueryShares> extends Map<string, infer S> ? S : never;
@@ -69,6 +70,8 @@ function formArms(config: z.infer<typeof ConditionalNavigationRunSchema>, row: R
   check(!row.structural_navigation || row.observation_domain === TEMPORAL_NAVIGATION_DOMAIN,
     "structural navigation requires an explicit admitted nomination domain");
   check(!row.structural_navigation || !config.comparison, "structural comparison uses separately frozen supplied arms");
+  check(row.delivery_policy?.windows !== "native-anchor" || row.structural_navigation === undefined,
+    "native-anchor delivery cannot share the prefix-only structural read ledger");
   const original = row.conditions.find(item => item.id === row.original)!;
   check(original?.status === "ready", "original query must remain independently ready");
   if (!config.comparison) return [{ arm: "supplied", row, formation: null, available: true }];
@@ -144,8 +147,13 @@ export async function runConditionalNavigation(value: unknown, output: string) {
         for (const suffix of ["-wal", "-shm"]) rmSync(filename + suffix, { force: true }); }
       check(navigationFileDigest(row.snapshot) === row.snapshot_sha256, "immutable prepared input changed");
     }
-  } catch (error) { failure = error instanceof Error ? error.message : String(error); }
-  finally {
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+    for (const read of metrics.deliveryReads) {
+      if (read.capture_status === "pending") read.capture_status = "failed";
+      if (read.status === "running") read.status = "failed";
+    }
+  } finally {
     try { await client?.close(); } catch (error) { failure ??= `cleanup: ${String(error)}`; }
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -164,7 +172,9 @@ export async function runConditionalNavigation(value: unknown, output: string) {
       total_native_work_units: 50_000_000 + STRUCTURAL_LIMITS.work_units,
       note: "Fixed acquisition/read partitions; no refill. SQLite internal work remains unknown; artifact visits and solver steps are separate." } } : {}),
     per_question_arm_allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 4096, work_units: 50_000_000, memory_bytes: 60_000_000 },
-    read_allowance_per_question_arm: { windows: 10, utf8_bytes_per_window: PREVIEW_BYTES, work_units: 1_000_000, native_bytes: 1280 * 1024 },
+    read_allowance_per_question_arm: { windows: FIELD_DELIVERY_LIMITS.slots, utf8_bytes_per_window: FIELD_DELIVERY_LIMITS.window_bytes,
+      work_units: FIELD_DELIVERY_LIMITS.slots * NAVIGATION_SOURCE_READ_ALLOWANCE.work_units,
+      native_bytes: FIELD_DELIVERY_LIMITS.slots * NAVIGATION_SOURCE_READ_ALLOWANCE.native_bytes },
     scratch_peak_bytes: metrics.peakScratch, retained_bytes_before_receipt: retainedBytes(root), wall_ms: performance.now() - started,
     historical_replay: "not_established_missing_old_witnesses" };
   writeFileSync(join(root, "receipt.json"), JSON.stringify(receipt, null, 2));
@@ -234,10 +244,10 @@ async function captureNavigationArm(ctx: ArmContext) {
   // Keep delivery effects even without structural opt-in, on admission failure,
   // transaction rollback, or a later capture-write failure. Scans remain separate.
   const delivery: DeliveryReads = { ordinal: arm.ordinal, question_id: arm.question_id, arm: name,
-    accounting: navigationReadAccounting(), reused_delivery_reads: 0 };
+    accounting: navigationReadAccounting(), reused_delivery_reads: 0, capture_status: "pending" };
   metrics.deliveryReads.push(delivery);
   const cached = new Map<string, NavigationSourceRead>();
-  const { observation, structural, solved, windows } = connection.transaction(() => {
+  const { observation, structural, solved, windows, fieldDelivery } = connection.transaction(() => {
     const observation = arm.observation_domain === undefined ? undefined :
       observeCandidateSources(arm, name, database, targets, ctx.projectSourceTime, metrics.observationScans, ledger, seedId, cached);
     const read = seedId === undefined ? undefined : cached.get(seedId);
@@ -249,22 +259,28 @@ async function captureNavigationArm(ctx: ArmContext) {
         record_id: seedId, prefix_bytes: read.prefixBytes, body_bytes: read.bodyBytes } : null) } : undefined;
     const solved = solveConditionalNavigation({ ...arm, pool, occurrences, source_observations: observation?.sources, structural });
     check(solved.single_condition_equivalent !== false, "same-input native C order mismatch");
-    const windows = readSelectedWindows(arm, database, solved.rows, targets, ctx.projectSourceTime, delivery, ledger, cached);
-    return { observation, structural, solved, windows };
+    const { windows, fieldDelivery } = readFieldDelivery({ row: arm, database, solved, targets,
+      witnesses: captures.flatMap(c => c.witness), projectSourceTime: ctx.projectSourceTime, delivery, ledger, cached });
+    return { observation, structural, solved, windows, fieldDelivery };
   })();
   const scratchBytes = readdirSync(scratch).reduce((sum, file) => sum + statSync(join(scratch, file)).size, 0);
   check(scratchBytes <= MAX_SCRATCH, "scratch limit exceeded"); metrics.peakScratch = Math.max(metrics.peakScratch, scratchBytes);
   const encoded = JSON.stringify({ ordinal: arm.ordinal, question_id: arm.question_id, arm: name, captures, occurrences, pool, solved, windows,
     ...(structural ? { structural: { ...structural, reads: ledger } } : {}),
+    ...(fieldDelivery ? { field_delivery: fieldDelivery } : {}),
     ...(observation === undefined ? {} : { observation: { domain: arm.observation_domain, ...observation,
       artifact_inspection: ctx.projectSourceTime.accounting, evaluations: solved.temporal_observations?.length ?? 0 } }),
     inventory: "admitted_nomination_union", interpretation_clock: arm.interpretation_clock,
-    tail: { status: pool.length <= 10 ? "exhausted" : "open", reason: "closed_admitted_inventory_only" } });
+    tail: { status: pool.length <= new Set(windows.map(window => window.target.root_id)).size ? "exhausted" : "open",
+      reason: "closed_admitted_inventory_only" } });
   check(Buffer.byteLength(encoded) + retainedBytes(root) < MAX_OUTPUT, "retained output limit reached");
-  const path = `${prefix}.json`; writeFileSync(join(root, path), encoded);
+  const path = `${prefix}.json`;
+  try { writeFileSync(join(root, path), encoded); delivery.capture_status = "published"; }
+  catch (error) { delivery.capture_status = "failed"; throw error; }
   rmSync(join(root, `${prefix}-observations.json`));
   return { ordinal: arm.ordinal, question_id: arm.question_id, arm: name,
-    status: structural ? structuralNavigationStatus(structural.config.mode, structural.nomination.status, structural.observation.status) : "complete", path,
+    status: fieldDelivery?.status === "unavailable" ? "delivery_unavailable"
+      : structural ? structuralNavigationStatus(structural.config.mode, structural.nomination.status, structural.observation.status) : "complete", path,
     sha256: navigationFileDigest(join(root, path)), single_condition_equivalent: solved.single_condition_equivalent,
     nominations: targets.size, windows: windows.length };
 }
@@ -293,28 +309,6 @@ function admitPreparedBinding(row: RunRow, repository: SqliteSourceIndexReposito
     && generation.status === expected.status && generation.enumeration_complete
     && generation.target_count === expected.target_count && generation.completed_count === expected.completed_count,
   "prepared profile/generation/coverage mismatch");
-}
-function readSelectedWindows(row: RunRow, database: StorageDatabase,
-  selected: ReturnType<typeof solveConditionalNavigation>["rows"], targets: ReadonlyMap<string, ReturnType<typeof sourceIndexTarget>>,
-  projectSourceTime: ReturnType<typeof bindSourceRecordsObservation>, delivery: DeliveryReads, ledger?: StructuralReadLedger,
-  cached: ReadonlyMap<string, NavigationSourceRead> = new Map()) {
-  const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  return selected.slice(0, 10).map((item, index) => {
-    const target = targets.get(item.record_id)!;
-    const reuse = cached.get(item.record_id);
-    const read = reuse ?? readNavigationSource(records, row.workspace, item.record_id, PREVIEW_BYTES,
-      delivery.accounting, ledger);
-    if (reuse) { delivery.reused_delivery_reads++; if (ledger) ledger.reused_delivery_reads++; }
-    check(read !== null && read.record !== null && read.record.source_body !== null && !read.invalidOffset && !read.resourceLimited,
-      "authorized source window unavailable");
-    check(read.record.content_digest === target.target.content_digest && read.record.source_version === target.target.source_version,
-      "source read identity changed");
-    authorizeSemanticScope(read.record.scope_class, row.authorized_scopes);
-    return { rank: index + 1, source_id: target.source_id, target: target.target, start: 0, end: read.prefixBytes,
-      source_time: projectSourceTime(sourceRecordFromRow(read.record)),
-      text: read.record.source_body, read: { status: read.prefixBytes === read.bodyBytes ? "complete" : "partial",
-        body_bytes: read.bodyBytes, native_bytes: read.nativeBytes + read.metadataBytes } };
-  });
 }
 /** The existing bounded Storage reader and complete projection join own admission.
  * Minimum one-byte probes are NOT seeds. Only the designated seed's larger,
