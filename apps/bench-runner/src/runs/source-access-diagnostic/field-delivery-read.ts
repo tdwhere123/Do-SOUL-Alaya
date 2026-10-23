@@ -44,7 +44,7 @@ export function readFieldDelivery(ctx: DeliveryContext) {
       if (result.status === "unavailable") { missing.push({ record_id: item.record_id, reason: result.reason }); return []; }
       return [result.window];
     }) : readLegacyPrefixes(ctx, ordered);
-    const packed = policy ? packFieldWindows(read, policy.byte_budget) : undefined;
+    const packed = policy ? packFieldWindows(read, policy.byte_budget, policy.packing) : undefined;
     const { windows, ...packing } = packed ?? { windows: read };
     delivery.delivered_roots = windows.map(w => w.target.root_id); delivery.status = "complete";
     return { windows, fieldDelivery: policy ? { policy, selection: selected,

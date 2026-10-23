@@ -42,13 +42,18 @@ for (const method of ['findCurrentBounded', 'findByIdBounded']) {
     }
     if (method === 'findCurrentBounded' && args[2] === 1) located = true;
     if (method !== 'findByIdBounded') return result;
-    if (args[2] === 4096 && ++prefixes === 2 && fault === 'prefix-null') return null;
+    if (args[2] === 4096) {
+      prefixes++;
+      if (prefixes === 2 && fault === 'prefix-null' || prefixes === 12 && fault === 'balanced-prefix-null') return null;
+    }
     if (located && args[3] > 0 && fault === 'anchor-throw') throw new Error('authored located hydration lost its final meter');
     return result;
   };
 }
-if (fault === 'publication' || fault === 'context-publication') fs.writeFileSync = function(path, ...args) {
-  if (String(path).endsWith(fault === 'publication' ? '/002-window-native-anchor.json' : '/001-window-source-context.json')) throw new Error('authored frozen capture publication failure');
+if (['publication', 'context-publication', 'balanced-publication'].includes(fault)) fs.writeFileSync = function(path, ...args) {
+  const suffix = fault === 'publication' ? '/002-window-native-anchor.json' : fault === 'context-publication'
+    ? '/001-window-source-context.json' : '/001-window-balanced-prefix.json';
+  if (String(path).endsWith(suffix)) throw new Error('authored frozen capture publication failure');
   return originalWrite.call(this, path, ...args);
 };
 syncBuiltinESMExports();

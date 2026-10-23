@@ -9,7 +9,7 @@ const boundaries = await vi.hoisted(async () => {
 afterAll(() => { expect(boundaries[0].violations).toEqual([]); expect(boundaries[1].forbidden).toEqual([]);
   boundaries[1].restore(); boundaries[0].restore(); });
 import { solveConditionalNavigation, type NavigationCondition } from "../../../runs/source-access-diagnostic/conditional-navigation.js";
-import { packFieldWindows, selectFieldDelivery, type FieldDelivery, type LiteralDeliveryWindow } from "../../../runs/source-access-diagnostic/field-delivery.js";
+import { FieldDeliverySchema, packFieldWindows, selectFieldDelivery, type FieldDelivery, type LiteralDeliveryWindow } from "../../../runs/source-access-diagnostic/field-delivery.js";
 import { scoreConsumerByteVisibility } from "../../../runs/longmemeval-semantic/message-visibility.js";
 import { readFieldAnchor } from "../../../runs/source-access-diagnostic/field-delivery-read.js";
 import { anchorAccounting } from "../../../runs/source-access-diagnostic/navigation-read-budget.js";
@@ -67,6 +67,48 @@ it("preserves zero delivery and under-codepoint remainder without replacement ch
   expect(packFieldWindows([window("a", "京都")], 2).windows).toEqual([]);
   expect(packFieldWindows([window("a", "京都")], 3).windows[0]!.text).toBe("京");
   expect(() => packFieldWindows([window("a", "x")], -1)).toThrow();
+});
+it("equal shares broaden prefixes but can lose late detail, without changing the input", () => {
+  const input = [window("a", "abcLATE!"), window("b", "USEFUL!!"), window("c", "USEFUL!!")];
+  const before = structuredClone(input), ordered = packFieldWindows(input, 9), balanced = packFieldWindows(input, 9, "equal-share-prefix");
+  expect(input).toEqual(before);
+  expect(ordered.windows.map(w => w.text)).toEqual(["abcLATE!", "U"]);
+  expect(balanced.windows.map(w => [w.source_id, w.start, w.end, w.text])).toEqual([
+    ["a", 0, 3, "abc"], ["b", 0, 3, "USE"], ["c", 0, 3, "USE"]]);
+  expect(balanced.input_utf8_bytes).toBe(24); expect(balanced.unique_utf8_bytes).toBe(9);
+  expect(packFieldWindows(input, 9, undefined)).toEqual(ordered);
+  expect(balanced.windows[0]!.target).toEqual(input[0]!.target);
+});
+it("redistributes short-prefix capacity and stable integer remainders", () => {
+  const input = [window("a", "x"), window("b", "abcdefgh"), window("c", "ABCDEFGH")];
+  expect(packFieldWindows(input, 10, "equal-share-prefix").windows.map(w => w.text)).toEqual(["x", "abcde", "ABCD"]);
+  expect(packFieldWindows(input, 30, "equal-share-prefix").unique_utf8_bytes).toBe(17);
+  expect(packFieldWindows([input[1]!, input[0]!, input[2]!], 5, "equal-share-prefix").windows.map(w => w.text)).toEqual(["ab", "x", "AB"]);
+  expect(packFieldWindows([], 10, "equal-share-prefix").windows).toEqual([]);
+});
+it("redistributes UTF-8 slack only in whole codepoints with stable least-filled ties", () => {
+  const input = [window("a", "京都"), window("b", "🙂🙂"), window("c", "abc")];
+  expect(packFieldWindows(input, 8, "equal-share-prefix").windows.map(w => w.text)).toEqual(["京", "abc"]);
+  expect(packFieldWindows(input, 9, "equal-share-prefix").windows.map(w => w.text)).toEqual(["京都", "abc"]);
+  expect(packFieldWindows(input, 10, "equal-share-prefix").windows.map(w => w.text)).toEqual(["京", "🙂", "abc"]);
+  for (const budget of [0, 1, 2]) expect(packFieldWindows([window("a", "京都")], budget, "equal-share-prefix").windows).toEqual([]);
+  expect(packFieldWindows([window("a", "京都"), window("b", "abc")], 2, "equal-share-prefix").windows.map(w => w.text)).toEqual(["ab"]);
+});
+it("keeps one prefix per root, ten slots, per-source cap, and explicit omitted extents", () => {
+  const input = [window("a", "abcdef"), window("a", "abcdefgh"), window("b", "0123456789")];
+  const packed = packFieldWindows(input, 8, "equal-share-prefix");
+  expect(packed.windows.map(w => w.text)).toEqual(["abcd", "0123"]);
+  expect(packed.duplicate_input_bytes).toBe(4); expect(packed.input_utf8_bytes).toBe(24);
+  const many = Array.from({ length: 11 }, (_, i) => window(String(i), "x".repeat(5000)));
+  const capped = packFieldWindows(many, 40960, "equal-share-prefix");
+  expect(capped.windows.map(w => [w.source_id, w.end])).toEqual(Array.from({ length: 10 }, (_, i) => [String(i), 4096]));
+  expect(capped.unique_utf8_bytes).toBe(40960);
+  expect(capped.prefix_packing?.[10]).toEqual({ record_id: "10", status: "omitted", read_start: 0, read_end: 5000, delivered_start: null, delivered_end: null });
+  expect(packFieldWindows([window("a", ""), window("b", "ok")], 1, "equal-share-prefix").windows.map(w => w.text)).toEqual(["o"]);
+  expect(() => packFieldWindows([window("a", "x", 1)], 1, "equal-share-prefix")).toThrow(/prefix/);
+  expect(() => packFieldWindows([{ ...window("a", "京都"), end: 2 }], 1, "equal-share-prefix")).toThrow(/extent/);
+  expect(() => packFieldWindows([window("a", "\ud800")], 1, "equal-share-prefix")).toThrow(/extent/);
+  expect(FieldDeliverySchema.safeParse({ ...policy, windows: "native-anchor", packing: "equal-share-prefix" }).success).toBe(false);
 });
 it("reuses actual SQLite containment for a non-prefix UTF-8 anchor, missing locations and identity/scope failures", () => {
   const db = fixture(), body = "前🙂".repeat(1000) + "京都🙂", start = 7000, end = 7010;

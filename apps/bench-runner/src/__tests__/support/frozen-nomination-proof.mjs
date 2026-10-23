@@ -74,6 +74,89 @@ try {
       }
     }
   }
+  // Packing-only comparison: equal ASCII prefix lengths make independently
+  // specified intervals exact. These are authored mechanisms, not task labels.
+  const balancedFixture = frozenFixture(join(root, 'balanced-native-fixture'), {
+    texts: Array.from({ length: 12 }, (_, i) => `needle ${i} ` + 'x'.repeat(5000)) });
+  const balancedInput = freezeFixture(join(root, 'origin-balanced'), balancedFixture);
+  const legacy = navigate('balanced-legacy', balancedInput);
+  balancedInput.frozen_nominations.comparison = 'balanced-prefix';
+  const balanced = navigate('balanced', balancedInput);
+  const zeroInput = structuredClone(balancedInput); zeroInput.frozen_nominations.byte_budget = 0;
+  const zero = navigate('balanced-zero', zeroInput);
+  const unknownInput = structuredClone(unknown); unknownInput.frozen_nominations.comparison = 'balanced-prefix';
+  const balancedUnknown = navigate('balanced-unknown', unknownInput);
+  const emptyInput = structuredClone(validEmpty); emptyInput.frozen_nominations.comparison = 'balanced-prefix';
+  const balancedEmpty = navigate('balanced-empty', emptyInput);
+  const utf8Fixture = frozenFixture(join(root, 'utf8-native-fixture'), {
+    texts: Array.from({ length: 12 }, (_, i) => i < 2 ? `needle 🙂 ${i}` : 'needle ' + '🙂'.repeat(1300) + ` ${i}`) });
+  const utf8Input = freezeFixture(join(root, 'origin-utf8'), utf8Fixture);
+  utf8Input.frozen_nominations.comparison = 'balanced-prefix';
+  const utf8 = navigate('balanced-utf8', utf8Input);
+  const utf8ZeroInput = structuredClone(utf8Input); utf8ZeroInput.frozen_nominations.byte_budget = 0;
+  const utf8Zero = navigate('balanced-utf8-zero', utf8ZeroInput);
+  for (const run of [utf8, utf8Zero]) for (const { capture } of run.captures.filter(c => c.ref.arm === 'window-balanced-prefix')) {
+    const packing = capture.field_delivery.packing;
+    const expected = capture.field_delivery.selection.rows.map(({ record_id }) => {
+      const i = utf8Fixture.members.findIndex(m => m.record_id === record_id);
+      // Seven ASCII bytes then four-byte codepoints: the 4096-byte read trims to
+      // 4095, independently of the allocator and admission implementation.
+      return [record_id, i < 2 ? Buffer.byteLength(utf8Fixture.texts[i]) : 4095];
+    });
+    assert.deepEqual(packing.prefix_packing.map(p => [p.record_id, p.read_end]), expected);
+    assert.equal(packing.input_utf8_bytes, expected.reduce((n, [, length]) => n + length, 0));
+    assert.ok(expected.some(([, length]) => length === 4095));
+    for (const window of capture.windows) {
+      const i = utf8Fixture.members.findIndex(m => m.record_id === window.target.root_id);
+      assert.equal(window.read.body_bytes, Buffer.byteLength(utf8Fixture.texts[i]));
+      assert.equal(window.read.status, i < 2 ? 'complete' : 'partial');
+      assert.equal(window.text, Buffer.from(utf8Fixture.texts[i]).subarray(0, window.end).toString('utf8'));
+      assert.ok(!window.text.includes('�'));
+    }
+    if (run === utf8Zero) assert.equal(capture.windows.length, 0);
+  }
+  assert.ok(balancedEmpty.captures.every(({ capture }) => capture.windows.length === 0 && capture.field_delivery.packing.input_utf8_bytes === 0));
+  const balancedFailed = navigate('balanced-failed-read', balancedInput, 2, 'balanced-prefix-null');
+  const balancedPublication = navigate('balanced-failed-publication', balancedInput, 2, 'balanced-publication');
+  for (const run of [balanced, zero, balancedUnknown, balancedEmpty, utf8, utf8Zero, balancedFailed, balancedPublication]) {
+    for (const key of ['local_query_inputs', 'local_inference_inputs', 'distinct_cached_queries', 'acquisitions', 'acquisition_cache_hits', 'external_calls', 'index_builds']) assert.equal(run.receipt[key], 0);
+    assert.equal(hash(readFileSync(run.config.rows[0].snapshot)), run.config.rows[0].snapshot_sha256);
+  }
+  for (let ordinal = 1; ordinal <= 8; ordinal++) {
+    const a = arm(balanced, ordinal, 'window-prefix'), b = arm(balanced, ordinal, 'window-balanced-prefix');
+    assert.deepEqual(a, arm(legacy, ordinal, 'window-prefix'));
+    for (const key of ['captures', 'occurrences', 'pool', 'solved']) assert.deepEqual(a[key], b[key]);
+    assert.deepEqual(a.field_delivery.selection, b.field_delivery.selection);
+    assert.deepEqual(a.field_delivery.policy, { contract: 'benchmark-field-delivery.v1', selection: 'field-order', windows: 'prefix', byte_budget: 8192 });
+    assert.deepEqual(b.field_delivery.policy, { ...a.field_delivery.policy, packing: 'equal-share-prefix' });
+    const selected = a.field_delivery.selection.rows.map(r => r.record_id);
+    assert.deepEqual(a.windows.map(w => [w.target.root_id, w.start, w.end]), selected.slice(0, 2).map(id => [id, 0, 4096]));
+    assert.deepEqual(b.windows.map(w => [w.target.root_id, w.start, w.end]), selected.map((id, i) => [id, 0, i < 2 ? 820 : 819]));
+    for (const w of b.windows) {
+      const i = balancedFixture.members.findIndex(m => m.record_id === w.target.root_id);
+      assert.equal(w.text, balancedFixture.texts[i].slice(w.start, w.end));
+      assert.deepEqual(w.target, b.captures[0].witness.find(hit => hit.source.target.root_id === w.target.root_id).source.target);
+    }
+    assert.equal(b.field_delivery.packing.input_utf8_bytes, 40960);
+    assert.equal(b.field_delivery.packing.unique_utf8_bytes, 8192);
+    assert.ok(b.field_delivery.packing.prefix_packing.every(p => p.read_end === 4096 && p.status === 'partial'));
+    const meters = balanced.receipt.delivery_reads.filter(r => r.ordinal === ordinal).map(({ arm, delivered_roots, ...rest }) => rest);
+    assert.deepEqual(meters[0], meters[1]); assert.equal(meters[0].accounting.source_reads, 10);
+    const z = arm(zero, ordinal, 'window-balanced-prefix');
+    assert.equal(z.windows.length, 0); assert.ok(z.field_delivery.packing.prefix_packing.every(p => p.status === 'omitted' && p.read_end === 4096));
+    assert.equal(z.field_delivery.packing.input_utf8_bytes, 40960);
+    const zeroMeters = zero.receipt.delivery_reads.filter(r => r.ordinal === ordinal).map(({ arm, delivered_roots, ...rest }) => rest);
+    assert.deepEqual(zeroMeters, meters);
+  }
+  const balancedTrace = invocations.find(i => i.name === 'balanced').boundary.trace.filter(t => t.method === 'findByIdBounded' && t.requested_bytes === 4096);
+  assert.equal(balancedTrace.length, 160);
+  for (let i = 0; i < balancedTrace.length; i += 20) assert.deepEqual(balancedTrace.slice(i, i + 10), balancedTrace.slice(i + 10, i + 20));
+  const failed = balancedFailed.receipt.delivery_reads.at(-1);
+  assert.equal(failed.arm, 'window-balanced-prefix'); assert.equal(failed.capture_status, 'failed');
+  assert.equal(failed.accounting.status, 'partial'); assert.equal(failed.accounting.unmetered_reads, 1); assert.ok(failed.accounting.native_bytes > 0);
+  const unpublished = balancedPublication.receipt.delivery_reads.at(-1);
+  assert.equal(unpublished.arm, 'window-balanced-prefix'); assert.equal(unpublished.status, 'complete'); assert.equal(unpublished.capture_status, 'failed');
+  assert.equal(unpublished.accounting.source_reads, 10);
   const baseline = get('ready');
   const trace = invocations.find(i => i.name === 'ready').boundary.trace;
   const prefixTrace = trace.filter(r => r.method === 'findByIdBounded' && r.requested_bytes === 4096);
@@ -191,11 +274,35 @@ try {
   write(join(root, 'labels.json'), { rows: [{ arm: 'C', visibility: { gold_messages: { annotated: 2, complete: false },
     messages: [{ session_index: 0, message_index: 0, source_id: fixture.queries[0].witness[0].source.source_id, target: goldTarget, start: 0, end: 1 }] } }] });
   write(join(root, 'labels-manifest.json'), Array.from({ length: 8 }, (_, i) => ({ ordinal: i + 1, path: join(root, 'labels.json') })));
+  // Gain/loss/unknown labels are introduced only after every run is frozen.
+  const balancedSelected = arm(balanced, 1, 'window-balanced-prefix').field_delivery.selection.rows;
+  const balancedLabels = Array.from({ length: 8 }, (_, i) => {
+    const id = balancedSelected[i < 3 ? 9 : 0].record_id;
+    const hit = balancedFixture.queries[0].witness.find(w => w.source.target.root_id === id);
+    const { kind, evidence_object_id, ...target } = hit.source.target;
+    const path = join(root, `balanced-label-${i}.json`), start = i < 3 ? 0 : 3000;
+    write(path, { rows: [{ arm: 'C', visibility: { gold_messages: { annotated: 1, complete: i < 6 },
+      messages: i >= 6 ? [] : [{ session_index: 0, message_index: 0, source_id: hit.source.source_id, target, start, end: start + 1 }] } }] });
+    return { ordinal: i + 1, path };
+  });
+  write(join(root, 'balanced-labels-manifest.json'), balancedLabels);
   for (const run of runs.filter(r => r.receipt)) {
     const output = join(root, `${run.name}-evaluation.json`);
-    invoke(['--evaluate', run.out, '--labels', join(root, 'labels-manifest.json'), '--out', output], `evaluate-${run.name}`);
+    invoke(['--evaluate', run.out, '--labels', join(root, run.name.startsWith('balanced') && run.name !== 'balanced-unknown'
+      ? 'balanced-labels-manifest.json' : 'labels-manifest.json'), '--out', output], `evaluate-${run.name}`);
     run.evaluation = json(output);
     assert.equal(run.evaluation.rows.length, 16); assert.ok(run.evaluation.summary.every(s => s.denominator === 8));
+  }
+  for (const [i, row] of balanced.evaluation.rows.filter(r => r.arm === 'window-balanced-prefix').entries()) {
+    const ordered = balanced.evaluation.rows.find(r => r.ordinal === row.ordinal && r.arm === 'window-prefix');
+    assert.equal(row.byte_visibility.all_at_budget.status, i < 3 ? 'hit' : i < 6 ? 'miss' : 'unknown');
+    assert.equal(ordered.byte_visibility.all_at_budget.status, i < 3 ? 'miss' : i < 6 ? 'hit' : 'unknown');
+    assert.equal(ordered.visibility.all_at_10.status, 'unknown');
+  }
+  assert.deepEqual(balanced.evaluation.summary[1].metrics.all_at_10, { hit: 3, miss: 3, unknown: 2 });
+  assert.deepEqual(balanced.evaluation.summary[1].paired.all_at_10, { gains: 0, losses: 0, unknown_pairs: 8 });
+  for (const name of ['balanced-unknown', 'balanced-failed-read', 'balanced-failed-publication']) {
+    const summary = get(name).evaluation.summary[1]; assert.equal(summary.status, 'unavailable'); assert.equal(summary.metrics, null); assert.equal(summary.paired, null);
   }
   for (const name of ['unknown', 'denied-scope', 'failed-prefix-null']) assert.ok(get(name).evaluation.summary.every(s => s.status === 'unavailable' && s.metrics === null && s.paired === null));
   for (const name of ['missing', 'allMissing']) {
@@ -205,18 +312,63 @@ try {
   assert.equal(get('ready').evaluation.summary[1].status, 'scored');
   assert.equal(get('ready').evaluation.summary[1].metrics.all_at_10.unknown, 8);
   assert.deepEqual(get('ready').evaluation.summary[1].paired.all_at_10, { gains: 0, losses: 0, unknown_pairs: 8 });
+  // Baseline reaches the absent label manifest. Coherently rebound mutations in
+  // the final selected capture must instead reject during whole-batch admission.
+  const absentLabels = join(root, 'MUST-NOT-OPEN-LABELS');
+  invoke(['--evaluate', balanced.out, '--labels', absentLabels, '--out', join(root, 'absent-label-evaluation.json')], 'balanced-admission-baseline', 2);
+  assert.match(invocations.at(-1).stderr, /ENOENT.*MUST-NOT-OPEN-LABELS/);
+  const extentProbes = [];
+  for (const [name, mutate, message, run = balanced] of [
+    ['read-end-status', c => { const p = c.field_delivery.packing.prefix_packing[0]; p.read_end = 820; p.status = 'complete'; }, 'prefix read byte accounting drift'],
+    ['delivered-end', c => { c.field_delivery.packing.prefix_packing[0].delivered_end++; }, 'prefix packing extent drift'],
+    ['input-bytes', c => { c.field_delivery.packing.input_utf8_bytes--; }, 'prefix read byte accounting drift'],
+    ['packing-budget', c => { c.field_delivery.packing.byte_budget--; }, 'prefix read byte accounting drift'],
+    ['read-body', c => { c.windows[0].read.body_bytes++; }, 'prefix read evidence drift'],
+    ['read-status', c => { c.windows[0].read.status = 'complete'; }, 'prefix read evidence drift'],
+    ['native-bytes', c => { c.windows[0].read.native_bytes = 0; }, 'prefix read evidence drift'],
+    ['zero-input-bytes', c => { c.field_delivery.packing.input_utf8_bytes = 0; }, 'prefix read byte accounting drift', zero],
+    ['utf8-input-bytes', c => { c.field_delivery.packing.input_utf8_bytes = 40960; }, 'prefix read byte accounting drift', utf8]
+  ]) {
+    const badRoot = mkdtempSync(join(root, 'balanced-drift-'));
+    try {
+      for (const file of readdirSync(run.out)) copyFileSync(join(run.out, file), join(badRoot, file));
+      const path = '008-window-balanced-prefix.json', badPath = join(badRoot, path), before = json(badPath), capture = structuredClone(before);
+      mutate(capture); write(badPath, capture);
+      const receiptPath = join(badRoot, 'receipt.json'), receipt = json(receiptPath);
+      receipt.rows.find(r => r.path === path).sha256 = hash(readFileSync(badPath)); write(receiptPath, receipt);
+      if (name === 'read-end-status') {
+        assert.equal(before.field_delivery.packing.prefix_packing[0].read_end, 4096);
+        assert.equal(capture.field_delivery.packing.prefix_packing[0].delivered_end, 820);
+        assert.equal(capture.field_delivery.packing.prefix_packing.reduce((n, p) => n + p.read_end, 0), 37684);
+        assert.equal(capture.field_delivery.packing.input_utf8_bytes, 40960);
+        assert.deepEqual(receipt.delivery_reads, run.receipt.delivery_reads);
+      }
+      invoke(['--evaluate', badRoot, '--labels', absentLabels, '--out', join(badRoot, 'evaluation.json')], `balanced-${name}-drift`, 2);
+      const invocation = invocations.at(-1);
+      assert.ok(invocation.stderr.includes(message), invocation.stderr);
+      assert.ok(!invocation.stderr.includes('ENOENT')); assert.deepEqual(invocation.boundary.trace, []);
+      extentProbes.push({ name, source_run: run.name, path, before_sha256: hash(JSON.stringify(before)),
+        after_sha256: receipt.rows.find(r => r.path === path).sha256,
+        before: { packing: before.field_delivery.packing, reads: before.windows.map(w => w.read) },
+        after: { packing: capture.field_delivery.packing, reads: capture.windows.map(w => w.read) }, rejection: message });
+    } finally { rmSync(badRoot, { recursive: true, force: true }); }
+  }
   // Later-capture mutation must fail before even an absent label path is opened.
   const later = join(baseline.out, '008-window-native-anchor.json'); writeFileSync(later, readFileSync(later, 'utf8') + ' ');
   invoke(['--evaluate', baseline.out, '--labels', join(root, 'MUST-NOT-OPEN-LABELS'), '--out', join(root, 'rejected-evaluation.json')], 'later-capture-drift', 2);
   assert.ok(invocations.at(-1).stderr.includes('selected capture digest drift'));
   bindings.forEach(b => assert.equal(hash(readFileSync(join(tree, b.path))), b.sha256));
   assert.deepEqual(safe.violations, []); assert.deepEqual(strict.forbidden, []);
-  const evidence = { contract: 'authored-frozen-nomination-entry-proof.v1', base_commit: '625611edf591f26c2148581c62aecb3ab487063b',
+  const evidence = { contract: 'authored-frozen-nomination-entry-proof.v1', base_commit: 'b0dbdac569de9a5283ed0bc80d2b7afa2d58d27b',
     claim: 'Authored frozen delivery mechanism only. No historical admission, natural run, inference or acquisition at the entry.', bindings,
-    scratch_peak_bytes: peak, runs, invocations, forbidden_effects: [], temporary_databases: 'disposed in finally' };
+    scratch_peak_bytes: peak, runs, invocations, extent_probes: extentProbes, forbidden_effects: [], temporary_databases: 'disposed in finally' };
   if (process.argv[2]) {
     const compressed = gzipSync(JSON.stringify(evidence)); assert.ok(compressed.length < 32 * 1024 ** 2);
     writeFileSync(process.argv[2], compressed, { flag: 'wx' });
   }
   process.stdout.write(JSON.stringify({ status: 'complete', runs: runs.length, invocations: invocations.length, scratch_peak_bytes: peak }) + '\n');
+} catch (error) {
+  if (process.argv[2]) writeFileSync(process.argv[2].replace(/\.json\.gz$/, '-failed.json.gz'), gzipSync(JSON.stringify({
+    status: 'failed', error: String(error), bindings, runs, invocations, scratch_peak_bytes: peak })), { flag: 'wx' });
+  throw error;
 } finally { rmSync(root, { recursive: true, force: true }); strict.restore(); safe.restore(); }

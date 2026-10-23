@@ -44,10 +44,10 @@ export function frozenDeliveryArms(config: NavigationRun) {
   return Object.entries(FROZEN_DELIVERY_COMPARISONS[config.frozen_nominations.comparison ?? "native-anchor"]);
 }
 export function frozenDeliveryPolicy(config: NavigationRun, arm: string) {
-  const windows = frozenDeliveryArms(config).find(([name]) => name === arm)?.[1];
-  if (!windows) throw new AlayaError("VALIDATION", "unknown frozen delivery policy");
+  const delivery = frozenDeliveryArms(config).find(([name]) => name === arm)?.[1];
+  if (!delivery) throw new AlayaError("VALIDATION", "unknown frozen delivery policy");
   return FieldDeliverySchema.parse({ contract: "benchmark-field-delivery.v1", selection: "field-order",
-    windows, byte_budget: config.frozen_nominations!.byte_budget });
+    ...delivery, byte_budget: config.frozen_nominations!.byte_budget });
 }
 export function navigationFileDigest(path: string) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");

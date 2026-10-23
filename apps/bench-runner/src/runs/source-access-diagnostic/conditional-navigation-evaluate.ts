@@ -13,6 +13,9 @@ const Reference = z.object({ ordinal: z.number().int(), question_id: z.string(),
   path: z.string().optional(), sha256: z.string().optional() }).passthrough();
 const Receipt = z.object({ status: z.enum(["complete", "stopped"]), input_sha256: z.string(), formations_sha256: z.string(),
   rows: z.array(Reference), frozen_nominations: z.object({ artifact_sha256: z.string(), origin: z.unknown(), inherited_costs: z.unknown() }).optional() }).passthrough();
+const PackingExtent = z.object({ record_id: z.string(), status: z.enum(["complete", "partial", "omitted"]),
+  read_start: z.number().int().nonnegative(), read_end: z.number().int().nonnegative(),
+  delivered_start: z.number().int().nonnegative().nullable(), delivered_end: z.number().int().nonnegative().nullable() }).strict();
 const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), arm: z.string(),
   frozen_nomination: z.object({ status: z.enum(["witnessed", "measured_empty", "unknown"]), capture_sha256: z.string() }).optional(),
   structural: z.object({
@@ -25,9 +28,7 @@ const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), a
     selection: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots) }).passthrough(),
     context_routes: z.array(z.object({ record_id: z.string(), route: SourceContextRouteSchema }).strict()).optional(),
     packing: z.object({ unique_utf8_bytes: z.number().int().nonnegative(),
-      source_context_packing: z.array(z.object({ record_id: z.string(), status: z.enum(["complete", "partial", "omitted"]),
-        read_start: z.number().int().nonnegative(), read_end: z.number().int().nonnegative(),
-        delivered_start: z.number().int().nonnegative().nullable(), delivered_end: z.number().int().nonnegative().nullable() }).strict()).optional() }).passthrough(),
+      source_context_packing: z.array(PackingExtent).optional(), prefix_packing: z.array(PackingExtent).optional() }).passthrough(),
     missing_locations: z.array(z.object({ record_id: z.string(), reason: z.string() })) }).passthrough().optional(),
   solved: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()) }).passthrough(),
   captures: z.array(z.object({ condition: z.string(), witness: z.array(SourceSemanticNominationOccurrenceSchema) }).passthrough()),
@@ -102,6 +103,7 @@ function admitNavigationSelection(root: string, input: z.infer<typeof Conditiona
       check((field.status === "unavailable") === (field.missing_locations.length > 0)
         && (ref.status === "nomination_unknown" || (ref.status === "delivery_unavailable") === (field.status === "unavailable")), "delivery availability drift");
     }
+    if (field?.policy.packing) admitPackedPrefixes(capture);
     if (field?.policy.windows === "source-context") admitSourceContexts(capture);
     else check(capture.windows.every(window => window.context_route === undefined), "non-context route annotation drift");
     for (const [i, window] of capture.windows.entries()) {
@@ -123,6 +125,39 @@ function admitNavigationSelection(root: string, input: z.infer<typeof Conditiona
     return { ref, capture: unavailableStructure || field?.status === "unavailable" || ref.status === "nomination_unknown" ? null : capture };
   }));
   return { admitted, expectedArms };
+}
+
+const PrefixPacking = z.object({ input_utf8_bytes: z.number().int().nonnegative(),
+  byte_budget: z.number().int().nonnegative(), total_slots: z.literal(FIELD_DELIVERY_LIMITS.slots),
+  per_message_slots: z.literal(1), duplicate_input_bytes: z.literal(0) });
+const PrefixRead = z.object({ status: z.enum(["complete", "partial"]), body_bytes: z.number().int().nonnegative(),
+  native_bytes: z.number().int().nonnegative() });
+
+/** Packing changes visible intervals, not the selected/read prefix membership.
+ * Reconcile retained literal bytes, not native/metadata work or requested bytes:
+ * the bounded reader can trim a UTF-8 boundary, even at zero delivery budget. */
+function admitPackedPrefixes(capture: z.infer<typeof Capture>) {
+  const field = capture.field_delivery!, packing = field.packing.prefix_packing;
+  const metadata = PrefixPacking.parse(field.packing);
+  const { targets } = navigationInventory(capture.captures);
+  check(packing !== undefined && canonicalJson(packing.map(item => item.record_id))
+    === canonicalJson(field.selection.rows.map(row => row.record_id)), "prefix read membership drift");
+  for (const item of packing) {
+    const window = capture.windows.find(w => w.target.root_id === item.record_id), source = targets.get(item.record_id)!;
+    check(item.read_start === 0 && item.read_end <= Math.min(source.body_bytes, FIELD_DELIVERY_LIMITS.window_bytes)
+      && item.delivered_start === (window?.start ?? null) && item.delivered_end === (window?.end ?? null)
+      && item.status === (!window ? "omitted" : window.end === item.read_end ? "complete" : "partial")
+      && (!window || window.start === 0 && window.end > 0 && window.end <= item.read_end), "prefix packing extent drift");
+    if (window) {
+      const read = PrefixRead.parse(window.read);
+      check(read.body_bytes === source.body_bytes && item.read_end <= read.body_bytes
+        && read.status === (item.read_end === read.body_bytes ? "complete" : "partial")
+        && read.native_bytes >= item.read_end, "prefix read evidence drift");
+    }
+  }
+  check(metadata.byte_budget === field.policy.byte_budget
+    && metadata.input_utf8_bytes === packing.reduce((sum, item) => sum + item.read_end - item.read_start, 0),
+  "prefix read byte accounting drift");
 }
 
 /** Recompute routing from the admitted full witness, not from a prefix presented
