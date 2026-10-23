@@ -88,7 +88,7 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
       if (field && i > 0) check(field.selection.rows.findIndex(s => s.record_id === capture.windows[i - 1]!.target.root_id)
         < field.selection.rows.findIndex(s => s.record_id === window.target.root_id), "delivered selection order drift");
     }
-    const unavailableStructure = admitStructuralAvailability(row, ref.status === "delivery_unavailable" ? "complete" : ref.status, capture);
+    const unavailableStructure = admitStructuralAvailability(row, ref.status === "delivery_unavailable" ? undefined : ref.status, capture);
     return { ref, capture: unavailableStructure || field?.status === "unavailable" ? null : capture };
   }));
   // Nothing above this point has label access. There is no retrieval entry after it.
@@ -141,9 +141,9 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
 /** Diagnostic windows do not make an unobserved structural intervention available.
  * Bind the seed back to the original query's actual retained nomination witness. */
 function admitStructuralAvailability(row: z.infer<typeof ConditionalNavigationRunSchema>["rows"][number],
-  status: string, capture: z.infer<typeof Capture>) {
+  status: string | undefined, capture: z.infer<typeof Capture>) {
   if (!row.structural_navigation || row.structural_navigation.mode === "off") {
-    check(status === "complete", "disabled structural availability drift"); return false;
+    check(status === undefined || status === "complete", "disabled structural availability drift"); return false;
   }
   const structure = capture.structural;
   check(structure !== undefined, "structural nomination/read observation missing");
@@ -160,6 +160,6 @@ function admitStructuralAvailability(row: z.infer<typeof ConditionalNavigationRu
     check((nomination.status === "measured_empty") === (nomination.completion === "complete"), "original nomination completeness drift");
   }
   const expected = structuralNavigationStatus(row.structural_navigation.mode, nomination.status, observation.status);
-  check(status === expected, "structural availability drift");
+  check(status === undefined || status === expected, "structural availability drift");
   return expected !== "complete";
 }

@@ -17,9 +17,9 @@ import { bindSourceRecordsObservation } from "../snapshot/source-records/observa
 import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
 import { readFieldDelivery, type DeliveryReads } from "./field-delivery-read.js";
 import { ObservationWindowSchema, TEMPORAL_NAVIGATION_DOMAIN } from "./temporal-navigation.js";
-import { StructuralNavigationSchema, STRUCTURAL_LIMITS, structuralReadLedger, observeSessionAdjacency, structuralNavigationStatus,
-  NAVIGATION_SOURCE_READ_ALLOWANCE, navigationReadAccounting, readNavigationSource, type ReadAccounting,
-  type NavigationSourceRead, type StructuralReadLedger } from "./structural-navigation.js";
+import { StructuralNavigationSchema, STRUCTURAL_LIMITS, observeSessionAdjacency, structuralNavigationStatus } from "./structural-navigation.js";
+import { NAVIGATION_SOURCE_READ_ALLOWANCE, navigationReadAccounting, navigationReadLedger, navigationReadTotals,
+  readNavigationSource, type ReadAccounting, type NavigationSourceRead, type NavigationReadLedger } from "./navigation-read-budget.js";
 
 const Condition = z.object({ id: z.string().min(1), object: z.string().min(1), hypothesis: z.string().min(1),
   query: z.string().min(1).max(16384), status: z.enum(["ready", "partial", "unknown", "unsupported", "rejected"]),
@@ -54,7 +54,7 @@ type ObservationScan = {
   artifact_inspection: ReturnType<typeof bindSourceRecordsObservation>["accounting"];
 };
 type RunMetrics = { inferenceInputs: number; peakScratch: number; acquisitions: number; acquisitionHits: number;
-  observationScans: ObservationScan[]; structuralReads: { ordinal: number; arm: string; ledger: StructuralReadLedger }[]; deliveryReads: DeliveryReads[] };
+  observationScans: ObservationScan[]; structuralReads: { ordinal: number; arm: string; ledger: NavigationReadLedger }[]; deliveryReads: DeliveryReads[] };
 type Share = ReturnType<typeof formationQueryShares> extends Map<string, infer S> ? S : never;
 function check(test: boolean, message: string): asserts test {
   if (!test) throw new AlayaError("VALIDATION", message);
@@ -70,8 +70,6 @@ function formArms(config: z.infer<typeof ConditionalNavigationRunSchema>, row: R
   check(!row.structural_navigation || row.observation_domain === TEMPORAL_NAVIGATION_DOMAIN,
     "structural navigation requires an explicit admitted nomination domain");
   check(!row.structural_navigation || !config.comparison, "structural comparison uses separately frozen supplied arms");
-  check(row.delivery_policy?.windows !== "native-anchor" || row.structural_navigation === undefined,
-    "native-anchor delivery cannot share the prefix-only structural read ledger");
   const original = row.conditions.find(item => item.id === row.original)!;
   check(original?.status === "ready", "original query must remain independently ready");
   if (!config.comparison) return [{ arm: "supplied", row, formation: null, available: true }];
@@ -164,7 +162,7 @@ export async function runConditionalNavigation(value: unknown, output: string) {
     local_query_inputs: config.comparison ? memo.size : metrics.inferenceInputs, local_inference_inputs: metrics.inferenceInputs,
     distinct_cached_queries: memo.size, acquisitions: metrics.acquisitions, acquisition_cache_hits: metrics.acquisitionHits, external_calls: 0, index_builds: 0,
     observation_scans: metrics.observationScans, delivery_reads: metrics.deliveryReads,
-    ...(metrics.structuralReads.length ? { structural_reads: metrics.structuralReads } : {}),
+    ...(metrics.structuralReads.length ? { structural_reads: metrics.structuralReads.map(read => ({ ...read, totals: navigationReadTotals(read.ledger) })) } : {}),
     bounds: { questions: 8, local_query_inputs: config.comparison ? 56 : 32, wall_ms: MAX_WALL, scratch_bytes: MAX_SCRATCH, retained_bytes: MAX_OUTPUT },
     allocation: config.comparison ? "original-half-remainder-even-no-refill.v1" : config.rows.some(row => row.structural_navigation !== undefined)
       ? "explicit-structural-shared-otherwise-legacy" : "legacy-per-condition",
@@ -230,7 +228,7 @@ async function captureNavigationArm(ctx: ArmContext) {
   const pool = [...targets.keys()].sort().map((record_id, catalog_position) => ({ record_id, catalog_position }));
   // The optional scan is also available to a no-time control, keeping its domain
   // and source-read work matched. Every member binds before any field selection.
-  const ledger = arm.structural_navigation ? structuralReadLedger(arm.structural_navigation) : undefined;
+  const ledger = arm.structural_navigation ? navigationReadLedger(arm.structural_navigation.max_source_reads) : undefined;
   if (ledger) metrics.structuralReads.push({ ordinal: arm.ordinal, arm: name, ledger });
   const originalNominee = arm.structural_navigation ? solveConditionalNavigation({ ...arm, pool, occurrences }).original_nominee : null;
   const originalResult = captures.find(row => row.condition === arm.original)?.phase.result;
@@ -316,7 +314,7 @@ function admitPreparedBinding(row: RunRow, repository: SqliteSourceIndexReposito
  * nonempty read is cached and may be reused for literal delivery in this transaction. */
 function observeCandidateSources(row: RunRow, arm: string, database: StorageDatabase,
   targets: ReadonlyMap<string, ReturnType<typeof sourceIndexTarget>>, project: ReturnType<typeof bindSourceRecordsObservation>, scans: ObservationScan[],
-  ledger?: StructuralReadLedger, seedId?: string, cached = new Map<string, NavigationSourceRead>()) {
+  ledger?: NavigationReadLedger, seedId?: string, cached = new Map<string, NavigationSourceRead>()) {
   const scan: ObservationScan = { ordinal: row.ordinal, question_id: row.question_id, arm, domain: row.observation_domain,
     status: "running", failure: null, candidates: targets.size, admitted_sources: 0,
     accounting: navigationReadAccounting(),

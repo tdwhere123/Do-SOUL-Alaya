@@ -11,7 +11,8 @@ afterAll(() => { expect(boundaries[0].violations).toEqual([]); expect(boundaries
 import { solveConditionalNavigation, type NavigationCondition } from "../../../runs/source-access-diagnostic/conditional-navigation.js";
 import { packFieldWindows, selectFieldDelivery, type FieldDelivery, type LiteralDeliveryWindow } from "../../../runs/source-access-diagnostic/field-delivery.js";
 import { scoreConsumerByteVisibility } from "../../../runs/longmemeval-semantic/message-visibility.js";
-import { anchorAccounting, readFieldAnchor } from "../../../runs/source-access-diagnostic/field-delivery-read.js";
+import { readFieldAnchor } from "../../../runs/source-access-diagnostic/field-delivery-read.js";
+import { anchorAccounting } from "../../../runs/source-access-diagnostic/navigation-read-budget.js";
 import { sourceIndexTarget, type SourceSemanticNominationOccurrence } from "@do-soul/alaya-protocol";
 import { fixture, publishSource, fieldSha256, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 const policy: FieldDelivery = { contract: "benchmark-field-delivery.v1", selection: "condition-cover", windows: "prefix", byte_budget: 8192 };

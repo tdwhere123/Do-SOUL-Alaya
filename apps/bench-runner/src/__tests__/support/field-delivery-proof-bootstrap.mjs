@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 const { SourceIndexAcquisition, fieldContractSha256 } = await import('@do-soul/alaya-core');
 const { unavailableSourceQueryPreparation } = await import('@do-soul/alaya-protocol');
-const { SqliteFieldSourceRecordRepo } = await import('@do-soul/alaya-storage');
+const { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } = await import('@do-soul/alaya-storage');
 const originalPrepare = SourceIndexAcquisition.prepareQuery;
 SourceIndexAcquisition.prepareQuery = async function(input, control) {
   if (control === 'lexical') return originalPrepare.call(this, input, control);
@@ -19,7 +19,46 @@ SourceIndexAcquisition.prepareQuery = async function(input, control) {
       status: 'ready', reason: 'authored_numerical_fixture_no_inference', navigation_digest: `sha256:${fieldContractSha256(input.navigation)}` } };
 };
 const fault = process.env.ALAYA_AUTHORED_DELIVERY_FAULT;
-if (['partial-location', 'original-location', 'compared-location'].includes(fault)) {
+if (fault?.startsWith('composed-')) {
+  const trace = [], save = () => writeFileSync(process.env.ALAYA_AUTHORED_DELIVERY_TRACE, JSON.stringify(trace));
+  let located = 0;
+  for (const method of ['findCurrentBounded', 'findByIdBounded']) {
+    const original = SqliteFieldSourceRecordRepo.prototype[method];
+    SqliteFieldSourceRecordRepo.prototype[method] = function(...args) {
+      // Acquisition's independent four-byte qualification probes are not part of
+      // the observation/seed/delivery ledger. Native hydration probes one byte.
+      if (method === 'findCurrentBounded' && args[2] !== 1) return original.apply(this, args);
+      if (method === 'findCurrentBounded') located++;
+      const result = original.apply(this, args);
+      trace.push({ method, located, requested_bytes: args[2], offset: args[3], native_bytes: result?.nativeBytes,
+        metadata_bytes: result?.metadataBytes, dependency_work: result?.dependencyWork }); save();
+      if (located !== 2 || !result?.record) return result;
+      if (method === 'findCurrentBounded' && fault === 'composed-stale') {
+        return { ...result, record: { ...result.record, source_version: 'changed' } };
+      }
+      if (method !== 'findByIdBounded') return result;
+      if (fault === 'composed-throw') throw new Error('authored located read meter lost');
+      if (fault === 'composed-null') return null;
+      if (fault === 'composed-limited') return { ...result, resourceLimited: true };
+      return result;
+    };
+  }
+  if (fault === 'composed-capture') {
+    const original = fs.writeFileSync;
+    fs.writeFileSync = function(path, ...args) {
+      if (String(path).endsWith('/001.json')) throw new Error('authored composed capture publication failure');
+      return original.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+  }
+  if (fault === 'composed-unknown') {
+    const original = SqliteSourceIndexRepository.prototype.readLexicalCandidates;
+    SqliteSourceIndexRepository.prototype.readLexicalCandidates = function(...args) {
+      const result = original.apply(this, args);
+      return args[1] === 'unmatchablequartzsentinel' ? { ...result, completion: 'partial', reason: 'authored incomplete original' } : result;
+    };
+  }
+} else if (['partial-location', 'original-location', 'compared-location'].includes(fault)) {
   const original = SourceIndexAcquisition.prototype.captureNative;
   let acquisitions = 0;
   SourceIndexAcquisition.prototype.captureNative = function(...args) {

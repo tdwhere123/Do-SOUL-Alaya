@@ -16,7 +16,7 @@ const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/con
 const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 // Freeze code evidence before preparation, selection, and authored evaluator labels.
-const owners = ['conditional-navigation', 'conditional-navigation-run', 'conditional-navigation-evaluate', 'structural-navigation'];
+const owners = ['conditional-navigation', 'conditional-navigation-run', 'conditional-navigation-evaluate', 'structural-navigation', 'navigation-read-budget'];
 const codeBinding = [...owners.flatMap(name => [`apps/bench-runner/src/runs/source-access-diagnostic/${name}.ts`,
   `apps/bench-runner/dist/runs/source-access-diagnostic/${name}.js`]),
   'apps/bench-runner/src/__tests__/longmemeval/measurement/structural-navigation.test.ts',

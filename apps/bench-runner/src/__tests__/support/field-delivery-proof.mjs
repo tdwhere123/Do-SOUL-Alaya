@@ -18,7 +18,8 @@ const json = path => JSON.parse(readFileSync(path, 'utf8'));
 const write = (path, value) => writeFileSync(path, JSON.stringify(value), { flag: 'wx' });
 const root = mkdtempSync(join(tmpdir(), 'field-delivery-'));
 const captures = [], invocations = [], failures = [], comparisons = [];
-const files = ['conditional-navigation', 'conditional-navigation-run', 'conditional-navigation-evaluate', 'field-delivery', 'field-delivery-read'];
+const files = ['conditional-navigation', 'conditional-navigation-run', 'conditional-navigation-evaluate', 'field-delivery', 'field-delivery-read',
+  'navigation-read-budget', 'structural-navigation'];
 const bindings = files.flatMap(name => ['src', 'dist'].map(dir => `apps/bench-runner/${dir}/runs/source-access-diagnostic/${name}.${dir === 'src' ? 'ts' : 'js'}`))
   .concat(['apps/bench-runner/src/runs/longmemeval-semantic/message-visibility.ts', 'apps/bench-runner/dist/runs/longmemeval-semantic/message-visibility.js',
     'apps/bench-runner/src/__tests__/support/field-delivery-proof.mjs', 'apps/bench-runner/src/__tests__/support/field-delivery-proof-bootstrap.mjs'])
@@ -59,7 +60,7 @@ try {
   const prepareArgs = [fileURLToPath(new URL('./session-observation-proof.mjs', import.meta.url)), 'prepare', join(home, 'prepare.json')];
   const prepared = execFileSync(process.execPath, prepareArgs, { env: process.env, encoding: 'utf8', timeout: 120_000 });
   invocations.push({ args: prepareArgs, status: 0, stdout: prepared });
-  const messages = []; inspectSourceRecordsArtifact(preparation.snapshotPath, m => messages.push(m));
+  const messages = [], artifact = inspectSourceRecordsArtifact(preparation.snapshotPath, m => messages.push(m));
   const snapshot = { snapshot_path: join(root, 'source.sqlite'), workspace_id: messages[0].record.workspace_id };
   copyFileSync(preparation.snapshotPath, snapshot.snapshot_path);
   const connection = new Database(snapshot.snapshot_path), database = new StorageDatabase(snapshot.snapshot_path, connection);
@@ -121,13 +122,35 @@ try {
     variants[name].rows[0].original = 'neutral'; variants[name].rows[0].conditions = ['neutral', 'red', 'blue'].map(condition);
     variants[name].rows[0].branches = [['red', 'blue']];
   }
+  // The same candidate/acquisition/read envelope and byte budget in every composed arm.
+  const composed = (mode, windows = 'native-anchor') => {
+    const value = variant({ windows, byte_budget: 8192 }); value.channels = 'dual';
+    value.rows[0].conditions = [condition('needle')]; value.rows[0].branches = [];
+    Object.assign(value.rows[0], { source_records: { snapshot: preparation.snapshotPath, manifest_sha256: artifact.manifest.manifest_sha256 },
+      observation_domain: 'admitted_nomination_union', structural_navigation: { contract: 'benchmark-read-session-adjacency.v1', mode, max_source_reads: 522 } });
+    return value;
+  };
+  Object.assign(variants, { composedOff: composed('off'), composedAdjacent: composed('adjacent'), composedAnd: composed('original_and_adjacent'),
+    composedPrefix: composed('adjacent', 'prefix'), composedExhausted: composed('adjacent'), composedPartial: composed('adjacent'),
+    composedUnbound: composed('adjacent'), composedUnboundMissing: composed('adjacent'), composedAbsent: composed('adjacent'), composedUnknown: composed('adjacent') });
+  variants.composedExhausted.rows[0].structural_navigation.max_source_reads = 12;
+  variants.composedPartial.rows[0].structural_navigation.max_source_reads = 13;
+  for (const name of ['composedUnbound', 'composedUnboundMissing']) delete variants[name].rows[0].source_records;
+  variants.composedUnboundMissing.channels = 'lexical';
+  for (const name of ['composedAbsent', 'composedUnknown']) {
+    variants[name].channels = 'lexical'; variants[name].rows[0].conditions = ['needle', 'red', 'blue'].map(condition);
+    variants[name].rows[0].branches = [['red'], ['blue']];
+    variants[name].rows[0].conditions[0].query = 'unmatchablequartzsentinel';
+  }
   const progress = structuredClone(variants.selected);
   progress.rows.push({ ...structuredClone(progress.rows[0]), ordinal: 2, question_id: 'authored-second' });
   write(join(root, 'progress.json'), progress);
   for (const [name, config] of Object.entries(variants)) write(join(root, `${name}.json`), config);
   for (const [name] of Object.entries(variants)) {
     const out = join(root, name), receipt = run(['--config', join(root, `${name}.json`), '--out', out],
-      name === 'partial' ? { ALAYA_AUTHORED_DELIVERY_FAULT: 'partial-location' } : {});
+      name === 'partial' ? { ALAYA_AUTHORED_DELIVERY_FAULT: 'partial-location' } : name.startsWith('composed')
+        ? { ALAYA_AUTHORED_DELIVERY_FAULT: name === 'composedUnknown' ? 'composed-unknown' : 'composed-meter',
+          ALAYA_AUTHORED_DELIVERY_TRACE: join(root, `${name}-trace.json`) } : {});
     const capture = json(join(out, '001.json'));
     assert.equal(receipt.external_calls, 0); assert.equal(receipt.local_inference_inputs, 0);
     captures.push({ name, receipt, capture, frozen: { input: json(join(out, 'input.json')), formations: json(join(out, 'formations.json')) } });
@@ -166,7 +189,83 @@ try {
     const c = get(name).capture;
     assert.equal(c.field_delivery.packing.unique_utf8_bytes, c.windows.reduce((n, w) => n + Buffer.byteLength(w.text), 0));
   }
+  const off = get('composedOff'), adjacent = get('composedAdjacent');
+  for (const name of ['composedAdjacent', 'composedAnd', 'composedPrefix', 'composedExhausted', 'composedPartial', 'composedUnbound']) {
+    const c = get(name);
+    assert.deepEqual(c.capture.pool, off.capture.pool); assert.deepEqual(c.capture.captures, off.capture.captures);
+    assert.deepEqual(c.receipt.structural_reads[0].ledger.allowance, name === 'composedExhausted' || name === 'composedPartial'
+      ? { ...off.receipt.structural_reads[0].ledger.allowance, source_reads: name === 'composedExhausted' ? 12 : 13 }
+      : off.receipt.structural_reads[0].ledger.allowance);
+    assert.equal(c.capture.field_delivery.policy.byte_budget, 8192);
+  }
+  assert.deepEqual(get('composedAnd').capture.solved.rows, off.capture.solved.rows);
+  assert.deepEqual(get('composedAnd').capture.windows, off.capture.windows);
+  assert.equal(off.capture.structural.observation.seed, null);
+  const seed = adjacent.capture.structural.observation.seed.record_id;
+  assert.equal(seed, adjacent.capture.solved.original_nominee.record_id);
+  assert.ok(adjacent.capture.structural.observation.edges.length > 0);
+  assert.ok(adjacent.capture.structural.observation.edges.length <= 2);
+  for (const c of captures.filter(c => c.name.startsWith('composed'))) {
+    const ledger = c.receipt.structural_reads[0].ledger, totals = c.receipt.structural_reads[0].totals;
+    const trace = json(join(root, `${c.name}-trace.json`)); c.native_trace = trace;
+    const prefix = trace.filter(r => r.located === 0), located = trace.filter(r => r.located > 0);
+    assert.equal(ledger.accounting.source_reads, prefix.length);
+    assert.equal(ledger.accounting.native_bytes, prefix.reduce((n, r) => n + r.native_bytes, 0));
+    assert.equal(ledger.accounting.metadata_bytes, prefix.reduce((n, r) => n + r.metadata_bytes, 0));
+    assert.equal(ledger.located_accounting.native_bytes_including_metadata, located.reduce((n, r) => n + r.native_bytes + r.metadata_bytes, 0));
+    assert.equal(ledger.located_accounting.native_work, located.reduce((n, r) => n + 5 + r.dependency_work, 0));
+    assert.equal(totals.native_bytes_including_metadata, trace.reduce((n, r) => n + r.native_bytes + r.metadata_bytes, 0));
+    assert.equal(totals.physical_reads, null);
+    assert.equal(totals.logical_requests, ledger.reserved.logical_requests);
+    assert.ok(ledger.reserved.requested_bytes <= ledger.allowance.requested_prefix_bytes);
+    for (const w of c.capture.windows) {
+      const i = members.findIndex(r => r.record_id === w.target.root_id);
+      assert.equal(w.text, Buffer.from(texts[i]).subarray(w.start, w.end).toString('utf8'));
+      if (c.name !== 'composedPrefix') assert.ok(c.capture.captures.some(q => q.witness.some(hit => hit.source.target.root_id === w.target.root_id
+        && hit.route.kind === 'vector' && hit.route.window?.status === 'available'
+        && hit.route.window.window.start_byte === w.start && hit.route.window.window.end_byte >= w.end)));
+    }
+  }
+  const adjacentLedger = adjacent.receipt.structural_reads[0].ledger;
+  assert.equal(adjacentLedger.accounting.source_reads, 12);
+  assert.equal(adjacentLedger.located_accounting.attempts, 10);
+  assert.equal(adjacentLedger.reused_delivery_reads, 0);
+  assert.equal(get('composedPrefix').receipt.structural_reads[0].ledger.reused_delivery_reads, 1);
+  assert.ok(adjacent.capture.windows.find(w => w.target.root_id === members[11].record_id).start > 4096);
+  for (const [name, attempts] of [['composedExhausted', 0], ['composedPartial', 1]]) {
+    const c = get(name); assert.equal(c.receipt.rows[0].status, 'delivery_unavailable');
+    assert.equal(c.receipt.structural_reads[0].ledger.located_accounting.attempts, attempts);
+    assert.equal(c.capture.windows.length, attempts);
+    assert.ok(c.capture.field_delivery.missing_locations.every(r => r.reason === 'shared_read_allowance_exhausted'));
+  }
+  for (const name of ['composedAbsent', 'composedUnknown']) {
+    assert.equal(get(name).capture.structural.observation.seed, null);
+    assert.equal(get(name).capture.structural.nomination.status, name === 'composedAbsent' ? 'measured_empty' : 'unknown');
+    assert.ok(get(name).capture.pool.length > 0);
+  }
+  assert.equal(get('composedUnbound').capture.structural.observation.status, 'unknown');
+  assert.equal(get('composedUnbound').receipt.rows[0].status, 'structure_unknown');
   // Failure runs occur before labels, after real SQLite reads. No retries of a failed arm.
+  for (const fault of ['composed-throw', 'composed-null', 'composed-limited', 'composed-stale', 'composed-capture']) {
+    const tracePath = join(root, `${fault}-trace.json`), out = join(root, `failure-composedAdjacent-${fault}`);
+    const receipt = run(['--config', join(root, 'composedAdjacent.json'), '--out', out],
+      { ALAYA_AUTHORED_DELIVERY_FAULT: fault, ALAYA_AUTHORED_DELIVERY_TRACE: tracePath }, 2);
+    const trace = json(tracePath), ledger = receipt.structural_reads[0].ledger, meter = ledger.located_accounting;
+    const known = trace.filter(r => r.located > 0 && !(['composed-null', 'composed-throw'].includes(fault) && r === trace.at(-1)));
+    assert.equal(meter.native_bytes_including_metadata, known.reduce((n, r) => n + r.native_bytes + r.metadata_bytes, 0));
+    // Null hides the returned meters, but the native owner still charges its
+    // fixed five-work lookup cost; a throw occurs before that debit.
+    assert.equal(meter.native_work, known.reduce((n, r) => n + 5 + r.dependency_work, 0) + (fault === 'composed-null' ? 5 : 0));
+    assert.ok(meter.native_bytes_including_metadata > 0);
+    assert.equal(meter.completed, fault === 'composed-capture' ? 10 : 1);
+    assert.equal(meter.status, fault === 'composed-capture' ? 'complete' : 'partial');
+    assert.deepEqual(meter, receipt.delivery_reads[0].anchor_accounting);
+    assert.equal(ledger.accounting.source_reads, 12);
+    assert.equal(receipt.delivery_reads[0].capture_status, 'failed');
+    failures.push({ arm: 'composedAdjacent', fault, receipt, native_trace: trace,
+      observations: json(join(out, '001-observations.json')),
+      frozen: { input: json(join(out, 'input.json')), formations: json(join(out, 'formations.json')) } });
+  }
   for (const arm of ['legacy', 'selected', 'anchored']) for (const fault of arm === 'anchored'
     ? ['throw', 'null', 'capture'] : ['throw', 'null', 'scope', 'content', 'capture']) {
     const trace = join(root, `${arm}-${fault}-trace.json`), out = join(root, `failure-${arm}-${fault}`);
@@ -282,6 +381,15 @@ try {
   assert.equal(get('missing').evaluation.summary[0].denominator, 1);
   assert.equal(get('partial').evaluation.rows[0].visibility, null);
   assert.equal(get('partial').evaluation.summary[0].denominator, 1);
+  for (const name of ['composedExhausted', 'composedPartial', 'composedUnbound', 'composedUnboundMissing', 'composedAbsent', 'composedUnknown']) {
+    assert.equal(get(name).evaluation.rows[0].visibility, null);
+    assert.equal(get(name).evaluation.summary[0].denominator, 1);
+    assert.equal(get(name).evaluation.summary[0].metrics, null);
+  }
+  for (const name of ['composedOff', 'composedAdjacent', 'composedAnd', 'composedPrefix']) {
+    assert.notEqual(get(name).evaluation.rows[0].visibility, null);
+    assert.equal(get(name).evaluation.summary[0].denominator, 1);
+  }
   bindings.forEach(b => assert.equal(hash(readFileSync(join(tree, b.path))), b.sha256));
   assert.deepEqual(safe.violations, []); assert.deepEqual(strict.forbidden, []);
   result = { contract: 'authored-field-delivery-proof.v1', claim: 'mechanism only; authored numerical vector input, no inference or natural efficacy',
