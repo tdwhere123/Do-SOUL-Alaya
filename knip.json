@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "include": ["files", "dependencies", "unlisted", "unresolved"],
+  "include": ["files", "dependencies", "unlisted", "unresolved", "catalog", "catalogReferences", "enumMembers", "namespaceMembers"],
   "ignore": [
     "vendor/**",
     "dist/**",
@@ -88,6 +88,7 @@
       "entry": [
         "src/cli/index.ts",
         "src/runs/lifecycle/recall-eval/recall-eval-process/child.ts",
+        "src/runs/frozen-answer/launch.ts",
         "src/__tests__/**/*.test.ts",
         "bin/*.mjs",
         "scripts/*.mjs",
