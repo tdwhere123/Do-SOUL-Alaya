@@ -2,9 +2,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { AlayaError, SourceEvidenceTargetSchema, SourceSemanticNominationOccurrenceSchema, canonicalJson } from "@do-soul/alaya-protocol";
-import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema } from "./field-delivery.js";
+import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema, SourceContextRouteSchema, sourceContextRoute } from "./field-delivery.js";
+import { navigationInventory } from "./conditional-navigation.js";
 import { scoreConsumerByteVisibility, scoreConsumerMessageVisibility } from "../longmemeval-semantic/message-visibility.js";
-import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, FROZEN_DELIVERY_ARMS } from "./conditional-navigation-input.js";
+import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, frozenDeliveryArms } from "./conditional-navigation-input.js";
 import { FrozenNominationArtifactSchema, admitFrozenQueries } from "./conditional-navigation-frozen.js";
 import { structuralNavigationStatus } from "./structural-navigation.js";
 
@@ -22,12 +23,16 @@ const Capture = z.object({ ordinal: z.number().int(), question_id: z.string(), a
   }).passthrough().optional(),
   field_delivery: z.object({ policy: FieldDeliverySchema, status: z.enum(["complete", "unavailable"]),
     selection: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots) }).passthrough(),
-    packing: z.object({ unique_utf8_bytes: z.number().int().nonnegative() }).passthrough(),
+    context_routes: z.array(z.object({ record_id: z.string(), route: SourceContextRouteSchema }).strict()).optional(),
+    packing: z.object({ unique_utf8_bytes: z.number().int().nonnegative(),
+      source_context_packing: z.array(z.object({ record_id: z.string(), status: z.enum(["complete", "partial", "omitted"]),
+        read_start: z.number().int().nonnegative(), read_end: z.number().int().nonnegative(),
+        delivered_start: z.number().int().nonnegative().nullable(), delivered_end: z.number().int().nonnegative().nullable() }).strict()).optional() }).passthrough(),
     missing_locations: z.array(z.object({ record_id: z.string(), reason: z.string() })) }).passthrough().optional(),
   solved: z.object({ rows: z.array(z.object({ record_id: z.string() }).passthrough()) }).passthrough(),
   captures: z.array(z.object({ condition: z.string(), witness: z.array(SourceSemanticNominationOccurrenceSchema) }).passthrough()),
   windows: z.array(z.object({ rank: z.number().int(), target: SourceEvidenceTargetSchema, start: z.number().int().nonnegative(),
-    end: z.number().int().nonnegative(), text: z.string() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots),
+    end: z.number().int().nonnegative(), text: z.string(), context_route: SourceContextRouteSchema.optional() }).passthrough()).max(FIELD_DELIVERY_LIMITS.slots),
   tail: z.object({ status: z.enum(["exhausted", "open", "unknown"]), reason: z.string() }) }).passthrough();
 const GoldTarget = SourceEvidenceTargetSchema.unwrap().omit({ kind: true, evidence_object_id: true, span: true });
 const LabelProjection = z.object({ rows: z.array(z.object({ arm: z.string(), visibility: z.object({
@@ -41,7 +46,7 @@ function check(test: boolean, message: string): asserts test { if (!test) throw 
 /** All selected captures, including later rows, admit BEFORE opening the label manifest or any labels.
  * Failed/unavailable arms remain unscored, never successful original-only substitutes. */
 function admitNavigationSelection(root: string, input: z.infer<typeof ConditionalNavigationRunSchema>, receipt: z.infer<typeof Receipt>) {
-  const expectedArms = input.frozen_nominations ? [...FROZEN_DELIVERY_ARMS] : input.comparison ? ["original", "mechanical", "model"] : ["supplied"];
+  const expectedArms = input.frozen_nominations ? frozenDeliveryArms(input).map(([arm]) => arm) : input.comparison ? ["original", "mechanical", "model"] : ["supplied"];
   check((input.frozen_nominations !== undefined) === (receipt.frozen_nominations !== undefined), "frozen nomination receipt drift");
   const frozen = receipt.frozen_nominations ? (() => {
     check(navigationFileDigest(join(root, "frozen-nominations.json")) === receipt.frozen_nominations!.artifact_sha256,
@@ -97,15 +102,17 @@ function admitNavigationSelection(root: string, input: z.infer<typeof Conditiona
       check((field.status === "unavailable") === (field.missing_locations.length > 0)
         && (ref.status === "nomination_unknown" || (ref.status === "delivery_unavailable") === (field.status === "unavailable")), "delivery availability drift");
     }
+    if (field?.policy.windows === "source-context") admitSourceContexts(capture);
+    else check(capture.windows.every(window => window.context_route === undefined), "non-context route annotation drift");
     for (const [i, window] of capture.windows.entries()) {
-      check(window.rank === i + 1 && (field?.policy.windows === "native-anchor" || window.start === 0)
+      check(window.rank === i + 1 && (field?.policy.windows === "native-anchor" || window.context_route === "native-anchor" || window.start === 0)
         && Buffer.byteLength(window.text) === window.end - window.start
         && window.target.workspace_id === row.workspace && (field
           ? field.selection.rows.some(item => item.record_id === window.target.root_id)
           : capture.solved.rows[i]?.record_id === window.target.root_id)
         && capture.captures.some(query => query.witness.some(hit => canonicalJson(hit.source.target) === canonicalJson(window.target))),
       "selected literal window admission failed");
-      if (field?.policy.windows === "native-anchor") check(capture.captures.some(query => query.witness.some(hit =>
+      if (field?.policy.windows === "native-anchor" || window.context_route === "native-anchor") check(capture.captures.some(query => query.witness.some(hit =>
         canonicalJson(hit.source.target) === canonicalJson(window.target) && hit.route.kind === "vector"
         && hit.route.window?.status === "available" && window.start === hit.route.window.window.start_byte
         && window.end <= hit.route.window.window.end_byte)), "delivered window lacks a bound native anchor");
@@ -116,6 +123,33 @@ function admitNavigationSelection(root: string, input: z.infer<typeof Conditiona
     return { ref, capture: unavailableStructure || field?.status === "unavailable" || ref.status === "nomination_unknown" ? null : capture };
   }));
   return { admitted, expectedArms };
+}
+
+/** Recompute routing from the admitted full witness, not from a prefix presented
+ * as an anchor. Read extent and packed extent deliberately remain distinct. */
+function admitSourceContexts(capture: z.infer<typeof Capture>) {
+  const field = capture.field_delivery!, { targets } = navigationInventory(capture.captures);
+  const witnesses = capture.captures.flatMap(query => query.witness);
+  const routes = field.selection.rows.map(({ record_id }) => ({ record_id, route: sourceContextRoute(targets.get(record_id)!, witnesses) }));
+  check(canonicalJson(routes) === canonicalJson(field.context_routes), "source context route drift");
+  const missing = field.missing_locations.map(item => item.record_id);
+  check(new Set(missing).size === missing.length && missing.every(id => routes.some(item => item.record_id === id))
+    && routes.every(item => item.route !== "unavailable" || missing.includes(item.record_id)), "source context availability drift");
+  const packing = field.packing.source_context_packing ?? [];
+  check(canonicalJson(packing.map(item => item.record_id)) === canonicalJson(routes.filter(item => !missing.includes(item.record_id)).map(item => item.record_id)),
+    "source context read membership drift");
+  for (const item of packing) {
+    const route = routes.find(r => r.record_id === item.record_id)!.route, source = targets.get(item.record_id)!;
+    const window = capture.windows.find(w => w.target.root_id === item.record_id);
+    check(item.read_end >= item.read_start && item.read_end - item.read_start <= FIELD_DELIVERY_LIMITS.window_bytes
+      && item.read_end <= source.body_bytes, "source context read extent drift");
+    if (route !== "native-anchor") check(item.read_start === 0 && (route !== "whole-source" || item.read_end === source.body_bytes),
+      "source context whole/prefix extent drift");
+    check(item.delivered_start === (window?.start ?? null) && item.delivered_end === (window?.end ?? null)
+      && item.status === (!window ? "omitted" : window.start === item.read_start && window.end === item.read_end ? "complete" : "partial")
+      && (!window || window.context_route === route && window.start === item.read_start && window.end <= item.read_end), "source context packing drift");
+  }
+  check(capture.windows.every(window => packing.some(item => item.record_id === window.target.root_id)), "source context window lacks read admission");
 }
 
 export function evaluateConditionalNavigation(root: string, labelManifestPath: string, output: string) {
@@ -151,7 +185,7 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
       visible_utf8_bytes: capture?.windows.reduce((sum, window) => sum + Buffer.byteLength(window.text), 0) ?? null };
   });
   // Pair availability must not suppress an otherwise scorable arm's own metrics.
-  const baseline = input.frozen_nominations ? FROZEN_DELIVERY_ARMS[0] : "original";
+  const baseline = input.frozen_nominations ? frozenDeliveryArms(input)[0]![0] : "original";
   const originalAvailable = rows.every(row => row.arm !== baseline || row.visibility !== null);
   const summary = expectedArms.map(arm => {
     const selected = rows.filter(row => row.arm === arm), complete = selected.every(row => row.visibility !== null);

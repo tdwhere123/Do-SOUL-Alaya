@@ -24,7 +24,7 @@ for (const name of ['readLexicalCandidates', 'readVectorCandidates', 'begin', 's
 for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) childProcess[name] = deny(name);
 const originalWrite = fs.writeFileSync;
 const fault = process.env.ALAYA_AUTHORED_FROZEN_FAULT;
-let located = false, prefixes = 0;
+let located = false, prefixes = 0, contexts = 0;
 for (const method of ['findCurrentBounded', 'findByIdBounded']) {
   const original = SqliteFieldSourceRecordRepo.prototype[method];
   SqliteFieldSourceRecordRepo.prototype[method] = function(...args) {
@@ -32,6 +32,14 @@ for (const method of ['findCurrentBounded', 'findByIdBounded']) {
     const entry = { method, requested_bytes: args[2], offset: args[3], native_bytes: result?.nativeBytes,
       metadata_bytes: result?.metadataBytes, dependency_work: result?.dependencyWork };
     trace.push(entry);
+    if (method === 'findCurrentBounded' && args[2] === 4096) {
+      contexts++;
+      if (fault === 'context-null') return null;
+      if (fault === 'context-throw' && contexts === 2) throw new Error('authored current read lost its meter');
+      if (fault === 'context-length') return { ...result, bodyBytes: result.bodyBytes + 1 };
+      if (fault === 'context-scope') return { ...result, record: { ...result.record, scope_class: 'global_core' } };
+      if (fault === 'context-digest') return { ...result, record: { ...result.record, content_digest: `sha256:${'0'.repeat(64)}` } };
+    }
     if (method === 'findCurrentBounded' && args[2] === 1) located = true;
     if (method !== 'findByIdBounded') return result;
     if (args[2] === 4096 && ++prefixes === 2 && fault === 'prefix-null') return null;
@@ -39,8 +47,8 @@ for (const method of ['findCurrentBounded', 'findByIdBounded']) {
     return result;
   };
 }
-if (fault === 'publication') fs.writeFileSync = function(path, ...args) {
-  if (String(path).endsWith('/002-window-native-anchor.json')) throw new Error('authored frozen capture publication failure');
+if (fault === 'publication' || fault === 'context-publication') fs.writeFileSync = function(path, ...args) {
+  if (String(path).endsWith(fault === 'publication' ? '/002-window-native-anchor.json' : '/001-window-source-context.json')) throw new Error('authored frozen capture publication failure');
   return originalWrite.call(this, path, ...args);
 };
 syncBuiltinESMExports();

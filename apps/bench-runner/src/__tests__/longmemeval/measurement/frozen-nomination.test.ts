@@ -28,15 +28,19 @@ const parsed = (value: unknown) => ConditionalNavigationRunSchema.parse(value);
 
 it("captures caller configuration and every full artifact before asynchronous delivery waits", async () => {
   const config = helper.freezeFixture(join(root, "origin-mutation"), fixture);
+  config.frozen_nominations.comparison = "source-context";
   const prepare = vi.spyOn(SourceIndexAcquisition, "prepareQuery").mockImplementation(() => { throw new Error("query preparation forbidden"); });
   const acquire = vi.spyOn(SourceIndexAcquisition.prototype, "captureNative").mockImplementation(() => { throw new Error("new acquisition forbidden"); });
   try {
     const pending = runConditionalNavigation(config, join(root, "mutation-output"));
     config.rows[7].authorized_scopes = []; config.rows[7].conditions[0].query = "mutated after call";
+    config.frozen_nominations.comparison = "native-anchor";
     writeFileSync(join(root, "origin-mutation", "008.json"), "mutated after admission");
     const receipt = await pending;
     expect(receipt.status).toBe("complete"); expect(receipt.rows).toHaveLength(16);
     const frozenInput = JSON.parse(readFileSync(join(root, "mutation-output", "input.json"), "utf8"));
+    expect(frozenInput.frozen_nominations.comparison).toBe("source-context");
+    expect(receipt.rows.filter(row => row.arm === "window-source-context")).toHaveLength(8);
     expect(frozenInput.rows[7].authorized_scopes).toEqual(["project"]);
     expect(frozenInput.rows[7].conditions[0].query).toBe("needle");
     expect(prepare).not.toHaveBeenCalled(); expect(acquire).not.toHaveBeenCalled();

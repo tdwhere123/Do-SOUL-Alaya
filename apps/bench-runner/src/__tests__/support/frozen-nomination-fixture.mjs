@@ -14,12 +14,12 @@ import { navigationInventory, solveConditionalNavigation } from '../../../dist/r
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const json = path => JSON.parse(readFileSync(path, 'utf8'));
 export const write = (path, value) => writeFileSync(path, JSON.stringify(value));
-export function frozenFixture(root, { windowBytes = 1024, emptyMembers = false } = {}) {
+export function frozenFixture(root, { windowBytes = 1024, emptyMembers = false, texts: authoredTexts } = {}) {
   mkdirSync(root);
   const snapshot = join(root, 'authored.sqlite'), workspace = 'authored-frozen-workspace', clock = '2026-09-22T00:00:00.000Z';
   const db = initDatabase({ filename: snapshot }), records = new SqliteFieldSourceRecordRepo(db, fieldContractSha256);
   const index = new SqliteSourceIndexRepository(db, fieldContractSha256);
-  const texts = Array.from({ length: emptyMembers ? 0 : 12 }, (_, i) => `needle ${i} ` + '前🙂'.repeat(windowBytes > 4096 ? 9400 : 1000) + ` AUTHORED-NATIVE-END-${i} 京都。`);
+  const texts = authoredTexts ?? Array.from({ length: emptyMembers ? 0 : 12 }, (_, i) => `needle ${i} ` + '前🙂'.repeat(windowBytes > 4096 ? 9400 : 1000) + ` AUTHORED-NATIVE-END-${i} 京都。`);
   const members = [], documents = [];
   const configuration = { revision: 'authored-frozen-source', profile: { provider_kind: 'authored-numerical-fixture', model_id: 'no-model',
     model_revision: 'raw-v1', artifact_digest: `sha256:${'a'.repeat(64)}`, tokenizer_revision: 'no-tokenizer', dimensions: 3,

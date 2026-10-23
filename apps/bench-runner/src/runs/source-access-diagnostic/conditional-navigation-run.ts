@@ -11,7 +11,7 @@ import { SourceIndexAcquisition, LocalOnnxEmbeddingClient, acquireProfiledSource
 import { sourceRecordFromRow, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo, StorageDatabase } from "@do-soul/alaya-storage";
 import { solveConditionalNavigation, navigationInventory, NAVIGATION_CONTRACT } from "./conditional-navigation.js";
 import { INPUT_NAVIGATION_POLICY, admitInputFormation, mechanicalFormation, formationQueryShares } from "./input-condition-formation.js";
-import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, FROZEN_DELIVERY_ARMS, type RunRow } from "./conditional-navigation-input.js";
+import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, frozenDeliveryArms, type RunRow } from "./conditional-navigation-input.js";
 import { admitFrozenNominations, admitFrozenSources, frozenAdmissionAccounting, type FrozenNominations } from "./conditional-navigation-frozen.js";
 
 import { bindSourceRecordsObservation } from "../snapshot/source-records/observation-projection.js";
@@ -47,7 +47,7 @@ function formArms(config: z.infer<typeof ConditionalNavigationRunSchema>, row: R
   check(!row.structural_navigation || !config.comparison, "structural comparison uses separately frozen supplied arms");
   const original = row.conditions.find(item => item.id === row.original)!;
   check(original?.status === "ready", "original query must remain independently ready");
-  if (config.frozen_nominations) return FROZEN_DELIVERY_ARMS.map(arm => ({ arm,
+  if (config.frozen_nominations) return frozenDeliveryArms(config).map(([arm]) => ({ arm,
     row: { ...row, delivery_policy: frozenDeliveryPolicy(config, arm) }, formation: null, available: true }));
   if (!config.comparison) return [{ arm: "supplied", row, formation: null, available: true }];
   check(row.conditions.length === 1 && row.branches.length === 0, "comparison input must be original-only");

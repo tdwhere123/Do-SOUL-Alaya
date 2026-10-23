@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AlayaError, SourceIndexConfigurationSchema } from "@do-soul/alaya-protocol";
 import { NAVIGATION_CONTRACT, NAVIGATION_LIMITS } from "./conditional-navigation.js";
 import { FormationCaptureSchema } from "./input-condition-formation.js";
-import { FieldDeliverySchema } from "./field-delivery.js";
+import { FieldDeliverySchema, FROZEN_DELIVERY_COMPARISONS } from "./field-delivery.js";
 import { ObservationWindowSchema, TEMPORAL_NAVIGATION_DOMAIN } from "./temporal-navigation.js";
 import { StructuralNavigationSchema } from "./structural-navigation.js";
 
@@ -21,7 +21,8 @@ const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
  * it is not a general historical runtime admission or a producer rerun. */
 export const FrozenNominationsSchema = z.object({ family: z.literal("conditional-navigation-pilot.v1"),
   receipt: z.object({ path: z.string().min(1), sha256: Sha256 }).strict(),
-  byte_budget: FieldDeliverySchema.shape.byte_budget }).strict();
+  byte_budget: FieldDeliverySchema.shape.byte_budget,
+  comparison: z.enum(Object.keys(FROZEN_DELIVERY_COMPARISONS) as (keyof typeof FROZEN_DELIVERY_COMPARISONS)[]).optional() }).strict();
 export const ConditionalNavigationRunSchema = z.object({
   contract: z.literal(NAVIGATION_CONTRACT), source_revision: z.string().min(1),
   cache_root: z.string().min(1), model_id: z.string().min(1).optional(), channels: z.enum(["dual", "lexical"]).default("dual"),
@@ -38,11 +39,15 @@ export const ConditionalNavigationRunSchema = z.object({
 }).strict();
 export type NavigationRun = z.infer<typeof ConditionalNavigationRunSchema>;
 export type RunRow = NavigationRun["rows"][number];
-export const FROZEN_DELIVERY_ARMS = ["window-prefix", "window-native-anchor"] as const;
+export function frozenDeliveryArms(config: NavigationRun) {
+  if (!config.frozen_nominations) throw new AlayaError("VALIDATION", "frozen delivery configuration missing");
+  return Object.entries(FROZEN_DELIVERY_COMPARISONS[config.frozen_nominations.comparison ?? "native-anchor"]);
+}
 export function frozenDeliveryPolicy(config: NavigationRun, arm: string) {
-  if (!config.frozen_nominations || !FROZEN_DELIVERY_ARMS.some(name => name === arm)) throw new AlayaError("VALIDATION", "unknown frozen delivery policy");
+  const windows = frozenDeliveryArms(config).find(([name]) => name === arm)?.[1];
+  if (!windows) throw new AlayaError("VALIDATION", "unknown frozen delivery policy");
   return FieldDeliverySchema.parse({ contract: "benchmark-field-delivery.v1", selection: "field-order",
-    windows: arm === "window-prefix" ? "prefix" : "native-anchor", byte_budget: config.frozen_nominations.byte_budget });
+    windows, byte_budget: config.frozen_nominations!.byte_budget });
 }
 export function navigationFileDigest(path: string) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");

@@ -65,7 +65,7 @@ export function accountLocatedRead<T>(accounting: AnchorAccounting, ledger: Navi
 /** Reserve before invoking Storage, retain known meters on rejection, and never
  * represent a thrown/null meter as zero work. Prefix meters count only these
  * direct Storage invocations; located hydrations have their own opaque meters. */
-export function readNavigationSource(records: SqliteFieldSourceRecordRepo, workspace: string, recordId: string,
+export function readNavigationSource(records: SqliteFieldSourceRecordRepo, workspace: string, recordId: string | { current_source_id: string },
   prefixBytes: number, accounting: ReadAccounting, ledger?: NavigationReadLedger) {
   const { work_units: work, native_bytes: bytes } = NAVIGATION_SOURCE_READ_ALLOWANCE;
   if (!reserveNavigationRead(ledger, prefixBytes)) throw new AlayaError("UNAVAILABLE", "shared navigation read allowance exhausted");
@@ -74,7 +74,9 @@ export function readNavigationSource(records: SqliteFieldSourceRecordRepo, works
     account.source_reads++; account.requested_prefix_bytes += prefixBytes; account.unmetered_reads++; account.status = "partial";
   }
   try {
-    const read = records.findByIdBounded(workspace, recordId, prefixBytes, 0, { workLimit: work, nativeByteLimit: bytes });
+    const read = typeof recordId === "string"
+      ? records.findByIdBounded(workspace, recordId, prefixBytes, 0, { workLimit: work, nativeByteLimit: bytes })
+      : records.findCurrentBounded(workspace, recordId.current_source_id, prefixBytes, 0, { workLimit: work, nativeByteLimit: bytes });
     if (read !== null) for (const account of accounts) {
       account.unmetered_reads--; account.native_bytes += read.nativeBytes;
       account.metadata_bytes += read.metadataBytes; account.dependency_work += read.dependencyWork;

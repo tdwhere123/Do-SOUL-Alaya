@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AlayaError, canonicalJson, sourceGoldRootIdentity, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import { hydrateUtf8Chunk } from "@do-soul/alaya-core";
+import type { SourceIndexTarget, SourceSemanticNominationOccurrence } from "@do-soul/alaya-protocol";
 import type { solveConditionalNavigation } from "./conditional-navigation.js";
 
 export const FIELD_DELIVERY_LIMITS = { slots: 10, window_bytes: 4096 } as const;
@@ -10,10 +11,31 @@ const MAX_DELIVERY_BYTES = FIELD_DELIVERY_LIMITS.slots * FIELD_DELIVERY_LIMITS.w
 export const FieldDeliverySchema = z.object({
   contract: z.literal("benchmark-field-delivery.v1"),
   selection: z.enum(["field-order", "condition-cover"]),
-  windows: z.enum(["prefix", "native-anchor"]),
+  windows: z.enum(["prefix", "native-anchor", "source-context"]),
   byte_budget: z.number().int().min(0).max(MAX_DELIVERY_BYTES)
 }).strict();
 export type FieldDelivery = z.infer<typeof FieldDeliverySchema>;
+
+/** Private frozen comparison identities. Omission retains the original pair. */
+export const FROZEN_DELIVERY_COMPARISONS = {
+  "native-anchor": { "window-prefix": "prefix", "window-native-anchor": "native-anchor" },
+  "source-context": { "window-prefix": "prefix", "window-source-context": "source-context" }
+} as const;
+export const SourceContextRouteSchema = z.enum(["whole-source", "native-anchor", "lexical-prefix", "unavailable"]);
+export type SourceContextRoute = z.infer<typeof SourceContextRouteSchema>;
+/** A lexical-only retained nominee has no native-window operation. An omitted or
+ * unavailable vector window is UNKNOWN, never permission to retry with a prefix.
+ * Short-source routing is independent of retrieval location; native extent and
+ * complete bytes must still be admitted by the chosen read before publication. */
+export function sourceContextRoute(source: SourceIndexTarget, witnesses: readonly SourceSemanticNominationOccurrence[]): SourceContextRoute {
+  const candidates = witnesses.filter(hit => hit.source.target.root_id === source.target.root_id);
+  if (candidates.length === 0) return "unavailable";
+  if (source.body_bytes <= FIELD_DELIVERY_LIMITS.window_bytes) return "whole-source";
+  const vectors = candidates.filter(hit => hit.route.kind === "vector");
+  if (vectors.some(hit => hit.route.kind === "vector" && hit.route.window?.status === "available")) return "native-anchor";
+  return vectors.length === 0 && candidates.every(hit => hit.route.kind === "lexical" && hit.route.hit === undefined)
+    ? "lexical-prefix" : "unavailable";
+}
 type Solved = ReturnType<typeof solveConditionalNavigation>;
 
 /** Greedy branch-navigation coverage, NOT factual support. Each existing compatible
@@ -80,6 +102,11 @@ export function packFieldWindows<T extends LiteralDeliveryWindow>(windows: reado
     ranges.set(key, prior);
   }
   return { windows: delivered, unique_utf8_bytes: bytes, duplicate_input_bytes: duplicateBytes,
+    ...(windows.some(window => "context_route" in window) ? { source_context_packing: windows.map(window => {
+      const packed = delivered.find(item => sourceGoldRootIdentity(item.target) === sourceGoldRootIdentity(window.target));
+      return { record_id: window.target.root_id, status: !packed ? "omitted" : packed.start === window.start && packed.end === window.end ? "complete" : "partial",
+        read_start: window.start, read_end: window.end, delivered_start: packed?.start ?? null, delivered_end: packed?.end ?? null };
+    }) } : {}),
     input_utf8_bytes: windows.reduce((n, w) => n + Buffer.byteLength(w.text), 0),
     byte_budget: budget, total_slots: FIELD_DELIVERY_LIMITS.slots, per_message_slots: 1 };
 }

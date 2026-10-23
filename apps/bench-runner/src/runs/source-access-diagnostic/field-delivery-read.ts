@@ -1,9 +1,11 @@
-import { AlayaError, type SourceIndexTarget, type SourceSemanticNominationOccurrence } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, hashContentDigest, sourceIndexTarget,
+  type SourceIndexTarget, type SourceSemanticNominationOccurrence } from "@do-soul/alaya-protocol";
 import { authorizeSemanticScope, fieldContractSha256, sourceSemanticLibrarySourceEntry } from "@do-soul/alaya-core";
 import { sourceRecordFromRow, SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { SourceSemanticReadBudget } from "../../../../core-daemon/dist/runtime/field/source-semantic-read-stores.js";
 import { prepareNominatedLibraryWindows } from "../../../../core-daemon/dist/runtime/recall-read-worker/source-semantic-library-nominated-windows.js";
-import { FIELD_DELIVERY_LIMITS, packFieldWindows, selectFieldDelivery, type FieldDelivery, type LiteralDeliveryWindow } from "./field-delivery.js";
+import { FIELD_DELIVERY_LIMITS, packFieldWindows, selectFieldDelivery, sourceContextRoute,
+  type SourceContextRoute, type FieldDelivery, type LiteralDeliveryWindow } from "./field-delivery.js";
 import type { NavigationCondition, solveConditionalNavigation } from "./conditional-navigation.js";
 import type { bindSourceRecordsObservation } from "../snapshot/source-records/observation-projection.js";
 import { NAVIGATION_SOURCE_READ_ALLOWANCE, readNavigationSource, anchorAccounting, accountLocatedRead, reserveNavigationRead,
@@ -31,7 +33,10 @@ export function readFieldDelivery(ctx: DeliveryContext) {
   delivery.selected_roots = ordered.slice(0, FIELD_DELIVERY_LIMITS.slots).map(item => item.record_id); delivery.status = "running";
   try {
     const missing: { record_id: string; reason: string }[] = [];
-    const read = policy?.windows === "native-anchor" ? ordered.flatMap((item, index) => {
+    // Freeze every route before the first read. A failed route is never retried.
+    const routes = policy?.windows === "source-context" ? ordered.map(item => ({ record_id: item.record_id,
+      route: sourceContextRoute(ctx.targets.get(item.record_id)!, ctx.witnesses) })) : undefined;
+    const read = routes ? readSourceContexts(ctx, routes, missing) : policy?.windows === "native-anchor" ? ordered.flatMap((item, index) => {
       delivery.anchor_accounting ??= anchorAccounting();
       const result = readFieldAnchor({ database, workspace: row.workspace, clock: row.interpretation_clock,
         original_query: row.conditions.find(c => c.id === row.original)!.query, scopes: row.authorized_scopes,
@@ -43,32 +48,66 @@ export function readFieldDelivery(ctx: DeliveryContext) {
     const { windows, ...packing } = packed ?? { windows: read };
     delivery.delivered_roots = windows.map(w => w.target.root_id); delivery.status = "complete";
     return { windows, fieldDelivery: policy ? { policy, selection: selected,
-      packing, missing_locations: missing, status: missing.length ? "unavailable" : "complete" } : undefined };
+      packing, ...(routes ? { context_routes: routes } : {}), missing_locations: missing, status: missing.length ? "unavailable" : "complete" } : undefined };
   } catch (error) { delivery.status = "failed"; throw error; }
 }
 
 /** Historical control: ten field-ordered prefixes, also used with fixed-member
  * prefix packing to isolate selection from the native-window intervention. */
 function readLegacyPrefixes(ctx: DeliveryContext, selected: ReturnType<typeof solveConditionalNavigation>["rows"]) {
-  const { row, database, targets, projectSourceTime, delivery, ledger, cached } = ctx;
-  const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  return selected.slice(0, FIELD_DELIVERY_LIMITS.slots).map((item, index) => {
-    const target = targets.get(item.record_id)!;
-    const reuse = cached.get(item.record_id);
-    const read = reuse ?? readNavigationSource(records, row.workspace, item.record_id, NAVIGATION_PREVIEW_BYTES, delivery.accounting, ledger);
-    if (reuse) { delivery.reused_delivery_reads++; if (ledger) ledger.reused_delivery_reads++; }
-    check(read !== null && read.record !== null && read.record.source_body !== null && !read.invalidOffset && !read.resourceLimited,
-      "authorized source window unavailable");
-    check(read.record.source_id === target.source_id && read.record.record_id === target.target.root_id
-      && read.record.workspace_id === target.target.workspace_id
-      && read.record.content_digest === target.target.content_digest && read.record.source_version === target.target.source_version,
-      "source read identity changed");
-    authorizeSemanticScope(read.record.scope_class, row.authorized_scopes);
-    return { rank: index + 1, source_id: target.source_id, target: target.target, start: 0, end: read.prefixBytes,
-      source_time: projectSourceTime(sourceRecordFromRow(read.record)), text: read.record.source_body,
-      read: { status: read.prefixBytes === read.bodyBytes ? "complete" : "partial",
-        body_bytes: read.bodyBytes, native_bytes: read.nativeBytes + read.metadataBytes } };
+  const records = new SqliteFieldSourceRecordRepo(ctx.database, fieldContractSha256);
+  return selected.slice(0, FIELD_DELIVERY_LIMITS.slots).map((item, index) =>
+    readBoundedDelivery(ctx, records, ctx.targets.get(item.record_id)!, index + 1));
+}
+
+function readSourceContexts(ctx: DeliveryContext, routes: { record_id: string; route: SourceContextRoute }[],
+  missing: { record_id: string; reason: string }[]) {
+  const records = new SqliteFieldSourceRecordRepo(ctx.database, fieldContractSha256);
+  return routes.flatMap<LiteralDeliveryWindow & { context_route?: SourceContextRoute }>(({ record_id, route }, index) => {
+    if (route === "unavailable") { missing.push({ record_id, reason: "native_location_unknown" }); return []; }
+    if (route !== "native-anchor") return [readBoundedDelivery(ctx, records, ctx.targets.get(record_id)!, index + 1, route)];
+    ctx.delivery.anchor_accounting ??= anchorAccounting();
+    const { row } = ctx;
+    const result = readFieldAnchor({ database: ctx.database, workspace: row.workspace, clock: row.interpretation_clock,
+      original_query: row.conditions.find(c => c.id === row.original)!.query, scopes: row.authorized_scopes,
+      witnesses: ctx.witnesses, record_id, rank: index + 1, accounting: ctx.delivery.anchor_accounting, ledger: ctx.ledger });
+    if (result.status === "unavailable") { missing.push({ record_id, reason: result.reason }); return []; }
+    return [{ ...result.window, context_route: route }];
   });
+}
+
+/** The bounded native current reader owns currentness and actual body extent.
+ * Legacy seed reuse remains legacy-only: an id-prefix cache is not a fresh
+ * currentness witness. New routes pay the same quote and prefix-reader meters. */
+function readBoundedDelivery(ctx: DeliveryContext, records: SqliteFieldSourceRecordRepo, target: SourceIndexTarget, rank: number,
+  contextRoute?: "whole-source" | "lexical-prefix") {
+  const { row, projectSourceTime, delivery, ledger, cached } = ctx;
+  const reuse = contextRoute === undefined ? cached.get(target.target.root_id) : undefined;
+  const read = reuse ?? readNavigationSource(records, row.workspace,
+    contextRoute ? { current_source_id: target.source_id } : target.target.root_id,
+    NAVIGATION_PREVIEW_BYTES, delivery.accounting, ledger);
+  if (reuse) { delivery.reused_delivery_reads++; if (ledger) ledger.reused_delivery_reads++; }
+  check(read !== null && read.record !== null && read.record.source_body !== null && !read.invalidOffset && !read.resourceLimited,
+    "authorized source window unavailable");
+  check(read.record.source_id === target.source_id && read.record.record_id === target.target.root_id
+    && read.record.workspace_id === target.target.workspace_id
+    && read.record.content_digest === target.target.content_digest && read.record.source_version === target.target.source_version,
+    "source read identity changed");
+  authorizeSemanticScope(read.record.scope_class, row.authorized_scopes);
+  if (contextRoute) {
+    const record = read.record;
+    check(canonicalJson(sourceIndexTarget({ kind: "source_evidence", workspace_id: record.workspace_id, root_kind: "source_record",
+      root_id: record.record_id, source_version: record.source_version, content_digest: record.content_digest,
+      evidence_object_id: record.evidence_object_id }, record.source_id, read.bodyBytes)) === canonicalJson(target), "source context extent/identity changed");
+    check(read.prefixBytes === Buffer.byteLength(record.source_body!), "source context literal extent mismatch");
+    if (contextRoute === "whole-source") check(read.prefixBytes === read.bodyBytes && read.bodyBytes <= NAVIGATION_PREVIEW_BYTES
+      && hashContentDigest(record.source_body!, fieldContractSha256) === record.content_digest, "whole source bytes incomplete or misbound");
+  }
+  return { rank, source_id: target.source_id, target: target.target, start: 0, end: read.prefixBytes,
+    ...(contextRoute ? { context_route: contextRoute } : {}),
+    source_time: projectSourceTime(sourceRecordFromRow(read.record)), text: read.record.source_body,
+    read: { status: read.prefixBytes === read.bodyBytes ? "complete" : "partial",
+      body_bytes: read.bodyBytes, native_bytes: read.nativeBytes + read.metadataBytes } };
 }
 
 /** Reuses the existing source-bound located-window operation, including its
