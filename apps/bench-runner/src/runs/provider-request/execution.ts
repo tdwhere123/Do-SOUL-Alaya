@@ -82,6 +82,7 @@ export type ProviderRequestDispatchContext = ProviderRequestPhysicalContext & Re
   suppliedExtractor: boolean;
   /** Absolute performance.now() deadline shared by readiness and physical attempts. */
   phaseDeadlineMs?: number;
+  abortSignal?: AbortSignal;
   assertScope: () => void;
 }>;
 
@@ -112,8 +113,10 @@ export async function executeProviderRequestLine(
   let used = replayed.attempts;
   const attemptLimit = context.maximumAttemptsPerKey;
   const timeoutCeilingMs = providerRequestTimeout(context.maxOutputTokens).timeout_ms;
-  const phaseSignal = context.phaseDeadlineMs === undefined ? undefined
+  const deadlineSignal = context.phaseDeadlineMs === undefined ? undefined
     : AbortSignal.timeout(Math.ceil(remainingProviderPhaseMs(context.phaseDeadlineMs)));
+  const signals = [deadlineSignal, context.abortSignal].filter((signal): signal is AbortSignal => signal !== undefined);
+  const phaseSignal = signals.length === 0 ? undefined : AbortSignal.any(signals);
   const remainingTimeout = () => context.phaseDeadlineMs === undefined ? timeoutCeilingMs
     : Math.min(timeoutCeilingMs, Math.floor(remainingProviderPhaseMs(context.phaseDeadlineMs)));
   while (used < attemptLimit) {
@@ -124,6 +127,7 @@ export async function executeProviderRequestLine(
       throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
     }
     context.assertScope();
+    phaseSignal?.throwIfAborted();
     await context.extractor.assertTransportReady?.(phaseSignal, remainingTimeout());
     context.assertScope();
     phaseSignal?.throwIfAborted();

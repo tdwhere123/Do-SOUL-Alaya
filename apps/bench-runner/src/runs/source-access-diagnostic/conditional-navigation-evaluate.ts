@@ -187,13 +187,18 @@ function admitSourceContexts(capture: z.infer<typeof Capture>) {
   check(capture.windows.every(window => packing.some(item => item.record_id === window.target.root_id)), "source context window lacks read admission");
 }
 
-export function evaluateConditionalNavigation(root: string, labelManifestPath: string, output: string) {
-  check(!existsSync(output), "evaluation output must be new");
+/** Shared pre-label admission for visibility evaluation and frozen answer consumption. */
+export function admitConditionalNavigationCaptures(root: string) {
   const receipt = Receipt.parse(readJson(join(root, "receipt.json")));
   check(navigationFileDigest(join(root, "input.json")) === receipt.input_sha256
     && navigationFileDigest(join(root, "formations.json")) === receipt.formations_sha256, "frozen input/formation drift");
   const input = ConditionalNavigationRunSchema.parse(readJson(join(root, "input.json")));
-  const { admitted, expectedArms } = admitNavigationSelection(root, input, receipt);
+  return { input, receipt, ...admitNavigationSelection(root, input, receipt) };
+}
+
+export function evaluateConditionalNavigation(root: string, labelManifestPath: string, output: string) {
+  check(!existsSync(output), "evaluation output must be new");
+  const { input, admitted, expectedArms } = admitConditionalNavigationCaptures(root);
   // Nothing above this point has label access. There is no retrieval entry after it.
   const labels = z.array(z.object({ ordinal: z.number().int(), path: z.string() }).strict()).parse(readJson(labelManifestPath));
   const gold = new Map(input.rows.map(row => {
