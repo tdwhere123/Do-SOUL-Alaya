@@ -17,7 +17,7 @@ import { runRecallMeasurementLauncher } from "../../../runs/recall-measurement/l
 
 afterAll(() => isolation.restore());
 
-it("preserves disabled raw Source preparation, sealed replay and evaluator admission without model requests", async () => {
+it("preserves disabled source preparation and refuses native field scoring before reading labels", async () => {
   const root = mkdtempSync(join(tmpdir(), "source-only-replay-"));
   const text = "The blue stone is kept in the cedar box.";
   try {
@@ -50,23 +50,30 @@ it("preserves disabled raw Source preparation, sealed replay and evaluator admis
     const replay = await replaySemanticChain(chainRoot);
     const row = ReplaySchema.parse(replay.result).rows[0]!;
     expect(row.status).toBe("replayed");
-    expect(row.first_exposure).not.toBeNull();
-    expect(row.response?.operation).toBe("recall");
+    // Native field pages cannot acquire an archived source-gold exposure credential.
+    // Historical accepted delivery remains covered by private-library-archive.test.ts.
+    expect(row.first_exposure).toBeNull();
+    expect(row.response).toMatchObject({ operation: "recall", protocol_version: 10 });
     if (row.response?.operation !== "recall") throw new Error("Disabled replay did not return native recall");
-    expect(row.response.results?.some(result => result.content_preview === text)).toBe(true);
     expect(row.response.proofs ?? []).toEqual([]);
     const replayPreparation = sourceSemanticAccessPhases(row.preparation_trace![0]!.access).preparation;
     expect(replayPreparation).toMatchObject({ status: "unavailable", method: "not_run", submitted_inputs: 0, external_api_attempts: 0 });
-    const measured = measureSemanticChain(chainRoot, replay.path, [{ query_key: query.query_key, source_units: [] }], join(root, "evaluator"));
-    expect(measured.result.rows[0]).toMatchObject({ status: "replayed", measurement: { status: "validated" } });
+    const labels = vi.fn(() => { throw new Error("unsupported delivery must not read labels"); });
+    const measured = measureSemanticChain(chainRoot, replay.path, labels, join(root, "evaluator"));
+    const refusal = { status: "replayed", reason: "invalid_response",
+      measurement: { schema_version: 1, status: "invalid", reason: "invalid_response" }, source_bearing_union: null };
+    expect(measured.result.rows[0]).toMatchObject(refusal);
+    expect(labels).not.toHaveBeenCalled();
+    expect(measured.result.gold).toEqual([{ query_key: query.query_key, source_units: null }]);
     const goldPath = join(root, "gold.json");
-    writeFileSync(goldPath, JSON.stringify([{ query_key: query.query_key, source_units: [] }]));
+    writeFileSync(goldPath, "not valid gold JSON");
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     try {
       expect(await runRecallMeasurementLauncher(["measure", "--root", chainRoot, "--replay", replay.path,
         "--gold", goldPath, "--evaluator-root", join(root, "cli-evaluator")])).toBe(0);
-      expect(JSON.parse(String(stdout.mock.calls.at(-1)?.[0])).result.rows[0]).toMatchObject({
-        status: "replayed", measurement: { status: "validated" } });
+      const result = JSON.parse(String(stdout.mock.calls.at(-1)?.[0])).result;
+      expect(result.rows[0]).toMatchObject(refusal);
+      expect(result.gold).toEqual([{ query_key: query.query_key, source_units: null }]);
     } finally { stdout.mockRestore(); }
     assertChainSnapshot(config);
     expect(isolation.violations).toEqual([]);
