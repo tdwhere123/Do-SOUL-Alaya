@@ -186,8 +186,8 @@ export function upperExcludesPredicate(input: Readonly<{
   if (input.quantized_cap_only === true && input.uses_raw_predicate !== true) return false;
   if (input.comparison === "gt") return input.upper <= input.threshold;
   if (input.comparison === "gte") return input.upper < input.threshold;
-  if (input.comparison === "lt") return input.upper >= input.threshold;
-  return input.upper > input.threshold;
+  // An upper bound cannot exclude lower-valued matches; that requires a lower-bound premise.
+  return false;
 }
 
 export function certifyClosure(input: CertifyClosureInput): ClosureCertificate | undefined {

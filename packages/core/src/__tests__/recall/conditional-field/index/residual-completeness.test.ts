@@ -401,6 +401,29 @@ describe("residual influence and completeness", () => {
     }
   });
 
+  it("does not use an upper bound as a lower-bound exclusion certificate", () => {
+    const certificate = (comparison: "gt" | "gte" | "lt" | "lte", upper: number, threshold: number) => certifyClosure({
+      query_id: QUERY_ID, predicate_id: "assoc", operator_id: "max-min", domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "upper_excludes_predicate", closed_effects: ["membership"],
+      residuals: [region("seed", "seed", "exhausted")], result_kind_view: "memory_only",
+      comparison, upper_milligrades: upper, threshold_milligrades: threshold
+    });
+    for (const comparison of ["lt", "lte"] as const) {
+      // Both values fit the same upper bound, but only one meets the predicate.
+      const matching = 200, nonmatching = 800, threshold = 500, upper = 900;
+      expect(matching).toBeLessThan(threshold);
+      expect(nonmatching).toBeGreaterThan(threshold);
+      expect(nonmatching).toBeLessThanOrEqual(upper);
+      expect(upperExcludesPredicate({ comparison, upper, threshold })).toBe(false);
+      expect(certificate(comparison, upper, threshold)).toBeUndefined();
+    }
+    expect(certificate("gt", 500, 500)?.closed_obligations).toEqual(["membership"]);
+    expect(certificate("gte", 499, 500)?.closed_obligations).toEqual(["membership"]);
+    expect(certificate("gte", 500, 500)).toBeUndefined();
+    expect(upperExcludesPredicate({ comparison: "gt", upper: 500, threshold: 500,
+      uses_raw_predicate: false, quantized_cap_only: true })).toBe(false);
+  });
+
   it("discards invalidated-epoch bounds and refuses vacuous certificates", () => {
     const invalidated = exhaustedRegions({ seed: "invalidated" });
     expect(residualsInvalidateBounds(invalidated)).toBe(true);
