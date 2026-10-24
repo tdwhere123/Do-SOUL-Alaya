@@ -178,15 +178,12 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   let owningSignal: AbortSignal | undefined;
   const result = await runBenchDaemonOperation<SourceIndexPreparationFailure | SourceIndexPreparationSuccess>(async () => {
     mkdirSync(root, { recursive: true });
-    if (expired()) return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
-      reason: "setup_soft_deadline", ...setupReport({ setup: idleSetupReceipt("setup_soft_deadline"), passes: 0,
-        resources: { ...SETUP_RESOURCE_ZERO }, diagnostics: { ...SETUP_DIAGNOSTIC_ZERO }, history: [],
-        stop_reason: "setup_soft_deadline" }, allowance, performance.now() - started) } };
+    if (expired()) return retainedSoftDeadline(execution, idleDeadlineRun(), allowance, performance.now() - started);
     const directory = mkdtempSync(join(root, "source-runtime-"));
     let daemon: BenchDaemonHandle | undefined;
     try {
       restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
-      if (expired()) throw new AlayaError("DEADLINE", "Source setup soft allowance expired before startup");
+      if (expired()) return retainedSoftDeadline(execution, idleDeadlineRun(), allowance, performance.now() - started);
       daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
         embeddingMode: "env", embeddingProviderKind: "local_onnx", cachedLocalEmbedding: execution,
         embeddingStartupProbe: "omit",
@@ -206,11 +203,7 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   refuseBenchWorkAfterCancel();
   if (owningSignal?.aborted) throw new AlayaError("CANCELLED", "Source setup was cancelled before publication");
   if (expired()) {
-    const report: SourceIndexPreparationFailure["report"] = { execution, ...setupReport({ setup: result.report.setup,
-      passes: result.report.setup_passes, resources: result.report.setup_resources, diagnostics: result.report.setup_diagnostics,
-      history: result.report.setup_history,
-      stop_reason: "setup_soft_deadline" }, allowance, performance.now() - started),
-      contract: "semantic-chain-source-preparation-failure-v1", reason: "setup_soft_deadline" };
+    const report = retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started).report;
     writeChainArtifact(join(root, "preparation.json"), report);
     return { config: null, report };
   }
@@ -220,8 +213,8 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   const prepared = bindPreparation(config, execution, result.report, join(root, "preparation.json"));
   assertChainSnapshot(prepared);
   refuseBenchWorkAfterCancel();
-  // Publication is synchronous; no new asynchronous work can escape the owned cleanup above.
-  if (expired()) throw new AlayaError("DEADLINE", "Source setup soft allowance expired before configuration publication");
+  // Publication is synchronous; a frozen success receipt is not rewritten if the clock expires here.
+  if (expired()) return retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started);
   writeChainJson(join(root, "chain-config.json"), prepared);
   return { config: prepared, report: result.report };
 }
@@ -292,6 +285,26 @@ function setupReport(run: SourceIndexSetupRun, allowance: CapturedAllowance, ela
     setup_history: run.history,
     setup_stop_reason: run.stop_reason, setup_allowance: allowance, setup_elapsed_ms: elapsed,
     setup_clock: "monotonic_entry_through_awaited_cleanup_before_publication" };
+}
+
+function setupRunFrom(report: SourceIndexPreparationBase): Omit<SourceIndexSetupRun, "stop_reason"> {
+  return { setup: report.setup, passes: report.setup_passes, resources: report.setup_resources,
+    diagnostics: report.setup_diagnostics, history: report.setup_history };
+}
+
+function idleDeadlineRun(): Omit<SourceIndexSetupRun, "stop_reason"> {
+  return { setup: idleSetupReceipt("setup_soft_deadline"), passes: 0, resources: { ...SETUP_RESOURCE_ZERO },
+    diagnostics: { ...SETUP_DIAGNOSTIC_ZERO }, history: [] };
+}
+
+function retainedSoftDeadline(
+  execution: z.infer<typeof CachedLocalSourceExecutionSchema>,
+  run: Omit<SourceIndexSetupRun, "stop_reason">,
+  allowance: CapturedAllowance,
+  elapsed: number
+): SourceIndexPreparationFailure {
+  return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
+    reason: "setup_soft_deadline", ...setupReport({ ...run, stop_reason: "setup_soft_deadline" }, allowance, elapsed) } };
 }
 
 function parseSetupAllowance(value: SemanticChainSourceSetupAllowance | undefined): CapturedAllowance {

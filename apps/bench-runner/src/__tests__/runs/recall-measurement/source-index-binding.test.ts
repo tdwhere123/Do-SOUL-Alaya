@@ -547,6 +547,61 @@ it("does not enter native startup for a zero soft allowance and rejects malforme
   expect(startBenchDaemon).not.toHaveBeenCalled();
 });
 
+it("retains a terminal soft deadline after snapshot restoration without daemon startup", async () => {
+  const { root, config, execution } = setup(), output = join(root, "early");
+  bindProducer(false);
+  let restoredDb = false;
+  vi.spyOn(performance, "now").mockImplementation(() => {
+    try {
+      for (const name of readdirSync(output)) {
+        if (name.startsWith("source-runtime-") && existsSync(join(output, name, "alaya.db"))) {
+          restoredDb = true;
+          return 60001;
+        }
+      }
+    } catch { /* output root does not exist yet */ }
+    return 0;
+  });
+  const result = await prepareSemanticChainSourceIndex(config, execution, output, undefined,
+    { maxPasses: 2, softElapsedMs: 60000 });
+  expect(restoredDb).toBe(true);
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({
+    contract: "semantic-chain-source-preparation-failure-v1", reason: "setup_soft_deadline",
+    setup_stop_reason: "setup_soft_deadline", setup_passes: 0,
+    setup: { status: "not_run", reason: "setup_soft_deadline" },
+    setup_resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }
+  });
+  expect(startBenchDaemon).not.toHaveBeenCalled();
+  expect(existsSync(join(output, "chain-config.json"))).toBe(false);
+  expect(readChainArtifact(join(output, "preparation.json"))).toMatchObject({
+    contract: "semantic-chain-source-preparation-failure-v1", reason: "setup_soft_deadline"
+  });
+  expect(readdirSync(output).filter(name => name.startsWith("source-runtime-"))).toEqual([]);
+  expect(existsSync(config.snapshot_path)).toBe(true);
+});
+
+it("records a retained soft deadline after preparation publication without enabling configuration", async () => {
+  const { root, config, execution } = setup(), output = join(root, "late");
+  bindProducer(false);
+  vi.spyOn(performance, "now").mockImplementation(() => existsSync(join(output, "preparation.json")) ? 60001 : 0);
+  const result = await prepareSemanticChainSourceIndex(config, execution, output, undefined,
+    { maxPasses: 2, softElapsedMs: 60000 });
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({
+    contract: "semantic-chain-source-preparation-failure-v1", reason: "setup_soft_deadline",
+    setup_stop_reason: "setup_soft_deadline", setup: { status: "settled" }
+  });
+  expect(result.report.setup_passes).toBeGreaterThan(0);
+  expect(result.report.setup_resources.model_inputs).toBeGreaterThan(0);
+  expect("admission" in result.report).toBe(false);
+  expect(existsSync(join(output, "chain-config.json"))).toBe(false);
+  expect(readdirSync(output).filter(name => name.startsWith("source-runtime-"))).toEqual([]);
+  const frozen = readChainArtifact(join(output, "preparation.json"));
+  expect(frozen).toMatchObject({ contract: "semantic-chain-source-preparation-v1", admission: "prepared_complete" });
+  expect(existsSync((frozen as { snapshot_path: string }).snapshot_path)).toBe(true);
+});
+
 it.each(["cancel", "cleanup_failure", "later_pass_throw"] as const)("retains completed pass prefixes without external publication after %s", async fault => {
   const { root, config, execution } = setupSources(3), output = join(root, fault);
   bindProducer(false, 2);
