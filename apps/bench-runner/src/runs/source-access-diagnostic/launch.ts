@@ -1,7 +1,9 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 
-/** Private access-only diagnostic. Gold remains behind the separate evaluate operation. */
+/** Private access-only diagnostic. Gold remains behind the separate evaluate operation.
+ * Exit zero acknowledges a retained artifact, including a stopped observation; callers must inspect its status.
+ */
 export async function runSourceAccessDiagnosticLauncher(args: readonly string[]): Promise<number> {
   try {
     const [operation, ...rest] = args;

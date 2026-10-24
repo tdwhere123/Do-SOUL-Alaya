@@ -692,6 +692,13 @@ describe("source access diagnostic", () => {
       expected_question_ids: ["not-the-frozen-question"] }, join(f.root, "rejected"));
     expect(observed.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
     expect(observed.result.stop_reason).toContain("source_identity:");
+    const configPath = join(f.root, "stopped-config.json"), cliRoot = join(f.root, "stopped-cli");
+    await writeFile(configPath, JSON.stringify({ ...f.config, expected_question_ids: ["not-the-frozen-question"] }));
+    expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", configPath, "--out", cliRoot])).toBe(0);
+    const retained = SourceAccessDiagnosticObservationSchema.parse(readChainArtifact(join(cliRoot, "observation.json")));
+    expect(retained.status).toBe("stopped");
+    expect(retained.rows.map(row => row.status)).toEqual(["unattempted", "unattempted"]);
+    expect(retained.stop_reason).toContain("source_identity:");
     expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", "missing"])).toBe(2);
   }, 120000);
 
