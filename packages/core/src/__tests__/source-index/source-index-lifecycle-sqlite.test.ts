@@ -196,7 +196,10 @@ describe("Source index lifecycle through migrated SQLite and native Source publi
     expect(environment.index.generation(WORKSPACE, generation.generation_id)).toMatchObject({ target_count: 1, completed_count: 1 });
     expect(environment.lifecycle.publish(WORKSPACE, generation.generation_id)).toEqual({ status: "rejected", reason: "incomplete" });
     expect(environment.index.state(WORKSPACE)).toMatchObject({ active_generation_id: null, status: "partial" });
-    environment.lifecycle.capture(WORKSPACE, generation.generation_id, 1, BUDGET);
+    expect(environment.lifecycle.capture(WORKSPACE, generation.generation_id, 1, BUDGET).generation)
+      .toMatchObject({ records_complete: true, enumeration_complete: false });
+    expect(environment.lifecycle.publish(WORKSPACE, generation.generation_id)).toEqual({ status: "rejected", reason: "incomplete" });
+    expect(environment.lifecycle.capture(WORKSPACE, generation.generation_id, 1, BUDGET).generation.enumeration_complete).toBe(true);
     expect(environment.lifecycle.publish(WORKSPACE, generation.generation_id)).toEqual({ status: "accepted" });
   });
 

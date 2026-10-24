@@ -82,6 +82,7 @@ function readSourceContexts(ctx: DeliveryContext, routes: { record_id: string; r
 function readBoundedDelivery(ctx: DeliveryContext, records: SqliteFieldSourceRecordRepo, target: SourceIndexTarget, rank: number,
   contextRoute?: "whole-source" | "lexical-prefix") {
   const { row, projectSourceTime, delivery, ledger, cached } = ctx;
+  check(target.target.root_kind === "source_record" && target.source_id !== null, "record diagnostic cannot read capsule roots");
   const reuse = contextRoute === undefined ? cached.get(target.target.root_id) : undefined;
   const read = reuse ?? readNavigationSource(records, row.workspace,
     contextRoute ? { current_source_id: target.source_id } : target.target.root_id,
@@ -126,6 +127,10 @@ export function readFieldAnchor(input: {
   }
   const { source, route } = located, boundWindow = located.route.window.window;
   const target = source.target;
+  const sourceId = source.source_id;
+  if (target.root_kind !== "source_record" || sourceId === null) {
+    return { status: "unavailable", reason: "record_diagnostic_requires_source_record" };
+  }
   const entry = sourceSemanticLibrarySourceEntry({ workspaceId: input.workspace, root_id: target.root_id,
     source_version: target.source_version, content_digest: target.content_digest,
     evidence_object_id: target.evidence_object_id, hypothesis_id: "benchmark-source-navigation" });
@@ -148,7 +153,7 @@ export function readFieldAnchor(input: {
       rank: route.native_rank, cosine: route.cosine, window: boundWindow } }]);
     const window = windows[0], span = window?.entry.target.kind === "source_evidence" ? window.entry.target.span : undefined;
     if (!window || !span) throw new AlayaError("UNAVAILABLE", "native located window unavailable");
-    return { status: "available", window: { rank: input.rank, source_id: source.source_id, target,
+    return { status: "available", window: { rank: input.rank, source_id: sourceId, target,
       start: span.content_start, end: span.content_end, text: window.preview } };
   });
 }

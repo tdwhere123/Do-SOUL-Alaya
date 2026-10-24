@@ -121,6 +121,7 @@ it("keeps profiled acquisition observation off/on/overflow noninterfering and at
     const evidence = event.data as { retained_occurrences: SourceSemanticRetainedNominationWitness };
     expect(evidence.retained_occurrences).toHaveLength(36);
     const occurrence = evidence.retained_occurrences[16]!, target = occurrence.source.target;
+    if (occurrence.source.source_id === null) throw new Error("expected a native SourceRecord nomination");
     const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
       spans: [{ session_index: 0, message_index: 0, source_id: occurrence.source.source_id,
         target: { workspace_id: WS, root_kind: "source_record" as const, root_id: target.root_id,

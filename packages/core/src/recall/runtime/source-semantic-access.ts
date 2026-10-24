@@ -1,11 +1,12 @@
 import {
-  canonicalJson, type RequestBudget, type SourceSemanticAccessPolicy, type SourceSemanticAccessSignal,
+  canonicalJson, type SourceIndexTarget, type RequestBudget, type SourceSemanticAccessPolicy, type SourceSemanticAccessSignal,
   type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticResourceLedger,
   type SourceSemanticPreviewExtents, SourceSemanticAccessProfileSchema, type SourceSemanticAccessProfile
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
 import { captureProfiledSourceIndexExecutionProfile } from "../../source-index/source-index-profiled-acquisition.js";
+import { sourceScopeEligible } from "../conditional-field/observers/observation-admission.js";
 import { createSourceRecallAccessPolicy } from "./source-recall-access.js";
 
 const SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT = "empty-interpretation-reserve-v1";
@@ -54,6 +55,14 @@ export function resolveSourceSemanticComparisonProfile(input: Readonly<{
 export function authorizeSemanticScope(scope: string | null | undefined, authorized: readonly string[] | null): void {
   if (scope == null) throw new CoreError("VALIDATION", "source has no governed scope", { details: { admission: "filtered" } });
   if (authorized !== null && !authorized.includes(scope)) {
+    throw new CoreError("VALIDATION", "source is outside authorized scopes", { details: { admission: "filtered" } });
+  }
+}
+
+/** Called only after native admission binds the actual retained root kind. Record scope remains governed. */
+export function authorizeSourceIndexScope(scope: string | null, source: SourceIndexTarget, authorized: readonly string[] | null): void {
+  if (source.target.root_kind === "source_record") return authorizeSemanticScope(scope, authorized);
+  if (!sourceScopeEligible(authorized, scope ?? undefined)) {
     throw new CoreError("VALIDATION", "source is outside authorized scopes", { details: { admission: "filtered" } });
   }
 }

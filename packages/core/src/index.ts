@@ -87,7 +87,7 @@ export {
 } from "./memory/evidence-create/audited-source-replacement.js";
 export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
-export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
+export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, authorizeSourceIndexScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,

@@ -1,5 +1,5 @@
 import {
-  SourceIndexConfigurationSchema, SourceIndexGenerationStatusSchema, sourceIndexGenerationCanServeQueries, type SourceIndexSelection, type SourceIndexGeneration,
+  SOURCE_INDEX_PREPARATION_REVISION, SourceIndexConfigurationSchema, SourceIndexGenerationStatusSchema, sourceIndexGenerationCanServeQueries, type SourceIndexSelection, type SourceIndexGeneration,
   type SourceIndexBudget, type SourceIndexResources, type SourceIndexVectorQueryState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -32,6 +32,9 @@ export function readSourceIndexGeneration(database: StorageDatabase, workspaceId
   const status = SourceIndexGenerationStatusSchema.parse(readNonEmptyStringField(row, "status"));
   return Object.freeze({ selection: selectionFromRow(raw), generation_id: readNonEmptyStringField(row, "generation_id"),
     source_epoch: readIntegerField(row, "source_epoch"), status,
+    preparation_revision: readIntegerField(row, "preparation_revision"),
+    records_complete: readSqliteBooleanIntField(row, "records_complete") === 1,
+    after_capsule_cursor: readNullableStringField(row, "after_capsule_cursor"),
     enumeration_complete: readSqliteBooleanIntField(row, "enumeration_complete") === 1,
     after_source_id: readNullableStringField(row, "after_source_id"), target_count: readIntegerField(row, "target_count"),
     completed_count: readIntegerField(row, "completed_count"), reason: readNullableStringField(row, "reason") });
@@ -59,6 +62,7 @@ export function verifySourceIndexTargetCoverage(database: StorageDatabase, works
 
 /** Native epoch and selected configuration are both CAS inputs, including after restart. */
 export function sourceIndexBuildGuard(database: StorageDatabase, generation: SourceIndexGeneration): "superseded" | "stale" | null {
+  if (generation.preparation_revision !== SOURCE_INDEX_PREPARATION_REVISION) return "superseded";
   const selection = readSourceIndexSelection(database, generation.selection.workspace_id);
   if (selection === null || selection.selection_revision !== generation.selection.selection_revision ||
       selection.config_id !== generation.selection.config_id || generation.status === "retired") return "superseded";
@@ -80,7 +84,7 @@ export function readSourceIndexQueryState(database: StorageDatabase, workspaceId
     const fields = ["s.config_id", "s.profile_id", "s.active_generation_id", "g.config_id", "g.profile_id", "g.status"];
     resources.work++;
     const size = database.connection.prepare(`SELECT ${fields.map(field => `COALESCE(octet_length(${field}),0)`).join("+")}
-      + 40 AS bytes ${from}`).get(workspaceId);
+      + 48 AS bytes ${from}`).get(workspaceId);
     resources.native_bytes += size === undefined ? 0 : 8;
     if (size === undefined) return { state: { status: "unknown", reason: "missing_selection" }, resources };
     const bytes = readIntegerField(readRecord(size, "source query state size"), "bytes");
@@ -88,7 +92,7 @@ export function readSourceIndexQueryState(database: StorageDatabase, workspaceId
     resources.work++;
     const raw = database.connection.prepare(`SELECT s.selection_revision,s.config_id,s.profile_id,s.active_generation_id,
       g.selection_revision AS generation_revision,g.config_id AS generation_config,g.profile_id AS generation_profile,
-      g.status,g.source_epoch,COALESCE(e.epoch,0) AS current_epoch,
+      g.status,g.source_epoch,g.preparation_revision,COALESCE(e.epoch,0) AS current_epoch,
       json_extract(g.configuration_json,'$.profile.dimensions') AS dimensions ${from}`).get(workspaceId);
     resources.native_bytes += raw === undefined ? 0 : bytes;
     const row = readRecord(raw, "source query state");
@@ -100,6 +104,7 @@ export function readSourceIndexQueryState(database: StorageDatabase, workspaceId
     const config = readNonEmptyStringField(row, "config_id"), profile = readNonEmptyStringField(row, "profile_id");
     if (revision !== readIntegerField(row, "generation_revision") || config !== readNonEmptyStringField(row, "generation_config") ||
         profile !== readNonEmptyStringField(row, "generation_profile")) return unavailable("superseded");
+    if (readIntegerField(row, "preparation_revision") !== SOURCE_INDEX_PREPARATION_REVISION) return unavailable("incompatible_preparation_revision");
     if (!sourceIndexGenerationCanServeQueries(status)) return unavailable(status);
     const epoch = readIntegerField(row, "source_epoch"), currentEpoch = readIntegerField(row, "current_epoch");
     const dimensions = readIntegerField(row, "dimensions");

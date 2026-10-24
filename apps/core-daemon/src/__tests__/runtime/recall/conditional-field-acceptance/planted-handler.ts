@@ -56,6 +56,11 @@ export function plantSourceRecord(database: StorageDatabase, body: string, sourc
     attribution_context: null,
     source_body: body
   });
+  expect(prepareSourceIndex(database).some(target => target.target.root_id === record.record_id)).toBe(true);
+  return record;
+}
+
+export function prepareSourceIndex(database: StorageDatabase) {
   // Ordinary source delivery nominates prepared native lexical documents, not raw record scans.
   // No vectors or embedding readiness are claimed by this provider-free fixture.
   const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
@@ -64,12 +69,11 @@ export function plantSourceRecord(database: StorageDatabase, body: string, sourc
   expect(lifecycle.capture(WS, generation.generation_id, 128, SOURCE_INDEX_BUDGET)
     .generation.enumeration_complete).toBe(true);
   const targets = repository.listTargets(WS, generation.generation_id, null, 128);
-  expect(targets.some((target) => target.target.root_id === record.record_id)).toBe(true);
   for (const target of targets) {
     expect(lifecycle.prepare(WS, generation.generation_id, target.root_key, SOURCE_INDEX_BUDGET).status)
       .toBe("ready");
   }
-  return record;
+  return targets;
 }
 
 export async function recallThroughHandler(

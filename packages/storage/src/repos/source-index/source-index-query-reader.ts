@@ -1,6 +1,6 @@
 import {
   CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema,
-  SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
+  SourceIndexOperationError, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
   sourceGoldRootIdentity, splitFtsLanes,
   type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
   type SourceIndexQueryResources, type SourceIndexResources, type SourceIndexTarget,
@@ -285,6 +285,13 @@ export function admitSourceIndexQueryCandidate(database: StorageDatabase, record
       : { status: guard.status, reason: guard.reason, resources: meter.resources() };
   } catch (error) {
     if (error instanceof SourceSemanticResourceExhausted) return refused(error.phase);
+    if (error instanceof SourceIndexOperationError) {
+      try { meter.absorb(error.resources); }
+      catch (budgetError) {
+        if (budgetError instanceof SourceSemanticResourceExhausted) return refused(budgetError.phase);
+        throw budgetError;
+      }
+    }
     return { status: "partial", reason: "native_source_unavailable", resources: meter.resources() };
   }
 }

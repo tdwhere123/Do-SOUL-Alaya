@@ -7,6 +7,8 @@ import { FieldContractDigestSchema, hashContentDigest, type FieldContractSha256 
 const Revision = z.string().min(1).max(256);
 export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const SOURCE_INDEX_MAX_WINDOWS = 4096;
+/** Expanded retained-root enumeration; historical record-only generations cannot serve it. */
+export const SOURCE_INDEX_PREPARATION_REVISION = 2;
 
 /** Explicit role; never inferred from an input id or text prefix. */
 export const SourceEmbeddingRoleSchema = z.enum(["query", "passage"]);
@@ -36,10 +38,11 @@ export const SourceIndexConfigurationSchema = z.object({
 export type SourceIndexProfile = z.infer<typeof SourceIndexProfileSchema>;
 export type SourceIndexConfiguration = z.infer<typeof SourceIndexConfigurationSchema>;
 export const SourceIndexTargetSchema = z.object({
-  root_key: z.string().min(1).max(2048), source_id: z.string().min(1).max(256),
-  target: SourceEvidenceTargetSchema.refine(target => target.root_kind === "source_record" && target.span === undefined),
+  root_key: z.string().min(1).max(2048), source_id: z.string().min(1).max(256).nullable(),
+  target: SourceEvidenceTargetSchema.refine(target => target.span === undefined),
   body_bytes: z.number().int().min(0)
-}).strict().readonly();
+}).strict().refine(source => (source.target.root_kind === "evidence_capsule") === (source.source_id === null),
+  "only capsule roots have no source id").readonly();
 export type SourceIndexTarget = z.infer<typeof SourceIndexTargetSchema>;
 export type SourceIndexSelection = Readonly<{
   workspace_id: string; selection_revision: number; config_id: string; profile_id: string;
@@ -55,6 +58,7 @@ export type SourceIndexGeneration = Readonly<{
   selection: SourceIndexSelection; generation_id: string; source_epoch: number;
   status: SourceIndexGenerationStatus; enumeration_complete: boolean; after_source_id: string | null;
   target_count: number; completed_count: number; reason: string | null;
+  preparation_revision: number; records_complete: boolean; after_capsule_cursor: string | null;
 }>;
 export type SourceIndexState = Readonly<{ status: "unknown" }> | Readonly<{
   status: SourceIndexGenerationStatus | "unbound"; selection: SourceIndexSelection;
@@ -160,9 +164,9 @@ export function sourceIndexConfigurationId(configuration: SourceIndexConfigurati
 }
 export function sourceIndexGenerationId(selection: SourceIndexSelection, epoch: number, sha256: FieldContractSha256): string {
   const captured = structuredClone(selection);
-  return digest(["source-index-generation.v1", captured.workspace_id, captured.selection_revision, captured.config_id, epoch], sha256);
+  return digest(["source-index-generation.v2", SOURCE_INDEX_PREPARATION_REVISION, captured.workspace_id, captured.selection_revision, captured.config_id, epoch], sha256);
 }
-export function sourceIndexTarget(target: SourceEvidenceTarget, sourceId: string, bodyBytes: number): SourceIndexTarget {
+export function sourceIndexTarget(target: SourceEvidenceTarget, sourceId: string | null, bodyBytes: number): SourceIndexTarget {
   const captured = structuredClone({ target, sourceId, bodyBytes });
   return SourceIndexTargetSchema.parse({ target: captured.target, source_id: captured.sourceId,
     body_bytes: captured.bodyBytes, root_key: sourceGoldRootIdentity(captured.target) });

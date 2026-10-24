@@ -332,13 +332,14 @@ export class SourceIndexProducer {
   }
 
   private nextWorkspace(): string | null {
-    // Three indexed keyset seeks include retained/orphan selections and source records. No UNION census.
-    // MIN uses each table's workspace-leading index; only three scalar results cross SQLite.
+    // Indexed keyset seeks include capsule-only workspaces and orphan selections, not a population census.
+    // MIN uses each table's workspace-leading index; only four scalar results cross SQLite.
     const row = this.input.database.connection.prepare(`SELECT MIN(workspace_id) AS workspace_id FROM (
       SELECT MIN(workspace_id) AS workspace_id FROM workspaces WHERE workspace_id>?
       UNION ALL SELECT MIN(workspace_id) FROM source_index_selections WHERE workspace_id>?
       UNION ALL SELECT MIN(workspace_id) FROM source_records WHERE workspace_id>?
-    )`).get(this.afterWorkspace, this.afterWorkspace, this.afterWorkspace) as { workspace_id: string | null };
+      UNION ALL SELECT MIN(workspace_id) FROM evidence_capsules WHERE workspace_id>?
+    )`).get(this.afterWorkspace, this.afterWorkspace, this.afterWorkspace, this.afterWorkspace) as { workspace_id: string | null };
     if (row.workspace_id === null) this.afterWorkspace = "";
     return row.workspace_id;
   }

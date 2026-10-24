@@ -42,6 +42,7 @@ it("attributes beyond-prefix SQLite acquisition witnesses after optional diagnos
     expect(beyond).toBeDefined();
     const frame = { ...captured, events: captured.events.filter(row => row.kind !== "source_index_acquisition") };
     expect(frame.events.find(row => row.kind === "source_index_routes")).toEqual(event);
+    if (beyond.source.source_id === null) throw new Error("expected a native SourceRecord nomination");
     const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
       spans: [{ session_index: 0, message_index: 0, source_id: beyond.source.source_id,
         target: { ...beyond.source.target, root_kind: "source_record" as const }, start: 0, end: 1 }] };

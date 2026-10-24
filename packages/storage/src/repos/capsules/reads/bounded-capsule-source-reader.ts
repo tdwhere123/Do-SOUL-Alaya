@@ -26,6 +26,15 @@ const COLUMNS = `${["object_id", "workspace_id", "updated_at", "created_at"].map
   CASE WHEN retained_content_bytes = COALESCE(octet_length(excerpt), octet_length(gist))
     THEN retained_content_bytes ELSE NULL END AS body_bytes`;
 
+const EXCLUDED_CAPSULE = `CASE WHEN lifecycle_state != 'active' THEN 1 ELSE EXISTS (
+  SELECT 1 FROM source_record_evidence_refs ref JOIN source_records r
+    ON r.workspace_id = ref.workspace_id AND r.record_id = ref.record_id
+  WHERE ref.workspace_id = e.workspace_id AND ref.evidence_object_id = e.object_id
+    AND ref.record_id = (SELECT active.record_id FROM source_record_active_evidence_refs active
+      WHERE active.workspace_id = e.workspace_id AND active.evidence_object_id = e.object_id
+      ORDER BY active.record_id LIMIT 1) AND octet_length(r.source_body) IS NOT NULL LIMIT 1
+) END`;
+
 /** Reads one indexed candidate before applying capsule-only membership. */
 export class BoundedCapsuleSourceReader {
   public constructor(private readonly database: StorageDatabase) {}
@@ -40,6 +49,16 @@ export class BoundedCapsuleSourceReader {
     return row === null ? null : this.withBody(row, byteLimit, offset);
   }
 
+  /** Same standalone membership as capture, without changing direct retained-target reads. */
+  public readCandidate(workspaceId: string, objectId: string, byteLimit: number): BoundedCapsuleSource | null {
+    this.validate(byteLimit, 0);
+    const row = this.database.connection.prepare(`SELECT ${COLUMNS}, ${EXCLUDED_CAPSULE} AS linked
+      FROM evidence_capsules e WHERE workspace_id=? AND object_id=? LIMIT 1`)
+      .get(workspaceId, objectId) as BoundedCapsuleSource | undefined;
+    if (row === undefined) return null;
+    return row.linked === 1 ? { ...row, prefix: null, nativeBytes: 0 } : this.withBody(row, byteLimit, 0);
+  }
+
   public page(workspaceId: string, after: { afterCreatedAt: string | null; afterObjectId: string | null },
     limit: number, byteLimit: number): readonly BoundedCapsuleSource[] {
     this.validate(byteLimit, 0);
@@ -50,14 +69,7 @@ export class BoundedCapsuleSourceReader {
       WHERE workspace_id = $workspace AND (created_at, object_id) > ($created, $id)
       ORDER BY created_at, object_id LIMIT $limit
     ) SELECT ${COLUMNS},
-      CASE WHEN lifecycle_state != 'active' THEN 1 ELSE EXISTS (
-        SELECT 1 FROM source_record_evidence_refs ref JOIN source_records r
-          ON r.workspace_id = ref.workspace_id AND r.record_id = ref.record_id
-        WHERE ref.workspace_id = e.workspace_id AND ref.evidence_object_id = e.object_id
-          AND ref.record_id = (SELECT active.record_id FROM source_record_active_evidence_refs active
-            WHERE active.workspace_id = e.workspace_id AND active.evidence_object_id = e.object_id
-            ORDER BY active.record_id LIMIT 1) AND octet_length(r.source_body) IS NOT NULL LIMIT 1
-      ) END AS linked
+      ${EXCLUDED_CAPSULE} AS linked
     FROM candidates c JOIN evidence_capsules e USING (object_id)
     ORDER BY created_at, object_id`).all({
       workspace: workspaceId, created: after.afterCreatedAt ?? "", id: after.afterObjectId ?? "",

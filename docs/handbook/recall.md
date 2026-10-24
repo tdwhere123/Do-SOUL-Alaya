@@ -708,6 +708,23 @@ observable in storage with source-current publication/restart checks; an
 unsupported kind query does not claim those artifacts are absent. Ordinary
 memory-source recall continues without optional enrichment or provider work.
 
+Protocol 22 / SourceIndex preparation revision 2 includes standalone capsule
+retained text in the existing native index. Bounded capture resumes SourceRecord
+and capsule families, charging rejected candidates and reads under the same
+allowance. Preparation indexes the retained reader's `excerpt ?? gist`, never a
+SourceRecord mirror or the original `source_hash`. Capsule targets keep their
+root kind, `updated_at` revision, retained digest and explicit null `source_id`;
+source-ID restrictions cannot admit them. Missing capsule scope uses existing
+field admission: unrestricted only, never invented project scope. SourceRecords
+still require governed scope. Missing source event time stays unknown.
+SQLite migration 023 retires old record-only exhaustive generations, fences old
+selection revisions, and preserves historical source IDs. Capsule lifecycle and
+active source-binding transitions invalidate derived text/windows in the native
+transaction. The producer visits capsule-only workspaces, but still requires its
+normal local binding. Cold/unbound storage is not promised warm lexical readiness:
+explicit model-independent lifecycle preparation can publish lexical text before
+vector completion. Recall itself performs no indexing or provider work.
+
 The finite max/min result assumes legal admitted premises; it does not prove
 that a natural-language event predicate or model identity is correct. Source
 retention, single-frame graph conformance, source-wide semantic coverage and

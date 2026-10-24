@@ -6,7 +6,7 @@ import { SourceIndexSnapshotFactSchema } from "./source-index-measurement.js";
 const Count = z.number().finite().nonnegative();
 const Origin = z.object({ session_id: z.string(), request_id: Count, object_id: z.string() }).strict();
 type Origin = z.infer<typeof Origin>;
-const Member = z.object({ record_id: z.string(), source_id: z.string(), source_version: z.string(), content_digest: z.string() }).strict();
+const Member = z.object({ record_id: z.string(), root_kind: z.enum(["source_record", "evidence_capsule"]).optional(), source_id: z.string().nullable(), source_version: z.string(), content_digest: z.string() }).strict();
 const Union = z.object({ capture: z.enum(["complete", "overflow"]), source_count: Count,
   members: z.array(Member), source_discovery_open: z.boolean(), interpretation_discovery_open: z.boolean(),
   full_universe: z.literal("not_established") }).strict();
@@ -82,10 +82,12 @@ export class SourceSemanticObservationFacts {
       this.value.binding = { ...binding, session_id: session, request_id: this.requestId };
     });
   }
-  pool(pool: object, poolId: string, sources: readonly Pick<SourceRecordIdentity, "identity" | "source_id" | "source_version" | "content_digest">[],
+  pool(pool: object, poolId: string, sources: readonly (Pick<SourceRecordIdentity, "identity" | "source_version" | "content_digest"> &
+    { source_id: string | null; root_kind?: "source_record" | "evidence_capsule" })[],
     sourceOpen: boolean, interpretationOpen: boolean, use: "created" | "reused"): void {
     this.safely(() => {
       const members = sources.map(row => ({ record_id: row.identity, source_id: row.source_id,
+        ...(row.root_kind === undefined ? {} : { root_kind: row.root_kind }),
         source_version: row.source_version, content_digest: row.content_digest }));
       const captured = Buffer.byteLength(JSON.stringify(members)) <= this.maxBytes / 2;
       const union: Union = { capture: captured ? "complete" : "overflow", source_count: sources.length,

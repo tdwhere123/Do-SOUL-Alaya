@@ -469,7 +469,7 @@ function sourceScopeClass(
   return undefined;
 }
 
-function mapBoundedCapsule(
+export function mapBoundedCapsule(
   capsule: BoundedCapsuleSource,
   byteLimit: number,
   offset: number
@@ -496,7 +496,7 @@ function mapBoundedCapsule(
   };
 }
 
-function capsuleMetadataBytes(row: BoundedCapsuleSource): number {
+export function capsuleMetadataBytes(row: BoundedCapsuleSource): number {
   return Object.entries(row).reduce((sum, [key, value]) =>
     sum + (key !== "prefix" && typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0), row.metadataBytes ?? 0);
 }

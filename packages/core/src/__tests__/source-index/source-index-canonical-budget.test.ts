@@ -95,7 +95,7 @@ function expectCopies(environment: Environment, spies: Spies, count: number) {
   expect(spies.copies().map(call => call.args)).toEqual(environment.origins.slice(0, count)
     .map(origin => [environment.target.root_key, WORKSPACE, origin.record_id]));
   for (const call of spies.copies()) {
-    expect(call.sql).toContain("SELECT workspace_id,?,record_id,source_id FROM source_records");
+    expect(call.sql).toContain("SELECT workspace_id,?,'source_record',record_id,source_id FROM source_records");
     if (call.result.type === "return") expect(call.result.value).toMatchObject({ changes: 1 });
   }
 }

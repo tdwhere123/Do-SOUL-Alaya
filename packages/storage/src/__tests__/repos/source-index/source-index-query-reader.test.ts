@@ -254,7 +254,13 @@ describe("source index CJK trigram migration rebuild and mutation", () => {
       erase: new SqliteFieldEraseBarrierRepo(old, fieldSha256)
     };
     const originalBody = "部署流水线配置说明";
-    const published = publishIndexed(foundation, originalBody, "cjk-root");
+    // Author the historical 021 projection layout, not today's expanded-root writer.
+    const record = publishSource(foundation, originalBody, "cjk-root");
+    const published = { record, source: targetFor(record) };
+    old.connection.prepare(`INSERT INTO source_index_roots(workspace_id,root_key,record_id,source_id,target_json)
+      VALUES(?,?,?,?,?)`).run(WORKSPACE, published.source.root_key, record.record_id, record.source_id, JSON.stringify(published.source));
+    old.connection.prepare(`INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
+      VALUES(?,?,?,?,?)`).run(WORKSPACE, published.source.root_key, record.content_digest, published.source.body_bytes, originalBody);
     expect(old.connection.prepare("SELECT name FROM sqlite_master WHERE name='source_index_fts_trigram'").get())
       .toBeUndefined();
     expect(old.connection.prepare("SELECT body FROM source_index_text WHERE workspace_id=? AND root_key=?")

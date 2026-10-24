@@ -505,8 +505,12 @@ retained configuration is historical, not a ready binding. Old captured selectio
 writes and activation cannot restore eligibility. Recovery starts a fresh generation,
 without encoding configuration absence as build failure.
 
-Passes are concurrency 1 with bounded rotating workspace/root visits and shared
-capture/backfill allowances. Stop and deadlines end local waiting without cancelling
+Passes are concurrency 1 with bounded rotating workspace/root visits (including
+capsule-only workspaces) and shared capture/backfill allowances. SourceIndex
+preparation revision 2 captures native SourceRecord and standalone retained-capsule
+families; migration 023 fences old exhaustive generations without changing source
+IDs. Capsule projection invalidation follows native lifecycle and binding writes
+inside their SQLite transaction, not a query-time repair. Stop and deadlines end local waiting without cancelling
 shared inference; native occupancy stays quarantined until settlement or provider
 close. Query preparation requires an eligible active generation. Local model artifacts
 must already be provisioned; this wiring does not download them. Mechanism-level

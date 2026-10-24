@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 21.0.0, engine gateway 2.0.0
+## Unreleased — protocol 22.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,16 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 22.0.0 expands native SourceIndex nomination to retained evidence-capsule
+roots under invariant §25 (major). Capsule `source_id` is explicitly null;
+SourceRecords retain their historical identifiers and governed-scope requirement.
+Capsule indexing reuses the retained `excerpt ?? gist`, revision and digest owner.
+Unrestricted field principals may observe capsules without invented scope; named
+and denied principals cannot. SQLite migration 023 fences pre-expansion generations
+and makes projection invalidation root-kind-aware. Existing model-independent
+lifecycle preparation is required; cold storage does not become query-time ready.
+No model downloads, provider work or query-time indexing are introduced.
 
 Protocol 21.0.0 is the ordinary ranking/delivery migration **major** under
 handbook invariant §25. `native_query` becomes the live ordinary default on the

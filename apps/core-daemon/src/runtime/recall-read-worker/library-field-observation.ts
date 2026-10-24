@@ -10,14 +10,14 @@ type Fit = Parameters<NonNullable<ConditionalFieldRecallRequest["observe_page_fi
 /** Private observation of the shared producer. No selection, second reads,
  * response serialization or resource debits occur in this adapter. */
 export class LibraryFieldObserver {
-  private readonly sourceIds = new Map<string, string>();
+  private readonly sourceIds = new Map<string, string | null>();
   public constructor(private readonly observer: SourceSemanticObserver | undefined,
     private readonly grounded: Parameters<SourceSemanticObserver["facts"]["pool"]>[2]) {}
 
   public pool(nomination: NativeSourceNomination | null | undefined, bound: Pool, use: "created" | "reused"): void {
     if (this.observer === undefined) return;
     const native = bound?.sources ?? nomination?.result?.nominations.map(row => ({
-      identity: row.source.target.root_id, source_id: row.source.source_id,
+      identity: row.source.target.root_id, root_kind: row.source.target.root_kind, source_id: row.source.source_id,
       source_version: row.source.target.source_version, content_digest: row.source.target.content_digest
     })) ?? [];
     const sources = [...new Map([...native, ...this.grounded].map(row => [row.identity, row])).values()];

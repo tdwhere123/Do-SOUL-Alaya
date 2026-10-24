@@ -5,7 +5,7 @@ import type { SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import { validateReportedRecallHits } from "../../../mcp-memory/usage/recall-usage-object-validation.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { createDeps, createDeliveryRecord } from "../tool/mcp-memory-tool-handler-fixture.js";
-import { openBoundSlice, plantSourceRecord, WS, defaultBudget, INTERPRETATION_CLOCK, SNAPSHOT_ID } from "../../runtime/recall/conditional-field-acceptance/planted-handler.js";
+import { openBoundSlice, plantSourceRecord, prepareSourceIndex, WS, defaultBudget, INTERPRETATION_CLOCK, SNAPSHOT_ID } from "../../runtime/recall/conditional-field-acceptance/planted-handler.js";
 
 const CAPSULE = "cccccccc-cccc-4ccc-8ccc-000000000201";
 const databases: StorageDatabase[] = [];
@@ -57,6 +57,7 @@ describe("current canonical source usage identity", () => {
     expect(before.evidence_object_id).toBeNull();
     await createCapsule(slice.capsules);
     slice.records.insert({ ...record, evidence_object_id: CAPSULE });
+    prepareSourceIndex(slice.database);
     const delivered = recalledTarget(slice.database);
     expect(delivered.evidence_object_id).toBe(CAPSULE);
     await expect(reportUsed(slice, delivered)).resolves.toBeUndefined();
@@ -68,6 +69,7 @@ describe("current canonical source usage identity", () => {
   it("validates capsule revision and retained-text digest against the exact delivered target", async () => {
     const slice = await fixture();
     await createCapsule(slice.capsules);
+    prepareSourceIndex(slice.database);
     const delivered = recalledTarget(slice.database);
     expect(delivered.root_kind).toBe("evidence_capsule");
     expect(delivered.content_digest).not.toBe("original-turn-digest");
@@ -81,7 +83,7 @@ describe("current canonical source usage identity", () => {
   it.each(["source_record", "evidence_capsule"] as const)("rejects out-of-body and split UTF-8 spans for %s", async (kind) => {
     const slice = await fixture();
     if (kind === "source_record") plantSourceRecord(slice.database, "needle 😀 original");
-    else await createCapsule(slice.capsules);
+    else { await createCapsule(slice.capsules); prepareSourceIndex(slice.database); }
     const delivered = recalledTarget(slice.database);
     const span = { content_start: 0, content_end: 10000, retained_extent: kind === "source_record" ? "body" as const : "excerpt" as const,
       content_complete: false, original_complete: kind === "source_record" };

@@ -31,6 +31,9 @@ export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntim
     // A lexical rank has no byte location. Never manufacture a prefix location for it.
     if (window === undefined) continue;
     const target = nomination.source.target;
+    if (target.root_kind !== "source_record" || nomination.source.source_id === null) {
+      throw new CoreError("VALIDATION", "diagnostic nominated windows require a source record");
+    }
     meter.retain(nomination.source, "library nominated source binding");
     if (target.workspace_id !== payload.workspace_id || nomination.source.root_key !== sourceGoldRootIdentity(target)) {
       throw new CoreError("CONFLICT", "nominated window has a different source binding");

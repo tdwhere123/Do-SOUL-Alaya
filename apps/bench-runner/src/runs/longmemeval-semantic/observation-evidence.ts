@@ -162,7 +162,8 @@ export function observationMessageFacts(span: AnswerTurnSpan, input: Observation
   const member = memberPositions.length === 1 ? finite.pool!.union.members[memberPositions[0]!]! : null;
   // A full native pool identity can bind a bare read event even when the optional snapshot map
   // was not captured. This does not promote pool membership into index or snapshot admission.
-  const readIdentity = admitted.root ?? (member !== null && joined.snapshot_bound && input.call.snapshot_id !== null ? {
+  const readIdentity = admitted.root ?? (member !== null && member.source_id !== null && member.root_kind !== "evidence_capsule"
+    && joined.snapshot_bound && input.call.snapshot_id !== null ? {
     record_id: member.record_id, source_id: member.source_id, snapshot_id: input.call.snapshot_id, identity: span.target } : null);
   const matches = (value: unknown) => span.target.workspace_id === input.call.workspace_id && eventMatches(value, readIdentity, span);
   const routes = indexRoutes(joined, span, qualification);

@@ -9,7 +9,7 @@ import {
 import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  type SourceIndexConfiguration, type SourceIndexSelection, type SourceSemanticWorkerRequest
+  type SourceIndexTarget, type SourceIndexConfiguration, type SourceIndexSelection, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import type { SourceEmbeddingBinding } from "../../../../../../packages/core/src/embedding-recall/source-embedding-runtime.js";
 import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
@@ -96,7 +96,10 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
       expect(captured.added).toBeGreaterThan(0);
       captured = lifecycle.capture(WS, generation.generation_id, 128, INDEX_BUDGET);
     }
-    const targets = repository.listTargets(WS, generation.generation_id, null, 128);
+    const targets = repository.listTargets(WS, generation.generation_id, null, 128).map(source => {
+      if (source.target.root_kind !== "source_record" || source.source_id === null) throw new Error("record-only fixture requires a native source id");
+      return { ...source, source_id: source.source_id };
+    });
     expect(targets).toHaveLength(indexed.length);
     const outsideTransaction = () => { expect(database.connection.inTransaction).toBe(false); };
     let backfillAxis: readonly number[] = [0, 1, 0];
@@ -151,7 +154,7 @@ export type IndexFixture = {
   lifecycle: SourceIndexLifecycle;
   selection: SourceIndexSelection;
   generation: ReturnType<SourceIndexLifecycle["begin"]>;
-  targets: ReturnType<SqliteSourceIndexRepository["listTargets"]>;
+  targets: readonly (SourceIndexTarget & { source_id: string })[];
   admit(source: IndexedSource, version?: string): Promise<Awaited<ReturnType<ReturnType<typeof createAuditedSourceAdmission>["admit"]>>["record"]>;
   backfillBinding: ReturnType<typeof simulatedBinding>;
   queryBinding: ReturnType<typeof simulatedBinding>;

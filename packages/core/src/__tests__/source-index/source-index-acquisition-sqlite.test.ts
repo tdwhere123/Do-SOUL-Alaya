@@ -90,7 +90,7 @@ describe("source index acquisition through native SQLite", () => {
   it("requires scope authorization, skips denied roots without a bonus refill, and preserves the full native tuple", () => {
     const environment = setup();
     const { documents } = publishIndex(environment);
-    const firstLexical = documents.filter(document => ["lexical", "overlap"].includes(document.source.source_id))
+    const firstLexical = documents.filter(document => document.source.source_id !== null && ["lexical", "overlap"].includes(document.source.source_id))
       .sort((a, b) => compareKey(a.source.root_key, b.source.root_key))[0]!;
     const vectorOnly = documents.find(document => document.source.source_id === "vector-only")!;
     const input = queryInput(configuration(), { allowance: { max_attempts: 2, max_roots: 2, max_vector_windows: 64 } });

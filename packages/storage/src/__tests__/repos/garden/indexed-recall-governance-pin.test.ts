@@ -82,14 +82,14 @@ const ROWS = [
   },
   {
     table: "source_index_roots",
-    insert: `INSERT INTO source_index_roots(workspace_id,root_key,record_id,source_id,target_json)
-      VALUES ('workspace','root','record','source','{}')`,
+    insert: `INSERT INTO source_index_roots(workspace_id,root_key,root_kind,record_id,source_id,target_json)
+      VALUES ('workspace','root','source_record','record','source','{}')`,
     mutation: "source_id = 'other-source'"
   },
   {
     table: "source_index_dependencies",
-    insert: `INSERT INTO source_index_dependencies(workspace_id,root_key,dependency_record_id,dependency_source_id)
-      VALUES ('workspace','root','dependency','source')`,
+    insert: `INSERT INTO source_index_dependencies(workspace_id,root_key,dependency_kind,dependency_record_id,dependency_source_id)
+      VALUES ('workspace','root','source_record','dependency','source')`,
     mutation: "dependency_source_id = 'other-source'"
   },
   {

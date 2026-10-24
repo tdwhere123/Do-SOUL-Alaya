@@ -15,11 +15,21 @@ schema export helpers. It must not depend on other workspace packages.
 - `src/soul/mcp-types.ts` contains MCP tool input/output schemas.
 - `src/engine/` contains conversation engine protocol types.
 
+## Retained root indexing compatibility
+
+Protocol 22.0.0 expands SourceIndex targets to standalone `evidence_capsule`
+roots. Their `source_id` is null; SourceRecord IDs are unchanged. The retained
+reader owns `excerpt ?? gist`, revision and content digest. Source-index
+preparation revision 2 and SQLite migration 023 fence old completed/valid-empty
+generations, retaining historical IDs while requiring a fresh bounded capture.
+Record-only semantic consumers explicitly reject capsule nominations. This is
+an invariant §25 major, not query-time indexing or automatic model preparation.
+
 ## Ordinary field delivery compatibility
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-`21.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the new
+now `22.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

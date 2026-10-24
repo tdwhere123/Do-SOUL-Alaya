@@ -2,7 +2,7 @@ import { sourceGoldRootIdentity, sourceRecallTarget, type SourceIndexQueryVector
   type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
-  authorizeSemanticScope,
+  authorizeSourceIndexScope,
   assertRecallConsumerCompatibility,
   authorizedScopesFromAdmission,
   captureIndexPreviews,
@@ -150,8 +150,8 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver): NativeSourceNomination {
   const acquisition = new SourceIndexAcquisition(
     new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true }), fieldContractSha256);
-  const admit = (scope: Parameters<Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1]>[0]) => {
-    try { authorizeSemanticScope(scope, input.authorizedScopes); return "admitted" as const; }
+  const admit: Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1] = (scope, source) => {
+    try { authorizeSourceIndexScope(scope, source, input.authorizedScopes); return "admitted" as const; }
     catch { return "denied" as const; }
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,

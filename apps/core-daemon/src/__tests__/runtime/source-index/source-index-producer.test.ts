@@ -41,7 +41,7 @@ import {
   type SourceIndexBackfillResult,
   type SourceIndexProfile
 } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { initDatabase, SqliteSourceIndexRepository, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import {
   BUDGET,
@@ -165,6 +165,22 @@ function producerFor(environment: { readonly database: Fixture["database"] }, bi
 }
 
 describe("daemon Source-index producer through file-backed SQLite", () => {
+  it("visits capsule-only workspaces absent from workspace and source-record inventories", async () => {
+    const environment = fileEnvironment(), workspace = "capsule-only";
+    await new SqliteEvidenceCapsuleRepo(environment.database).create({ object_id: "cccccccc-cccc-4ccc-8ccc-000000000201",
+      object_kind: "evidence_capsule", schema_version: 1, lifecycle_state: "active",
+      created_at: "2026-09-07T00:00:00Z", updated_at: "2026-09-07T00:00:00Z", created_by: "user_action",
+      evidence_kind: "conversation_excerpt", semantic_anchor: { topic: "source", keywords: ["source"], summary: "source" },
+      event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "gist", excerpt: "needle retained",
+      source_hash: null, run_id: "run-1", workspace_id: workspace, surface_id: null });
+    const { bind } = labeledBind({ max_input_tokens: 32 });
+    expect(await producerFor(environment, bind).runPass()).toMatchObject({ status: "settled" });
+    expect(environment.index.state(workspace)).toMatchObject({ status: "ready" });
+    expect(environment.index.readLexicalCandidates(workspace, "needle", 4, { work_units: 10000, memory_bytes: 1000000 })
+      .candidates[0]?.source).toMatchObject({ source_id: null, target: { root_kind: "evidence_capsule" } });
+    expect(environment.database.connection.prepare("SELECT count(*) AS n FROM source_records WHERE workspace_id=?").get(workspace)).toEqual({ n: 0 });
+    expect(environment.database.connection.prepare("SELECT count(*) AS n FROM workspaces WHERE workspace_id=?").get(workspace)).toEqual({ n: 0 });
+  });
   it("publishes a generation that query state can read without a manual index fixture", async () => {
     const environment = fileEnvironment();
     publishSource(environment, "Alpha uses tools.");
@@ -452,8 +468,17 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(embedInputs).toHaveBeenCalledTimes(1);
     expect(environment.index.state("workspace-2")).toEqual({ status: "unknown" });
     await producer.runPass();
-    expect(environment.index.state("workspace-2").status).toBe("ready");
+    // A record-only exhausted cursor no longer closes the capsule family for free.
+    expect(environment.index.state("workspace-2").status).toBe("partial");
     expect(embedInputs).toHaveBeenCalledTimes(2);
+    for (let pass = 0; pass < 2; pass++) {
+      const before = capture.mock.calls.length;
+      const receipt = await producer.runPass();
+      expect(capture.mock.calls.length - before).toBeLessThanOrEqual(2);
+      expect(receipt.resources.model_inputs).toBeLessThanOrEqual(1);
+    }
+    expect(environment.index.state("workspace-2").status).toBe("ready");
+    expect(embedInputs).toHaveBeenCalledTimes(3);
   });
 
   it("debits actual native operations from one capture/backfill/workspace allowance", async () => {

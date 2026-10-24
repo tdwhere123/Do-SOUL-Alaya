@@ -54,7 +54,8 @@ export type SourceIndexQueryAdmission = Readonly<{ resources: SourceIndexQueryRe
   Readonly<{ status: "resource_limited"; reason: "read_budget"; phase: string }>
 );
 
-/** The daemon must delegate to authorizeSemanticScope. Denied roots are skipped, not native unknowns.
+/** Field callers delegate to authorizeSourceIndexScope after native root-kind binding;
+ * record-only semantic consumers retain authorizeSemanticScope. Denied roots are skipped, not native unknowns.
  * There is deliberately no unrestricted default. The callback must not perform unmetered native reads.
  */
 export type SourceIndexScopeAdmission = (scopeClass: string | null, source: SourceIndexTarget) => "admitted" | "denied";

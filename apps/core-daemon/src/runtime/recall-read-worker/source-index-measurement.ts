@@ -25,7 +25,8 @@ export const SourceIndexSnapshotFactSchema: z.ZodType<SourceIndexSnapshotFact> =
   query_state: SourceSemanticAcquisitionSchema.unwrap().shape.vector.unwrap().shape.state.unwrap(),
   selection: Selection.nullable(), generation: z.object({ selection: Selection, generation_id: z.string(), source_epoch: Count,
     status: SourceIndexGenerationStatusSchema, enumeration_complete: z.boolean(), after_source_id: z.string().nullable(),
-    target_count: Count, completed_count: Count, reason: z.string().nullable() }).strict().nullable()
+    target_count: Count, completed_count: Count, reason: z.string().nullable(),
+    preparation_revision: Count, records_complete: z.boolean(), after_capsule_cursor: z.string().nullable() }).strict().nullable()
 }).strict();
 const Status = z.lazy(() => {
   try { return z.enum(owner().statuses); } catch { return z.never(); }

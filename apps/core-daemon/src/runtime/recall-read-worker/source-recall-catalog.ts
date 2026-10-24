@@ -47,6 +47,9 @@ export function listEligibleSemanticSources(database: StorageDatabase, workspace
   let exhausted = false;
   const admitNominations = (nominations: readonly SourceIndexTarget[]) => {
     for (const nomination of nominations) {
+      if (nomination.target.root_kind !== "source_record" || nomination.source_id === null) {
+        throw new CoreError("VALIDATION", "semantic record catalog requires source-record nominations");
+      }
       try {
         meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
         const page = repo.findCurrentBounded(workspace, nomination.source_id, 1, 0, { workLimit: meter.work, nativeByteLimit: meter.bytes });

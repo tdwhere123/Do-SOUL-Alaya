@@ -5,11 +5,11 @@ import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus, computeOffici
   parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { readRetainedBatchRun } from "../../../runs/extraction/fill/batch/store.js";
 import { readExtractionCacheManifest, writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
-import { bindAdmittedActualModelShard, bindNativeAdmittedControlShard, publishBoundPublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
+import { bindAdmittedActualModelShard, bindNativeAdmittedControlShard } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
 import { withPlantedSourceWorker } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption-plant.js";
 import { publicSearchRequest } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption.js";
 import { consumePublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumer.js";
-import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { preflightExtractionCache } from "../../../runs/compile-seed/compile-seed-preflight.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
@@ -63,11 +63,8 @@ it("keeps native Batch admission readable after completion finalization and reop
     writeFileSync(statePath, stateBytes);
     const bind = bindNativeAdmittedControlShard(input);
     expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
-    await withPlantedSourceWorker(sourceCorpus, "unrelated distractor", (planted) => {
-      publishBoundPublicSources({ database: planted.database, source: planted.source,
-        workspaceId: WS, runId: RUN, now: NOW, bind });
-      return {};
-    }, async (planted, handler, receipts, client) => {
+    // Ordinary native delivery reads retained SourceRecords, not proposal-only gists.
+    await withPlantedSourceWorker(sourceCorpus, "unrelated distractor", () => ({}), async (planted, handler, receipts, client) => {
       planted.database.close();
       closeCachedDatabase(planted.filename);
       await client.ready();

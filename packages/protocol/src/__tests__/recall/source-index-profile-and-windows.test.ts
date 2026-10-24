@@ -204,7 +204,7 @@ describe("source index profile and configuration identity", () => {
     expect(sourceIndexProfileId(beforeProfile, sha256)).toBe(profileId);
   });
 
-  it("binds generation identity to captured workspace, revision, config, and epoch only", () => {
+  it("binds generation identity to retained-root preparation revision, workspace, selection and epoch", () => {
     const selection: SourceIndexSelection = {
       workspace_id: "workspace-a",
       selection_revision: 3,
@@ -214,7 +214,7 @@ describe("source index profile and configuration identity", () => {
     };
     const generationId = sourceIndexGenerationId(selection, 9, sha256);
     expect(generationId).toBe(digest([
-      "source-index-generation.v1", selection.workspace_id, selection.selection_revision, selection.config_id, 9
+      "source-index-generation.v2", 2, selection.workspace_id, selection.selection_revision, selection.config_id, 9
     ]));
     const reordered: SourceIndexSelection = {
       configuration: CONFIG,
@@ -359,7 +359,7 @@ describe("source index preparation refusals and source identity", () => {
     expect(otherWorkspace.target.workspace_id).toBe("workspace-b");
   });
 
-  it("rejects spanned and non-record targets at the source target constructor", () => {
+  it("rejects spanned targets and fabricated capsule source IDs", () => {
     const digestValue = hashContentDigest("hello", sha256);
     expect(() => sourceIndexTarget(sourceRecallTarget({
       workspace_id: "workspace-a",
@@ -381,6 +381,17 @@ describe("source index preparation refusals and source identity", () => {
       content_digest: digestValue,
       evidence_object_id: null
     }), "logical-source", 5)).toThrow();
+  });
+
+  it("prepares capsule retained bytes with an explicit absent source ID", () => {
+    const body = "needle 😀 retained";
+    const target = sourceRecallTarget({ workspace_id: "workspace-a", root_kind: "evidence_capsule", root_id: "capsule-1",
+      source_version: "retained-revision", content_digest: hashContentDigest(body, sha256), evidence_object_id: "capsule-1" });
+    const source = sourceIndexTarget(target, null, utf8(body).length);
+    expect(source.source_id).toBeNull();
+    expect(prepareSourceIndexLexical({ source, body }, sha256).body).toBe(body);
+    expect(() => sourceIndexTarget({ ...target, root_kind: "source_record" }, null, utf8(body).length)).toThrow();
+    expect(source.root_key).not.toBe(sourceIndexTarget({ ...target, root_kind: "source_record" }, "logical-id", utf8(body).length).root_key);
   });
 
   it("rejects mismatched byte count, digest, root identity, and unpaired surrogates", () => {

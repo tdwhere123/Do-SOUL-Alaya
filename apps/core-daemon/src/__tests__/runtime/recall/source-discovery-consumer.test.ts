@@ -10,12 +10,10 @@ import {
   RecallService
 } from "@do-soul/alaya-core";
 import {
-  locateSourceInterpretation,
   MemoryDimension,
   ScopeClass,
   SoulMemorySearchRequestSchema,
   sourceEvidenceRootTarget,
-  sourceRecallTarget,
   SoulMemorySearchResponseSchema,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
@@ -31,7 +29,6 @@ import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { MEM, NOW, RUN, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
-import { fieldContractSha256 } from "../../../../../../packages/core/src/shared/field-hash.js";
 import { SOURCE_DISCOVERY_CANARY } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import {
   INTERPRETATION_CLOCK,
@@ -59,7 +56,6 @@ describe("source discovery consumer surfaces", () => {
     const slice = await openSourceSlice(() => {}, filename);
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert({ ...hashedRecord(WS, body, "intended"), scope_class: ScopeClass.PROJECT });
-    insertBoundGist(slice.database, "a-intended", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
     const filler = `${canary.intended} filler ${"y".repeat(3000)}`;
     new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert({ ...hashedRecord(WS, filler, "filler"), scope_class: ScopeClass.PROJECT });
     prepareRetainedSourceLexicalIndex(slice.database, WS);
@@ -156,7 +152,6 @@ describe("source discovery consumer surfaces", () => {
     const slice = await openSourceSlice((database) => databases.push(database));
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
-    insertBoundGist(slice.database, "a-cli", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
     prepareRetainedSourceLexicalIndex(slice.database, WS);
     const proposal = compileQuerySourceSketch({
       snapshot_id: SNAPSHOT_ID,
@@ -187,7 +182,6 @@ describe("source discovery consumer surfaces", () => {
     records.insert({ ...hashedRecord(WS, canary.distractor, "distractor"), scope_class: ScopeClass.PROJECT });
     await slice.writeMemory(MEM.r, canary.original_query, MemoryDimension.FACT);
     await slice.writeMemory(MEM.c, `${canary.original_query} second memory`, MemoryDimension.FACT);
-    insertBoundGist(slice.database, "a-reopen", canary.intended, intended.record_id, intended.content_digest, intended.evidence_object_id, canary.sketch);
     prepareRetainedSourceLexicalIndex(slice.database, WS);
     slice.database.close();
     closeCachedDatabase(filename);
@@ -293,54 +287,4 @@ async function recallNativeSourcesThroughCli(
   }, parsed.data);
   expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
   return SoulMemorySearchResponseSchema.parse(result.json);
-}
-
-function insertBoundGist(
-  database: StorageDatabase,
-  objectId: string,
-  source: string,
-  rootId: string,
-  digest: string,
-  evidenceObjectId: string | null,
-  relation: NonNullable<(typeof SOURCE_DISCOVERY_CANARY)[number]["sketch"]>
-): void {
-  const located = locateSourceInterpretation({
-    source,
-    artifactKey: objectId,
-    sha256: fieldContractSha256,
-    assertion: { assertion_id: 1, text: source, source_span: [0, source.length] },
-    response: {
-      kind: "received",
-      value: {
-        interpretations: [{
-          assertion_id: 1,
-          relations: [{
-            predicate: { text: relation.predicate },
-            arguments: (relation.arguments ?? []).map((item) => ({ role: item.role, phrase: { text: item.phrase } })),
-            qualifiers: (relation.qualifiers ?? []).map((item) => ({ role: item.role, phrase: { text: item.phrase } }))
-          }]
-        }]
-      }
-    }
-  });
-  if (located.outcome !== "candidates") {
-    throw new Error(`locate failed: ${JSON.stringify(located.diagnostics)}`);
-  }
-  const bound = {
-    ...located,
-    source_target: sourceRecallTarget({
-      workspace_id: WS,
-      root_kind: "source_record",
-      root_id: rootId,
-      source_version: "v1",
-      content_digest: digest,
-      evidence_object_id: evidenceObjectId
-    })
-  };
-  database.connection.prepare(`
-    INSERT INTO evidence_capsules (
-      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
-      gist, excerpt, run_id, workspace_id
-    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
-  `).run(objectId, NOW, NOW, JSON.stringify(bound), source, RUN, WS);
 }

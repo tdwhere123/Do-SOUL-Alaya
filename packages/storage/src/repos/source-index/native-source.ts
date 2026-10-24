@@ -7,6 +7,8 @@ import { StorageError } from "../../shared/errors.js";
 import { SqliteFieldSourceRecordRepo, type BoundedSourceRecordRead } from "../field/source-repo.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "../field/retained-source-chunks.js";
 
+import { guardCapsuleIndexTarget, readCapsuleIndexChunk } from "./capsule-source.js";
+
 const SOURCE_READ_WORK = 5;
 export const SOURCE_INDEX_STANDALONE_BUDGET: SourceIndexBudget = { work: 1000, native_bytes: 131072 };
 
@@ -41,6 +43,8 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
     if (budget.work < SOURCE_READ_WORK || budget.native_bytes < RETAINED_SOURCE_READ_RESERVATION) {
       return { status: "partial" as const, reason: "read_budget" as const, resources };
     }
+    if (source.target.root_kind === "evidence_capsule") return guardCapsuleIndexTarget(database, source, budget);
+    if (source.source_id === null) return { status: "stale" as const, reason: "source_identity", resources };
     const read = records.findCurrentBounded(source.target.workspace_id, source.source_id, 4, 0,
       { workLimit: budget.work, nativeByteLimit: budget.native_bytes });
     Object.assign(resources, read === null ? { work: 1, native_bytes: 0 } : sourceReadCost(read));
@@ -89,6 +93,15 @@ export function readSourceIndexDocument(database: StorageDatabase, records: Sqli
       if (budget.work - resources.work < SOURCE_READ_WORK ||
           budget.native_bytes - resources.native_bytes < RETAINED_SOURCE_READ_RESERVATION) {
         return { status: "partial", reason: "read_budget", resources };
+      }
+      if (source.target.root_kind === "evidence_capsule") {
+        const read = readCapsuleIndexChunk(database, source, Math.min(65536, source.body_bytes - offset), offset);
+        resources.work += read.resources.work; resources.native_bytes += read.resources.native_bytes;
+        if (read.row?.content === undefined || read.row.content_end <= offset) {
+          return { status: "partial", reason: "incomplete_source_bytes", resources };
+        }
+        parts.push(read.row.content); offset = read.row.content_end;
+        continue;
       }
       const read = records.findByIdBounded(source.target.workspace_id, source.target.root_id,
         Math.min(65536, source.body_bytes - offset), offset,

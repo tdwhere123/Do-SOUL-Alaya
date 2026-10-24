@@ -1,5 +1,5 @@
 import {
-  SourceIndexConfigurationSchema, SourceIndexTargetSchema, SourceIndexOperationError, BoundedIdSchema, canonicalJson,
+  SOURCE_INDEX_PREPARATION_REVISION, SourceIndexConfigurationSchema, SourceIndexTargetSchema, SourceIndexOperationError, BoundedIdSchema, canonicalJson,
   prepareSourceIndexDocument, prepareSourceIndexLexical, sourceIndexConfigurationId, sourceIndexGenerationId,
   sourceIndexProfileId, type FieldContractSha256, type SourceIndexBudget, type SourceIndexCaptureResult,
   type SourceIndexConfiguration, type SourceIndexDocument, type SourceIndexGeneration, type SourceIndexGuardedWriteResult,
@@ -14,7 +14,8 @@ import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { encodeEmbeddingBlob, isFiniteNonzeroEmbedding } from "../memory/embedding-vector-validity.js";
 import { readBufferField, readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
 import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument,
-  sourceReadCost, sourceTargetFromRead } from "./native-source.js";
+} from "./native-source.js";
+import { captureSourceIndexTargets, persistSourceIndexRoot } from "./capture-targets.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
@@ -116,9 +117,9 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
       const epoch = sourceIndexEpoch(this.database, current.workspace_id);
       const generationId = sourceIndexGenerationId(current, epoch, this.sha256);
       this.database.connection.prepare(`INSERT INTO source_index_generations
-        (workspace_id,generation_id,selection_revision,config_id,profile_id,configuration_json,source_epoch,status)
-        VALUES(?,?,?,?,?,?,?,'building') ON CONFLICT(workspace_id,generation_id) DO NOTHING`).run(current.workspace_id,
-        generationId, current.selection_revision, current.config_id, current.profile_id, canonicalJson(current.configuration), epoch);
+        (workspace_id,generation_id,selection_revision,config_id,profile_id,configuration_json,source_epoch,status,preparation_revision)
+        VALUES(?,?,?,?,?,?,?,'building',?) ON CONFLICT(workspace_id,generation_id) DO NOTHING`).run(current.workspace_id,
+        generationId, current.selection_revision, current.config_id, current.profile_id, canonicalJson(current.configuration), epoch, SOURCE_INDEX_PREPARATION_REVISION);
       this.database.connection.prepare(`UPDATE source_index_generations SET status = 'building', reason = NULL
         WHERE workspace_id = ? AND generation_id = ? AND status = 'failed'`).run(current.workspace_id, generationId);
       return requireSourceIndexGeneration(this.database, current.workspace_id, generationId);
@@ -132,52 +133,9 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   public capturePage(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexCaptureResult {
     const captured = structuredClone({ workspaceId, generationId, limit, budget });
     assertIndexPageLimit(captured.limit); assertIndexBudget(captured.budget);
-    return this.atomic(() => this.captureTargets(captured));
-  }
-
-  private captureTargets(input: { workspaceId: string; generationId: string; limit: number; budget: SourceIndexBudget }): SourceIndexCaptureResult {
-    let generation = requireSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
     const resources = { work: 0, native_bytes: 0 };
-    const guard = sourceIndexBuildGuard(this.database, generation);
-    if (guard !== null || generation.enumeration_complete || generation.status === "failed") return { generation, added: 0, resources };
-    let cursor = generation.after_source_id, added = 0, complete = false, reason: string | null = null;
-    for (let index = 0; index < input.limit; index++) {
-      if (input.budget.work - resources.work < 320 || input.budget.native_bytes - resources.native_bytes < 262144) {
-        reason = "enumeration_budget"; break;
-      }
-      const read = this.records.findNextCurrentBounded(input.workspaceId, cursor, 4,
-        { workLimit: input.budget.work - resources.work, nativeByteLimit: input.budget.native_bytes - resources.native_bytes });
-      if (read === null) { resources.work++; complete = true; break; }
-      const cost = sourceReadCost(read); resources.work += cost.work; resources.native_bytes += cost.native_bytes;
-      if (read.record === null || read.resourceLimited || read.record.source_body === null && read.bodyBytes > 0) {
-        reason = "native_source_unknown"; break;
-      }
-      const source = sourceTargetFromRead(read);
-      if (source !== null) {
-        const available = guardSourceIndexTarget(this.database, this.records, source,
-          { work: input.budget.work - resources.work, native_bytes: input.budget.native_bytes - resources.native_bytes });
-        resources.work += available.resources.work; resources.native_bytes += available.resources.native_bytes;
-        if (available.status === "partial") {
-          reason = available.reason === "read_budget" ? "enumeration_budget" : "native_source_unknown"; break;
-        }
-        if (available.status === "ready") {
-          if (!this.persistRoot(source, available.dependencies, input.budget, resources)) {
-            reason = "enumeration_budget"; break;
-          }
-          const write = this.database.connection.prepare(`INSERT INTO source_index_targets
-            (workspace_id,generation_id,root_key) VALUES(?,?,?) ON CONFLICT DO NOTHING`)
-            .run(input.workspaceId, input.generationId, source.root_key);
-          added += write.changes;
-        }
-      }
-      cursor = read.record.source_id;
-    }
-    if (!complete && reason === null) reason = "enumeration_page";
-    this.database.connection.prepare(`UPDATE source_index_generations SET after_source_id=?, enumeration_complete=?,
-      status=?, reason=? WHERE workspace_id=? AND generation_id=?`).run(cursor, complete ? 1 : 0,
-      complete ? "building" : "partial", reason, input.workspaceId, input.generationId);
-    generation = requireSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
-    return { generation, added, resources };
+    try { return this.atomic(() => captureSourceIndexTargets(this.database, this.records, captured, resources)); }
+    catch (error) { throw new SourceIndexOperationError(error, resources); }
   }
 
   public listTargets(workspaceId: string, generationId: string, afterRootKey: string | null, limit: number): readonly SourceIndexTarget[] {
@@ -236,30 +194,9 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     }
   }
 
-  private persistRoot(source: SourceIndexTarget, dependencies: readonly string[], budget: SourceIndexBudget,
-    resources: { work: number; native_bytes: number }): boolean {
-    // Admit every indexed dependency lookup before replacing any existing root/dependency metadata.
-    if (budget.work - resources.work < dependencies.length) return false;
-    this.database.connection.prepare(`INSERT INTO source_index_roots
-      (workspace_id,root_key,record_id,source_id,target_json) VALUES(?,?,?,?,?)
-      ON CONFLICT(workspace_id,root_key) DO UPDATE SET target_json=excluded.target_json`)
-      .run(source.target.workspace_id, source.root_key, source.target.root_id, source.source_id, canonicalJson(source));
-    this.database.connection.prepare(`DELETE FROM source_index_dependencies WHERE workspace_id=? AND root_key=?`)
-      .run(source.target.workspace_id, source.root_key);
-    const insert = this.database.connection.prepare(`INSERT INTO source_index_dependencies
-      (workspace_id,root_key,dependency_record_id,dependency_source_id)
-      SELECT workspace_id,?,record_id,source_id FROM source_records WHERE workspace_id=? AND record_id=?`);
-    // INSERT ... SELECT keeps all identity bytes inside SQLite; no source metadata/body is hydrated.
-    for (const id of dependencies) {
-      insert.run(source.root_key, source.target.workspace_id, id);
-      resources.work++;
-    }
-    return true;
-  }
-
   private persistLexical(source: SourceIndexTarget, body: string, dependencies: readonly string[], budget: SourceIndexBudget,
     resources: { work: number; native_bytes: number }): boolean {
-    if (!this.persistRoot(source, dependencies, budget, resources)) return false;
+    if (!persistSourceIndexRoot(this.database, source, dependencies, budget, resources)) return false;
     this.database.connection.prepare(`INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
       VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
       body_bytes=excluded.body_bytes,body=excluded.body`).run(source.target.workspace_id, source.root_key,

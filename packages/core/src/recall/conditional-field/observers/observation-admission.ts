@@ -59,9 +59,13 @@ function scopePrincipal(
   return { kind: admission.mode };
 }
 
+export function sourceScopeEligible(authorized: readonly string[] | null | undefined, scopeClass: string | undefined): boolean {
+  const principal = scopePrincipal(authorized);
+  return principal.kind !== "denied" && !namedScopesExclude(principal, scopeClass);
+}
+
 function namedScopesExclude(principal: ScopePrincipal, scopeClass: string | undefined): boolean {
-  return principal.kind === "named"
-    && (scopeClass === undefined || !principal.scopes.includes(scopeClass));
+  return principal.kind === "named" && (scopeClass === undefined || !principal.scopes.includes(scopeClass));
 }
 
 function sourceValidityActiveAt(
@@ -92,7 +96,7 @@ export function sourceFactEligible(
   if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
   if (row.retention_state === "tombstoned") return false;
   if (!sourceValidityActiveAt(row, asOf)) return false;
-  return !namedScopesExclude(principal, row.scope_class);
+  return sourceScopeEligible(authorizedScopes, row.scope_class);
 }
 
 export function sourceRootEligible(
@@ -104,7 +108,7 @@ export function sourceRootEligible(
   if (row.body_erased === true) return false;
   const asOf = input.as_of ?? input.query.interpretation_clock;
   if (!sourceValidityActiveAt(row, asOf)) return false;
-  return !namedScopesExclude(principal, row.scope_class);
+  return sourceScopeEligible(input.authorized_scopes, row.scope_class);
 }
 
 /** One hypothesis packet admits only its own interpretation rows. */
