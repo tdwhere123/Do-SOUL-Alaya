@@ -151,7 +151,11 @@ function* canonicalStructureChunks<T>(value: unknown, scalar: (value: unknown) =
         // Match Array.map(...).join: undefined and holes contribute an empty slot.
         const child = value[index];
         if (child !== undefined && typeof child !== "function" && typeof child !== "symbol") {
-          yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
+          // A scalar needs a visit and its encoding, not another recursive generator.
+          if (child === null || typeof child !== "object") {
+            meter?.charge(1, 0, "canonical identity traversal");
+            yield scalar(child);
+          } else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
         }
       }
       yield token("]");
@@ -168,7 +172,11 @@ function* canonicalStructureChunks<T>(value: unknown, scalar: (value: unknown) =
         if (index) yield token(",");
         yield scalar(key);
         yield token(":");
-        yield* canonicalChunks((value as Record<string, unknown>)[key], scalar, token, meter, ancestors, prepared, planner, execution);
+        const child = (value as Record<string, unknown>)[key];
+        if (child === null || typeof child !== "object") {
+          meter?.charge(1, 0, "canonical identity traversal");
+          yield scalar(child);
+        } else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
       }
       yield token("}");
     }

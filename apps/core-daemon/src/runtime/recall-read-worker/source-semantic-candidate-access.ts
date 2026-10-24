@@ -23,7 +23,7 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import type { SourceSemanticRequestExecution } from "./source-semantic-reasoning.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-recall-source-text.js";
-import { acquireSourceSemanticIndex, type NativeSourceRouteCaptures } from "./source-semantic-index-acquisition.js";
+import { acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
 import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
 import { observeSourceRecallAccess, orderSourceRecallObservations, readSourceRecallHeaders, navigateSourceRecallHeaders } from "./source-recall-access.js";
 import { bindAccessPoolIdentity, sourceSemanticObservationAccounting,
@@ -39,7 +39,6 @@ export type SourceSemanticAccessPool<Access extends SourceSemanticReadableAccess
   descriptors: readonly SourceSemanticHandleDescriptor[];
   access: Access extends SourceSemanticAccessReceipt ? Omit<SourceSemanticAccessReceipt, "trace"> : Omit<SourceSemanticProfiledAccessReceipt, "trace">;
   retainedWitness?: SourceSemanticRetainedNominationWitness;
-  nativeCaptures?: NativeSourceRouteCaptures;
   catalogPositions?: readonly (readonly [string, number])[];
   accessHint?: string;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
@@ -93,7 +92,6 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   let retainedWitness: SourceSemanticRetainedNominationWitness | undefined;
   meter.charge(1, 64, "source catalog position map");
   const catalogPositions = new Map<string, number>();
-  let nativeCaptures: NativeSourceRouteCaptures | undefined;
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter, accessHint);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = meter.child(sourceRecallPhaseAllowance(meter, "observation"), "observation");
@@ -134,7 +132,6 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
             canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost };
           const observed = acquireAtCatalogSeam(acquisitionInput, next, policy, unionCompletion);
           retainedWitness = observed.witness;
-          nativeCaptures = "captures" in observed ? observed.captures : undefined;
           releaseCanonical = observed.releaseCanonical; acquisition = observed.phase;
           sourceReader = observed.sourceReader; canonicalRead = observed.canonicalRead; canonicalRecord = observed.canonicalRecord;
           return observed.nominations;
@@ -143,6 +140,9 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     : restrictedSource(runtime, payload.workspace_id, sourceId, authorized, observation);
   if (sourceId !== undefined) for (const record of sources.sources) beforeRetain(record);
   const records = sources.sources;
+  meter.charge(catalogPositions.size, 64 + 24 * catalogPositions.size, "retained catalog position references");
+  const positions = [...catalogPositions];
+  unionCompletion.metadata({ catalogPositions: positions });
   if (canonicalRead !== undefined && records[0] !== canonicalRecord) {
     throw new CoreError("CONFLICT", "canonical source observation no longer matches the admitted catalog");
   }
@@ -168,7 +168,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
           policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
           suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint, sourcePreviewExtents,
           phases: { preparation: prepare, acquisition: observation.acquisition ?? acquisition as SourceSemanticReadableAcquisition },
-          retainedWitness,
+          retainedWitness, catalogPositions: positions,
           borrowPreparation: completion.executionOf,
           acquisitionCapture: !Array.isArray(acquisition) ? acquisition as SourceSemanticAcquisitionPhase : undefined
         }); }, sourcePreviewExtents, beforeRetain, unionCompletion,
@@ -181,7 +181,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   return finalizeObservedSourceAccess(runtime, payload.workspace_id, authorized, meter, policy, policyName, records, sources, interpretations,
     sourceRows, byId, stops, original, query, budget, sourceId,
     prepare, observation.acquisition ?? acquisition as SourceSemanticReadableAcquisition, observation,
-    sourcePreviewExtents, accessHint, identity, retainedWitness, catalogPositions, nativeCaptures);
+    sourcePreviewExtents, accessHint, identity, retainedWitness, positions);
   } finally {
     // The prepared identity survives completion-hold release but never the request.
     identity?.close(); identity = undefined;
@@ -201,7 +201,9 @@ function acquireAtCatalogSeam(input: Parameters<typeof acquireSourceSemanticInde
   let sourceReader: SqliteFieldSourceRecordRepo | undefined;
   let canonicalRead: ReturnType<typeof beginCanonicalSourceText>;
   try {
-    if (!("witness" in observed)) input.metadataMeter.charge(witness.length, 64 + witness.length * 8, "retained route witness references");
+    // One paid immutable witness survives in the pool; quotes and both leases borrow
+    // it instead of retaining another expanded acquisition result per handle.
+    input.metadataMeter.retain(witness, "retained route witness", "immutable");
     if (next !== null) {
       releaseCanonical();
       sourceReader = new SqliteFieldSourceRecordRepo(input.runtime.database, fieldContractSha256);
@@ -225,8 +227,7 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
   preparation: SourceSemanticAccessReceipt["phases"][1], acquisition: SourceSemanticReadableAcquisition,
   observation: SourceSemanticReadBudget, sourcePreviewExtents?: SourceSemanticPreviewExtents, accessHint?: string,
   identity?: PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases>,
-  retainedWitness?: SourceSemanticRetainedNominationWitness, catalogPositions?: ReadonlyMap<string, number>,
-  nativeCaptures?: NativeSourceRouteCaptures): SourceSemanticReadableAccessPool {
+  retainedWitness?: SourceSemanticRetainedNominationWitness, catalogPositions?: readonly (readonly [string, number])[]): SourceSemanticReadableAccessPool {
   const { orderedSources, orderedInterpretations } = orderSourceRecallObservations(records, sourceRows,
     interpretations.rows, stops, meter, rows => policy.order(rows, meter), count => {
       const cost = SourceSemanticReadBudget.signalReconciliationCost(count);
@@ -246,9 +247,7 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
   for (let index = 0; index < selectedSources.length; index++) selectedSources[index] = byId.get(orderedSources[index]!.record_id)!;
   const descriptors = new Array<SourceSemanticHandleDescriptor>(orderedInterpretations.length);
   for (let index = 0; index < descriptors.length; index++) descriptors[index] = interpretations.descriptors.get(orderedInterpretations[index]!.interpretation_id)!;
-  meter.charge(catalogPositions?.size ?? 0, 64 + 24 * (catalogPositions?.size ?? 0), "retained catalog position references");
-  const pool = { sources: selectedSources, descriptors,
-    nativeCaptures, catalogPositions: [...(catalogPositions ?? [])],
+  const pool = { sources: selectedSources, descriptors, catalogPositions,
     access, ...(retainedWitness === undefined ? {} : { retainedWitness }), ...(accessHint === undefined ? {} : { accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
     sourcePages: sources.pages, interpretationPages: interpretations.pages };

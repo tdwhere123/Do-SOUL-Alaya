@@ -193,7 +193,9 @@ it("prices fixed instruction blocks once, keeps first structure in planning only
   // Four opcode blocks at 256+128+88 and four 129-slot reference arrays at 64+129*8.
   expect(planning.bytesFor("canonical prepared opcode block")).toBe(4 * 472);
   expect(planning.bytesFor("canonical prepared scalar block")).toBe(4 * 1096);
-  expect(planning.bytesFor("canonical identity traversal")).toBe((55 + 201 + 1) * 64);
+  // Six objects/one array in preparation, 34 objects/17 arrays in acquisition.
+  // Scalar visits do not instantiate recursive generator frames.
+  expect(planning.bytesFor("canonical identity traversal")).toBe((7 + 51 + 1) * 64);
   expect(planning.bytesFor("canonical identity key ordering")).toBe((6 + 34 + 1) * 64 + (53 + 175 + 2) * 16);
   expect(future.bytesFor("canonical identity traversal")).toBe(64);
   expect(future.bytesFor("canonical identity key ordering")).toBe(96);
@@ -202,7 +204,7 @@ it("prices fixed instruction blocks once, keeps first structure in planning only
   expect(future.bytesFor("canonical identity scalar encoding")).toBe(scalarBytes);
   expect(planning.bytesFor("canonical identity scalar encoding")).toBe(0);
   // 7,600 Protocol overhead; daemon separately owns its 128-byte borrower allocation.
-  expect(planning.spentBytes).toBe(7600 + 22592 + 160 + 64 + 176);
+  expect(planning.spentBytes).toBe(7600 + 22592 - 198 * 64 + 160 + 64 + 176);
   const actual = new Charges({ work_units: future.spentWork, memory_bytes: future.spentBytes });
   const keys = vi.spyOn(Object, "keys"), encoding = vi.spyOn(JSON, "stringify");
   let chunks: string[];

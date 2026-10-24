@@ -13,7 +13,7 @@ import { canonicalJson, SourceSemanticAccessReceiptSchema, SourceSemanticExecuti
 } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { listEligibleSemanticSources } from "../../../runtime/recall-read-worker/source-recall-catalog.js";
-import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
+import { readSemanticLease, sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { acquireSourceSemanticIndex } from "../../../runtime/recall-read-worker/source-semantic-index-acquisition.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
@@ -204,7 +204,7 @@ it("checks the entire nominated target tuple without redirecting a mismatched ro
 
 it("keeps useful source observation and real v2 phase evidence inside the original small native preparation budget", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
-    const budget = { ...QUERY_BUDGET, memory_bytes: 300_000 };
+    const budget = { ...QUERY_BUDGET, memory_bytes: 300_000 }, worker = runtime(fixture);
     const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, supplemental_navigation: "x".repeat(1024),
       signal: new AbortController().signal, remainingMs: () => 60_000 });
     const reserve = SourceSemanticResourceLedger.prototype.reserve;
@@ -217,7 +217,7 @@ it("keeps useful source observation and real v2 phase evidence inside the origin
       }
     });
     const result = (() => {
-      try { return runSourceSemanticWorker(runtime(fixture), { workspace_id: WS, as_of: CLOCK,
+      try { return runSourceSemanticWorker(worker, { workspace_id: WS, as_of: CLOCK,
         authorized_scopes: SCOPES, prepared_query: prepared,
         request: { ...preparation, access_hint: "x".repeat(1024), budget } }); }
       catch (error) { throw new Error(`native preparation failed: ${JSON.stringify(refusals)}`, { cause: error }); }
@@ -234,8 +234,11 @@ it("keeps useful source observation and real v2 phase evidence inside the origin
       .toEqual(sourceSemanticAccessPhases(result.access!).acquisition);
     const { pool_id, trace: _trace, phases: _phases, ...fields } = result.access!;
     const expanded = { ...fields, ...sourceSemanticAccessPhases(result.access!) };
+    const retained = readSemanticLease(worker, { workspace_id: WS, as_of: CLOCK }, result.query_handle!, ["project"], "query");
+    expect(retained.access_pool?.retainedWitness).toHaveLength(2);
     expect(pool_id).toBe(`sha256:${fieldContractSha256(canonicalJson({ receipt: expanded,
-      workspace: WS, authorized: ["project"], revision: sourceSemanticRevision(runtime(fixture)) }))}`);
+      workspace: WS, authorized: ["project"], revision: sourceSemanticRevision(worker),
+      retained_witness: retained.access_pool!.retainedWitness }))}`);
     expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
     expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
   });

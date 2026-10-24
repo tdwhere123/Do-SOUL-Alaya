@@ -5,8 +5,9 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { SourceSemanticResourceExhausted, sourceSemanticAccessPhases, sourceSemanticExecution } from "@do-soul/alaya-protocol";
-import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
+import { SourceSemanticResourceExhausted, sourceSemanticAccessPhases, sourceSemanticExecution,
+  SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, ORDINARY_NATIVE_FIELD_RESULT_VERSION } from "@do-soul/alaya-protocol";
+import { createSourceSemanticAccessPolicy, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
@@ -105,7 +106,8 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
       let error: unknown;
       try { reserveEmptyInterpretationCompletion({ runtime, parent, child, records: observed.sources,
         sourcePages: observed.sourcePages, policy: "query-conditioned-v1", budget: ACCESS_BUDGET,
-        orderCost: order.orderCost, leaseContext: context, phases }); }
+        orderCost: order.orderCost, leaseContext: context, phases,
+        retainedWitness: observed.retainedWitness, catalogPositions: observed.catalogPositions }); }
       catch (caught) { error = caught; }
       finally { parent.absorb(child); }
       return { parent, child, error };
@@ -190,7 +192,22 @@ it.each([0, 1])("finishes maximum-length hinted preparation for %i raw sources w
     expect(prepared.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
     const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
       query_handle: prepared.query_handle!, semantic_correspondences: [], budget, output_byte_limit: 1_000_000 });
-    expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
+    expect(recalled.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
+    if (recalled.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) throw new Error("field library delivery expected");
+    expect(recalled.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+    // Live field delivery does not manufacture the archived discovery.access receipt.
+    // Its request identity retains the frozen hint, and the lease still enforces
+    // the exact preparation budget even though that receipt is not public output.
+    expect(recalled.request_identity).toBe(sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK,
+      authorized_scopes: ["project"], original_query: "orchid", query_semantics_status: prepared.query_semantics_status,
+      access_hint: "x".repeat(1024), semantic_correspondences: [], budget,
+      output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1" }));
+    expect(recalled.index.entries.map(row => row.target.kind === "source_evidence" ? row.target.root_id : null))
+      .toEqual(prepared.access!.source_candidates.map(row => row.record_id));
     expect(recalled.total_count).toBe(count);
+    await expect(accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle!, semantic_correspondences: [],
+      budget: { ...budget, memory_bytes: budget.memory_bytes - 1 }, output_byte_limit: 1_000_000 }))
+      .rejects.toThrow(/access policy or budget changed/u);
   });
 });

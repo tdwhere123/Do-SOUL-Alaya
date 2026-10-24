@@ -34,7 +34,8 @@ export function listEligibleSemanticSources(database: StorageDatabase, workspace
     try {
       const tuple = semanticSourceTupleIdentity(record, meter);
       if (accepted.has(tuple)) return "skipped" as const;
-      union?.beforeRetain(record, tuple); meter.retain(record, "current source catalog"); accepted.add(tuple); sources.push(record);
+      meter.retain(record, "current source catalog", "immutable");
+      union?.beforeRetain(record, tuple); accepted.add(tuple); sources.push(record);
       meter.observer?.event("union_admission", meter.phase, () => ({ route, position: sources.length - 1,
         record_id: record.identity, source_id: record.source_id, source_version: record.source_version, content_digest: record.content_digest }));
       return "accepted" as const;

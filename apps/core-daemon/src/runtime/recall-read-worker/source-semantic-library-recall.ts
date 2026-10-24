@@ -1,6 +1,6 @@
 import {
   SNAPSHOT_PIN_NATIVE_WORK, SourceSemanticFieldLibraryWorkerResultSchema, canonicalJson, sourceGoldRootIdentity, sourceRecallTarget,
-  sourceSemanticExecution, type SourceEvidenceTarget, type SourceSemanticAcquisitionPhase,
+  sourceSemanticExecution, sourceSemanticAccessPhases, type SourceEvidenceTarget, type SourceSemanticAcquisitionPhase,
   type SourceSemanticExecution, type SourceSemanticQuery, type SourceSemanticQueryStatus,
   type SourceSemanticResourceLedger, type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult
@@ -178,7 +178,7 @@ function libraryReaders(runtime: RecallReadWorkerRuntime, payload: SourceSemanti
   const adapter: ObserverReaders = {
     ...base,
     nominateSources: input => {
-      const reused = reusedNomination(boundPool, input.sourceId);
+      const reused = reusedNomination(boundPool, input.sourceId, meter);
       const nomination = reused ?? base.nominateSources!(input);
       if (nomination.result !== null && reused === undefined) capture.result = nomination.result;
       const native = nomination.result?.nominations.map(row => row.source.target) ?? [];
@@ -224,11 +224,16 @@ function libraryReaders(runtime: RecallReadWorkerRuntime, payload: SourceSemanti
  * hint lane and source scope without a second acquisition or a post-hoc selector.
  */
 function reusedNomination(pool: SourceSemanticLease["access_pool"] | undefined,
-  sourceId: string | undefined) {
-  const captures = pool?.nativeCaptures;
-  if (captures === undefined) return undefined;
-  const rows = [captures.original, captures.hint]
-    .filter((row): row is NonNullable<typeof row> => row !== undefined);
+  sourceId: string | undefined, meter: SourceSemanticReadBudget) {
+  if (pool === undefined || pool.access.contract !== "source-semantic-access-v2") return undefined;
+  // Compact phases and the full occurrence witness are the retained authorities.
+  // Decode their captured results rather than keeping a second expanded result
+  // graph in every preparation lease. This is reuse, never fresh acquisition.
+  const { acquisition } = sourceSemanticAccessPhases(pool.access, meter);
+  const supplemental = acquisition.supplemental ?? [];
+  const rows = [acquisition, ...supplemental].flatMap((phase, index) =>
+    phase.result === null ? [] : [{ result: phase.result,
+      witness: (pool.retainedWitness ?? []).filter(row => row.view === (index === 0 ? "original" : "hint")) }]);
   if (rows.length === 0) return undefined;
   return nominationFromCaptures(rows, sourceId, {
     ...(pool?.catalogPositions === undefined ? {} : { catalog_positions: Object.fromEntries(pool.catalogPositions) }),

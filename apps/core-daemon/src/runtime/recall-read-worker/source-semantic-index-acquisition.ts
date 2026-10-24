@@ -10,7 +10,7 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
 
 type Route = Readonly<{ navigation: string; vector: SourceIndexQueryVector }>;
 type Allowance = SourceSemanticAcquisitionPhase["allowance"];
-export type NativeSourceRouteCaptures = Readonly<Partial<Record<"original" | "hint", ReturnType<SourceIndexAcquisition["nominateWithWitness"]>>>>;
+type NativeSourceRouteCaptures = Readonly<Partial<Record<"original" | "hint", ReturnType<SourceIndexAcquisition["nominateWithWitness"]>>>>;
 
 /** Original first, then a distinct hint with only the remaining SAME envelope. One canonical
  * quote survives both routes until the observation owner begins that source. No refill.

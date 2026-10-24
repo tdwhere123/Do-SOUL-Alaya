@@ -24,6 +24,7 @@ type Completion = Readonly<{
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery;
   phases?: Readonly<{ preparation: SourceSemanticCompactPreparation; acquisition: SourceSemanticReadableAcquisition }>;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
+  catalogPositions?: readonly (readonly [string, number])[];
   leaseCount?: 1 | 2;
 }> & SourceSemanticIdentityCaptures;
 type PreparedIdentity = PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases>;
@@ -60,6 +61,7 @@ function completionEnvelope(input: Completion, planning: SourceSemanticReadBudge
     memory_bytes: planning.spentBytes - beforeReceipt.memory_bytes };
   const access = { ...receipt, pool_id: DIGEST };
   const pool = { sources: records, descriptors: [], access, sourcePages: WIDE_SCALAR, interpretationPages: WIDE_SCALAR,
+    catalogPositions: input.catalogPositions ?? [],
     ...(input.retainedWitness === undefined ? {} : { retainedWitness: input.retainedWitness }),
     ...(input.sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents: input.sourcePreviewExtents }),
     ...(input.accessHint === undefined ? {} : { accessHint: input.accessHint }) };
@@ -155,12 +157,16 @@ export class SourceSemanticUnionCompletion {
 
   // Receipt, delivered trace, two query/page leases and current execution evidence.
   metadata(value: Readonly<{ preparation: SourceSemanticCompactPreparation }> | SourceSemanticReadableAcquisition |
-    Readonly<{ retainedWitness: SourceSemanticRetainedNominationWitness }>): void {
+    Readonly<{ retainedWitness: SourceSemanticRetainedNominationWitness }> |
+    Readonly<{ catalogPositions: readonly (readonly [string, number])[] }>): void {
+    const copies = "retainedWitness" in value || "catalogPositions" in value ? 2 : 5;
     this.reserve(planning => {
       const payload = SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning, "borrow");
-      // Retention borrows five references, but each future lease still scans the actual
-      // phase for capacity. Immutable ownership does not exempt that separate operation.
-      const retention = SourceSemanticResourceLedger.quoteRetain([payload, payload, payload, payload, payload], planning.remaining(), planning);
+      // Phases survive in receipt, trace, two leases and execution; pool-only
+      // metadata survives in the two leases. Each future lease must still scan
+      // actual contents for capacity, even when retention borrows owned data.
+      const references = copies === 2 ? [payload, payload] : [payload, payload, payload, payload, payload];
+      const retention = SourceSemanticResourceLedger.quoteRetain(references, planning.remaining(), planning);
       const sizing = SourceSemanticResourceLedger.measureCanonicalJsonLength(value, planning.remaining(), planning);
       return add(retention, sizing, sizing);
     });
@@ -173,7 +179,7 @@ export class SourceSemanticUnionCompletion {
       signal: { source_text_score: WIDE_SCALAR, interpretation_reading_score: WIDE_SCALAR } };
     // Lookup, order input/output references, receipt plus two retained query/page pool copies.
     this.reserve(planning => {
-      const recordPrice = SourceSemanticResourceLedger.quoteRetain(record, planning.remaining(), planning);
+      const recordPrice = SourceSemanticResourceLedger.quoteRetain(record, planning.remaining(), planning, "borrow");
       const rowPrice = SourceSemanticResourceLedger.quoteRetain(row, planning.remaining(), planning);
       const sizing = SourceSemanticResourceLedger.measureCanonicalJsonLength([record, row], planning.remaining(), planning);
       return add(SourceSemanticResourceLedger.quoteRetain([recordPrice, recordPrice, rowPrice, rowPrice, rowPrice, rowPrice],

@@ -61,7 +61,9 @@ it("removes only the two phase expansions and repeated structure, preserving exa
     "source phase acquisition expansion traversal", "source phase expanded acquisition allocation"]) {
     expect(planning.bytesFor(phase)).toBe(0); expect(actual.bytesFor(phase)).toBe(0);
   }
-  expect(ordinary.spentBytes - actual.spentBytes).toBe(21408 + 22592 - 128);
+  // The phase inventories have 198 scalar children emitted inline, without
+  // recursive generator frames. Only their remaining container structure is saved.
+  expect(ordinary.spentBytes - actual.spentBytes).toBe(21408 + 22592 - 198 * 64 - 128);
   expect(actual.bytesFor("canonical prepared replay frame")).toBe(128);
   expect(actual.bytesFor("canonical identity scalar encoding")).toBe(ordinary.bytesFor("canonical identity scalar encoding"));
   expect(actual.bytesFor("canonical identity hash handoff")).toBe(ordinary.bytesFor("canonical identity hash handoff"));

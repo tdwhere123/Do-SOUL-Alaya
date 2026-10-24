@@ -22,10 +22,11 @@ function quoteUnpreparedChunks(value: unknown, execution: SourceSemanticResource
 }
 
 // Independent preimage: {"a":[,0,false],"z":"A\\n原🙂\\ud800"}.
-// Five traversal frames (320), two ordered keys (96), five scalar encodings
-// (30+26+34+30+52), and fourteen UTF-8 handoffs (39) cost 627 bytes.
+// Two container traversal frames (128), two ordered keys (96), five scalar encodings
+// (30+26+34+30+52), and fourteen UTF-8 handoffs (39) cost 435 bytes.
+// Scalar child visits still cost work but create no recursive generator frame.
 const VALUE = { z: "A\n原🙂\ud800", a: [undefined, 0, false] };
-const EXACT = { work_units: 27, memory_bytes: 627 };
+const EXACT = { work_units: 27, memory_bytes: 435 };
 const AMPLE = { work_units: 10_000, memory_bytes: 1_000_000 };
 
 it("quotes exact canonical execution and hash handoffs without creating a hash or encoded strings", () => {
@@ -37,10 +38,10 @@ it("quotes exact canonical execution and hash handoffs without creating a hash o
     expect(createHash).not.toHaveBeenCalled();
   } finally { stringify.mockRestore(); }
   expect(future.remaining()).toEqual({ work_units: 0, memory_bytes: 0 });
-  // Ordinary traversal/key frames and quotation cost 480; the empty registry
+  // Ordinary traversal/key frames and quotation cost 288; the empty registry
   // and its quotation frame add 128+64, without changing future canonical costs.
   expect(planning.spentWork).toBe(29);
-  expect(planning.spentBytes).toBe(672);
+  expect(planning.spentBytes).toBe(480);
   const actual = new SourceSemanticResourceLedger(EXACT);
   expect(fieldContractSha256Chunks(canonicalJsonChunks(VALUE, actual), actual))
     .toBe("dc3bae5dafe47b6b8223f5edb376824c92a68fab7de2864cb13d68c1c858b0c6");
@@ -62,10 +63,10 @@ it.each([{ ...EXACT, work_units: EXACT.work_units - 1 }, { ...EXACT, memory_byte
 
 it("keeps already executed quotation scans charged when a planning bound refuses", () => {
   const future = new SourceSemanticResourceLedger(AMPLE);
-  const planning = new SourceSemanticResourceLedger({ work_units: 28, memory_bytes: 672 });
+  const planning = new SourceSemanticResourceLedger({ work_units: 28, memory_bytes: 480 });
   expect(() => quoteFieldContractSha256Chunks(quoteUnpreparedChunks(VALUE, future, planning), future, planning))
     .toThrow(SourceSemanticResourceExhausted);
   expect(planning.spentWork).toBe(28);
-  expect(planning.spentBytes).toBe(672);
+  expect(planning.spentBytes).toBe(480);
   expect(createHash).not.toHaveBeenCalled();
 });
