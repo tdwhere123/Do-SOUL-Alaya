@@ -8,14 +8,10 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal, runOutsideBenchDaemonScope, settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import Database from "better-sqlite3";
-import { AlayaError, SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { AlayaError, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
-import { startBenchDaemon } from "../../../harness/daemon.js";
 import * as benchDaemon from "../../../harness/daemon.js";
-import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { snapshotPublishLockPath } from "../../../runs/snapshot/freeze/publish-lock.js";
-import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
 import * as sourceCensus from "../../../runs/snapshot/source-records/census.js";
 import * as sourcePublication from "../../../runs/snapshot/source-records/publish.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -34,6 +30,7 @@ import * as semanticReplay from "../../../runs/recall-measurement/replay.js";
 import { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
 import { seedRetainedSemanticCache } from "../../runs/semantic-cache/retained-cache.test-support.js";
 import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
+import { expectArchivedFieldRefusal, expectPublishedSourceDelivery } from "./source-records-publication.test-support.js";
 
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
@@ -146,7 +143,7 @@ describe("complete-source census and publication", () => {
   // This correctness E2E covers development and formal arms across multiple cold daemon sessions.
   // Hosted macOS phase receipts reached formal replay at 60s with 56s of CPU
   // work, so it needs the same bounded cold-start headroom as Windows.
-  it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async (testContext) => {
+  it("keeps original question haystacks isolated through native source delivery and archived scoring refusal", async (testContext) => {
     const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
       testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
     const benchPhase = phases.phase;
@@ -178,9 +175,15 @@ describe("complete-source census and publication", () => {
     expect(blockedMeasurement.result.rows.filter(row => row.measurement_path !== null)
       .every(row => isContainedPath(evaluatorRoot, row.measurement_path!))).toBe(true);
     expect(readdirSync(root).some(name => name.startsWith("measurement-"))).toBe(false);
-    // An unavailable Q interpretation still permits the original-query raw source hit.
-    expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, hits: 1, unknown: 0,
-      lower_bound: 1, upper_bound: 1 });
+    // Unavailable Q does not revoke source access; field pages cannot be scored by the archived evaluator.
+    expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, hits: 0, misses: 0, unknown: 1,
+      lower_bound: 0, upper_bound: 1 });
+    for (const row of blockedMeasurement.result.rows.filter(row => row.selected)) expectArchivedFieldRefusal(row, blockedReplay.result);
+    for (const row of blocked.result.rows) {
+      if (row.status !== "prepared") throw new Error("question publication required");
+      await benchPhase("native.source-delivery", () => expectPublishedSourceDelivery(join(f.root, `native-${row.question_id}`),
+        readChainArtifact(row.publication_path), census.records.filter(source => source.question_id === row.question_id)));
+    }
     const published = blocked.result.rows[0]!;
     if (published.status !== "prepared") throw new Error("question publication required");
     unlinkSync(published.publication_path);
@@ -205,8 +208,8 @@ describe("complete-source census and publication", () => {
     const measured = await benchPhase("new-q.measure", () => measureLongMemEvalSemanticRun(root, replayed.path, evaluatorRoot));
     expect(measured.result).toMatchObject({ contract: "longmemeval-semantic-measurement-v2", order_policy: "native_canonical_source_root_order" });
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
-    expect(measured.result.rows.find((row) => row.selected && row.cohort === "answerable")?.reason).toBeNull();
-    expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 1, misses: 0, unknown: 0, target_decision: "development_only" });
+    for (const row of measured.result.rows.filter(row => row.selected)) expectArchivedFieldRefusal(row, replayed.result);
+    expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 0, misses: 0, unknown: 1, target_decision: "development_only" });
     expect(measured.result.rows).toHaveLength(3);
     expect(measured.result.rows.find((row) => row.question_id === "absent-interpretation_abs")?.outcome).toBe("uncalibrated");
     expect(measured.result.rows.find((row) => row.question_id === "repeated-text")?.outcome).toBe("not_selected_development");
@@ -228,13 +231,14 @@ describe("complete-source census and publication", () => {
     const formalPrepared = await benchPhase("formal.prepare", () => prepareLongMemEvalSemanticRun(formalRoot));
     const formalReplay = await benchPhase("formal.replay", () => replayLongMemEvalSemanticRun(formalRoot, formalPrepared.path));
     const formalMeasurement = await benchPhase("formal.measure", () => measureLongMemEvalSemanticRun(formalRoot, formalReplay.path, evaluatorRoot));
-    // This legacy source-only fixture observes the native raw-query fallback; it does not approve a new formal arm.
-    expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 2, unknown: 0, target_decision: "achieved" });
+    // A known unsupported delivery family cannot certify a formal target or consult answer gold.
+    expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2, target_decision: "unresolved" });
     expect(formalMeasurement.result.formal_target).toMatchObject({ eligible: 2, strict_over_90_required_hits: 2,
-      status: "achieved", additional_confirmed_hits_needed: 0 });
+      status: "unresolved", additional_confirmed_hits_needed: 2 });
+    for (const row of formalMeasurement.result.rows) expectArchivedFieldRefusal(row, formalReplay.result);
     expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
     expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
-      .every(row => row.attribution.layer === "query_unavailable")).toBe(true);
+      .every(row => row.attribution.layer === "invalid_measurement")).toBe(true);
   }, ["win32", "darwin"].includes(process.platform) ? 120_000 : 60_000);
 
   it("admits every physical question path before any evaluator output and requires a separate chain CLI root", async () => {
@@ -273,22 +277,28 @@ describe("complete-source census and publication", () => {
     expect(readdirSync(first.chain_root).some(name => name.startsWith("measurement-"))).toBe(false);
     expect(readdirSync(physicalQuestion).some(name => name.startsWith("measurement-"))).toBe(false);
     const measured = await measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot);
-    expect(measured.result.primary).toMatchObject({ eligible: 2, hits: 2, misses: 0, unknown: 0 });
+    expect(measured.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
+    for (const row of measured.result.rows) expectArchivedFieldRefusal(row, replay.result);
+    for (const row of replay.result.rows) {
+      if (row.status !== "replayed") throw new Error("question replay required");
+      await expectPublishedSourceDelivery(join(f.root, `native-${row.question_id}`), readChainArtifact(row.publication_path),
+        census.records.filter(source => source.question_id === row.question_id));
+    }
     const unavailableMember = replay.result.rows[1]!;
     if (unavailableMember.status !== "replayed") throw new Error("second question replay required");
     const retainedReplayBytes = readFileSync(unavailableMember.replay_path, "utf8");
     unlinkSync(unavailableMember.replay_path);
     const missing = await measureLongMemEvalSemanticRun(root, replay.path, join(f.root, "missing-member-evaluator"));
-    expect(missing.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    expect(missing.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
     expect(missing.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
       outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
-    expect(missing.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+    expectArchivedFieldRefusal(missing.result.rows.find(row => row.question_id === "first")!, replay.result);
     writeFileSync(unavailableMember.replay_path, "{");
     const corrupt = await measureLongMemEvalSemanticRun(root, replay.path, join(f.root, "corrupt-member-evaluator"));
-    expect(corrupt.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    expect(corrupt.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
     expect(corrupt.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
       outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
-    expect(corrupt.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+    expectArchivedFieldRefusal(corrupt.result.rows.find(row => row.question_id === "first")!, replay.result);
     writeFileSync(unavailableMember.replay_path, retainedReplayBytes);
     const planPath = join(unavailableMember.chain_root, "prepare.json");
     const planBytes = readFileSync(planPath);
@@ -297,8 +307,10 @@ describe("complete-source census and publication", () => {
       else writeFileSync(planPath, "{");
       const unavailable = await measureLongMemEvalSemanticRun(root, replay.path,
         join(f.root, `${state}-plan-evaluator`));
-      expect(unavailable.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
-      expect(unavailable.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+      expect(unavailable.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
+      expectArchivedFieldRefusal(unavailable.result.rows.find(row => row.question_id === "first")!, replay.result);
+      expect(unavailable.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
+        outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
       writeFileSync(planPath, planBytes);
     }
     const peerPublication = readChainArtifact(unavailableMember.publication_path) as { snapshot_path: string };
@@ -306,7 +318,10 @@ describe("complete-source census and publication", () => {
     await rename(peerPublication.snapshot_path, snapshotBackup);
     const staleSnapshot = await measureLongMemEvalSemanticRun(root, replay.path,
       join(f.root, "unavailable-snapshot-evaluator"));
-    expect(staleSnapshot.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    expect(staleSnapshot.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
+    expectArchivedFieldRefusal(staleSnapshot.result.rows.find(row => row.question_id === "first")!, replay.result);
+    expect(staleSnapshot.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
+      outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
     await rename(snapshotBackup, peerPublication.snapshot_path);
     const detailPath = measured.result.rows.find(row => row.question_id === "first")?.measurement_path;
     if (!detailPath) throw new Error("first source detail required");
@@ -364,6 +379,8 @@ describe("complete-source census and publication", () => {
     if (prepared.result.rows[0]?.status !== "prepared") throw new Error("admitted source must prepare");
     const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(prepared.result.rows[0].chain_root, "prepare.json")));
     expect(plan.queries[0]).toMatchObject({ status: "raw_ready", reason: "unattempted", query_semantics_unavailable: "absent" });
+    await expectPublishedSourceDelivery(join(f.root, "native-admitted"), readChainArtifact(prepared.result.rows[0].publication_path),
+      census.records.filter(source => source.question_id === "admitted"));
     const directory = join(root, "questions", "00001");
     const report = JSON.parse(readFileSync(join(directory, "library.sqlite.publication.json"), "utf8"));
     expect(report).toMatchObject({ census_count: 1, admitted_count: 0, rejected_count: 1,
@@ -372,7 +389,8 @@ describe("complete-source census and publication", () => {
     const replay = await replayLongMemEvalSemanticRun(root, prepared.path);
     expect(replay.result.rows[1]).toEqual(prepared.result.rows[1]);
     const measured = await measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot);
-    expect(measured.result.primary).toMatchObject({ eligible: 2, hits: 1, unknown: 1 });
+    expect(measured.result.primary).toMatchObject({ eligible: 2, hits: 0, misses: 0, unknown: 2 });
+    expectArchivedFieldRefusal(measured.result.rows.find(row => row.question_id === "admitted")!, replay.result);
     expect(measured.result.rows.find(row => row.question_id === rejectedId)).toMatchObject({ outcome: "unknown",
       measurement_path: null, mechanism: "not_exercised" });
     expect(frozen.selected).toHaveLength(2);
@@ -546,25 +564,8 @@ describe("complete-source census and publication", () => {
       expect(db.prepare("SELECT count(*) AS n FROM source_records").get()).toMatchObject({ n: 3 });
       expect(db.prepare("SELECT count(*) AS n FROM memory_entries").get()).toMatchObject({ n: 0 });
     } finally { db.close(); }
-    const restoreRoot = join(f.root, "restore");
-    restoreSnapshotToDataDir({ snapshotDbPath: report.snapshot_path, dataDirRoot: restoreRoot, expectedSha256: report.db_sha256 });
-    const daemon = await startBenchDaemon({
-      dataDirRoot: restoreRoot, workspaceId: report.workspace_id, runId: report.run_id, embeddingMode: "disabled"
-    });
-    try {
-      const response = await callMcpTool<SoulMemorySearchResponse>(daemon.mcpClient, "soul.recall", SoulMemorySearchRequestSchema.parse({
-        query: "Unrelated distractor lives in Suzhou.", max_results: 20, result_kind_view: "source_only",
-        scope_class: null, dimension: null, domain_tags: null, source_observed_at: AS_OF,
-        protocol_version: 1, supports_source_evidence: true,
-        supported_result_kinds: ["source_evidence"], supports_product_updates: true
-      }));
-      const roots = new Set(response.results.flatMap((result) =>
-        result.target.kind === "source_evidence" ? [result.target.root_id] : []));
-      expect(roots.size).toBe(3);
-      expect(roots).toEqual(new Set(report.sources.map((row) => row.record_id)));
-    } finally {
-      await daemon.shutdown();
-    }
+    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    await expectPublishedSourceDelivery(join(f.root, "restore"), report, census.records);
   }, 120000);
 });
 
