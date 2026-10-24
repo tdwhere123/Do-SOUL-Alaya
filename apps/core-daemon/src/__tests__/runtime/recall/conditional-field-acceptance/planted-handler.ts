@@ -1,14 +1,17 @@
 import { PassThrough } from "node:stream";
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import {
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  ScopeClass,
   hashContentDigest,
   hashSourceRecordId,
   type InformationIndex,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
-import { capableRecallConsumerDeclaration, RecallService, fieldContractSha256 } from "@do-soul/alaya-core";
-import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { capableRecallConsumerDeclaration, RecallService, SourceIndexLifecycle, fieldContractSha256 } from "@do-soul/alaya-core";
+import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, type StorageDatabase } from "@do-soul/alaya-storage";
+import { BUDGET as SOURCE_INDEX_BUDGET, configuration as sourceIndexConfiguration } from
+  "../../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../../cli/bridge.js";
 import { createToolsCommand } from "../../../../cli/tools.js";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -18,11 +21,8 @@ import { createDependencies } from
   "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { INTERPRETATION_CLOCK } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { WS } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
-import {
-  readersFor,
-  runRecall,
-  type SourceSlice
-} from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
+import { readersFor, type SourceSlice } from
+  "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
 
 export { readersFor, runRecall, plantDeployment, openBoundSlice, tombstone, stamp, setScope, setContent, plantNeedles, countingReaders, encodedRecall } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
 export type { SourceSlice } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
@@ -35,7 +35,7 @@ export function recallReadWorkerUrl(): URL {
 
 export function plantSourceRecord(database: StorageDatabase, body: string, sourceId = "speaker-a") {
   const content_digest = hashContentDigest(body, fieldContractSha256);
-  return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert({
+  const record = new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert({
     record_id: hashSourceRecordId({
       source_id: sourceId,
       source_version: "v1",
@@ -52,10 +52,24 @@ export function plantSourceRecord(database: StorageDatabase, body: string, sourc
     valid_to: null,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null,
-    scope_class: null,
+    scope_class: ScopeClass.PROJECT,
     attribution_context: null,
     source_body: body
   });
+  // Ordinary source delivery nominates prepared native lexical documents, not raw record scans.
+  // No vectors or embedding readiness are claimed by this provider-free fixture.
+  const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
+  const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
+  const generation = lifecycle.begin(lifecycle.select(WS, sourceIndexConfiguration()));
+  expect(lifecycle.capture(WS, generation.generation_id, 128, SOURCE_INDEX_BUDGET)
+    .generation.enumeration_complete).toBe(true);
+  const targets = repository.listTargets(WS, generation.generation_id, null, 128);
+  expect(targets.some((target) => target.target.root_id === record.record_id)).toBe(true);
+  for (const target of targets) {
+    expect(lifecycle.prepare(WS, generation.generation_id, target.root_key, SOURCE_INDEX_BUDGET).status)
+      .toBe("ready");
+  }
+  return record;
 }
 
 export async function recallThroughHandler(

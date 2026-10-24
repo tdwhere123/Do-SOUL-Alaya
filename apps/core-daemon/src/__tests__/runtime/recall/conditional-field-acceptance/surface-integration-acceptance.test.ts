@@ -17,6 +17,7 @@ afterAll(() => { isolation.restore(); });
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
+  ORDINARY_NATIVE_FIELD_RESULT_VERSION,
   QueryViewSchema,
   canonicalIndexEntryIdentity,
   memoryProductStateKey,
@@ -58,7 +59,6 @@ import {
   openBoundSlice,
   plantSourceRecord,
   recallReadWorkerUrl,
-  recallThroughHandler,
   toConsumer,
   type SourceSlice
 } from "./planted-handler.js";
@@ -160,7 +160,7 @@ async function callRecall(
     readonly max_results: number;
     readonly continuation?: InformationIndex["continuation"];
     readonly result_kind_view?: "mixed" | "memory_only" | "source_only";
-    readonly enumeration_policy?: "canonical" | "associative";
+    readonly enumeration_policy?: "native_query";
     readonly cap_contracts?: readonly AssociationCapContract[];
     readonly payload_continuation?: PayloadContinuationRequest;
   }>
@@ -258,7 +258,7 @@ function projectTypedUpdateIndex(snapshotId: string): InformationIndex {
   };
   const view = QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    enumeration_policy: "associative",
+    enumeration_policy: "native_query",
     result_kind_view: "mixed",
     include_routing_only: false,
     requested_roles: ["requested", "associated"],
@@ -288,7 +288,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     const record = plantSourceRecord(slice.database, SOURCE_BODY);
     const gardenBefore = slice.pendingGarden().length;
-    const mcp = await recallThroughHandler(slice, {
+    const handler = handlerFor(slice.database, serviceFor(slice.database));
+    const mcp = await callRecall(handler, {
       query: SOURCE_BODY,
       max_results: 32,
       result_kind_view: "source_only"
@@ -304,8 +305,10 @@ describe("CP09 worker MCP CLI surfaces", () => {
       evidence_object_id: null
     });
     expect(result.target.span).toBeDefined();
+    expect(mcp.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+    expect(mcp.index.entries.find((entry) => entry.target.kind === "source_evidence")?.navigation)
+      .toMatchObject({ contract: "native-query-navigation.v1", view: "original", operator: "source_lexical" });
 
-    const handler = handlerFor(slice.database, serviceFor(slice.database));
     const delivered = await callRecall(handler, {
       query: SOURCE_BODY,
       max_results: 32,
@@ -333,6 +336,12 @@ describe("CP09 worker MCP CLI surfaces", () => {
       }]
     }, context);
     expect(accepted.status).toBe("recorded");
+    const history = await new SqliteTrustStateRepo(slice.database).listUsageByDeliveryIds([delivered.delivery_id]);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.used_object_ids).toEqual([]);
+    expect(history[0]?.used_objects).toEqual([{
+      object_kind: "source_evidence", target: deliveredSource.target
+    }]);
     await expect(usage({
       delivery_id: delivered.delivery_id,
       usage_state: "used",
@@ -370,7 +379,7 @@ describe("CP09 worker MCP CLI surfaces", () => {
     const mcp = await callRecall(handler, {
       query: "yesterday failed deployment",
       max_results: 1,
-      enumeration_policy: "associative",
+      enumeration_policy: "native_query",
       cap_contracts: [identityAssociationCap()]
     });
     expect(mcp.page_purpose).toBe("update");
@@ -394,7 +403,7 @@ describe("CP09 worker MCP CLI surfaces", () => {
         dimension: null,
         domain_tags: null,
         max_results: 1,
-        enumeration_policy: "associative",
+        enumeration_policy: "native_query",
         cap_contracts: [identityAssociationCap()]
       }),
       "--workspace",
@@ -431,6 +440,9 @@ describe("CP09 worker MCP CLI surfaces", () => {
       expect(native.results.map((row) => row.object_kind).sort())
         .toEqual(direct.results.map((row) => row.object_kind).sort());
       expect(native.results.some((row) => row.object_kind === "source_evidence")).toBe(true);
+      expect(native.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+      expect(native.index.entries.find((entry) => entry.target.kind === "source_evidence")?.navigation)
+        .toMatchObject({ contract: "native-query-navigation.v1", view: "original", operator: "source_lexical" });
       expect(native.results.some((row) => row.object_id === MEM.r)).toBe(true);
       expect(native.results.find((row) => row.object_kind === "source_evidence")?.target)
         .toMatchObject({ root_kind: "source_record", root_id: record.record_id, evidence_object_id: null });
@@ -676,25 +688,26 @@ describe("CP09 worker MCP CLI surfaces", () => {
       }, context);
       expect(used.status).toBe("recorded");
 
-      if (sourceRow.target.span !== undefined && sourceRow.target.span.content_complete === false) {
-        const expanded = await callRecall(handler, {
-          query: SOURCE_BODY,
-          max_results: 8,
-          result_kind_view: "source_only",
-          continuation: sourceOnly.index.continuation,
-          payload_continuation: {
-            schema_version: 1,
-            purpose: "payload_expansion",
-            target: sourceRow.target,
-            start_offset: sourceRow.target.span.content_end
-          }
-        });
-        const expandedRow = expanded.results.find((row) => row.object_kind === "source_evidence");
-        if (expandedRow?.target.kind !== "source_evidence") throw new Error("matrix payload continuation missing");
-        expect(expandedRow.target.span?.content_start).toBe(sourceRow.target.span.content_end);
-        expect(expandedRow.target.span?.content_end ?? 0)
-          .toBeGreaterThan(sourceRow.target.span.content_end);
-      }
+      expect(sourceRow.target.span?.content_complete).toBe(false);
+      expect(sourceOnly.index.continuation).not.toBeNull();
+      if (sourceRow.target.span === undefined) throw new Error("expected retained source span");
+      const expanded = await callRecall(handler, {
+        query: SOURCE_BODY,
+        max_results: 8,
+        result_kind_view: "source_only",
+        continuation: sourceOnly.index.continuation,
+        payload_continuation: {
+          schema_version: 1,
+          purpose: "payload_expansion",
+          target: sourceRow.target,
+          start_offset: sourceRow.target.span.content_end
+        }
+      });
+      const expandedRow = expanded.results.find((row) => row.object_kind === "source_evidence");
+      if (expandedRow?.target.kind !== "source_evidence") throw new Error("matrix payload continuation missing");
+      expect(expandedRow.target.span?.content_start).toBe(sourceRow.target.span.content_end);
+      expect(expandedRow.target.span?.content_end ?? 0)
+        .toBeGreaterThan(sourceRow.target.span.content_end);
 
       const page = await callRecall(handler, { query: "needle matrix", max_results: 1 });
       expect(page.index.continuation).not.toBeNull();

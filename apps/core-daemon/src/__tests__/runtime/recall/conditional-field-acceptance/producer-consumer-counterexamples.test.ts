@@ -189,7 +189,10 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
         min_envelope: 1,
         page_budget: 800
       })
-    })).toThrow(/Recall delivery retention budget exhausted/);
+    })).toThrow(expect.objectContaining({ details: expect.objectContaining({
+      outcome: "resource_exhausted", resource: "encoded_page", available_bytes: 1,
+      required_bytes: expect.any(Number)
+    }) }));
     const long = "y".repeat(1400);
     const complete = runRecall(slice, { query_text: "needle" });
     expect(complete.entries.length).toBeGreaterThan(0);
