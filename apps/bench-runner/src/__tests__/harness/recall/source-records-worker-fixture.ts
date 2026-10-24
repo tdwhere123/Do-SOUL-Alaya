@@ -14,21 +14,25 @@ import { BUDGET, configuration } from "../../../../../../packages/storage/src/__
 export function prepareSourceRecordLexicalIndex(dataDir: string, workspaceId: string): void {
   const filename = join(dataDir, BENCH_DAEMON_DB_FILENAME);
   const database = new StorageDatabase(filename, new Database(filename));
-  try {
-    const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
-    const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
-    const generation = lifecycle.begin(lifecycle.select(workspaceId, configuration()));
-    const captured = lifecycle.capture(workspaceId, generation.generation_id, 128, BUDGET);
-    expect(captured.generation.enumeration_complete).toBe(true);
-    const targets = repository.listTargets(workspaceId, generation.generation_id, null, 128);
-    expect(targets.length).toBeGreaterThan(0);
-    for (const target of targets) {
-      expect(lifecycle.prepare(workspaceId, generation.generation_id, target.root_key, BUDGET).status).toBe("ready");
-    }
-    // Lexical text is model-independent; no vector generation is activated.
-    lifecycle.unbind(workspaceId);
-    expect(repository.state(workspaceId)).toMatchObject({ status: "unbound", active_generation_id: null });
-  } finally { database.close(); }
+  try { prepareRetainedSourceLexicalIndex(database, workspaceId); }
+  finally { database.close(); }
+}
+
+/** Prepare retained source-record text using the same lifecycle for in-memory and file fixtures. */
+export function prepareRetainedSourceLexicalIndex(database: StorageDatabase, workspaceId: string): void {
+  const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
+  const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
+  const generation = lifecycle.begin(lifecycle.select(workspaceId, configuration()));
+  const captured = lifecycle.capture(workspaceId, generation.generation_id, 128, BUDGET);
+  expect(captured.generation.enumeration_complete).toBe(true);
+  const targets = repository.listTargets(workspaceId, generation.generation_id, null, 128);
+  expect(targets.length).toBeGreaterThan(0);
+  for (const target of targets) {
+    expect(lifecycle.prepare(workspaceId, generation.generation_id, target.root_key, BUDGET).status).toBe("ready");
+  }
+  // Lexical text is model-independent; no vector generation is activated.
+  lifecycle.unbind(workspaceId);
+  expect(repository.state(workspaceId)).toMatchObject({ status: "unbound", active_generation_id: null });
 }
 
 /** Advance only server-issued pages; an exhausted cursor is not logical closure. */

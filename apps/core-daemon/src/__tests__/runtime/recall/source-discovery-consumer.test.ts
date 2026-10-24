@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,9 +12,12 @@ import {
 import {
   locateSourceInterpretation,
   MemoryDimension,
+  ScopeClass,
   SoulMemorySearchRequestSchema,
   sourceEvidenceRootTarget,
-  sourceRecallTarget
+  sourceRecallTarget,
+  SoulMemorySearchResponseSchema,
+  type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase,
@@ -35,7 +39,11 @@ import {
   defaultBudget,
   defaultView
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
-import { recallThroughCli } from "./conditional-field-acceptance/planted-handler.js";
+import { prepareRetainedSourceLexicalIndex } from "../../../../../bench-runner/src/__tests__/harness/recall/source-records-worker-fixture.js";
+import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
+import { createToolsCommand } from "../../../cli/tools.js";
+import { ALAYA_SYSEXITS } from "../../../cli/bridge.js";
+import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
 const databases: StorageDatabase[] = [];
 afterEach(() => {
@@ -50,10 +58,11 @@ describe("source discovery consumer surfaces", () => {
     const filename = join(directory, "alaya.db");
     const slice = await openSourceSlice(() => {}, filename);
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
-      .insert(hashedRecord(WS, body, "intended"));
+      .insert({ ...hashedRecord(WS, body, "intended"), scope_class: ScopeClass.PROJECT });
     insertBoundGist(slice.database, "a-intended", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
     const filler = `${canary.intended} filler ${"y".repeat(3000)}`;
-    new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(hashedRecord(WS, filler, "filler"));
+    new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert({ ...hashedRecord(WS, filler, "filler"), scope_class: ScopeClass.PROJECT });
+    prepareRetainedSourceLexicalIndex(slice.database, WS);
     const proposal = compileQuerySourceSketch({
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget(),
@@ -146,8 +155,9 @@ describe("source discovery consumer surfaces", () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
     const slice = await openSourceSlice((database) => databases.push(database));
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
-      .insert(hashedRecord(WS, canary.intended, "intended"));
+      .insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
     insertBoundGist(slice.database, "a-cli", canary.intended, record.record_id, record.content_digest, record.evidence_object_id, canary.sketch);
+    prepareRetainedSourceLexicalIndex(slice.database, WS);
     const proposal = compileQuerySourceSketch({
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget(),
@@ -155,13 +165,16 @@ describe("source discovery consumer surfaces", () => {
       view: { ...defaultView(), result_kind_view: "source_only" },
       sketch: { original_query: canary.original_query, relation: canary.sketch }
     }).interpretation_proposal;
-    const result = await recallThroughCli(slice, canary.original_query, 8, proposal);
-    const preview = (result as { readonly results?: readonly { readonly content_preview?: string }[] }).results?.[0]?.content_preview;
-    expect(preview).toBe(canary.intended);
-    expect(result).toMatchObject({ results: [expect.objectContaining({
-      source_lookup_reasons: [expect.objectContaining({ kind: "proposal", predicate_key: "access",
-        source_target: expect.objectContaining({ root_id: record.record_id }) })]
-    })] });
+    const result = await recallNativeSourcesThroughCli(slice.database, canary.original_query, proposal);
+    const row = result.results.find((result) => result.target?.kind === "source_evidence"
+      && result.target.root_id === record.record_id);
+    expect(row?.content_preview).toBe(canary.intended);
+    // Native lexical navigation does not certify the planted proposal interpretation.
+    expect(row?.source_lookup_reasons).toBeUndefined();
+    expect(result.index?.entries).toEqual(expect.arrayContaining([expect.objectContaining({
+      target: expect.objectContaining({ kind: "source_evidence", root_id: record.record_id }),
+      navigation: expect.objectContaining({ operator: "source_lexical", view: "original" })
+    })]));
   });
 
   it.each(["source_only", "mixed", "memory_only"] as const)("resumes %s membership and invalidates old continuations after worker restart", async (view) => {
@@ -170,11 +183,12 @@ describe("source discovery consumer surfaces", () => {
     const filename = join(directory, "alaya.db");
     const slice = await openSourceSlice(() => {}, filename);
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-    const intended = records.insert(hashedRecord(WS, canary.intended, "intended"));
-    records.insert(hashedRecord(WS, canary.distractor, "distractor"));
+    const intended = records.insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
+    records.insert({ ...hashedRecord(WS, canary.distractor, "distractor"), scope_class: ScopeClass.PROJECT });
     await slice.writeMemory(MEM.r, canary.original_query, MemoryDimension.FACT);
     await slice.writeMemory(MEM.c, `${canary.original_query} second memory`, MemoryDimension.FACT);
     insertBoundGist(slice.database, "a-reopen", canary.intended, intended.record_id, intended.content_digest, intended.evidence_object_id, canary.sketch);
+    prepareRetainedSourceLexicalIndex(slice.database, WS);
     slice.database.close();
     closeCachedDatabase(filename);
     const first = createRecallReadWorkerClient({
@@ -251,6 +265,35 @@ describe("source discovery consumer surfaces", () => {
     }
   }, 30_000);
 });
+
+async function recallNativeSourcesThroughCli(
+  database: StorageDatabase,
+  query: string,
+  interpretationProposal: SoulMemorySearchRequest["interpretation_proposal"]
+) {
+  const service = new RecallService({
+    ...createDependencies().dependencies,
+    now: () => INTERPRETATION_CLOCK,
+    observerReaders: createConditionalFieldObserverReaders(database)
+  });
+  const command = createToolsCommand({
+    handler: createMcpMemoryToolHandler({ ...createDeps(), recallService: service }),
+    defaultWorkspaceId: WS,
+    defaultAgentTarget: "codex"
+  });
+  const parsed = command.argsSchema.safeParse(["call", "soul.recall", JSON.stringify({
+    ...capableRecallConsumerDeclaration(), query, max_results: 8,
+    result_kind_view: "source_only", scope_class: null, dimension: null, domain_tags: null,
+    interpretation_proposal: interpretationProposal
+  }), "--workspace", WS]);
+  if (!parsed.success) throw new Error("CLI args parse failed");
+  const result = await command.handler({
+    cwd: "/tmp", env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
+    stderr: new PassThrough(), isTTY: false, jsonRequested: true, daemon: { startupSteps: [] }
+  }, parsed.data);
+  expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+  return SoulMemorySearchResponseSchema.parse(result.json);
+}
 
 function insertBoundGist(
   database: StorageDatabase,

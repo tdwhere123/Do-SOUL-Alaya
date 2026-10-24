@@ -1,3 +1,4 @@
+import { prepareSourceRecordLexicalIndex } from "../../harness/recall/source-records-worker-fixture.js";
 import { installHistoricalSignalReplay } from "../../harness/seeding/historical-signal-replay-fixture.js";
 import { createHash } from "node:crypto";
 import { initDatabase, SqliteSignalRepo } from "@do-soul/alaya-storage";
@@ -46,7 +47,7 @@ afterEach(async () => {
 });
 
 describe("LongMemEval source evidence fallback integration", () => {
-  it("preserves verified fallback evidence without claiming unsupported bare-capsule Recall delivery", async () => {
+  it("preserves verified fallback evidence and delivers prepared retained source text", async () => {
     root = await mkdtemp(join(tmpdir(), "longmemeval-source-evidence-"));
     const cacheRoot = join(root, "cache");
     writeExtractionCacheTestManifest({
@@ -100,12 +101,18 @@ describe("LongMemEval source evidence fallback integration", () => {
         evidenceId: entries[0]?.objectId
       }]
     });
+    // Seeding retained the source records and fallback capsule; lexical readiness is separate.
+    prepareSourceRecordLexicalIndex(daemon.dataDir, daemon.workspaceId);
     const recallResult = await daemon.recall(question.question, {
       maxResults: 10,
       referenceTime: question.question_date
     });
     expect(recallResult.results.length).toBeGreaterThan(0);
     expect(recallResult.results.every((row) => row.object_kind === "source_evidence")).toBe(true);
+    expect(recallResult.results).toEqual(expect.arrayContaining([expect.objectContaining({
+      content_preview: expect.stringContaining("I plan to take the 7:15 train from Central Station."),
+      target: expect.objectContaining({ kind: "source_evidence" })
+    })]));
     const snapshotQuestion = buildLongMemEvalSnapshotQuestion({
       question,
       workspace: { ...daemon, detach: async () => undefined },
