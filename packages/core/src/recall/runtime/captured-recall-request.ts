@@ -1,4 +1,5 @@
 import type { Continuation } from "@do-soul/alaya-protocol";
+import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 
@@ -30,10 +31,12 @@ export type CapturedRecallRequest = Readonly<{
  * authority, receipt or query identity this request already committed to. */
 export function captureRecallRequest(sent: ConditionalFieldRecallRequest): CapturedRecallRequest {
   const retained: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(sent)) {
+  const { prepared_query: prepared, ...domain } = sent;
+  for (const [key, value] of Object.entries(domain)) {
     if (value === undefined || isEnvironmentField(key)) continue;
     retained[key] = copyOwnedData(value);
   }
+  if (prepared !== undefined) retained.prepared_query = SourceIndexAcquisition.capturePreparedQuery(prepared);
   const continuation = ownedContinuation(sent.continuation);
   if (continuation !== undefined) retained.continuation = continuation;
   return Object.freeze({
@@ -55,10 +58,13 @@ export function withRecallEnvironment(
   for (const [key, value] of Object.entries(captured.environment)) {
     if (value !== undefined) merged[key] = value;
   }
-  for (const [key, value] of Object.entries(patch)) {
+  const { prepared_query: prepared, ...domain } = patch;
+  for (const [key, value] of Object.entries(domain)) {
     if (value === undefined) delete merged[key];
     else merged[key] = isEnvironmentField(key) ? value : copyOwnedData(value);
   }
+  if (prepared !== undefined) merged.prepared_query = SourceIndexAcquisition.capturePreparedQuery(prepared);
+  else if (Object.hasOwn(patch, "prepared_query")) delete merged.prepared_query;
   return Object.freeze(merged) as ConditionalFieldRecallRequest;
 }
 
@@ -91,8 +97,8 @@ function copyOwnedData(value: unknown): unknown {
   if (typeof value === "function") throw new TypeError("Recall domain data cannot contain functions");
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return Object.freeze(value.map((child) => copyOwnedData(child)));
-  // Domain types contain records/arrays, not objects whose data lives in internal
-  // slots (Map, Date, AbortSignal, etc.). Never retain those as implicit services.
+  // Record domain fields cannot carry internal-slot objects as implicit services.
+  // Prepared source vectors are captured separately by their source-index owner.
   if (Object.prototype.toString.call(value) !== "[object Object]") {
     throw new TypeError("Recall domain data must use record or array containers");
   }

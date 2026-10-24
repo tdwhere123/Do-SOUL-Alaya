@@ -3,7 +3,7 @@ import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
   BoundedIdSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceIndexProfileId,
-  unavailableSourceQueryPreparation,
+  unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
@@ -131,6 +131,33 @@ export class SourceIndexAcquisition {
     if (input.receipt !== undefined && input.receipt.status !== "ready") {
       throw new CoreError("VALIDATION", "vector acquisition control requires ready query preparation");
     }
+  }
+
+  /** Own prepared domain state before recall callbacks. Receipt/profile capture uses
+   * their existing authorities; vector admission (binding, dimensions, norm) remains
+   * in acquisition. Typed-array freezing cannot protect elements or backing buffers,
+   * so each consumer gets a fresh view of privately retained vector values. */
+  public static capturePreparedQuery(prepared: PreparedSourceQuery): PreparedSourceQuery {
+    const captureRoute = (route: PreparedRoute): PreparedRoute => {
+      const vector = route.vector;
+      let capturedVector: SourceIndexQueryVector;
+      if (vector.status === "unavailable") {
+        capturedVector = Object.freeze({ status: vector.status, reason: vector.reason });
+      } else {
+        const suppliedEmbedding = vector.embedding;
+        if (!(suppliedEmbedding instanceof Float32Array)) {
+          throw new TypeError("Prepared source query embedding must be a Float32Array");
+        }
+        const embedding = new Float32Array(suppliedEmbedding);
+        capturedVector = Object.freeze({ status: vector.status,
+          profile: captureSourceEmbeddingProfile(vector.profile), profile_id: vector.profile_id,
+          input_digest: vector.input_digest, get embedding() { return new Float32Array(embedding); } });
+      }
+      return Object.freeze({ vector: capturedVector, receipt: captureSourceSemanticQueryPreparation(route.receipt) });
+    };
+    const primary = captureRoute(prepared);
+    return Object.freeze({ ...primary,
+      ...(prepared.supplemental === undefined ? {} : { supplemental: captureRoute(prepared.supplemental) }) });
   }
 
   /** Private inference before the native snapshot. Observe the selected configuration; never create one. */

@@ -58,8 +58,13 @@ function simulatedBinding(selection: SourceIndexSelection, axis: (text: string) 
     outsideTransaction();
     expect(options.profile_id).toBe(selection.profile_id);
     expect(options.signal?.aborted).toBe(false);
-    return inputs.map(input => ({ status: "embedded" as const, input_id: input.input_id,
-      input_digest: digest(input.text), vector: new Float32Array(axis(input.text)), token_count: 2, truncated: false as const }));
+    return inputs.map(input => {
+      const representation = selection.configuration.profile.representation;
+      return { status: "embedded" as const, input_id: input.input_id,
+        input_digest: digest(input.text), vector: new Float32Array(axis(input.text)), token_count: 2, truncated: false as const,
+        ...(representation === undefined ? {} : { role: input.role,
+          prepared_input_digest: digest((input.role === "query" ? representation.query_prefix : representation.passage_prefix) + input.text) }) };
+    });
   });
   return { status: "ready" as const, profile: selection.configuration.profile, profile_id: selection.profile_id, embedInputs };
 }

@@ -137,7 +137,8 @@ export async function executeRecall(
   const port = fieldDeps(context).conditionalFieldPort;
   return port?.withPreparedExecution === undefined ? executeCapturedRecall(context, params, sent)
     : port.withPreparedExecution(withoutReaders(sent), captured =>
-      executeCapturedRecall(context, params, { ...captured, readers: sent.readers }));
+      executeCapturedRecall(context, params,
+        withRecallEnvironment(captureRecallRequest({ ...captured, readers: sent.readers }))));
 }
 
 async function executeCapturedRecall(context: RecallExecutionContext, params: RecallExecutionParams,
