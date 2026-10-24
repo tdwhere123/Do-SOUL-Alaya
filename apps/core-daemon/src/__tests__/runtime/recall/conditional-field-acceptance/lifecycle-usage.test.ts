@@ -3,9 +3,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
-import { MemoryDimension, type InformationIndex, type SoulMemorySearchResponse, type UsageReport } from "@do-soul/alaya-protocol";
-import { capableRecallConsumerDeclaration, EventPublisher, RecallService, attributeUsageReports, snapshotIdFromPin } from "@do-soul/alaya-core";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => isolation.restore());
+import { MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, type InformationIndex, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { capableRecallConsumerDeclaration, CoreError, EventPublisher, RecallService, attributeUsageReports, snapshotIdFromPin } from "@do-soul/alaya-core";
 import { SqliteTrustStateRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteRunRepo, SqliteIndexedRecallProjection, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
 import { createBoundedActiveConstraintsReader } from "../../../../runtime/recall-read-worker/active-constraints.js";
@@ -76,6 +82,15 @@ async function recall(handler: ReturnType<typeof handlerFor>, continuation?: Inf
   return response.output as SoulMemorySearchResponse & { index: InformationIndex };
 }
 
+async function recallRefusal(request: Promise<unknown>) {
+  try { await request; }
+  catch (error) {
+    if (!(error instanceof CoreError)) throw error;
+    return error;
+  }
+  throw new Error("Expected Recall resource refusal, not an issued delivery");
+}
+
 async function collectBoundaryPages(handler: ReturnType<typeof handlerFor>) {
   const entries: InformationIndex["entries"][number][] = [];
   let continuation: InformationIndex["continuation"] = null;
@@ -93,8 +108,9 @@ async function collectBoundaryPages(handler: ReturnType<typeof handlerFor>) {
     entries.push(...page.index.entries);
     continuation = page.index.continuation;
     if (continuation === null) {
-      expect(page.index.completeness.observed_coverage).toBe("complete");
-      expect(page.index.completeness.logical_index).toBe("complete");
+      // A drained planted memory set does not prove exhaustive native source coverage.
+      expect(page.index.completeness.observed_coverage).toBe("unknown");
+      expect(page.index.completeness.logical_index).toBe("open");
       expect(page.index.completeness.interpretation_coverage).toBe("open");
       break;
     }
@@ -214,33 +230,94 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     const service = serviceFor(slice.database);
     const params = { workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat" as const,
       budget: { schema_version: 1 as const, work_units: 10000, memory_bytes: 600, page_budget: 100, finalization_reserve: 100, min_envelope: 1 } };
-    const first = await service.recall(params);
-    expect(first.index?.continuation).not.toBeNull();
-    const resumed = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000 },
-      continuation: first.index!.continuation });
-    expect([...new Set([...first.index!.entries, ...resumed.index!.entries].map((entry) => entry.object_id))].sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
+    // 600 bytes cannot hold even the required control envelope. No resumable page
+    // was issued; repeat the precise refusal before retrying the original query.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const failure = await recallRefusal(service.recall(params));
+      expect(failure).toMatchObject({ code: "CONFLICT", details: {
+        outcome: "resource_exhausted", resource: "encoded_page", available_bytes: 600,
+        execution_receipt: { requested_budget: params.budget, actual: {
+          native_visits: SNAPSHOT_PIN_NATIVE_WORK, native_rows: 0, charged_retained_bytes: 0,
+          phases: { index: { budget_work: 4 } }
+        } }
+      } });
+      expect(failure.subCode).toBeUndefined();
+      expect(failure.details?.required_bytes).toBeGreaterThan(600);
+      expect(failure.details).not.toHaveProperty("continuation");
+      expect(failure.details).not.toHaveProperty("issued_delivery_id");
+    }
+    const resumed = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000 } });
+    expect(resumed.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
+    expect(resumed.candidates.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
+    expect(resumed.issued_delivery_id).toBeDefined();
+    expect(resumed.index!.continuation).toBeNull();
     const tightReserve = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000, finalization_reserve: 1 } });
-    expect(tightReserve.index!.completeness.observed_coverage).toBe("complete");
+    expect(tightReserve.index!.completeness.observed_coverage).toBe("unknown");
+    expect(tightReserve.index!.completeness.logical_index).toBe("open");
     expect(tightReserve.index!.completeness.interpretation_coverage).toBe("open");
     expect(tightReserve.index!.continuation).toBeNull();
     expect(tightReserve.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
   });
 
-  it("bounds physical lexical, source and relation visits by one request allowance", async () => {
+  it("bounds native reader access and preserves framing refusals separately from logical work", async () => {
     const slice = await openSourceSlice((db) => databases.add(db));
     for (const id of [MEM.r, MEM.c, MEM.h]) await slice.writeMemory(id, "needle", MemoryDimension.FACT);
     const readers = createConditionalFieldObserverReaders(slice.database);
     for (const work_units of [5, 8, 12, 20]) {
       let visits = 0;
+      const snapshotPin = vi.fn(readers.snapshotPin!);
+      const nominateSources = vi.fn(readers.nominateSources!);
       const { dependencies } = createDependencies();
       const service = new RecallService({ ...dependencies, now: () => NOW,
-        observerReaders: { ...readers,
+        observerReaders: { ...readers, snapshotPin, nominateSources,
           source: (input) => { const page = readers.source!(input); visits += page.rowsRead; return page; },
           lexical: (input) => { const page = readers.lexical!(input); visits += page.nativeVisits; return page; },
           relation: (input) => { const page = readers.relation!(input); visits += page.nativeVisits; return page; } } });
-      await service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat",
-        budget: { schema_version: 1 as const, work_units, memory_bytes: 1000000, page_budget: 100, finalization_reserve: 1, min_envelope: 1 } });
-      expect(visits).toBeLessThanOrEqual(work_units);
+      const params = { ...capableRecallConsumerDeclaration(), workspaceId: WS,
+        taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat" as const,
+        budget: { schema_version: 1 as const, work_units, memory_bytes: 1000000,
+          page_budget: 100, finalization_reserve: 1, min_envelope: 1 } };
+      if (work_units < 20) {
+        const failure = await recallRefusal(service.recall(params));
+        expect(failure).toMatchObject({ code: "CONFLICT", details: {
+          outcome: "resource_exhausted", resource: "framing_work", execution_receipt: {
+            requested_budget: params.budget, actual: {
+              native_visits: work_units === 12 ? SNAPSHOT_PIN_NATIVE_WORK : 0,
+              native_rows: 0, charged_retained_bytes: 0,
+              phases: { index: { budget_work: work_units === 12 ? 3 : 0 } }
+            }
+          }
+        } });
+        expect(failure.details).not.toHaveProperty("required_bytes");
+        expect(nominateSources).not.toHaveBeenCalled();
+      } else {
+        const result = await service.recall(params);
+        expect(result.index!.entries).toEqual([]);
+        expect(result.index!.continuation).not.toBeNull();
+        expect(result.index!.completeness).toMatchObject({ observed_coverage: "unknown", logical_index: "open" });
+        expect(result.issued_delivery_id).toBeDefined();
+        expect(result.execution_receipt!.actual).toMatchObject({ native_visits: 2 * SNAPSHOT_PIN_NATIVE_WORK,
+          native_rows: 0, phases: { index: { budget_work: 8 } } });
+        expect(visits + snapshotPin.mock.calls.length * SNAPSHOT_PIN_NATIVE_WORK).toBeLessThanOrEqual(work_units);
+        snapshotPin.mockClear();
+        // The fitted empty progress page is retryable under the same allowance,
+        // not successful absence. Count each request independently.
+        const replay = await service.recall({ ...params, continuation: result.index!.continuation });
+        expect(replay.index!.completeness).toMatchObject({ observed_coverage: "unknown", logical_index: "open" });
+        expect(replay.index!.continuation).not.toBeNull();
+        expect(replay.index).toMatchObject({ query_id: result.index!.query_id,
+          snapshot_id: result.index!.snapshot_id, interpretation_id: result.index!.interpretation_id,
+          as_of: result.index!.as_of });
+        expect(replay.issued_delivery_id).toBeDefined();
+      }
+      // Native operation/row counters are not SQLite VM steps or acquisition work.
+      expect(visits).toBe(0);
+      expect(visits + snapshotPin.mock.calls.length * SNAPSHOT_PIN_NATIVE_WORK).toBeLessThanOrEqual(work_units);
+      for (const [index, nomination] of nominateSources.mock.results.entries()) {
+        expect(nomination.type).toBe("return");
+        expect(nomination.value.result?.resources.sql_internal_work).toBe("unknown");
+        expect(nomination.value.result?.resources.work).toBeLessThanOrEqual(nominateSources.mock.calls[index]![0].budget.work_units);
+      }
     }
   });
 
