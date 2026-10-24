@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { indexEntryCacheKey } from "@do-soul/alaya-protocol";
 import { EvidenceService, type ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
 import { SqliteEvidenceCapsuleRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID, composeField, plantRevoke, produceAdaSource } from "./source-field-harness.js";
@@ -13,19 +14,35 @@ describe("native source publication and conditional Recall", () => {
     const payload = conditionalRecallPayload("nebulapivot");
     const empty = await dispatchQueryOnly(pair.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
     expect(empty.index.entries).toEqual([]);
-    expect(empty.index.completeness.observed_coverage).toBe("exhausted_empty");
+    // No native profile/index or query vector is bound: no rows is not proved absence.
+    expect(empty.index.completeness.observed_coverage).toBe("unknown");
     expect(empty.index.completeness.logical_index).toBe("open");
     expect(empty.index.completeness.interpretation_coverage).toBe("open");
-    await persistConditionalSource(pair.writer, MEMORY_ID, "nebulapivot native source");
+    const { source } = await persistConditionalSource(pair.writer, MEMORY_ID, "nebulapivot native source");
     const published = await dispatchQueryOnly(pair.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
-    expect(published.index.entries.map((entry) => entry.object_id)).toEqual([MEMORY_ID]);
+    expect(published.index.entries.map((entry) => entry.target.kind)).toEqual(["source_evidence", "memory_entry"]);
+    expect(published.index.entries.find((entry) => entry.target.kind === "memory_entry")?.object_id).toBe(MEMORY_ID);
     expect(published.previews[MEMORY_ID]).toContain("nebulapivot");
+    const delivered = published.index.entries.find((entry) => entry.target.kind === "source_evidence")!;
+    expect(delivered).toMatchObject({ target: {
+      root_kind: "source_record", root_id: source.identity, source_version: "1",
+      content_digest: source.content_digest, evidence_object_id: null,
+      span: { content_start: 0, content_complete: true }
+    }, navigation: { operator: "source_lexical", view: "original" } });
+    expect(delivered.object_id).toBeUndefined();
+    expect(published.previews[indexEntryCacheKey(delivered)]).toBe("nebulapivot native source");
     const filename = pair.writer.filename;
     pair.queryOnly.connection.close();
     hydration.planted.close(pair.writer);
     const reopened = hydration.openQueryOnlyPair(filename, false);
     const replay = await dispatchQueryOnly(reopened.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
-    expect(replay.index).toEqual(published.index);
+    expect(replay.index.continuation).not.toBeNull();
+    expect(published.index.continuation).not.toBeNull();
+    expect(replay.index).toEqual({ ...published.index, continuation: {
+      ...published.index.continuation,
+      continuation_id: replay.index.continuation!.continuation_id,
+      capability: replay.index.continuation!.capability
+    } });
     expect(replay.previews).toEqual(published.previews);
     expect(reopened.writer.connection.pragma("integrity_check", { simple: true })).toBe("ok");
   });

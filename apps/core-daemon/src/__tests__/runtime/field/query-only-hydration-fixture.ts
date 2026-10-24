@@ -1,7 +1,10 @@
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
-  MemoryService
+  MemoryService,
+  SourceIndexLifecycle,
+  createAuditedSourceAdmission,
+  fieldContractSha256
 } from "@do-soul/alaya-core";
 import {
   SqliteClaimFormRepo,
@@ -9,6 +12,7 @@ import {
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqliteSynthesisCapsuleRepo,
+  SqliteSourceIndexRepository,
   prepareIndexedRecallProjection,
   StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -41,6 +45,11 @@ import {
   produceAdaSource,
   realMemoryRepo
 } from "./source-field-harness.js";
+
+import {
+  BUDGET as SOURCE_INDEX_BUDGET,
+  configuration as sourceIndexConfiguration
+} from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 
 export const LIVE_B_ID = "22222222-2222-4222-8222-222222222222";
 export const TOMBSTONE_ID = "33333333-3333-4333-8333-333333333333";
@@ -76,6 +85,19 @@ export function createQueryOnlyHydrationHarness() {
 
 export async function persistConditionalSource(database: StorageDatabase, objectId: string, content: string) {
   prepareIndexedRecallProjection(database);
+  const admission = createAuditedSourceAdmission({
+    stores: composeField(database).stores,
+    eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: async () => {} },
+    sha256: fieldContractSha256
+  });
+  const source = (await admission.admit({
+    workspace_id: WORKSPACE_ID, source_id: `source-${objectId}`, source_version: "1",
+    content_bytes: content, evidence_object_id: null, recorded_at: CLOCK,
+    event_time: null, valid_from: null, valid_to: null,
+    speaker: "user", scope_class: "project", spans: []
+  }, { workspaceId: WORKSPACE_ID })).record;
+  prepareNativeSourceLexicalIndex(database);
   const evidence = new SqliteEvidenceCapsuleRepo(database);
   const service = new MemoryService({
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
@@ -88,9 +110,25 @@ export async function persistConditionalSource(database: StorageDatabase, object
     },
     runtimeNotifier: { notifyEntry: async () => {} }
   });
-  return service.create({ created_by: "user_action", dimension: "fact", source_kind: "user",
+  const memory = await service.create({ created_by: "user_action", dimension: "fact", source_kind: "user",
     formation_kind: "explicit", scope_class: "project", content, domain_tags: [], evidence_refs: [],
     workspace_id: WORKSPACE_ID, run_id: "run-1", surface_id: null });
+  return { source, memory };
+}
+
+/** Prepare actual lexical documents; selecting a fixture profile does not claim vector readiness. */
+function prepareNativeSourceLexicalIndex(database: StorageDatabase): void {
+  const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
+  const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
+  const generation = lifecycle.begin(lifecycle.select(WORKSPACE_ID, sourceIndexConfiguration()));
+  const captured = lifecycle.capture(WORKSPACE_ID, generation.generation_id, 128, SOURCE_INDEX_BUDGET);
+  expect(captured.generation.enumeration_complete).toBe(true);
+  const targets = repository.listTargets(WORKSPACE_ID, generation.generation_id, null, 128);
+  expect(targets.length).toBeGreaterThan(0);
+  for (const target of targets) {
+    expect(lifecycle.prepare(WORKSPACE_ID, generation.generation_id, target.root_key, SOURCE_INDEX_BUDGET).status)
+      .toBe("ready");
+  }
 }
 
 export function conditionalRecallPayload(queryText: string) {
@@ -104,7 +142,7 @@ export function conditionalRecallPayload(queryText: string) {
     supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     supports_source_evidence: true,
     supports_product_updates: true,
-    authorized_scopes: null };
+    authorized_scopes: ["project"] };
 }
 
 async function openHydrationFixture(
