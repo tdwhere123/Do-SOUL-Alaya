@@ -4,7 +4,7 @@
 |---|---|
 | [`invariants.md`](invariants.md) | Rules that always win |
 | [`architecture.md`](architecture.md) | Package shape, surfaces, write model, governance routes |
-| [`recall.md`](recall.md) | Recall algorithm, fallible interpretation/use boundaries, live path and readiness |
+| [`recall.md`](recall.md) | Live Recall query, native source observation, conditional proof, delivery and recovery |
 | [`glossary.md`](glossary.md) | Stable SOUL / Alaya vocabulary |
 
 ## When to edit
@@ -13,19 +13,13 @@
 |---|---|
 | An invariant or dependency rule | `invariants.md` |
 | A surface, package boundary, or governance route | `architecture.md` |
-| Recall conditional-field entry, historical ranking/fusion receipts, embedding, path transfer, or readiness labels | `recall.md` |
+| Recall query, source discovery, field transfer, delivery or read-time qualification | `recall.md` |
 | A stable term | `glossary.md` |
 
-Prefer concise files. `architecture.md`, `recall.md`, and
-`invariants.md` currently exceed 15 KB because they are the long-form
-contracts. Code locations for recall are cited in `recall.md`;
-otherwise use `rg` or CodeGraph.
-
-For semantic-memory work, start with
+For semantic-memory work start with
 [fallible interpretation and task use](recall.md#fallible-interpretation-and-task-use).
-Keep implemented contracts separate from proposed task-loop capabilities.
-Historical study gates do not add universal runtime admission requirements.
-
-Ordinary engineering debt belongs in PR descriptions, not a handbook
-issue list. Keep bench KPI degradations in local history; see the
+The source modules linked there own exact schemas, producer grammar and
+algorithms. Archive readability is not execution support; study gates are
+not universal runtime admission rules. Keep ordinary engineering debt in
+PR descriptions and bench results in local history; see the
 [benchmark reproduction policy](../bench-history/README.md).

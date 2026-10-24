@@ -1,310 +1,149 @@
 # Glossary
 
-Vocabulary used across Alaya handbook, task cards, and code. Terms
-were inherited from upstream `do-what-new` SOUL during the v0.1 port
-where applicable; Alaya-specific terms are flagged.
+Stable terms only. [Invariants](invariants.md) own rules;
+[architecture](architecture.md) owns package/effect boundaries and
+[Recall](recall.md) owns live query mechanics.
 
 ## Core SOUL Vocabulary
 
-**SOUL** — Governed long-term memory kernel. Three layers: Memory
-Ontology (governed durable records), Structure Registry (routing), Runtime
-Control (per-turn). Authoritative stored state is not a claim of infallible
-source statements or model understanding.
+**SOUL** — Governed memory kernel with durable ontology, routing structures
+and per-turn runtime control. Governed stored state is not infallible world
+truth.
 
-**Memory Object** — Faceted stable semantic unit forming the ontology.
-Includes `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`,
-`ClaimForm`. Defined in `packages/protocol/src/memory/` and
-`packages/protocol/src/evidence/`.
+**Memory Object** — Faceted stable semantic unit, including
+`EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule` and `ClaimForm`.
 
-**EvidenceCapsule** — First-class evidence object. Contains semantic /
-event / physical anchors plus a health state. Evidence is required
-for any durable write.
+**EvidenceCapsule** — First-class evidence object with semantic/event/physical
+anchors and health. Retained excerpt and gist are not automatically complete
+original bodies.
 
-**MemoryEntry** — A durable memory record with at least one
-`EvidenceCapsule` reference.
+**MemoryEntry** — Durable memory record referencing evidence; not itself a
+certificate of model or source fidelity.
 
-**SynthesisCapsule** — Multi-memory synthesis. Organizes understanding
-but does not directly legislate durable claims.
+**SynthesisCapsule** — Multi-memory organization, not direct legislation of
+durable claims.
 
-**ClaimForm** — Promotion-track artifact: a claim that wants to become
-a `MemoryEntry`, gated by the Promotion Gate.
+**ClaimForm** — Governed claim lifecycle record. Garden produces `draft`;
+active promotion requires a typed resolution.
 
-**Path / PathRelation** — Learnable conditional relation structure
-between objects. Recall, prediction, and reminder are runtime
-manifestations of paths, not paths themselves.
+**RelationAssertion / PathRelation** — Immutable, evidence-grounded relation
+truth / its rebuildable current-or-as-of routing projection. Neither
+query-time transfer nor a conditional result is another assertion.
 
-**ActivationCandidate** — Runtime control object: "this memory might
-matter for this turn". Never persisted directly.
+**ActivationCandidate** — Per-turn relevance control, not persisted truth.
 
-**ManifestationDecision** — Per-turn decision about how a memory
-shows up: `hidden` / `hint` / `excerpt` / `full_eligible`.
+**ManifestationDecision** — Per-turn visibility decision:
+`hidden`, `hint`, `excerpt` or `full_eligible`.
 
-**ContextLens** — Per-turn projection of memory into the current
-agent context. Not a second memory layer.
+**ContextLens / ContextPack** — Projection of memory into a turn / assembled
+deliverable. Neither creates a second ontology.
 
-**ContextPack** — Assembled deliverable for a single recall request:
-included candidates + excluded candidates + degradation reasons.
-
-**ConversationService** *(adapted in Alaya)* — Upstream do-what used
-this as the orchestration entry point for a chat turn (Memory +
-Recall + Evidence + Green + Governance + OutputShaping). Alaya
-retains only the candidate→recall→govern→durable memory orchestration;
-chat-specific orchestration (worker-dispatch / runtime-adapter /
-tool-substrate) was dropped during the v0.1 port. The port-era
-phase-3 brief was deleted on 2026-08-24 (commit 2b23da6f2).
-
-**RecallQuery** — Per-turn request to RecallService describing what
-the consuming agent needs (subject, scope, dimensions, budgets,
-exclusion reasons it does not want).
-
-**TaskSurfaceBuilder** — Builder that assembles the task-shaped
-context Alaya hands to a worker (run-side); used by run lifecycle
-services. Run lifecycle consumes it but does not own it.
+**RecallQuery** — Scoped, budgeted request to RecallService.
 
 ## Garden / Maintenance
 
-**Garden** — Fire-and-forget background maintenance subsystem. The
-HTTP daemon and the attached MCP stdio process start it; it runs one
-startup background pass, then keeps Auditor, Janitor, Librarian, and
-Scheduler work on intervals until that daemon/MCP process exits.
+**Garden** — Fire-and-forget background maintenance relative to the consuming
+agent's main turn. Auditor checks stale evidence and pointer health; Janitor
+manages retention/control-plane cleanup; Librarian maintains path
+consolidation; Scheduler dispatches those tasks.
 
-**Current-directory workspace** — Default workspace used by CLI fallback
-and attached MCP when neither `--workspace` nor `ALAYA_WORKSPACE_ID` is
-set. Alaya derives a stable local workspace id from the process cwd and
-registers that root before memory tools or Garden startup run.
-
-**Auditor** — Garden role: scans for evidence staleness
-(`EVIDENCE_STALE`), orphan detection (OrphanRadar), pointer healing
-(`POINTER_BROKEN`).
-
-**Janitor** — Garden role: hot/cold storage demotion, strong-ref
-protection, control-plane cleanup.
-
-**Librarian** — Garden role: path compaction, merge detection,
-neighbour consolidation.
-
-**GardenScheduler** — Periodic dispatcher for Garden tasks
-(`EVIDENCE_STALENESS_CHECK`, `POINTER_HEALTH_CHECK`,
-`POINTER_HEALING`, etc.).
-
-**ConsolidationLoop** — Garden's primary mechanism for path plasticity
-maintenance. The Librarian (TIER_2) owns `path_plasticity_update`,
-keeping the work off the recall request path while matching the role
-that owns path consolidation. v0.3.10
-keeps used-report evidence soft: repeated use decays for strength,
-`trust_mode = automatic` is half-weighted, and support counters remain
-event counts rather than host-attested truth.
+**Current-directory workspace** — Default local workspace for CLI fallback
+and attached MCP when no explicit workspace is supplied; a stable ID is
+derived from process cwd and registered before memory tools/Garden start.
 
 ## Governance
 
-**Promotion Gate** — Gate that decides whether a candidate / claim
-becomes durable. Considers evidence sufficiency, governance policy,
-and HITL requirements.
+**Promotion Gate** — Evidence/governance decision for a candidate; it is not
+supplied by a producer's confidence field.
 
-**Green Status** — Per-memory eligibility state: `ELIGIBLE` /
-`GRACE` / `REVOKED`. Owned by `GreenService`. Garden's Auditor flips
-states when verification expires.
+**Green Status** — `ELIGIBLE`, `GRACE` or `REVOKED` eligibility, owned by
+GreenService.
 
-**GovernanceLease** — Write-lock lease for governance-sensitive
-mutations. ID + holder + expiry.
+**GovernanceLease / SessionOverride** — Lease for sensitive mutation /
+per-session runtime correction; neither substitutes for persistent truth.
 
-**SessionOverride** — Runtime correction signal: "this
-governance/recall decision is wrong, override it for this session".
+**Candidate Signal** — Agent-emitted relevance input, not durable memory.
 
-**HITL** — Human-In-The-Loop. High-risk candidates require explicit
-human approval before promotion to durable memory.
+**Proposal / Accepted Proposal** — Typed review request / approved governed
+mutation. An accepted proposal still needs its owned audited application.
+Inline `soul.resolve` is the other typed-resolution route.
 
-**Candidate Signal** — An explicit runtime signal (`soul.emit_candidate_signal`)
-that marks memory relevance for follow-up processing. It is not durable
-memory and does not bypass governance.
-
-**Proposal** — A structured governance request
-(`soul.propose_memory_update`) that asks a reviewer to approve a
-controlled durable memory update.
-
-**Accepted Proposal** — A proposal that has passed review/governance
-and is authorized for promotion application.
-
-**Durable Memory Application** — The audited state transition that
-materializes an accepted proposal into durable memory records. This is
-the durable boundary; earlier steps are advisory.
-
-**Reviewer Identity Trio** *(Alaya v0.1 audit-trail vocabulary)* —
-Three actor-shaped fields appear on review-related rows and they are
-NOT interchangeable:
-
-- `caused_by` (event_log) — the audit-trail principal-of-action for
-  one EventLog row. Carries different values depending on event kind:
-  on `SOUL_PROPOSAL_CREATED` it is the proposing agent's `agent_target`
-  (e.g. `"codex"`); on `SOUL_REVIEW_CREATED` / `SOUL_REVIEW_COMPLETED`
-  / `SOUL_PROPOSAL_RESOLVED` it is the `reviewer_identity` value
-  asserted by the human reviewer (e.g. `"user:alice"`).
-- `reviewer_identity` (proposals row) — the proposal-side projection
-  of `caused_by` for the review event chain. Persisted on the
-  `proposals.reviewer_identity` column once the proposal resolves.
-  IMPORTANT: in v0.1 this has two trust modes. When
-  `ALAYA_REVIEWER_TOKEN` and `ALAYA_REVIEWER_IDENTITY` are configured,
-  the daemon binds it server-side and rejects missing, bad, or
-  mismatched reviewer tokens. When local binding is not configured, the
-  MCP / Inspector / CLI surfaces accept it as an agent / human
-  attestation, not an authenticated principal. Operators reading this
-  column should distinguish "the runtime verified this identity" from
-  "the reviewer attested to this identity".
-- `agent_target` (MCP call context) — the MCP transport surface that
-  delivered the call (`"codex"`, `"claude-code"`, `"inspector"`,
-  `"cli"`, ...). The runtime trusts this only as transport-level
-  routing metadata.
+**Reviewer identity** — Server-bound principal only when reviewer token and
+identity are configured; otherwise review fields are agent/human attestations.
+`agent_target` is transport routing metadata, not reviewer authentication.
 
 ## Trust And Session
 
-**Trust State** — Per-session state that distinguishes installed,
-configured, delivered, used, skipped, unverifiable. Defined in
-`docs/handbook/architecture.md`.
+**Trust State** — Setup (`installed`, `configured`), delivered, reported
+`used`/`skipped`, or `unverifiable`/mixed evidence; delivery is not usage.
 
-**Delivered ≠ Used** *(Alaya invariant)* — Context delivery to a
-consumer agent is not proof of usage. Trust state must record only
-what the runtime can prove.
-
-**ContextDeliveryRecord** — Audit row: "Alaya delivered this context
-pack to this agent at this time".
-
-**UsageProofRecord** — Audit row: "the agent emitted explicit proof of
-how it used the delivered context".
-
-**Recall Delivery** — Runtime action where Alaya returns recall/context
-to an attached agent over MCP/CLI contract surfaces.
-
-**Usage Receipt** — Runtime-recorded usage acknowledgment
-(`soul.report_context_usage`) linked to prior recall delivery. Receipt
-evidences usage reporting, not automatic durable promotion.
+**Delivery / Usage Receipt** — Evidence that Alaya returned a context page /
+that an agent subsequently reported using or skipping it. Neither is a
+world-truth certificate or automatic memory promotion.
 
 ## Surface
 
-**MCP Surface** — Alaya's primary outward surface. Alaya exposes
-first-party memory tools only; it does not expose MCP prompts or
-resources in v0.1.
+**MCP Surface / CLI Fallback** — Stdio agent attach / command-line memory-tool
+fallback sharing one runtime contract. Daemon HTTP is not an MCP server.
 
-**CLI Fallback** — Plain command-line fallback that shares the same
-runtime contract as MCP. Tested for parity.
+**Attach / Profile** — Host integration configured only after preview and
+explicit confirmation.
 
-**Attach / Profile** — The mechanism by which an agent (Codex, Claude
-Code) is configured to use Alaya as its memory plane. Always
-preview-then-confirm; no silent profile mutation.
-
-**Slash Boot Trigger** — A host CLI command such as `/alaya-inspect`
-that opens an Alaya operator surface. It is a convenience launcher for
-`alaya inspect --open`, not a memory tool and not a durable memory
-write path.
-
-**Host Slash Registry** — The host application's own mechanism for
-recognizing slash commands. Alaya can write managed profile entries,
-but recognition must be proven against the concrete host and version
-before the trigger is called consumable.
+**Memory Inspector** — Local memory-management UI, not an agent chat frontend
+or alternate durable write path.
 
 ## Recall
 
-**Fallible interpretation** — A revisable reading of task or source meaning.
-Q represents a query interpretation; H represents a source interpretation.
-Admission checks the applicable contract, not every semantic choice. Declared
-gaps need not enumerate silent omissions.
+**Fallible interpretation (Q/H/C)** — Q reads query meaning, H reads source
+meaning, C proposes explicit correspondence between them. Admission validates
+the contract, not every natural-language choice. Q/H/C keep separate
+identities and unreviewed status.
 
-**Semantic correspondence (C)** — An explicitly bound mapping between one
-query interpretation and one source interpretation. It is not a universal
-cross-source identity authority. A useful search association does not establish
-that correspondence.
+**Conditional use / exploration hypothesis** — A result under stated,
+traceable premises / a tentative connection useful for further observation.
+Search usefulness alone never proves identity or a world claim. A failed
+dependent condition need not revoke independent source access.
 
-**Conditional use** — Use under stated premises and retained dependencies.
-An unresolved premise can limit a conclusion without making all related source
-material unusable. Conditional validity and world truth are different claims.
+**Whole-chain utility** — Task benefit after source observation, reasoning,
+delivery, agent use and possible revision, including errors and cost. Hits,
+proof counts and producer admission alone do not establish it.
 
-**Exploration hypothesis** — A tentative connection used to decide what to
-inspect or which conditional consequences to compare. This is a responsibility
-distinction, not a promise of a separate implemented storage type. Observation
-may support, refute or leave it unresolved.
+**SourceIndex** — Derived native source discovery over current SourceRecord
+and standalone retained EvidenceCapsule roots; a capsule target is not a
+source-record mirror and preserves its own root identity.
 
-**Whole-chain utility** — Task benefit after observation, interpretation,
-reasoning, delivery, consumer use and any revision, including errors and total
-cost. It is not established by producer admission, proof count or source hits
-alone. See [the Recall boundary](recall.md#fallible-interpretation-and-task-use).
+**Conditional field** — The single ordinary Recall decision route:
+`compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`.
+UGAF (Unified Governed Associative Field) names its governed associative
+model, not a separately executable stack or proved attractor dynamic.
 
-**UGAF** — Unified Governed Associative Field. One continuous governed
-associative-memory field, not a stack of post-processors. In-repo owner:
-`docs/handbook/recall.md`. Hopfield / Lyapunov / attractor wording is a
-design lens, not a proved runtime. **LIVE** HEAD is the conditional field
-(`compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`).
-Historical query-proof `prefixSK` and C01 budget-aware-q are receipts, not
-the live selector.
+**Navigation witness / association grade** — Native ordinal discovery
+coordinate / declared conditional-strength domain value. A lexical or
+vector rank is not proof or an association grade.
 
-**Safe Dominance** — Historical query-proof vocabulary: a strict
-query-conditioned pointwise partial order over applicable attributed
-observations. It is not a scalar score or general outranking; a cycle is a
-contract failure in that historical contract. The current conditional field
-uses declared association domains and accepting product states.
+**Source evidence / semantic proof** — An authorized source-root delivery /
+a verified, explicitly qualified result under selected Q/H/C premises.
+Neither is ground truth; proof may remain unreviewed and world-unknown.
 
-**Pointwise Frontier** — A historical deterministic layer of safe-dominance structure.
-Frontier index is not Gamma gain and does not require F1-before-F2 capture when
-a lower frontier supplies positive gain on a compiled Gamma atom that every
-eligible higher-frontier candidate is proved not to cover. This is archive
-vocabulary, not an ordinary Recall scheduling rule.
+**Logical-index completeness** — Query-relative certificate that no
+remaining counterfactual influence changes the index, not a reader's
+`exhausted` flag, complete language understanding or complete payload.
 
-**Gamma_q** — Historical query-proof vocabulary: query-compiled,
-selected-set-dependent marginal strata (answer binding/position,
-required-proposition, compiler-required certified-independent support).
-Compiled Gamma and the later evidence-set objective are retired decision
-contracts. The current owner is the conditional accepting index in `recall.md`.
+**Source disclosure** — Read-time qualification of original/reduced material,
+clock, checked temporal relation and proof use. It does not change
+eligibility or source identity.
 
-**Budgeted Capture Walk** — **LIVE:** observer work and page budget on the
-conditional field; continuation is offset paging plus worker-lifetime
-`FIELD_RESUME`. There is no all-K prefix promise; changing page budget may
-change which accepting states fit one packet. Historical `prefixSK` /
-`selectGammaWalk` wording is a receipt.
-
-**Lexical Recall** — BM25 / FTS-based search used as a seed observer on
-the live conditional field. Historical family-max RRF
-(`fusion-delivery-families.ts`) is not the live scorer. See `recall.md`.
-
-**Path-Aware Recall** — Query-conditioned traversal of eligible
-`PathRelation` projections through the conditional field. Transfers preserve
-bindings, semantic time, association domains and derivation dependencies.
-Only accepting product states enter the index. Missing measurements and
-unavailable observations remain explicit; propagation does not establish truth.
-
-**Embedding Supplement** — Optional vector infrastructure with independent
-storage and enrichment consumers. The conditional observer interface includes
-a bounded embedding-measurement extension; the ordinary daemon reader does
-not currently bind it. Ordinary Recall does not call a provider or use the
-retired candidate-injection/pool-rescoring path. Vector presence alone does
-not define conditional association or durable truth (invariant §18).
-Historical discovery rates and E0/E1 ranking promises belong to their frozen
-benchmark contracts. See `recall.md`.
-
-**API Embedding Provider** — A network-backed embedding supplement. API use is
-always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires
-both provider credentials and an enabled supplement; local default-on applies
-only when `@huggingface/transformers` resolves, and never authorizes a network
-call. Missing extra makes effective provider off.
+**Embedding supplement** — Optional discovery/measurement infrastructure;
+not a durable-truth decision or permission for provider calls. Ordinary
+Recall does not generate embeddings on demand.
 
 ## Provider
 
-**ProviderRegistry** — Capability registry of LLM / embedding / rerank
-/ proposal providers.
+**ProviderRegistry / Provider Status** — Gateway capability registry and
+its configured, enabled or unavailable operational state; these are not
+per-request attempt settlement.
 
-**Provider Status** — `not-configured` / `configured-but-disabled` /
-`enabled` / `unavailable` / `degraded`.
-
-**ProposalRecord** — Output from the agent / LLM proposal route. Never
-becomes durable directly; flows through the Promotion Gate.
-
-## Storage *(Alaya v0.1 specific)*
-
-**Sync-first repo methods** — Storage repos expose synchronous primary
-methods for SQLite-backed durable mutation. Parallel `*Sync` sibling
-methods are retired; async wrapping now belongs at
-I/O boundaries rather than inside SQLite repo APIs.
-
-## Port Vocabulary *(Historical, retired after v0.1.0)*
-
-The `Port` / `trivial-copy` / `adapt-and-port` / `requires-redesign`
-/ `Vendor Snapshot` terminology was load-bearing only during the v0.1
-port wave. Those archive trees were deleted on 2026-08-24
-(commit 2b23da6f2). Forward (post-v0.1.0) work does not use these terms.
+**Settled attempt** — Exact, witnessed terminal provider request with its
+recorded outcome and usage certainty. A cache hit, raw shard, preflight,
+reserved attempt or unknown transport result alone is not settlement or
+authority to dispatch.

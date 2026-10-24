@@ -49,7 +49,7 @@ field continuation that both the public recall request and the worker recall
 request can replay. Frozen v6/v7 library
 deliveries stay readable through `SourceSemanticLibraryDeliverySchema` and the
 private comparison schema; those readers do not authorize live legacy execution.
-See [the migration contract](../../docs/handbook/recall.md#ordinary-native-field-delivery-protocol-21).
+See [ordinary native field delivery](../../docs/handbook/recall.md#ordinary-native-field-delivery).
 
 ## Source access compatibility
 
@@ -60,12 +60,11 @@ phase/execution tuple 2; readers must dispatch the nested versions, not the oute
 version alone. These historical families do not describe the current public page.
 
 Ordinary MCP/worker recall now uses the
-[native field delivery contract](../../docs/handbook/recall.md#ordinary-native-field-delivery-protocol-21),
+[native field delivery contract](../../docs/handbook/recall.md#ordinary-native-field-delivery),
 including library field pages and their continuation. The old comparison
 execution entry is retired; retained archive readers do not authorize its replay.
-The [Protocol 20 foundation record](../../docs/handbook/recall.md#versioned-source-access-foundation)
-explains historical identities, not an unwired implementation or a pending
-ordinary cutover.
+The [current compatibility boundary](../../docs/handbook/recall.md#ordinary-native-field-delivery)
+distinguishes archival readmission from live execution.
 
 ## EventLog compatibility
 

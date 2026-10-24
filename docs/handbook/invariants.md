@@ -225,7 +225,7 @@ These rules always win over lower-level docs and task-card convenience.
     non-engineering users to install or operate Alaya. Surfaces that
     reach a non-engineering audience (e.g. xiaohongshu) require either
     a separate consumer-facing product or a charter amendment to §21
-    before publication. (Added 2026-05-03.)
+    before publication.
 21b. `reviewer_identity` on review records (`proposals.reviewer_identity`
     column, `caused_by` field on `SOUL_REVIEW_*` /
     `SOUL_PROPOSAL_RESOLVED` event_log rows, `reviewer_identity`
@@ -320,21 +320,7 @@ These rules always win over lower-level docs and task-card convenience.
     in `mcp-types.ts` must cite §25 and declare the SemVer step. If
     either SemVer snapshot moves, the PR is touching the MCP contract.
 
-## Port (Historical, retired after v0.1.0)
-
-The v0.1-specific port invariants (vendor snapshot as source of
-truth, `trivial-copy` / `adapt-and-port` / `requires-redesign` port
-modes, no-self-rewrite rule) closed with v0.1.0 and the vendor
-snapshot was removed by vendor-snapshot cleanup. The port-protocol
-archive was deleted on 2026-08-24 (commit 2b23da6f2). New work scopes
-through a PR brief.
-
-## Defense-against-recurrence (added 2026-05-03)
-
-The following three invariants were extracted from a cause-class
-aggregation across independent reviews. Each was a cause class that
-appeared in ≥2 independent findings; abstracting them here is the
-required anti-recurrence step when a cause class recurs across independent reviews.
+## Scope and concurrency
 
 29. **Default Scope Invariant.** All Alaya-redesign / clean-room
     storage paths, MCP tool inputs, HTTP routes, and resource access
@@ -360,21 +346,16 @@ required anti-recurrence step when a cause class recurs across independent revie
 
 ## Docs
 
-32. The v0.1 port-era task-card record was removed on 2026-08-24
-    (commit 2b23da6f2). Track ordinary engineering debt in PR
-    descriptions. Do not keep a parallel handbook issue list. The in-repo
-    authority for the recall-field contract and current live state is
-    `docs/handbook/recall.md`. Gitignored local work artifacts under
-    `.do-it/` (including `.do-it/plans/`) are execution tracking, not
-    handbook or invariant truth. Bench KPI results and degradations belong in
-    ignored `.bench-artifacts/history/`; `docs/bench-history/` retains the
+32. Track ordinary engineering debt in PR descriptions, not a parallel
+    handbook issue list. The in-repo authority for live recall is
+    `docs/handbook/recall.md`. Gitignored `.do-it/` execution artifacts are
+    not handbook or invariant truth. Bench KPI results and degradations belong
+    in ignored `.bench-artifacts/history/`; `docs/bench-history/` owns
     reproduction policy, pinned datasets, and sampling definitions.
 33. `docs/handbook/` is the maintained implementation handbook.
-34. `docs/archive/` holds retired-but-preserved documents. The
-    remaining file is `docs/archive/recall-before-retirement-2026-09-08.md`.
-    Port-protocol and port-era task-card trees were deleted on
-    2026-08-24 (commit 2b23da6f2). Archive files are archaeology, not
-    active rules.
+34. `docs/archive/` holds retired-but-preserved documents. Archive
+    readability does not authorize current execution or override the
+    handbook.
 
 ## Governance (two-route promotion)
 

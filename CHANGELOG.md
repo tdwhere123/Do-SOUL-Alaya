@@ -75,7 +75,7 @@ retained occurrence witness binds the existing pool/snapshot identity independen
 of its displayed 16-occurrence prefix. Private captures use the shared first-exposure
 owner and explicit versioned admission, never fabricated MCP calls. This is not
 measurement, default promotion or release; the temporary selector is removed on
-comparison promotion or termination. App/root and gateway versions are unchanged. See [the migration contract](docs/handbook/recall.md#versioned-source-access-foundation).
+comparison promotion or termination. App/root and gateway versions are unchanged. See [current compatibility and delivery](docs/handbook/recall.md#ordinary-native-field-delivery); this entry records historical migration, not a live comparison route.
 
 Protocol 19.1.0 added the conflict-edge deletion audit type and expands the
 EventLog payload envelope to an independent 8,388,608 serialized-character
