@@ -82,7 +82,7 @@ export class SourceSemanticObservationFacts {
       this.value.binding = { ...binding, session_id: session, request_id: this.requestId };
     });
   }
-  pool(pool: object, poolId: string, sources: readonly SourceRecordIdentity[],
+  pool(pool: object, poolId: string, sources: readonly Pick<SourceRecordIdentity, "identity" | "source_id" | "source_version" | "content_digest">[],
     sourceOpen: boolean, interpretationOpen: boolean, use: "created" | "reused"): void {
     this.safely(() => {
       const members = sources.map(row => ({ record_id: row.identity, source_id: row.source_id,
@@ -100,12 +100,12 @@ export class SourceSemanticObservationFacts {
   plan(plan: object, pool: object): void {
     this.safely(() => { this.origin(plan); PLAN_POOLS.set(plan, ORIGINS.get(pool) ?? null); });
   }
-  lease(action: "read" | "issue", id: string, lease: { kind: string; access_pool?: object; library_plan?: object }): void {
+  lease(action: "read" | "issue", id: string, lease: { kind: string; access_pool?: object; library_plan?: object; field_page?: object }): void {
     this.safely(() => {
       const rows = action === "read" ? this.value.lease_reads : this.value.lease_issues;
       if (rows.length >= 32) { this.overflow("lease_fact_limit"); return; }
       const origin = action === "issue" ? this.origin(lease) : ORIGINS.get(lease) ?? null;
-      const plan = lease.library_plan;
+      const plan = lease.field_page ?? lease.library_plan;
       rows.push({ handle_digest: digest(id), kind: lease.kind, origin,
         pool_origin: lease.access_pool === undefined ? plan === undefined ? null : PLAN_POOLS.get(plan) ?? null : ORIGINS.get(lease.access_pool) ?? null,
         plan_origin: plan === undefined ? null : ORIGINS.get(plan) ?? null });

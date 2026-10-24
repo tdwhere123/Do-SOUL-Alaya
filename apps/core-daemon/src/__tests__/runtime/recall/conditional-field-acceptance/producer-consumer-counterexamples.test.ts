@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { CONDITIONAL_FIELD_SCHEMA_VERSION, MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
-import { encodeIndexResults, frameEncodedIndex } from "../../../../mcp-memory/recall/recall-result.js";
+import { encodeIndexResults, frameEncodedIndex } from "@do-soul/alaya-core";
 import {
   MEM,
   WS,
@@ -168,7 +168,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 801);
     const counted = countingReaders(slice);
-    const tight = runRecall(slice, {
+    expect(() => runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({
         work_units: 101,
@@ -177,7 +177,9 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
         page_budget: 800
       }),
       readers: counted.readers
-    });
+    })).toThrow(expect.objectContaining({ details: expect.objectContaining({
+      outcome: "resource_exhausted", resource: "framing_work"
+    }) }));
     expect(counted.counters.nativeVisits).toBeLessThanOrEqual(101);
     expect(() => runRecall(slice, {
       query_text: "needle",

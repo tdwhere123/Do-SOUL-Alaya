@@ -17,8 +17,9 @@ import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema, SourceSemanticLibraryProofSchema,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
-  sourceSemanticProofQualifier, verifySourceSemanticLibraryDelivery
+  SourceSemanticFieldLibraryContinuationSchema, sourceSemanticProofQualifier, verifySourceSemanticLibraryDelivery
 } from "../../garden/source-semantic-worker.js";
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION } from "../../recall/conditional-field/navigation.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const budget = {
@@ -133,15 +134,28 @@ it("admits prepare and one-shot reason without a continuation token", () => {
     kind: "recall", accepts_unreviewed_conditional_results: true, original_query: "question",
     query_semantics_unavailable: "producer_failure", query_semantics: {}, budget, output_byte_limit: 1024
   }).success).toBe(false);
+  const fieldContinuation = {
+    schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
+    result_version: ORDINARY_NATIVE_FIELD_RESULT_VERSION, expires_at: "2099-01-01T00:00:00.000Z",
+    cursor: "offset-10", enumeration_policy: "native_query" as const
+  };
   expect(SourceSemanticWorkerRequestSchema.parse({
     kind: "recall", accepts_unreviewed_conditional_results: true, query_handle: "query-handle",
-    budget, output_byte_limit: 1024,
-    continuation: {
-      schema_version: 1, continuation_id: "page-10", query_id: "q1", snapshot_id: digest,
-      result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, expires_at: "2099-01-01T00:00:00.000Z",
-      cursor: "offset-10"
-    }
+    budget, output_byte_limit: 1024, continuation: fieldContinuation
   }).kind).toBe("recall");
+  // A frozen v6 library cursor is a historical reader shape; live recall ingress
+  // rejects it rather than resuming under a substituted enumeration policy.
+  for (const legacy of [
+    { ...fieldContinuation, result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION },
+    { ...fieldContinuation, enumeration_policy: "canonical" },
+    { ...fieldContinuation, enumeration_policy: undefined }
+  ]) {
+    expect(SourceSemanticWorkerRequestSchema.safeParse({
+      kind: "recall", accepts_unreviewed_conditional_results: true, query_handle: "query-handle",
+      budget, output_byte_limit: 1024, continuation: legacy
+    }).success).toBe(false);
+  }
+  expect(SourceSemanticFieldLibraryContinuationSchema.safeParse(fieldContinuation).success).toBe(true);
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
     source_disclosure: disclosure,

@@ -8,12 +8,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
+  encodeIndexResults, frameEncodedIndex,
   capableRecallConsumerDeclaration
 } from "@do-soul/alaya-core";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import {
-  encodeIndexResults,
-  frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics
 } from "../../../mcp-memory/recall/recall-result.js";

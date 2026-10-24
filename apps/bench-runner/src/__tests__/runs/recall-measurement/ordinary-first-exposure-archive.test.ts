@@ -1,4 +1,4 @@
-import { afterAll, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
@@ -16,12 +16,15 @@ import { OrdinaryRecallExecutionSchema } from "../../../runs/recall-measurement/
 import { executeOrdinaryRecallEntry } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
+import { publishIndexedGeneration } from "../../../../../core-daemon/src/__tests__/runtime/recall/recall-storage.test-support.js";
+import { simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { exposureSlots, firstExposureMismatch } from "../../../runs/measurement/first-exposure-session.js";
 
 const roots: string[] = [];
+afterEach(() => vi.restoreAllMocks());
 afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true });
   isolation.restore(); expect(isolation.violations).toEqual([]); });
-function fixture(count: number) {
+async function fixture(count: number) {
   const root = mkdtempSync(join(tmpdir(), "ordinary-exposure-archive-")); roots.push(root);
   const snapshot = join(root, "source.sqlite"), clock = "2026-10-01T00:00:00.000Z";
   const database = initDatabase({ filename: snapshot });
@@ -40,9 +43,12 @@ function fixture(count: number) {
         operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID, speaker: null, scope_class: "project",
         attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, source_body: body });
     }
+    // Native Recall enumerates the admitted source-index generation, not all
+    // stored records. Authored numerical vectors exercise indexing, not a model.
+    expect(await publishIndexedGeneration(database, [{ text: body }], undefined, "synthetic-workspace")).toBe(count);
     database.connection.pragma("wal_checkpoint(TRUNCATE)"); database.connection.pragma("journal_mode = DELETE");
   } finally { database.close({ optimize: false }); }
-  const query = { query_key: "a".repeat(64), original_query: "Synthetic fixture query, not a dataset question" };
+  const query = { query_key: "a".repeat(64), original_query: "Synthetic" };
   const config = SemanticChainConfigSchema.parse({ snapshot_path: snapshot, snapshot_sha256: hashRegularFileNoFollow(snapshot),
     implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: clock,
     workspace_id: "synthetic-workspace", run_id: "synthetic-run",
@@ -57,11 +63,19 @@ function fixture(count: number) {
 }
 
 it.each([8, 10])("retains authenticated first exposure across a fresh %i-root SQLite/built-worker/MCP archive", async count => {
-  const input = fixture(count), execution = await executeOrdinaryRecallEntry(input);
+  const input = await fixture(count);
+  // The published generation uses authored axes. Prepare the query with that same
+  // explicit simulation at the binding seam; all capture, SQLite reads, worker
+  // execution, MCP delivery and archive admission remain real.
+  const preparation = simulateIndexedQueryPreparation();
+  const execution = await executeOrdinaryRecallEntry(input);
+  expect(preparation).toHaveBeenCalled();
   const archived = OrdinaryRecallExecutionSchema.parse(readChainArtifact(join(input.root, "ordinary-entry.json")));
   expect(archived).toEqual(OrdinaryRecallExecutionSchema.parse(JSON.parse(JSON.stringify(execution))));
-  const row = archived.rows[0]!, initial = row.first_exposure!.initial!;
-  expect(row.pages.map(page => page.occupied_slots)).toEqual(count === 8 ? [5, 3, 0] : [5, 5]);
+  const row = archived.rows[0]!;
+  expect(row.first_exposure, JSON.stringify(row)).not.toBeNull();
+  const initial = row.first_exposure!.initial!;
+  expect(row.pages.map(page => page.occupied_slots), JSON.stringify(row)).toEqual(count === 8 ? [5, 3, 0] : [5, 5]);
   expect(row.status).toBe("complete");
   expect(row.stop_cause).toBe(count === 8 ? "occupancy_tail_exhausted" : "observed_ten_slot_prefix");
   for (const [position, page] of row.pages.entries()) {

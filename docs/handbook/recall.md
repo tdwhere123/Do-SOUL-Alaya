@@ -595,6 +595,16 @@ worker events, native facts and bounded logical costs, whose event/byte limits
 bound the record rather than the delivered result
 ([`runtime observation scope`](../../apps/core-daemon/src/runtime/recall/source-semantic-observation.ts),
 [`worker observations`](../../apps/core-daemon/src/runtime/recall-read-worker/source-semantic-observation.ts)).
+Successful delivery acknowledgment returns the delivery owner's final execution
+receipt and, when observation is enabled, records it separately in a bounded
+`delivery_settlement` event under the acknowledgment request id. Its Core cost
+and worker-native measurement stay distinct; neither is reconstructed by summing
+preparation phase counters. The fitted public library envelope and its work fields
+remain preparation-only and are not rewritten after issuance. A retried successful
+acknowledgment returns the same settlement receipt without another issuance debit.
+Omitted or failed observation is not a zero-cost settlement, and an unknown transport
+outcome is not evidence of rollback.
+
 Native facts follow actual runtime objects, not equal request numbers or pool
 labels: session, request, pool, lease and plan origins record the objects
 really used, a reused pool whose creation was not observed keeps unknown
@@ -1047,6 +1057,63 @@ settings or winner are selected by this bridge.
 The ordinary public-capture reader explicitly admits Protocol 19 and 20's unchanged
 conditional-field source-only contract using its current compact disclosure reader;
 neither is routed through the Protocol 14–18 named-object archive adapter.
+
+### Ordinary native field delivery (protocol 21)
+
+Protocol 21.0.0 declares the ordinary ranking/delivery migration a **major** under
+invariant §25. It is a contract and fixture migration, not a release or an
+acceptance of every ordinary/library runtime path.
+
+`native_query` is the only live ordinary enumeration route. The public
+`SoulMemorySearchRequestSchema` and `QueryViewSchema` default to it; `canonical`
+and `associative` stay parseable so historical readers and recorded requests keep
+their meaning, and live execution refuses them (`executeRecall`,
+`runConditionalFieldRecallWithReceipt`) instead of substituting one ranking for
+another. `RECALL_CONSUMER_PROTOCOL_VERSION` still negotiates source-evidence
+support only; it is not a ranking-version selector.
+
+`RecallNavigationWitnessSchema` carries ordinal discovery evidence on an index
+entry or typed observation: contract `native-query-navigation.v1`, the query view
+(`original` / `hint`), one operator (`source_lexical`, `source_vector`,
+`memory_lexical`, `bound_catalog`), its ordinal, an optional access ordinal and
+native rank, and an optional half-open byte location. Navigation is not an
+association grade, a claim, assertion support, product identity material or the
+frozen historical `canonical`/`associative` value. Ordering under the live route
+is reported through this coordinate; the encoder must not relabel it.
+
+`QueryView` binds delivery with `delivery_context` (an identity digest) and
+`delivery_budget` (token/byte limits) so the delivered page is fitted to the same
+envelope the caller paid for. Field results report
+`ORDINARY_NATIVE_FIELD_RESULT_VERSION` in the index and continuation.
+
+Library recall uses the same tagged field page. `SourceSemanticFieldLibraryDeliverySchema`
+(protocol 10) carries the ordinary index plus same-order `results`, and attaches
+Q/H/C evidence only to delivered source targets; memory targets never inherit a
+proof claim. Its continuation is the field continuation family, so a delivered
+cursor can be replayed and a frozen v6 offset cursor is rejected rather than
+resumed. The legacy library v6 / protocol 8 and private comparison v7 / protocol 9
+readers remain for recorded artifacts; live library adapters must emit the field
+delivery. Both live ingress paths - the public MCP recall request and the worker
+recall request - accept only the field continuation family. That daemon cutover
+belongs to the library-surface owner and is not
+claimed here. The archived source-gold library measurement contract likewise
+refuses a protocol 10 page as an `invalid_response`; it never scores tagged field
+rows under its source-gold rules or reports them as a measured-empty page, and
+replay/capture admission preserves that explicit refusal instead of turning an
+archived query-identity mismatch into an unavailable delivery. After archive integrity
+admission, invalid measurement is terminal before evaluator gold joins, answer-span
+census, order-policy scoring gates or visibility scoring. LongMemEval reports retain
+its original reason and measured costs in the selected-population denominator.
+The private chain measurement records `gold[].source_units: null` when labels were
+not consulted; `[]` remains an evaluated empty label set. Supported archived pages
+still require their original request, clock, budget, pool, source and proof bindings.
+
+Keep the explicit states: unavailable query semantics, known refusal, measured
+empty and partial delivery are distinct, and acquisition/preparation costs are
+retained on failure. The frozen benchmark receipt reader retains
+`query_preparation` when the execution declared it (an unavailable or
+not_requested state stays explicit), refuses a malformed one, and never
+substitutes a counter for missing evidence.
 
 ### Current source-semantics implementation
 

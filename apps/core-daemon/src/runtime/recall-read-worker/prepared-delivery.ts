@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { indexEntryCacheKey, type InformationIndex } from "@do-soul/alaya-protocol";
-import type { ConditionalFieldRecallPortResult, runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
+import { CoreError, type ConditionalFieldRecallPortResult, type runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
+import { attachMeasuredWorkerCost, measuredWorkerCostOfReceipt } from "../recall/worker-actual-cost.js";
+import { claimDeliverySettlement, finishDeliverySettlement } from "./delivery-settlement.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 type Execution = ReturnType<typeof runConditionalFieldRecallWithReceipt>;
@@ -36,18 +38,48 @@ export function settleWorkerDelivery(
   if (discard) { pending?.delete(id); return null; }
   const prepared = pending?.get(id);
   if (prepared === undefined) throw new Error("Recall preparation expired or discarded");
-  if (prepared.issue === undefined) return prepared.receipt;
-  const acknowledgePayload = payload as WorkerOperationPayload<"conditionalField.acknowledge">;
+  try {
+    return settlePrepared(pending!, id, prepared,
+      payload as WorkerOperationPayload<"conditionalField.acknowledge">);
+  } catch (error) {
+    // issue() refreshes this same receipt even on refusal (including its pin read).
+    const measured = measuredWorkerCostOfReceipt(prepared.receipt);
+    if (measured !== undefined) attachMeasuredWorkerCost(error, measured);
+    throw error;
+  }
+}
+
+function settlePrepared(pending: Map<string, Prepared>, id: string, prepared: Prepared,
+  acknowledgePayload: WorkerOperationPayload<"conditionalField.acknowledge">): Execution["execution_receipt"] | null {
+  // A retried or first acknowledgement must describe the same prepared membership;
+  // a re-issued envelope may never substitute entries after the fact.
   const issuedIds = acknowledgePayload.issued_entry_ids;
   const expected = prepared.index.entries.map(indexEntryCacheKey);
   if (issuedIds.length !== expected.length
     || issuedIds.some((entryId, offset) => entryId !== expected[offset])) {
     throw new Error("Recall envelope changed prepared membership");
   }
+  if (prepared.issue === undefined) {
+    // A cancelled retry cannot undo an already acknowledged exposure.
+    finishDeliverySettlement(acknowledgePayload.settlement, true);
+    return prepared.receipt;
+  }
   const entries = Object.entries(acknowledgePayload.previews);
   if (entries.some(([, value]) => typeof value !== "string")) throw new TypeError("invalid Recall previews");
-  prepared.issue({ index: prepared.index, previews: new Map(entries), metadata: prepared.metadata });
+  if (!claimDeliverySettlement(acknowledgePayload.settlement)) {
+    pending.delete(id);
+    throw new CoreError("CONFLICT", "Recall acknowledgment cancelled before issuance", {
+      details: { delivery_settlement: "cancelled", execution_receipt: prepared.receipt }
+    });
+  }
+  try {
+    prepared.issue({ index: prepared.index, previews: new Map(entries), metadata: prepared.metadata });
+    finishDeliverySettlement(acknowledgePayload.settlement, true);
+  } catch (error) {
+    finishDeliverySettlement(acknowledgePayload.settlement, false);
+    throw error;
+  }
   // An acknowledgment retry must neither retain source closures nor advance a successor.
-  pending!.set(id, { metadata: {}, receipt: prepared.receipt, index: prepared.index });
+  pending.set(id, { metadata: {}, receipt: prepared.receipt, index: prepared.index });
   return prepared.receipt;
 }

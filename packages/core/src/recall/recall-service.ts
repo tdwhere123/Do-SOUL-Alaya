@@ -54,7 +54,7 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
   readonly supports_product_updates?: boolean;
 }>;
 
-export type { ObserverReaders, StoredEmbeddingVector, StoredPairMeasurement } from "./conditional-field/observers/observe.js";
+export type { NativeSourceNomination, ObserverReaders, StoredEmbeddingVector, StoredPairMeasurement } from "./conditional-field/observers/observe.js";
 export {
   applyUtf8HydrateToSourceRootPage,
   hasMeasurementProducer,

@@ -109,9 +109,13 @@ export function consumeMemoryIfNeeded(
 }
 
 export function defaultView(): QueryView {
+  // Typed reasoning and legacy fallbacks bind their own computation view. The
+  // public ordinary route supplies `native_query` explicitly; inheriting a public
+  // default here would silently change proof computation.
   return QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    requested_roles: ["requested", "associated"]
+    requested_roles: ["requested", "associated"],
+    enumeration_policy: "canonical"
   });
 }
 

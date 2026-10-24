@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
-  SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
+  SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
+  SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
   SourceSemanticExecutionSchema, SourceSemanticProfiledExecutionSchema, sourceSemanticExecutionExternalAttempts,
   SourceSemanticComparisonWorkerResultSchema, SourceSemanticComparisonResponseSchema, SourceSemanticProfiledLibraryDeliverySchema,
@@ -199,7 +200,11 @@ export function admitSourceSemanticLibraryContinuation(input: LibraryAdmissionIn
   const previous = admitSourceSemanticLibraryResponse(input.previous);
   const before = isRecord(input.previous.recallResult) ? parseLibraryRecall(input.previous.recallResult) : null;
   const current = isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null;
-  if (previous?.status !== "admitted" || before === null || before === "invalid" || current === null || current === "invalid"
+  // An unsupported family is reported for what it is, not as a continuation defect.
+  if (before === "invalid" || current === "invalid" || before === "field_family" || current === "field_family") {
+    return invalid("invalid_response");
+  }
+  if (previous?.status !== "admitted" || before === null || current === null
     || before.request_identity !== input.requestIdentity || current.request_identity !== input.requestIdentity
     || previous.index.continuation == null
     || canonicalJson(input.requestContinuation) !== canonicalJson(previous.index.continuation)
@@ -217,8 +222,11 @@ export function admitSourceSemanticLibraryContinuation(input: LibraryAdmissionIn
   return admitted;
 }
 
+/** Decoded delivery family. The live field page is a different contract, not a malformed archive. */
+type LibraryRecallParse = LibraryRecall | "invalid" | "field_family" | null;
+
 function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
-  recalled: LibraryRecall | "invalid" | null, historicalSourceOnly = false): SourceSemanticLibraryEvaluation {
+  recalled: LibraryRecallParse, historicalSourceOnly = false): SourceSemanticLibraryEvaluation {
   const pageBudget = historicalSourceOnly ? HISTORICAL_SOURCE_ONLY_PAGE_BUDGET : SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET;
   const admitted = admitLibraryMeasurement(input, recalled, pageBudget);
   if (admitted === null || admitted.status === "invalid") return unavailableEvaluation(admitted);
@@ -307,7 +315,7 @@ export function readmitHistoricalSourceOnlyLibraryMeasurement(rawMeasurement: un
 }
 
 function readmitLibraryDelivery(rawMeasurement: unknown, input: SourceSemanticLibraryMeasurementInput,
-  recalled: LibraryRecall | "invalid" | null, historicalSourceOnly = false): SourceSemanticLibraryEvaluation {
+  recalled: LibraryRecallParse, historicalSourceOnly = false): SourceSemanticLibraryEvaluation {
   const stored = (historicalSourceOnly ? HistoricalValidatedMeasurementRecord : ValidatedMeasurementRecord).safeParse(rawMeasurement);
   if (!stored.success || recordInconsistency(stored.data) !== undefined
     || (stored.data.source_records ?? []).some((record) => !(input.sourceRecords ?? []).some((trusted) =>
@@ -327,7 +335,7 @@ function unavailableEvaluation(measurement: SourceSemanticLibraryMeasurement | n
 }
 
 function admitLibraryMeasurement(
-  input: LibraryAdmissionInput, recalled: LibraryRecall | "invalid" | null, pageBudget: number,
+  input: LibraryAdmissionInput, recalled: LibraryRecallParse, pageBudget: number,
   initialExposure?: FirstExposurePage
 ): {
   readonly status: "admitted";
@@ -344,10 +352,12 @@ function admitLibraryMeasurement(
     & { readonly query_semantics_status?: SourceSemanticQueryStatus };
 } | Extract<SourceSemanticLibraryMeasurement, { status: "invalid" }> | null {
   if (!isRecord(input.recallResult)) return null;
+  // An unsupported or unparseable library family is refused before call evidence:
+  // what cannot be measured here is an invalid response, not a metered page.
+  if (recalled === "invalid" || recalled === "field_family") return invalid("invalid_response");
   const zeroCall = zeroCallReason(input.recallResult, pageBudget !== HISTORICAL_SOURCE_ONLY_PAGE_BUDGET);
   if (zeroCall !== null) return invalid(zeroCall);
   if (recalled === null) return null;
-  if (recalled === "invalid") return invalid("invalid_response");
   if (pageBudget !== HISTORICAL_SOURCE_ONLY_PAGE_BUDGET && recalled.query_semantics_status === undefined) return invalid("invalid_response");
   const budget = RequestBudgetSchema.safeParse(input.requestBudget);
   if (!budget.success) return invalid("missing_request_budget");
@@ -385,7 +395,7 @@ function admitLibraryMeasurement(
   };
 }
 
-function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "invalid" | null {
+function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecallParse {
   if (isProfiledRecall(raw)) {
     const parsed = raw.kind === "recall" ? SourceSemanticComparisonWorkerResultSchema.safeParse(raw)
       : SourceSemanticComparisonResponseSchema.safeParse(raw);
@@ -397,6 +407,12 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
   const worker = SourceSemanticWorkerResultSchema.safeParse(raw);
   if (worker.success) {
     if (worker.data.kind !== "recall") return null;
+    // This evaluator owns the source-gold delivery contract only. The protocol 10
+    // tagged field page is a different delivered shape; refusing it keeps it from
+    // being scored as an empty, unknown or source-gold measurement.
+    if (worker.data.protocol_version !== SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION) {
+      return worker.data.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION ? "field_family" : "invalid";
+    }
     return {
       delivery_id: worker.data.delivery_id, request_identity: worker.data.request_identity, index: worker.data.index, order: worker.data.order,
       slot_qualifiers: worker.data.slot_qualifiers, total_count: worker.data.total_count,
@@ -408,6 +424,13 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
   const mcp = SoulInterpretationResponseSchema.safeParse(raw);
   if (mcp.success) {
     if (mcp.data.operation !== "recall") return null;
+    // The archived producer declares protocol 8. An outcome-only legacy response
+    // declares no version and still decodes through the named reader; the tagged
+    // field page is a different delivered shape here.
+    if (mcp.data.protocol_version !== undefined
+      && mcp.data.protocol_version !== SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION) {
+      return mcp.data.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION ? "field_family" : "invalid";
+    }
     if (mcp.data.index === undefined) return null; // Protocol admitted an outcome-only response, not an empty delivery.
     if (mcp.data.index === undefined || mcp.data.order === undefined || mcp.data.results === undefined || mcp.data.total_count === undefined
       || mcp.data.slot_qualifiers === undefined || mcp.data.delivery_id === undefined || mcp.data.discovery === undefined) {
@@ -421,6 +444,26 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
     };
   }
   return looksLikeLibraryRecall(raw) ? "invalid" : null;
+}
+
+/**
+ * Family gate for archived consumers. The source-gold evaluator owns which delivered
+ * families it can measure, and archived library admission binds the archived producer's
+ * query identity. A page from the live field family is therefore refused here before
+ * that admission instead of being bound, or reported as an unavailable delivery.
+ */
+export function refusesSourceSemanticLibraryFamily(recallResult: unknown): boolean {
+  return isRecord(recallResult) && parseLibraryRecall(recallResult) === "field_family";
+}
+
+/**
+ * The refusal evaluation for a known unsupported library family. Decoding the family is
+ * the only evidence it needs: no first exposure, gold, source record or proof claim is
+ * read, so consumers keep the cause explicit when exposure itself is unavailable.
+ */
+export function sourceSemanticLibraryFamilyRefusal(recallResult: unknown): SourceSemanticLibraryEvaluation | null {
+  return refusesSourceSemanticLibraryFamily(recallResult)
+    ? unavailableEvaluation(invalid("invalid_response")) : null;
 }
 
 function isProfiledRecall(raw: Record<string, unknown>): boolean {

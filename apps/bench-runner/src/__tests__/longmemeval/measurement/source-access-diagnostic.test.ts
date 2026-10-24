@@ -256,7 +256,14 @@ describe("source access diagnostic", () => {
     const frozen = readLongMemEvalSemanticFreeze(f.config.source_run_root);
     const sourceSessions = new Map(frozen.selected[0]!.source_manifest.map((source) => [source.source_id, source.session_id]));
     for (const [index, row] of observed.result.rows.entries()) {
-      expect(row.status).toBe("observed");
+      // The canonical pool sees all 140 roots, but the shared finite work limit
+      // permits retaining only 128. Observed ranks survive that honest partial.
+      expect(row.status).toBe(row.policy === "canonical-v1" ? "partial" : "observed");
+      if (row.policy === "canonical-v1") {
+        expect(row.reason).toBe("logical_work_limit");
+        expect(row.retained_source_count).toBe(128);
+        expect(row.unretained_observed_sources).toBe(12);
+      }
       const orderedSessions = row.page_paths.flatMap((path) => {
         const page = readChainArtifact(join(f.root, "multi-round", path)) as { response: {
           access: { source_candidates: { source_id: string }[] } } };
@@ -265,7 +272,7 @@ describe("source access diagnostic", () => {
       const sourceRank = orderedSessions.findIndex((session) => session === "session-69") + 1;
       const sessionRank = [...new Set(orderedSessions.slice(0, sourceRank))].length;
       expect(sourceRank).toBeGreaterThan(0);
-      expect(evaluated.result.rows[index]).toMatchObject({ first_gold_source_rank: sourceRank,
+      expect(evaluated.result.rows[index]).toMatchObject({ observation_status: row.status, first_gold_source_rank: sourceRank,
         first_gold_session_rank: sessionRank, source_rank_unit: "source_root",
         session_rank_unit: "distinct_session", pool_k_unit: "source_root" });
     }

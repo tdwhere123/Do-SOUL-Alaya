@@ -1083,10 +1083,6 @@
     "max": 7,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/measurement/first-exposure-session.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/measurement/question-validity.ts": {
     "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"

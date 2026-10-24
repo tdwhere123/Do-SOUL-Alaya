@@ -140,6 +140,9 @@ export type CreateFieldInput = Readonly<{
 }>;
 
 export type FieldEngineState = Readonly<{
+  /** undefined is unobserved; null is an absent native discovery capability. */
+  readonly native_sources?: import("../observers/observe-ports.js").NativeSourceNomination | null;
+  readonly native_source_retained_bytes?: number;
   readonly binding_contexts?: BindingContextStore;
   readonly binding_context_bytes?: number;
   readonly query_id: string;
@@ -651,7 +654,9 @@ function rejectedField(
     authorized_scopes: input.authorized_scopes,
     budget: input.budget,
     remaining_exploration: 0,
-    remaining_reserve: input.budget.finalization_reserve,
+    // A depleted request retains its declared reserve in identity metadata, but
+    // rejection cannot recreate work that admission has already spent.
+    remaining_reserve: Math.min(input.budget.finalization_reserve, input.budget.work_units),
     remaining_memory_bytes: input.budget.memory_bytes,
     admitted_allocation_bytes: 0,
     memory_exhausted: false,

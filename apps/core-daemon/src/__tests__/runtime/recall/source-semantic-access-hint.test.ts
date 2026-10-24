@@ -27,7 +27,7 @@ it("uses original navigation then supplemental hint to reach a source outside th
     { id: "middle", text: "Granite ".repeat(1000), reading: "surround", count: 40 },
     { id: "private", text: "Harbor opening was put off.", reading: "postpone", scope: "global_core" },
     { id: "z", text: "Harbor opening was put off.", reading: "postpone" }
-  ], async ({ execute, filename }) => {
+  ], async ({ execute, filename, port }) => {
     const budget = { ...ACCESS_BUDGET, work_units: 200_000, memory_bytes: 4_000_000 };
     const request = { ...prepare, budget };
     const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -48,7 +48,7 @@ it("uses original navigation then supplemental hint to reach a source outside th
       expect(meter.spentWork).toBeLessThanOrEqual(budget.work_units);
     } finally { navigation.mockRestore(); database.close(); closeCachedDatabase(filename); }
 
-    const handler = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
+    const handler = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: port });
     const context = { workspaceId: WS, runId: "access-test", agentTarget: "codex" as const, sessionId: "access-test" };
     const { kind: _kind, ...fields } = request;
     const authorized_scopes = { mode: "named" as const, scopes: ["project"] };
@@ -76,13 +76,9 @@ it("uses original navigation then supplemental hint to reach a source outside th
       authorized_scopes }, context);
     if (recalled.operation !== "recall" || recalled.discovery === undefined ||
         recalled.results === undefined || recalled.index === undefined) throw new Error("completed recall expected");
-    expect(recalled.discovery.access?.pool_id).toBe(hinted.access?.pool_id);
-    const delivered = recalled.results.find(row => row.target?.kind === "source_evidence" && row.target.root_id === target.record_id);
-    expect(delivered?.content_preview).toContain("Harbor opening was put off.");
-    expect(delivered?.source_channels).toEqual(["source_record"]);
-    const targetSlot = recalled.index.entries.findIndex(row => row.target.kind === "source_evidence" && row.target.root_id === target.record_id);
-    expect(targetSlot).toBeGreaterThanOrEqual(0);
-    expect(recalled.slot_qualifiers).toContainEqual(expect.objectContaining({ index: targetSlot, evidence_kind: "source_evidence" }));
+    // Membership is the shared field's native nomination, not the library access catalog:
+    // a prepared hint no longer substitutes a second selection on the recall path.
+    expect(recalled.discovery.visited_source_pages).toBe(0);
     expect(recalled.query_semantics_status).toEqual(hinted.query_semantics_status);
     expect(recalled.request_identity).toBe(sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK,
       authorized_scopes: ["project"], original_query: original, query_semantics: query,
@@ -90,12 +86,16 @@ it("uses original navigation then supplemental hint to reach a source outside th
       semantic_correspondences: [], budget, output_byte_limit: 1_000_000 }));
     expect(recalled.proofs ?? []).toHaveLength(0);
     expect(recalled.coverage.conditional_computation).toBe("unexercised");
-  });
+  }, { prepareDatabase: async database => {
+    const { publishIndexedGeneration } = await import("./recall-storage.test-support.js");
+    await publishIndexedGeneration(database, [{ text: "Granite walls." }, { text: "Granite ".repeat(1000) },
+      { text: "Harbor opening was put off.", vector: [1, 0, 0] }, { text: "Harbor opening was put off.", vector: [1, 0, 0] }]);
+  } });
 }, 60_000);
 
 it("admits one current source tuple shared by canonical, native index and repeated interpretation discovery", async () => {
   await withAccessLibrary([{ id: "overlap", text: "Harbor opening was put off.", reading: "postpone", count: 2 }],
-    async ({ execute, filename, ids }) => {
+    async ({ execute, filename, ids, port }) => {
       const { database } = await createRecallRealStorage(() => undefined, filename);
       let target;
       try {
@@ -121,18 +121,19 @@ it("admits one current source tuple shared by canonical, native index and repeat
       expect(prepared.access?.observed_interpretation_count).toBe(2);
       expect(prepared.access?.source_candidates.map(row => row.record_id)).toEqual([target!.target.root_id]);
       expect(new Set(prepared.candidates.map(row => row.interpretation_id))).toEqual(new Set(ids.get("overlap")));
+      // The field owns membership: one admitted root stays one delivered slot.
       const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
-        query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+        original_query: "Harbor opening", semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+      expect(recalled.query_semantics_status.status).toBe("unavailable");
       expect(recalled.index.entries.filter(row => row.target.kind === "source_evidence"
         && row.target.root_id === target!.target.root_id)).toHaveLength(1);
-      expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(recalled.execution)).acquisition.status).toBe("not_run");
-      expect(recalled.discovery.access?.phases[2]).toEqual(prepared.access?.phases[2]);
+      expect(recalled.proofs ?? []).toEqual([]);
     });
 }, 60_000);
 
 it("inherits a frozen hint across source-only continuation and rejects changes, scope drift and a stale revision", async () => {
   await withAccessLibrary(Array.from({ length: 17 }, (_, index) => ({ id: `raw-${index}`, text: "Harbor notes." })),
-  async ({ execute, filename }) => {
+  async ({ execute, filename, port }) => {
     const first = await accessCall(execute, { ...prepare, access_hint: "Harbor" });
     expect(first.continuation_handle).toBeDefined();
     const continued = { ...prepare, continuation_handle: first.continuation_handle! };

@@ -79,7 +79,7 @@ describe("conditional-field schemas", () => {
     expect(view.facet_mode).toBe("same_path");
     expect(view.threshold_milligrades).toBe(0);
     expect(view.facet_obligations).toBeUndefined();
-    expect(view.enumeration_policy).toBe("canonical");
+    expect(view.enumeration_policy).toBe("native_query");
     expect(view.result_kind_view).toBe("mixed");
     expect(view.protocol_version).toBeUndefined();
     expect(view.supported_result_kinds).toBeUndefined();
@@ -562,6 +562,19 @@ describe("conditional-field transfer identity and request coverage", () => {
       supported_result_kinds: ["memory_entry", "source_evidence"]
     }).supported_result_kinds).toEqual(["memory_entry", "source_evidence"]);
     expect(parsed.claim_demands?.[0]?.required_claim).toBe("any");
+  });
+
+  it("keeps legacy enumeration values parseable while the live default is native query", () => {
+    const request = {
+      query: "needle", scope_class: null, dimension: null, domain_tags: null, max_results: 5
+    };
+    expect(SoulMemorySearchRequestSchema.parse(request).enumeration_policy).toBe("native_query");
+    // Historical values keep their recorded meaning for readers and requests;
+    // only live execution refuses to run them as an ordinary route.
+    expect(SoulMemorySearchRequestSchema.parse({ ...request, enumeration_policy: "canonical" })
+      .enumeration_policy).toBe("canonical");
+    expect(SoulMemorySearchRequestSchema.parse({ ...request, enumeration_policy: "associative",
+      cap_contracts: [milligradeContract] }).enumeration_policy).toBe("associative");
   });
 
   it("rejects associative MCP recall without declared cap_contracts", () => {

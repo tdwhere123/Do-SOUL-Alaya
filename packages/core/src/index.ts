@@ -240,7 +240,8 @@ export type { SourceFeedbackCorrespondenceAction, SourceFeedbackCorrespondenceRe
   SourceFeedbackCorrespondenceHost } from "./recall/runtime/source-feedback-correspondence.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
-export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
+export { sourceSemanticSupportExtent, sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
+export { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex, type RecallPageSourceMetadata } from "./recall/runtime/recall-page-encoding.js";
 export { selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage,
   type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {

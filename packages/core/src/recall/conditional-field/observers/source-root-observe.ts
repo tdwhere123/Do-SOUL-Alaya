@@ -100,9 +100,11 @@ export function observeSourceAwareSeed(
     if (sourced.resourceLimited) resourceLimited = true;
   }
   let memoryIdle = !wantMemory;
+  let pagedMemory = false;
   // Source hydration failure is not a lexical skip: mixed seed would fail-close FTS memory.
   if (wantMemory && share.memoryWork > 0) {
     const taken = takeLexicalPage(input, share, memoryCommitted);
+    pagedMemory = taken !== null;
     if (taken === null) {
       memoryIdle = true;
     } else {
@@ -135,11 +137,30 @@ export function observeSourceAwareSeed(
     sourcesTruncated = true;
     truncated = true;
   }
+  // An empty source inventory must not close the mixed seed before the
+  // independently supported memory lane is read. Source membership remains
+  // explicit through its own residual; this only refuses to let absence suppress it.
+  if (wantMemory && !pagedMemory && input.readers.lexical !== undefined && input.seed_query !== undefined
+    && sourceRows.length === 0 && workUnits < input.action.work_limit) {
+    const taken = takeLexicalPage(input, {
+      memoryWork: input.action.work_limit - workUnits, memoryLimit: pageLimit(input) }, memoryCommitted);
+    if (taken !== null) {
+      pagedMemory = true;
+      observations.push(...taken.observations);
+      workUnits += taken.workUnits;
+      bytes += taken.bytes;
+      truncated = truncated || taken.truncated;
+      memoryCommitted = taken.memoryCommitted;
+      memoryIdle = taken.ids === 0 && !taken.truncated;
+      if (taken.hydrationUnavailable) hydrationUnavailable = true;
+      if (taken.resourceLimited) resourceLimited = true;
+    }
+  }
   const sourcesDone = cursor.sourcesDone || (pagedSources && !sourcesTruncated);
-  if (wantMemory && share.memoryWork === 0) truncated = true;
+  if (wantMemory && !pagedMemory) truncated = true;
   return finishSourceSeed(input, {
     source: sourceCommitted, memory: memoryCommitted, sourcesDone, hint: hintCommitted,
-    hintsDone, hintsUnavailable, persistHint: sketch !== undefined || wantMemory, laneTurn: laneTurn + 1
+    hintsDone, hintsUnavailable, persistHint: sketch !== undefined || wantMemory || input.query.view.enumeration_policy === "native_query", laneTurn: laneTurn + 1
   }, { observations, sourceRows, lookupReasons, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited });
 }
 

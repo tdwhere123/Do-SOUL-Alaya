@@ -47,7 +47,7 @@ it("follows real prepare/query/pool/plan leases across native worker calls but n
     if (initial.outcome.status !== "success") throw initial.outcome.error;
     const continuation = initial.outcome.value.index.continuation!;
     expect(continuation).not.toBeNull();
-    const next = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, query_handle, continuation }));
+    const next = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, query_handle, continuation: continuation as never }));
     if (next.outcome.status !== "success") throw next.outcome.error;
     const prep = prepared.observations[0]!.facts!, first = initial.observations[0]!.facts!, second = next.observations[0]!.facts!;
     expect(first.pool).toMatchObject({ use: "reused", origin: prep.pool!.origin, union: prep.pool!.union });
@@ -71,7 +71,8 @@ it("captures the finite actual union despite interrupted native reading and coal
   await withIndexedSources([{ id: "a-long", text: "Harbor ".repeat(8000), indexed: false },
     { id: "z-small", text, vector: [1, 0, 0] }], async fixture => {
     const client = await fixture.openClient();
-    const captured = await client.observeSourceSemantics({}, () => workerCall(client, recall));
+    const captured = await client.observeSourceSemantics({}, () => workerCall(client, {
+      kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }));
     if (captured.outcome.status !== "success") throw captured.outcome.error;
     const row = captured.observations[0]!;
     expect(row.facts?.pool?.union).toMatchObject({ capture: "complete", full_universe: "not_established" });
@@ -84,7 +85,10 @@ it("captures the finite actual union despite interrupted native reading and coal
       start: 0, read_calls: expect.any(Number), chronology: "source_extent_summary" }));
     expect(row.totals!.debit_work).toBe(captured.outcome.value.work.logical_work);
     expect(row.totals!.debit_bytes).toBe(captured.outcome.value.work.logical_memory_bytes);
-    expect(row.facts!.encodings.some(encoding => encoding.encoder_invocations > 0)).toBe(true);
+    const query_handle = captured.outcome.value.query_handle;
+    const delivery = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, query_handle }));
+    if (delivery.outcome.status !== "success") throw delivery.outcome.error;
+    expect(delivery.observations[0]!.facts!.encodings.some(encoding => encoding.encoder_invocations > 0)).toBe(true);
   });
 }, 60_000);
 

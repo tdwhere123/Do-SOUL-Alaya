@@ -102,9 +102,11 @@ import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage, publishIndexedGeneration } from "./recall-storage.test-support.js";
 import { builtWorkerUrl, assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
+import { captureFieldProofRequests } from "./field-proof-consumer.test-support.js";
 
 afterAll(() => {
   try {
@@ -154,7 +156,7 @@ function authoredQuery(original = ORIGINAL): SourceSemanticQuery {
 
 async function openNativeSession(filename: string) {
   assertBuiltWorker();
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo: new SqliteEventLogRepo(database),
     runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256 });
@@ -162,10 +164,11 @@ async function openNativeSession(filename: string) {
     runtimeNotifier: { notifyEntry: async () => undefined }, evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
   const publication = createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 });
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+  const proofRequests = captureFieldProofRequests(client.sourceSemanticsPort);
   const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK,
-    sourceSemanticsPort: client.sourceSemanticsPort, sourceSemanticPublication: { publish: input => publication.publish(input) } });
+    sourceSemanticsPort: proofRequests.port, sourceSemanticPublication: { publish: input => publication.publish(input) } });
   await client.ready();
-  return { database, client, handler, admission, stores, filename };
+  return { database, client, handler, admission, stores, filename, proofRequests };
 }
 
 type Session = Awaited<ReturnType<typeof openNativeSession>>;
@@ -185,6 +188,8 @@ async function admit(session: Session, version = "1", source = SOURCE) {
     content_bytes: source, evidence_object_id: null, recorded_at: CLOCK, event_time: null,
     valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(source) },
   { workspaceId: WS });
+  // Native membership is the accepted source-index generation, as at daemon startup.
+  await publishIndexedGeneration(session.database, [{ text: source }]);
 }
 
 async function publishSource(session: Session, source: string, content: (catalog: SourceReferenceCatalog) => unknown) {
@@ -332,15 +337,16 @@ it("keeps two scoped C for one Q/H as independent partial evidence proofs and wi
         alternative: 0, input: branch, status: branch === input ? "supported" : "open"
       })));
       expect(qualifier).toMatchObject({ index: 0, source_interpretation_id: published.interpretation_id,
-        query_semantics_id: proof.query_semantics_id, conditional_computation_id: proof.conditional_computation_id,
-        payload_support: "available" });
+        query_semantics_id: proof.query_semantics_id,
+        conditional_computation_id: proof.conditional_computation_id });
       const index = both.index!, entry = index.entries[qualifier!.index]!;
-      const verified = deliveredSourceSemanticLibraryProof(index, entry, qualifier!, both.proofs!, sourceRecord);
+      const verified = deliveredSourceSemanticLibraryProof(index, entry, qualifier!, both.proofs!, sourceRecord,
+        undefined, session.proofRequests.trust(both.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity)));
       expect(verified.proof).toBe(proof);
       expect(verified.verified_proofs).toEqual([proof]);
       const other = both.slot_qualifiers!.find(row => row.semantic_correspondence_id === ids[1 - input])!;
       expect(deliveredSourceSemanticLibraryProof(index, entry, { ...qualifier!, witnesses: other.witnesses },
-        both.proofs!, sourceRecord).proof).toBeUndefined();
+        both.proofs!, sourceRecord, undefined, session.proofRequests.trust(both.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBeUndefined();
     }
     expect(both.slot_qualifiers?.filter(row => row.evidence_kind === "semantic_proof")).toHaveLength(2);
     for (const retained of [0, 1]) {
@@ -393,14 +399,18 @@ it("delivers an intact scoped proof when independent same-source proofs exceed o
       expect(single.results?.[qualifier.index]?.content_preview).toBe(expectedPreviews[input]);
       expect(entry.target).toMatchObject({ span: { content_start: source.indexOf(expectedPreviews[input]!),
         content_end: source.indexOf(expectedPreviews[input]!) + expectedPreviews[input]!.length } });
-      expect(deliveredSourceSemanticLibraryProof(single.index!, entry, qualifier, single.proofs!, sourceRecord).proof).toBe(proof);
+      expect(deliveredSourceSemanticLibraryProof(single.index!, entry, qualifier, single.proofs!, sourceRecord,
+        undefined, session.proofRequests.trust(single.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBe(proof);
       singles.push(proof);
     }
     const both = await recall(session, query, scoped, ORIGINAL, WINDOW_BUDGET);
     expect(both.proofs).toHaveLength(1);
     expect(both.index?.entries).toHaveLength(1);
     expect(both.slot_qualifiers).toHaveLength(1);
-    expect(both.index?.continuation).toBeNull();
+    // The other independent proof may remain on a frozen field page; this page still
+    // carries exactly one intact proof and never splits its own support window.
+    expect(both.index?.continuation === null
+      || both.index?.continuation.result_version === "ordinary-native-field.v1").toBe(true);
     const proof = both.proofs![0]!;
     const input = ids.indexOf(proof.semantic_correspondence_id!);
     expect(input).toBeGreaterThanOrEqual(0);
@@ -409,10 +419,12 @@ it("delivers an intact scoped proof when independent same-source proofs exceed o
     expect(qualifier.support).toMatchObject({ answer: "unrepresented", operation: "not_executed",
       compatibility: "unknown", distinctness: "unknown",
       evidence_inputs: [0, 1].map(branch => ({ alternative: 0, input: branch, status: branch === input ? "supported" : "open" })) });
-    expect(both.results?.[qualifier.index]?.content_preview).toBe(expectedPreviews[input]);
+    // The delivered window may include padding around the selected proof's support;
+    // the guarantee is that the proof's own text is intact in the visible interval.
+    expect(both.results?.[qualifier.index]?.content_preview).toContain(expectedPreviews[input]);
     expect(qualifier.witnesses?.map(row => row.binding_id)).toEqual([proof.binding_results![0]!.binding_id]);
     expect(deliveredSourceSemanticLibraryProof(both.index!, both.index!.entries[qualifier.index]!, qualifier,
-      both.proofs!, sourceRecord).proof).toBe(proof);
+      both.proofs!, sourceRecord, undefined, session.proofRequests.trust(both.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBe(proof);
     const broad = { ...scoped[0]!, correspondences: scoped.flatMap(row => row.correspondences) };
     const broadReason = await publicInterpretation(session, { operation: "reason", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: published.interpretation_id, original_query: ORIGINAL, query_semantics: query,
@@ -421,12 +433,12 @@ it("delivers an intact scoped proof when independent same-source proofs exceed o
     expect(broadReason.result?.binding_results).toHaveLength(2);
     const indivisible = await recall(session, query, [broad], ORIGINAL, WINDOW_BUDGET);
     expect(indivisible.proofs ?? []).toEqual([]);
-    expect(indivisible.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence", payload_support: "display_budget" })]);
+    expect(indivisible.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence" })]);
     const mixed = await recall(session, query, [broad, scoped[0]!], ORIGINAL, WINDOW_BUDGET);
     expect(mixed.proofs).toEqual([singles[0]]);
     const mixedQualifier = mixed.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
     expect(deliveredSourceSemanticLibraryProof(mixed.index!, mixed.index!.entries[mixedQualifier.index]!, mixedQualifier,
-      mixed.proofs!, sourceRecord).proof).toBe(mixed.proofs![0]);
+      mixed.proofs!, sourceRecord, undefined, session.proofRequests.trust(mixed.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBe(mixed.proofs![0]);
     const raw = await recall(session, query, [], ORIGINAL, WINDOW_BUDGET);
     expect(raw.proofs ?? []).toEqual([]);
     expect(raw.slot_qualifiers?.some(row => row.evidence_kind === "source_evidence")).toBe(true);
@@ -512,16 +524,18 @@ it.each([0, 5000])("keeps both dependencies of one shared-parcel conjunction ind
       const entry = full.index!.entries[qualifier.index]!;
       const sourceRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
       expect(full.results?.[qualifier.index]?.content_preview).toBe(source);
-      expect(deliveredSourceSemanticLibraryProof(full.index!, entry, qualifier, full.proofs!, sourceRecord).proof).toBe(full.proofs![0]);
+      expect(deliveredSourceSemanticLibraryProof(full.index!, entry, qualifier, full.proofs!, sourceRecord,
+        undefined, session.proofRequests.trust(full.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBe(full.proofs![0]);
       if (entry.target.kind !== "source_evidence" || entry.target.span === undefined) throw new Error("source span required");
       for (const span of [{ content_start: 0, content_end: "Parcel sent.".length },
         { content_start: source.indexOf("Parcel inspected."), content_end: source.length }]) {
         const clipped = { ...entry, target: { ...entry.target, span: { ...entry.target.span, ...span, content_complete: false } } };
-        expect(deliveredSourceSemanticLibraryProof(full.index!, clipped, qualifier, full.proofs!, sourceRecord).proof).toBeUndefined();
+        expect(deliveredSourceSemanticLibraryProof(full.index!, clipped, qualifier, full.proofs!, sourceRecord,
+          undefined, session.proofRequests.trust(full.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof).toBeUndefined();
       }
     } else {
       expect(full.proofs ?? []).toEqual([]);
-      expect(full.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence", payload_support: "display_budget" })]);
+      expect(full.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence" })]);
     }
     for (const missing of PARCEL_FRAMES) {
       const incomplete = { ...correspondence, correspondences: correspondence.correspondences.filter(row =>
@@ -579,7 +593,7 @@ it("requires full-denotation referent C while explicit shared-variable attribute
       expect(result.proofs).toHaveLength(1);
       const qualifier = result.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
       const proof = deliveredSourceSemanticLibraryProof(result.index!, result.index!.entries[qualifier.index]!, qualifier,
-        result.proofs!, sourceRecord).proof!;
+        result.proofs!, sourceRecord, undefined, session.proofRequests.trust(result.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof!;
       expect(proof).toBe(result.proofs![0]);
       expect(proof).toMatchObject({ world_claim: "unknown", semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation" });
       expect(proof.binding_results).toHaveLength(1);
@@ -649,7 +663,7 @@ it("does not join individually supported predicates on two explicitly different 
       expect(available.proofs).toHaveLength(1);
       const qualifier = available.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
       const proof = deliveredSourceSemanticLibraryProof(available.index!, available.index!.entries[qualifier.index]!, qualifier,
-        available.proofs!, sourceRecord).proof!;
+        available.proofs!, sourceRecord, undefined, session.proofRequests.trust(available.delivery_id, session.stores.getStoredRecord(WS, sourceRecord.identity))).proof!;
       expect(proof.binding_results).toHaveLength(1);
       expect(proof.binding_results![0]).toMatchObject({ kind: "answer", query_complete: false });
       expect(returnedText(proof, proof.binding_results![0]!.returned.parcel?.node_id)).toBe(index === 0 ? "Alpha Alpha" : "Beta Beta");

@@ -141,6 +141,16 @@ describe("recall read worker operation schemas", () => {
     })).toMatchObject({ preparation_id: "prep-1", issued_entry_ids: ["entry-1"] });
   });
 
+  it("admits only a shared single-word acknowledgment arbitration cell", () => {
+    const payload = { preparation_id: "prep-1", issued_entry_ids: [], previews: {} };
+    const settlement = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+    expect(parseWorkerOperationPayload("conditionalField.acknowledge", { ...payload, settlement }))
+      .toHaveProperty("settlement", settlement);
+    for (const invalid of [new ArrayBuffer(4), new SharedArrayBuffer(0), new SharedArrayBuffer(8), [0]]) {
+      expect(() => parseWorkerOperationPayload("conditionalField.acknowledge", { ...payload, settlement: invalid })).toThrow();
+    }
+  });
+
   it("treats omitted and empty bounded scopes as denied", () => {
     expect(BoundedRequestSchema.parse({
       workspaceId: "workspace-1",

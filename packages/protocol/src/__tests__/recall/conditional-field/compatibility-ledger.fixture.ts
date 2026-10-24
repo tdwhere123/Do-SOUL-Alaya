@@ -88,7 +88,7 @@ export const COMPATIBILITY_LEDGER: readonly CompatibilityLedgerRow[] = Object.fr
   Object.freeze({
     field: "enumeration_policy",
     disposition: "already-migrated",
-    note: "canonical default and explicit associative live on QueryView, public request, continuation and execution receipt"
+    note: "native_query is the ordinary default on QueryView, public request and continuation; canonical/associative stay parseable but live execution refuses them under invariant 25"
   }),
   Object.freeze({
     field: "result_kind_view",

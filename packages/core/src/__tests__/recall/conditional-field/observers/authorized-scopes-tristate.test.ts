@@ -72,7 +72,8 @@ describe("authorized_scopes tri-state admission", () => {
 
   it("maps admission onto the internal request without collapsing omitted and null", () => {
     expect(authorizedScopesFromAdmission({ mode: "unrestricted" })).toEqual({ authorized_scopes: null });
-    expect(authorizedScopesFromAdmission({ mode: "denied" })).toEqual({});
+    // A denied admission is an explicit empty scope set, not an omitted capability.
+    expect(authorizedScopesFromAdmission({ mode: "denied" })).toEqual({ authorized_scopes: [] });
     expect(authorizedScopesFromAdmission(undefined)).toEqual({});
     expect(authorizedScopesFromAdmission({ mode: "named", scopes: ["project"] }))
       .toEqual({ authorized_scopes: ["project"] });
@@ -83,6 +84,7 @@ describe("authorized_scopes tri-state admission", () => {
     const continuation = {
       schema_version: 1 as const,
       continuation_id: "page-1",
+      enumeration_policy: view.enumeration_policy,
       query_id: "q",
       snapshot_id: SNAPSHOT_ID,
       result_version: "v1",

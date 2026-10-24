@@ -49,28 +49,79 @@ export function withWorkerActualCost<T extends {
   const counters: NativeCostCounters = { native_visits: 0, bytes_read: 0, row_visits: 0 };
   const started = performance.now();
   const rssBefore = process.memoryUsage().rss;
-  const result = run(instrumentObserverReaders(readers, counters));
-  const rssAfter = process.memoryUsage().rss;
-  const cost: WorkerActualCost = {
+  const settle = (): WorkerActualCost => ({
     native_visits: counters.native_visits,
     bytes_read: counters.bytes_read,
     row_visits: counters.row_visits,
     elapsed_ms: performance.now() - started,
-    rss_bytes: Math.max(rssBefore, rssAfter),
+    rss_bytes: Math.max(rssBefore, process.memoryUsage().rss),
     rss_sampling_method: RSS_SAMPLING_METHOD
-  };
+  });
+  let result: T;
+  try {
+    result = run(instrumentObserverReaders(readers, counters));
+  } catch (error) {
+    // Reads already performed are incurred cost. The refusal boundary carries the
+    // measured worker snapshot through the owner's serialized error details; an
+    // unmeasured worker cost is never reported as zero.
+    attachMeasuredWorkerCost(error, settle());
+    throw error;
+  }
+  const cost = settle();
   const executionReceipt = { ...result.execution_receipt, worker: cost };
   return {
     ...result,
     execution_receipt: executionReceipt,
     ...(result.issue === undefined ? {} : { issue: ((issued) => {
       try { return result.issue!(issued); }
-      finally { Object.assign(executionReceipt, result.execution_receipt, { worker: {
-        ...cost, native_visits: counters.native_visits, bytes_read: counters.bytes_read, row_visits: counters.row_visits,
-        elapsed_ms: performance.now() - started, rss_bytes: Math.max(rssBefore, process.memoryUsage().rss)
-      } }); }
+      finally { Object.assign(executionReceipt, result.execution_receipt, { worker: settle() }); }
     }) as NonNullable<T["issue"]> })
   };
+}
+
+/** Measured snapshots survive a refusal even when the error object is frozen or has
+ * no writable details. Serialization consults this owner instead of guessing.
+ */
+const MEASURED_FAILURE_COST = new WeakMap<Error, WorkerActualCost>();
+
+/** Attach the measured worker snapshot to the refusal the worker already serializes. */
+export function attachMeasuredWorkerCost(error: unknown, cost: WorkerActualCost): void {
+  if (!(error instanceof Error)) return;
+  MEASURED_FAILURE_COST.set(error, Object.freeze({ ...cost }));
+  const target = error as Error & { details?: Readonly<Record<string, unknown>> };
+  const details = target.details ?? {};
+  // Preserve properties for callers holding this error. Adapters and serialization
+  // read the WeakMap's latest sample rather than mistaking an older property for it.
+  if (Object.prototype.hasOwnProperty.call(details, "worker")) return;
+  try {
+    target.details = Object.freeze({ ...details, worker: Object.freeze({ ...cost }) });
+  } catch {
+    // A frozen error keeps its classification; serialization still reads the WeakMap.
+  }
+}
+
+/** Measured cost a serialization owner must preserve for any error classification. */
+export function measuredWorkerCostOf(error: unknown): WorkerActualCost | undefined {
+  return error instanceof Error ? MEASURED_FAILURE_COST.get(error) : undefined;
+}
+
+/** Error adapters and IPC use the same latest physical snapshot, including immutable
+ * errors. Other owner records (work/execution_receipt) are retained without conversion.
+ */
+export function workerFailureDetails(error: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const value = (error as Error & { readonly details?: unknown }).details;
+  const details = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>> : undefined;
+  const measured = measuredWorkerCostOf(error);
+  return measured === undefined ? details : Object.freeze({ ...details, worker: measured });
+}
+
+/** Optional receipt reader; unknown stays absent, never zero. */
+export function measuredWorkerCostOfReceipt(
+  receipt: ConditionalFieldExecutionReceipt | undefined
+): WorkerActualCost | undefined {
+  try { return workerActualCostOf(receipt); } catch { return undefined; }
 }
 
 export function workerActualCostOf(

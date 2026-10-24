@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { CoreError } from "../../shared/errors.js";
 import type { RetainedFieldLevels } from "./request-cost-engine-snapshot.js";
 
 export const REQUEST_COST_PHASES = [
@@ -17,6 +18,8 @@ export type RequestCostPhase = (typeof REQUEST_COST_PHASES)[number];
 export const RSS_SAMPLE_METHOD = "process.memoryUsage().rss" as const;
 
 export type RequestCostDelta = Readonly<{
+  /** Mixed resource-ledger budget units, not a count of native visits or joins. */
+  readonly budget_work?: number;
   readonly native_visits?: number;
   readonly native_rows?: number;
   readonly native_bytes?: number;
@@ -33,6 +36,8 @@ export type RequestCostDelta = Readonly<{
 export type RequestPhaseCost = Readonly<{
   readonly exclusive_ms: number;
   readonly inclusive_ms: number;
+  /** Absent only on legacy receipts; absence is not measured zero. */
+  readonly budget_work?: number;
   readonly native_visits: number;
   readonly native_rows: number;
   readonly native_bytes: number;
@@ -70,6 +75,7 @@ const NESTED_PHASES: Readonly<Partial<Record<RequestCostPhase, readonly RequestC
 
 type MutablePhase = {
   inclusive_ms: number;
+  budget_work: number;
   native_visits: number;
   native_rows: number;
   native_bytes: number;
@@ -85,6 +91,7 @@ type MutablePhase = {
 function emptyPhase(): MutablePhase {
   return {
     inclusive_ms: 0,
+    budget_work: 0,
     native_visits: 0,
     native_rows: 0,
     native_bytes: 0,
@@ -104,6 +111,8 @@ export class RequestCostLedger {
   private peakRss: number;
   private retainedStatesCurrent = 0;
   private retainedBytesCurrent = 0;
+  private fieldBudgetWork: number | undefined;
+  private reservedBudgetWork = 0;
   private readonly phases = Object.fromEntries(
     REQUEST_COST_PHASES.map((phase) => [phase, emptyPhase()])
   ) as Record<RequestCostPhase, MutablePhase>;
@@ -124,6 +133,7 @@ export class RequestCostLedger {
 
   public add(phase: RequestCostPhase, delta: RequestCostDelta): void {
     const row = this.phases[phase];
+    row.budget_work += delta.budget_work ?? 0;
     row.native_visits += delta.native_visits ?? 0;
     row.native_rows += delta.native_rows ?? 0;
     row.native_bytes += delta.native_bytes ?? 0;
@@ -134,6 +144,19 @@ export class RequestCostLedger {
     row.pending_work += delta.pending_work ?? 0;
     row.cache_hits += delta.cache_hits ?? 0;
     row.cache_misses += delta.cache_misses ?? 0;
+  }
+
+  public addFieldBudgetWork(work: number): void {
+    if (!Number.isSafeInteger(work) || work < 0) throw new CoreError("OBLIGATION_VIOLATION", "Invalid field budget balance");
+    this.fieldBudgetWork = (this.fieldBudgetWork ?? 0) + work;
+  }
+  public recordReservedBudgetWork(work: number): void { this.reservedBudgetWork += work; }
+  public invalidateBudgetWork(): void { this.fieldBudgetWork = undefined; }
+  /** Internal transfer uses the owner's balance, not partial phase subtotals.
+   * This is not an extension of the versioned wire receipt. */
+  public captureBudgetWork(capture?: (work: number | undefined) => void): void {
+    try { capture?.(this.fieldBudgetWork === undefined ? undefined : this.fieldBudgetWork + this.reservedBudgetWork); }
+    catch { /* A failed measurement consumer cannot change field issuance. */ }
   }
 
   public markAfterProjection(): void {
@@ -161,6 +184,7 @@ export class RequestCostLedger {
       phases[phase] = {
         exclusive_ms: Math.max(0, row.inclusive_ms - nested),
         inclusive_ms: row.inclusive_ms,
+        budget_work: row.budget_work,
         native_visits: row.native_visits,
         native_rows: row.native_rows,
         native_bytes: row.native_bytes,

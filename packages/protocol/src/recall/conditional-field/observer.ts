@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecallNavigationWitnessSchema } from "./navigation.js";
 import { InterpretationNodeCoordinateSchema } from "./interpretation-coordinate.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
@@ -136,6 +137,7 @@ export const TypedObservationSchema = z
     source_revision: ConditionalFieldIdSchema,
     workspace_id: ConditionalFieldIdSchema.optional(),
     applicability: GuardSchema,
+    navigation: RecallNavigationWitnessSchema.optional(),
     association_milligrades: MilligradeSchema.optional(),
     low_milligrades: MilligradeSchema.optional(),
     high_milligrades: MilligradeSchema.optional(),

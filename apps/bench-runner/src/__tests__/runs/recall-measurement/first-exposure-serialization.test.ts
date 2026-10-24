@@ -131,8 +131,17 @@ it("does not silently insert a default into captured continuation claim identity
   expect(ContinuationSchema.safeParse(raw).success).toBe(true);
   const session = new FirstExposureSession();
   const output = response("first", [], null); Object.assign(output.index!, { continuation: raw });
-  expect(() => session.record(output)).toThrow(/normaliz/u);
+  expect(() => session.record(output)).toThrowError(expect.objectContaining({ code: "VALIDATION",
+    message: "first-exposure material cannot be normalized during capture" }));
   expect(raw.claim_demands[0]).not.toHaveProperty("required_claim");
+});
+
+it("reports malformed responses and inconsistent exposure as distinct domain failures", () => {
+  const output = response(), page = new FirstExposureSession().record(output);
+  expect(() => initialScoringSlots({ ...output, results: null })).toThrowError(expect.objectContaining({ code: "VALIDATION",
+    message: "conditional Recall response is invalid" }));
+  expect(() => initialScoringSlots({ ...output, first_exposure_page: { ...page, commitment: "0".repeat(64) } }))
+    .toThrowError(expect.objectContaining({ code: "CONFLICT", message: "conditional Recall first exposure unavailable or inconsistent" }));
 });
 
 it("rejects tampered commitment, initial identity and actual request binding without re-signing", () => {

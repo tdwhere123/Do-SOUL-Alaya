@@ -105,10 +105,10 @@ function approvalCorrespondence(question: string, semantics: SourceSemanticQuery
 it("delivers a dated approval with its own support despite a separate current-date gap", async () => {
   await withAccessLibrary([{ id: "dated-approval-source", text: SOURCE, verbatim: true,
     eventTime: "2026-09-22T00:00:00.000Z", recordedAt: "2026-09-22T00:00:00.000Z", authoredDraft: approvalDraft }],
-  async ({ execute, ids }) => {
+  async ({ execute, ids, port }) => {
     const context = { workspaceId: WS, runId: "dated-approval-control", agentTarget: "codex", sessionId: "dated-approval-control" };
     const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => "2026-09-24T00:00:00.000Z",
-      sourceSemanticsPort: { execute } });
+      sourceSemanticsPort: port });
     const call = async (args: unknown) => {
       const response = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider: () => context },
         "soul.interpretation", SoulInterpretationRequestSchema.parse(args));
@@ -137,8 +137,8 @@ it("delivers a dated approval with its own support despite a separate current-da
     const person = interpretation.referents.find(row => row.id === answer?.returned.answerPerson?.node_id);
     expect(person?.mentions.map(id => interpretation.mentions.find(m => m.id === id)?.text)).toContain("Noor");
     expect(past.slot_qualifiers?.some(row => row.source_interpretation_id === sourceId
-      && row.evidence_kind === "semantic_proof" && row.payload_support === "available"
-      && row.selection_basis === "direct_answer")).toBe(true);
+      && row.evidence_kind === "semantic_proof"
+      && row.conditional_computation_id === proof?.conditional_computation_id)).toBe(true);
     expect(past.results?.some(row => row.content_preview?.includes("22 September 2026 only"))).toBe(true);
 
     const current = approvalQuery(CURRENT, "today");
@@ -149,8 +149,12 @@ it("delivers a dated approval with its own support despite a separate current-da
     if (today.operation !== "recall") throw new Error("current recall expected");
     expect(today.query_semantics_status?.status).toBe("admitted");
     expect((today.proofs ?? []).flatMap(row => row.binding_results ?? []).some(row => row.kind === "answer")).toBe(false);
-    expect(today.slot_qualifiers?.every(row => row.evidence_kind === "source_evidence"
-      && row.selection_basis === "source_access")).toBe(true);
+    // A current-date gap keeps the delivered slot unproved rather than inheriting support.
+    expect(today.slot_qualifiers?.every(row => row.evidence_kind === "source_evidence")).toBe(true);
     expect(today.results?.some(row => row.content_preview?.includes("24 September 2026"))).toBe(true);
-  });
+  }, { prepareDatabase: async database => {
+    // Library membership is the accepted native source-index generation, as at daemon startup.
+    const { publishIndexedGeneration } = await import("./recall-storage.test-support.js");
+    await publishIndexedGeneration(database, [{ text: SOURCE }]);
+  } });
 }, 60_000);

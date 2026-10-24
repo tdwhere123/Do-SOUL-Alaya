@@ -37,7 +37,6 @@ import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/clean
 import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
 import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
-import { bindSourceComparisonExecution } from "./runtime/recall/source-comparison-execution.js";
 import { bindSourceFeedbackExecutionPort } from "./runtime/recall/source-feedback-execution.js";
 import { bindSourceSemanticObservation } from "./runtime/recall/source-semantic-observation.js";
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
@@ -116,7 +115,6 @@ export async function createAlayaDaemonRuntime(
       bindSourceSemanticObservation(runtime, runtimeRecallReadWorkerClient.observeSourceSemantics);
       if (runtimeRecallReadWorkerClient.sourceSemanticsPort !== undefined) {
         bindSourceFeedbackExecutionPort(runtime, runtimeRecallReadWorkerClient.sourceSemanticsPort);
-        bindSourceComparisonExecution(runtime, runtime.services.mcpMemoryToolHandler, runtimeRecallReadWorkerClient.sourceSemanticsPort);
       }
     }
     return runtime;

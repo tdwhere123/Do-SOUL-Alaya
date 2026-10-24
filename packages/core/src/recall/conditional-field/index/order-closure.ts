@@ -62,14 +62,16 @@ export function evaluateOrderClosure(input: OrderClosureInput): OrderClosureResu
 }
 
 function orderCertificate(input: OrderClosureInput): ClosureCertificate {
-  const operator_id = input.enumeration_policy === "associative" ? "associative-prefix" : "canonical-prefix";
+  const operator_id = input.enumeration_policy === "native_query" ? "native-query-navigation.v1"
+    : input.enumeration_policy === "associative" ? "associative-prefix" : "canonical-prefix";
+  const domain_id = input.enumeration_policy === "native_query" ? "native-query-navigation.v1" : ASSOCIATION_DOMAIN_ID;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    certificate_id: [input.query_id, "order", operator_id, ASSOCIATION_DOMAIN_ID].join(":").slice(0, 256),
+    certificate_id: [input.query_id, "order", operator_id, domain_id].join(":").slice(0, 256),
     query_id: input.query_id,
     predicate_id: "order",
     operator_id,
-    domain_id: ASSOCIATION_DOMAIN_ID,
+    domain_id,
     coverage_premise: "required_regions_irrelevant",
     closed_effects: ["order"],
     closed_obligations: ["order"],

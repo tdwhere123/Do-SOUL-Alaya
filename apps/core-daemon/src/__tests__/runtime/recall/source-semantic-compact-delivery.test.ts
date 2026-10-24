@@ -75,7 +75,7 @@ function requireUndelivered(compact: Reason, full: Reason, limit: number) {
 }
 
 it("preserves full multibyte evidence first and undelivered H/Q/C/computation controls through built worker and public MCP", async () => {
-  await withAccessLibrary(sources, async ({ execute, ids }) => {
+  await withAccessLibrary(sources, async ({ execute, ids, port }) => {
     const id = ids.get(sourceId)?.[0];
     if (id === undefined) throw new Error("published interpretation expected");
     const query = queryOf(), correspondence = correspondenceOf(id, query);
@@ -86,7 +86,7 @@ it("preserves full multibyte evidence first and undelivered H/Q/C/computation co
     const native = await accessCall(execute, { kind: "reason", ...request, output_byte_limit: 1600 });
     requireUndelivered(native, full, 1600);
     expect(SourceSemanticWorkerResultSchema.safeParse(native).success).toBe(true);
-    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, sourceSemanticsPort: { execute } });
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, sourceSemanticsPort: port });
     const context = { workspaceId: WS, runId: "compact-reason", agentTarget: "codex", sessionId: "compact-reason" };
     const mcp = async (arguments_: unknown) => {
       const response = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider: () => context },

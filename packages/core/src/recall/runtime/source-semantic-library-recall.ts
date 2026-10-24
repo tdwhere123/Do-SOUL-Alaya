@@ -5,7 +5,8 @@ import {
   SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, sourceIndexEntry, indexEntryCacheKey, indexEntryObjectKind,
   indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
   type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
-  SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
+  SoulInterpretationResponseSchema, SoulInterpretationFieldRecallDeliverySchema, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION,
+  type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
   type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
@@ -311,6 +312,11 @@ export function encodeSourceSemanticLibraryResponse(
 ): SoulInterpretationResponse | SourceSemanticComparisonResponse {
   verifySourceSemanticLibraryDelivery(result, fieldContractSha256);
   if (result.execution === undefined) throw new CoreError("VALIDATION", "Source library v2 requires actual execution accounting");
+  if (result.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
+    const { kind: _kind, previews: _previews, preparation_id: _preparation,
+      field_execution_receipt: _receipt, ...delivery } = result;
+    return SoulInterpretationFieldRecallDeliverySchema.parse({ ...delivery, operation: "recall" });
+  }
   const { kind: _kind, previews, coverage, ...rest } = result;
   const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true,
     result.source_disclosures);

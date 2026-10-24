@@ -1,11 +1,10 @@
 import { z } from "zod";
+import { PreparedQuerySchema } from "./prepared-source-query.js";
 import {
   AuthorizedScopesAdmissionSchema,
   SourceInterpretationReasoningRequestSchema,
   SourceInterpretationReasoningResultSchema,
-  SourceSemanticWorkerRequestSchema, SourceSemanticComparisonWorkerRequestSchema,
-  SourceSemanticReadableWorkerResultSchema,
-  SourceSemanticAccessProfileSchema, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema,
+  SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
@@ -64,7 +63,9 @@ const PageSchema = z.object({
 const AcknowledgeSchema = z.object({
   preparation_id: z.string(),
   issued_entry_ids: z.array(z.string()).readonly(),
-  previews: z.record(z.string(), z.string())
+  previews: z.record(z.string(), z.string()),
+  settlement: z.instanceof(SharedArrayBuffer)
+    .refine(buffer => buffer.byteLength === Int32Array.BYTES_PER_ELEMENT).optional()
 }).strict();
 const DiscardSchema = z.object({
   preparation_id: z.string()
@@ -92,21 +93,6 @@ export const SourceSemanticsPublicPayloadSchema = z.object({
   expires_at: z.string().datetime().optional(), request: SourceSemanticWorkerRequestSchema
 }).strict();
 export type SourceSemanticsPublicPayload = z.infer<typeof SourceSemanticsPublicPayloadSchema>;
-export const SourceSemanticsComparisonPayloadSchema = SourceSemanticsPublicPayloadSchema.extend({
-  comparison: z.object({ profile: SourceSemanticAccessProfileSchema.optional() }).strict(),
-  request: SourceSemanticComparisonWorkerRequestSchema
-}).strict();
-export type SourceSemanticsComparisonPayload = z.infer<typeof SourceSemanticsComparisonPayloadSchema>;
-const PreparedRouteSchema = z.object({
-  receipt: SourceSemanticQueryPreparationSchema.refine(value => value.supplemental === undefined,
-    "private route preparation cannot nest supplemental routes"),
-  vector: z.union([
-    z.object({ status: z.literal("unavailable"), reason: z.string().min(1).max(256) }).strict(),
-    z.object({ status: z.literal("available"), profile: SourceIndexProfileSchema, profile_id: z.string(),
-      input_digest: z.string(), embedding: z.custom<Float32Array>(value => value instanceof Float32Array) }).strict()
-  ])
-}).strict();
-const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional() }).strict();
 
 const PAYLOAD_SCHEMAS = {
   ready: EmptyObjectSchema,
@@ -119,9 +105,7 @@ const PAYLOAD_SCHEMAS = {
     as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
     request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
-    prepared_query: PreparedQuerySchema.optional(),
-    request: z.union([SourceSemanticWorkerRequestSchema, SourceSemanticComparisonWorkerRequestSchema]),
-    comparison: z.object({ profile: SourceSemanticAccessProfileSchema }).strict().optional()
+    prepared_query: PreparedQuerySchema.optional()
   }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
@@ -293,7 +277,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
-  "conditionalField.sourceSemantics": SourceSemanticReadableWorkerResultSchema,
+  "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

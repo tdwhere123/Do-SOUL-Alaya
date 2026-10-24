@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ContinuationSchema, PagePurposeSchema, RecallTargetRefSchema, SoulMemorySearchResponseSchema, stableCanonicalStringify,
+import { AlayaError, ContinuationSchema, PagePurposeSchema, RecallTargetRefSchema, SoulMemorySearchResponseSchema, stableCanonicalStringify,
   type Continuation, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 
 export const ExposureSlotSchema = z.object({
@@ -37,7 +37,7 @@ function captureExposureMaterial<T>(schema: z.ZodType<T>, value: unknown): T {
   const serialized: unknown = JSON.parse(JSON.stringify(captured));
   const parsed = schema.parse(serialized);
   if (stableCanonicalStringify(parsed) !== stableCanonicalStringify(serialized)) {
-    throw new Error("first-exposure material cannot be normalized during capture");
+    throw new AlayaError("VALIDATION", "first-exposure material cannot be normalized during capture");
   }
   return parsed;
 }
@@ -121,14 +121,14 @@ export function initialScoringSlots(raw: unknown) {
   const row = raw as Record<string, unknown>;
   const parsed = SoulMemorySearchResponseSchema.safeParse({ delivery_id: row.delivery_id,
     protocol_version: row.protocol_version, results: row.results, index: row.index, total_count: row.total_count });
-  if (!parsed.success || parsed.data.index === undefined) throw new Error("conditional Recall response is invalid");
+  if (!parsed.success || parsed.data.index === undefined) throw new AlayaError("VALIDATION", "conditional Recall response is invalid");
   const response = parsed.data;
   const index = parsed.data.index;
   const page = FirstExposurePageSchema.safeParse(row.first_exposure_page);
   if (!page.success || page.data.page_purpose !== (index.page_purpose ?? "membership")
     || firstExposureMismatch(page.data, { query_id: index.query_id, snapshot_id: index.snapshot_id,
       interpretation_id: index.interpretation_id!, as_of: index.as_of! }, exposureSlots(response), response.delivery_id)) {
-    throw new Error("conditional Recall first exposure unavailable or inconsistent");
+    throw new AlayaError("CONFLICT", "conditional Recall first exposure unavailable or inconsistent");
   }
   return page.data.initial!.scoring_slots;
 }

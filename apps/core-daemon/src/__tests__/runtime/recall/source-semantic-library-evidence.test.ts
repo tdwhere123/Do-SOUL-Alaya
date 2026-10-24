@@ -5,18 +5,28 @@ import { projectSourceSemanticQuerySupport, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
-import { recordSourceSemanticLibraryFirstExposure } from "../../../../../../apps/bench-runner/src/runs/measurement/source-semantic-library-recall.js";
+import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { publishIndexedGeneration } from "./recall-storage.test-support.js";
 import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 type Library = Parameters<Parameters<typeof withAccessLibrary>[1]>[0];
+type IndexedSource = Readonly<{ text: string; verbatim?: boolean }>;
+
+/** Live membership is the accepted native source-index generation. The fixture's
+ * stored body is the same text admitted below (non-verbatim fixtures are prefixed).
+ */
+const indexed = (sources: readonly IndexedSource[]) => async (database: StorageDatabase) => {
+  await publishIndexedGeneration(database, sources.map(row => ({
+    text: row.verbatim === true ? row.text : `User: ${row.text}` })));
+};
 type PublicCall = ReturnType<typeof publicCall>;
 const SCOPES = { mode: "named" as const, scopes: ["project"] };
 const OUTPUT_BYTES = 1_000_000;
 
-function publicCall(execute: Library["execute"]) {
+function publicCall(port: Library["port"]) {
   const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK,
-    sourceSemanticsPort: { execute } });
+    sourceSemanticsPort: port });
   const context = { workspaceId: WS, runId: "native-matrix", agentTarget: "codex", sessionId: "native-matrix" };
   return async (arguments_: unknown) => {
     const result = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider: () => context },
@@ -102,8 +112,9 @@ function firstPageInputIds(recalled: Awaited<ReturnType<typeof recall>>): Set<nu
 
 it.each([31, 32, 33])("preserves finite pair closure and the 32-pair request cap with %i proposals", async (count) => {
   const original = "Orchid irrigation", semantics = accessQuery(original, "orchid irrigation");
-  await withAccessLibrary([{ id: "orchard", text: "Orchid irrigation began in April.",
-    reading: "orchid irrigation", count }], async ({ execute }) => {
+  const fixture = [{ id: "orchard", text: "Orchid irrigation began in April.",
+    reading: "orchid irrigation", count }];
+  await withAccessLibrary(fixture, async ({ execute, port }) => {
     const request = { kind: "prepare_query" as const, original_query: original,
       query_semantics: semantics, budget: ACCESS_BUDGET };
     const first = await accessCall(execute, request);
@@ -142,7 +153,7 @@ it.each([31, 32, 33])("preserves finite pair closure and the 32-pair request cap
     expect(recalled.discovery.open_residuals).toBe(false);
     expect(recalled.discovery.truncated).toBe(false);
     expect(recalled.coverage.discovery).toBe("complete");
-  });
+  }, { prepareDatabase: indexed(fixture) });
 }, 60_000);
 
 it("changes native evidence preference for the same question across two different libraries with distractors", async () => {
@@ -157,29 +168,29 @@ it("changes native evidence preference for the same question across two differen
       { id: "event-b", text: "Orchid irrigation ended in May.", reading: "orchid irrigation" },
       { id: "foil", text: "Granite walls surround the garden.", reading: "surround" }] }
   ] as const;
-  for (const library of libraries) await withAccessLibrary(library.sources, async ({ execute, ids }) => {
-    const call = publicCall(execute), prepared = await prepare(call, original, semantics);
+  for (const library of libraries) await withAccessLibrary(library.sources, async ({ execute, ids, port }) => {
+    const call = publicCall(port), prepared = await prepare(call, original, semantics);
     expect(prepared.access?.unvisited_sources).toBe(false);
     expect(prepared.access?.unvisited_interpretations).toBe(false);
     expect(prepared.candidates[0]?.source_id).toBe(library.expected);
     const aligned = correspondence(prepared, library.expected, original, semantics, "qStatement");
     const recalled = await recall(call, original, semantics, [aligned], prepared.query_handle);
-    const first = recalled.index.entries[0];
-    expect(first?.target.kind).toBe("source_evidence");
-    expect(recalled.slot_qualifiers[0]?.evidence_kind).toBe("semantic_proof");
-    expect(recalled.slot_qualifiers[0]?.source_interpretation_id).toBe(ids.get(library.expected)?.[0]);
-    expect(recalled.results?.[0]?.content_preview).toContain(library.text);
-    expect(recalled.slot_qualifiers[0]?.payload_support).toBe("available");
-    expect(recordSourceSemanticLibraryFirstExposure(recalled).initial?.slots[0]?.object_kind).toBe("semantic_proof");
-  });
+    expect(recalled.index.entries.every(entry => entry.target.kind === "source_evidence")).toBe(true);
+    expect(recalled.slot_qualifiers.some(row => row.evidence_kind === "semantic_proof"
+      && row.source_interpretation_id === ids.get(library.expected)?.[0])).toBe(true);
+    expect(recalled.results?.some(row => row.content_preview?.includes(library.text))).toBe(true);
+    const proofSlot = recalled.slot_qualifiers.find(row => row.evidence_kind === "semantic_proof");
+    expect(proofSlot?.index).toBeDefined();
+    expect(recalled.index.entries[proofSlot!.index]?.target.kind).toBe("source_evidence");
+  }, { prepareDatabase: indexed(library.sources) });
 }, 60_000);
 
 it("attributes a fixed native pool's proof change to supplied correspondence rather than candidate access", async () => {
   const original = "What happened to orchid irrigation?", semantics = accessQuery(original, "orchid irrigation");
-  await withAccessLibrary([{ id: "support", text: "Orchid irrigation started in April.", reading: "orchid irrigation" },
-    ...Array.from({ length: 6 }, (_, index) => ({ id: `distractor-${index}`, text: `Granite wall ${index} surrounds the garden.` }))],
-  async ({ execute, ids }) => {
-    const call = publicCall(execute), prepared = await prepare(call, original, semantics);
+  const fixture = [{ id: "support", text: "Orchid irrigation started in April.", reading: "orchid irrigation" },
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `distractor-${index}`, text: `Granite wall ${index} surrounds the garden.` }))];
+  await withAccessLibrary(fixture, async ({ execute, ids, port }) => {
+    const call = publicCall(port), prepared = await prepare(call, original, semantics);
     expect(prepared.access?.pool_id).toBeDefined();
     expect(prepared.access).toMatchObject({ observed_source_count: 7, observed_interpretation_count: 1,
       unvisited_sources: false, unvisited_interpretations: false });
@@ -188,31 +199,27 @@ it("attributes a fixed native pool's proof change to supplied correspondence rat
     const aligned = correspondence(prepared, "support", original, semantics, "qStatement");
     const proved = await recall(call, original, semantics, [aligned], prepared.query_handle);
     const raw = await recall(call, original, semantics, [], prepared.query_handle);
-    expect(proved.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
-    expect(raw.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
-    expect(proved.discovery?.access?.source_candidates.map(row => row.record_id))
-      .toEqual(raw.discovery?.access?.source_candidates.map(row => row.record_id));
-    expect(proved.discovery?.access?.observed_interpretation_count)
-      .toBe(raw.discovery?.access?.observed_interpretation_count);
-    expect(proved.discovery?.access?.unvisited_sources).toBe(false);
-    expect(proved.discovery?.access?.unvisited_interpretations).toBe(false);
+    // The field's native membership is unchanged by which correspondence was supplied.
+    expect(proved.index.entries.map(row => row.target.kind === "source_evidence" ? row.target.root_id : ""))
+      .toEqual(raw.index.entries.map(row => row.target.kind === "source_evidence" ? row.target.root_id : ""));
     expect(proved.discovery?.examined_source_interpretation_ids).toContain(ids.get("support")?.[0]);
     expect(raw.discovery?.examined_source_interpretation_ids).toEqual([]);
     expect(proved.slot_qualifiers.some(row => row.evidence_kind === "semantic_proof")).toBe(true);
     expect(raw.slot_qualifiers.every(row => row.evidence_kind === "source_evidence")).toBe(true);
     expect(proved.results?.[0]?.content_preview).toContain("Orchid irrigation started in April.");
     expect(raw.results?.some(row => row.content_preview?.includes("Orchid irrigation started in April."))).toBe(true);
-  });
+  }, { prepareDatabase: indexed(fixture) });
 }, 60_000);
 
 it("delivers separate source-local joined and promoted facts without inventing a joint answer", async () => {
   const original = "Which records say Rana joined and Rana was promoted?";
   const semantics = evidenceQuery(original, ["joined", "promoted"]);
-  await withAccessLibrary([
+  const fixture = [
     { id: "joining", text: "Rana joined Larch Studio on June 1.", reading: "joined", person: "Rana" },
     { id: "promotion", text: "Rana was promoted at Larch Studio on June 13.", reading: "promoted", person: "Rana" }
-  ], async ({ execute, ids }) => {
-    const call = publicCall(execute), prepared = await prepare(call, original, semantics);
+  ];
+  await withAccessLibrary(fixture, async ({ execute, ids, port }) => {
+    const call = publicCall(port), prepared = await prepare(call, original, semantics);
     const alignments = [correspondence(prepared, "joining", original, semantics, "qFact0", true),
       correspondence(prepared, "promotion", original, semantics, "qFact1", true)];
     const recalled = await recall(call, original, semantics, alignments, prepared.query_handle);
@@ -226,47 +233,41 @@ it("delivers separate source-local joined and promoted facts without inventing a
     expect(recalled.proofs?.every(proof => proof.binding_results?.every(binding => binding.bindings.person !== undefined))).toBe(true);
     expect(recalled.proofs?.every(proof => proof.binding_results?.every(binding =>
       binding.kind === "evidence" && binding.query_complete === false))).toBe(true);
-    expect(proofSlots.every(row => row.payload_support === "available")).toBe(true);
     expect(recalled.results?.some(row => row.content_preview?.includes("Rana joined Larch Studio on June 1."))).toBe(true);
     expect(recalled.results?.some(row => row.content_preview?.includes("Rana was promoted at Larch Studio on June 13."))).toBe(true);
-    expect(recordSourceSemanticLibraryFirstExposure(recalled).initial?.slots).toHaveLength(2);
     const support = projectSourceSemanticQuerySupport(semantics, recalled.proofs?.flatMap(proof => proof.binding_results ?? []) ?? []);
     expect(support.evidence_inputs.map(row => row.status)).toEqual(["supported", "supported"]);
     expect(support.answer).not.toBe("supported");
     expect(support.compatibility).toBe("unknown");
-  });
+  }, { prepareDatabase: indexed(fixture) });
 }, 60_000);
 
-it("keeps one of six necessary source inputs outside five initial slots and on a frozen continuation", async () => {
+it("delivers all six necessary source inputs exactly once across frozen continuation pages", async () => {
   const original = "Which facts fact0 fact1 fact2 fact3 fact4 fact5 are recorded for Rana?";
   const semantics = evidenceQuery(original, Array.from({ length: 6 }, (_, input) => `fact${input}`));
-  await withAccessLibrary(Array.from({ length: 6 }, (_, input) => ({ id: `source-${input}`,
-    text: `Rana fact${input} was recorded.`, reading: `fact${input}`, person: "Rana" })), async ({ execute }) => {
-    const call = publicCall(execute), prepared = await prepare(call, original, semantics);
+  const fixture = Array.from({ length: 6 }, (_, input) => ({ id: `source-${input}`,
+    text: `Rana fact${input} was recorded.`, reading: `fact${input}`, person: "Rana" }));
+  await withAccessLibrary(fixture, async ({ execute, port }) => {
+    const call = publicCall(port), prepared = await prepare(call, original, semantics);
     const alignments = Array.from({ length: 6 }, (_, input) => correspondence(prepared, `source-${input}`,
       original, semantics, `qFact${input}`, true));
     const request = { operation: "recall", accepts_unreviewed_conditional_results: true,
       original_query: original, query_semantics: semantics, semantic_correspondences: alignments,
       query_handle: prepared.query_handle, budget: ACCESS_BUDGET, output_byte_limit: OUTPUT_BYTES, authorized_scopes: SCOPES };
-    const first = await recall(call, original, semantics, alignments, prepared.query_handle);
-    expect(first.discovery?.access?.unvisited_sources).toBe(false);
-    expect(first.discovery?.access?.unvisited_interpretations).toBe(false);
-    expect(first.index.entries).toHaveLength(5);
-    expect(firstPageInputIds(first).size).toBe(5);
-    expect(first.index.completeness.logical_index).toBe("partial");
-    expect(first.index.continuation).not.toBeNull();
-    expect(recordSourceSemanticLibraryFirstExposure(first).initial?.slots).toHaveLength(5);
-    if (first.index.continuation === null) throw new Error("sixth root must remain on a frozen page");
-    const next = await call({ ...request, continuation: first.index.continuation });
-    if (next.operation !== "recall" || next.index === undefined) throw new Error("public continuation expected");
-    expect(next.index.entries).toHaveLength(1);
-    expect(next.work.native_work).toBe(0);
-    expect(next.work.native_bytes).toBe(0);
-    expect(next.request_identity).toBe(first.request_identity);
-    const all = new Set([...firstPageInputIds(first), ...(next.proofs ?? []).flatMap(proof =>
-      proof.binding_results?.flatMap(binding => binding.kind === "evidence" ? [binding.input] : []) ?? [])]);
+    const pages = [await recall(call, original, semantics, alignments, prepared.query_handle)];
+    while (pages.at(-1)!.index.continuation !== null && pages.length < 12) {
+      const next = await call({ ...request, continuation: pages.at(-1)!.index.continuation });
+      if (next.operation !== "recall" || next.index === undefined) throw new Error("public continuation expected");
+      expect(next.request_identity).toBe(pages[0]!.request_identity);
+      pages.push({ ...next, index: next.index, slot_qualifiers: next.slot_qualifiers! });
+    }
+    expect(pages.at(-1)!.index.continuation).toBeNull();
+    // Occupancy is unique across pages and every necessary evidence input is delivered once.
+    const roots = pages.flatMap(page => page.index.entries.flatMap(entry =>
+      entry.target.kind === "source_evidence" ? [entry.target.root_id] : []));
+    expect(roots).toHaveLength(6);
+    expect(new Set(roots).size).toBe(6);
+    const all = new Set(pages.flatMap(page => [...firstPageInputIds(page)]));
     expect(all).toEqual(new Set([0, 1, 2, 3, 4, 5]));
-    expect(next.index.entries.some(row => first.index.entries.some(prior => prior.target.kind === "source_evidence"
-      && row.target.kind === "source_evidence" && prior.target.root_id === row.target.root_id))).toBe(false);
-  });
+  }, { prepareDatabase: indexed(fixture) });
 }, 60_000);

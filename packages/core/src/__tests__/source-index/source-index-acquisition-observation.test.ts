@@ -7,7 +7,7 @@ const isolation = await vi.hoisted(async () => {
 afterAll(() => { isolation.restore(); });
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { SourceIndexAcquisitionFact } from "../../source-index/source-index-acquisition.js";
-import { fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { configuration, fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
   AXIS_ROOTS, admitScope, expectBounded, expectMetadataOnly, publishIndex, query, queryInput
 } from "./source-index-acquisition-fixture.js";
@@ -114,9 +114,15 @@ describe("source index acquisition observation through native SQLite", () => {
   });
 
   it("does not publish vector ranks when later rank retention refuses after at least one real meter charge", () => {
-    const environment = setup();
-    publishIndex(environment);
-    const input = queryInput();
+    const environment = setup(), config = configuration({ dimensions: 128 });
+    // Real scoring work separates native read preflight from the later ranking
+    // boundary; reducing the whole allowance must not truncate native input first.
+    publishIndex(environment, AXIS_ROOTS.map(root => ({ ...root,
+      vectors: root.vectors.map(vector => [...vector, ...Array<number>(125).fill(0)]) })), config);
+    const supplied = queryInput(config);
+    if (supplied.vector.status !== "available") throw new Error("expected supplied query vector");
+    const input = { ...supplied, vector: { ...supplied.vector,
+      embedding: new Float32Array([5, ...Array<number>(127).fill(0)]) } };
     const charge = SourceSemanticResourceLedger.prototype.charge;
     const spentAfterRetention: number[] = [];
     const spy = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(

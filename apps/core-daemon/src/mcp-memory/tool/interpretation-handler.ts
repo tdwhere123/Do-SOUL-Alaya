@@ -3,6 +3,7 @@ import { sourceDisclosure, sourceSemanticExecution, SoulInterpretationResponseSc
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork, type SourceSemanticReadableWorkerRequest,
   type AuthorizedScopesAdmission, type SourceRecordIdentity, type SourceInterpretationInvalidation,
   type SourceInterpretationInvalidationResult } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION } from "@do-soul/alaya-protocol";
 import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { finalizeSourceSemanticReason } from "../../runtime/recall-read-worker/source-semantic-reason-finalization.js";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
@@ -18,9 +19,10 @@ const DEFAULT_BUDGET: RequestBudget = { schema_version: 1, work_units: 200000, m
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
 
 export type SourceSemanticHostPort = Readonly<{
-  executeComparison?: import("../../runtime/recall/recall-read-worker-client.js").SourceSemanticsExecutionPort["executeComparison"];
   execute(input: Readonly<{ workspace_id: string; as_of: string; authorized_scopes: AuthorizedScopesAdmission;
     principal?: string; expires_at?: string; lifetime_now?: string; request: SourceSemanticWorkerRequest }>): Promise<SourceSemanticWorkerResult>;
+  acknowledge?: import("../../runtime/recall/recall-read-worker-client.js").SourceSemanticsExecutionPort["acknowledge"];
+  discard?(preparationId: string): Promise<void>;
 }>;
 export type SourceSemanticPublicationPort = Readonly<{
   invalidate?(input: Readonly<{ request: SourceInterpretationInvalidation; budget: RequestBudget }>): Promise<Readonly<{
@@ -65,7 +67,7 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
         authorized_scopes ?? { mode: "unrestricted" });
       const fitted = request.operation === "reason" && result.kind === "reason"
         ? finalizeSourceSemanticReason(result, request.output_byte_limit, value => JSON.stringify(mcpFromWorker(value))) : result;
-      return mcpFromWorker(fitted);
+      return await settleRecallPage(input.sourceSemanticsPort, fitted, context.abortSignal);
     } catch (error) {
       if (request.operation === "prepare_source" && error instanceof CoreError) {
         const work = measuredFailure(error);
@@ -233,6 +235,58 @@ export function buildSourceSemanticWorkerPayload<Request extends SourceSemanticR
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
     expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request };
 }
+/** The library page is prepared by the worker's delivery owner: the public
+ * envelope must encode before the page is acknowledged, and a failed encode
+ * discards it rather than leaving an unissued preparation. A cancellation that
+ * arrives after the worker prepared the page must discard it instead of
+ * acknowledging exposure the caller already abandoned.
+ */
+async function settleRecallPage(port: SourceSemanticHostPort | undefined,
+  result: SourceSemanticWorkerResult, signal?: AbortSignal): Promise<SoulInterpretationResponse> {
+  if (result.kind !== "recall" || result.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION
+    || result.preparation_id === undefined) return mcpFromWorker(result);
+  if (port?.acknowledge === undefined || port.discard === undefined) {
+    throw new CoreError("OBLIGATION_VIOLATION", "library delivery acknowledgment port missing");
+  }
+  let response: SoulInterpretationResponse;
+  try {
+    response = mcpFromWorker(result);
+  } catch (error) {
+    await port.discard(result.preparation_id);
+    throw error;
+  }
+  // Encoding is local; acknowledgement is the exposure boundary. Do not publish a
+  // page the caller cancelled, and keep the incurred execution cost on the refusal.
+  if (signal?.aborted === true) {
+    await port.discard(result.preparation_id);
+    attachIncurredWork(signal.reason, result.work);
+    throwIfAborted(signal);
+  }
+  const index = "index" in response && response.index !== undefined ? response.index : result.index;
+  try {
+    // The acknowledgment adapter preserves its final receipt independently in the
+    // request-scoped observation channel. Do not rewrite this fitted preparation
+    // envelope or add physical visits to its logical preparation work.
+    await port.acknowledge(result.preparation_id, index,
+      new Map(Object.entries(result.previews ?? {})), signal);
+  } catch (error) {
+    attachIncurredWork(error, result.work);
+    // Only the worker can decide whether cancellation beat issuance. A transport
+    // failure is unknown, not permission to claim rollback or successful discard.
+    throw error;
+  }
+  return response;
+}
+
+/** Cancellation is not a free request: the envelope keeps its incurred work. */
+function attachIncurredWork(reason: unknown, work: SourceSemanticWorkerWork): void {
+  if (!(reason instanceof Error)) return;
+  const target = reason as Error & { details?: Readonly<Record<string, unknown>> };
+  const details = target.details ?? {};
+  if (Object.prototype.hasOwnProperty.call(details, "work")) return;
+  try { target.details = Object.freeze({ ...details, work }); } catch { /* Classification wins. */ }
+}
+
 /** Private bench feedback projection also consumes this conversion, never another worker call. */
 export function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
   if (result.kind === "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "internal preparation cannot escape as an MCP response");

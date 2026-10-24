@@ -130,10 +130,10 @@ function correspondence(question: string, semantics: SourceSemanticQuery,
 it("keeps the reported inspection and telling dates attached through public worker delivery", async () => {
   await withAccessLibrary([{ id: "report-time-source", text: SOURCE, verbatim: true,
     eventTime: "2026-06-09T00:00:00.000Z", authoredDraft: reportDraft }],
-    async ({ execute, ids }) => {
+    async ({ execute, ids, port }) => {
       const context = { workspaceId: WS, runId: "report-time-control", agentTarget: "codex", sessionId: "report-time-control" };
       const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => "2026-09-24T00:00:00.000Z",
-        sourceSemanticsPort: { execute } });
+        sourceSemanticsPort: port });
       const call = async (args: unknown) => {
         const response = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider: () => context },
           "soul.interpretation", SoulInterpretationRequestSchema.parse(args));

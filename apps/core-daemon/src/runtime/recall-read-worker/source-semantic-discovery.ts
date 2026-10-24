@@ -14,7 +14,7 @@ export const IDLE: SourceSemanticCoverage = {
   semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
 };
 
-type VerifiedInterpretation = NonNullable<ReturnType<typeof verifyPublishedSourceSemanticInterpretation>>;
+export type VerifiedInterpretation = NonNullable<ReturnType<typeof verifyPublishedSourceSemanticInterpretation>>;
 export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation;
 export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,

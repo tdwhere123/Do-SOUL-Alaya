@@ -13,11 +13,14 @@ export type NativeRouteOccurrence = Readonly<{
   reference: string; root_key: string; native_rank: number;
   window?: NativeRoutePosition; hit?: NativeRoutePosition;
 }>;
-export type NativeRouteLane = Readonly<{ lane: LaneId; scope: string } & (
+type NativeLaneCapture = (
   { state: "absent" | "disabled" | "measured-empty" } |
   { state: "unavailable"; reason: string } |
   { state: "exact-captured"; occurrences: readonly NativeRouteOccurrence[] }
-)>;
+);
+export type NativeRouteLane = Readonly<{ lane: LaneId; scope: string } & NativeLaneCapture>;
+export type NativeMemoryLane = Readonly<{ lane: "memory-lexical"; scope: string } & NativeLaneCapture>;
+type AnyNativeLane = NativeRouteLane | NativeMemoryLane;
 export type NativeRoutePending = Readonly<{
   ordinal: number; lane: LaneId; scope: string; occurrence: NativeRouteOccurrence;
 }>;
@@ -53,12 +56,12 @@ function validatePosition(position: NativeRoutePosition | undefined): void {
 }
 
 /** Validate only the owned clone; never freeze or retain caller-owned objects. */
-function validateLanes(lanes: readonly NativeRouteLane[]): void {
-  requireFact(Array.isArray(lanes) && lanes.length === OPPORTUNITY_CYCLE.length, "four ordered native lanes required");
+function validateLanes(lanes: readonly AnyNativeLane[], cycle: readonly string[] = OPPORTUNITY_CYCLE): void {
+  requireFact(Array.isArray(lanes) && lanes.length === cycle.length, "complete ordered native lanes required");
   const references = new Set<string>();
   for (let index = 0; index < lanes.length; index++) {
     const lane = lanes[index]!;
-    requireFact(lane !== null && typeof lane === "object" && lane.lane === OPPORTUNITY_CYCLE[index] &&
+    requireFact(lane !== null && typeof lane === "object" && lane.lane === cycle[index] &&
       nonempty(lane.scope), "invalid native lane order or scope");
     requireFact(["absent", "disabled", "unavailable", "measured-empty", "exact-captured"].includes(lane.state),
       "invalid native lane state");
@@ -81,22 +84,22 @@ function validateLanes(lanes: readonly NativeRouteLane[]): void {
 }
 
 /** Only captured pages are walked. End-of-capture says nothing about the full corpus. */
-function capturedWalk(lanes: readonly NativeRouteLane[]) {
-  const cursors = [0, 0, 0, 0];
+function capturedWalk<L extends AnyNativeLane>(lanes: readonly L[]) {
+  const cursors = lanes.map(() => 0);
   let turn = 0;
   return {
-    peek: (): Omit<NativeRoutePending, "ordinal"> | null => {
-      for (let skipped = 0; skipped < OPPORTUNITY_CYCLE.length; skipped++) {
-        const index = (turn + skipped) % OPPORTUNITY_CYCLE.length, lane = lanes[index]!;
+    peek: (): Omit<NativeRoutePending, "ordinal" | "lane"> & { lane: L["lane"] } | null => {
+      for (let skipped = 0; skipped < lanes.length; skipped++) {
+        const index = (turn + skipped) % lanes.length, lane = lanes[index]!;
         if (lane.state !== "exact-captured") continue;
         const occurrence = lane.occurrences[cursors[index]!];
         if (occurrence !== undefined) return { lane: lane.lane, scope: lane.scope, occurrence };
       }
       return null;
     },
-    advance: (lane: LaneId): void => {
-      const index = OPPORTUNITY_CYCLE.indexOf(lane);
-      cursors[index] = cursors[index]! + 1; turn = (index + 1) % OPPORTUNITY_CYCLE.length;
+    advance: (lane: L["lane"]): void => {
+      const index = lanes.findIndex(row => row.lane === lane);
+      cursors[index] = cursors[index]! + 1; turn = (index + 1) % lanes.length;
     },
     trace: () => lanes.map((lane, index) => {
       const consumed = cursors[index]!, occurrences = lane.state === "exact-captured" ? lane.occurrences : [];
@@ -175,17 +178,20 @@ export type NativeRoutePoolMember = Readonly<{
   /** Captured catalog position; null is genuinely unavailable, not array index. */
   catalog_position: number | null;
 }>;
-export type NativeRouteAssociation = Readonly<{
+/** Internal closure record: a verified occurrence-to-root association, never a
+ * public receipt shape.
+ */
+type NativeRouteAssociation = Readonly<{
   occurrence_reference: string; root_key: string; record_id: string;
 }>;
-type AccessTrace = Readonly<{
-  lane: LaneId; scope: string; occurrence: NativeRouteOccurrence; record_id: string; decision: "placed" | "duplicate";
+type AccessTrace<L extends AnyNativeLane> = Readonly<{
+  lane: L["lane"]; scope: string; occurrence: NativeRouteOccurrence; record_id: string; decision: "placed" | "duplicate";
 }>;
 
 function validateAccessMembership(input: Readonly<{
   pool: readonly NativeRoutePoolMember[]; acquired_root_keys: readonly string[];
   associations: readonly NativeRouteAssociation[];
-}>, lanes: readonly NativeRouteLane[]) {
+}>, lanes: readonly AnyNativeLane[]) {
   const members = new Set<string>(), positions = new Set<number>();
   for (const member of input.pool) {
     requireFact(nonempty(member.record_id) && !members.has(member.record_id), "invalid closed pool membership");
@@ -216,15 +222,29 @@ function validateAccessMembership(input: Readonly<{
  * The bridge supplies only eligible occurrences and verified associations. No source-id join or identity derivation occurs.
  * Global unvisited sources do not invalidate a total order over this independently closed pool.
  */
-export function orderNativeRouteAccess(input: Readonly<{
-  lanes: readonly NativeRouteLane[]; pool: readonly NativeRoutePoolMember[];
+type AccessInput<L extends AnyNativeLane> = Readonly<{
+  lanes: readonly L[]; pool: readonly NativeRoutePoolMember[];
   acquired_root_keys: readonly string[]; associations: readonly NativeRouteAssociation[]; unvisited_sources: boolean;
-}>) {
+}>;
+export function orderNativeRouteAccess(input: AccessInput<NativeRouteLane>) {
+  return orderCapturedAccess(input, OPPORTUNITY_CYCLE);
+}
+
+/** Ordinary field navigation adds one observed memory-FTS lane to the same
+ * captured-opportunity walk. This is navigation, not a cross-kind relevance score.
+ * An unavailable lane is skipped, never filled from an unrelated catalog.
+ */
+export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & { memory: NativeMemoryLane }) {
+  return orderCapturedAccess<AnyNativeLane>({ ...input, lanes: [...input.lanes, input.memory] },
+    [...OPPORTUNITY_CYCLE, "memory-lexical"]);
+}
+
+function orderCapturedAccess<L extends AnyNativeLane>(input: AccessInput<L>, cycle: readonly string[]) {
   const captured = structuredClone(input);
-  validateLanes(captured.lanes);
+  validateLanes(captured.lanes, cycle);
   requireFact(typeof captured.unvisited_sources === "boolean", "missing global source residual state");
   const associations = validateAccessMembership(captured, captured.lanes), walk = capturedWalk(captured.lanes);
-  const recordIds: string[] = [], placed = new Set<string>(), trace: AccessTrace[] = [];
+  const recordIds: string[] = [], placed = new Set<string>(), trace: AccessTrace<L>[] = [];
   for (let next = walk.peek(); next !== null; next = walk.peek()) {
     const recordId = associations.get(next.occurrence.reference)!.record_id;
     const decision = placed.has(recordId) ? "duplicate" : "placed";

@@ -102,7 +102,6 @@ interface BenchDaemonState {
   readonly relationProjectionAdmissionMode: BenchDaemonOptions["relationProjectionAdmissionMode"];
   readonly sourceSemanticInterpretationClock: string | undefined;
   readonly sourceSemanticObservations: boolean | undefined;
-  readonly sourceSemanticComparison: boolean | undefined;
   readonly fieldProjectionAdmissionMode: BenchDaemonOptions["fieldProjectionAdmissionMode"];
   readonly dataDir: string;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
@@ -172,7 +171,6 @@ async function createBenchDaemonState(
     fieldProjectionAdmissionMode,
     sourceSemanticInterpretationClock: opts.sourceSemanticInterpretationClock,
     sourceSemanticObservations: opts.sourceSemanticObservations,
-    sourceSemanticComparison: opts.sourceSemanticComparison,
     dataDir,
     savedEnv,
     managedEnvKeys,
@@ -211,7 +209,6 @@ async function bootBenchDaemon(
     fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,
     ...(state.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: state.sourceSemanticInterpretationClock }),
     ...(state.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: state.sourceSemanticObservations }),
-    ...(state.sourceSemanticComparison === undefined ? {} : { sourceSemanticComparison: state.sourceSemanticComparison }),
     configDirectory: state.configDirectory,
     managedEnvKeys: state.managedEnvKeys,
     createManagedWorkspaceRoot: state.workspaceManager.createManagedWorkspaceRoot
@@ -254,7 +251,6 @@ function buildBenchDaemonHandle(
   return {
     runtime: resources.runtime,
     ...(resources.observeSourceSemantics === undefined ? {} : { observeSourceSemantics: resources.observeSourceSemantics }),
-    ...(resources.compareSourceSemantics === undefined ? {} : { compareSourceSemantics: resources.compareSourceSemantics }),
     mcpClient: resources.mcpClient,
     get workspaceId() {
       return state.activeContext.workspaceId;

@@ -25,7 +25,7 @@ import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
-import { encodeIndexResults } from "../../../mcp-memory/recall/recall-result.js";
+import { encodeIndexResults } from "@do-soul/alaya-core";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { runSourceInterpretationReasoning } from "../../../runtime/recall-read-worker/source-interpretation-reasoning.js";
 

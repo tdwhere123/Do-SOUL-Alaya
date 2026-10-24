@@ -149,9 +149,9 @@ for (const world of WORLDS) it(`admits the frozen ${world.name} meaning through 
   await withAccessLibrary(fixture.map(row => ({ id: row.sourceId,
     text: row.body, verbatim: true, recordedAt: row.ingestedAt, eventTime: OBSERVED,
     authoredDraft: (catalog: SourceReferenceCatalog) => sourceDraft(row.body, row.sourceId, catalog) })),
-  async ({ execute }) => {
+  async ({ execute, port }) => {
     const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK,
-      sourceSemanticsPort: { execute } });
+      sourceSemanticsPort: port });
     const contextProvider = () => ({ workspaceId: WS, runId: `original-${world.name}`, agentTarget: "codex", sessionId: `original-${world.name}` });
     const call = async (args: unknown) => {
       const response = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider },
@@ -187,7 +187,7 @@ for (const world of WORLDS) it(`admits the frozen ${world.name} meaning through 
       expect(matched).toBe(true);
       expect(answers).toHaveLength(1);
       expect(recalled.slot_qualifiers?.some(row => row.evidence_kind === "semantic_proof"
-        && row.selection_basis === "direct_answer" && row.payload_support === "available")).toBe(true);
+        && row.conditional_computation_id !== undefined)).toBe(true);
       expect(recalled.results?.slice(0, 5).some(row => row.content_preview?.includes(world.support!))).toBe(true);
     }
     const search = soulSearchFromLibraryRecall(recalled);

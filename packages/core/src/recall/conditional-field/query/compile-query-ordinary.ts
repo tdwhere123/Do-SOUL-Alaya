@@ -11,7 +11,7 @@ import {
   type QueryView,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
-import { identityFor } from "./compile-query-identity.js";
+import { identityFor, type QueryDenotationParts } from "./compile-query-identity.js";
 import type { OrdinaryLanguageCompileInput } from "./compile-query.js";
 import {
   attachSourceFilters,
@@ -47,6 +47,16 @@ import {
 import { admitQueryProposal } from "./query-proposal-admission.js";
 
 const MAX_ORDINARY_TEXT = 4096;
+
+/** A query-lease source restriction and prepared hint participate in ordinary
+ * identity and in native nomination cost; they never select a result here. */
+function ordinaryRestriction(input: OrdinaryLanguageCompileInput):
+  Pick<QueryDenotationParts, "source_id" | "access_hint"> {
+  return {
+    ...(input.source_id === undefined ? {} : { source_id: input.source_id }),
+    ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint })
+  };
+}
 
 type TimeHints =
   | { readonly kind: "none" }
@@ -96,6 +106,7 @@ export function compileOrdinary(
       view,
       interpretation_clock: input.interpretation_clock,
       authorized_scopes: input.authorized_scopes,
+      ...ordinaryRestriction(input),
       lexical_text: input.text
     });
   }
@@ -160,6 +171,7 @@ function finishOrdinary(
       interpretation_clock: input.interpretation_clock,
       time_window: interpreted.time_window,
       authorized_scopes: input.authorized_scopes,
+      ...ordinaryRestriction(input),
       lexical_text: input.text,
       ordinary_request: { relations, query_id: queryId }
     })),
@@ -219,7 +231,8 @@ function compileSupportedRequest(
         hypotheses,
         interpretation_clock: input.interpretation_clock,
         time_window: yesterday,
-        authorized_scopes: input.authorized_scopes
+        authorized_scopes: input.authorized_scopes,
+    ...ordinaryRestriction(input)
       })),
       status: "hypotheses",
       snapshot_id: snapshotId,
@@ -246,7 +259,8 @@ function compileSupportedRequest(
       lexical_text: input.text,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
-      authorized_scopes: input.authorized_scopes
+      authorized_scopes: input.authorized_scopes,
+    ...ordinaryRestriction(input)
     })),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
@@ -282,6 +296,7 @@ function compileLexicalRequest(
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes,
+      ...ordinaryRestriction(input),
       lexical_text: input.text,
       source_guard: sourceGuard
     })),
@@ -329,7 +344,8 @@ function compileOpenRelations(
       view,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
-      authorized_scopes: input.authorized_scopes
+      authorized_scopes: input.authorized_scopes,
+    ...ordinaryRestriction(input)
     })),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,

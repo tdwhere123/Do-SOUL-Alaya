@@ -17,7 +17,7 @@ import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit
   sourceReadCost, sourceTargetFromRead } from "./native-source.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
-import { admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
+import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
   readSourceIndexVectorCandidates } from "./source-index-query-reader.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
@@ -31,20 +31,25 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     readSnapshot: readSourceIndexSnapshotFact, readRoot: readSourceIndexRootQualification });
   private records: SqliteFieldSourceRecordRepo;
   private connectionVersion: number;
-  public constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256) {
+  private readonly targetCapture: SourceIndexTargetCapture | undefined;
+  public constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256,
+    options: Readonly<{ captureReadTargets?: boolean }> = {}) {
+    this.targetCapture = options.captureReadTargets ? new SourceIndexTargetCapture() : undefined;
     this.records = new SqliteFieldSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
   }
 
   public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget) {
     BoundedIdSchema.parse(workspaceId);
-    return this.atomic(() => readSourceIndexLexicalCandidates(this.database, workspaceId, navigationText, limit, budget, this.sha256), "read");
+    const capture = this.database.connection.inTransaction ? this.targetCapture : undefined;
+    return this.atomic(() => readSourceIndexLexicalCandidates(this.database, workspaceId, navigationText, limit, budget, this.sha256, capture), "read");
   }
 
   public readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget) {
     BoundedIdSchema.parse(workspaceId);
-    return this.atomic(() => readSourceIndexVectorCandidates(this.database, workspaceId, cursor, limit, budget), "read");
+    const capture = this.database.connection.inTransaction ? this.targetCapture : undefined;
+    return this.atomic(() => readSourceIndexVectorCandidates(this.database, workspaceId, cursor, limit, budget, capture), "read");
   }
 
   public admitQueryCandidate(source: SourceIndexTarget, vectorBinding: SourceIndexVectorBinding | null,

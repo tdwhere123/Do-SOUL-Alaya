@@ -90,8 +90,12 @@ import { sourceSemanticCorrespondenceIdentity } from "@do-soul/alaya-protocol";
 function correspondenceId(correspondence: SourceSemanticCorrespondence) { return sourceSemanticCorrespondenceIdentity(correspondence, sha); }
 
 export function deliveredProofFixture(input: { interpretation?: SourceSemanticInterpretation; semantics?: SourceSemanticQuery;
-  correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget; workspaceId?: string } = {}) {
-  const interpretation = input.interpretation ?? source(), semantics = input.semantics ?? query();
+  correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget; workspaceId?: string;
+  assertionLocations?: SourceSemanticInterpretation["source"]["assertion_locations"] } = {}) {
+  const base = input.interpretation ?? source();
+  const interpretation = input.assertionLocations === undefined ? base
+    : { ...base, source: { ...base.source, assertion_locations: input.assertionLocations } };
+  const semantics = input.semantics ?? query();
   const correspondence = input.correspondence ?? correspondenceFor(interpretation, semantics), original = input.original ?? ORIGINAL;
   const { source_id, source_version, content_digest } = interpretation.source;
   const identity = hashSourceRecordId(interpretation.source, sha);
@@ -124,5 +128,5 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
   if (offset < 0) throw new Error(`fixture must deliver a proof slot: ${JSON.stringify({ outcome: proof.outcome,
     bindings: proof.binding_results, usage: proof.resource_usage, entries: index.entries.length, completeness: proof.completeness })}`);
   return { record, target, proof, index, entry: index.entries[offset]!, qualifier: qualifiers[offset]!,
-    source_dependencies: executed.source_dependencies ?? [] };
+    source_dependencies: executed.source_dependencies ?? [], execution: executed, interpretation };
 }

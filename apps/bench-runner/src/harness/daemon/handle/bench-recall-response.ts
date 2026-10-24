@@ -1,5 +1,5 @@
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
-import type { ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
+import { encodeIndexResults, frameEncodedIndex, type ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
 import {
   InformationIndexSchema,
   indexEntryCacheKey,
@@ -12,7 +12,7 @@ import {
   type RequestBudget,
   type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
-import { encodeIndexResults, frameEncodedIndex, sourceMetadataForRecallResult } from "@do-soul/alaya/recall/index-response";
+import { sourceMetadataForRecallResult } from "@do-soul/alaya/recall/index-response";
 import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch,
   type ExpectedConditionalFieldRequest
 } from "../../../runs/measurement/conditional-field-request-binding.js";
@@ -111,7 +111,10 @@ export function buildBenchRecallResponse(
   });
   return {
     ...response,
-    provider_calls: recallResult.provider_calls,
+    // The receipt schema retains the declared preparation state and refuses an
+    // unparseable one, so this literal is the measured zero admitted above, not
+    // a substitute for missing preparation evidence.
+    provider_calls: 0,
     garden_enqueue: recallResult.garden_enqueue,
     request_budget: budget,
     execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(

@@ -74,14 +74,14 @@ export async function runOperation(
     );
   }
   if (request.operation === "conditionalField.acknowledge") {
-    return parseWorkerOperationResult(
-      request.operation,
-      settleWorkerDelivery(
-        runtime,
-        parsedPayload as WorkerOperationPayload<"conditionalField.acknowledge">,
-        false
-      )
-    );
+    const payload = parsedPayload as WorkerOperationPayload<"conditionalField.acknowledge">;
+    const receipt = settleWorkerDelivery(runtime, payload, false);
+    // Settlement owns the final receipt. Preserve it separately through the bounded
+    // diagnostic channel: preparation totals and the fitted public bytes stay intact.
+    observer?.event("delivery_settlement", "delivery", () => ({
+      preparation_id: payload.preparation_id, execution_receipt: receipt
+    }));
+    return parseWorkerOperationResult(request.operation, receipt);
   }
   if (request.operation === "conditionalField.discard") {
     return parseWorkerOperationResult(

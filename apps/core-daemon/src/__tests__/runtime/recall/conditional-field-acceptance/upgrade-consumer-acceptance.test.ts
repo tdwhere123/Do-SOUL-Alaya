@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { attributeUsageReports } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
-import { encodeIndexResults } from "../../../../mcp-memory/recall/recall-result.js";
+import { encodeIndexResults } from "@do-soul/alaya-core";
 import { COMPATIBILITY_LEDGER } from "../../../../../../../packages/protocol/src/__tests__/recall/conditional-field/compatibility-ledger.fixture.js";
 import {
   defaultBudget,

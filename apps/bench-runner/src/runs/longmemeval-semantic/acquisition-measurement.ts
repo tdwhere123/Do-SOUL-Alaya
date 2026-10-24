@@ -25,6 +25,16 @@ const unavailableCost: Cost = { status: "unknown", unit: "unobserved", value: nu
 const knownCost = (unit: string, value: number | null | undefined): Cost => value == null
   ? { status: "unknown", unit, value: null } : { status: "known", unit, value };
 
+/** The source-gold evaluator's admission outcome for one recorded row. */
+const admissionMeasurement = (native?: NativeMeasurement) => native?.measurement?.status === "validated"
+  || native?.measurement?.status === "invalid" ? native.measurement : null;
+
+/** A known refusal or malformed delivery states itself; it is not converted into an
+ * unobserved native delivery, an ordinary absence or a scoreable `miss`. The cause
+ * stays explicit through every downstream metric and the loss attribution. */
+const refusedMeasurement = (native: NativeMeasurement | undefined) => native?.measurement?.status === "invalid"
+  ? unknown(native.measurement.reason) : null;
+
 /** No aggregate native counter is silently allocated to a stage, nor to cold start/reuse. */
 function measurementCosts(native?: NativeMeasurement) {
   const work = native?.diagnostics?.work;
@@ -60,6 +70,10 @@ function lossAttribution(stages: readonly Observation[]) {
 
 function stageObservations(native: NativeMeasurement | undefined, gold: readonly SourceGoldUnit[],
   sourceHit: boolean, exposure: AcquisitionMetric, complete: boolean): readonly Observation[] {
+  const refused = refusedMeasurement(native);
+  if (refused !== null) return STAGES.map(stage => ({ stage,
+    status: stage === "consumer_use" ? "not_run" : "unknown",
+    reason: stage === "consumer_use" ? "provider_gated" : refused.reason! }));
   if (native?.measurement?.status !== "validated") return STAGES.map(stage => ({ stage,
     status: stage === "consumer_use" ? "not_run" : "unknown", reason: stage === "consumer_use" ? "provider_gated" : "native_admission_unavailable" }));
   const traces = native.preparation_trace ?? [];
@@ -95,12 +109,15 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
   replay?: NativeReplayRow;
   unavailableReason?: string;
 }>) {
-  const { native, replay, sourceGold, answerGold } = input;
-  const measurement = native?.status === "replayed" ? native.measurement : null;
+  const { native, replay } = input;
+  const refused = refusedMeasurement(native);
+  const sourceGold = refused === null ? input.sourceGold : undefined;
+  const answerGold = refused === null ? input.answerGold : undefined;
+  const measurement = native?.status === "replayed" ? admissionMeasurement(native) : null;
   const intervals = measurement?.status === "validated" && replay?.status === "replayed"
     ? deliveredSourceSemanticLibraryIntervals(measurement, replay.response) : null;
-  const unavailable = input.cohort === "abstention" ? "abstention_requires_separate_calibration"
-    : intervals === null ? input.unavailableReason ?? "native_delivery_unavailable" : null;
+  const unavailable = refused?.reason ?? (input.cohort === "abstention" ? "abstention_requires_separate_calibration"
+    : intervals === null ? input.unavailableReason ?? "native_delivery_unavailable" : null);
   const source5: AcquisitionMetric = unavailable !== null ? unknown(unavailable)
     : native?.source_bearing_union?.any_at_5.status === "hit" ? hit
     : sourceGold?.complete && native?.source_bearing_union?.any_at_5.status === "miss" ? miss
@@ -118,9 +135,9 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
       intervals: intervals.map(({ rank, target, start, end }) =>
         ({ rank, target: sourceGoldUnitFromPublishedRoot(target), start, end }))
     };
-  const visibility = scoreConsumerMessageVisibility({ gold: answerGold,
-    pages: deliveryPage === undefined ? [] : [deliveryPage],
-    ...(unavailable === null ? {} : { unavailableReason: unavailable }) });
+  const visibility = unavailable !== null ? { any_at_5: unknown(unavailable), any_at_10: unknown(unavailable),
+    all_at_5: unknown(unavailable), all_at_10: unknown(unavailable) }
+    : scoreConsumerMessageVisibility({ gold: answerGold, pages: deliveryPage === undefined ? [] : [deliveryPage] });
   const answer5 = visibility.any_at_5;
   const at10 = (at5: AcquisitionMetric): AcquisitionMetric => at5.status === "hit" ? at5
     : hasContinuation ? unknown("second_page_not_observed") : at5;
@@ -148,7 +165,14 @@ export function summarizeLongMemEvalAcquisition(rows: readonly LongMemEvalAcquis
       lower_bound: rows.length === 0 ? null : hits / rows.length,
       upper_bound: rows.length === 0 ? null : (hits + unknown) / rows.length }];
   }));
-  return { contract: "longmemeval-acquisition-observation-v1", metrics,
+  // Every selected row keeps its own unknown count; a known refusal stays attributable at
+  // aggregate level instead of being folded into ordinary unavailability.
+  const unknownRows = rows.filter(row => row.metrics["source_bearing_any@5"].status === "unknown");
+  const unknownReasons = Object.entries(unknownRows.reduce<Record<string, number>>((counts, row) => {
+    const reason = row.metrics["source_bearing_any@5"].reason ?? "unstated";
+    return { ...counts, [reason]: (counts[reason] ?? 0) + 1 };
+  }, {})).sort(([left], [right]) => left.localeCompare(right)).map(([reason, rowsWithReason]) => ({ reason, rows: rowsWithReason }));
+  return { contract: "longmemeval-acquisition-observation-v1", metrics, unknown_reasons: unknownReasons,
     support_sufficiency: { measured: 0, not_measured: rows.length },
     loss_attribution: { denominator: rows.length,
       stages: Object.fromEntries(STAGES.map(stage => [stage, rows.filter(row => row.earliest_observable_loss.stage === stage).length])),

@@ -8,14 +8,15 @@ import { AlayaError, canonicalJson, SoulInterpretationResponseSchema,
 import { callMcpTool, type BenchMcpToolCapture } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
-import { measureSourceSemanticLibraryResponse } from "../measurement/source-semantic-library-measurement.js";
+import { measureSourceSemanticLibraryResponse, refusesSourceSemanticLibraryFamily,
+  sourceSemanticLibraryFamilyRefusal } from "../measurement/source-semantic-library-measurement.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { sourceLookupStores } from "../snapshot/source-records/publish.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { FirstExposurePageSchema, type FirstExposureSession } from "../measurement/first-exposure-session.js";
 import { admitDeliveredSources, admitSemanticChainLibraryBinding, sameSealedSnapshotObservation,
   semanticChainLibraryRecallRequest } from "./library-admission.js";
-import { SemanticChainPlanSchema, SemanticChainQuerySchema, chainIdentity, readChainArtifact, writeChainArtifact,
+import { SemanticChainPlanSchema, SemanticChainQuerySchema, SemanticChainDiscoveryTraceSchema, chainIdentity, readChainArtifact, writeChainArtifact,
   assertChainSnapshot, withSemanticChainDaemon, type SemanticChainPlan } from "./contract.js";
 import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
 import { semanticChainCacheInputPaths } from "./inputs.js";
@@ -184,6 +185,17 @@ export async function deliverPreparedSemanticChainQuery(input: Readonly<{
   const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation", request, input.capture));
   refuseBenchWorkAfterCancel();
   if (response.operation !== "recall") throw new AlayaError("INTERNAL", "native recall returned a different operation");
+  // The delivered family is decided before any acceptance-prerequisite (prepared query
+  // semantics, prepared access pool, exposure): a known unsupported family keeps its own
+  // refusal instead of being reported as a changed pool or an unavailable delivery.
+  const refusedFamily = refusesSourceSemanticLibraryFamily(response);
+  if (refusedFamily) {
+    const row = { query_key: query.query_key, status: "replayed" as const, correspondence_outcomes: outcomes,
+      response, first_exposure: null, preparation_trace: prepared.discovery.discovery_trace,
+      preparation_elapsed_ms: preparationElapsed, native_elapsed_ms: performance.now() - started };
+    writeChainArtifact(rowPath, row);
+    return row;
+  }
   if (response.query_semantics_status !== undefined &&
     canonicalJson(response.query_semantics_status) !== canonicalJson(prepared.discovery.discovery_trace.at(-1)?.query_semantics_status)) {
     throw new AlayaError("CONFLICT", "native recall changed prepared query semantic availability");
@@ -194,7 +206,10 @@ export async function deliverPreparedSemanticChainQuery(input: Readonly<{
   }
   const exposure = response.index === undefined || response.delivery_id === undefined ? null
     : recordSourceSemanticLibraryFirstExposure(response, input.exposureSession);
-  const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",
+  // Genuinely absent exposure still records `native_unavailable`; the family refusal above
+  // already returned its own row.
+  const row = { query_key: query.query_key, status: response.index === undefined || response.delivery_id === undefined
+    ? "native_unavailable" : "replayed",
     correspondence_outcomes: outcomes, response, first_exposure: exposure,
     preparation_trace: prepared.discovery.discovery_trace, preparation_elapsed_ms: preparationElapsed,
     native_elapsed_ms: performance.now() - started };
@@ -206,24 +221,43 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   const { plan, replay, admittedInputPaths } = admitSemanticChainReplay(root, replayPath);
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
     plan.config.snapshot_path, ...semanticChainCacheInputPaths(plan)]);
-  const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
-  const expected = plan.queries.map((row) => row.query_key).sort();
-  if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort())) {
-    throw new AlayaError("VALIDATION", "measurement requires exact per-query gold and replay denominator coverage");
-  }
+  // Labels are evaluator-only and are not even loaded for an invalid/unobserved delivery.
+  // Null records an unconsulted label set; [] is reserved for an evaluated, valid-empty set.
+  const gold = plan.queries.map(({ query_key }) => ({ query_key,
+    source_units: null as z.infer<typeof SourceGoldUnitSchema>[] | null }));
+  let labels: unknown[] | undefined;
+  const sourceUnits = (queryKey: string) => {
+    if (labels === undefined) {
+      labels = z.array(z.unknown()).parse(typeof goldValue === "function" ? goldValue() : goldValue);
+      const keys = labels.map(value => z.object({ query_key: z.string() }).parse(value).query_key).sort();
+      if (canonicalJson(plan.queries.map(row => row.query_key).sort()) !== canonicalJson(keys)) {
+        throw new AlayaError("VALIDATION", "measurement requires exact per-query gold and replay denominator coverage");
+      }
+    }
+    const value = labels.find(value => z.object({ query_key: z.string() }).parse(value).query_key === queryKey);
+    const units = z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict().parse(value).source_units;
+    gold.find(row => row.query_key === queryKey)!.source_units = units;
+    return units;
+  };
   const rows = replay.rows.map((row) => {
     const prepared = plan.queries.find((query) => query.query_key === row.query_key)!;
-    const evaluated = row.status !== "replayed" || row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
-      recallResult: row.response, firstExposurePage: row.first_exposure,
-      requestBudget: plan.config.budget, sourceRecords: row.source_records,
-      goldSourceUnits: gold.find((entry) => entry.query_key === row.query_key)!.source_units
-    });
+    // The delivered family is decided by its own authority before any first-exposure
+    // prerequisite: a known unsupported response is refused on what it is, not because
+    // exposure, gold or proof evidence happened to be unavailable.
+    const evaluated = row.status !== "replayed" ? null : sourceSemanticLibraryFamilyRefusal(row.response)
+      ?? (row.first_exposure == null ? null : measureSourceSemanticLibraryResponse({
+        recallResult: row.response, firstExposurePage: row.first_exposure,
+        requestBudget: plan.config.budget, sourceRecords: row.source_records,
+        get goldSourceUnits() { return sourceUnits(row.query_key); }
+      }));
     return { query_key: row.query_key, status: row.status,
     query_failure_reason: prepared.status === "raw_ready" ? prepared.reason : null,
-    reason: row.reason ?? (evaluated?.sourceBearingUnion?.any_at_5.status === "unavailable"
-      ? evaluated.sourceBearingUnion.any_at_5.reason : null),
+    reason: evaluated?.measurement?.status === "invalid" ? evaluated.measurement.reason
+      : row.reason ?? (evaluated?.sourceBearingUnion?.any_at_5.status === "unavailable"
+        ? evaluated.sourceBearingUnion.any_at_5.reason : null),
     mechanism: { status: (evaluated?.validatedProofRanks.length ?? 0) > 0 ? "proof_exercised" : "unexercised",
-      reason: row.status === "blocked" ? row.reason : row.status === "native_unavailable" ? "native_unavailable"
+      reason: evaluated?.measurement?.status === "invalid" ? evaluated.measurement.reason
+        : row.status === "blocked" ? row.reason : row.status === "native_unavailable" ? "native_unavailable"
         : prepared.status === "raw_ready" ? prepared.reason
         : (evaluated?.validatedProofRanks.length ?? 0) > 0 ? null : "no_validated_delivered_proof",
       validated_proof_ranks: evaluated?.validatedProofRanks ?? [],
@@ -252,17 +286,48 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
 
 // Keep declaration inference at the public value boundary, not the nested Zod graph.
 const ReplayResponseSchema: z.ZodType<SoulInterpretationResponse> = SoulInterpretationResponseSchema;
-export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v3"),
+const ReplayCorrespondenceOutcomeSchema = z.object({ key: z.string().nullable(), raw_digest: z.string().nullable() }).passthrough();
+/** Recorded per-query outcome. The declaration is explicit because the public
+ * response union is too large to re-serialize inside an inferred const; every
+ * field type still comes from the schema that validates it. */
+type SemanticChainReplayRow = {
+  query_key: string;
+  status: "blocked" | "replayed" | "native_unavailable";
+  reason?: string;
+  native_elapsed_ms?: number;
+  preparation_elapsed_ms?: number;
+  discovery_failure?: z.infer<typeof SemanticChainSourceFailureSchema>;
+  preparation_failure?: z.infer<typeof SemanticChainSourceFailureSchema>;
+  response?: SoulInterpretationResponse;
+  first_exposure?: z.infer<typeof FirstExposurePageSchema> | null;
+  correspondence_outcomes?: z.infer<typeof ReplayCorrespondenceOutcomeSchema>[];
+  preparation_trace?: z.infer<typeof SemanticChainDiscoveryTraceSchema> | null;
+  /** Measured rows carry admitted source records; recorded rows do not. */
+  source_records?: readonly SourceRecordIdentity[];
+};
+type SemanticChainReplay = {
+  contract: "source-semantic-chain-replay-v3";
+  plan_identity: string;
+  identity: string;
+  arm: "retained" | "without_semantic_correspondences";
+  provider_calls: 0;
+  rows: SemanticChainReplayRow[];
+};
+
+/** One recorded replay row; the capture owner parses single rows before admission. */
+export const ReplayRowSchema: z.ZodType<SemanticChainReplayRow> = z.object({
+  query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
+  reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
+  preparation_elapsed_ms: z.number().nonnegative().optional(),
+  discovery_failure: SemanticChainSourceFailureSchema.optional(), preparation_failure: SemanticChainSourceFailureSchema.optional(),
+  response: ReplayResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional(),
+  correspondence_outcomes: z.array(ReplayCorrespondenceOutcomeSchema).optional(),
+  preparation_trace: SemanticChainDiscoveryTraceSchema.nullable().optional()
+}).passthrough();
+export const ReplaySchema: z.ZodType<SemanticChainReplay> = z.object({ contract: z.literal("source-semantic-chain-replay-v3"),
   plan_identity: z.string(), identity: z.string(), arm: z.enum(["retained", "without_semantic_correspondences"]), provider_calls: z.literal(0),
-  rows: z.array(z.object({ query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
-    reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
-    preparation_elapsed_ms: z.number().nonnegative().optional(),
-    discovery_failure: SemanticChainSourceFailureSchema.optional(), preparation_failure: SemanticChainSourceFailureSchema.optional(),
-    response: ReplayResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional(),
-    correspondence_outcomes: z.array(z.object({ key: z.string().nullable(), raw_digest: z.string().nullable() }).passthrough()).optional(),
-    preparation_trace: SemanticChainQuerySchema.options[1].shape.discovery_trace.nullable().optional()
-  }).passthrough()) }).passthrough();
-type ReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
+  rows: z.array(ReplayRowSchema) }).passthrough();
+type ReplayRow = SemanticChainReplayRow;
 
 /** Physical replay inputs are known from the frozen path and query keys, even if the plan or replay is unavailable. */
 export function semanticChainReplayInputPaths(root: string, replayPath: string, queryKeys: readonly string[]): readonly string[] {
@@ -337,7 +402,11 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
     return [];
   }
   const response = row.response;
-  if (response?.operation !== "recall" || response.index === undefined || row.first_exposure == null) {
+  // The family authority decides before the archived exposure prerequisite: a known
+  // unsupported family is refused on its own evidence, without gold, proof or exposure.
+  // Genuinely absent exposure still fails the archived delivery requirement below.
+  const familyRefused = refusesSourceSemanticLibraryFamily(response);
+  if (response?.operation !== "recall" || response.index === undefined || (!familyRefused && row.first_exposure == null)) {
     throw new AlayaError("CONFLICT", "replayed row requires its native initial delivery");
   }
   const { config } = plan;
@@ -347,6 +416,11 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
   if (canonicalJson(row.correspondence_outcomes) !== canonicalJson(outcomes)) {
     throw new AlayaError("CONFLICT", "native delivery belongs to another frozen request");
   }
+  // Archived library admission binds the archived producer's query identity. The
+  // field family is refused by the source-gold evaluator before that binding, so the
+  // recorded row stays a delivery and its measurement carries the explicit refusal
+  // instead of becoming an unavailable native result.
+  if (familyRefused) return [];
   const scopes = admitSemanticChainLibraryBinding(config, query, response, selected, row.preparation_trace);
   return admitDeliveredSources(config, response, stores, reader, scopes, selected);
 }

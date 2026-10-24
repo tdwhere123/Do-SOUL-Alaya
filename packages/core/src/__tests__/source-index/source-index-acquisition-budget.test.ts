@@ -112,17 +112,21 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
 
   it.each(["work", "memory"] as const)("keeps successful and refused canonical dependency guards in the aggregate %s allowance", dimension => {
     const environment = setup();
-    const origins = ["a", "b"].map(id => publishSource(environment, `retained origin ${id}`, `origin-${id}`,
-      { source_representation: { kind: "retained_excerpt" } }));
-    const projections = origins.map((origin, index) => publishSource(environment, `needle ${index}`, `canonical-${index}`, {
-      source_representation: { kind: "canonical_projection", source_record_ids: [origin.record_id] }
+    // Enough real dependency work to reach the later guard after lexical read
+    // preflight, even when admission reuses an already validated target.
+    const dependencyCount = dimension === "work" ? 48 : 1;
+    const origins = ["a", "b"].map(id => Array.from({ length: dependencyCount }, (_, index) =>
+      publishSource(environment, `retained origin ${id}-${index}`, `origin-${id}-${index}`,
+        { source_representation: { kind: "retained_excerpt" } })));
+    const projections = origins.map((rows, index) => publishSource(environment, `needle ${index}`, `canonical-${index}`, {
+      source_representation: { kind: "canonical_projection", source_record_ids: rows.map(row => row.record_id) }
     }));
     const generation = environment.index.begin(environment.index.select(WORKSPACE, configuration()));
     const documents = captureDocuments(environment, generation);
     for (const projection of projections) {
       expect(projection.record_id).not.toBe(projection.source_id);
       expect(environment.records.findCurrent(WORKSPACE, projection.source_id)?.source_representation)
-        .toEqual({ kind: "canonical_projection", source_record_ids: [origins[projections.indexOf(projection)]!.record_id] });
+        .toEqual({ kind: "canonical_projection", source_record_ids: origins[projections.indexOf(projection)]!.map(row => row.record_id) });
     }
     const observed = observeRepository(environment);
     const input = queryInput(configuration(), { vector: { status: "unavailable", reason: "not_requested" },
@@ -134,7 +138,8 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
     const second = observed.calls[2]!;
     const secondSource = observed.admissionSpy.mock.calls[1]![0];
     expect(documents.some(document => document.source.root_key === secondSource.root_key)).toBe(true);
-    const retained = SourceSemanticResourceLedger.measureRetain(secondSource, QUERY_BUDGET);
+    // Schema-owned targets take one checked reference, not another graph capture.
+    const retained = { work_units: 1, memory_bytes: 8 };
     const budget = { ...QUERY_BUDGET };
     if (dimension === "work") {
       // Native fixed read costs five; one canonical dependency needs two further checks.
@@ -161,12 +166,12 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
     expect(result.completion).toBe("partial");
     expect(authorize).toHaveBeenCalledTimes(1);
     expect(current).toHaveBeenCalledTimes(2);
-    expect(current.mock.results[0]!.value).toMatchObject({ dependencyWork: 2 });
+    expect(current.mock.results[0]!.value).toMatchObject({ dependencyWork: 2 * dependencyCount });
     expect(current.mock.results[0]!.value.resourceLimited).not.toBe(true);
     expect(current.mock.results[1]!.value).toMatchObject({ resourceLimited: true });
     expect(current.mock.calls.every(call => projections.some(projection => projection.source_id === call[1]))).toBe(true);
     const admissions = observed.calls.filter(call => call.phase === "admission");
-    expect(admissions[0]!.resources.work).toBe(retained.work_units + 9);
+    expect(admissions[0]!.resources.work).toBe(retained.work_units + 6 + 3 * dependencyCount);
     expect(admissions[1]!.resources.work).toBeGreaterThan(retained.work_units);
     expect(admissions[1]!.resources.native_bytes).toBeGreaterThan(0);
     expect(result.resources.native_bytes).toBe(observed.calls.reduce((sum, call) => sum + call.resources.native_bytes, 0));
@@ -178,14 +183,15 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
 
   it("reports native admission preflight exhaustion as a resource refusal, not unknown source identity", () => {
     const environment = setup();
-    const { documents } = publishIndex(environment, [{ id: "bounded", body: "needle a", vectors: [[1, 0, 0]] }]);
+    publishIndex(environment, [{ id: "bounded", body: "needle a", vectors: [[1, 0, 0]] }]);
     const observed = observeRepository(environment);
     const input = queryInput(configuration(), { vector: { status: "unavailable", reason: "not_requested" } });
     query(environment, input, admitScope);
     const admission = observed.calls.find(call => call.phase === "admission")!;
-    const capture = SourceSemanticResourceLedger.measureRetain(documents[0]!.source, QUERY_BUDGET);
+    // A target reference fits, but the native guard's chunk/metadata reservation
+    // does not. Lexical preflight remains feasible under this memory boundary.
     const limitedInput = { ...input, budget: { ...QUERY_BUDGET,
-      work_units: QUERY_BUDGET.work_units - admission.budget.work_units + capture.work_units } };
+      memory_bytes: QUERY_BUDGET.memory_bytes - admission.budget.memory_bytes + 8 + 4096 + 8192 - 1 } };
     observed.calls.length = 0;
     vi.clearAllMocks();
     const authorize = vi.fn(admitScope);

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION } from "../recall/conditional-field/navigation.js";
+import { MemorySearchResultSchema } from "../surfaces/mcp-memory-search-types.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { SourceSemanticGenerationTaskSummarySchema, sourceSemanticGenerationTaskSummary } from "./source-semantic-generation-task.js";
 import { SourceSemanticReasonDeliverySchema, refineSourceSemanticReasonDelivery } from "./source-semantic-reason-delivery.js";
@@ -38,6 +40,10 @@ export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
 export const SourceSemanticLibraryContinuationSchema = ContinuationSchema.unwrap().extend({
   result_version: z.literal(SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION),
   enumeration_policy: z.never().optional()
+}).readonly();
+
+export const SourceSemanticFieldLibraryContinuationSchema = ContinuationSchema.unwrap().extend({
+  result_version: z.literal(ORDINARY_NATIVE_FIELD_RESULT_VERSION), enumeration_policy: z.literal("native_query")
 }).readonly();
 
 export const SOURCE_SEMANTIC_COVERAGE_STATES = [
@@ -170,7 +176,7 @@ const RecallRequestSchema = z.object({
   semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
-  continuation: SourceSemanticLibraryContinuationSchema.optional()
+  continuation: SourceSemanticFieldLibraryContinuationSchema.optional()
 }).strict().superRefine((request, context) => refineSourceSemanticQueryRequest(request, context, true)).readonly();
 
 export const SourceSemanticWorkerRequestSchema = z.discriminatedUnion("kind", [
@@ -337,6 +343,7 @@ export const SourceSemanticLibraryUnprovedComputationSchema = z.object({
 export type SourceSemanticLibraryUnprovedComputation = z.infer<typeof SourceSemanticLibraryUnprovedComputationSchema>;
 
 type LibraryDeliveryConsistency = Readonly<{
+  protocol_version?: number;
   query_semantics_status: SourceSemanticQueryStatus;
   slot_qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
   proofs?: readonly SourceSemanticLibraryProof[];
@@ -348,25 +355,48 @@ type LibraryDeliveryConsistency = Readonly<{
 }>;
 type DeliveryRefinementContext = { addIssue(issue: { code: "custom"; path?: (string | number)[]; message: string }): void };
 
+/** The tagged page rows a field library delivery must hand back in delivered order. */
+type FieldLibraryDeliveryBinding = Readonly<{
+  total_count: number;
+  results: readonly Readonly<{ object_kind: string; target: IndexEntry["target"] }>[];
+}>;
+
+function fieldLibraryDelivery(value: LibraryDeliveryConsistency):
+  (Omit<LibraryDeliveryConsistency, "results"> & FieldLibraryDeliveryBinding) | null {
+  const candidate = value as Omit<LibraryDeliveryConsistency, "results"> & Partial<FieldLibraryDeliveryBinding>;
+  const { total_count: totalCount, results } = candidate;
+  return typeof totalCount === "number" && Array.isArray(results)
+    ? { ...candidate, total_count: totalCount, results: results as FieldLibraryDeliveryBinding["results"] }
+    : null;
+}
+
 /** Availability and proof claims share one admission rule across worker and public deliveries. */
 export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsistency, context: DeliveryRefinementContext): void {
+  const fieldDelivery = value.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION;
   for (const [position, slot] of value.slot_qualifiers.entries()) {
-    if (slot.evidence_kind !== "semantic_proof") continue;
     const entry = value.index.entries[slot.index];
+    if (fieldDelivery && entry?.target.kind !== "source_evidence") {
+      context.addIssue({ code: "custom", path: ["slot_qualifiers", position], message: "Q/H/C qualifiers require a delivered source target" });
+      continue;
+    }
+    if (slot.evidence_kind !== "semantic_proof") continue;
     const proofs = value.proofs ?? [];
-    if (entry === undefined || indexEntryObjectKind(entry) !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
+    if (entry === undefined || entry.target.kind !== "source_evidence"
+      || !fieldDelivery && indexEntryObjectKind(entry) !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
       context.addIssue({ code: "custom", path: ["slot_qualifiers", position],
         message: "semantic proof qualifier must reference a delivered source slot" });
       continue;
     }
-    if (proofForLibraryEntry(entry, proofs) === undefined || proofForLibraryQualifier(entry, slot, proofs) === undefined) {
+    if ((!fieldDelivery && proofForLibraryEntry(entry, proofs) === undefined)
+      || proofForLibraryQualifier(entry, slot, proofs) === undefined) {
       context.addIssue({ code: "custom", path: ["slot_qualifiers", position],
         message: "semantic proof qualifier must bind the delivered proof" });
     }
   }
   if (value.source_disclosures !== undefined) {
-    const keys = new Set(value.index.entries.map(indexEntryCacheKey));
+    const keys = new Set(value.index.entries.filter(entry => !fieldDelivery || entry.target.kind === "source_evidence").map(indexEntryCacheKey));
     for (const [position, entry] of value.index.entries.entries()) {
+      if (fieldDelivery && entry.target.kind === "memory_entry") continue;
       const disclosure = value.source_disclosures[indexEntryCacheKey(entry)];
       // Any independent proof at this explicit slot governs disclosure; array order is not occupancy.
       const expected = value.slot_qualifiers.some(row => row.index === position && row.evidence_kind === "semantic_proof")
@@ -387,8 +417,8 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
       || value.slot_qualifiers.some((slot) => slot.evidence_kind !== "source_evidence"
       || slot.query_semantics_id !== undefined || slot.semantic_correspondence_id !== undefined
       || slot.conditional_computation_id !== undefined || slot.witnesses !== undefined || slot.support !== undefined)
-      || value.index.entries.some((entry) => entry.interpretation_node !== undefined || entry.explanation_ids.length > 0)
-      || (value.index.explanations?.length ?? 0) > 0) {
+      || value.index.entries.some((entry) => entry.interpretation_node !== undefined || !fieldDelivery && entry.explanation_ids.length > 0)
+      || !fieldDelivery && (value.index.explanations?.length ?? 0) > 0) {
       context.addIssue({ code: "custom", message: "unavailable query semantics cannot deliver semantic proof claims" });
     }
     if (value.coverage !== undefined && (value.coverage.query_semantics !== "unexercised"
@@ -423,7 +453,16 @@ export function verifySourceSemanticLibraryDelivery<T extends LibraryDeliveryCon
   value: T, sha256: FieldContractSha256
 ): T {
   const issues: Parameters<DeliveryRefinementContext["addIssue"]>[0][] = [];
-  refineSourceSemanticLibraryDelivery(value, { addIssue: issue => issues.push(issue) });
+  const addIssue = (issue: Parameters<DeliveryRefinementContext["addIssue"]>[0]) => { issues.push(issue); };
+  if (value.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
+    // A value that declares the field family is never verified with the archived
+    // rules: the family owns the delivered target/row binding, so a missing one is
+    // this verifier's failure, not a reason to check less.
+    const field = fieldLibraryDelivery(value);
+    if (field === null) addIssue({ code: "custom", path: ["results"],
+      message: "field library delivery requires its delivered total_count and results" });
+    else refineSourceSemanticFieldLibraryDelivery(field, { addIssue });
+  } else refineSourceSemanticLibraryDelivery(value, { addIssue });
   if (issues.length > 0) throw new z.ZodError(issues.map(issue => ({ ...issue, path: issue.path ?? [] })));
   for (const computation of value.unproved_computations ?? []) {
     assertFieldIdentity(computation.source_record.identity,
@@ -432,7 +471,7 @@ export function verifySourceSemanticLibraryDelivery<T extends LibraryDeliveryCon
   return value;
 }
 
-/** Current native library delivery; invariant §25 major requires request binding. Generic InformationIndex stays independent. */
+/** Archived v6 delivery reader. Live library execution uses the shared field contract below. */
 export const SourceSemanticLibraryDeliverySchema = z.object({
   delivery_id: BoundedIdSchema,
   request_identity: Sha256DigestSchema,
@@ -459,6 +498,57 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
     .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   request_budget: RequestBudgetSchema.optional()
 }).strict().superRefine(refineSourceSemanticLibraryDelivery);
+
+export const SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION = 10 as const;
+
+/** A library query carries Q/H/C evidence beside the same tagged field page used
+ * by ordinary recall. Native field derivations are not conditional proof claims.
+ * Legacy v6/v7 readers below remain for recorded artifacts, not live selection.
+ */
+export const SourceSemanticFieldLibraryDeliverySchema = z.object({
+  delivery_id: BoundedIdSchema, request_identity: Sha256DigestSchema,
+  query_semantics_status: SourceSemanticQueryStatusSchema,
+  protocol_version: z.literal(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION),
+  total_count: NonNegativeIntSchema,
+  // A delivered field page must hand back a continuation the live ingress can
+  // replay; a frozen v6 offset cursor is a historical reader concern only.
+  index: InformationIndexSchema.unwrap().extend({
+    result_version: z.literal(ORDINARY_NATIVE_FIELD_RESULT_VERSION),
+    continuation: SourceSemanticFieldLibraryContinuationSchema.nullable()
+  }).readonly(),
+  results: z.array(MemorySearchResultSchema).readonly(),
+  page_purpose: InformationIndexSchema.unwrap().shape.page_purpose,
+  discovery: SourceSemanticLibraryDiscoverySchema,
+  order: z.object({ enumeration_policy: z.literal("native_query"), tie_policy: z.literal("canonical_identity"),
+    occupancy: z.literal("tagged_target_identity"), occupancy_prefix: NonNegativeIntSchema,
+    page_budget: NonNegativeIntSchema }).strict().readonly(),
+  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).readonly(),
+  source_disclosures: z.record(z.string(), SourceDisclosureSchema),
+  proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
+  unproved_computations: z.array(SourceSemanticLibraryUnprovedComputationSchema)
+    .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
+  request_budget: RequestBudgetSchema.optional()
+}).strict().superRefine(refineSourceSemanticFieldLibraryDelivery);
+
+export function refineSourceSemanticFieldLibraryDelivery(
+  value: Omit<LibraryDeliveryConsistency, "results"> & FieldLibraryDeliveryBinding, context: DeliveryRefinementContext
+): void {
+  refineSourceSemanticLibraryDelivery(value, context);
+  if (value.total_count !== value.index.entries.length || value.results.length !== value.index.entries.length
+    || value.results.some((row, index) => canonicalJson(row.target) !== canonicalJson(value.index.entries[index]?.target))) {
+    context.addIssue({ code: "custom", message: "field library results must preserve the exact delivered tagged targets and intervals" });
+  }
+}
+
+export const SourceSemanticLegacyLibraryWorkerResultSchema = z.object({
+  kind: z.literal("recall"), ...SourceSemanticLibraryDeliverySchema.shape,
+  previews: z.record(z.string().min(1).max(16384), z.string().max(65536)).optional(), ...CoverageWork
+}).strict().superRefine(refineSourceSemanticLibraryDelivery).readonly();
+export const SourceSemanticFieldLibraryWorkerResultSchema = z.object({
+  kind: z.literal("recall"), ...SourceSemanticFieldLibraryDeliverySchema.shape,
+  previews: z.record(z.string().min(1).max(16384), z.string().max(65536)).optional(),
+  preparation_id: BoundedIdSchema.optional(), field_execution_receipt: z.unknown().optional(), ...CoverageWork
+}).strict().superRefine(refineSourceSemanticFieldLibraryDelivery).readonly();
 
 export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -498,12 +588,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
     source_disclosure: SourceDisclosureSchema,
     ...CoverageWork
   }).strict().superRefine(refineSourceSemanticReasonDelivery).readonly(),
-  z.object({
-    kind: z.literal("recall"),
-    ...SourceSemanticLibraryDeliverySchema.shape,
-    previews: z.record(z.string().min(1).max(16384), z.string().max(65536)).optional(),
-    ...CoverageWork
-  }).strict().superRefine(refineSourceSemanticLibraryDelivery).readonly()
+  z.discriminatedUnion("protocol_version", [SourceSemanticLegacyLibraryWorkerResultSchema, SourceSemanticFieldLibraryWorkerResultSchema])
 ]);
 
 export type SourceSemanticCoverage = z.infer<typeof SourceSemanticCoverageSchema>;

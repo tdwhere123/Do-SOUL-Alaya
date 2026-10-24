@@ -5,10 +5,9 @@ import {
   captureSourceSemanticQueryPreparation,
   packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
   sourceSemanticPreparationReason,
-  sourceSemanticProfiledAcquisitionNotRun,
-  type SourceSemanticAccessProfile, type SourceSemanticProfiledAccessReceipt, type SourceSemanticReadableAccessReceipt,
+  type SourceSemanticProfiledAccessReceipt, type SourceSemanticReadableAccessReceipt,
   type SourceSemanticReadableAcquisition, type SourceSemanticRetainedNominationWitness, type SourceSemanticReadableAccessPhases,
-  type SourceSemanticProfiledAcquisitionPhase, type SourceSemanticReadableExecution,
+  type SourceSemanticReadableExecution,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessPolicy,
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents,
   type SourceSemanticAcquisitionPhase, type SourceSemanticCompactAcquisition, type PreparedSourceSemanticCanonicalSubtrees
@@ -24,8 +23,7 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import type { SourceSemanticRequestExecution } from "./source-semantic-reasoning.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-recall-source-text.js";
-import { nativeSourceAccessPositions } from "./source-semantic-native-access.js";
-import { acquireProfiledSourceSemanticIndex, acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
+import { acquireSourceSemanticIndex, type NativeSourceRouteCaptures } from "./source-semantic-index-acquisition.js";
 import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
 import { observeSourceRecallAccess, orderSourceRecallObservations, readSourceRecallHeaders, navigateSourceRecallHeaders } from "./source-recall-access.js";
 import { bindAccessPoolIdentity, sourceSemanticObservationAccounting,
@@ -41,6 +39,8 @@ export type SourceSemanticAccessPool<Access extends SourceSemanticReadableAccess
   descriptors: readonly SourceSemanticHandleDescriptor[];
   access: Access extends SourceSemanticAccessReceipt ? Omit<SourceSemanticAccessReceipt, "trace"> : Omit<SourceSemanticProfiledAccessReceipt, "trace">;
   retainedWitness?: SourceSemanticRetainedNominationWitness;
+  nativeCaptures?: NativeSourceRouteCaptures;
+  catalogPositions?: readonly (readonly [string, number])[];
   accessHint?: string;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   sourcePages: number; interpretationPages: number;
@@ -52,9 +52,9 @@ type EmptyCompletion = Readonly<{
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
   policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  accessHint?: string, profile?: SourceSemanticAccessProfile): string {
+  accessHint?: string): string {
   return sourceSemanticAccessInputIdentity({ original_query: original, query_semantics: query,
-    source_id: sourceId, budget, ...(profile === undefined ? { policy, contract: "source-semantic-access-v2" as const } : { candidate_profile: profile }),
+    source_id: sourceId, budget, policy, contract: "source-semantic-access-v2",
     ...(accessHint === undefined ? {} : { access_hint: accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }) });
 }
@@ -70,16 +70,11 @@ export function previewExtent(record: SourceRecordIdentity,
 
 /** Observe once, score once, then order the whole observed pool before any descriptor or correspondence page. */
 export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime,
-  payload: Omit<SourceSemanticWorkerPayload, "comparison"> & { comparison?: never },
+  payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
   sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
   preferredSourceIds?: readonly string[], accessHint?: string): SourceSemanticAccessPool;
-export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
-  query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
-  sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  preferredSourceIds?: readonly string[], accessHint?: string): SourceSemanticReadableAccessPool;
 export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
@@ -95,9 +90,10 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   // Keep the exact pre-child allowance: no new tuple, borrower closure or eligibility scan here.
   if (meter.preparation !== undefined && completion?.executionOf?.(meter.preparation) !== undefined) meter.charge(1, 16, "source phase request ownership bridge");
   let identity: PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases> | undefined;
-  const profile = payload.comparison?.profile;
-  let retainedWitness: SourceSemanticRetainedNominationWitness | undefined = profile === undefined ? undefined : [];
-  const catalogPositions = profile === undefined ? undefined : new Map<string, number>();
+  let retainedWitness: SourceSemanticRetainedNominationWitness | undefined;
+  meter.charge(1, 64, "source catalog position map");
+  const catalogPositions = new Map<string, number>();
+  let nativeCaptures: NativeSourceRouteCaptures | undefined;
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter, accessHint);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = meter.child(sourceRecallPhaseAllowance(meter, "observation"), "observation");
@@ -112,11 +108,8 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     payload.prepared_query?.receipt ?? unavailableSourceQueryPreparation(
       controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable", controlled ? "not_requested" : "unavailable"), meter), meter);
   if (payload.prepared_query !== undefined) meter.preparation = prepare;
-  let acquisition: SourceSemanticReadableAcquisition | SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase = profile === undefined
-    ? packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun(controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter)
-    : meter.acquisition ?? packSourceSemanticAcquisition(sourceSemanticProfiledAcquisitionNotRun(profile,
-      controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter);
-  if (profile !== undefined) meter.acquisition = acquisition as SourceSemanticReadableAcquisition;
+  let acquisition: SourceSemanticReadableAcquisition | SourceSemanticAcquisitionPhase =
+    packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun(controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter);
   let absorbed = false;
   let releaseCanonical: () => void = () => undefined;
   let canonicalRecord: SourceRecordIdentity | undefined;
@@ -139,8 +132,9 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
             ...(accessHint === undefined || accessHint === original ? {} : { supplemental: { navigation: accessHint,
               vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
             canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost };
-          const observed = acquireAtCatalogSeam(acquisitionInput, next, policy, unionCompletion, profile);
+          const observed = acquireAtCatalogSeam(acquisitionInput, next, policy, unionCompletion);
           retainedWitness = observed.witness;
+          nativeCaptures = "captures" in observed ? observed.captures : undefined;
           releaseCanonical = observed.releaseCanonical; acquisition = observed.phase;
           sourceReader = observed.sourceReader; canonicalRead = observed.canonicalRead; canonicalRecord = observed.canonicalRecord;
           return observed.nominations;
@@ -176,7 +170,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
           phases: { preparation: prepare, acquisition: observation.acquisition ?? acquisition as SourceSemanticReadableAcquisition },
           retainedWitness,
           borrowPreparation: completion.executionOf,
-          acquisitionCapture: profile === undefined && !Array.isArray(acquisition) ? acquisition as SourceSemanticAcquisitionPhase : undefined
+          acquisitionCapture: !Array.isArray(acquisition) ? acquisition as SourceSemanticAcquisitionPhase : undefined
         }); }, sourcePreviewExtents, beforeRetain, unionCompletion,
       () => { if (canonicalRead === undefined) releaseCanonical(); }, canonicalRead?.resume, sourceReader);
   } finally {
@@ -187,7 +181,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   return finalizeObservedSourceAccess(runtime, payload.workspace_id, authorized, meter, policy, policyName, records, sources, interpretations,
     sourceRows, byId, stops, original, query, budget, sourceId,
     prepare, observation.acquisition ?? acquisition as SourceSemanticReadableAcquisition, observation,
-    sourcePreviewExtents, accessHint, identity, profile, retainedWitness, catalogPositions);
+    sourcePreviewExtents, accessHint, identity, retainedWitness, catalogPositions, nativeCaptures);
   } finally {
     // The prepared identity survives completion-hold release but never the request.
     identity?.close(); identity = undefined;
@@ -200,13 +194,14 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
 /** Own the handoff from acquisition's native reservation to the first source extent.
  * A failed metadata quote must close that extent before returning ownership to observation. */
 function acquireAtCatalogSeam(input: Parameters<typeof acquireSourceSemanticIndex>[0], next: SourceRecordIdentity | null,
-  policy: Policy, completion: SourceSemanticUnionCompletion, profile?: SourceSemanticAccessProfile) {
-  const observed = profile === undefined ? acquireSourceSemanticIndex(input) : acquireProfiledSourceSemanticIndex(input, profile);
-  const witness = "witness" in observed ? observed.witness : undefined;
+  policy: Policy, completion: SourceSemanticUnionCompletion) {
+  const observed = acquireSourceSemanticIndex(input);
+  const witness = [...(observed.captures.original?.witness ?? []), ...(observed.captures.hint?.witness ?? [])];
   let releaseCanonical = observed.releaseCanonical;
   let sourceReader: SqliteFieldSourceRecordRepo | undefined;
   let canonicalRead: ReturnType<typeof beginCanonicalSourceText>;
   try {
+    if (!("witness" in observed)) input.metadataMeter.charge(witness.length, 64 + witness.length * 8, "retained route witness references");
     if (next !== null) {
       releaseCanonical();
       sourceReader = new SqliteFieldSourceRecordRepo(input.runtime.database, fieldContractSha256);
@@ -229,27 +224,19 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
   original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget, sourceId: string | undefined,
   preparation: SourceSemanticAccessReceipt["phases"][1], acquisition: SourceSemanticReadableAcquisition,
   observation: SourceSemanticReadBudget, sourcePreviewExtents?: SourceSemanticPreviewExtents, accessHint?: string,
-  identity?: PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases>, profile?: SourceSemanticAccessProfile,
-  retainedWitness?: SourceSemanticRetainedNominationWitness, catalogPositions?: ReadonlyMap<string, number>): SourceSemanticReadableAccessPool {
-  const nativePositions = profile?.order_policy === "native-route-round-robin-v1"
-    ? nativeSourceAccessPositions(records, retainedWitness!, catalogPositions, sources.open || sources.truncated, meter) : undefined;
+  identity?: PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases>,
+  retainedWitness?: SourceSemanticRetainedNominationWitness, catalogPositions?: ReadonlyMap<string, number>,
+  nativeCaptures?: NativeSourceRouteCaptures): SourceSemanticReadableAccessPool {
   const { orderedSources, orderedInterpretations } = orderSourceRecallObservations(records, sourceRows,
-    interpretations.rows, stops, meter, rows => {
-      if (nativePositions === undefined) return policy.order(rows, meter);
-      meter.charge(rows.length, rows.length * 8, "native access observation references");
-      return [...rows].sort((left, right) => {
-        meter.charge(1, 0, "native access record order");
-        return nativePositions.get(left.record_id)! - nativePositions.get(right.record_id)!;
-      });
-    }, count => {
+    interpretations.rows, stops, meter, rows => policy.order(rows, meter), count => {
       const cost = SourceSemanticReadBudget.signalReconciliationCost(count);
       meter.charge(cost.work_units, cost.memory_bytes, "access final source signal reconciliation");
     });
-  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents, accessHint, profile);
+  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents, accessHint);
   const accounting = sourceSemanticObservationAccounting(acquisition, observation, meter);
   const receipt = sourceSemanticAccessReceiptValue(meter, policyName, inputId, orderedSources, orderedInterpretations,
     sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
-    sourcePreviewExtents, { preparation, acquisition, observation: accounting }, profile);
+    sourcePreviewExtents, { preparation, acquisition, observation: accounting }, undefined);
   meter.retain(receipt, "access receipt identity", "borrow");
   const access = bindAccessPoolIdentity(runtime, workspace, authorized, receipt, meter, identity, retainedWitness);
   meter.observer?.event("access_order", meter.phase, () => ({ pool_id: access.pool_id,
@@ -259,7 +246,9 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
   for (let index = 0; index < selectedSources.length; index++) selectedSources[index] = byId.get(orderedSources[index]!.record_id)!;
   const descriptors = new Array<SourceSemanticHandleDescriptor>(orderedInterpretations.length);
   for (let index = 0; index < descriptors.length; index++) descriptors[index] = interpretations.descriptors.get(orderedInterpretations[index]!.interpretation_id)!;
+  meter.charge(catalogPositions?.size ?? 0, 64 + 24 * (catalogPositions?.size ?? 0), "retained catalog position references");
   const pool = { sources: selectedSources, descriptors,
+    nativeCaptures, catalogPositions: [...(catalogPositions ?? [])],
     access, ...(retainedWitness === undefined ? {} : { retainedWitness }), ...(accessHint === undefined ? {} : { accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
     sourcePages: sources.pages, interpretationPages: interpretations.pages };
@@ -360,20 +349,6 @@ export function accessDescriptorPage(runtime: SourceSemanticReadRuntime, workspa
 export function preparationAccessReceipt(pool: SourceSemanticReadableAccessPool, sourceOffset: number,
   interpretationOffset: number, interpretationCount: number, meter: SourceSemanticReadBudget): SourceSemanticReadableAccessReceipt {
   const receipt = preparationAccessReceiptValue(pool, sourceOffset, interpretationOffset, interpretationCount);
-  meter.retain(receipt, "access trace delivery", "borrow");
-  return receipt;
-}
-
-export function libraryAccessReceipt(pool: SourceSemanticReadableAccessPool, examined: readonly string[], returnedRecords: readonly string[],
-  meter: SourceSemanticReadBudget): SourceSemanticReadableAccessReceipt {
-  meter.charge(pool.access.observed_source_count + pool.access.observed_interpretation_count, 0, "access trace selection");
-  const selected = new Set(examined), records = new Set(returnedRecords);
-  const interpretationRows = pool.access.interpretation_candidates.filter((row) => selected.has(row.interpretation_id));
-  for (const row of interpretationRows) records.add(row.record_id);
-  const sourceRows = pool.access.source_candidates.filter((row) => records.has(row.record_id));
-  const receipt: SourceSemanticReadableAccessReceipt = { ...pool.access, source_candidates: sourceRows, interpretation_candidates: interpretationRows,
-    trace: { kind: "library_selection", omitted_source_count: pool.access.observed_source_count - sourceRows.length,
-      omitted_interpretation_count: pool.access.observed_interpretation_count - interpretationRows.length } };
   meter.retain(receipt, "access trace delivery", "borrow");
   return receipt;
 }

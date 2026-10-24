@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   EnumerationPolicySchema,
+  SourceSemanticQueryPreparationSchema,
   QueryInterpretationProposalSchema,
   QueryViewSchema,
   RequestBudgetSchema,
@@ -33,6 +34,7 @@ const NonNegMs = z.number().finite().nonnegative();
 // Root visits/bytes/rss stay optional worker wire fields and are never nested actual.
 const PhaseCost = z.object({
   exclusive_ms: NonNegMs, inclusive_ms: NonNegMs,
+  budget_work: NonNegInt.optional(),
   native_visits: NonNegInt, native_rows: NonNegInt, native_bytes: NonNegInt,
   charged_retained_bytes: NonNegInt, joins: NonNegInt, relaxations: NonNegInt,
   state_creates: NonNegInt, pending_work: NonNegInt, cache_hits: NonNegInt, cache_misses: NonNegInt
@@ -74,7 +76,8 @@ export const ConditionalFieldExecutionReceiptSchema = z.object({
   rss_bytes: NonNegInt.optional(),
   rss_sampling_method: z.literal("process.memoryUsage().rss").optional(),
   worker: WorkerReceipt.optional(),
-  actual: ActualReceipt.optional()
+  actual: ActualReceipt.optional(),
+  query_preparation: SourceSemanticQueryPreparationSchema.optional()
 }).strict().readonly().superRefine((receipt, context) => {
   const compiled = compileConditionalFieldQuery(receipt.compile_input);
   const expectedInterpretation = interpretationIdentity({ interpretation_clock: receipt.compile_input.interpretation_clock });
@@ -135,7 +138,7 @@ function normalizedFilters(filters: ConditionalFieldRequestFilters): string {
     authorized_scopes: filters.authorized_scopes === undefined || filters.authorized_scopes === null
       ? filters.authorized_scopes
       : [...filters.authorized_scopes].sort(),
-    enumeration_policy: filters.enumeration_policy ?? "canonical",
+    enumeration_policy: filters.enumeration_policy ?? "native_query",
     cap_contracts: filters.cap_contracts?.map((contract) => capContractId(contract, fieldContractSha256)).sort(),
     result_kind_view: filters.result_kind_view ?? "mixed"
   });

@@ -1,7 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => isolation.restore());
 import {
   sourceDisclosure, MemoryDimension,
   indexEntryCacheKey,
@@ -15,12 +21,13 @@ import type {
   RequestActualCost
 } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
-import { encodeIndexResults } from "../../../mcp-memory/recall/recall-result.js";
+import { CoreError, encodeIndexResults } from "@do-soul/alaya-core";
 import { runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { settleWorkerDelivery } from "../../../runtime/recall-read-worker/prepared-delivery.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import {
   RSS_SAMPLING_METHOD,
+  attachMeasuredWorkerCost,
   withWorkerActualCost,
   workerActualCostOf,
   type WorkerActualCost
@@ -31,6 +38,8 @@ import {
   defaultBudget
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 
+import { serializeWorkerError } from "../../../runtime/recall-read-worker/protocol-validation.js";
+
 const databases = new Set<StorageDatabase>();
 const directories: string[] = [];
 afterEach(async () => {
@@ -40,6 +49,21 @@ afterEach(async () => {
 });
 
 describe("native worker actual cost", () => {
+  it.each(["ordinary", "core", "frozen"])("serializes the latest physical sample without overwriting other owner records: %s", kind => {
+    const details = { work: { native_work: 17 }, execution_receipt: { actual: { native_visits: 29 } } };
+    const error = kind === "ordinary" ? Object.assign(new Error("native refusal"), { details })
+      : new CoreError("CONFLICT", "native refusal", { details });
+    if (kind === "frozen") Object.freeze(error);
+    const first = { native_visits: 3, bytes_read: 7, row_visits: 2, elapsed_ms: 11, rss_bytes: 1024,
+      rss_sampling_method: RSS_SAMPLING_METHOD };
+    attachMeasuredWorkerCost(error, first);
+    const latest = { ...first, native_visits: 5, bytes_read: 13, elapsed_ms: 19 };
+    attachMeasuredWorkerCost(error, latest);
+    const wire = structuredClone(serializeWorkerError(error));
+    expect(wire.core?.details ?? wire.details).toEqual({ ...details, worker: latest });
+    if (kind !== "ordinary") expect(wire.core?.code).toBe("CONFLICT");
+    else expect(wire.core).toBeUndefined();
+  });
   it("charges reader pages instead of copying the requested work_units", () => {
     const readers: ObserverReaders = {
       lexical: () => ({
@@ -117,6 +141,7 @@ describe("native worker actual cost", () => {
     for (const [id, text] of [[MEM.r, "needle first"], [MEM.c, "needle second"], [MEM.h, "needle third"]]) {
       await slice.writeMemory(id!, text!, MemoryDimension.FACT);
     }
+    // Preserve the shipped 240-unit success without hiding native work in a larger allowance.
     const budget = defaultBudget({ work_units: 240, finalization_reserve: 20, min_envelope: 1, page_budget: 10 });
     const result = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
     const cost = assertMeasuredWork(result, budget);
@@ -130,6 +155,31 @@ describe("native worker actual cost", () => {
     expect(cost.native_visits).not.toBe(result.execution_receipt!.compile_input.budget.work_units);
     expect(result.execution_receipt!.actual).toBeDefined();
     expect(result.execution_receipt).not.toHaveProperty("native_visits");
+  });
+
+  it("retains physical and logical costs when the encoded byte allowance refuses a 240-unit request", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    for (const [id, text] of [[MEM.r, "needle first"], [MEM.c, "needle second"], [MEM.h, "needle third"]]) {
+      await slice.writeMemory(id!, text!, MemoryDimension.FACT);
+    }
+    const budget = defaultBudget({ work_units: 240, finalization_reserve: 20, min_envelope: 1, page_budget: 10 });
+    let failure: unknown;
+    try {
+      runConditionalFieldWorkerRecall(runtime(slice.database), { ...payload(budget, "needle"),
+        delivery_budget: { max_total_tokens: 2_000, max_encoded_bytes: 64 } });
+    } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(CoreError);
+    if (!(failure instanceof CoreError)) throw new Error("encoded page refusal expected");
+    expect(failure.details).toMatchObject({ outcome: "resource_exhausted", resource: "encoded_page" });
+    const receipt = failure.details?.execution_receipt as { actual: RequestActualCost };
+    expect(receipt.actual.phases.observe.budget_work).toBeGreaterThan(0);
+    expect(receipt.actual.phases.observe.budget_work).toBeLessThan(budget.work_units);
+    const cost = failure.details?.worker as WorkerActualCost;
+    expect(cost.native_visits).toBeGreaterThan(0);
+    expect(cost.native_visits).toBeLessThanOrEqual(240);
+    expect(cost.bytes_read).toBeGreaterThan(0);
+    expect(failure.details).not.toHaveProperty("index");
+    expect(failure.details).not.toHaveProperty("results");
   });
 
   it("samples live process RSS via process.memoryUsage().rss", async () => {
@@ -214,14 +264,14 @@ describe("native worker actual cost", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
     const budget = defaultBudget({ work_units, finalization_reserve: 0, min_envelope: 1, page_budget: 1 });
-    const result = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
-    const cost = workerActualCostOf(result.execution_receipt);
-    expect(result.index.entries).toEqual([]);
-    expect(result.index.continuation).toBeNull();
-    expect(result.index.completeness.logical_index).not.toBe("complete");
-    expect(cost.native_visits).toBe(0);
-    expect(cost.row_visits).toBe(0);
-    expect(cost.bytes_read).toBe(0);
+    let failure: unknown;
+    try { runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle")); }
+    catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "CONFLICT", details: { outcome: "resource_exhausted",
+      resource: "framing_work", worker: { native_visits: 0, row_visits: 0, bytes_read: 0 } } });
+    // A failed envelope has no issued membership to consume.
+    const recovered = runConditionalFieldWorkerRecall(runtime(slice.database), payload(defaultBudget(), "needle"));
+    expect(recovered.index.entries.map(entry => entry.object_id)).toContain(MEM.r);
   });
 
   it("treats sequential first-page recalls with omitted continuation as independent observation epochs", async () => {

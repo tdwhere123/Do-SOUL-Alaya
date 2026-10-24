@@ -236,7 +236,7 @@ describe("conditional-field product identity", () => {
       schema_version: 1,
       requested_roles: ["requested"]
     });
-    expect(view.enumeration_policy).toBe("canonical");
+    expect(view.enumeration_policy).toBe("native_query");
     expect(view.result_kind_view).toBe("mixed");
     const proposal = QueryInterpretationProposalSchema.parse({
       schema_version: 1,

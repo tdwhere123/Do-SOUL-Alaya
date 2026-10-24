@@ -4,12 +4,14 @@ import { CoreError } from "../../shared/errors.js";
 import {
   bindCommittedDelivery,
   committedProductStatesOf,
-  committedRevisionsOf
+  committedRevisionsOf,
+  type EmittedProductLedger
 } from "../conditional-field/index/product-component-diff.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import {
   mergeCommittedRevisions,
   bindIssuedDeliveryId,
+  type EmittedRevisions,
   issuedDeliveryIdOf,
   evictIssuedDeliveries,
   replayIssuedDelivery,
@@ -152,28 +154,33 @@ export function commitIssuedDelivery(input: Readonly<{
   return deliveryId;
 }
 
-export function retainAndIssueIndex(input: Readonly<{
+export type PreparedIndexCommit = Readonly<{
+  readonly index: InformationIndex;
+  readonly retained: FieldEngineState;
+  readonly retention_bytes: number;
+  readonly revisions?: EmittedRevisions;
+  readonly products?: EmittedProductLedger;
+  readonly pending?: PendingIssuedDelivery;
+}>;
+
+/** Assemble the exact page that will be fitted: committed progress, payload
+ * continuation, sealed token and hydrated visible spans. Nothing is charged or
+ * staged here, so a page that does not fit leaves no committed effect. */
+export function prepareIndexCommit(input: Readonly<{
   readonly index: InformationIndex;
   readonly projected: InformationIndex;
   readonly projectionProgress: ProjectionProgress;
   readonly state: FieldEngineState;
   readonly first_retention: boolean;
   readonly payload: BoundedIndexPayload;
-  readonly cost: RequestCostLedger;
   readonly request: ConditionalFieldRecallRequest;
   readonly queryKey: string;
   readonly requestDigest: string;
   readonly close_when?: (state: FieldEngineState, index: InformationIndex) => boolean;
-}>): Readonly<{
-  readonly index: InformationIndex;
-  readonly retained: FieldEngineState;
-}> {
+}>): PreparedIndexCommit {
   const revisions = committedRevisionsOf(input.projected);
   const products = committedProductStatesOf(input.projected);
   let index = input.index;
-  if (revisions !== undefined && products !== undefined) {
-    bindCommittedDelivery(index, revisions, products);
-  }
   const invalidated = index.completeness.logical_index === "invalidated";
   const committed = invalidated
     ? input.projectionProgress.delivered_entries
@@ -184,53 +191,68 @@ export function retainAndIssueIndex(input: Readonly<{
     input.first_retention,
     invalidated ? input.projectionProgress.delivered_products : products
   );
-  let retained = input.state;
-  if (delivery.bytes > input.payload.remainingMemoryBytes) {
-    throw new CoreError("CONFLICT", "Recall delivery retention budget exhausted; page was not committed", {
-      details: { outcome: "resource_exhausted", resource: "delivery_retention",
-        required_bytes: delivery.bytes, available_bytes: input.payload.remainingMemoryBytes }
-    });
-  } else {
-    input.payload.remainingMemoryBytes -= delivery.bytes;
-    input.cost.add("index", { charged_retained_bytes: delivery.bytes });
-    retained = { ...retained, projection_progress: delivery.progress };
-    if (index.continuation === null && !invalidated && index.entries.some((entry) => entry.target.kind === "source_evidence")) {
-      const view = input.state.interpretation.view;
-      index = { ...index, continuation: {
-        schema_version: 1, continuation_id: "payload", query_id: index.query_id, snapshot_id: index.snapshot_id,
-        result_version: index.result_version, expires_at: input.request.expires_at,
-        cursor: `p${delivery.progress.offset}r${delivery.progress.generation}`,
-        interpretation_id: index.interpretation_id,
-        interpretation_clock: input.request.interpretation_clock,
-        authorized_scopes: input.request.authorized_scopes,
-        enumeration_policy: view.enumeration_policy, result_kind_view: view.result_kind_view,
-        protocol_version: view.protocol_version, supported_result_kinds: view.supported_result_kinds,
-        cap_contracts: view.cap_contracts, claim_demands: view.claim_demands,
-        emitted_revisions: committed
-      } };
-    }
+  assertDeliveryRetention(delivery.bytes, input.payload.remainingMemoryBytes);
+  let retained = { ...input.state, projection_progress: delivery.progress };
+  if (index.continuation === null && !invalidated && index.entries.some((entry) => entry.target.kind === "source_evidence")) {
+    const view = input.state.interpretation.view;
+    index = { ...index, continuation: {
+      schema_version: 1, continuation_id: "payload", query_id: index.query_id, snapshot_id: index.snapshot_id,
+      result_version: index.result_version, expires_at: input.request.expires_at,
+      cursor: `p${delivery.progress.offset}r${delivery.progress.generation}`,
+      interpretation_id: index.interpretation_id,
+      interpretation_clock: input.request.interpretation_clock,
+      authorized_scopes: input.request.authorized_scopes,
+      enumeration_policy: view.enumeration_policy, result_kind_view: view.result_kind_view,
+      protocol_version: view.protocol_version, supported_result_kinds: view.supported_result_kinds,
+      cap_contracts: view.cap_contracts, claim_demands: view.claim_demands,
+      emitted_revisions: committed
+    } };
   }
   if (input.close_when?.(retained, index)) index = { ...index, continuation: null };
   if (index.continuation !== null) {
     index = { ...index, continuation: sealIssuedContinuation(index.continuation) };
   }
   index = input.payload.applyDeliveredSpans(index);
-  if (revisions !== undefined && products !== undefined) {
-    bindCommittedDelivery(index, revisions, products);
-  }
-  attachIndexSurfaces(index, input.payload.previews, input.payload.sourceMetadata);
-  if (index.completeness.logical_index !== "invalidated"
-    && retained.projection_progress === delivery.progress) {
-    PENDING_ISSUE.set(index, {
-      query_key: input.queryKey,
-      request_digest: input.requestDigest,
-      request: input.request.continuation
+  return { index, retained, retention_bytes: delivery.bytes, revisions, products,
+    ...(index.completeness.logical_index !== "invalidated" && retained.projection_progress === delivery.progress
+      ? { pending: { query_key: input.queryKey, request_digest: input.requestDigest,
+        request: input.request.continuation } }
+      : {}) };
+}
+
+function assertDeliveryRetention(required: number, available: number): void {
+  if (required > available) {
+    throw new CoreError("CONFLICT", "Recall delivery retention budget exhausted; page was not committed", {
+      details: { outcome: "resource_exhausted", resource: "delivery_retention",
+        required_bytes: required, available_bytes: available }
     });
   }
-  retained = {
-    ...retained,
+}
+
+/** Commit exactly the fitted page. The caller must pass the page returned by the
+ * full-envelope fit; this function never re-expands or re-encodes it. */
+export function commitPreparedIndex(input: Readonly<{
+  readonly prepared: PreparedIndexCommit;
+  readonly index: InformationIndex;
+  readonly previews: ReadonlyMap<string, string>;
+  readonly payload: BoundedIndexPayload;
+  readonly cost: RequestCostLedger;
+}>): Readonly<{ readonly index: InformationIndex; readonly retained: FieldEngineState }> {
+  const { prepared } = input;
+  assertDeliveryRetention(prepared.retention_bytes, input.payload.remainingMemoryBytes);
+  if (prepared.revisions !== undefined && prepared.products !== undefined) {
+    bindCommittedDelivery(input.index, prepared.revisions, prepared.products);
+  }
+  input.payload.remainingMemoryBytes -= prepared.retention_bytes;
+  input.cost.add("index", { charged_retained_bytes: prepared.retention_bytes });
+  if (prepared.pending !== undefined) PENDING_ISSUE.set(input.index, prepared.pending);
+  // The fitted previews are exactly what the public surface displays for this page;
+  // the payload retains the full hydrated previews so a later page never reuses a
+  // shortened preview as complete content.
+  attachIndexSurfaces(input.index, input.previews, input.payload.sourceMetadata);
+  return { index: input.index, retained: {
+    ...prepared.retained,
     preview_cache: Object.fromEntries(input.payload.previews),
     remaining_memory_bytes: input.payload.remainingMemoryBytes
-  };
-  return { index, retained };
+  } };
 }

@@ -6,8 +6,8 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
 import { Worker } from "node:worker_threads";
-import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
-import { sourceSemanticExecutionPhases, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
+import { encodeSourceSemanticLibraryResponse, type ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
+import { SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, sourceSemanticExecutionPhases, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
@@ -81,7 +81,10 @@ it("keeps SQLite/worker delivery and debit parity with diagnostics off and on, a
     const posts = vi.spyOn(Worker.prototype, "postMessage");
     const ordinary = await workerCall(client, recall);
     expect(posts.mock.calls.every(args => !("observation" in args[0]))).toBe(true);
-    const observed = await client.observeSourceSemantics({}, () => workerCall(client, recall));
+    // An independent runtime starts with the same empty lease table. Reusing the
+    // first runtime incurs real retention accounting for its already-issued lease.
+    const observedClient = await fixture.openClient();
+    const observed = await observedClient.observeSourceSemantics({}, () => workerCall(observedClient, recall));
     expect(observed.status).toBe("available");
     if (observed.outcome.status !== "success") throw observed.outcome.error;
     const diagnostic = observed.outcome.value;
@@ -101,19 +104,30 @@ it("keeps SQLite/worker delivery and debit parity with diagnostics off and on, a
     expect(row.totals!.debit_work).toBe(diagnostic.work.logical_work);
     expect(row.totals!.debit_bytes).toBe(diagnostic.work.logical_memory_bytes);
     expect(row.totals!.absorb_work).toBeGreaterThan(0);
-    expect(events(row, "source_index_routes")[0]?.data).toMatchObject({ original: { status: "executed",
-      result: { nominations: [expect.objectContaining({ vector: expect.objectContaining({ rank: 1 }) })] } },
+    expect(events(row, "field_nomination")[0]?.data).toMatchObject({
+      result: { nominations: [expect.objectContaining({ vector: expect.objectContaining({ rank: 1 }) })] },
       beyond_observed_prefix: "unknown_not_nomination_limit" });
-    expect(events(row, "union_admission")[0]?.data).toMatchObject({ route: "cursor", position: 0, source_id: "harbor" });
+    expect(row.facts?.pool?.union.members).toContainEqual(expect.objectContaining({ source_id: "harbor" }));
     expect(events(row, "source_read").some(event => (event.data as { purpose: string }).purpose === "observation")).toBe(true);
-    expect(events(row, "source_read").some(event => (event.data as { purpose: string }).purpose === "package_hydration")).toBe(true);
-    expect(events(row, "access_order")).toHaveLength(1);
-    expect(events(row, "selection_attempt").length).toBeGreaterThan(0);
-    expect(events(row, "selection_result").length).toBeGreaterThan(0);
+    expect(events(row, "source_read").some(event => (event.data as { purpose: string }).purpose === "payload")).toBe(true);
+    expect(events(row, "encoding_result").map(event => event.data)).toContainEqual(expect.objectContaining({ fits: true }));
     expect(events(row, "encoding_attempt").length).toBeGreaterThan(0);
-    expect(events(row, "encoded_membership")[0]?.data).toMatchObject({ offset: 0,
-      results: [expect.objectContaining({ preview_bytes: Buffer.byteLength(text), within_budget: true })] });
-    expect(row.costs.some(cost => cost.phase === "selection" && cost.reason === "candidate delivery bytes" && cost.operation === "debit")).toBe(true);
+    expect(events(row, "encoded_membership")[0]?.data).toMatchObject({
+      results: [expect.objectContaining({ preview_bytes: Buffer.byteLength(text) })] });
+    if (diagnostic.protocol_version !== 10) throw new Error("field recall required");
+    const receipt = diagnostic.field_execution_receipt as ConditionalFieldExecutionReceipt | undefined;
+    expect(receipt?.actual?.phases.index.budget_work).toBeGreaterThan(0);
+    expect(diagnostic.work.native_work).toBeGreaterThan(0);
+    expect(diagnostic.work.index_work).toBeGreaterThan(0);
+    expect(diagnostic.work.native_accounting).toBe("partial");
+    const transferred = events(row, "field_execution_cost")[0]!.data as { budget_work: number };
+    expect(transferred.budget_work).toBeGreaterThan(Object.values(receipt!.actual!.phases)
+      .reduce((sum, phase) => sum + phase.budget_work!, 0));
+    expect(diagnostic.work.logical_work).toBeGreaterThan(transferred.budget_work);
+    expect(receipt!.actual!).not.toHaveProperty("budget_work");
+    // The later acknowledgment's three-read pin is reserved, not yet incurred.
+    expect(diagnostic.request_budget).toBeDefined();
+    expect(diagnostic.work.logical_work! + 3).toBeLessThanOrEqual(diagnostic.request_budget!.work_units);
     expect(row.overhead.capture_ms).toBeGreaterThan(0);
     expect(row.overhead.ipc_bytes).toBeNull(); // Actual structured-clone transport is not measured.
     expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(1_000_000);
@@ -207,12 +221,14 @@ it("propagates opt-in scope through actual in-memory MCP transport for concurren
         expect(envelope.ok).toBe(true);
         const output = SoulInterpretationResponseSchema.parse(envelope.output);
         if (output.operation !== "recall") throw new Error("MCP recall expected");
-        expect(captured.observations).toHaveLength(1);
+        expect(captured.observations).toHaveLength(2);
+        expect(events(captured.observations[1]!, "delivery_settlement")).toHaveLength(1);
+        expect(captured.observations[1]!.execution).toBe("success");
         expect(captured.observations[0]!.totals!.debit_work).toBe(output.work.logical_work);
         expect(JSON.stringify(envelope)).not.toContain("debit_work");
       }
-      expect(events(indexed.observations[0]!, "source_index_routes")).toHaveLength(1);
-      expect(events(canonical.observations[0]!, "source_index_routes")).toHaveLength(0);
+      expect(events(indexed.observations[0]!, "field_nomination")).toHaveLength(1);
+      expect(events(canonical.observations[0]!, "field_nomination")).toHaveLength(1);
       expect(indexed.observations[0]!.request_id).not.toBe(canonical.observations[0]!.request_id);
       expect(indexed.observations[0]!.totals!.debit_work).not.toBe(canonical.observations[0]!.totals!.debit_work);
     } finally { await mcp.close(); await server.close(); }
@@ -222,21 +238,33 @@ it("propagates opt-in scope through actual in-memory MCP transport for concurren
 it("preserves leased runtime identity across observed preparation, recall and frozen continuation", async () => {
   await withIndexedSources(Array.from({ length: 6 }, (_, index) => ({ id: `harbor-${index}`, text, vector: [1, 0, 0] })), async fixture => {
     const client = await fixture.openClient();
+    const pageBudget = QUERY_BUDGET;
     const prepared = await client.observeSourceSemantics({}, () => workerCall(client, {
-      kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }));
+      kind: "prepare_query", original_query: ORIGINAL, budget: pageBudget }));
     if (prepared.outcome.status !== "success") throw prepared.outcome.error;
     const query_handle = prepared.outcome.value.query_handle;
     expect(query_handle).toBeDefined();
-    const delivered = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, query_handle }));
+    const delivered = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, budget: pageBudget, query_handle }));
     if (delivered.outcome.status !== "success") throw delivered.outcome.error;
     expect(events(delivered.observations[0]!, "pool_reuse")).toHaveLength(1);
     expect(events(delivered.observations[0]!, "source_index_routes")).toHaveLength(0);
-    const continuation = delivered.outcome.value.index.continuation;
+    const page = delivered.outcome.value;
+    if (page.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION || page.preparation_id === undefined
+      || page.previews === undefined) {
+      throw new Error("expected a prepared shared field page");
+    }
+    await client.sourceSemanticsPort!.acknowledge!(page.preparation_id, page.index, new Map(Object.entries(page.previews)));
+    const continuation = page.index.continuation;
     expect(continuation).not.toBeNull();
-    const next = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, query_handle, continuation: continuation! }));
+    const next = await client.observeSourceSemantics({}, () => workerCall(client, { ...recall, budget: pageBudget, query_handle, continuation: continuation! as never }));
     if (next.outcome.status !== "success") throw next.outcome.error;
-    expect(next.outcome.value.index.entries.length).toBeGreaterThan(0);
-    expect(events(next.observations[0]!, "source_read")).toHaveLength(0);
+    // The shared field emits all six slots under this large page allowance;
+    // its frozen continuation proves the empty tail without rediscovery.
+    expect(delivered.outcome.value.index.entries).toHaveLength(6);
+    expect(next.outcome.value.index.entries).toHaveLength(0);
+    expect(next.outcome.value.index.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete" });
+    expect(events(next.observations[0]!, "source_read").filter(event =>
+      (event.data as { purpose: string }).purpose === "observation")).toHaveLength(0);
     expect(events(next.observations[0]!, "encoding_attempt")).toHaveLength(1);
   });
 }, 60_000);
@@ -245,7 +273,8 @@ it("records a real interrupted SQLite source observation and refused native enco
   await withIndexedSources([{ id: "a-long", text: "Harbor ".repeat(8000), indexed: false },
     { id: "z-small", text, vector: [1, 0, 0] }], async fixture => {
     const client = await fixture.openClient();
-    const result = await client.observeSourceSemantics({}, () => workerCall(client, recall));
+    const result = await client.observeSourceSemantics({}, () => workerCall(client, {
+      kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }));
     if (result.outcome.status !== "success") throw result.outcome.error;
     const observed = result.observations[0]!;
     expect(events(observed, "observation_read_complete").map(event => event.data)).toContainEqual(expect.objectContaining({

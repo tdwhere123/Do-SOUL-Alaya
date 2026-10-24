@@ -233,7 +233,7 @@ export class SourceSemanticObserver {
       allowances.push(...structuredClone([...this.allowances.values()]));
     });
     const status = this.failed ? "failure" : this.dropped > 0 || !this.aggregatesComplete || this.omittedAllowanceMeters > 0 || this.issues.has("meter_detail_limit") ? "overflow" : execution === "failure"
-      ? "partial" : this.meters.length === 0 ? "not_observed" : "observed";
+      ? "partial" : this.meters.length === 0 && this.events.length === 0 ? "not_observed" : "observed";
     const result: SourceSemanticObservation = { version: 1, request_id: this.requestId, status, execution,
       events: this.events, costs: [...this.costs.values()], meters: snapshots, totals: { ...this.totals },
       meter_allowances: { complete: !this.failed && this.omittedAllowanceMeters === 0, scope: "parent_phase_siblings", state: "final",

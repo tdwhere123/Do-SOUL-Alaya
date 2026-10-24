@@ -5,7 +5,7 @@ import { SourceSemanticObserver } from "../../../../dist/runtime/recall-read-wor
 // Production dispatch, SQLite, resource owners and result admission are unchanged.
 const event = SourceSemanticObserver.prototype.event;
 SourceSemanticObserver.prototype.event = function (kind, phase, data) {
-  return event.call(this, kind, phase, kind === "source_index_routes" ? () => {
+  return event.call(this, kind, phase, kind === "field_nomination" ? () => {
     throw new Error("native observation metadata capture failed");
   } : data);
 };

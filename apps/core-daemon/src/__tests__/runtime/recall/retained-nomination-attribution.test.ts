@@ -8,10 +8,8 @@ afterAll(() => { isolation.restore(); });
 import type { SourceSemanticObservation } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
 import { SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticRetainedNominationWitnessSchema,
   sourceSemanticRetainedWitnessMatchesPhase, type SourceSemanticAccessProfile } from "@do-soul/alaya-protocol";
-import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
-import { bindSourceComparisonExecution, sourceComparisonForRuntime } from "../../../runtime/recall/source-comparison-execution.js";
-import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
-import { withIndexedSources, CLOCK, WS, SCOPES, QUERY_BUDGET } from "./source-semantic-index-acquisition.test-support.js";
+import { observeProfiledAcquisition } from "./profiled-acquisition-observation.test-support.js";
+import { withIndexedSources, CLOCK, WS } from "./source-semantic-index-acquisition.test-support.js";
 import { attributeObservation, type ObservationCallScope } from "../../../../../bench-runner/src/runs/longmemeval-semantic/observation-attribution.js";
 import { scoreConsumerMessageVisibility } from "../../../../../bench-runner/src/runs/longmemeval-semantic/message-visibility.js";
 
@@ -19,22 +17,14 @@ const profile: SourceSemanticAccessProfile = { contract: "source-semantic-access
   protocol_version: 9, order_policy: "native-route-round-robin-v1", acquisition_policy: "source-index-grouped-round-robin.v1",
   channels: "dual", declared_allowance: { max_attempts: 128, max_roots: 20, max_vector_windows: 4096 } };
 
-it("attributes beyond-prefix nominations from the SQLite/built-worker witness after optional diagnostic elision", async () => {
-  // Synthetic indexed inputs and fixed-axis vectors use real SQLite admission/acquisition and the built worker.
+it("attributes beyond-prefix SQLite acquisition witnesses after optional diagnostic elision", async () => {
+  // Synthetic indexed inputs and fixed-axis vectors use real SQLite admission/acquisition.
+  // Public worker attribution remains covered by source-semantic-native-facts.test.ts.
   // Diagnostic elision below is explicit post-capture fault injection, not natural-corpus measurement.
   await withIndexedSources(Array.from({ length: 20 }, (_, index) => ({ id: `retained-${index}`,
     text: `needle proof ${index}`, vector: [1, 0, 0] })), async fixture => {
-    const client = await fixture.openClient();
-    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, sourceSemanticsPort: client.sourceSemanticsPort });
-    const runtime = {};
-    bindSourceComparisonExecution(runtime, handler, client.sourceSemanticsPort!);
-    const execute = sourceComparisonForRuntime(runtime, () => ({ workspaceId: WS, runId: "retained-proof",
-      sessionId: "retained-proof", agentTarget: "bench-runner" }));
-    const observed = await client.observeSourceSemantics({ max_events: 2048, max_bytes: 524288 }, () => execute({ profile,
-      request: { operation: "prepare_query", original_query: "needle", access_hint: "proof", authorized_scopes: SCOPES,
-        budget: { ...QUERY_BUDGET, work_units: 2000000, memory_bytes: 20000000 } } }));
-    if (observed.outcome.status !== "success") throw observed.outcome.error;
-    const captured = structuredClone(observed.observations[0]!);
+    const observed = await observeProfiledAcquisition(fixture, profile, { max_events: 2048, max_bytes: 524288 }, "proof");
+    const captured = structuredClone(observed.observation!);
     const event = captured.events.find(row => row.kind === "source_index_routes")!;
     const data = event.data as { candidate_phase?: unknown; retained_occurrences?: unknown };
     const phase = SourceSemanticProfiledAcquisitionPhaseSchema.parse(data.candidate_phase);

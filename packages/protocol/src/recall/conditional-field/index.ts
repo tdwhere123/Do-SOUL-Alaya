@@ -1,3 +1,4 @@
+export { ORDINARY_NATIVE_FIELD_RESULT_VERSION, RecallNavigationWitnessSchema, type RecallNavigationWitness } from "./navigation.js";
 export {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_DIGEST_PREFIX,

@@ -36,6 +36,8 @@ export class BoundedIndexPayload {
     readonly workspaceId: string;
     readonly asOf?: string;
     readonly remainingMemoryBytes: number;
+    /** Surface delivery envelope in bytes; hydrated text is a bounded prefix of it. */
+    readonly contentByteBudget?: number;
     readonly manifestationFor: (objectId: string) => ManifestationState;
     readonly payloadContinuation?: PayloadContinuationRequest;
   }>) {
@@ -85,6 +87,11 @@ export class BoundedIndexPayload {
       }
       const continued = this.payloadContinuationFor(entry.target);
       if (continued !== undefined) forgetPreview(this.previews, cacheKey, objectId);
+      // A persisted preview does not retain its hydrated source span. Re-read the
+      // pinned source on a later membership page rather than expose unbound bytes.
+      if (entry.target.kind === "source_evidence" && !this.deliveredSpans.has(sourceEvidenceRootKey(entry.target))) {
+        forgetPreview(this.previews, cacheKey, objectId);
+      }
       const cachedPreview = this.previews.has(cacheKey)
         || (objectId !== undefined
           && entry.target.kind !== "memory_entry"
@@ -109,7 +116,8 @@ export class BoundedIndexPayload {
         continue;
       }
       if (entry.target.kind === "source_evidence") {
-        const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining);
+        const location = this.input.readers.sourceRootPayloadRange?.(entry.target) ?? entry.navigation?.location;
+        const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining, location);
         remaining = hydrated.remaining;
         if (hydrated.retryable) retryable = true;
         if (hydrated.ok) continue;
@@ -176,19 +184,23 @@ export class BoundedIndexPayload {
   private hydrateSourceTarget(
     target: SourceEvidenceTarget,
     cacheKey: string,
-    remaining: number
+    remaining: number,
+    location?: Readonly<{ start_byte: number; end_byte: number }>
   ): Readonly<{ readonly ok: boolean; readonly remaining: number; readonly retryable: boolean }> {
     const reader = this.input.readers.sourceRoot;
     if (reader === undefined || remaining < 5 || this.remainingMemoryBytes < 1) {
       return { ok: false, remaining, retryable: false };
     }
     const continuation = this.payloadContinuationFor(target);
-    const offset = continuation?.start_offset ?? 0;
-    const byteLimit = hydrateByteLimit(continuation, this.remainingMemoryBytes, this.input.readers.sourceRootMetadataByteLimit ?? 0);
+    const offset = continuation?.start_offset ?? location?.start_byte ?? 0;
+    const byteLimit = Math.min(hydrateByteLimit(continuation, this.remainingMemoryBytes,
+      this.input.readers.sourceRootMetadataByteLimit ?? 0, this.input.contentByteBudget),
+      continuation === undefined && location !== undefined ? location.end_byte - location.start_byte : Infinity);
     if (byteLimit < 1) {
       return { ok: false, remaining, retryable: continuation?.byte_budget !== 0 };
     }
     const page = reader({
+      purpose: "payload",
       workspaceId: this.input.workspaceId,
       rootKind: target.root_kind,
       rootId: target.root_id,
@@ -262,9 +274,11 @@ export class BoundedIndexPayload {
 function hydrateByteLimit(
   continuation: PayloadContinuationRequest | undefined,
   remainingMemoryBytes: number,
-  metadataReserve: number
+  metadataReserve: number,
+  contentByteBudget?: number
 ): number {
-  const memoryCap = Math.max(0, Math.min(65536, remainingMemoryBytes - metadataReserve));
+  const memoryCap = Math.max(0, Math.min(65536, remainingMemoryBytes - metadataReserve,
+    contentByteBudget ?? Number.MAX_SAFE_INTEGER));
   if (continuation === undefined) return memoryCap;
   const spanCap = continuation.end_offset === undefined ? memoryCap
     : continuation.end_offset - (continuation.start_offset ?? 0);

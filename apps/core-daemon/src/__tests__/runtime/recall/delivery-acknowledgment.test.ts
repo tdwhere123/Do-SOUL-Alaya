@@ -10,6 +10,7 @@ import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-rea
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
+import { publishIndexedGeneration } from "./recall-storage.test-support.js";
 import { TrustStateRecorder } from "../../../trust/state.js";
 import { workerActualCostOf } from "../../../runtime/recall/worker-actual-cost.js";
 import { fieldSha256, hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
@@ -107,7 +108,7 @@ it.each(["prepare", "record", "replay"] as const)("rejects source withdrawal dur
     let request = fixture.request;
     if (phase === "replay") {
       const first = await fixture.handler(request, fixture.context);
-      expect(first.index?.continuation).not.toBeNull();
+      expect(first.index?.continuation, JSON.stringify(first)).not.toBeNull();
       request = { ...request, continuation: first.index!.continuation! };
       const second = await fixture.handler(request, fixture.context);
       expect(second.results[0]?.content_preview).toBe("needle initial");
@@ -124,6 +125,7 @@ it("expands the remaining bytes of a final source clipped by the real public res
   const fixture = await sourceWorkerFixture(body);
   try {
     const first = await fixture.handler(fixture.request, fixture.context);
+    expect(first.results, JSON.stringify(first)).toHaveLength(1);
     const result = first.results[0]!;
     expect(result.target?.kind).toBe("source_evidence");
     if (result.target?.kind !== "source_evidence") throw new Error("source target missing");
@@ -146,33 +148,40 @@ it("expands the remaining bytes of a final source clipped by the real public res
   } finally { await fixture.close(); }
 }, 30_000);
 
-it("expands a source whose entire public payload was omitted after another source used the byte budget", async () => {
+it("defers an unfitted source to membership continuation before permitting its payload expansion", async () => {
   const body = `needle ${"x".repeat(3000)}`;
   const fixture = await sourceWorkerFixture(body, 2);
   try {
     const request = { ...fixture.request, max_results: 8 };
     const first = await fixture.handler(request, fixture.context);
-    expect(first.results).toHaveLength(1);
-    expect(first.index?.entries).toHaveLength(2);
-    expect(first.index?.completeness.payload).toBe("omitted");
+    expect(first.results, JSON.stringify(first)).toHaveLength(1);
+    expect(first.index?.entries).toHaveLength(1);
+    expect(first.index?.completeness.payload).toBe("partial");
     const visible = first.results[0]!;
     if (visible.target.kind !== "source_evidence") throw new Error("visible source target missing");
     const visibleRootId = visible.target.root_id;
-    const omitted = first.index!.entries.find((entry) => entry.target.kind === "source_evidence"
+    const next = await fixture.handler({ ...request, continuation: first.index!.continuation! }, fixture.context);
+    expect(next.results).toHaveLength(1);
+    expect(next.index?.entries).toHaveLength(1);
+    const deferred = next.index!.entries.find((entry) => entry.target.kind === "source_evidence"
       && entry.target.root_id !== visibleRootId);
-    expect(omitted?.target.kind).toBe("source_evidence");
-    if (omitted?.target.kind !== "source_evidence") throw new Error("omitted source target missing from index");
-    expect(omitted.target.span).toBeUndefined();
-    expect(first.index?.continuation).not.toBeNull();
-    const expanded = await fixture.handler({ ...request, continuation: first.index!.continuation!,
-      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(omitted.target),
+    expect(deferred?.target.kind).toBe("source_evidence");
+    if (deferred?.target.kind !== "source_evidence") throw new Error("deferred source target missing from index");
+    const deferredPreview = next.results[0]!.content_preview;
+    expect(deferredPreview.length).toBeGreaterThan(0);
+    expect(deferredPreview).toBe(body.slice(0, Buffer.byteLength(deferredPreview)));
+    expect(deferred.target.span).toMatchObject({ content_start: 0,
+      content_end: Buffer.byteLength(deferredPreview), content_complete: false });
+    expect(next.index?.continuation).not.toBeNull();
+    const expanded = await fixture.handler({ ...request, continuation: next.index!.continuation!,
+      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(deferred.target),
         start_offset: 0, byte_budget: 1200 } }, fixture.context);
     expect(expanded.page_purpose).toBe("payload");
     expect(expanded.results.map((result) => result.content_preview)).toEqual([body.slice(0, 1200)]);
-    expect(expanded.results[0]?.target).toMatchObject({ root_id: omitted.target.root_id, span: { content_start: 0, content_end: 1200, content_complete: false } });
+    expect(expanded.results[0]?.target).toMatchObject({ root_id: deferred.target.root_id, span: { content_start: 0, content_end: 1200, content_complete: false } });
     expect(expanded.results[0]?.source_disclosure).toEqual(visible.source_disclosure);
-    const retry = await fixture.handler({ ...request, continuation: first.index!.continuation!,
-      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(omitted.target),
+    const retry = await fixture.handler({ ...request, continuation: next.index!.continuation!,
+      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(deferred.target),
         start_offset: 0, byte_budget: 1200 } }, fixture.context);
     expect(retry.results).toEqual(expanded.results);
     expect(retry.delivery_id).toBe(expanded.delivery_id);
@@ -211,7 +220,10 @@ async function sourceWorkerFixture(body: string, count = 1) {
   const filename = join(directory, "alaya.db");
   const { database } = await openSourceSlice(() => {}, filename);
   const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
-  for (let index = 0; index < count; index += 1) records.insert(hashedOriginalRecord(WS, body, `source-${index}`));
+  for (let index = 0; index < count; index += 1) records.insert({
+    ...hashedOriginalRecord(WS, body, `source-${index}`), scope_class: "project" });
+  // Ordinary membership is the accepted native source-index generation, as at daemon startup.
+  await publishIndexedGeneration(database, [{ text: body }]);
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 2 })!;
   await client.ready();
   const hooks: { beforeAcknowledgment?: () => void } = {};

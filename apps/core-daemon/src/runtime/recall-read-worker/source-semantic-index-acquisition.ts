@@ -10,6 +10,7 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
 
 type Route = Readonly<{ navigation: string; vector: SourceIndexQueryVector }>;
 type Allowance = SourceSemanticAcquisitionPhase["allowance"];
+export type NativeSourceRouteCaptures = Readonly<Partial<Record<"original" | "hint", ReturnType<SourceIndexAcquisition["nominateWithWitness"]>>>>;
 
 /** Original first, then a distinct hint with only the remaining SAME envelope. One canonical
  * quote survives both routes until the observation owner begins that source. No refill.
@@ -20,8 +21,10 @@ export function acquireSourceSemanticIndex(input: Readonly<{
   runtime: SourceSemanticReadRuntime; workspace: string; navigation: string; authorized: readonly string[] | null;
   meter: SourceSemanticReadBudget; metadataMeter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
   supplemental?: Route; canonicalBytes: number; sourceCost: (length: number) => SourceSemanticResourceBudget;
-}>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
+}>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[];
+  captures: NativeSourceRouteCaptures; releaseCanonical: () => void } {
   const { meter } = input;
+  const captures: Partial<Record<"original" | "hint", ReturnType<SourceIndexAcquisition["nominateWithWitness"]>>> = {};
   const quote = quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes));
   let release: (() => void) | undefined, handedOff = false;
   let phase = sourceSemanticAcquisitionNotRun("canonical_observation_allowance");
@@ -37,17 +40,20 @@ export function acquireSourceSemanticIndex(input: Readonly<{
       beyond_observed_prefix: "unknown_not_nomination_limit" }));
     capturePackSourceSemanticAcquisitionForRequest(phase, input.metadataMeter, finish);
     handedOff = true;
-    return { phase, nominations: value as readonly SourceIndexTarget[], releaseCanonical: () => release?.() };
+    return { phase, captures, nominations: value as readonly SourceIndexTarget[], releaseCanonical: () => release?.() };
   }
   try {
     release = meter.hold(quote);
     const budget = meter.remaining(), attempts = Math.min(128, budget.work_units);
     const allowance = { max_attempts: attempts, max_roots: Math.min(16, attempts),
       max_vector_windows: Math.min(4096, budget.work_units) };
-    const repository = new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256);
+    const repository = new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256, { captureReadTargets: true });
     const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
-    const run = (route: Route, remaining: Allowance, invocation: "original" | "hint"): SourceSemanticAcquisitionPhase =>
-      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter, invocation);
+    const run = (route: Route, remaining: Allowance, invocation: "original" | "hint"): SourceSemanticAcquisitionPhase => {
+      if (remaining.max_attempts > 0 && remaining.max_roots > 0) meter.charge(1, 16, "native route capture frame");
+      return acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter, invocation,
+        captured => { captures[invocation] = captured; });
+    };
     phase = run(input, allowance, "original");
     const nominations = phase.result?.nominations.map(row => row.source) ?? [];
     const hint = input.supplemental;
@@ -91,7 +97,8 @@ export function acquireProfiledSourceSemanticIndex(input: Parameters<typeof acqu
   const release = meter.hold(quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes)));
   let handedOff = false;
   try {
-    const produced = acquireProfiledSourceIndex({ repository: new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256),
+    const produced = acquireProfiledSourceIndex({ repository: new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256,
+      { captureReadTargets: true }),
       sha256: fieldContractSha256, workspace: input.workspace, original: { navigation: input.navigation, vector: input.vector },
       hint: input.supplemental, profile, budget: meter.remaining(),
       ...(meter.observer === undefined ? {} : { observe: (invocation, capture, kind) => {
@@ -117,8 +124,17 @@ export function acquireProfiledSourceSemanticIndex(input: Parameters<typeof acqu
   } finally { if (!handedOff) release(); }
 }
 
+/** Native refusal evidence owns outcome/accounting for both preparation and field recall. */
+export function sourceSemanticAcquisitionOutcome(result: NonNullable<SourceSemanticAcquisitionPhase["result"]>):
+  Pick<SourceSemanticAcquisitionPhase, "status" | "reason" | "accounting"> {
+  const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");
+  return { status: failed ? "failed" : "executed", reason: failed ? "acquisition_failed" : null,
+    accounting: failed ? "partial" : "complete" };
+}
+
 function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, authorized: readonly string[] | null,
-  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget, invocation: "original" | "hint"): SourceSemanticAcquisitionPhase {
+  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget, invocation: "original" | "hint",
+  retain: (captured: ReturnType<SourceIndexAcquisition["nominateWithWitness"]>) => void): SourceSemanticAcquisitionPhase {
   let phase = { ...sourceSemanticAcquisitionNotRun("acquisition_envelope_allowance"), allowance, budget: meter.remaining() };
   if (allowance.max_attempts === 0 || allowance.max_roots === 0) return { ...phase, reason: "shared_nomination_allowance" };
   try {
@@ -135,21 +151,21 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       2048 + 8 * allowance.max_roots + navigation.memory_bytes + vectorInput.memory_bytes +
       (dimensions === 0 ? 0 : 256 + 4 * dimensions), "source acquisition envelope and input capture");
     const observer = meter.observer;
-    const result = acquisition.nominate({ workspace_id: workspace, navigation_text: route.navigation,
+    const captured = acquisition.nominateWithWitness({ workspace_id: workspace, navigation_text: route.navigation,
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
-      }, undefined, observer === undefined ? undefined : (capture, kind) => {
+      }, invocation, observer === undefined ? undefined : (capture, kind) => {
         // Window inspections can outnumber the entire observation envelope. Keep only
         // counts; finalized best-per-root ranks share the existing diagnostic quota.
         if (kind === "vector_inspected") observer.omitDiagnostic(`source_index_${invocation}_${kind}`);
         else observer.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }),
           kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
       });
+    const { result } = captured;
     meter.absorbIndex(result.resources);
-    const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");
-    return { ...phase, status: failed ? "failed" : "executed", reason: failed ? "acquisition_failed" : null,
-      result, accounting: failed ? "partial" : "complete" };
+    retain(captured);
+    return { ...phase, ...sourceSemanticAcquisitionOutcome(result), result };
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     return phase;

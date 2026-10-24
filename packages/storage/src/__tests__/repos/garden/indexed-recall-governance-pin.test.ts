@@ -60,6 +60,61 @@ const ROWS = [
       '2026-09-06T00:00:00.000Z','user_action','conversation_excerpt',
       '{"topic":"pin","keywords":["pin"],"summary":"gist"}',NULL,NULL,'verified','gist',NULL,NULL,'run','workspace',NULL)`,
     mutation: "gist = 'mutated gist'"
+  },
+  // Source-index publication is observable recall state: index-building writes
+  // must invalidate a pinned recall snapshot just like memory or source records.
+  {
+    table: "source_index_epochs",
+    insert: "INSERT INTO source_index_epochs(workspace_id,epoch) VALUES ('workspace',0)",
+    mutation: "epoch = 1"
+  },
+  {
+    table: "source_index_selections",
+    insert: `INSERT INTO source_index_selections(workspace_id,selection_revision,config_id,profile_id,configuration_json,active_generation_id)
+      VALUES ('workspace',1,'config','profile','{}','generation')`,
+    mutation: "active_generation_id = 'other-generation'"
+  },
+  {
+    table: "source_index_generations",
+    insert: `INSERT INTO source_index_generations(workspace_id,generation_id,selection_revision,config_id,profile_id,
+      configuration_json,source_epoch,status) VALUES ('workspace','generation',1,'config','profile','{}',0,'building')`,
+    mutation: "reason = 'mutated'"
+  },
+  {
+    table: "source_index_roots",
+    insert: `INSERT INTO source_index_roots(workspace_id,root_key,record_id,source_id,target_json)
+      VALUES ('workspace','root','record','source','{}')`,
+    mutation: "source_id = 'other-source'"
+  },
+  {
+    table: "source_index_dependencies",
+    insert: `INSERT INTO source_index_dependencies(workspace_id,root_key,dependency_record_id,dependency_source_id)
+      VALUES ('workspace','root','dependency','source')`,
+    mutation: "dependency_source_id = 'other-source'"
+  },
+  {
+    table: "source_index_targets",
+    insert: `INSERT INTO source_index_targets(workspace_id,generation_id,root_key,expected_windows,complete)
+      VALUES ('workspace','target-generation','root',1,0)`,
+    mutation: "complete = 1"
+  },
+  {
+    table: "source_index_text",
+    insert: `INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
+      VALUES ('workspace','root','sha256:aaa',4,'body')`,
+    mutation: "body = 'other'"
+  },
+  {
+    table: "source_index_windows",
+    insert: `INSERT INTO source_index_windows(workspace_id,generation_id,root_key,window_id,ordinal,start_byte,
+      end_byte,content_digest,body) VALUES ('workspace','window-generation','root','window',0,0,4,'sha256:aaa','body')`,
+    mutation: "body = 'other'"
+  },
+  {
+    table: "source_index_vectors",
+    insert: `INSERT INTO source_index_vectors(workspace_id,generation_id,root_key,window_id,dimensions,embedding_blob,token_count)
+      VALUES ('workspace','vector-generation','root','window',1,X'00000000',1)`,
+    mutation: "token_count = 2"
   }
 ];
 

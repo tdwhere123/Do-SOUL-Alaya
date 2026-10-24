@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecallNavigationWitnessSchema } from "./navigation.js";
 import { InterpretationNodeCoordinateSchema } from "./interpretation-coordinate.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
@@ -53,6 +54,7 @@ export const IndexEntrySchema = z
     hypothesis_id: ConditionalFieldIdSchema,
     output_binding: ConditionalFieldIdSchema,
     role: IndexRoleSchema,
+    navigation: RecallNavigationWitnessSchema.optional(),
     association_milligrades: MilligradeSchema,
     guaranteed_milligrades: MilligradeSchema.optional(),
     claim: ClaimStateSchema,

@@ -154,7 +154,7 @@ export function buildOrdinaryRecallRequest(input: Readonly<{
   return SoulMemorySearchRequestSchema.parse({
     query: input.query, scope_class: input.scope_class, dimension: null, domain_tags: null,
     max_results: ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, source_observed_at: input.source_observed_at,
-    enumeration_policy: "canonical", result_kind_view: "source_only", protocol_version: 1,
+    enumeration_policy: "native_query", result_kind_view: "source_only", protocol_version: 1,
     supports_source_evidence: true
   });
 }

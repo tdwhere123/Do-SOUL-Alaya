@@ -24,7 +24,16 @@ import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
 export type ConditionalFieldRecallRequest = Readonly<{
+  readonly prepared_query?: Awaited<ReturnType<typeof import("../../source-index/source-index-acquisition.js").SourceIndexAcquisition.prepareQuery>>;
   readonly requested_budget?: RequestBudget;
+  readonly delivery_context?: string;
+  readonly delivery_budget?: NonNullable<import("@do-soul/alaya-protocol").QueryView["delivery_budget"]>;
+  /** Internal surface codec: selection remains owned by the shared field projection. */
+  /** Private diagnostics observe an executed fit, never decide or pay for it. */
+  readonly observe_page_fit?: (fit: import("./recall-page-fit.js").RecallPageFit & { readonly codec_invocations: number }) => void;
+  readonly encode_page?: (index: import("@do-soul/alaya-protocol").InformationIndex,
+    previews: ReadonlyMap<string, string>, metadata: Readonly<Record<string, import("./recall-service-results.js").RecallSourceMetadata>>,
+    meter: import("@do-soul/alaya-protocol").SourceSemanticResourceLedger) => unknown;
   readonly workspace_id: string;
   readonly query_text: string;
   readonly budget: RequestBudget;
@@ -42,6 +51,10 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly continuation?: Continuation | null;
   readonly cancelled?: boolean;
   readonly authorized_scopes?: readonly string[] | null;
+  /** Library lease restriction; native nomination must stay within this source. */
+  readonly source_id?: string;
+  /** Prepared access hint for discovery only; never proof or rank. */
+  readonly access_hint?: string;
   readonly governance?: BoundedActiveConstraintsResult;
   readonly enumeration_policy?: EnumerationPolicy;
   readonly result_kind_view?: ResultKindView;

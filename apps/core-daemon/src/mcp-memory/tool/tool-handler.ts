@@ -1,4 +1,3 @@
-import { bindSourceComparisonHandler } from "./source-comparison-handler.js";
 import { randomUUID } from "node:crypto";
 import { isHandlerTimeoutError, throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { hasAlayaMemoryToolName } from "./tool-catalog.js";
@@ -80,8 +79,13 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       }
 
       try {
-        await admit(context, toolName);
-        return await dispatcher.dispatchToolCall({ toolName, rawArguments, context });
+        // Admission may invoke or await host policy. Capture recall intent and
+        // principal before either boundary; cancellation stays a live capability.
+        const capturedContext = { ...context };
+        const capturedArguments = toolName === "soul.interpretation" || toolName === "soul.recall"
+          ? structuredClone(rawArguments) : rawArguments;
+        await admit(capturedContext, toolName);
+        return await dispatcher.dispatchToolCall({ toolName, rawArguments: capturedArguments, context: capturedContext });
       } catch (error) {
         // Timeout abort is not a tool-domain failure; keep it as the race winner.
         if (isHandlerTimeoutError(error)) {
@@ -91,6 +95,5 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       }
     }
   };
-  bindSourceComparisonHandler(handler, { now, interpretationClock, sourceSemanticsPort: deps.sourceSemanticsPort, admit });
   return handler;
 }

@@ -53,6 +53,7 @@ import { digestOriginalQuery } from "../../../../../../packages/core/src/recall/
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage } from "./recall-storage.test-support.js";
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const ASSERTION = "Alice uses tools.";
@@ -172,7 +173,7 @@ async function withPublished(body: (input: {
 }> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-reasoning-"));
   const filename = join(directory, "alaya.db");
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const runtimeNotifier = { notifyEntry: async () => undefined };
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
@@ -363,7 +364,7 @@ it("waits for an independent semantic request instead of inheriting an ordinary 
     });
     await opened;
     let settled = false;
-    const writer = await createRecallRealStorage(() => undefined, filename);
+    const writer = await openRecallStorage(() => undefined, filename);
     try {
       new SqliteFieldEraseBarrierRepo(writer.database, fieldContractSha256).apply({
         identity: hashLabeledIdentity("erase_barrier", [WS, "source_record", sourceRecordId, ""], fieldContractSha256),
@@ -420,7 +421,7 @@ it("reads current legacy-key H through the worker without mutation and rejects a
     expect(discovery.candidates.map(row => row.interpretation_id)).toContain(sourceInterpretationId);
     await expect(execute({ workspace_id: "foreign", as_of: CLOCK, authorized_scopes: { mode: "unrestricted" }, request: reason }))
       .rejects.toThrow(/absent/u);
-    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const { database } = await openRecallStorage(() => undefined, filename);
     const repo = new SqliteEvidenceCapsuleRepo(database);
     const legacy = semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256);
     const original = await repo.findById(legacy);
@@ -438,7 +439,7 @@ it("reads current legacy-key H through the worker without mutation and rejects a
 
 it("keeps durable legacy interpretation bytes and identity while failing closed through the worker", async () => {
   await withPublished(async ({ sourceInterpretationId, execute, filename }) => {
-    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const { database } = await openRecallStorage(() => undefined, filename);
     const repo = new SqliteEvidenceCapsuleRepo(database);
     const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256, WS));
     if (capsule === null) throw new Error("published capsule missing");
@@ -465,7 +466,7 @@ it("keeps durable legacy interpretation bytes and identity while failing closed 
       source_interpretation_id: legacyId, query_semantics: queryOf(), semantic_correspondence: correspondenceOf(legacyId, queryOf()), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000 })).rejects.toMatchObject({ code: "VALIDATION",
       details: expect.objectContaining({ reason: "malformed_interpretation" }) });
-    const reopened = await createRecallRealStorage(() => undefined, filename);
+    const reopened = await openRecallStorage(() => undefined, filename);
     expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(oldBytes);
     reopened.database.close(); closeCachedDatabase(filename);
   });
@@ -473,7 +474,7 @@ it("keeps durable legacy interpretation bytes and identity while failing closed 
 
 it("keeps discovery open and returns typed validation for persisted interpretations missing accounting gaps", async () => {
   await withPublished(async ({ sourceInterpretationId, execute, filename }) => {
-    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const { database } = await openRecallStorage(() => undefined, filename);
     const repo = new SqliteEvidenceCapsuleRepo(database);
     const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256, WS));
     if (capsule === null) throw new Error("published capsule missing");
@@ -507,7 +508,7 @@ it("keeps discovery open and returns typed validation for persisted interpretati
     await expect(call(execute, { ...reason, budget: { ...BUDGET, work_units: 1 } })).rejects.toMatchObject({
       name: "CoreError", code: "CONFLICT", subCode: "RETRYABLE_BACKPRESSURE"
     });
-    const reopened = await createRecallRealStorage(() => undefined, filename);
+    const reopened = await openRecallStorage(() => undefined, filename);
     expect((await new SqliteEvidenceCapsuleRepo(reopened.database).findById(evidenceId))?.gist).toBe(retainedBytes);
     reopened.database.close(); closeCachedDatabase(filename);
   });
@@ -693,7 +694,7 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
     });
     if (first.kind !== "reason" || first.result === undefined) throw new Error("expected first full reason");
     expect(first.result.outcome.status).toBe("interpreted");
-    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const { database } = await openRecallStorage(() => undefined, filename);
     const source = database.connection.prepare(
       "SELECT record_id FROM source_records WHERE workspace_id=? LIMIT 1"
     ).get(WS) as { record_id: string };

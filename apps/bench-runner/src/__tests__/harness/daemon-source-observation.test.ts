@@ -35,7 +35,11 @@ describe("bench private source observation binding", () => {
         expect(SoulInterpretationResponseSchema.safeParse(captured.outcome.value).success).toBe(true);
         expect(captured.outcome.value).not.toHaveProperty("observations");
         expect(captured.status).toBe("available");
-        expect(captured.observations).toHaveLength(1);
+        expect(captured.observations).toHaveLength(2);
+        expect(captured.observations[1]).toMatchObject({ execution: "success", status: "observed",
+          events: [{ kind: "delivery_settlement", phase: "delivery", data: {
+            execution_receipt: { schema_version: 1 }
+          } }] });
         expect(captured.observations[0]).toMatchObject({ version: 1, execution: "success", status: "observed" });
         const frame = captured.observations[0]!;
         expect(frame.meters.length).toBeGreaterThan(0);

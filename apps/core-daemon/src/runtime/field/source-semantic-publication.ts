@@ -3,6 +3,7 @@ import { CoreError, createSourceSemanticInterpretationPublication, fieldContract
   authorizedScopesFromAdmission, type EvidenceService } from "@do-soul/alaya-core";
 import { SqliteSourceHintReader, type StorageDatabase } from "@do-soul/alaya-storage";
 import type { SourceSemanticPublicationPort } from "../../mcp-memory/tool/interpretation-handler.js";
+import { workerFailureDetails } from "../recall/worker-actual-cost.js";
 import { sourceSemanticReadStores, SourceSemanticReadBudget } from "./source-semantic-read-stores.js";
 
 /** Publication and invalidation share request-bounded reads of the current effective source binding. */
@@ -50,11 +51,14 @@ async function withPublicationBudget<T extends object>(budget: SourceSemanticRes
   } catch (error) {
     const work = { native_work: meter.nativeWork, native_bytes: meter.nativeBytes,
       logical_work: meter.spentWork, logical_memory_bytes: meter.spentBytes, rss_bytes: process.memoryUsage().rss };
+    const original = workerFailureDetails(error);
+    const details = { ...original,
+      ...(original !== undefined && Object.prototype.hasOwnProperty.call(original, "work") ? {} : { work }) };
     if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, {
-      subCode: "RETRYABLE_BACKPRESSURE", details: { work }
+      subCode: "RETRYABLE_BACKPRESSURE", details
     });
     if (error instanceof CoreError) throw new CoreError(error.code, error.message, {
-      subCode: error.subCode, details: { ...error.details, work }
+      subCode: error.subCode, details
     });
     throw error;
   }

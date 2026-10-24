@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
-import type { SourceIndexVectorBinding, SourceIndexVectorRead } from "@do-soul/alaya-protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-index-repo.js";
+import { canonicalJson, type SourceIndexVectorBinding, type SourceIndexVectorRead } from "@do-soul/alaya-protocol";
 import {
   BUDGET, QUERY_BUDGET, WORKSPACE, expectQueryResources, fixture, targetFor, vectorWindowIds, type Fixture
 } from "./source-index-query-fixture.js";
 import {
-  buildReady, configuration, eraseSource, publishSource, vectorFor
+  buildReady, configuration, eraseSource, fieldSha256, publishSource, vectorFor
 } from "./source-index-fixture.js";
 
 const environments: Fixture[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const environment of environments.splice(0)) environment.database.close();
 });
 function setup() {
@@ -22,6 +24,78 @@ function requireBinding(read: SourceIndexVectorRead): SourceIndexVectorBinding {
 }
 
 describe("source index query currentness after native mutation", () => {
+  it("reuses parsed targets across channels only within a paid stable capture and invalidates after native writes", () => {
+    const environment = setup();
+    const record = publishSource(environment, "needle captured target", "captured", { scope_class: "project" });
+    buildReady(environment);
+    const captured = new SqliteSourceIndexRepository(environment.database, fieldSha256, { captureReadTargets: true });
+    environment.database.connection.transaction(() => {
+      const lexical = captured.readLexicalCandidates(WORKSPACE, "needle", 8, QUERY_BUDGET);
+      const source = lexical.candidates[0]!.source;
+      const statement = environment.database.connection.prepare("SELECT 1");
+      const get = vi.spyOn(Object.getPrototypeOf(statement) as typeof statement, "get");
+      const reused = captured.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET);
+      const reusedRows = get.mock.results.flatMap(result => result.type === "return" && result.value !== null
+        && typeof result.value === "object" && "embedding_blob" in result.value ? [result.value] : []);
+      get.mockClear();
+      const cold = environment.index.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET);
+      const coldRows = get.mock.results.flatMap(result => result.type === "return" && result.value !== null
+        && typeof result.value === "object" && "embedding_blob" in result.value ? [result.value] : []);
+      get.mockRestore();
+      expect(reused.completion).toBe("complete");
+      expect(reused.candidates.length).toBeGreaterThan(1);
+      expect(reused.candidates.every(row => row.source === source)).toBe(true);
+      expect(reused.candidates).toEqual(cold.candidates);
+      expect(reused.resources.work).toBeLessThan(cold.resources.work);
+      expect(reusedRows).toHaveLength(reused.candidates.length);
+      expect(coldRows).toHaveLength(cold.candidates.length);
+      expect(reusedRows.every(row => !Object.hasOwn(row, "target_json"))).toBe(true);
+      expect(coldRows.every(row => Object.hasOwn(row, "target_json"))).toBe(true);
+      expect(reusedRows.every(row => Buffer.isBuffer(row.embedding_blob) && row.embedding_blob.length > 0)).toBe(true);
+      // Only omitted JSON transfer is saved; the capture pays its three native
+      // revision reads (24 bytes) and still transfers every embedding BLOB.
+      expect(cold.resources.native_bytes - reused.resources.native_bytes)
+        .toBe(reused.candidates.length * Buffer.byteLength(canonicalJson(source)) - 24);
+      environment.database.connection.prepare("UPDATE source_index_roots SET target_json=json_set(target_json,'$.root_key','forged') WHERE workspace_id=?")
+        .run(WORKSPACE);
+      expect(captured.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET))
+        .toMatchObject({ completion: "unavailable", reason: "native_query_failed", candidates: [] });
+      environment.database.connection.prepare("UPDATE source_index_roots SET target_json=? WHERE workspace_id=?").run(canonicalJson(source), WORKSPACE);
+      const afterWrite = captured.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET);
+      expect(afterWrite.candidates[0]!.source).not.toBe(source);
+      environment.database.connection.prepare("UPDATE source_records SET scope_class='global_core' WHERE record_id=?").run(record.record_id);
+      expect(captured.admitQueryCandidate(source, requireBinding(reused), QUERY_BUDGET))
+        .toMatchObject({ status: "ready", scope_class: "global_core" });
+      eraseSource(environment, record.record_id);
+      expect(captured.admitQueryCandidate(source, null, QUERY_BUDGET)).toMatchObject({ status: "stale" });
+    })();
+  });
+
+  it("reuses only reader-owned immutable identity while rechecking scope and erasure", () => {
+    const environment = setup();
+    const record = publishSource(environment, "needle immutable identity", "borrowed-source", { scope_class: "project" });
+    buildReady(environment);
+    const read = environment.index.readLexicalCandidates(WORKSPACE, "needle", 8, QUERY_BUDGET);
+    expect(read.completion).toBe("complete");
+    const source = read.candidates[0]!.source;
+    expect(Object.isFrozen(source)).toBe(true);
+    expect(Object.isFrozen(source.target)).toBe(true);
+    const trusted = environment.index.admitQueryCandidate(source, null, QUERY_BUDGET);
+    expect(trusted).toMatchObject({ status: "ready", scope_class: "project" });
+    const copied = environment.index.admitQueryCandidate(Object.freeze({ ...source }), null, QUERY_BUDGET);
+    expect(copied.status).toBe("ready");
+    expect(copied.resources.work).toBeGreaterThan(trusted.resources.work);
+    expect(environment.index.admitQueryCandidate(Object.freeze({ ...source, root_key: "forged" }), null, QUERY_BUDGET))
+      .toMatchObject({ status: "stale", reason: "target_identity" });
+    environment.database.connection.prepare("UPDATE source_records SET scope_class='global_core' WHERE record_id=?")
+      .run(record.record_id);
+    expect(environment.index.admitQueryCandidate(source, null, QUERY_BUDGET))
+      .toMatchObject({ status: "ready", scope_class: "global_core" });
+    eraseSource(environment, record.record_id);
+    expect(environment.index.admitQueryCandidate(source, null, QUERY_BUDGET))
+      .toMatchObject({ status: "stale", reason: "native_source_unavailable" });
+  });
+
   it("keeps an activated same-profile generation readable as partial for an unchanged root", () => {
     const environment = setup();
     const kept = publishSource(environment, "kept current body", "kept");

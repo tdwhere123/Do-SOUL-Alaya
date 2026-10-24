@@ -9,7 +9,14 @@ import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js
 export const LIBRARY_SOURCE_DISPLAY_BYTES = 4096;
 export type LibrarySourceNomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
 
-/** Private navigation hydration, never a semantic support or multi-span package producer. */
+/** Private navigation hydration, never a semantic support or multi-span package producer.
+ *
+ * Live daemon library recall no longer selects nominations; the retained consumer is the
+ * accepted C3 diagnostic (`apps/bench-runner/src/runs/source-access-diagnostic/field-delivery-read.ts`),
+ * which supplies its own frozen nominations and must keep the unchanged window/packing
+ * behavior. Removal gate: delete this module and that import together when the diagnostic
+ * retires its native-anchor window path or moves to the conditional-field page producer.
+ */
 export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, sources: readonly IndexEntry[],
   nominations: readonly LibrarySourceNomination[], sourcePositions?: ReadonlyMap<string, number>): SourceSemanticLibraryPackage[] {

@@ -1,5 +1,6 @@
 import {
   assertRecallProductUpdateCompatibility,
+  encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort,
   type EventPublisher
@@ -9,7 +10,6 @@ import {
   SNAPSHOT_PIN_NATIVE_WORK,
   ControlPlaneObjectKind,
   RetentionPolicy,
-  SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
   UsageReportSchema,
@@ -32,9 +32,7 @@ import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
-  encodeIndexResults,
   sourceMetadataForRecallResult,
-  frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
   type RecallMcpHonestyDiagnostics
@@ -100,7 +98,7 @@ export interface RecallUsageHandlerDependencies {
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
       readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
       readonly index: import("@do-soul/alaya-protocol").InformationIndex;
-      readonly provider_calls?: 0;
+      readonly provider_calls?: number | null;
       readonly garden_enqueue?: 0;
       readonly issued_delivery_id?: string;
       readonly execution_receipt?: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt;
@@ -205,7 +203,7 @@ async function executeRecall(
     const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
     assertRecallProductUpdateCompatibility(request, encoded.index.product_updates);
     const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
-    const response = buildRecallResponse(delivery.deliveryId, encoded.results, encoded.results.length,
+    const response = buildRecallResponse(delivery.deliveryId, encoded.results,
       { ...recallResult, index: encoded.index }, encoded.explainabilityPartial);
     throwIfAborted(context.abortSignal);
     await recallResult.acknowledge_delivery?.(encoded.index, new Map(encoded.index.entries.map((entry, offset) =>
@@ -321,21 +319,18 @@ function buildRecallDelivery(
 function buildRecallResponse(
   deliveryId: string,
   results: readonly RecallSearchResult[],
-  totalCount: number,
   recallResult: RecallServiceResult,
   explainabilityPartial: boolean
 ): SoulMemorySearchResponse {
   const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
-  return SoulMemorySearchResponseSchema.parse({
+  return encodeRecallPageResponse({
     delivery_id: deliveryId,
-    protocol_version: 1,
     results,
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
     ...(recallResult.active_constraints_completeness === undefined ? {} : {
       active_constraints_completeness: recallResult.active_constraints_completeness
     }),
-    total_count: totalCount,
     degradation_reason: resolveMcpDegradationReason(
       {
         degradation_reason: recallResult.degradation_reason,
@@ -343,12 +338,7 @@ function buildRecallResponse(
       },
       explainabilityPartial
     ),
-    index: recallResult.index,
-    ...(recallResult.index.order_status === undefined ? {} : { order_status: recallResult.index.order_status }),
-    ...(recallResult.index.page_purpose === undefined ? {} : { page_purpose: recallResult.index.page_purpose }),
-    ...(recallResult.index.product_updates === undefined
-      ? {}
-      : { product_updates: recallResult.index.product_updates })
+    index: recallResult.index
   });
 }
 

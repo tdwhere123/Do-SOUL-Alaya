@@ -5,10 +5,11 @@ import {
   HARD_IDENTITY_TRANSFER_VERSION,
   IDENTITY_NORMALIZATION_ID,
   InformationIndexSchema,
-  RecallCandidateSchema
+  RecallCandidateSchema,
+  unavailableSourceQueryPreparation
 } from "@do-soul/alaya-protocol";
 import { runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
-import { encodeIndexResults, frameEncodedIndex } from "@do-soul/alaya/recall/index-response";
+import { encodeIndexResults, frameEncodedIndex } from "@do-soul/alaya-core";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/daemon-support.js";
 import {
   buildBenchRecallResponse,
@@ -156,32 +157,49 @@ describe("bench conditional field index response", () => {
       .toThrow(/observed zero/);
   });
 
-  it("binds omitted filters to a live canonical receipt and associative expected to an associative receipt", () => {
+  it("retains declared query preparation evidence instead of imputing a measured zero", () => {
+    const base = fixture();
+    const preparation = unavailableSourceQueryPreparation("acquisition_channel_not_requested", "not_requested");
+    const result = { ...base,
+      execution_receipt: { ...base.execution_receipt!, query_preparation: preparation } };
+    const response = buildBenchRecallResponse("delivery", encodeBenchRecallResults(result, policy), result, budget);
+    expect(response.execution_receipt.query_preparation).toEqual(preparation);
+    expect(response.execution_receipt.query_preparation?.token_count).toBeNull();
+    // A receipt whose preparation is unparseable is an execution refusal, never dropped or zeroed.
+    const malformed = { ...base, execution_receipt: { ...base.execution_receipt!,
+      query_preparation: { status: "ready" } } } as Result;
+    expect(() => encodeBenchRecallResults(malformed, policy)).toThrow();
+  });
+
+  it("binds omitted filters to the live native-query receipt and refuses legacy policy receipts", () => {
     const expected = {
       queryText: "needle",
       workspaceId: "workspace",
       referenceTime: "2026-09-06T00:00:00.000Z",
       requestBudget: budget
     };
-    expect(() => encodeBenchRecallResults(fixture(), policy, budget, { ...expected, requestFilters: {} }))
+    const native = fixture();
+    expect(() => encodeBenchRecallResults(native, policy, budget, { ...expected, requestFilters: {} }))
       .not.toThrow();
-    expect(() => encodeBenchRecallResults(fixture(), policy, budget, {
+    expect(() => encodeBenchRecallResults(native, policy, budget, {
       ...expected, requestFilters: { authorized_scopes: null }
     })).toThrow(/differs from the invoked request/);
-    const associativeCaps = [{
-      domain_id: ASSOCIATION_DOMAIN_ID,
-      normalization: IDENTITY_NORMALIZATION_ID,
-      transfer_id: HARD_IDENTITY_TRANSFER_ID,
-      transfer_version: HARD_IDENTITY_TRANSFER_VERSION
-    }];
-    const associative = fixture("associative");
-    expect(() => encodeBenchRecallResults(associative, policy, budget, {
-      ...expected, requestFilters: { enumeration_policy: "associative", cap_contracts: associativeCaps }
-    })).not.toThrow();
-    expect(() => encodeBenchRecallResults(associative, policy, budget, {
-      ...expected, requestFilters: { enumeration_policy: "associative" }
-    })).toThrow(/differs from the invoked request/);
-    expect(() => encodeBenchRecallResults(associative, policy, budget, { ...expected, requestFilters: {} }))
-      .toThrow(/differs from the invoked request/);
+    // A historical expectation must not silently match the current receipt, and
+    // the frozen adapter cannot execute a legacy enumeration policy at all.
+    for (const requestFilters of [
+      { enumeration_policy: "canonical" as const },
+      { enumeration_policy: "associative" as const, cap_contracts: [{
+        domain_id: ASSOCIATION_DOMAIN_ID,
+        normalization: IDENTITY_NORMALIZATION_ID,
+        transfer_id: HARD_IDENTITY_TRANSFER_ID,
+        transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+      }] }
+    ]) {
+      expect(() => encodeBenchRecallResults(native, policy, budget, { ...expected, requestFilters }))
+        .toThrow(/differs from the invoked request/);
+    }
+    for (const legacy of ["canonical", "associative"] as const) {
+      expect(() => fixture(legacy)).toThrow(/requires native_query/u);
+    }
   });
 });

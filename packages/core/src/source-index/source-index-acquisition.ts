@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
   BoundedIdSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
-  canonicalJson, hashContentDigest, sourceGoldRootIdentity, sourceIndexProfileId,
+  canonicalJson, hashContentDigest, sourceIndexProfileId,
   unavailableSourceQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
@@ -227,6 +227,18 @@ export class SourceIndexAcquisition {
       observer, { view, grouped, retained, progress });
     const result = query.run(grouped);
     return { result, retained, progress, ...query.capturedNative() };
+  }
+
+  /** Runtime capture retains every admitted occurrence before root occupancy is projected.
+   * The caller owns the snapshot and the returned inventory's lifetime.
+   */
+  public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
+    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver) {
+    validateInput(input, admitScope);
+    const retained: SourceSemanticNominationOccurrence[] = [];
+    const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
+      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 } });
+    return { result: query.run(), witness: retained };
   }
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -480,8 +492,10 @@ class AcquisitionQuery {
     if (!Number.isFinite(cosine)) return;
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
-    const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceGoldRootIdentity(candidate.source.target);
-    this.meter.charge(1 + key.length, 0, "source vector root lookup");
+    const key = this.candidate?.grouped === true ? candidate.window.window_id : candidate.source.root_key;
+    // Both keys are captured by the native reader. Reuse their identities rather
+    // than reconstructing the same canonical root for every vector window.
+    this.meter.charge(1, 0, "source vector root lookup");
     const previous = best.get(key);
     if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
         compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return;
@@ -501,7 +515,7 @@ class AcquisitionQuery {
       const source = lexical?.source ?? vector!.source;
       const channel = lexicalTurn ? "lexical" as const : "vector" as const;
       this.stage = "nomination";
-      this.meter.charge(1 + source.root_key.length, 0, "source nomination attempt");
+      this.meter.charge(1, 0, "source nomination attempt");
       this.counts.attempted++;
       if (this.candidate !== undefined) this.candidate.progress[channel]++;
       this.stage = "admission";
@@ -559,7 +573,9 @@ class AcquisitionQuery {
 
   private retainNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
     lexical: SourceIndexLexicalRank | null, vector: SourceIndexRootNomination["vector"]): void {
-    const key = sourceGoldRootIdentity(source.target), previous = this.nominations.get(key);
+    // Admission owns canonical target validation. Reuse that admitted identity;
+    // reconstructing it here copies and scans a key already retained by the reader.
+    const key = source.root_key, previous = this.nominations.get(key);
     if (previous !== undefined) {
       this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
       this.retainOccurrence(source, lexical, vector);
@@ -572,7 +588,7 @@ class AcquisitionQuery {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
       this.observeNomination(channel, source, "nomination_limit"); return;
     }
-    this.meter.charge(1 + key.length, 192 + 4 * key.length, "source nomination retention");
+    this.meter.charge(1, 192, "source nomination reference retention");
     this.retainOccurrence(source, lexical, vector);
     this.nominations.set(key, { source, lexical: lexical === null ? [] : [lexical], vector });
     this.counts.admitted++;
@@ -587,10 +603,13 @@ class AcquisitionQuery {
       ? { kind: "lexical", native_rank: lexical.rank, lane: lexical.lane, lane_rank: lexical.lane_rank, bm25: lexical.bm25 }
       : { kind: "vector", native_rank: vector!.rank, cosine: vector!.cosine,
         window: { status: "available", window: vector!.window } };
-    const occurrence = { reference: `${view}:${route.kind}:${route.native_rank}`, attempt: this.counts.attempted,
-      source, view, route };
-    this.meter.retain(occurrence, "source retained nomination occurrence");
-    this.candidate.retained.push(occurrence);
+    const metadata = { reference: `${view}:${route.kind}:${route.native_rank}`, attempt: this.counts.attempted, view, route };
+    this.meter.retain(metadata, "source retained nomination occurrence");
+    // The native reader already owns and charges the immutable source graph.
+    // Attach its reference after measuring the newly allocated metadata, rather
+    // than traversing that same graph again for each lexical/vector occurrence.
+    this.meter.charge(1, 8, "source retained occurrence source reference");
+    this.candidate.retained.push(Object.assign(metadata, { source }));
   }
 
   private absorb(resources: SourceIndexQueryResources): void {

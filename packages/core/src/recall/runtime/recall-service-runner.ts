@@ -17,6 +17,7 @@ import {
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectFromField, annotatePublicIndex, invalidatedPublicIndex } from "./recall-field-projection.js";
+import { deliveryBudgetOf } from "./recall-page-fit.js";
 import {
   captureEffectiveAsOf,
   normalizeQueryText,
@@ -43,6 +44,9 @@ import {
   pendingIssuedDeliveryOf
 } from "./recall-index-commit.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
+import { attachIncurredExecutionReceipt } from "./conditional-field-execution-receipt.js";
+import { captureRecallData, captureRecallRequest, withRecallEnvironment } from "./captured-recall-request.js";
+import { CoreError } from "../../shared/errors.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
 import { restoredFieldFootprint, retainedFieldLevels, stampRetainedFieldLevel, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
 import type {
@@ -82,7 +86,7 @@ const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
   readonly index: InformationIndex;
-  readonly provider_calls: 0;
+  readonly provider_calls: number | null;
   readonly garden_enqueue: 0;
   readonly issued_delivery_id?: string;
   readonly acknowledge_delivery?: (index: InformationIndex, previews: ReadonlyMap<string, string>) => Promise<void>;
@@ -99,6 +103,8 @@ export type ConditionalFieldRecallPortResult = Readonly<{
 }>;
 
 export type ConditionalFieldRecallPort = Readonly<{
+  withPreparedExecution?<T>(input: Omit<ConditionalFieldRecallRequest, "readers">,
+    execute: (captured: Omit<ConditionalFieldRecallRequest, "readers">) => Promise<T>): Promise<T>;
   acknowledge?(preparationId: string, index: InformationIndex, previews: ReadonlyMap<string, string>): Promise<ConditionalFieldExecutionReceipt | void>;
   discard?(preparationId: string): Promise<void>;
   recall(
@@ -110,6 +116,10 @@ export async function executeRecall(
   context: RecallExecutionContext,
   params: RecallExecutionParams
 ): Promise<ConditionalFieldRecallResult> {
+  // Capture intent and controls before even the clock/default-policy callbacks.
+  // Service and cancellation capabilities are references, never frozen caller data.
+  params = captureRecallData(params);
+  context = { ...context, dependencies: { ...context.dependencies } };
   if (params.policyOverride?.scoring_weight_overrides !== undefined
     || params.policyOverride?.domain_weight_overrides !== undefined) {
     throw new TypeError("Recall scoring_weight_overrides and domain_weight_overrides are retired for conditional-field requests");
@@ -118,7 +128,20 @@ export async function executeRecall(
     || params.querySemanticFactorCompletenessReceipt !== undefined) {
     throw new TypeError("Recall query semantic factor capture and completeness receipt overrides are retired for conditional-field requests");
   }
+  if (params.enumeration_policy !== undefined && params.enumeration_policy !== "native_query") {
+    throw new TypeError("Legacy Recall enumeration policies are read-only; ordinary execution requires native_query");
+  }
   assertRecallZeroLiveExtraction();
+  const sent = withRecallEnvironment(captureRecallRequest(buildRecallRequest(context, params)));
+  assertRecallConsumerCompatibility(sent);
+  const port = fieldDeps(context).conditionalFieldPort;
+  return port?.withPreparedExecution === undefined ? executeCapturedRecall(context, params, sent)
+    : port.withPreparedExecution(withoutReaders(sent), captured =>
+      executeCapturedRecall(context, params, { ...captured, readers: sent.readers }));
+}
+
+async function executeCapturedRecall(context: RecallExecutionContext, params: RecallExecutionParams,
+  sent: ConditionalFieldRecallRequest): Promise<ConditionalFieldRecallResult> {
   let previews = new Map<string, string>();
   let sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {};
   let governance: BoundedActiveConstraintsResult | undefined;
@@ -130,8 +153,6 @@ export async function executeRecall(
   try {
     const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
       const port = fieldDeps(context).conditionalFieldPort;
-      const sent = buildRecallRequest(context, params);
-      assertRecallConsumerCompatibility(sent);
       const original = captureRequestSnapshot(sent, port === undefined);
       const governed = await readRequestGovernance(original, context.dependencies.activeConstraintsPort,
         params.activeConstraintsCap, port !== undefined);
@@ -171,6 +192,8 @@ export async function executeRecall(
     const issuedDeliveryId = preparedId ?? issuedDeliveryIdOf(index);
     return {
       ...encoded,
+      provider_calls: sent.prepared_query?.receipt.external_api_attempts ??
+        (sent.prepared_query?.receipt.external_api_attempts === null ? null : 0),
       execution_receipt: executionReceipt,
       ...(params.defer_delivery ? { acknowledge_delivery: acknowledge, discard_delivery: discard ?? (async () => {}) } : {}),
       ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
@@ -187,7 +210,9 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
 
 export function runConditionalFieldRecallWithReceipt(
   input: ConditionalFieldRecallRequest,
-  options?: Readonly<{ readonly issue?: "now" | "defer" }>
+  options?: Readonly<{ readonly issue?: "now" | "defer";
+    /** Internal debit transfer before result publication; not a wire receipt field. */
+    readonly capture_budget_work?: (work: number | undefined) => void }>
 ): Readonly<{
   readonly index: InformationIndex;
   readonly execution_receipt: ConditionalFieldExecutionReceipt;
@@ -198,12 +223,27 @@ export function runConditionalFieldRecallWithReceipt(
     readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
   }>) => string | undefined;
 }> {
-  const cost = startRequestCost();
-  const requestedBudget = input.requested_budget ?? input.budget;
-  if (input.readers.snapshotPin !== undefined) {
-    const reserved = reserveSnapshotPinWork(reserveSnapshotPinWork(input.budget).budget);
-    input = { ...input, budget: options?.issue === "defer" ? reserveSnapshotPinWork(reserved.budget).budget : reserved.budget };
+  // Capture the caller's domain request and authorization before validation, identity
+  // compilation or any port call. Every later step (receipt, nomination, projection,
+  // async or sync callback) reads this owned copy, never the caller object.
+  const { issue = "now", capture_budget_work } = options ?? {};
+  const captured = captureRecallRequest(input);
+  if (captured.request.enumeration_policy !== undefined && captured.request.enumeration_policy !== "native_query") {
+    throw new TypeError("Legacy Recall enumeration policies are read-only; ordinary execution requires native_query");
   }
+  const cost = startRequestCost();
+  const requestedBudget = captured.request.requested_budget ?? captured.request.budget;
+  const capturedBudget = captured.request.budget;
+  // The announced envelope becomes an explicit request field so the public view and
+  // the page fit derive it from one owner instead of two defaults.
+  input = withRecallEnvironment(captured, {
+    ...(captured.environment.readers.snapshotPin === undefined
+      ? {}
+      : { budget: issue === "defer"
+        ? reserveSnapshotPinWork(reserveSnapshotPinWork(capturedBudget).budget).budget
+        : reserveSnapshotPinWork(capturedBudget).budget }),
+    requested_budget: requestedBudget
+  });
   const compileInput = {
     source: "ordinary" as const,
     text: input.query_text,
@@ -216,10 +256,14 @@ export function runConditionalFieldRecallWithReceipt(
     ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.source_id === undefined ? {} : { source_id: input.source_id }),
+    ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     view: QueryViewSchema.parse({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       requested_roles: ["requested", "associated"],
-      enumeration_policy: input.enumeration_policy ?? "canonical",
+      enumeration_policy: input.enumeration_policy ?? "native_query",
+      delivery_context: input.delivery_context,
+      delivery_budget: deliveryBudgetOf(input),
       result_kind_view: input.result_kind_view ?? "mixed",
       ...(input.cap_contracts === undefined ? {} : { cap_contracts: input.cap_contracts }),
       ...(input.claim_demands === undefined ? {} : { claim_demands: input.claim_demands }),
@@ -230,25 +274,44 @@ export function runConditionalFieldRecallWithReceipt(
       : { interpretation_proposal: input.interpretation_proposal })
   };
   const interpretation = cost.time("compile", () => compileConditionalFieldQuery(compileInput));
-  const index = runCompiledConditionalFieldRecall(input, interpretation, cost);
-  cost.markAfterProjection();
-  const execution_receipt = {
+  const receiptBase = {
     schema_version: 1 as const, workspace_id: input.workspace_id, requested_budget: requestedBudget,
     compile_input: compileInput, query_id: interpretation.query_id,
     interpretation_id: interpretationIdentity({ interpretation_clock: input.interpretation_clock }),
     snapshot_id: input.snapshot_id, interpretation_clock: input.interpretation_clock,
-    actual: cost.snapshot()
+    ...(input.prepared_query === undefined ? {} : { query_preparation: input.prepared_query.receipt })
   };
-  if ((options?.issue ?? "now") === "defer") {
+  let index: InformationIndex;
+  try {
+    index = runCompiledConditionalFieldRecall(input, interpretation, cost);
+  } catch (error) {
+    cost.invalidateBudgetWork();
+    // Request, preparation and projection work already incurred stays visible when
+    // the page is refused. Existing measured worker/library snapshots keep their
+    // own authority on the same error.
+    throw attachIncurredExecutionReceipt(error, { ...receiptBase, actual: cost.snapshot() });
+  }
+  cost.markAfterProjection();
+  const execution_receipt: ConditionalFieldExecutionReceipt = { ...receiptBase, actual: cost.snapshot() };
+  if (issue === "defer") {
+    cost.captureBudgetWork(capture_budget_work);
     const pending = pendingIssuedDeliveryOf(index);
     const delivery_id = pending === undefined ? issuedDeliveryIdOf(index) : preparedDeliveryId(pending.request_digest, index);
     return { index, execution_receipt, delivery_id, issue: (issued) => {
       try { return issueRetainedIndex(index, issued); }
-      finally { Object.assign(execution_receipt, { actual: cost.snapshot() }); }
+      catch (error) {
+        cost.invalidateBudgetWork();
+        throw attachIncurredExecutionReceipt(error, { ...execution_receipt, actual: cost.snapshot() });
+      } finally { Object.assign(execution_receipt, { actual: cost.snapshot() }); }
     } };
   }
-  issueRetainedIndex(index);
+  try { issueRetainedIndex(index); }
+  catch (error) {
+    cost.invalidateBudgetWork();
+    throw attachIncurredExecutionReceipt(error, { ...execution_receipt, actual: cost.snapshot() });
+  }
   Object.assign(execution_receipt, { actual: cost.snapshot() });
+  cost.captureBudgetWork(capture_budget_work);
   return { index, execution_receipt };
 }
 
@@ -258,6 +321,7 @@ function runCompiledConditionalFieldRecall(
   interpretation: QueryInterpretation,
   cost: RequestCostLedger
 ): InformationIndex {
+  cost.addFieldBudgetWork(0);
   if (input.authorized_scopes === undefined
     || continuationEpochMismatch(input.continuation, interpretation, input.authorized_scopes)
     || (input.continuation != null && (
@@ -268,7 +332,7 @@ function runCompiledConditionalFieldRecall(
   }
   if (interpretation.status === "resource_rejected" || interpretation.status === "malformed"
     || interpretation.status === "unsupported") {
-    return projectFromField(emptyField(interpretation, input), input, interpretation, undefined, cost);
+    return projectMeasuredField(emptyField(interpretation, input), input, interpretation, cost).index;
   }
   const restored = restoreField(
     input.continuation,
@@ -279,7 +343,10 @@ function runCompiledConditionalFieldRecall(
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
   const pin = input.readers.snapshotPin?.(input.workspace_id);
-  if (pin !== undefined) cost.add("observe", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
+  if (pin !== undefined) {
+    cost.add("observe", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
+    cost.recordReservedBudgetWork(SNAPSHOT_PIN_NATIVE_WORK);
+  }
   const currentPin = pin === undefined ? undefined : JSON.stringify([
     snapshotIdFromPin(input.workspace_id, pin), [...(input.readers.permittedTimelessPolicyIds?.() ?? [])].sort()
   ]);
@@ -298,6 +365,8 @@ function runCompiledConditionalFieldRecall(
     cost,
     on_reused_cost_owner: (owner) => { reusedCostOwner = owner; },
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.source_id === undefined ? {} : { source_id: input.source_id }),
+    ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
@@ -307,21 +376,29 @@ function runCompiledConditionalFieldRecall(
   const assessed = assessUnknownCause(field, input);
   cost.add("index", { charged_retained_bytes: Math.max(0,
     (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });
-  let retained = assessed;
-  const index = projectFromField(assessed, input, interpretation, (next) => { retained = next; }, cost, restored);
+  const projected = projectMeasuredField(assessed, input, interpretation, cost, restored);
+  const index = projected.index;
+  let retained = projected.retained;
   if (restoredFieldFootprint(retained) <= input.budget.memory_bytes) {
     retained = stampRetainedFieldLevel(retained, input.budget.memory_bytes);
   }
   stageIndexSourceValidation(index, () => {
     const latest = input.readers.snapshotPin?.(input.workspace_id);
-    if (latest !== undefined) cost.add("index", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
+    if (latest !== undefined) {
+      cost.add("index", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
+      cost.recordReservedBudgetWork(SNAPSHOT_PIN_NATIVE_WORK);
+    }
     const latestPin = latest === undefined ? undefined : JSON.stringify([
       snapshotIdFromPin(input.workspace_id, latest), [...(input.readers.permittedTimelessPolicyIds?.() ?? [])].sort()
     ]);
     if (latestPin !== currentPin) {
       invalidateFieldDelivery(fieldResumeKey(retained.query_id, retained.snapshot_id,
         interpretationIdentity({ interpretation_clock: retained.interpretation.interpretation_clock })));
-      throw new Error("Recall source generation changed before delivery");
+      // A typed refusal keeps its classification and cause so the caller's incurred
+      // receipt (already spent on this request) survives the boundary.
+      throw new CoreError("CONFLICT", "Recall source generation changed before delivery", {
+        details: { outcome: "stale_generation", resource: "source_generation" }
+      });
     }
   });
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
@@ -334,6 +411,17 @@ function runCompiledConditionalFieldRecall(
   return index;
 }
 
+
+/** The field balance owns total budget expenditure; phase operation counters
+ * cannot reconstruct it by adding visits, joins or partial ledger subtotals. */
+function projectMeasuredField(state: FieldEngineState, input: ConditionalFieldRecallRequest,
+  interpretation: QueryInterpretation, cost: RequestCostLedger, restored?: FieldEngineState) {
+  let retained = state;
+  const index = projectFromField(state, input, interpretation, next => { retained = next; }, cost, restored);
+  cost.addFieldBudgetWork(state.remaining_exploration + state.remaining_reserve
+    - retained.remaining_exploration - retained.remaining_reserve);
+  return { index, retained };
+}
 
 export { encodeRecallResult } from "./recall-result-encoding.js";
 
@@ -365,7 +453,7 @@ function continuationEpochMismatch(
   authorizedScopes?: readonly string[] | null
 ): boolean {
   if (continuation === undefined || continuation === null) return false;
-  if (continuation.interpretation_id === undefined) return true;
+  if (continuation.query_id !== interpretation.query_id || continuation.interpretation_id === undefined) return true;
   if (continuation.interpretation_id !== interpretationIdOf(interpretation)) return true;
   return continuationViewMismatch(continuation, interpretation.view, authorizedScopes);
 }
@@ -381,9 +469,8 @@ function buildRecallRequest(
     readonly interpretationClock?: string;
   };
   const now = context.now();
-  const scopeFilter = (params.policyOverride ?? context.buildDefaultPolicy(
-    params.strategy, params.taskSurface.runtime_id, now
-  )).coarse_filter.deterministic_match.scope_filter;
+  const policy = params.policyOverride ?? context.buildDefaultPolicy(params.strategy, params.taskSurface.runtime_id, now);
+  const scopeFilter = policy.coarse_filter.deterministic_match.scope_filter;
   const queryText = extra.queryText ?? normalizeQueryText(params.taskSurface.display_name) ?? "";
   const pageBudget = extra.pageBudget
     ?? extra.budget?.page_budget
@@ -398,6 +485,8 @@ function buildRecallRequest(
   return {
     workspace_id: params.workspaceId,
     query_text: queryText,
+    delivery_budget: extra.delivery_budget ?? { max_total_tokens: policy.fine_assessment.budgets.max_total_tokens,
+      max_encoded_bytes: extra.budget?.memory_bytes ?? DEFAULT_MEMORY_BYTES },
     budget: extra.budget ?? {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       work_units: DEFAULT_WORK_UNITS,

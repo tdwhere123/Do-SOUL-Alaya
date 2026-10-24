@@ -25,7 +25,8 @@ import {
   SourceSemanticCoverageSchema,
   SourceSemanticHandleDescriptorSchema,
   SourceSemanticLibraryDeliverySchema,
-  SourceSemanticLibraryContinuationSchema,
+  SourceSemanticFieldLibraryDeliverySchema, refineSourceSemanticFieldLibraryDelivery,
+  SourceSemanticFieldLibraryContinuationSchema,
   SourceSemanticQueryStatusSchema,
   SourceSemanticQueryUnavailableReasonSchema,
   refineSourceSemanticQueryRequest,
@@ -105,7 +106,10 @@ const SoulInterpretationRecallRequestSchema = z.object({
   semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000),
-  continuation: SourceSemanticLibraryContinuationSchema.optional(),
+  // Live recall resumes the field continuation family the worker ingress accepts. A
+  // recorded v6 cursor stays readable inside its archived delivery but is refused here
+  // instead of being migrated to a different enumeration policy.
+  continuation: SourceSemanticFieldLibraryContinuationSchema.optional(),
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().superRefine((request, context) => refineSourceSemanticQueryRequest(request, context, true)).readonly();
 
@@ -189,7 +193,7 @@ const SoulInterpretationRecallDeliveryBaseSchema = z.object({
 export const SoulInterpretationRecallDeliverySchema = SoulInterpretationRecallDeliveryBaseSchema
   .superRefine(refineSourceSemanticLibraryDelivery);
 
-const SoulInterpretationRecallResponseSchema = z.object({
+const LegacySoulInterpretationRecallResponseSchema = z.object({
   ...SoulInterpretationRecallDeliveryBaseSchema.partial().shape,
   operation: z.literal("recall"),
   ...CoverageWork
@@ -203,6 +207,16 @@ const SoulInterpretationRecallResponseSchema = z.object({
   const delivery = SoulInterpretationRecallDeliverySchema.safeParse(response);
   if (!delivery.success) for (const issue of delivery.error.issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
 }).readonly();
+
+export const SoulInterpretationFieldRecallDeliverySchema = z.object({
+  ...SourceSemanticFieldLibraryDeliverySchema.shape, operation: z.literal("recall"), ...CoverageWork
+}).strict().superRefine(refineSourceSemanticFieldLibraryDelivery).readonly();
+
+// Named compatibility readers: retained-evidence fixtures and historical source
+// measurements still decode v6. Live adapters emit only the field delivery.
+const SoulInterpretationRecallResponseSchema = z.discriminatedUnion("protocol_version", [
+  LegacySoulInterpretationRecallResponseSchema, SoulInterpretationFieldRecallDeliverySchema
+]);
 
 export const SoulInterpretationInvalidateResponseSchema = z.object({
   operation: z.literal("invalidate"),

@@ -174,10 +174,10 @@ it("uses one Q for a stated answer and two qualified measured inputs without cla
   await withAccessLibrary([
     { id: "measured-comparison-source", text: MEASURED, verbatim: true, authoredDraft: measuredDraft },
     { id: "stated-comparison-source", text: STATED, verbatim: true, authoredDraft: statedDraft }
-  ], async ({ execute, ids }) => {
+  ], async ({ execute, ids, port }) => {
     const context = { workspaceId: WS, runId: "comparison-control", agentTarget: "codex", sessionId: "comparison-control" };
     const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => "2026-09-24T00:00:00.000Z",
-      sourceSemanticsPort: { execute } });
+      sourceSemanticsPort: port });
     const call = async (args: unknown) => {
       const response = await callAlayaMcpMemoryTool({ memoryToolHandler: handler, contextProvider: () => context },
         "soul.interpretation", SoulInterpretationRequestSchema.parse(args));

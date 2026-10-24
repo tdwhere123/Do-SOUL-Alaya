@@ -183,7 +183,9 @@ export const SoulMemorySearchRequestSchema = z
     active_constraints_cap: NonNegativeIntSchema.max(50).optional(),
     // Resume a previously issued index page. Identity must match query/snapshot/result.
     continuation: ContinuationSchema.optional(),
-    enumeration_policy: EnumerationPolicySchema.default("canonical"),
+    // The live ordinary route is native query navigation. The legacy values stay
+    // parseable for historical readers but are rejected by live execution.
+    enumeration_policy: EnumerationPolicySchema.default("native_query"),
     result_kind_view: ResultKindViewSchema.default("mixed"),
     interpretation_proposal: QueryInterpretationProposalSchema.optional(),
     payload_continuation: PayloadContinuationRequestSchema.optional(),

@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 20.1.0, engine gateway 2.0.0
+## Unreleased — protocol 21.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,33 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 21.0.0 is the ordinary ranking/delivery migration **major** under
+handbook invariant §25. `native_query` becomes the live ordinary default on the
+public request and `QueryView`; historical `canonical` and `associative` stay
+parseable with their recorded meaning but live execution refuses them instead of
+substituting a ranking. Index entries and typed observations may carry a
+`RecallNavigationWitnessSchema` (ordinal discovery: view, operator, ordinal,
+access ordinal, native rank, optional byte location), which is not an association
+grade, claim support, product identity or the historical enumeration value.
+`QueryView` binds `delivery_context`/`delivery_budget`, and field pages report
+`ordinary-native-field.v1`. Library recall uses
+`SourceSemanticFieldLibraryDeliverySchema` (protocol 10): the same tagged field
+page with same-order results, Q/H/C evidence only on source targets, and a
+replayable field continuation. Legacy library v6 / protocol 8 and private
+comparison v7 / protocol 9 readers remain for recorded artifacts; the live
+library adapter cutover is not part of this contract change. The public MCP recall
+request and the worker recall request both accept only the field continuation
+family; a frozen v6 cursor stays readable inside its recorded delivery but is
+refused at live ingress. The archived source-gold library measurement contract
+refuses a protocol 10 page as an `invalid_response`, never scores it with its
+source-gold rules, and preserves that refusal through replay and capture
+admission instead of reporting an unavailable delivery. The frozen benchmark receipt
+reader retains `query_preparation` when the execution declared it, including an
+explicit unavailable/not_requested state, refuses a malformed one, and never
+substitutes a counter for missing evidence. This is not a release,
+default promotion, measurement or acceptance of every runtime path; the
+`semver-surface` fixture is pinned at `21.0.0` with its new surface hash.
 
 Protocol 20.1.0 adds optional paired-prefix Source representation descriptors
 and explicit query/passage roles under invariant §25 (minor, additive). Core's

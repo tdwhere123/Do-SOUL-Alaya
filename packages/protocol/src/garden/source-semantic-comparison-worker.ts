@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
-import { SourceSemanticWorkerResultSchema, SourceSemanticWorkerRequestSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, refineSourceSemanticQueryRequest, refineSourceSemanticLibraryDelivery } from "./source-semantic-worker.js";
+import { SourceSemanticWorkerResultSchema, SourceSemanticLegacyLibraryWorkerResultSchema, SourceSemanticWorkerRequestSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, refineSourceSemanticQueryRequest, refineSourceSemanticLibraryDelivery } from "./source-semantic-worker.js";
 import { SourceSemanticProfiledLibraryDeliverySchema, SourceSemanticProfiledLibraryContinuationSchema, refineSourceSemanticProfiledLibraryDelivery } from "./source-semantic-profiled-library.js";
 import { SourceSemanticProfiledAccessReceiptSchema } from "./source-semantic-access.js";
 import { SourceSemanticProfiledExecutionSchema } from "./source-semantic-phase-wire.js";
@@ -33,9 +33,9 @@ const Query = SourceSemanticWorkerResultSchema.options[2].unwrap().extend({
 });
 const Recall = z.object({ ...SourceSemanticProfiledLibraryDeliverySchema.shape,
   kind: z.literal("recall"),
-  previews: SourceSemanticWorkerResultSchema.options[4].unwrap().shape.previews,
-  coverage: SourceSemanticWorkerResultSchema.options[4].unwrap().shape.coverage,
-  work: SourceSemanticWorkerResultSchema.options[4].unwrap().shape.work
+  previews: SourceSemanticLegacyLibraryWorkerResultSchema.unwrap().shape.previews,
+  coverage: SourceSemanticLegacyLibraryWorkerResultSchema.unwrap().shape.coverage,
+  work: SourceSemanticLegacyLibraryWorkerResultSchema.unwrap().shape.work
 }).strict();
 const refineRecall = (value: z.infer<typeof Recall>, ctx: z.RefinementCtx) => {
   refineSourceSemanticLibraryDelivery(value, ctx); refineSourceSemanticProfiledLibraryDelivery(value, ctx);
@@ -72,8 +72,14 @@ export function admitSourceSemanticWorkerResultFamily(value: SourceSemanticReada
 export function admitSourceSemanticWorkerResultFamily(value: SourceSemanticReadableWorkerResult, comparison: boolean): SourceSemanticReadableWorkerResult;
 export function admitSourceSemanticWorkerResultFamily(value: SourceSemanticReadableWorkerResult, comparison: boolean): SourceSemanticReadableWorkerResult {
   const contract = comparison ? "source-semantic-access-v3" : "source-semantic-access-v2";
+  // The private comparison family keeps its own delivery version. The public
+  // family admits the archived v6 reader and the current field page; every other
+  // recall version belongs to another family rather than a substitutable ranking.
   if (comparison && value.kind !== "prepare_query" && value.kind !== "recall" ||
-      value.kind === "recall" && value.protocol_version !== (comparison ? 9 : 8) ||
+      value.kind === "recall" && (comparison
+        ? value.protocol_version !== SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION
+        : value.protocol_version !== SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION
+          && value.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) ||
       value.kind === "prepare_query" && value.access !== undefined && value.access.contract !== contract ||
       value.execution !== undefined && value.execution !== "native_reasoning_only" && value.execution[2][0] !== (comparison ? 2 : 1)) {
     throw new AlayaError("VALIDATION", "source worker result belongs to another contract family");

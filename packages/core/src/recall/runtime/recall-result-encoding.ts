@@ -17,16 +17,11 @@ export function encodeRecallResult(
     const preview = encodedPreview(previews, entry);
     // The public preview is a display field. Preserve a hydrated empty source
     // distinctly from unavailable payload without altering stored source bytes.
-    return entry.target.kind === "source_evidence" && preview === "" ? "[empty source]" : preview;
+    return displayRecallPreview(preview, entry.target);
   });
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
-  const payload = index.entries.length === 0
-    ? index.completeness.payload
-    : hydrated === 0
-      ? "omitted"
-      : hydrated < index.entries.length
-        ? "partial"
-        : index.completeness.payload;
+  const payload = projectPayloadCompleteness(index.completeness.payload,
+    index.entries.length > 0 && hydrated === 0, hydrated < index.entries.length);
   const encodedIndex: InformationIndex = payload === index.completeness.payload
     ? index
     : {
@@ -122,4 +117,18 @@ function candidatePlaneAttributes(
   };
 }
 
-const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
+export const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
+
+/** Display decoration, never source bytes or evidence of a nonempty span. */
+export function displayRecallPreview(preview: string | undefined,
+  target: InformationIndex["entries"][number]["target"]): string | undefined {
+  return target.kind === "source_evidence" && preview === "" ? "[empty source]" : preview;
+}
+
+/** Encoding can reduce delivered completeness, not erase an explicit execution
+ * failure, unknown state or interruption. Both service and wire adapters use this. */
+export function projectPayloadCompleteness(status: InformationIndex["completeness"]["payload"],
+  omitted: boolean, partial: boolean): InformationIndex["completeness"]["payload"] {
+  if (status !== "complete" && status !== "partial") return status;
+  return omitted ? "omitted" : partial ? "partial" : status;
+}

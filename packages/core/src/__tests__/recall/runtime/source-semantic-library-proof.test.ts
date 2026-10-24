@@ -1,9 +1,26 @@
 import { expect, it } from "vitest";
-import { hashSourceRecordId, interpretationNodeIdentity } from "@do-soul/alaya-protocol";
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, QueryViewSchema, hashSourceRecordId, interpretationNodeIdentity } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceSemanticSupportExtent } from "../../../memory/evidence-create/source-semantic-support-window.js";
 import { deliveredSourceSemanticLibraryProof } from "../../../recall/runtime/source-semantic-library-proof.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { source, query, correspondenceFor, deliveredProofFixture } from "./source-semantic-proof-fixture.js";
+import { source, query, correspondenceFor, deliveredProofFixture, ORIGINAL, CLOCK } from "./source-semantic-proof-fixture.js";
+import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
+
+/** The trusted request that a field page is compiled from. The page's query identity
+ * is Core's compiled identity of this request, so a verifier can bind the delivered
+ * page to its proof's own query without trusting the page. */
+const FIELD_BUDGET = { schema_version: 1 as const, work_units: 10_000_000, memory_bytes: 60_000_000,
+  page_budget: 100, finalization_reserve: 50_000, min_envelope: 10 };
+const FIELD_COMPILE_INPUT = { source: "ordinary" as const, text: ORIGINAL, snapshot_id: `sha256:${"a".repeat(64)}`,
+  budget: FIELD_BUDGET, interpretation_clock: CLOCK, authorized_scopes: null,
+  view: QueryViewSchema.parse({ schema_version: 1 as const, requested_roles: ["requested", "associated"] as const,
+    enumeration_policy: "native_query" as const, result_kind_view: "mixed" as const,
+    delivery_budget: { max_total_tokens: FIELD_BUDGET.memory_bytes, max_encoded_bytes: FIELD_BUDGET.memory_bytes } }) };
+const FIELD_QUERY_ID = compileConditionalFieldQuery(FIELD_COMPILE_INPUT).query_id;
+const FIELD_BODY_BYTES = Buffer.byteLength("Alice uses X. Bob uses Y.", "utf8");
+const FIELD_TRUST = { compile_input: FIELD_COMPILE_INPUT, source_body_bytes: FIELD_BODY_BYTES };
 import { finiteSource, finiteQuery, finiteCorrespondence, FINITE_QUERY } from "./source-semantic-finite-fixture.js";
 import { BindingContextStore, encodeBindingContext } from "../../../recall/conditional-field/engine/binding-environment.js";
 
@@ -40,14 +57,96 @@ it("rejects an occupied entry rebound to another evidence object within the same
 
 it("retains the executed proof root identity when delivery adds a source window", () => {
   const { record, proof, index, entry, qualifier, target } = deliveredProofFixture({ library: true });
-  const delivered = { ...entry, target: { ...target, span: { content_start: 0, content_end: 24,
+  const bodyBytes = Buffer.byteLength("Alice uses X. Bob uses Y.", "utf8");
+  const delivered = { ...entry, target: { ...target, span: { content_start: 0, content_end: bodyBytes,
     retained_extent: "body" as const, content_complete: true, original_complete: false } } };
   expect(proof.source_target?.span).toBeUndefined();
-  expect(deliveredSourceSemanticLibraryProof(index, delivered, qualifier, [proof], record).proof).toBe(proof);
+  // The fixture has no assertion locations, so the whole-body fallback applies and
+  // needs the authoritative extent as well as the delivered interval.
+  const trust = { source_body_bytes: bodyBytes };
+  expect(deliveredSourceSemanticLibraryProof(index, delivered, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, trust).proof).toBe(proof);
   expect(deliveredSourceSemanticLibraryProof(index, { ...delivered, target: { ...delivered.target,
-    evidence_object_id: "other-object" } }, qualifier, [proof], record).proof).toBeUndefined();
+    evidence_object_id: "other-object" } }, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, trust).proof).toBeUndefined();
   expect(deliveredSourceSemanticLibraryProof(index, { ...delivered, target: { ...delivered.target,
-    span: { ...delivered.target.span, content_complete: false } } }, qualifier, [proof], record).proof).toBeUndefined();
+    span: { ...delivered.target.span, content_complete: false } } }, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, trust).proof).toBeUndefined();
+});
+
+it("binds a root-bound executed proof to its authoritative dependency support locations", () => {
+  const { execution, interpretation } = deliveredProofFixture({
+    assertionLocations: [{ assertion_id: 1, source_utf8_span: [0, 18] }] });
+  expect(execution.index).not.toBeNull();
+  expect(execution.source_dependencies?.length ?? 0).toBeGreaterThan(0);
+  const meter = new SourceSemanticResourceLedger(SOURCE_SEMANTIC_REASONING_BUDGET);
+  expect(sourceSemanticSupportExtent(interpretation, execution.source_dependencies!, meter))
+    .toEqual({ status: "located", start: 0, end: 18 });
+});
+
+/** A field page's proof is authored through the same scoped-branch owner the daemon
+ * producer uses; only the page family differs. */
+function fieldProofFixture(input: Parameters<typeof deliveredProofFixture>[0] = {}) {
+  const fixture = deliveredProofFixture({ ...input, library: true });
+  return { ...fixture, index: { ...fixture.index, query_id: FIELD_QUERY_ID,
+    result_version: ORDINARY_NATIVE_FIELD_RESULT_VERSION } };
+}
+
+it("verifies a field-family proof only through its actual visible support interval", () => {
+  const { record, proof, index, entry, qualifier, target } = fieldProofFixture();
+  const fieldIndex = index;
+  // The field page delivers the source slot, not a proof entry: no interpretation
+  // node or explanation list. The side qualifier carries the proof binding.
+  const slot = { ...entry, interpretation_node: undefined, explanation_ids: [],
+    target: { ...target, span: { content_start: 0, content_end: FIELD_BODY_BYTES, retained_extent: "body" as const,
+      content_complete: true, original_complete: true } } };
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, slot, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, FIELD_TRUST).proof).toBe(proof);
+  // The delivered page's query identity is its trusted request's identity, and that
+  // request is this proof's own query: a page carrying a foreign query id does not
+  // verify even when every other delivered binding is unchanged.
+  const foreign = { ...fieldIndex, query_id: `sha256:${"f".repeat(64)}` };
+  expect(deliveredSourceSemanticLibraryProof(foreign, slot, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, FIELD_TRUST).proof).toBeUndefined();
+  // Without the trusted request there is no binding to the page at all.
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, slot, qualifier, [proof], record).proof).toBeUndefined();
+  // A trusted request for another query does not adopt this page's proof.
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, slot, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET,
+    { compile_input: { ...FIELD_COMPILE_INPUT, text: "which tools does Bob use?" } }).proof).toBeUndefined();
+  // Without a delivered interval there is no visible support, so nothing verifies.
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, { ...slot, target },
+    qualifier, [proof], record, SOURCE_SEMANTIC_REASONING_BUDGET, FIELD_TRUST).proof).toBeUndefined();
+  // A truncated body does not expose the whole required support closure.
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, { ...slot, target: { ...slot.target,
+    span: { ...slot.target.span, content_complete: false } } }, qualifier, [proof], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, FIELD_TRUST).proof).toBeUndefined();
+  // A forged execution binding is not the reproduced proof.
+  const forged = structuredClone(proof);
+  Object.assign(forged.binding_results![0]!.bindings.tools!, { node_id: "rY" });
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, slot, qualifier, [forged], record,
+    SOURCE_SEMANTIC_REASONING_BUDGET, FIELD_TRUST).proof).toBeUndefined();
+});
+
+it("treats a missing-location whole-body claim as complete only at the authoritative body extent", () => {
+  const { record, proof, index, entry, qualifier, target } = fieldProofFixture();
+  const fieldIndex = index;
+  const BODY = Buffer.byteLength("Alice uses X. Bob uses Y.", "utf8");
+  const slot = (start: number, end: number) => ({ ...entry, interpretation_node: undefined, explanation_ids: [],
+    target: { ...target, span: { content_start: start, content_end: end, retained_extent: "body" as const,
+      content_complete: true, original_complete: true } } });
+  const verify = (start: number, end: number, bodyBytes?: number) =>
+    deliveredSourceSemanticLibraryProof(fieldIndex, slot(start, end), qualifier, [proof], record,
+      SOURCE_SEMANTIC_REASONING_BUDGET,
+      { compile_input: FIELD_COMPILE_INPUT, ...(bodyBytes === undefined ? {} : { source_body_bytes: bodyBytes }) });
+  // A producer Boolean over a one-byte prefix cannot attest a complete source.
+  expect(verify(0, 1, BODY).proof).toBeUndefined();
+  // A declared length larger than the delivered interval is not the same body.
+  expect(verify(0, BODY - 1, BODY).proof).toBeUndefined();
+  // An unknown body extent stays unverified instead of trusting the Boolean.
+  expect(verify(0, BODY).proof).toBeUndefined();
+  // The real complete-source positive keeps verifying at the actual extent.
+  expect(verify(0, BODY, BODY).proof).toBe(proof);
 });
 
 it.each([false, true])("binds delivered coordinates and alternatives to the execution witness (library namespace=%s)", (library) => {
@@ -122,7 +221,7 @@ it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("
     restrictions: [], status: "member", query_support: { kind: "query_text", excerpt: "New" }, description: "Assume New belongs to users." }] };
   if (kind === "comparison") correspondence = { ...correspondence, correspondences: [] };
   const budget = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: 10_000_000, memory_bytes: 60_000_000, finalization_reserve: 50_000 };
-  const { record, proof, index, entry, qualifier } = deliveredProofFixture({ interpretation, semantics, correspondence,
+  const { record, proof, index, entry, qualifier, target } = deliveredProofFixture({ interpretation, semantics, correspondence,
     original: FINITE_QUERY, library: true, budget });
   expect(proof.outcome.status).toBe("interpreted");
   if (kind === "instantiation" || kind === "query_entity") expect(proof.derived_nodes?.some((row) => row.kind === kind)).toBe(true);
@@ -131,5 +230,16 @@ it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("
   const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
   Object.assign(answer, { alternative: 999 });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record, budget).proof).toBeUndefined();
+  // The ordinary field family retains the same positive witnesses and independently
+  // supplied request/body binding; it must not become blanket-unverified.
+  const compile_input = { ...FIELD_COMPILE_INPUT, text: FINITE_QUERY, budget };
+  const fieldIndex = { ...index, result_version: ORDINARY_NATIVE_FIELD_RESULT_VERSION,
+    query_id: compileConditionalFieldQuery(compile_input).query_id };
+  const fieldSlot = { ...entry, interpretation_node: undefined, explanation_ids: [], target: { ...target,
+    span: { retained_extent: "body" as const, content_start: 0, content_end: FIELD_BODY_BYTES,
+      content_complete: true, original_complete: true } } };
+  const trust = { compile_input, source_body_bytes: FIELD_BODY_BYTES };
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, fieldSlot, qualifier, [proof], record, budget, trust).proof).toBe(proof);
+  expect(deliveredSourceSemanticLibraryProof(fieldIndex, fieldSlot, qualifier, [forged], record, budget, trust).proof).toBeUndefined();
   // Coverage instruments comparison projection; the witness budget stays the fixture value.
 }, 60_000);

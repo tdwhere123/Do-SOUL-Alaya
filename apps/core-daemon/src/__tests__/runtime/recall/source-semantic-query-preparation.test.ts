@@ -55,7 +55,7 @@ describe("Source query preparation before native snapshots", () => {
           expect(h.database.connection.inTransaction).toBe(false);
           expect(h.observations().at(-1)?.in_transaction).toBe(false);
           expect(posts.calls()).toEqual([]);
-          expect(inputs).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL }]);
+          expect(inputs).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL, role: "query" }]);
           expect(options.signal?.aborted).toBe(false);
           return embedded(inputs);
         } };
@@ -190,20 +190,27 @@ describe("Source query preparation before native snapshots", () => {
     const h = await queryClient({ workerCount: 2, publishInterpretation: true });
     const posts = observePosts();
     try {
-      const prepared = await h.client.sourceSemanticsPort!.execute(initialQuery());
+      const preparation = await h.client.observeSourceSemantics({}, () => h.client.sourceSemanticsPort!.execute(initialQuery()));
+      if (preparation.outcome.status !== "success") throw preparation.outcome.error;
+      const prepared = preparation.outcome.value;
       if (prepared.kind !== "prepare_query" || prepared.query_handle === undefined) throw new Error("query handle expected");
       const owner = posts.calls().at(-1)!.worker;
       expect(prepared.candidates.map(row => row.interpretation_id)).toEqual([h.sourceInterpretationId]);
       const reason = await h.client.sourceSemanticsPort!.execute(payload({ kind: "reason", query_handle: prepared.query_handle,
         source_interpretation_id: prepared.candidates[0]!.interpretation_id,
         accepts_unreviewed_conditional_results: true, budget: BUDGET, output_byte_limit: 1_000_000 }));
-      const recalled = await h.client.sourceSemanticsPort!.execute(payload({ kind: "recall", query_handle: prepared.query_handle,
-        accepts_unreviewed_conditional_results: true, budget: BUDGET, output_byte_limit: 1_000_000 }));
+      const delivery = await h.client.observeSourceSemantics({}, () => h.client.sourceSemanticsPort!.execute(payload({
+        kind: "recall", query_handle: prepared.query_handle, accepts_unreviewed_conditional_results: true,
+        budget: BUDGET, output_byte_limit: 1_000_000 })));
+      if (delivery.outcome.status !== "success") throw delivery.outcome.error;
+      const recalled = delivery.outcome.value;
       expect(reason.kind).toBe("reason");
       if (recalled.kind !== "recall") throw new Error("recall expected");
       expect(prepared.access).toBeDefined();
-      expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
-      expect(recalled.discovery.access?.phases[1]).toEqual(prepared.access?.phases[1]);
+      const originalPool = preparation.observations[0]!.facts!.pool!;
+      expect(originalPool.origin).not.toBeNull();
+      expect(delivery.observations[0]!.facts!.pool).toEqual({ ...originalPool, use: "reused" });
+      expect(originalPool.pool_id).toBe(prepared.access?.pool_id);
       expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(recalled.execution)).query_preparation).toMatchObject({ status: "not_requested", submitted_inputs: 0 });
       expect(h.prepare).toHaveBeenCalledTimes(1);
       expect(h.bind).toHaveBeenCalledTimes(1);

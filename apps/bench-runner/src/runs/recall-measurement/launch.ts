@@ -35,7 +35,7 @@ export async function runRecallMeasurementLauncher(args: readonly string[]): Pro
     else if (operation === "measure") {
       const root = required("--root"), replayPath = required("--replay"), goldPath = required("--gold");
       const outputRoot = admitEvaluatorOutputRoot(required("--evaluator-root"), [root, replayPath, goldPath]);
-      result = measureSemanticChain(root, replayPath, json(goldPath), outputRoot);
+      result = measureSemanticChain(root, replayPath, () => json(goldPath), outputRoot);
     } else throw new AlayaError("VALIDATION", "unknown recall measurement operation");
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return code;

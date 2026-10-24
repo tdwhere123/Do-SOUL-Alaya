@@ -62,7 +62,10 @@ export const GuardSchema = z
 export type ProposedGuard = z.infer<typeof ProposedGuardSchema>;
 export type Guard = z.infer<typeof GuardSchema>;
 
-export const EnumerationPolicySchema = z.enum(["canonical", "associative"]);
+/** `canonical` and `associative` stay parseable for historical readers, but only
+ * `native_query` is a live ordinary route: a live entry rejects the other values
+ * instead of substituting a different ranking. See invariant §25. */
+export const EnumerationPolicySchema = z.enum(["canonical", "associative", "native_query"]);
 export const ResultKindViewSchema = z.enum(["mixed", "memory_only", "source_only"]);
 export const ClaimRequiredClaimSchema = z.enum(["supported", "unknown", "any"]);
 
@@ -98,7 +101,10 @@ export const QueryViewSchema = z
     facet_obligations: QueryFacetObligationListSchema.optional(),
     facet_mode: FacetModeSchema.default("same_path"),
     threshold_milligrades: MilligradeSchema.default(0),
-    enumeration_policy: EnumerationPolicySchema.default("canonical"),
+    enumeration_policy: EnumerationPolicySchema.default("native_query"),
+    delivery_context: Sha256DigestSchema.optional(),
+    delivery_budget: z.object({ max_total_tokens: NonNegativeIntSchema,
+      max_encoded_bytes: NonNegativeIntSchema }).strict().readonly().optional(),
     result_kind_view: ResultKindViewSchema.default("mixed"),
     cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     protocol_version: NonNegativeIntSchema.min(1).optional(),

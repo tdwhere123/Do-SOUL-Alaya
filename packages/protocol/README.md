@@ -15,6 +15,32 @@ schema export helpers. It must not depend on other workspace packages.
 - `src/soul/mcp-types.ts` contains MCP tool input/output schemas.
 - `src/engine/` contains conversation engine protocol types.
 
+## Ordinary field delivery compatibility
+
+Protocol 21.0.0 is the ordinary ranking/delivery **major** under
+[handbook invariant §25](../../docs/handbook/invariants.md); the package is
+`21.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the new
+surface hash. The public request and `QueryView` default to `native_query`.
+Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
+for recorded readers and requests, but live execution refuses them rather than
+substituting a ranking; `RECALL_CONSUMER_PROTOCOL_VERSION` negotiates
+source-evidence support, not ranking.
+
+`RecallNavigationWitnessSchema` (`recall/conditional-field/navigation.ts`) is the
+ordinal discovery coordinate carried on index entries and typed observations. It
+is not an association grade, claim, support statement, identity preimage or a
+renamed historical enumeration value. `QueryView` adds `delivery_context` and
+`delivery_budget`; field pages and continuations report
+`ORDINARY_NATIVE_FIELD_RESULT_VERSION`.
+
+Library recall reuses that page through `SourceSemanticFieldLibraryDeliverySchema`
+(protocol 10): tagged mixed results, Q/H/C evidence only on source targets, and a
+field continuation that both the public recall request and the worker recall
+request can replay. Frozen v6/v7 library
+deliveries stay readable through `SourceSemanticLibraryDeliverySchema` and the
+private comparison schema; those readers do not authorize live legacy execution.
+See [the migration contract](../../docs/handbook/recall.md#ordinary-native-field-delivery-protocol-21).
+
 ## Source access compatibility
 
 Protocol 20.0.0 is the explicitly versioned Source access migration major under

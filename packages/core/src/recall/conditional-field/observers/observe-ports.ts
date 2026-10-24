@@ -1,4 +1,7 @@
 import {
+  type RecallNavigationWitness,
+  type SourceIndexAcquisitionResult,
+  type SourceSemanticNominationOccurrence,
   type ObserverAction,
   type ObserverCursor,
   type ObserverPage,
@@ -61,6 +64,7 @@ export type SourceObserverPage = Readonly<{
 }>;
 
 export type SourceRootObserverRow = Readonly<{
+  readonly navigation?: RecallNavigationWitness;
   readonly source_lookup_reasons?: readonly ProposalMatchReason[];
   readonly kind: SourceEvidenceRootKind;
   readonly workspace_id: string;
@@ -167,7 +171,31 @@ export type EmbeddingObserverPage = Readonly<{
   readonly domainStatus?: "missing" | "unavailable";
 }>;
 
+export type NativeSourceNomination = Readonly<{
+  result: SourceIndexAcquisitionResult | null;
+  witness: readonly SourceSemanticNominationOccurrence[];
+  /** An explicitly bound source pool can include scoped or proved catalog roots. */
+  admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
+  catalog_positions?: Readonly<Record<string, number>>;
+  navigation_digests?: Readonly<{ original: string; hint?: string }>;
+  /** The outer library request already absorbed acquisition; do not debit it again. */
+  charged_by_caller?: true;
+  retained_bytes?: number;
+}>;
+
 export type ObserverReaders = Readonly<{
+  readonly nominateSources?: (input: Readonly<{
+    workspaceId: string; query: string; authorizedScopes: readonly string[] | null;
+    budget: { work_units: number; memory_bytes: number };
+    /** Query-lease source restriction, carried into acquisition identity and cost. */
+    sourceId?: string;
+    /** Prepared access hint; a discovery proposal, never proof of relevance. */
+    hint?: string;
+  }>) => NativeSourceNomination;
+  /** An admitted Q/H/C package may require a different visible source interval
+   * from the native navigation window; this never changes membership or rank. */
+  readonly sourceRootPayloadRange?: (target: import("@do-soul/alaya-protocol").SourceEvidenceTarget) =>
+    Readonly<{ start_byte: number; end_byte: number }> | undefined;
   readonly sourceRootMetadataByteLimit?: number;
   readonly sourceRootChunkByteLimit?: number;
   readonly permittedTimelessPolicyIds?: () => readonly string[];
@@ -194,6 +222,8 @@ export type ObserverReaders = Readonly<{
     readonly nativeByteLimit?: number;
   }>) => SourceRootObserverPage;
   readonly sourceRoot?: (input: Readonly<{
+    /** Actual caller phase; absent on older readers means unclassified, not observation. */
+    readonly purpose?: "observation" | "payload";
     readonly workspaceId: string;
     readonly rootKind: SourceEvidenceRootKind;
     readonly rootId: string;

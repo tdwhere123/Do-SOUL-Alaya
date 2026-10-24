@@ -74,7 +74,7 @@ export function acceptingEntries(
     : input.projection_scan_offset
       ?? Number(cursorMatch?.[1] ?? 0);
   let values: NonNullable<AcceptingProjectionInput["ordered_values"]>;
-  if (input.ordered_values !== undefined && emitted === undefined) values = input.ordered_values;
+  if (input.ordered_values !== undefined && (emitted === undefined || policy === "native_query")) values = input.ordered_values;
   else {
     const sorted = sortFieldValues(input.snapshot.values, emitted === undefined ? "canonical" : policy);
     values = { size: sorted.length, at: (index: number) => sorted[index] };
@@ -318,6 +318,7 @@ export function indexEntryForValue(
     program_state: value.state.program_state,
     time_state: value.state.time_state,
     role,
+    ...(input.navigationFor?.(value.state.target) === undefined ? {} : { navigation: input.navigationFor!(value.state.target) }),
     association_milligrades: milligrades,
     ...(guaranteed === undefined ? {} : { guaranteed_milligrades: guaranteed }),
     claim,

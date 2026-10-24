@@ -5,9 +5,7 @@ import { AlayaError, canonicalJson, SourceSemanticAccessProfileSchema, SourceSem
 import { admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizedScopesFromAdmission,
   sourceSemanticAccessInputIdentity, sourceSemanticLibraryRequestIdentity, sourceSemanticLibraryQueryIdentity,
   preparedDeliveryId } from "@do-soul/alaya-core";
-import type { BenchDaemonHandle } from "../../harness/daemon.js";
-import { FirstExposurePageSchema, FirstExposureSession } from "../measurement/first-exposure-session.js";
-import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
+import { FirstExposurePageSchema } from "../measurement/first-exposure-session.js";
 import { admitSourceSemanticLibraryResponse, admitSourceSemanticLibraryContinuation } from "../measurement/source-semantic-library-measurement.js";
 
 type Recall = Extract<SourceSemanticComparisonResponse, { operation: "recall" }>;
@@ -22,46 +20,10 @@ const CaptureSchema = z.object({ contract: z.literal("source-semantic-private-li
   stop: z.enum(["requested_page_bound", "no_issued_continuation"])
 }).strict();
 
-/** Temporary private comparison capture. No gold, model, public MCP call or policy selection.
- * The caller owns freezing the request/settings, artifact placement and runtime close evidence.
- * A captured page does not attest process or storage shutdown.
- */
-export async function capturePrivateSourceLibrary(input: Readonly<{
-  daemon: Pick<BenchDaemonHandle, "compareSourceSemantics">; request: unknown;
-  profile: SourceSemanticAccessProfile; maxPages: 1 | 2;
-}>) {
-  const profile = SourceSemanticAccessProfileSchema.parse(structuredClone(input.profile));
-  const request = SourceSemanticComparisonRequestSchema.parse(structuredClone(input.request));
-  if (request.operation !== "recall" || request.continuation !== undefined || request.query_handle !== undefined ||
-      input.maxPages !== 1 && input.maxPages !== 2) throw new AlayaError("VALIDATION", "private capture requires one fresh frozen library request");
-  const execute = input.daemon.compareSourceSemantics;
-  if (execute === undefined) throw new AlayaError("CONFLICT", "private source comparison was not enabled at startup");
-  const session = new FirstExposureSession(), pages: z.infer<typeof CaptureSchema>["pages"] = [];
-  let next = request;
-  for (let page = 0; page < input.maxPages; page++) {
-    let frame: z.infer<typeof FrameSchema> | undefined;
-    const response = await execute({ request: next, ...(page === 0 ? { profile } : {}),
-      capture: value => { frame = FrameSchema.parse(value); } });
-    if (response.operation !== "recall" || frame === undefined || frame.response.operation !== "recall") {
-      throw new AlayaError("CONFLICT", "private capture has no actual library output");
-    }
-    // Retain only validated JSON bytes; the shared exposure owner binds that same wire snapshot.
-    const wire = FrameSchema.parse(JSON.parse(JSON.stringify(frame)));
-    const first_exposure = recordSourceSemanticLibraryFirstExposure(response, session, next.continuation);
-    pages.push({ ...wire, first_exposure });
-    if (response.index.continuation === null) return CaptureSchema.parse({ contract: "source-semantic-private-library-capture-v1",
-      profile, max_pages: input.maxPages, pages, stop: "no_issued_continuation" });
-    const continuation = SourceSemanticComparisonRequestSchema.parse({ ...request, continuation: response.index.continuation });
-    if (continuation.operation !== "recall") throw new AlayaError("CONFLICT", "private continuation kind changed");
-    next = continuation;
-  }
-  return CaptureSchema.parse({ contract: "source-semantic-private-library-capture-v1", profile, max_pages: input.maxPages,
-    pages, stop: "requested_page_bound" });
-}
-
 /** Whole private artifact admission before labels. Source/preview/proof verification is supplied
  * by the existing sealed-source owner, not inferred from an index or fabricated MCP envelope.
- * Consumer: the bounded comparison; promotion/termination removes the temporary private selector.
+ * Consumer: historical private comparison archives. Keep admission and identity meanings
+ * while those archives are supported; this module cannot initiate a live comparison.
  */
 export function admitPrivateSourceLibraryCapture(raw: unknown, input: Readonly<{
   workspace_id: string; run_id: string | null; as_of: string; request: unknown; profile: SourceSemanticAccessProfile;

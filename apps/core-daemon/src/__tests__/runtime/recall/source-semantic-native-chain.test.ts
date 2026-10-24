@@ -2,9 +2,16 @@ import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => isolation.restore());
 import {
-  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
+  indexEntryCacheKey, sourceDisclosure, sourceSemanticExecutionPhases,
+  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
@@ -27,6 +34,7 @@ import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage, publishIndexedGeneration } from "./recall-storage.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { finiteSource, finiteQuery, finiteCorrespondence, FINITE_QUERY }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-finite-fixture.js";
@@ -40,7 +48,8 @@ import {
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const ALICE = "Alice uses tools.";
-const SILENT = "Bob stays silent.";
+// Raw-only source has lawful lexical membership in the tools query, without H/C.
+const SILENT = "Bob stays silent about tools.";
 const OTHER = "Alice stays home.";
 const PROMISE = "Alice promised to send tools.";
 const ORIGINAL = "which tools does Alice use?";
@@ -228,7 +237,7 @@ function receiveCorrespondence(semantics: SourceSemanticQuery, interpretation: S
 }
 
 async function admitSources(filename: string, sources: readonly { id: string; content: string; version?: string; recordedAt?: string }[]) {
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const admission = createAuditedSourceAdmission({
@@ -243,6 +252,8 @@ async function admitSources(filename: string, sources: readonly { id: string; co
     }, { workspaceId: WS });
     identities[source.id] = admitted.record.identity;
   }
+  // Native membership is an accepted source-index generation, as at daemon startup.
+  await publishIndexedGeneration(database, sources.map(source => ({ text: source.content })));
   expect(database.connection.prepare("SELECT count(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
   database.close(); closeCachedDatabase(filename);
   return identities;
@@ -250,7 +261,7 @@ async function admitSources(filename: string, sources: readonly { id: string; co
 
 async function openSession(filename: string) {
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const evidenceService = new EvidenceService({
     eventLogRepo: new SqliteEventLogRepo(database), runtimeNotifier: { notifyEntry: async () => undefined },
@@ -426,8 +437,10 @@ it("preserves table source interpretation and receiver query semantics and seman
         if (recalled.operation !== "recall") throw new Error("library recall expected");
         expect(sourceSemanticExecutionPhases(recalled.execution).query_preparation.external_api_attempts).toBe(0);
         expect((mcp.structuredContent as { output: { operation: string } }).output.operation).toBe("recall");
-        expect(recalled.discovery?.eligible_source_count).toBeGreaterThanOrEqual(2);
-        expect(recalled.order?.enumeration_policy).toBe("evidence_support");
+        // The ordinary field is query-conditioned native membership, not an exhaustive
+        // source catalog; at least the interpreted source is eligible and tagged.
+        expect(recalled.discovery?.eligible_source_count).toBeGreaterThanOrEqual(1);
+        expect(recalled.order?.enumeration_policy).toBe("native_query");
         expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === interpretationId)).toBe(true);
         const proof = recalled.proofs?.find((row) => row.source_interpretation_id === interpretationId);
         expect(proof?.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding")).toBe(true);
@@ -436,7 +449,10 @@ it("preserves table source interpretation and receiver query semantics and seman
         const goldSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === interpretationId);
         expect(goldSlot).toBeDefined();
         expect(search.results.some((row) => row.content_preview?.includes("Alice uses tools."))).toBe(true);
-        expect(search.results.some((row) => row.content_preview?.includes(SILENT) && row.object_kind === "source_evidence")).toBe(true);
+        const rawSlot = search.results.findIndex(row => row.content_preview?.includes(SILENT));
+        expect(rawSlot).toBeGreaterThanOrEqual(0);
+        expect(recalled.slot_qualifiers?.find(row => row.index === rawSlot)?.evidence_kind).toBe("source_evidence");
+        expect(search.results.every((row) => row.target.kind === "source_evidence")).toBe(true);
         expect(search.results[goldSlot!.index]?.target.kind).toBe("source_evidence");
         const target = search.results[goldSlot!.index]?.target;
         if (target?.kind !== "source_evidence") throw new Error("source slot required");
@@ -560,11 +576,12 @@ it("discovers a table-published interpretation after the first descriptor page",
           output_byte_limit: 1_000_000, authorized_scopes: SCOPES
         }, reopened.context);
         if (recalled.operation !== "recall") throw new Error("library recall expected");
-        expect(recalled.discovery?.visited_source_interpretation_pages).toBeGreaterThanOrEqual(2);
-        expect(recalled.discovery?.visited_source_interpretation_descriptors).toBeGreaterThan(16);
+        // The field pages no interpretation catalog; the guarantee is that the
+        // interpretation beyond the first preparation page is actually examined.
+        expect(recalled.discovery?.visited_source_interpretation_pages).toBe(0);
+        expect(recalled.discovery?.visited_source_interpretation_descriptors).toBe(1);
         expect(recalled.discovery?.examined_source_interpretation_ids).toContain(gold);
         expect(recalled.discovery?.examined_source_interpretation_ids).toHaveLength(1);
-        expect(recalled.discovery?.unexamined_source_interpretation_count).toBeGreaterThan(0);
         expect(recalled.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === gold)).toBe(true);
       } finally {
         await closeSession(reopened, filename);
@@ -714,7 +731,10 @@ it("keeps failed sources available and reserves or paginates complete packages u
         const receivedCorrespondence = receiveCorrespondence(receivedQuery.query, published.interpretation, published.interpretation_id);
         const full = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQuery.query, [receivedCorrespondence.semantic_correspondence]);
         if (full.operation !== "recall") throw new Error("full recall expected");
-        expect(soulSearchFromLibraryRecall(full).results.some((row) => row.content_preview?.includes(SILENT))).toBe(true);
+        // Missing interpretation and a gapped interpretation independently retain raw access.
+        const raw = soulSearchFromLibraryRecall(full).results;
+        expect(raw.some(row => row.content_preview?.includes(SILENT))).toBe(true);
+        expect(raw.some(row => row.content_preview?.includes("Alice uses tools."))).toBe(true);
         const execute = reopened.client.sourceSemanticsPort!.execute;
         const workerFull = await execute({
           workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
@@ -740,8 +760,15 @@ it("keeps failed sources available and reserves or paginates complete packages u
           || workerLimited.index.continuation !== null).toBe(true);
         expect(Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(workerLimited))))
           .toBeLessThanOrEqual(Math.max(1024, workerBytes - 1));
+        // A delivered proof qualifier must reference a visible source slot, never a
+        // claim without exposed support (the retired selector's payload_support flag).
         expect(workerLimited.slot_qualifiers.filter(row => row.evidence_kind === "semantic_proof")
-          .every(row => row.payload_support === "available")).toBe(true);
+          .every(row => {
+            const entry = workerLimited.index.entries[row.index];
+            const wire = entry === undefined ? undefined : workerLimited.source_disclosures?.[indexEntryCacheKey(entry)];
+            return entry?.target.kind === "source_evidence" && entry.target.span !== undefined
+              && wire !== undefined && sourceDisclosure(wire).proof_use.kind === "conditional_support";
+          })).toBe(true);
         expect(soulSearchFromLibraryRecall(workerLimited).results.some((row) => row.object_kind === "memory_entry")).toBe(false);
         expect(sourceSemanticExecutionPhases(full.execution).query_preparation.external_api_attempts).toBe(0);
       } finally {
@@ -799,7 +826,7 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     } finally {
       await closeSession(recovered, backup);
     }
-    const { database } = await createRecallRealStorage(() => undefined, backup);
+    const { database } = await openRecallStorage(() => undefined, backup);
     try {
       const eraser = new SqliteFieldEraseBarrierRepo(database, fieldContractSha256);
       const barrier = {

@@ -21,15 +21,19 @@ import {
   admitOrdinaryEntryCursor, executeOrdinaryRecallEntry, ordinaryEntryStatusReason,
   type OrdinaryEntryCursorSeen
 } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
-import { nativeRecallFixture, HIDDEN_GOLD, QUESTION } from "./native-recall.test-support.js";
+import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
+import { HIDDEN_GOLD, QUESTION } from "./native-recall.test-support.js";
 
 const PROJECTS = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory"] as const;
 
-let base: Awaited<ReturnType<typeof nativeRecallFixture>>;
+let base: Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>;
+let preparation: ReturnType<typeof simulateIndexedQueryPreparation>;
 beforeAll(async () => {
-  base = await nativeRecallFixture(PROJECTS.map(name => `Project ${name} was mentioned.`));
+  preparation = simulateIndexedQueryPreparation();
+  base = await ordinaryIndexedSnapshot(PROJECTS.map(name => `Project ${name} was mentioned.`));
 }, 120000);
 afterAll(() => {
+  preparation?.mockRestore();
   if (base !== undefined) rmSync(base.root, { recursive: true, force: true });
   isolation.restore(); expect(isolation.violations).toEqual([]);
 });
@@ -132,7 +136,7 @@ it("fails closed on repeated cursors and does not treat replayed positions as fr
 });
 
 it("executes public soul.recall through MCP against the restored SQLite snapshot", async () => {
-  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const plan = base, query = plan.queries[0]!;
   expect(plan.config.budget.page_budget).not.toBe(ORDINARY_RECALL_PUBLIC_PAGE_SLOTS);
   const root = join(base.root, "ordinary-entry-success");
   const execution = await executeOrdinaryRecallEntry({
@@ -184,7 +188,7 @@ it("executes public soul.recall through MCP against the restored SQLite snapshot
 }, 120000);
 
 it("captures an actual continuation page without replacing first exposure", async () => {
-  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const plan = base, query = plan.queries[0]!;
   const execution = await executeOrdinaryRecallEntry({
     config: plan.config, root: join(base.root, "ordinary-entry-pages"),
     queries: [{ query_key: query.query_key, original_query: query.original_query }]
@@ -231,7 +235,7 @@ it.each([
   { page: "later", defect: "missing-index-identity", status: "partial", count: 2 }
 ] as const)("keeps a $page-page $defect as an unobserved attempted page with raw frame and timing",
   async ({ page, defect, status, count }) => {
-    const plan = base.admitted.plan, query = plan.queries[0]!;
+    const plan = base, query = plan.queries[0]!;
     const original = Client.prototype.callTool;
     const injected: unknown[] = [];
     let recalls = 0;
@@ -293,7 +297,7 @@ it.each([
   }, 120000);
 
 it.each(["query_id", "snapshot_id"] as const)("fails closed when a real continuation response changes %s", async field => {
-  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const plan = base, query = plan.queries[0]!;
   const root = join(base.root, `ordinary-entry-changed-${field}`);
   const input = { config: plan.config, root,
     queries: [{ query_key: query.query_key, original_query: query.original_query }] };
@@ -327,9 +331,9 @@ it.each(["query_id", "snapshot_id"] as const)("fails closed when a real continua
 it("follows public continuation past two pages until ten slots or admitted tail exhaustion", async () => {
   const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory",
     "Ironwood", "Juniper", "Kauri", "Larch", "Maple", "Nance", "Oak", "Pine"];
-  const large = await nativeRecallFixture(names.map(name => `Project ${name} was mentioned. ${"Encoding padding. ".repeat(400)}`));
+  const large = await ordinaryIndexedSnapshot(names.map(name => `Project ${name} was mentioned. ${"Encoding padding. ".repeat(400)}`));
   try {
-    const plan = large.admitted.plan, query = plan.queries[0]!;
+    const plan = large, query = plan.queries[0]!;
     const execution = await executeOrdinaryRecallEntry({
       config: plan.config, root: join(large.root, "ordinary-entry-long-pages"),
       queries: [{ query_key: query.query_key, original_query: query.original_query }]
@@ -361,7 +365,7 @@ it("follows public continuation past two pages until ten slots or admitted tail 
 }, 180000);
 
 it("does not reuse an ordinary entry artifact for a different requested config", async () => {
-  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const plan = base, query = plan.queries[0]!;
   const root = join(base.root, "ordinary-entry-identity");
   const queries = [{ query_key: query.query_key, original_query: query.original_query }];
   const first = await executeOrdinaryRecallEntry({ config: plan.config, root, queries });
@@ -373,7 +377,7 @@ it("does not reuse an ordinary entry artifact for a different requested config",
 }, 120000);
 
 it("returns not-run without intervals when ordinary entry cannot express authorized scopes", async () => {
-  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const plan = base, query = plan.queries[0]!;
   const root = join(base.root, "ordinary-entry-denied");
   const execution = await executeOrdinaryRecallEntry({
     config: { ...plan.config, authorized_scopes: { mode: "denied" } }, root,

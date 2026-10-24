@@ -1,5 +1,6 @@
 import type { CoreError } from "@do-soul/alaya-core";
 import { z } from "zod";
+import { PreparedQuerySchema } from "./prepared-source-query.js";
 import {
   AssociationCapContractSchema,
   AuthorizedScopesAdmissionSchema,
@@ -10,6 +11,7 @@ import {
   PathRelationSchema,
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
+  QueryViewSchema,
   RecallTargetKindSchema,
   RequestBudgetSchema,
   ResultKindViewSchema,
@@ -126,8 +128,15 @@ export const ConditionalFieldRecallWorkerPayloadSchema = z
   .object({
     workspace_id: z.string(),
     query_text: z.string(),
+    prepared_query: PreparedQuerySchema.optional(),
+    // Additive optional surface fields: the field keeps its own delivery default,
+    // so a peer that predates them still executes this operation.
+    delivery_budget: QueryViewSchema.unwrap().shape.delivery_budget.optional(),
+    delivery_context: QueryViewSchema.unwrap().shape.delivery_context,
     budget: RequestBudgetSchema,
     requested_budget: RequestBudgetSchema.optional(),
+    source_id: z.string().optional(),
+    access_hint: z.string().optional(),
     snapshot_id: z.string(),
     interpretation_clock: z.string(),
     as_of: z.string(),
@@ -191,5 +200,7 @@ export type RecallReadWorkerResponse =
         readonly message: string;
         readonly stack?: string;
         readonly core?: Pick<CoreError, "code" | "subCode" | "details">;
+        /** Structured measured/owner details for non-core classifications. */
+        readonly details?: Readonly<Record<string, unknown>>;
       }>;
     }>;

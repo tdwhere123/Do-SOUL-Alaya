@@ -61,7 +61,7 @@ function accessPoolIdentityMaterial(runtime: SourceSemanticReadRuntime, workspac
   }
   meter.charge(4, 512 + Object.keys(expanded).length * 24 + 32, "source access identity frames");
   return { receipt: expanded, workspace, authorized, revision: sourceSemanticRevision(runtime),
-    ...(receipt.contract === "source-semantic-access-v3" ? { retained_witness: retainedWitness } : {}) };
+    ...(retainedWitness === undefined ? {} : { retained_witness: retainedWitness }) };
 }
 
 export function bindAccessPoolIdentity<Receipt extends IdentityReceipt>(runtime: SourceSemanticReadRuntime,

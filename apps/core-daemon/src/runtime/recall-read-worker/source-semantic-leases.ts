@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { canonicalJson, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation, type UtteranceAttribution, type SourceSemanticAccessProfile } from "@do-soul/alaya-protocol";
-import { resolveSourceSemanticComparisonProfile, CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
+import { canonicalJson, type InformationIndex, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation, type UtteranceAttribution } from "@do-soul/alaya-protocol";
+import { CoreError, fieldContractSha256, type NativeSourceNomination } from "@do-soul/alaya-core";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadableAccessPool as SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
-import type { LibraryDeliveryPlan } from "./source-semantic-library-delivery.js";
 
 export type SourceSemanticLease = Readonly<{
   kind: "source" | "query" | "page" | "library";
-  profile?: SourceSemanticAccessProfile;
   workspace_id: string; principal: string; as_of: string; authorized: readonly string[] | null;
   lifetime_now?: string;
   expires_at: string; revision: string;
@@ -20,11 +18,12 @@ export type SourceSemanticLease = Readonly<{
   candidates?: readonly string[];
   access_pool?: SourceSemanticAccessPool; access_offset?: number; access_source_offset?: number; truncated?: boolean;
   continuation?: Continuation; request_identity?: string;
-  library_plan?: LibraryDeliveryPlan;
+  /** References to the shared producer's original page and frozen nomination.
+   * Resumes report the same finite membership, not fresh discovery or a second plan. */
+  field_page?: Readonly<{ index: InformationIndex; nomination: NativeSourceNomination | null }>;
 }>;
 type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
-type Caller = Clock & Readonly<{ workspace_id: string; principal?: string;
-  comparison?: Readonly<{ profile: SourceSemanticAccessProfile }> }>;
+type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
 type LeaseRow<Lease = SourceSemanticLease> = { lease: Lease; bytes: number };
 const LEASES = new WeakMap<SourceSemanticReadRuntime, Map<string, LeaseRow>>();
 const MAX_LEASES = 32;
@@ -118,7 +117,6 @@ export function readSemanticLease(runtime: SourceSemanticReadRuntime, caller: Ca
   if (lease === undefined || lease.expires_at <= sourceSemanticLifetimeNow(caller)) {
     rows?.delete(id); throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
   }
-  resolveSourceSemanticComparisonProfile({ comparison: caller.comparison, bound: lease });
   if (lease.kind !== kind || lease.workspace_id !== caller.workspace_id || lease.principal !== (caller.principal ?? "")) {
     throw new CoreError("VALIDATION", "source semantic preparation handle is bound to another principal or operation", { details: { admission: "expired" } });
   }

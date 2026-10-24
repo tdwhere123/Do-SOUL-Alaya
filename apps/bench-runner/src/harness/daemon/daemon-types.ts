@@ -61,8 +61,6 @@ export type { BenchTokenMetrics } from "../token/token-metrics.js";
 export interface BenchDaemonOptions {
   /** Private observation transport, opt-in only; never changes a public MCP response. */
   readonly sourceSemanticObservations?: boolean;
-  /** Temporary runtime-bound private comparison, not a public MCP arm selector. */
-  readonly sourceSemanticComparison?: boolean;
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDirRoot?: string;
   /** Execution placement only; the root must already exist. The owned child lease is removed on shutdown. */
@@ -112,7 +110,6 @@ export interface BenchEdgeFormationMember {
 
 export interface BenchDaemonHandle {
   readonly observeSourceSemantics?: SourceSemanticObservationScope;
-  readonly compareSourceSemantics?: import("../../../../core-daemon/dist/runtime/recall/source-comparison-execution.js").SourceComparisonCall;
   readonly runtime: AlayaDaemonRuntime;
   readonly mcpClient: Client;
   readonly workspaceId: string;

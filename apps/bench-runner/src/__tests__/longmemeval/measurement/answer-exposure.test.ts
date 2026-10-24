@@ -6,7 +6,7 @@ const isolation = await vi.hoisted(async () => {
 import { createHash } from "node:crypto";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
-import type { SoulInterpretationResponse } from "@do-soul/alaya-protocol";
+import { SoulInterpretationRecallDeliverySchema } from "@do-soul/alaya-protocol";
 import { LongMemEvalQuestionSchema } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { LongMemEvalSourceCensusRecord } from "../../../runs/snapshot/source-records/census.js";
 import { QuestionPublicationSchema } from "../../../runs/longmemeval-semantic/execute.js";
@@ -44,8 +44,9 @@ function observed(start: number, end: number, emitted = Buffer.from(content).sub
   const index = assemble(entries, []);
   const response = encodeSourceSemanticLibraryResponse(workerRecall(index));
   if (response.operation !== "recall" || response.results === undefined) throw new Error("public recall required");
-  const publicResponse = { ...response, results: response.results.map(result => ({ ...result, content_preview: emitted,
-    budget_state: { ...result.budget_state, within_budget: within } })) } satisfies SoulInterpretationResponse;
+  const publicResponse = SoulInterpretationRecallDeliverySchema.parse({ ...response,
+    results: response.results.map(result => ({ ...result, content_preview: emitted,
+      budget_state: { ...result.budget_state, within_budget: within } })) });
   const exposure = recordSourceSemanticLibraryFirstExposure(publicResponse);
   const evaluated = measureSourceSemanticLibraryResponse({ recallResult: publicResponse, firstExposurePage: exposure,
     requestBudget: REQUEST, goldSourceUnits: [GOLD] });

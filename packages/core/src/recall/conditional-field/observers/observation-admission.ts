@@ -45,7 +45,8 @@ export function encodeAuthorizedScopesAdmission(
 export function authorizedScopesFromAdmission(
   admission: AuthorizedScopesAdmission | undefined
 ): { readonly authorized_scopes?: readonly string[] | null } {
-  if (admission == null || admission.mode === "denied") return {};
+  if (admission == null) return {};
+  if (admission.mode === "denied") return { authorized_scopes: [] };
   if (admission.mode === "unrestricted") return { authorized_scopes: null };
   return { authorized_scopes: admission.scopes };
 }
@@ -184,6 +185,7 @@ export function buildTypedObservation(
     source_revision: args.sourceRevision,
     workspace_id: input.workspace_id,
     applicability,
+    ...(args.sourceRoot?.navigation === undefined ? {} : { navigation: args.sourceRoot.navigation }),
     ...(relationKind === undefined ? {} : { relation_kind: relationKind }),
     ...(measurementId === undefined ? {} : { measurement_id: measurementId }),
     ...(modelId === undefined ? {} : { model_id: modelId }),

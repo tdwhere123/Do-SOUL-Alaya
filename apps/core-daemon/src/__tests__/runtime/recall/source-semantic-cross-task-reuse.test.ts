@@ -25,6 +25,8 @@ import { accessQuery, ACCESS_BUDGET as BUDGET, CLOCK, WS } from "./source-semant
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 import { createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN } from
   "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage, publishIndexedGeneration } from "./recall-storage.test-support.js";
+import { captureFieldProofRequests } from "./field-proof-consumer.test-support.js";
 
 // Authored conditional control: this is neither captured CLI work nor model-produced meaning.
 const SOURCE = "Typecheck passed. Golden snapshot updated.";
@@ -54,7 +56,7 @@ function queries() {
 
 async function openSession(filename: string, trace: Trace) {
   assertBuiltWorker();
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const runRepo = new SqliteRunRepo(database);
   if (await runRepo.getById(CONTEXT_B.runId) === null) await runRepo.create({ run_id: CONTEXT_B.runId,
     workspace_id: WS, title: "Release handoff", goal: null, run_mode: RunMode.CHAT, engine_binding_id: null,
@@ -66,11 +68,12 @@ async function openSession(filename: string, trace: Trace) {
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo,
     runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256 });
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+  const proofRequests = captureFieldProofRequests(client.sourceSemanticsPort!);
   const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK,
-    sourceSemanticsPort: client.sourceSemanticsPort,
+    sourceSemanticsPort: proofRequests.port,
     sourceSemanticPublication: createSourceSemanticPublication({ database, evidenceService }) });
   await client.ready();
-  return { database, stores, admission, client, handler, filename, trace };
+  return { database, stores, admission, client, handler, filename, trace, proofRequests };
 }
 type Session = Awaited<ReturnType<typeof openSession>>;
 
@@ -148,10 +151,17 @@ async function recall(session: Session, context: Context, original: string, quer
   const result = await output(session, context, { operation: "recall", accepts_unreviewed_conditional_results: true,
     original_query: original, query_semantics: query, semantic_correspondences: correspondences, output_byte_limit: 1_000_000 });
   if (result.operation !== "recall") throw new Error("recall required");
+  const trusted = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
+  const trust = session.proofRequests.trust(result.delivery_id!, session.stores.getStoredRecord(WS, trusted.identity));
+  historicalTrust.set(result, trust);
   for (const qualifier of result.slot_qualifiers ?? []) {
     if (qualifier.evidence_kind !== "semantic_proof") continue;
-    const verified = deliveredSourceSemanticLibraryProof(result.index!, result.index!.entries[qualifier.index]!, qualifier,
-      result.proofs!, session.stores.getCurrentRecord(WS, SOURCE_ID)!);
+    const entry = result.index!.entries[qualifier.index]!;
+    // Core's delivered-proof verifier re-executes the accepting witness. The field page
+    // binds the proof as side evidence, but the verifier must accept that result version
+    // before this boundary is proved; binding presence alone is not verification.
+    const verified = deliveredSourceSemanticLibraryProof(result.index!, entry, qualifier,
+      result.proofs!, trusted, BUDGET, trust);
     expect(verified.proof).toBeDefined();
     expect(verified.proof).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
       conclusion_scope: "conditional_on_interpretation" });
@@ -162,6 +172,8 @@ async function recall(session: Session, context: Context, original: string, quer
   }
   return result;
 }
+
+const historicalTrust = new WeakMap<object, ReturnType<Session["proofRequests"]["trust"]>>();
 
 function publications(session: Session, phase: string) {
   const rows = session.database.connection.prepare(`SELECT object_id, lifecycle_state, gist FROM evidence_capsules
@@ -190,6 +202,8 @@ it("reuses task-scoped meaning across tasks, supplements omitted meaning and wit
     await session.admission.admit({ workspace_id: WS, source_id: SOURCE_ID, source_version: "1", content_bytes: SOURCE,
       evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
       speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE) }, { workspaceId: WS });
+    // Library membership is the accepted native source-index generation, as at daemon startup.
+    await publishIndexedGeneration(session.database, [{ text: SOURCE }]);
     const { a, b } = queries();
     const good = await publish(session, CONTEXT_A, TASK_A, "Typecheck passed", "typecheck passed");
     const wrong = await publish(session, CONTEXT_A, TASK_A, "Typecheck passed", "typecheck failed");
@@ -258,8 +272,10 @@ it("reuses task-scoped meaning across tasks, supplements omitted meaning and wit
     expectProofs(afterB, [good.interpretation_id, supplement.interpretation_id]);
     for (const historical of [beforeA, beforeB]) {
       const qualifier = historical.slot_qualifiers!.find(row => row.source_interpretation_id === wrong.interpretation_id)!;
+      // A historical derivation stays inspectable only when the verifier can reproduce it.
       expect(deliveredSourceSemanticLibraryProof(historical.index!, historical.index!.entries[qualifier.index]!, qualifier,
-        historical.proofs!, session.stores.getCurrentRecord(WS, SOURCE_ID)!).proof).toBeDefined();
+        historical.proofs!, session.stores.getCurrentRecord(WS, SOURCE_ID)!, BUDGET,
+        historicalTrust.get(historical)!).proof).toBeDefined();
       trace.push({ boundary: "historical_proof_verification_after_withdrawal", value: {
         source_interpretation_id: wrong.interpretation_id, query_semantics_id: qualifier.query_semantics_id,
         current_eligibility: false, historical_derivation_verified: true } });

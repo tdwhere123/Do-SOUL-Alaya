@@ -310,6 +310,8 @@ export {
   SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
+  SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, SourceSemanticFieldLibraryDeliverySchema, SourceSemanticFieldLibraryWorkerResultSchema,
+  SourceSemanticFieldLibraryContinuationSchema,
   SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport,
   proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier, verifySourceSemanticLibraryDelivery
 } from "./garden/source-semantic-worker.js";

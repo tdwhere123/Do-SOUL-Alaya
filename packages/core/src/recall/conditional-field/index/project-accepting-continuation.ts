@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
+import { viewIdentityMaterial } from "../query/compile-query-identity.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import {
   OFFSET_CURSOR,
@@ -83,7 +84,7 @@ function projectionPrefixIdentity(input: AcceptingProjectionInput, offset: numbe
     .slice(0, offset).map((value) => stableStringify([value,
       input.roles?.get(productStateNodeId(value.state)) ?? "associated",
       facetsForCandidate(value, input), facetModeForValue(value, input)]));
-  return `projection-${identityDigest([stableStringify(input.view), ...prefix])}`;
+  return `projection-${identityDigest([stableStringify(viewIdentityMaterial(input.view)), ...prefix])}`;
 }
 
 export function nextContinuation(

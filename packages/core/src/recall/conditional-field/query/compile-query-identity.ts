@@ -23,6 +23,8 @@ export type QueryDenotationParts = Readonly<{
   readonly authorized_scopes?: readonly string[] | null;
   readonly lexical_text?: string;
   readonly ordinary_request?: unknown;
+  readonly source_id?: string;
+  readonly access_hint?: string;
   readonly interpretation_proposal?: QueryInterpretationProposal;
   readonly proposal_registry_policy_version?: string;
   readonly proposal_effective_limits?: QueryProposalStructuralLimits;
@@ -32,12 +34,25 @@ export function digestOriginalQuery(text: string): string {
   return formatConditionalFieldDigest(createHash("sha256").update(text, "utf8").digest("hex"));
 }
 
+/** The delivery envelope is a resource-derived delivery parameter, not part of the
+ * query interpretation. A continuation interrupted by a smaller work/memory budget
+ * must keep its frozen query and continuation identity when the caller resumes with
+ * a larger budget (handbook: larger-budget continuation recovery). Explicit and
+ * default encoded-byte allowances therefore never enter identity material.
+ */
+export function viewIdentityMaterial(view: QueryView | undefined): unknown {
+  if (view === undefined) return null;
+  if (view.delivery_budget === undefined) return view;
+  const { delivery_budget: _deliveryBudget, ...interpretationView } = view;
+  return interpretationView;
+}
+
 export function identityFor(queryId: string | undefined, parts: QueryDenotationParts): string {
   if (queryId !== undefined) return queryId;
   return formatConditionalFieldDigest(
     createHash("sha256").update(stableStringify({
       program: parts.program,
-      view: parts.view ?? null,
+      view: viewIdentityMaterial(parts.view),
       hypotheses: parts.hypotheses ?? [],
       interpretation_clock: parts.interpretation_clock ?? null,
       time_window: parts.time_window ?? null,
@@ -48,6 +63,8 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
           : [...parts.authorized_scopes].sort(),
       lexical_text: parts.lexical_text ?? "",
       ordinary_request: parts.ordinary_request ?? null,
+      source_id: parts.source_id ?? null,
+      access_hint: parts.access_hint ?? null,
       source_guard: parts.source_guard ?? null,
       interpretation_proposal: parts.interpretation_proposal === undefined
         ? null

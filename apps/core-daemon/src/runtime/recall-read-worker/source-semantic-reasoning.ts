@@ -1,12 +1,12 @@
 import {
-  SourceSemanticWorkerResultSchema, SourceSemanticComparisonWorkerResultSchema, SourceSemanticResourceExhausted,
-  sourceSemanticProfiledAcquisitionNotRun, packSourceSemanticAcquisition, admitSourceSemanticWorkerResultFamily, SourceReferenceCapacityExceeded,
+  SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted,
+  admitSourceSemanticWorkerResultFamily, SourceReferenceCapacityExceeded,
   buildSourceReferenceCatalog, canonicalJson, sourceSemanticExecution,
   capturePackSourceSemanticPreparationForRequest,
-  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticExecution, type SourceSemanticReadableExecution, type SourceSemanticReadableWorkerResult,
+  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticExecution, type SourceSemanticReadableExecution,
   type SourceSemanticCompactPreparation, type SourceSemanticQueryPreparation, type SourceSemanticQuery, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
-import { CoreError, resolveSourceSemanticComparisonProfile, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
+import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, executeSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
@@ -20,6 +20,7 @@ import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
+import { workerFailureDetails } from "../recall/worker-actual-cost.js";
 import { readSourceIndexSnapshotFact } from "./source-index-measurement.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
@@ -33,30 +34,13 @@ export interface SourceSemanticRequestExecution<Execution extends SourceSemantic
 }
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime,
-  payload: Omit<Payload, "comparison"> & { comparison?: never }, observer?: SourceSemanticObserver): SourceSemanticWorkerResult;
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload, observer?: SourceSemanticObserver): SourceSemanticReadableWorkerResult;
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload, observer?: SourceSemanticObserver): SourceSemanticReadableWorkerResult {
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload, observer?: SourceSemanticObserver): SourceSemanticWorkerResult {
   const meter = new SourceSemanticReadBudget(payload.request.budget, observer);
-  resolveSourceSemanticComparisonProfile({ comparison: payload.comparison,
-    public_policy: "access_policy" in payload.request ? payload.request.access_policy : undefined });
-  if (payload.comparison !== undefined && (payload.request.kind !== "prepare_query" && payload.request.kind !== "recall" ||
-      "access_policy" in payload.request && payload.request.access_policy !== undefined)) {
-    throw new CoreError("VALIDATION", "invalid private source comparison operation or public policy");
-  }
   const run = (executionOf: SourceSemanticRequestExecution<SourceSemanticReadableExecution>) => {
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
         ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {
           supplemental: [payload.prepared_query.supplemental.receipt] }) }, meter, executionOf);
-    }
-    const request = payload.request;
-    const initial = request.kind === "prepare_query" ? request.continuation_handle === undefined && request.source_handle === undefined
-      : request.kind === "recall" && request.query_handle === undefined && request.continuation === undefined;
-    if (payload.comparison !== undefined && initial) {
-      const profile = payload.comparison.profile;
-      meter.acquisition = packSourceSemanticAcquisition(sourceSemanticProfiledAcquisitionNotRun(profile,
-        profile.order_policy === "canonical-v1" ? "controlled_or_scoped_access" : "observation_allowance"), meter);
     }
     if (payload.prepared_query !== undefined) {
       // Keep inference evidence even if charging the received buffers refuses observation.
@@ -85,17 +69,22 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   return withSourceSemanticTransaction(runtime, payload, meter, executionOf => {
     const body = run(executionOf);
     const execution = executionOf();
+    // A recall owner constructs its execution from the native acquisition it actually
+    // consumed. The outer cache only tracks preparation/acquisition phases, so replacing
+    // the body execution would drop that acquisition evidence from the delivered result.
+    const deliveredExecution = payload.request.kind === "recall" && body.execution !== undefined
+      ? body.execution : execution;
     // Operation owners already admitted body and packed phases. Preserve their charged
     // subtrees rather than allocating an unmetered second nested schema copy.
-    const result = Object.freeze({ ...body, execution, work: Object.freeze(workOf(meter)) }) as SourceSemanticReadableWorkerResult;
-    admitSourceSemanticWorkerResultFamily(result, payload.comparison !== undefined);
+    const result = Object.freeze({ ...body, execution: deliveredExecution, work: Object.freeze(workOf(meter)) }) as SourceSemanticWorkerResult;
+    admitSourceSemanticWorkerResultFamily(result, false);
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
   });
 }
 
 function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
-  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution<SourceSemanticReadableExecution>) => SourceSemanticReadableWorkerResult): SourceSemanticReadableWorkerResult {
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution<SourceSemanticReadableExecution>) => SourceSemanticWorkerResult): SourceSemanticWorkerResult {
   let execution: SourceSemanticReadableExecution | undefined;
   let preparation: typeof meter.preparation | SourceSemanticQueryPreparation, acquisition: typeof meter.acquisition;
   function executionOf(): SourceSemanticReadableExecution;
@@ -140,9 +129,12 @@ function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, paylo
   };
   try { return runtime.database.connection.inTransaction ? execute() : runtime.database.connection.transaction(execute)(); }
   catch (error) {
+    const details = workerFailureDetails(error);
+    const incurred = details !== undefined && Object.prototype.hasOwnProperty.call(details, "work")
+      ? {} : { work: workOf(meter) };
     // Failed capture/packing cannot be reported as native-only or successful absence of phase evidence.
     if (error instanceof SourceSemanticResourceExhausted && error.phase.startsWith("source phase")) {
-      throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
+      throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { ...details, ...incurred } });
     }
     if (!(error instanceof SourceReferenceCapacityExceeded || error instanceof SourceSemanticResourceExhausted || error instanceof CoreError)) throw error;
     // Failure handling cannot reconstruct metered execution; a later observation can leave <33 work or <24 bytes.
@@ -152,26 +144,29 @@ function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, paylo
     if (current !== undefined && payload.request.kind === "prepare_query" && (error instanceof SourceSemanticResourceExhausted
       || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) {
       const request = payload.request;
-      return (payload.comparison === undefined ? SourceSemanticWorkerResultSchema : SourceSemanticComparisonWorkerResultSchema).parse({ kind: "prepare_query",
+      return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query",
         execution: current,
         query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(request.query_semantics, request.original_query),
           request.query_semantics_unavailable),
         outcome: { status: "resource_exhausted" }, candidates: [], truncated: true,
         coverage: IDLE, work: workOf(meter) });
     }
-    const work = workOf(meter);
+    // Adapt immutable errors through the measurement owner before replacing them.
+    // Semantic work and the Core receipt remain distinct, authoritative records.
+    const adapted = { ...details, ...incurred,
+      ...(details?.execution !== undefined || current === undefined ? {} : { execution: current }) };
     if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
-      { details: { admission: "unsupported_source", capacity: error.reason, work,
-        ...(current === undefined ? {} : { execution: current }) } });
-    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work, ...(current === undefined ? {} : { execution: current }) } });
-    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work, ...(current === undefined ? {} : { execution: current }) } });
+      { details: { ...adapted, admission: "unsupported_source", capacity: error.reason } });
+    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message,
+      { subCode: "RETRYABLE_BACKPRESSURE", details: adapted });
+    if (error instanceof CoreError) throw new CoreError(error.code, error.message,
+      { subCode: error.subCode, details: adapted });
     throw error;
   } finally { executionOf("retire_prepare"); }
 }
 
 function leaseBase(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null) {
   return { workspace_id: payload.workspace_id, principal: payload.principal ?? "", as_of: payload.as_of,
-    ...(payload.comparison === undefined ? {} : { profile: payload.comparison.profile }),
     lifetime_now: sourceSemanticLifetimeNow(payload),
     authorized, expires_at: semanticLeaseExpiry(sourceSemanticLifetimeNow(payload), payload.expires_at), revision: sourceSemanticRevision(runtime) };
 }
@@ -216,7 +211,7 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
 }
 
 function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null,
-  meter: SourceSemanticReadBudget, executionOf: SourceSemanticRequestExecution<SourceSemanticReadableExecution>): SourceSemanticReadableWorkerResult {
+  meter: SourceSemanticReadBudget, executionOf: SourceSemanticRequestExecution<SourceSemanticReadableExecution>): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "query preparation kind mismatch");
   const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source", meter);
@@ -240,15 +235,14 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
     }
   }
   const query = admission.kind === "admitted" ? admission.query : undefined;
-  const profile = payload.comparison?.profile;
-  const policy = request.access_policy ?? (profile?.order_policy === "canonical-v1" ? "canonical-v1" :
-    prior?.access_pool?.access.contract === "source-semantic-access-v2" ? prior.access_pool.access.policy : "query-conditioned-v1");
+  const policy = request.access_policy ?? (prior?.access_pool?.access.contract === "source-semantic-access-v2"
+    ? prior.access_pool.access.policy : "query-conditioned-v1");
   const accessHint = request.access_hint ?? prior?.access_pool?.accessHint;
   if (accessHint !== undefined && (scopeLease?.source_id !== undefined || policy === "canonical-v1")) {
     throw new CoreError("VALIDATION", "access hint requires query-conditioned preparation without a source handle");
   }
   const inputId = accessInputIdentity(request.original_query, query, request.budget, policy,
-    scopeLease?.source_id, request.source_preview_extents, accessHint, profile);
+    scopeLease?.source_id, request.source_preview_extents, accessHint);
   if (prior !== undefined && prior.access_pool?.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "preparation continuation access policy or budget changed", { details: { admission: "bound" } });
   }
@@ -287,7 +281,7 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   const outcome = admission.kind === "admitted" ? undefined : admission.kind === "absent"
     ? { status: "preparation_required" as const, missing: "query_semantics" as const }
     : { status: "invalid" as const, reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_query" };
-  return (profile === undefined ? SourceSemanticWorkerResultSchema : SourceSemanticComparisonWorkerResultSchema).parse({ kind: "prepare_query", query_handle, continuation_handle, query_semantics_id: querySemanticsId,
+  return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query", query_handle, continuation_handle, query_semantics_id: querySemanticsId,
     query_semantics_status: queryStatus,
     access, candidates: discovery.candidates, truncated: discovery.truncated || sourceTraceRemaining || open, outcome, coverage, work: workOf(meter) });
 }

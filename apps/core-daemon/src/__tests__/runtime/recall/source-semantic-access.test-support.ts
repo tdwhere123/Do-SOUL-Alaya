@@ -7,7 +7,8 @@ import { buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE
   type SourceRepresentation, type SourceSpeakerRole } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
-import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo,
+  type StorageDatabase } from "@do-soul/alaya-storage";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
@@ -63,9 +64,13 @@ export async function accessCall<K extends SourceSemanticWorkerRequest["kind"]>(
 
 export async function withAccessLibrary(sources: readonly AccessFixtureSource[], body: (input: SetupSnapshot & {
   execute: Execute;
-}) => Promise<void>, options?: { publicationBudget: SourceSemanticResourceBudget;
+  /** The complete host port: library recall also settles its prepared page. */
+  port: NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>;
+}) => Promise<void>, options?: { publicationBudget?: SourceSemanticResourceBudget;
   onPublicationBoundary?: PublicationObserver;
-  onSetupExhausted?: (input: SetupSnapshot) => Promise<void> }): Promise<AccessFixtureSetup> {
+  onSetupExhausted?: (input: SetupSnapshot) => Promise<void>;
+  /** Daemon-startup work owned by the caller: native index generation and schema. */
+  prepareDatabase?: (database: StorageDatabase) => Promise<void> }): Promise<AccessFixtureSetup> {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-access-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database), runtimeNotifier = { notifyEntry: async () => undefined };
@@ -75,7 +80,8 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
     evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => publicationClock });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
   const publication = createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 });
-  const meter = options === undefined ? undefined : new SourceSemanticResourceLedger(options.publicationBudget);
+  const meter = options?.publicationBudget === undefined ? undefined
+    : new SourceSemanticResourceLedger(options.publicationBudget);
   const progress: PublicationProgress = { ids: new Map(), publicationUsage: new Map(), admittedSourceIds: [], sourceId: "", publicationIndex: 0 };
   let client: RecallReadWorkerClient | undefined, databaseOpen = true;
   const snapshot = (error?: SourceSemanticResourceExhausted): SetupSnapshot => ({ filename, ids: progress.ids,
@@ -101,10 +107,14 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
       return partial.setup;
     }
     const complete = snapshot();
+    // The daemon prepares the indexed-recall projection at startup; library recall pins that generation.
+    prepareIndexedRecallProjection(database);
+    await options?.prepareDatabase?.(database);
     database.close(); databaseOpen = false; closeCachedDatabase(filename);
     client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
     await client.ready();
-    await body({ ...complete, execute: (input) => client!.sourceSemanticsPort!.execute(input) });
+    await body({ ...complete, execute: (input) => client!.sourceSemanticsPort!.execute(input),
+      port: client!.sourceSemanticsPort! });
     return complete.setup;
   } finally {
     try { await client?.close(); }

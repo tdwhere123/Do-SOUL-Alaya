@@ -6,7 +6,7 @@ import { expect, vi } from "vitest";
 import {
   SourceIndexAcquisition, SourceIndexBackfill, SourceIndexLifecycle, createAuditedSourceAdmission, fieldContractSha256
 } from "@do-soul/alaya-core";
-import { closeCachedDatabase, SqliteEventLogRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceIndexConfiguration, type SourceIndexSelection, type SourceSemanticWorkerRequest
@@ -68,6 +68,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
   configuration: SourceIndexConfiguration = SIMULATED_CONFIGURATION) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-index-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
+  prepareIndexedRecallProjection(database);
   const clients: RecallReadWorkerClient[] = [];
   try {
     const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });

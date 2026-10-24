@@ -1,4 +1,5 @@
 import { CoreError } from "@do-soul/alaya-core";
+import { workerFailureDetails } from "../recall/worker-actual-cost.js";
 import {
   RecallReadWorkerEnvelopeSchema,
   type RecallReadWorkerRequest,
@@ -10,12 +11,25 @@ type WorkerError = Extract<
   { readonly ok: false }
 >["error"];
 
+/** Serialization is the owning boundary for structured failure evidence. Core keeps
+ * its classification; a measured worker snapshot is added to whichever details the
+ * error carries, including ordinary and frozen errors whose property write failed.
+ */
 export function serializeWorkerError(error: unknown): WorkerError {
   if (error instanceof Error) {
+    const details = workerFailureDetails(error);
+    if (error instanceof CoreError) {
+      return {
+        name: error.name,
+        message: error.message,
+        core: { code: error.code, subCode: error.subCode, details },
+        ...(error.stack === undefined ? {} : { stack: error.stack })
+      };
+    }
     return {
       name: error.name,
       message: error.message,
-      ...(error instanceof CoreError ? { core: { code: error.code, subCode: error.subCode, details: error.details } } : {}),
+      ...(details === undefined ? {} : { details }),
       ...(error.stack === undefined ? {} : { stack: error.stack })
     };
   }

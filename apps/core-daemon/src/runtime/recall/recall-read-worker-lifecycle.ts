@@ -348,7 +348,8 @@ export class RecallReadWorkerLifecycle {
     deadline.check();
     this.assertUsable(resource);
     const id = this.nextRequestId++;
-    const scope = operation === "conditionalField.sourceSemantics" ? this.observations.getStore() : undefined;
+    const scope = operation === "conditionalField.sourceSemantics" || operation === "conditionalField.acknowledge"
+      ? this.observations.getStore() : undefined;
     const observe = scope === undefined ? undefined : (value: unknown) => {
       if (scope.rows.length >= 16) { scope.overflow = true; return; }
       scope.rows.push(readSourceSemanticObservation(value, id));
@@ -388,9 +389,19 @@ export class RecallReadWorkerLifecycle {
         pending.observe?.(message.observation);
         pending.resolve(consumed?.value ?? parsed);
       } else {
-        const error = message.error.core === undefined ? new Error(message.error.message)
-          : new CoreError(message.error.core.code, message.error.message,
-            { subCode: message.error.core.subCode, details: message.error.core.details });
+        const core = message.error.core;
+        let error: Error & { details?: Readonly<Record<string, unknown>> };
+        if (core === undefined) {
+          error = new Error(message.error.message);
+          // A non-core classification keeps its type; measured/owner details still cross IPC.
+          if (message.error.details !== undefined) error.details = message.error.details;
+        } else {
+          const details = core.details === undefined ? message.error.details
+            : message.error.details === undefined ? core.details
+              : Object.freeze({ ...core.details, ...message.error.details });
+          error = new CoreError(core.code, message.error.message,
+            { subCode: core.subCode, details });
+        }
         error.name = message.error.name;
         if (message.error.stack !== undefined) error.stack = message.error.stack;
         this.pending.delete(message.id);

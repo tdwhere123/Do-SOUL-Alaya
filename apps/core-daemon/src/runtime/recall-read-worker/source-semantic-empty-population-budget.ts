@@ -46,7 +46,7 @@ function completionEnvelope(input: Completion, planning: SourceSemanticReadBudge
   const beforeReceipt = { work_units: planning.spentWork, memory_bytes: planning.spentBytes };
   const value = sourceSemanticAccessReceiptValue(planning, policy, DIGEST, sourceRows, [],
     WIDE_SCALAR, WIDE_SCALAR, ALL_STOPS, input.sourcePreviewExtents, input.phases === undefined ? undefined : {
-      ...input.phases, observation: null }, leaseContext.profile);
+      ...input.phases, observation: null }, undefined);
   const accounting = sourceSemanticObservationAccounting(value.phases[2], { spentWork: Number.MAX_SAFE_INTEGER,
     spentBytes: Number.MAX_SAFE_INTEGER, nativeBytes: Number.MAX_SAFE_INTEGER }, planning);
   // Acquisition can become known after the base quote. Always price the populated

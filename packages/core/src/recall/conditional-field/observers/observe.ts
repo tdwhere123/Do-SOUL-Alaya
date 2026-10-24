@@ -37,6 +37,7 @@ export { hasMeasurementProducer, queryDigestOf } from "./measure-stored.js";
 export type {
   EmbeddingObserverPage,
   LexicalObserverPage,
+  NativeSourceNomination,
   ObserveConditionalFieldInput,
   ObserverActionResult,
   ObserverReaders,

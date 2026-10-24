@@ -99,6 +99,7 @@ export {
 } from "./facet-obligation-join.js";
 
 export type AcceptingProjectionInput = Readonly<{
+  readonly navigationFor?: (target: import("@do-soul/alaya-protocol").RecallTargetRef) => import("@do-soul/alaya-protocol").RecallNavigationWitness | undefined;
   readonly binding_contexts?: import("../engine/binding-environment.js").BindingContextStore;
   readonly snapshot: FieldSnapshot;
   readonly view: QueryView;

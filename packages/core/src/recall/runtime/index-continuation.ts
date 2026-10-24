@@ -79,6 +79,13 @@ export function compareIndexEntries(
   right: IndexEntry,
   policy: EnumerationPolicy
 ): number {
+  if (policy === "native_query") {
+    // Coordinates are assigned by the native opportunity owner over the captured
+    // pool. A consumer must not reconstruct its scheduling from route ranks.
+    const navigation = (left.navigation?.access_ordinal ?? Number.MAX_SAFE_INTEGER)
+      - (right.navigation?.access_ordinal ?? Number.MAX_SAFE_INTEGER);
+    if (navigation !== 0) return navigation;
+  }
   if (policy === "associative") {
     const grade = (guaranteedMilligradesOf(right) ?? 0) - (guaranteedMilligradesOf(left) ?? 0);
     if (grade !== 0) return grade;

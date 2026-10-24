@@ -9,7 +9,7 @@ import type { SourceEmbeddingBinding, SourceEmbeddingInput, SourceEmbeddingResul
   "../../../../../../packages/core/src/embedding-recall/source-embedding-runtime.js";
 import { SourceIndexBackfill } from "../../../../../../packages/core/src/source-index/source-index-backfill.js";
 import { SourceIndexLifecycle } from "../../../../../../packages/core/src/source-index/source-index-lifecycle.js";
-import { closeCachedDatabase, SqliteEventLogRepo, SqliteSourceIndexRepository, SqliteEvidenceCapsuleRepo,
+import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteSourceIndexRepository, SqliteEvidenceCapsuleRepo,
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { configuration, BUDGET as INDEX_BUDGET } from
   "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
@@ -72,6 +72,7 @@ async function publishQuerySourceInterpretation(database: StorageDatabase,
 export async function queryDatabase(options: { publishInterpretation?: boolean } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "alaya-source-query-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
+  prepareIndexedRecallProjection(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo: new SqliteEventLogRepo(database),
     runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256 });

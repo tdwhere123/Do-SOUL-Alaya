@@ -2,14 +2,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
-import { expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => isolation.restore());
 import {
   sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceReferenceResolver, sourceSemanticQueryIdentity,
   SourceInterpretationInvalidatedPayloadSchema, type SourceReferenceCatalog, type SourceSemanticCorrespondence,
   type SourceInterpretationInvalidation, type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, EvidenceService,
-  fieldContractSha256, deliveredSourceSemanticLibraryProof, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
+  fieldContractSha256, deliveredSourceSemanticLibraryProof, sourceGoldRootIdentity,
+  SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo, StorageDatabase } from "@do-soul/alaya-storage";
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
@@ -23,6 +30,8 @@ import { accessQuery, ACCESS_BUDGET as BUDGET, CLOCK, WS } from "./source-semant
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 import { createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN } from
   "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage, publishIndexedGeneration } from "./recall-storage.test-support.js";
+import { captureFieldProofRequests } from "./field-proof-consumer.test-support.js";
 
 const SOURCE = "Ada opened crate.";
 const SOURCE_ID = "crate-source";
@@ -33,7 +42,7 @@ const CONTEXT = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: 
 
 async function openSession(filename: string) {
   assertBuiltWorker();
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const eventLogRepo = new SqliteEventLogRepo(database), repo = new SqliteEvidenceCapsuleRepo(database);
   const notifyEntry = vi.fn(async () => undefined);
@@ -42,10 +51,11 @@ async function openSession(filename: string) {
   const publication = createSourceSemanticPublication({ database, evidenceService });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier: { notifyEntry }, sha256: fieldContractSha256 });
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
-  const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, sourceSemanticsPort: client.sourceSemanticsPort,
+  const proofRequests = captureFieldProofRequests(client.sourceSemanticsPort);
+  const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, sourceSemanticsPort: proofRequests.port,
     sourceSemanticPublication: publication });
   await client.ready();
-  return { database, stores, eventLogRepo, repo, notifyEntry, evidenceService, publication, admission, client, handler, filename };
+  return { database, stores, eventLogRepo, repo, notifyEntry, evidenceService, publication, admission, client, handler, filename, proofRequests };
 }
 type Session = Awaited<ReturnType<typeof openSession>>;
 
@@ -105,6 +115,8 @@ async function admit(session: Session, sourceId = SOURCE_ID, version = "1", evid
   await session.admission.admit({ workspace_id: WS, source_id: sourceId, source_version: version, content_bytes: SOURCE,
     evidence_object_id: evidenceId, recorded_at: version === "1" ? CLOCK : "2026-09-19T00:00:00.000Z", event_time: null,
     valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE) }, { workspaceId: WS });
+  // Library membership is the accepted native source-index generation, as at daemon startup.
+  await publishIndexedGeneration(session.database, [{ text: SOURCE, vector: [1, 0, 0] }]);
 }
 function invalidation(bound: SourceSemanticPublishedInterpretation): SourceInterpretationInvalidation {
   return { workspace_id: WS, run_id: RUN, source_interpretation_id: bound.interpretation_id,
@@ -164,8 +176,10 @@ it("persists independent H invalidation through the public route and reopen whil
       source_interpretation_id: bad.interpretation_id, from_state: "active", to_state: "archived", semantic_status: "unreviewed" });
     // The old proof remains an inspectable historical derivation, never a currentness oracle.
     const qualifier = before.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+    const historicalRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
+    const historicalTrust = session.proofRequests.trust(before.delivery_id, session.stores.getStoredRecord(WS, historicalRecord.identity));
     expect(deliveredSourceSemanticLibraryProof(before.index!, before.index!.entries[qualifier.index]!, qualifier,
-      before.proofs!, session.stores.getCurrentRecord(WS, SOURCE_ID)!).proof).toBeDefined();
+      before.proofs!, historicalRecord, undefined, historicalTrust).proof).toBeDefined();
     await closeSession(session); session = await openSession(filename);
     const rediscovered = await output(session, { operation: "prepare_query", original_query: ORIGINAL, query_semantics: QUERY });
     if (rediscovered.operation !== "prepare_query") throw new Error("query required");
@@ -177,10 +191,12 @@ it("persists independent H invalidation through the public route and reopen whil
     const currentQualifier = current.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
     const currentRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
     const currentProof = deliveredSourceSemanticLibraryProof(current.index!, current.index!.entries[currentQualifier.index]!,
-      currentQualifier, current.proofs!, currentRecord);
+      currentQualifier, current.proofs!, currentRecord, undefined,
+      session.proofRequests.trust(current.delivery_id, session.stores.getStoredRecord(WS, currentRecord.identity)));
     expect(currentProof.verified_proofs.map(row => row.source_interpretation_id)).toEqual([good.interpretation_id]);
     const exhausted = deliveredSourceSemanticLibraryProof(current.index!, current.index!.entries[currentQualifier.index]!,
-      currentQualifier, current.proofs!, currentRecord, { ...BUDGET, work_units: 100, finalization_reserve: 10 });
+      currentQualifier, current.proofs!, currentRecord, { ...BUDGET, work_units: 100, finalization_reserve: 10 },
+      session.proofRequests.trust(current.delivery_id, session.stores.getStoredRecord(WS, currentRecord.identity)));
     expect(exhausted.proof).toBeUndefined();
     expect(exhausted.verified_proofs).toEqual([]);
     expect(exhausted.resource_usage.work_units).toBeGreaterThan(0);
@@ -189,7 +205,7 @@ it("persists independent H invalidation through the public route and reopen whil
     // Reopen changes neither the old evidence nor its historical replay meaning.
     expect(JSON.stringify(before)).toBe(historicalEnvelope);
     expect(deliveredSourceSemanticLibraryProof(before.index!, before.index!.entries[qualifier.index]!, qualifier,
-      before.proofs!, currentRecord).verified_proofs.map(row => row.source_interpretation_id)).toEqual([bad.interpretation_id]);
+      before.proofs!, currentRecord, undefined, historicalTrust).verified_proofs.map(row => row.source_interpretation_id)).toEqual([bad.interpretation_id]);
     const fresh = await prepareSource(session);
     expect(await output(session, { ...request, source_handle: fresh.source_handle })).toMatchObject({ invalidation: { status: "already_invalidated" } });
     expect(auditRows(session)).toHaveLength(1);
@@ -273,23 +289,66 @@ it("accounts for preparation plus bounded invalidation and exhausts allowance be
   } finally { await closeSession(session); await rm(directory, { recursive: true, force: true }); }
 }, 30_000);
 
-it("rejects a previously valid library continuation after H invalidation", async () => {
+it("keeps a frozen library continuation additive and withdraws invalidated Q/H/C support", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-invalidation-continuation-"));
   const session = await openSession(join(directory, "alaya.db"));
   try {
     await admit(session);
     for (let index = 0; index < 11; index++) await admit(session, `other-source-${index}`);
     const bound = await publish(session, "sealed"), prepared = await prepareSource(session);
-    const request = { operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
-      query_semantics: QUERY, semantic_correspondences: [], output_byte_limit: 1_000_000 };
-    const first = await output(session, request);
-    if (first.operation !== "recall" || first.index?.continuation == null) throw new Error("library continuation required");
-    const continued = { ...request, continuation: first.index.continuation };
-    expect(await output(session, continued)).toMatchObject({ operation: "recall", index: { entries: expect.any(Array) } });
+    const request = { kind: "recall" as const, accepts_unreviewed_conditional_results: true as const,
+      original_query: ORIGINAL, query_semantics: QUERY, semantic_correspondences: [correspondence(bound)],
+      budget: { ...BUDGET, page_budget: 1 }, output_byte_limit: 1_000_000 };
+    const execute = session.client.sourceSemanticsPort!.execute;
+    const page = async (continuation?: unknown) => {
+      const result = await execute({ workspace_id: WS, as_of: CLOCK, lifetime_now: CLOCK,
+        expires_at: "2026-09-18T00:10:00.000Z", authorized_scopes: SCOPES, request: {
+        ...request, ...(continuation === undefined ? {} : { continuation: continuation as never }) } });
+      if (result.kind !== "recall") throw new Error("recall expected");
+      // The frozen page is issued only through the prepared-delivery acknowledgement.
+      const prepared = result as typeof result & { preparation_id?: string;
+        previews?: Readonly<Record<string, string>> };
+      if (prepared.preparation_id !== undefined) {
+        await session.client.sourceSemanticsPort!.acknowledge!(prepared.preparation_id, result.index,
+          new Map(Object.entries(prepared.previews ?? {})));
+      }
+      return result;
+    };
+    const root = sourceGoldRootIdentity(bound.source_target);
+    const first = await page();
+    const frozen = first.index.continuation;
+    if (frozen === null) throw new Error("library continuation required");
+    // A frozen page cannot be retargeted to another premise set.
+    await expect(execute({ workspace_id: WS, as_of: CLOCK, lifetime_now: CLOCK, authorized_scopes: SCOPES,
+      request: { ...request, semantic_correspondences: [], continuation: frozen as never } })).rejects
+      .toThrow(/library continuation request changed/u);
+    const roots: string[] = [];
+    let proofRoots: string[] = [];
+    let current = first, continuation: unknown = frozen;
+    for (let index = 0; index < 12; index += 1) {
+      roots.push(...current.index.entries.flatMap(entry => entry.target.kind === "source_evidence"
+        ? [`${sourceGoldRootIdentity(entry.target)}`] : []));
+      proofRoots = [...proofRoots, ...current.slot_qualifiers.flatMap(qualifier => {
+        if (qualifier.evidence_kind !== "semantic_proof") return [];
+        const entry = current.index.entries[qualifier.index]!;
+        return entry.target.kind === "source_evidence" ? [`${sourceGoldRootIdentity(entry.target)}`] : [];
+      })];
+      if (current.index.continuation === null) break;
+      continuation = current.index.continuation;
+      current = await page(continuation);
+    }
+    // Frozen pages stay additive, and the admitted premise qualifies only its own delivered slot.
+    expect(new Set(roots).size).toBe(roots.length);
+    expect(proofRoots).toContain(root);
     await output(session, { operation: "invalidate", source_handle: prepared.source_handle,
       source_interpretation_id: bound.interpretation_id, error_basis: invalidation(bound).error_basis, reporter_id: "test-reviewer" });
-    expect(await call(session, continued)).toMatchObject({ isError: true,
-      structuredContent: { ok: false, error: { code: "VALIDATION" } } });
+    // Revocation applies to the actual issued capability, not only a fresh query.
+    await expect(page(frozen)).rejects.toThrow(/snapshot is no longer current/u);
+    // The withdrawn premise keeps its raw source page and loses every proof claim.
+    const after = await page();
+    expect(after.proofs ?? []).toEqual([]);
+    expect(after.slot_qualifiers.every(row => row.evidence_kind === "source_evidence")).toBe(true);
+    expect(after.coverage.conditional_computation).toBe("open");
   } finally { await closeSession(session); await rm(directory, { recursive: true, force: true }); }
 }, 30_000);
 

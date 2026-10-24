@@ -1,7 +1,11 @@
 import { meterReaders } from "./observer-reader-budget.js";
+import { nativeSourceReaders } from "./native-source-observer.js";
+import { nominationScopes } from "./captured-recall-request.js";
+import { observationSettled } from "./index-continuation.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   SNAPSHOT_PIN_NATIVE_WORK,
+  SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   type CoverageRegion,
   type ObserverCursor,
   type QueryInterpretation,
@@ -26,7 +30,7 @@ import { adjacencyKindsFor } from "../conditional-field/engine/path-composition-
 import { runtimeProgram, seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
 import { compileProgramAutomaton, programAutomatonCost, ProgramAutomatonResourceError } from "../conditional-field/engine/program-automaton.js";
 import { routingOverlayKinds } from "../conditional-field/engine/path-routing.js";
-import { authorizedScopesMismatch } from "../conditional-field/query/compile-query-identity.js";
+import { authorizedScopesMismatch, viewIdentityMaterial } from "../conditional-field/query/compile-query-identity.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { ObservedSourceFacts } from "./observed-source-facts.js";
@@ -53,6 +57,8 @@ export type ObserveFieldInput = Readonly<{
   readonly as_of: string;
   readonly readers: ObserverReaders;
   readonly authorized_scopes?: readonly string[] | null;
+  readonly source_id?: string;
+  readonly access_hint?: string;
   readonly cancelled?: boolean;
   readonly resume_cursors?: Readonly<Record<string, string | null>>;
   readonly resume_field?: FieldEngineState;
@@ -74,14 +80,69 @@ export function observeField(
     interpretationNeedsGuardWork(interpretation),
     sourceDomainCoverageOf(interpretation, input)
   );
-  const initial = startObservedField(interpretation, input, residuals);
-  // Retained observations still need bytes for grounded explanations and serialized payloads.
+  let initial = startObservedField(interpretation, input, residuals);
+  const initialWork = initial.remaining_exploration + initial.remaining_reserve;
+  // Use the field's existing finalization reserve, not a second acquisition quota.
   const finalizationBytes = Math.min(initial.remaining_memory_bytes, MAX_FINALIZATION_MEMORY_BYTES,
     Math.max(0, Math.floor((input.budget.memory_bytes - input.budget.min_envelope) / 4)));
-  const observed = observeWithinMemory(interpretation, input, {
-    ...initial, remaining_memory_bytes: initial.remaining_memory_bytes - finalizationBytes
-  });
-  const completed = { ...observed, remaining_memory_bytes: observed.remaining_memory_bytes + finalizationBytes };
+  initial = { ...initial, remaining_memory_bytes: initial.remaining_memory_bytes - finalizationBytes };
+  if (interpretation.view.enumeration_policy === "native_query" && !input.cancelled
+    && interpretation.view.result_kind_view !== "memory_only" && input.authorized_scopes !== undefined
+    && input.readers.nominateSources !== undefined) {
+    if (initial.native_sources === undefined) {
+      const captured = input.readers.nominateSources?.({ workspaceId: input.workspace_id,
+        query: input.query_text, authorizedScopes: nominationScopes(input.authorized_scopes),
+        ...(input.source_id === undefined ? {} : { sourceId: input.source_id }),
+        ...(input.access_hint === undefined ? {} : { hint: input.access_hint }),
+        budget: { work_units: initial.remaining_exploration,
+          memory_bytes: initial.remaining_memory_bytes } }) ?? null;
+      const resources = captured?.result?.resources;
+      const work = captured?.charged_by_caller ? 0 : resources?.work ?? 0;
+      const bytes = captured?.charged_by_caller ? 0 : resources?.memory_bytes ?? 0;
+      initial = { ...initial, native_sources: captured,
+        native_source_retained_bytes: captured?.retained_bytes ?? resources?.memory_bytes ?? 0,
+        remaining_exploration: initial.remaining_exploration - work,
+        remaining_memory_bytes: initial.remaining_memory_bytes - bytes,
+        admitted_allocation_bytes: initial.admitted_allocation_bytes + bytes };
+      // Engine allocation deltas own these bytes. The acquisition receipt's mixed
+      // work units cannot truthfully be relabelled as native visits or joins.
+      input.cost?.add("observe", { budget_work: work, native_bytes: captured?.charged_by_caller ? 0 : resources?.native_bytes ?? 0 });
+    }
+    // An exhausted retained observation has no source-reader call left to make.
+    // Rebuilding its frozen frontier would repay acquisition frames merely to
+    // acknowledge an empty tail. Payload reads use their own original reader.
+    if (input.resume_field === undefined || !observationSettled(initial)) {
+      const bridge = new SourceSemanticResourceLedger({ work_units: initial.remaining_exploration,
+        memory_bytes: initial.remaining_memory_bytes });
+      try {
+        input = { ...input, readers: nativeSourceReaders(input.readers, initial.native_sources ?? null, bridge) };
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        input = { ...input, readers: { ...input.readers, sourceRoots: undefined, sourceTextHints: undefined,
+          boundInterpretations: undefined } };
+        initial = { ...initial, last_observer_status: "interrupted" };
+      } finally {
+        input.cost?.add("observe", { budget_work: bridge.spentWork });
+        initial = { ...initial, remaining_exploration: Math.max(0, initial.remaining_exploration - bridge.spentWork),
+          remaining_memory_bytes: bridge.bytes,
+          admitted_allocation_bytes: initial.admitted_allocation_bytes + bridge.spentBytes };
+      }
+    }
+  }
+  const observed = observeWithinMemory(interpretation, input, initial);
+  const incompleteNative = observed.native_sources !== undefined
+    && (observed.native_sources === null || observed.native_sources.result?.completion !== "complete");
+  const nativeStatus = observed.native_sources === null ? "unavailable" as const : "unknown" as const;
+  // Preserve the unchanged residual reference: it participates in projection's
+  // revision identity. Reallocating the same unknown frontier on every resume
+  // would restart a settled membership scan and charge it again.
+  const unchangedNative = observed.residuals.some(row => row.region_id === "native-source-membership"
+    && row.status === nativeStatus);
+  const completed = { ...observed, remaining_memory_bytes: observed.remaining_memory_bytes + finalizationBytes,
+    ...(incompleteNative && !unchangedNative ? { residuals: [...observed.residuals.filter(row => row.region_id !== "native-source-membership"),
+      { schema_version: 1 as const, region_id: "native-source-membership", kind: "source_domain" as const,
+        status: nativeStatus, semantic_effects: ["membership" as const, "order" as const] }] } : {}) };
+  input.cost?.addFieldBudgetWork(initialWork - completed.remaining_exploration - completed.remaining_reserve);
   return restoredFieldFootprint(completed) > input.budget.memory_bytes
     ? completed : stampRetainedFieldLevel(completed, input.budget.memory_bytes);
 }
@@ -205,7 +266,10 @@ function startObservedField(
   if (resumed !== undefined
     && resumed.query_id === interpretation.query_id
     && resumed.snapshot_id === interpretation.snapshot_id
-    && stableStringify(resumed.interpretation) === stableStringify(interpretation)
+    // Reuse only the identical interpretation and program; the resource-derived
+    // delivery envelope is not interpretation identity.
+    && stableStringify({ ...resumed.interpretation, view: viewIdentityMaterial(resumed.interpretation.view) })
+      === stableStringify({ ...interpretation, view: viewIdentityMaterial(interpretation.view) })
     && !authorizedScopesMismatch(resumed.authorized_scopes, input.authorized_scopes)
     && resumed.observation_workspace_id === input.workspace_id
     && resumed.observation_query_text === input.query_text

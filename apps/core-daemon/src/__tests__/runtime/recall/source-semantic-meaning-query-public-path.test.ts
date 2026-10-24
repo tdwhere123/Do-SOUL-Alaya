@@ -26,6 +26,7 @@ import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
+import { openRecallStorage } from "./recall-storage.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 
@@ -256,7 +257,7 @@ function referentOf(sourceInterpretation: SourceSemanticInterpretation, text: st
 
 async function admitSource(filename: string, content = SOURCE, sourceId = "artifact-lathe",
   attribution?: UtteranceAttribution): Promise<void> {
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const admission = createAuditedSourceAdmission({
@@ -273,7 +274,7 @@ async function admitSource(filename: string, content = SOURCE, sourceId = "artif
 }
 
 async function expectRetainedPublicationAfterReopen(filename: string, bound: SourceSemanticPublishedInterpretation) {
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   try {
     const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
     const owner = { stores, sha256: fieldContractSha256 };
@@ -290,7 +291,7 @@ async function expectRetainedPublicationAfterReopen(filename: string, bound: Sou
 
 async function openSession(filename: string) {
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
-  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const { database } = await openRecallStorage(() => undefined, filename);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const evidenceService = new EvidenceService({
     eventLogRepo: new SqliteEventLogRepo(database), runtimeNotifier: { notifyEntry: async () => undefined },
@@ -466,7 +467,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
       expect(proofSlot!.witnesses).toHaveLength(2);
       expect(proofSlot!.support).toMatchObject({ answer: "supported", evidence_inputs: [{ alternative: 0, input: 0, status: "supported" }],
         operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
-      expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
+      expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("source_evidence");
       expect(recalled.delivery_id).toEqual(expect.any(String));
       const otherQueryAttribution: UtteranceAttribution = { ...QUERY_ATTRIBUTION, status: "captured",
         utterances: [{ ...QUERY_ATTRIBUTION.utterances[0]!, author_ref: "person-2" }] };

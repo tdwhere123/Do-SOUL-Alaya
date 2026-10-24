@@ -55,12 +55,14 @@ export const SemanticChainConfigSchema = z.object({
 export type SemanticChainConfig = z.infer<typeof SemanticChainConfigSchema>;
 
 const QueryBase = { query_key: Digest, original_query: z.string(), raw_digest: Digest.nullable() };
+/** One native discovery step. Shared by the query variants and the recorded replay row. */
+export const SemanticChainDiscoveryTraceSchema = z.array(z.object({ coverage: SourceSemanticCoverageSchema, work: SourceSemanticWorkerWorkSchema,
+  execution: SourceSemanticExecutionSchema,
+  access: SourceSemanticAccessReceiptSchema, query_semantics_status: SourceSemanticQueryStatusSchema,
+  continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict());
 const Discovery = {
   descriptors: z.array(SourceSemanticHandleDescriptorSchema),
-  discovery_trace: z.array(z.object({ coverage: SourceSemanticCoverageSchema, work: SourceSemanticWorkerWorkSchema,
-    execution: SourceSemanticExecutionSchema,
-    access: SourceSemanticAccessReceiptSchema, query_semantics_status: SourceSemanticQueryStatusSchema,
-    continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
+  discovery_trace: SemanticChainDiscoveryTraceSchema,
   discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
   initial_discovery_elapsed_ms: z.number().nonnegative().optional(),
   unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()

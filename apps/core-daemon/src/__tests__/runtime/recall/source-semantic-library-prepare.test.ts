@@ -12,7 +12,7 @@ import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
-import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, prepareSourceSemanticLibrary, proposeQuerySemantics, proposeSourceSemantics,
   sourceSemanticLibraryCorrespondenceCacheKey
@@ -183,6 +183,8 @@ async function admitSources(filename: string, sources: readonly { id: string; co
 async function openSession(filename: string) {
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
   const { database } = await createRecallRealStorage(() => undefined, filename);
+  // Library recall pins the same indexed-recall generation the daemon prepares at startup.
+  prepareIndexedRecallProjection(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
   const evidenceService = new EvidenceService({
     eventLogRepo: new SqliteEventLogRepo(database), runtimeNotifier: { notifyEntry: async () => undefined },
@@ -357,7 +359,9 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         });
         if (recalled.kind !== "recall") throw new Error("library recall expected");
         expect(recalled.discovery.examined_source_interpretation_ids).toEqual(prepared.semantic_correspondences.map((row) => row.source_interpretation_id));
-        expect(recalled.discovery.unexamined_source_interpretation_count).toBeGreaterThan(0);
+        // The field pages no library catalog: the correspondent set is exactly what it examined.
+        expect(recalled.discovery.visited_source_pages).toBe(0);
+        expect(recalled.discovery.unexamined_source_interpretation_count).toBe(0);
         expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof"
           && row.source_interpretation_id === prepared.semantic_correspondences[0]?.source_interpretation_id)).toBe(true);
       } finally {
