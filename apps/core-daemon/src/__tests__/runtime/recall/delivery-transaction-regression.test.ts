@@ -8,7 +8,7 @@ afterAll(() => isolation.restore());
 import { MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, sourceGoldRootIdentity, sourceRecallTarget,
   type InformationIndex, type Continuation } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
-import { runConditionalFieldRecallWithReceipt, captureIndexPreviews, type ConditionalFieldRecallRequest } from "@do-soul/alaya-core";
+import { runConditionalFieldRecallWithReceipt, captureIndexPreviews, captureIndexSourceMetadata, type ConditionalFieldRecallRequest } from "@do-soul/alaya-core";
 import { readersFor } from "../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
 import { FAR_FUTURE_EXPIRY, defaultBudget } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { MEM, NOW, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -20,7 +20,7 @@ import { evictIssuedDeliveries, replayIssuedDelivery } from "../../../../../../p
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const db of databases) db.close(); databases.clear(); });
 
-it.each(["settled", "unserviceable"] as const)("keeps the %s empty tail page retry identity", async (kind) => {
+it.each(["settled", "constrained"] as const)("keeps the %s empty tail page retry identity", async (kind) => {
   const { slice, input: base } = await fixture(true);
   const record = hashedRecord(WS, "needle only", "only");
   new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(record);
@@ -30,21 +30,42 @@ it.each(["settled", "unserviceable"] as const)("keeps the %s empty tail page ret
   const first = runConditionalFieldRecallWithReceipt(input);
   expect(first.index.continuation).not.toBeNull();
   const request = { ...input, continuation: first.index.continuation,
-    ...(kind === "unserviceable" ? { budget: { ...input.budget,
+    ...(kind === "constrained" ? { budget: { ...input.budget,
       work_units: SNAPSHOT_PIN_NATIVE_WORK * 3 + 1, finalization_reserve: 0, min_envelope: 1 } } : {}) };
-  const closed = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
-  expect(closed.index.entries).toHaveLength(0);
-  expect(closed.index.continuation).toBeNull();
-  expect(closed.delivery_id).toBeDefined();
-  const id = closed.issue!({ index: closed.index, previews: new Map(), metadata: {} });
+  const page = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
+  expect(page.index.entries).toHaveLength(0);
+  if (kind === "settled") expect(page.index.continuation).toBeNull();
+  else {
+    // The paid control fits, but the remaining work cannot frame a settled tail.
+    // A fitted progress response must preserve recovery, not claim termination.
+    expect(page.index.continuation).not.toBeNull();
+    expect(page.index.representation.page_budget).toBe(0);
+    expect(page.index.completeness).toMatchObject({ logical_index: "interrupted", transport: "interrupted" });
+    expect(page.index.explanations).toEqual([]);
+    expect(page.index.product_updates ?? []).toEqual([]);
+    expect(captureIndexPreviews(page.index, input.readers, WS).size).toBe(0);
+    expect(page.execution_receipt.actual?.phases.index.budget_work).toBe(4);
+  }
+  expect(page.delivery_id).toBeDefined();
+  const id = page.issue!({ index: page.index, previews: new Map(), metadata: {} });
+  if (kind === "constrained") {
+    expect(page.execution_receipt.actual?.native_visits).toBe(SNAPSHOT_PIN_NATIVE_WORK * 2);
+    expect(page.execution_receipt.actual?.native_rows).toBe(0);
+    expect(page.execution_receipt.actual?.charged_retained_bytes).toBe(0);
+  }
   const retry = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
   expect(retry.delivery_id).toBe(id);
-  expect(retry.index.entries).toEqual(closed.index.entries);
-  expect(retry.index.continuation).toBeNull();
+  expect(retry.index).toEqual({ ...page.index, page_purpose: "retry" });
   expect(retry.issue!({ index: retry.index, previews: new Map(), metadata: {} })).toBe(id);
+  if (kind === "constrained") {
+    const recovered = runConditionalFieldRecallWithReceipt({ ...input, continuation: page.index.continuation });
+    expect(recovered.index.entries).toEqual([]);
+    expect(recovered.index.continuation).toBeNull();
+    expect(recovered.index.completeness.logical_index).not.toBe("invalidated");
+  }
 });
 
-it("reports a constrained unfinished page as retryable progress, not a size impossibility", async () => {
+it("refuses unfinished-page framing without consuming its token or declaring size impossibility", async () => {
   const { slice, input: base } = await fixture(true);
   // Unlike the settled tail above, this page still owes an undelivered source.
   const records = [hashedRecord(WS, "needle first", "first"), hashedRecord(WS, "needle second", "second")];
@@ -53,34 +74,86 @@ it("reports a constrained unfinished page as retryable progress, not a size impo
   const input = nominated(base, records);
   const first = runConditionalFieldRecallWithReceipt(input);
   expect(first.index.continuation).not.toBeNull();
-  // A budget that only covers the pin plus a fragment of the page work.
-  const constrained = { ...input, continuation: first.index.continuation, budget: { ...input.budget,
-    work_units: SNAPSHOT_PIN_NATIVE_WORK * 3 + 1, finalization_reserve: 0, min_envelope: 1 } };
-  // Unlike a measured size refusal, insufficient framing work cannot establish
-  // fit. It must refuse without acknowledging or consuming the original token.
-  expect(() => runConditionalFieldRecallWithReceipt(constrained, { issue: "defer" }))
-    .toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
-      resource: "framing_work", execution_receipt: expect.objectContaining({ actual: expect.any(Object) }) }) }));
-  const recovered = runConditionalFieldRecallWithReceipt({ ...input, continuation: first.index.continuation });
+  // The ordinary control now fits this allowance. Deliberately scan a larger
+  // JSON envelope so the real framing owner, not obsolete overhead, refuses it.
+  const workload = framingWorkload(16_384);
+  const constrained = { ...input, ...workload.port, continuation: first.index.continuation,
+    budget: { ...input.budget,
+      work_units: SNAPSHOT_PIN_NATIVE_WORK * 3 + 1, finalization_reserve: 0, min_envelope: 1 } };
+  const incoming = structuredClone(first.index.continuation);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect(() => runConditionalFieldRecallWithReceipt(constrained, { issue: "defer" }))
+      .toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
+        resource: "framing_work", execution_receipt: expect.objectContaining({ actual: expect.objectContaining({
+          native_visits: SNAPSHOT_PIN_NATIVE_WORK, native_rows: 0, charged_retained_bytes: 0,
+          phases: expect.objectContaining({ index: expect.objectContaining({ budget_work: 4 }) })
+        }) }) }) }));
+  }
+  expect(workload.port.encode_page).toHaveBeenCalledTimes(2);
+  expectInterruptedFits(workload);
+  expect(first.index.continuation).toEqual(incoming);
+  const recovery = { ...input, ...workload.port, continuation: incoming };
+  const recovered = runConditionalFieldRecallWithReceipt(recovery, { issue: "defer" });
+  expect(recovered.index.page_purpose).toBe("membership");
   expect(recovered.index.completeness.logical_index).not.toBe("invalidated");
   expect(recovered.index.entries).toHaveLength(1);
   expect(recovered.index.entries[0]!.target).not.toEqual(first.index.entries[0]!.target);
+  const id = recovered.issue!({ index: recovered.index,
+    previews: captureIndexPreviews(recovered.index, input.readers, WS),
+    metadata: captureIndexSourceMetadata(recovered.index) });
+  expect(id).toBeDefined();
+  const replay = runConditionalFieldRecallWithReceipt(recovery, { issue: "defer" });
+  expect(replay.delivery_id).toBe(id);
+  expect(replay.index).toEqual({ ...recovered.index, page_purpose: "retry" });
 });
 
 it("refuses interrupted framing without issuing its unfitted members and recovers on retry", async () => {
   const { slice, input } = await fixture();
   await slice.writeMemory(MEM.r, "needle member", MemoryDimension.FACT);
-  const encode = vi.fn(() => ({ large: "x".repeat(100_000) }));
-  expect(() => runConditionalFieldRecallWithReceipt({ ...input, encode_page: encode,
+  // 100,000 ASCII bytes cost only 100 framing units and now fit the paid control.
+  // This envelope exceeds the unchanged 120-work allowance but fits normal retry.
+  const workload = framingWorkload(131_072);
+  expect(() => runConditionalFieldRecallWithReceipt({ ...input, ...workload.port,
     budget: { ...input.budget, work_units: 120, finalization_reserve: 30 } }, { issue: "defer" }))
     .toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
-      resource: "framing_work", execution_receipt: expect.objectContaining({ actual: expect.any(Object) }) }) }));
-  expect(encode).toHaveBeenCalledTimes(1);
-  const recovered = runConditionalFieldRecallWithReceipt({ ...input, encode_page: encode });
+      resource: "framing_work", execution_receipt: expect.objectContaining({ actual: expect.objectContaining({
+        native_visits: SNAPSHOT_PIN_NATIVE_WORK, native_rows: 0, charged_retained_bytes: 0,
+        phases: expect.objectContaining({ index: expect.objectContaining({ budget_work: 114 }) })
+      }) }) }) }));
+  expect(workload.port.encode_page).toHaveBeenCalledTimes(1);
+  expectInterruptedFits(workload);
+  const unissued = workload.port.observe_page_fit.mock.calls[0]![0].index.continuation;
+  expect(unissued).not.toBeNull();
+  expect(runConditionalFieldRecallWithReceipt({ ...input, continuation: unissued }).index.completeness.logical_index)
+    .toBe("invalidated");
+  const recovered = runConditionalFieldRecallWithReceipt({ ...input, ...workload.port });
   expect(recovered.index.entries.map(entry => entry.object_id)).toEqual([MEM.r]);
   expect(recovered.index.completeness.transport).not.toBe("interrupted");
-  expect(encode).toHaveBeenCalledTimes(2);
+  // Recovery pays both the control fit and the member fit, not one cached attempt.
+  expect(workload.port.encode_page).toHaveBeenCalledTimes(3);
+  for (const [fit] of workload.port.observe_page_fit.mock.calls.slice(1)) {
+    expect(fit).toMatchObject({ fits: true, bytes: workload.encodedBytes, codec_invocations: 1 });
+    expect(fit.interruption).toBeUndefined();
+  }
 });
+
+function framingWorkload(bytes: number) {
+  const envelope = { large: "x".repeat(bytes) };
+  return { encodedBytes: Buffer.byteLength(JSON.stringify(envelope)), port: {
+    encode_page: vi.fn(() => envelope),
+    observe_page_fit: vi.fn<NonNullable<ConditionalFieldRecallRequest["observe_page_fit"]>>()
+  } };
+}
+
+function expectInterruptedFits(workload: ReturnType<typeof framingWorkload>) {
+  expect(workload.port.observe_page_fit.mock.calls.length).toBeGreaterThan(0);
+  for (const [fit] of workload.port.observe_page_fit.mock.calls) {
+    expect(fit).toMatchObject({ fits: false, interruption: "work", result_count: 0, codec_invocations: 1 });
+    expect(fit.bytes).toBeGreaterThan(0);
+    expect(fit.bytes).toBeLessThan(workload.encodedBytes);
+    expect(fit.previews.size).toBe(0);
+  }
+}
 
 /** Native inventory for fixtures that used to rely on exhaustive source enumeration. */
 function nominated(input: ConditionalFieldRecallRequest, records: readonly ReturnType<typeof hashedRecord>[]) {
