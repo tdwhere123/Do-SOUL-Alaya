@@ -6,9 +6,9 @@ import { buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE
   type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult,
   type SourceRepresentation, type SourceSpeakerRole } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
-  fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
+  fieldContractSha256, SourceIndexLifecycle, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { closeCachedDatabase, prepareIndexedRecallProjection, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo,
-  type StorageDatabase } from "@do-soul/alaya-storage";
+  SqliteSourceIndexRepository, type StorageDatabase } from "@do-soul/alaya-storage";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
@@ -19,7 +19,36 @@ import { digestOriginalQuery } from "../../../../../../packages/core/src/recall/
 import { createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
   from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 
+import { BUDGET as SOURCE_INDEX_BUDGET, configuration as sourceIndexConfiguration }
+  from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
+
 export { WS };
+
+/** Prepare native lexical documents through the lifecycle owner for every current root.
+ * The fixture profile declares windowing only: no vector is generated or admitted,
+ * and the generation is not falsely published as vector-ready. */
+export async function prepareAccessNativeIndex(database: StorageDatabase): Promise<void> {
+  const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
+  const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
+  const generation = lifecycle.begin(lifecycle.select(WS, sourceIndexConfiguration()));
+  for (;;) {
+    const captured = lifecycle.capture(WS, generation.generation_id, 128, SOURCE_INDEX_BUDGET);
+    if (captured.generation.enumeration_complete) break;
+    if (captured.added === 0) throw new Error("access fixture native index capture stalled");
+  }
+  let after: string | null = null;
+  for (;;) {
+    const targets = repository.listTargets(WS, generation.generation_id, after, 128);
+    if (targets.length === 0) break;
+    for (const target of targets) {
+      const prepared = lifecycle.prepare(WS, generation.generation_id, target.root_key, SOURCE_INDEX_BUDGET);
+      if (prepared.status !== "ready" && !(prepared.status === "partial" && prepared.reason === "window_capacity")) {
+        throw new Error(`access fixture native lexical preparation failed: ${JSON.stringify(prepared)}`);
+      }
+    }
+    after = targets.at(-1)!.root_key;
+  }
+}
 export const CLOCK = "2026-09-18T00:00:00.000Z";
 export const ACCESS_BUDGET = { schema_version: 1 as const, work_units: 10_000_000, memory_bytes: 200_000_000,
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
@@ -64,6 +93,7 @@ export async function accessCall<K extends SourceSemanticWorkerRequest["kind"]>(
 
 export async function withAccessLibrary(sources: readonly AccessFixtureSource[], body: (input: SetupSnapshot & {
   execute: Execute;
+  observe: RecallReadWorkerClient["observeSourceSemantics"];
   /** The complete host port: library recall also settles its prepared page. */
   port: NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>;
 }) => Promise<void>, options?: { publicationBudget?: SourceSemanticResourceBudget;
@@ -114,7 +144,7 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
     client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
     await client.ready();
     await body({ ...complete, execute: (input) => client!.sourceSemanticsPort!.execute(input),
-      port: client!.sourceSemanticsPort! });
+      port: client!.sourceSemanticsPort!, observe: (limits, work) => client!.observeSourceSemantics(limits, work) });
     return complete.setup;
   } finally {
     try { await client?.close(); }

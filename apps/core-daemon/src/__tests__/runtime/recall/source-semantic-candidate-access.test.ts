@@ -9,11 +9,12 @@ import { closeCachedDatabase, SqliteEventLogRepo, SqliteFieldSourceRecordRepo, S
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
-import { sourceSemanticAccessPhases, sourceSemanticExecutionPhases, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticResourceExhausted,
-  type SourceSemanticCorrespondence, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
+import { hashContentDigest, hashSourceRecordId, sourceSemanticExecutionPhases, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION,
+  SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticResourceExhausted,
+  type SourceSemanticCorrespondence, type SourceSemanticPreviewExtents, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
-import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, prepareAccessNativeIndex, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
@@ -26,6 +27,46 @@ import { expectFirstExtentThenCensusRefusal, sourceObservationOrder }
 const orchid = "orchid irrigation", jasmine = "jasmine pruning";
 const prepare = (original: string) => ({ kind: "prepare_query" as const, original_query: original,
   query_semantics: accessQuery(original), budget: ACCESS_BUDGET });
+
+type AccessLibrary = Parameters<Parameters<typeof withAccessLibrary>[1]>[0];
+
+async function recallPrepared({ execute, observe }: Pick<AccessLibrary, "execute" | "observe">,
+  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, poolId: string) {
+  const observed = await observe({ max_events: 2048, max_bytes: 524288 }, () => accessCall(execute, request));
+  if (observed.outcome.status !== "success") throw observed.outcome.error;
+  expect(observed.status).toBe("available");
+  expect(observed.observations).toHaveLength(1);
+  const recalled = observed.outcome.value, observation = observed.observations[0]!;
+  if (recalled.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) throw new Error("native field delivery required");
+  expect(observation.execution).toBe("success");
+  expect(observation.totals?.debit_work).toBe(recalled.work.logical_work);
+  expect(observation.totals?.debit_bytes).toBe(recalled.work.logical_memory_bytes);
+  expect(observation.events.filter(row => row.kind === "pool_reuse").map(row => row.data))
+    .toEqual([{ pool_id: poolId, discovery: "not_observed_this_request" }]);
+  expect(observation.facts?.pool?.pool_id).toBe(poolId);
+  // The lease read precedes any new nomination. Preparation was not observed,
+  // so its ancestry must remain unknown rather than inferred from equal pool IDs.
+  expect(observation.facts?.lease_reads).toEqual([{ kind: "query",
+    handle_digest: `sha256:${fieldContractSha256(request.query_handle!)}`, origin: null, pool_origin: null, plan_origin: null }]);
+  expect(recalled.discovery).not.toHaveProperty("access");
+  expect(recalled.discovery.visited_source_pages).toBe(0);
+  expect(recalled.discovery.visited_source_interpretation_pages).toBe(0);
+  expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(0);
+  expect(recalled.order.enumeration_policy).toBe("native_query");
+  expect(recalled.index.result_version).toBe("ordinary-native-field.v1");
+  expect(recalled.request_budget).toEqual(request.budget);
+  expect(recalled.work.logical_work).toBeLessThanOrEqual(request.budget.work_units);
+  expect(recalled.work.logical_memory_bytes).toBeLessThanOrEqual(request.budget.memory_bytes);
+  expect(recalled.execution).toBeDefined();
+  expect(sourceSemanticExecutionPhases(recalled.execution!).query_preparation.external_api_attempts).toBe(0);
+  expect(recalled.results.every(result => result.source_lookup_reasons === undefined)).toBe(true);
+  return { recalled, observation };
+}
+
+function recordIdentity(sourceId: string, text: string) {
+  return hashSourceRecordId({ source_id: sourceId, source_version: "1",
+    content_digest: hashContentDigest(`User: ${text}`, fieldContractSha256) }, fieldContractSha256);
+}
 
 function traceSourceObservation(database: StorageDatabase, sourceId: string, previews?: SourceSemanticPreviewExtents) {
   const current = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findCurrentBounded");
@@ -284,7 +325,7 @@ it("keeps chronological verification independent of navigation arrival across pa
 
 it("verifies a lexical nominee beyond an unavailable census row and reuses its complete source observation", async () => {
   await withAccessLibrary([{ id: "a", text: "Granite walls." },
-    { id: "z", text: "Orchid irrigation.", reading: orchid }], async ({ filename, execute }) => {
+    { id: "z", text: "Orchid irrigation.", reading: orchid }], async ({ filename, execute, observe }) => {
     const { database } = await createRecallRealStorage(() => undefined, filename);
     database.connection.prepare("UPDATE source_records SET operator_id=? WHERE source_id='a'").run("x".repeat(9000));
     const read = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
@@ -305,9 +346,13 @@ it("verifies a lexical nominee beyond an unavailable census row and reuses its c
     expect(prepared.access?.source_candidates).toEqual([expect.objectContaining({ source_id: "z", complete: true })]);
     expect(prepared.access?.unvisited_sources).toBe(true);
     expect(prepared.coverage.semantic_correspondence).toBe("unexercised");
-    const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
-      query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
-    expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
+    const { recalled, observation } = await recallPrepared({ execute, observe }, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 }, prepared.access!.pool_id);
+    expect(observation.facts?.pool?.union).toMatchObject({ source_count: 1, source_discovery_open: true,
+      members: [{ source_id: "z", record_id: recordIdentity("z", "Orchid irrigation.") }] });
+    expect(recalled.coverage.discovery).toBe("truncated");
+    expect(recalled.index.entries.map(entry => entry.target)).toEqual([expect.objectContaining({
+      kind: "source_evidence", root_kind: "source_record", root_id: recordIdentity("z", "Orchid irrigation.") })]);
     expect(recalled.proofs ?? []).toHaveLength(0);
   });
 });
@@ -351,7 +396,7 @@ it("orders the complete observed pool for two queries before native descriptor p
     { id: "garden", text: "Jasmine pruning.", reading: jasmine },
     { id: "raw", text: "Orchid irrigation notes remain available." },
     { id: "private", text: "Orchid irrigation.", reading: orchid, scope: "global_core" }
-  ], async ({ execute, ids }) => {
+  ], async ({ execute, observe, ids }) => {
     const canonical = await accessCall(execute, { ...prepare(orchid), access_policy: "canonical-v1" });
     const canonicalIds = canonical.access!.interpretation_candidates.map((row) => row.interpretation_id);
     let cursor = canonical.continuation_handle;
@@ -380,34 +425,31 @@ it("orders the complete observed pool for two queries before native descriptor p
     expect(continued.access?.trace).toMatchObject({ kind: "preparation_page", interpretation_offset: 16 });
     expect(continued.candidates).toHaveLength(16);
     expect(continued.candidates.every((row) => !first.candidates.some((prior) => prior.interpretation_id === row.interpretation_id))).toBe(true);
-    const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
-      query_handle: first.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
-    expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(130);
-    expect(recalled.discovery.access?.pool_id).toBe(first.access?.pool_id);
-    expect(recalled.discovery.access?.trace).toMatchObject({ kind: "library_selection", omitted_interpretation_count: 130 });
+    const { recalled, observation } = await recallPrepared({ execute, observe }, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: first.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 }, first.access!.pool_id);
+    expect(observation.facts?.pool?.union).toMatchObject({ capture: "complete", source_count: 4,
+      source_discovery_open: false, interpretation_discovery_open: false });
+    expect(observation.facts?.pool?.union.members.map(row => row.source_id).sort()).toEqual(["filler", "garden", "orchard", "raw"]);
     expect(recalled.proofs ?? []).toHaveLength(0);
     expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "source_evidence")).toBe(true);
     const direct = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
       original_query: orchid, query_semantics: accessQuery(orchid), semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
-    const directAccess = direct.discovery.access, frozenAccess = recalled.discovery.access;
-    if (directAccess === undefined || frozenAccess === undefined) throw new Error("both access receipts are required");
-    const { pool_id: directPool, phases: directPhases, ...directObservation } = directAccess;
-    const { pool_id: frozenPool, phases: frozenPhases, ...frozenObservation } = frozenAccess;
-    const { acquisition: directAcquisition, ...directPhaseObservation } = sourceSemanticAccessPhases({ phases: directPhases });
-    const { acquisition: frozenAcquisition, ...frozenPhaseObservation } = sourceSemanticAccessPhases({ phases: frozenPhases });
-    expect(directObservation).toEqual(frozenObservation);
-    expect(directPhaseObservation).toEqual(frozenPhaseObservation);
-    const { budget: directAllowance, ...directAcquisitionEvidence } = directAcquisition;
-    const { budget: frozenAllowance, ...frozenAcquisitionEvidence } = frozenAcquisition;
-    expect(directAcquisitionEvidence).toEqual(frozenAcquisitionEvidence);
-    // Direct recall reserves its own finalization; frozen recall reuses the
-    // preparation's allowance evidence. Equal observations do not erase that history.
-    expect(directAllowance).not.toEqual(frozenAllowance);
-    expect(directPool).not.toBe(frozenPool);
+    // Direct native lookup does not repeat the preparation's complete interpretation census.
+    expect(direct.discovery).not.toHaveProperty("access");
+    expect(direct.discovery.visited_source_interpretation_descriptors).toBe(0);
+    expect(direct.request_identity).toBe(recalled.request_identity);
+    const expectedRoots = [recordIdentity("orchard", "Orchid irrigation."),
+      recordIdentity("raw", "Orchid irrigation notes remain available.")];
+    expect(direct.index.entries.map(entry => entry.target.kind === "source_evidence" ? entry.target.root_id : null).sort())
+      .toEqual(expectedRoots.sort());
+    expect(recalled.index.entries.map(entry => entry.target.kind === "source_evidence" ? entry.target.root_id : null))
+      .toEqual(expect.arrayContaining(expectedRoots));
+    expect(direct.proofs ?? []).toEqual([]);
+    expect(sourceSemanticExecutionPhases(direct.execution!).query_preparation.external_api_attempts).toBe(0);
     expect(first.work.native_bytes).toBeGreaterThan(0);
     expect(first.work.logical_work).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
     expect(first.work.logical_memory_bytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
-  });
+  }, { prepareDatabase: prepareAccessNativeIndex });
 }, 15_000);
 
 it("rejects changed query, budget, policy, scope and stale revision instead of borrowing a frozen access cursor", async () => {
@@ -515,18 +557,26 @@ it.each([80_000, 200_000])("keeps unvisited growth and body tails open within %i
 
 it("pages all 512 observed source traces without rereading or overflowing the public envelope", async () => {
   await withAccessLibrary(Array.from({ length: 512 }, (_, index) => ({ id: `source-${String(index).padStart(3, "0")}`,
-    text: "Orchid irrigation notes remain available." })), async ({ execute }) => {
+    text: "Orchid irrigation notes remain available." })), async ({ execute, observe }) => {
     const prepared = await accessCall(execute, prepare(orchid));
     const request = { kind: "recall" as const, accepts_unreviewed_conditional_results: true as const,
       query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 100_000 };
     expect(prepared.access?.observed_source_count).toBe(512);
     expect(prepared.access?.source_candidates).toHaveLength(16);
     expect(prepared.access?.unvisited_sources).toBe(true);
-    const recalled = await accessCall(execute, request);
+    const { recalled, observation } = await recallPrepared({ execute, observe }, request, prepared.access!.pool_id);
     const publicBytes = Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(recalled)));
     expect(publicBytes).toBeLessThanOrEqual(request.output_byte_limit);
-    expect(recalled.discovery.access?.source_candidates.length).toBeLessThanOrEqual(10);
-    expect(recalled.discovery.access?.trace).toMatchObject({ kind: "library_selection", omitted_source_count: 507 });
+    expect(observation.facts?.pool?.union).toMatchObject({ capture: "complete", source_count: 512,
+      source_discovery_open: true });
+    expect(recalled.index.entries.length).toBeGreaterThan(0);
+    expect(recalled.index.entries.length).toBeLessThan(512);
+    expect(recalled.index.continuation).not.toBeNull();
+    for (const entry of recalled.index.entries) {
+      expect(entry.target.kind).toBe("source_evidence");
+      if (entry.target.kind !== "source_evidence") throw new Error("raw source target required");
+      expect(observation.facts?.pool?.union.members.map(row => row.record_id)).toContain(entry.target.root_id);
+    }
     const seen = new Set(prepared.access!.source_candidates.map((row) => row.record_id));
     let cursor = prepared.continuation_handle, sourceOffset = 16;
     while (cursor !== undefined) {
@@ -542,7 +592,7 @@ it("pages all 512 observed source traces without rereading or overflowing the pu
     }
     expect(seen.size).toBe(512);
     expect(Buffer.byteLength(JSON.stringify(prepared.access))).toBeLessThan(5_000);
-    expect(Buffer.byteLength(JSON.stringify(recalled.discovery.access))).toBeLessThan(4_000);
+    expect(Buffer.byteLength(JSON.stringify(recalled.discovery))).toBeLessThan(4_000);
   });
 }, 60_000);
 
@@ -604,7 +654,7 @@ it("keeps both handles from a fitting preparation usable through the worker", as
 
 it("reads a raw-only body beyond the general observation half after proving no capsules", async () => {
   const original = "orchid irrigation";
-  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation. ".repeat(600) }], async ({ execute, filename }) => {
+  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation. ".repeat(600) }], async ({ execute, observe, filename }) => {
     const budget = { ...ACCESS_BUDGET, work_units: 180_000, memory_bytes: 4_000_000 };
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const runtime = { database } as RecallReadWorkerRuntime;
@@ -635,10 +685,13 @@ it("reads a raw-only body beyond the general observation half after proving no c
       expect(childSpend[0]).toBeGreaterThan(Math.floor(budget.work_units / 2));
       expect(prepared.work.logical_work).toBeLessThanOrEqual(budget.work_units);
       expect(prepared.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
-      const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
-        query_handle: prepared.query_handle!, semantic_correspondences: [], budget, output_byte_limit: 1_000_000 });
-      expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
-      expect(recalled.index.entries).toHaveLength(1);
+      const { recalled, observation } = await recallPrepared({ execute, observe }, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [], budget, output_byte_limit: 1_000_000 }, prepared.access!.pool_id);
+      expect(observation.facts?.pool?.union).toMatchObject({ source_count: 1, source_discovery_open: false });
+      expect(recalled.index.entries.map(entry => entry.target)).toEqual([expect.objectContaining({
+        kind: "source_evidence", root_kind: "source_record", root_id: recordIdentity("raw", "Orchid irrigation. ".repeat(600)) })]);
+      expect(recalled.query_semantics_status).toMatchObject({ status: "unavailable" });
+      expect(recalled.proofs ?? []).toEqual([]);
       expect(recalled.work.logical_work).toBeLessThanOrEqual(budget.work_units);
       expect(recalled.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
     } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
