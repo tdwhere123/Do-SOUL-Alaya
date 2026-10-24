@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
 const boundary = vi.hoisted(() => ({ load: vi.fn(), start: vi.fn() }));
 vi.mock("../../../datasets/longmemeval/ingestion/fetch.js", () => ({ loadDatasetWindowWithIdentity: boundary.load }));
@@ -50,7 +51,15 @@ it("pins a relative config root before asynchronous dataset loading can change c
     const rejection = expect(prepared).rejects.toThrow("captured launch boundary");
     expect(boundary.load).toHaveBeenCalledOnce();
     process.chdir(after);
-    release({ sha256: "b".repeat(64), questions: [{ question_id: "captured-root-question" }] });
+    release({ sha256: "b".repeat(64), questions: [{
+      question_id: "captured-root-question", question_type: "single-session-user",
+      question: "Where is the notebook stored?", answer: "On the shelf.",
+      question_date: "2026-09-13T00:00:00.000Z",
+      haystack_session_ids: ["captured-root-session"],
+      haystack_dates: ["2026-09-12T00:00:00.000Z"],
+      haystack_sessions: [[{ role: "user", content: "The notebook is stored on the shelf." }]],
+      answer_session_ids: ["captured-root-session"]
+    } satisfies LongMemEvalQuestion] });
     await rejection;
     expect(boundary.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       configDirectoryRoot: expect.any(String), dataDirRoot: join(root, "live") }));
