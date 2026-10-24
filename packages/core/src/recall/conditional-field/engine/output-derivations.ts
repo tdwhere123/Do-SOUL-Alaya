@@ -6,6 +6,15 @@ import { joinDerivation, leafDerivation, seedDerivationIdentity } from "./path-d
 
 type RuleIndex = PersistentStringMap<PersistentStringMap<SharedRule>>;
 type CurrentProduct = Readonly<{ id: string; grade: number; phase: "incoming" | "outgoing"; offset: number; root?: Derivation }>;
+type ProofFrame = Readonly<{
+  id: string;
+  offset: number;
+  root?: Derivation;
+  cycle: boolean;
+  depth: number;
+  active: PersistentStringMap<true>;
+  parent?: ProofFrame;
+}>;
 type InputReferences = readonly unknown[];
 
 export type GroundingProgress = Readonly<{
@@ -22,6 +31,11 @@ export type GroundingProgress = Readonly<{
   settled: PersistentStringMap<true>;
   queue: MaxMinWorkQueue;
   current?: CurrentProduct;
+  proof_needed: boolean;
+  proof_offset: number;
+  proof_frame?: ProofFrame;
+  proof_memo: PersistentStringMap<Derivation | null>;
+  proof_capacity: number;
   derivation_offset: number;
   transition_offset: number;
   seed_offset: number;
@@ -90,6 +104,11 @@ class GroundingMachine {
   private settled: PersistentStringMap<true>;
   private queue: MaxMinWorkQueue;
   private current: CurrentProduct | undefined;
+  private proofNeeded: boolean;
+  private proofOffset: number;
+  private proofFrame: ProofFrame | undefined;
+  private proofMemo: PersistentStringMap<Derivation | null>;
+  private proofCapacity: number;
   private derivationOffset: number;
   private transitionOffset: number;
   private seedOffset: number;
@@ -106,6 +125,11 @@ class GroundingMachine {
     this.settled = prior?.settled ?? new PersistentStringMap();
     this.queue = prior?.queue ?? new MaxMinWorkQueue();
     this.current = prior?.current;
+    this.proofNeeded = prior?.proof_needed ?? false;
+    this.proofOffset = prior?.proof_offset ?? 0;
+    this.proofFrame = prior?.proof_frame;
+    this.proofMemo = prior?.proof_memo ?? new PersistentStringMap();
+    this.proofCapacity = prior?.proof_capacity ?? 0;
     this.derivationOffset = prior?.derivation_offset ?? 0;
     this.transitionOffset = prior?.transition_offset ?? 0;
     this.seedOffset = prior?.seed_offset ?? 0;
@@ -115,7 +139,8 @@ class GroundingMachine {
 
   public get complete(): boolean {
     return this.derivationOffset === this.input.derivations.length && this.transitionOffset === this.input.transitions.length
-      && this.seedOffset === this.input.seeds.length && this.current === undefined && this.queue.size === 0;
+      && this.seedOffset === this.input.seeds.length && this.current === undefined && this.queue.size === 0
+      && (!this.proofNeeded || (this.proofOffset === this.settled.size && this.proofFrame === undefined));
   }
 
   public step(): boolean {
@@ -130,13 +155,15 @@ class GroundingMachine {
     if (this.seedOffset < this.input.seeds.length) return this.indexSeed();
     if (this.current !== undefined) return this.advanceProduct(this.current);
     const next = this.queue.pop();
-    if (next === undefined) return false;
-    this.queue = next.queue;
-    if (this.settled.has(next.item.nodeId) || this.grades.get(next.item.nodeId) !== next.item.strength) return true;
-    this.settled = this.settled.with(next.item.nodeId, true);
-    this.current = { id: next.item.nodeId, grade: next.item.strength, phase: "incoming", offset: 0,
-      root: this.assembled.get(next.item.nodeId) };
-    return true;
+    if (next !== undefined) {
+      this.queue = next.queue;
+      if (this.settled.has(next.item.nodeId) || this.grades.get(next.item.nodeId) !== next.item.strength) return true;
+      this.settled = this.settled.with(next.item.nodeId, true);
+      this.current = { id: next.item.nodeId, grade: next.item.strength, phase: "incoming", offset: 0,
+        root: this.assembled.get(next.item.nodeId) };
+      return true;
+    }
+    return this.advanceProof();
   }
 
   private indexTransition(): boolean {
@@ -186,14 +213,18 @@ class GroundingMachine {
         this.current = { ...current, phase: "outgoing", offset: 0 };
         return true;
       }
-      const premise = this.assembled.get(rule.from);
+      // Only a seed with no incoming rules is an independent, single-edge premise.
+      // Assembled roots may already contain a weaker seed or a walk through this product.
+      const premise = this.incoming.has(rule.from) ? undefined : this.forest.get(seedDerivationIdentity(rule.from));
       const edge = this.forest.get(rule.derivation_id);
       let root = current.root;
-      if (premise !== undefined && edge !== undefined) {
+      if (premise !== undefined && edge !== undefined && rule.from !== current.id) {
         const serial = joinDerivation("serial", [premise, edge]);
         const alternative = root === undefined ? serial : joinDerivation("or", [root, serial]);
         if (!this.retainNodes([serial, alternative])) return false;
         root = alternative;
+      } else {
+        this.proofNeeded = true;
       }
       this.current = { ...current, offset: current.offset + 1, root };
       return true;
@@ -208,6 +239,81 @@ class GroundingMachine {
       }
     }
     this.current = { ...current, offset: current.offset + 1 };
+    return true;
+  }
+
+  private advanceProof(): boolean {
+    const frame = this.proofFrame;
+    if (frame === undefined) {
+      const next = this.settled.entryAt(this.proofOffset);
+      if (next === undefined) return false;
+      return this.openProof(next[0]);
+    }
+    const rule = this.incoming.get(frame.id)?.entryAt(frame.offset)?.[1];
+    if (rule === undefined) return this.finishProof(frame);
+    if (!this.settled.has(rule.from) || frame.active.has(rule.from)) {
+      // A repeated product is a cyclic walk, not a new founded witness.
+      this.proofFrame = { ...frame, offset: frame.offset + 1,
+        cycle: frame.cycle || frame.active.has(rule.from) };
+      return true;
+    }
+    const known = this.proofMemo.get(rule.from);
+    if (known !== undefined) return this.joinProof(frame, rule, known === null ? undefined : known);
+    return this.openProof(rule.from, frame);
+  }
+
+  private openProof(id: string, parent?: ProofFrame): boolean {
+    const depth = (parent?.depth ?? 0) + 1;
+    if (depth > this.proofCapacity) {
+      // Parent frames retain every version of the active AVL map. Insertion copies a
+      // search path and may rotate nodes; reserve a conservative per-depth peak for
+      // the frame, map wrapper and all copied AVL nodes, not only the frame object.
+      // Branches reuse the slot once their prior frames are no longer retained.
+      const copiedNodes = 2 * Math.ceil(Math.log2(depth + 2)) + 5;
+      if (!this.retain(128 + copiedNodes * 96)) return false;
+      this.proofCapacity = depth;
+    }
+    this.proofFrame = { id, offset: 0, root: this.forest.get(seedDerivationIdentity(id)), cycle: false,
+      depth, active: (parent?.active ?? new PersistentStringMap<true>()).with(id, true), parent };
+    return true;
+  }
+
+  private joinProof(frame: ProofFrame, rule: SharedRule, premise: Derivation | undefined): boolean {
+    const edge = this.forest.get(rule.derivation_id);
+    let root = frame.root;
+    if (premise !== undefined && edge !== undefined) {
+      const serial = joinDerivation("serial", [premise, edge]);
+      const alternative = root === undefined ? serial : joinDerivation("or", [root, serial]);
+      if (!this.retainNodes([serial, alternative])) return false;
+      root = alternative;
+    }
+    this.proofFrame = { ...frame, offset: frame.offset + 1, root };
+    return true;
+  }
+
+  private finishProof(frame: ProofFrame): boolean {
+    const memoBytes = frame.cycle || this.proofMemo.has(frame.id) ? 0 : 64 + Buffer.byteLength(frame.id, "utf8");
+    if (frame.parent !== undefined) {
+      const rule = this.incoming.get(frame.parent.id)?.entryAt(frame.parent.offset)?.[1];
+      if (rule === undefined) throw new Error("missing retained proof rule");
+      const edge = this.forest.get(rule.derivation_id);
+      const serial = frame.root !== undefined && edge !== undefined ? joinDerivation("serial", [frame.root, edge]) : undefined;
+      const alternative = serial === undefined ? undefined : frame.parent.root === undefined
+        ? serial : joinDerivation("or", [frame.parent.root, serial]);
+      if (!this.retainNodes([...(serial === undefined ? [] : [serial, alternative!])], memoBytes)) return false;
+      if (!frame.cycle) this.proofMemo = this.proofMemo.with(frame.id, frame.root ?? null);
+      this.proofFrame = { ...frame.parent, offset: frame.parent.offset + 1,
+        root: alternative ?? frame.parent.root, cycle: frame.parent.cycle || frame.cycle };
+      return true;
+    }
+    // Numeric reachability without a founded proof cannot be certified as complete.
+    if (frame.root === undefined) return false;
+    if (!this.retainNodes([], memoBytes)) return false;
+    if (!frame.cycle) this.proofMemo = this.proofMemo.with(frame.id, frame.root);
+    this.assembled = this.assembled.with(frame.id, frame.root);
+    this.roots = this.roots.with(frame.id, [frame.root.derivation_id]);
+    this.proofFrame = undefined;
+    this.proofOffset += 1;
     return true;
   }
 
@@ -234,7 +340,10 @@ class GroundingMachine {
     return { input_digest: inputDigest, input_references: references, completed_work: (this.prior?.completed_work ?? 0) + this.work,
       retained_bytes: (this.prior?.retained_bytes ?? 0) + this.retainedBytes, forest: this.forest, incoming: this.incoming,
       outgoing: this.outgoing, root_map: this.roots, assembled: this.assembled, grades: this.grades, settled: this.settled,
-      queue: this.queue, current: this.current, derivation_offset: this.derivationOffset, transition_offset: this.transitionOffset,
+      queue: this.queue, current: this.current, proof_needed: this.proofNeeded,
+      proof_offset: this.proofOffset, proof_frame: this.proofFrame,
+      proof_memo: this.proofMemo, proof_capacity: this.proofCapacity,
+      derivation_offset: this.derivationOffset, transition_offset: this.transitionOffset,
       seed_offset: this.seedOffset, retained_rule_references: this.ruleReferences };
   }
 }
