@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
+import type { SourceIndexAcquisition } from "@do-soul/alaya-core";
 import { SourceSemanticNativeFactsSchema, SourceSemanticObservationFacts, type SourceSemanticNativeFacts } from "./source-semantic-provenance.js";
 
 /** Private Node/worker metadata only; never part of an operation payload or public result. */
@@ -9,6 +10,7 @@ export const SourceSemanticObservationRequestSchema = z.object({
 }).strict();
 export type SourceSemanticObservationOptions = z.input<typeof SourceSemanticObservationRequestSchema>;
 export type SourceSemanticObservationRequest = z.output<typeof SourceSemanticObservationRequestSchema>;
+type AcquisitionObserver = NonNullable<Parameters<SourceIndexAcquisition["nominateWithWitness"]>[3]>;
 type AcquisitionDiagnosticKind = `source_index_${"original" | "hint"}_${"vector_inspected" | "vector_ranked" | "lexical_candidate"}`;
 export type ObservationCost = { phase: string; reason: string; operation: string; count: number; work: number; bytes: number };
 export type ObservationMeter = { id: number; parent: number | null; phase: string;
@@ -180,6 +182,14 @@ export class SourceSemanticObserver {
       this.omittedDiagnosticCounts[kind] = (this.omittedDiagnosticCounts[kind] ?? 0) + 1;
       this.omittedDiagnostics++;
     });
+  }
+
+  /** Window counts cannot eclipse finalized ranks, attempts or delivery progress. */
+  sourceIndexAcquisition(invocation: "original" | "hint", phase: string,
+    capture: Parameters<AcquisitionObserver>[0], kind: Parameters<AcquisitionObserver>[1]): void {
+    if (kind === "vector_inspected") this.omitDiagnostic(`source_index_${invocation}_${kind}`);
+    else this.event("source_index_acquisition", phase, () => ({ invocation, ...capture() }),
+      kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
   }
 
   event(kind: string, phase: string, data: () => unknown, diagnosticKind?: AcquisitionDiagnosticKind): void {

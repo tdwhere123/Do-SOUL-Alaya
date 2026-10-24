@@ -1,4 +1,4 @@
-import { indexEntryCacheKey, type InformationIndex } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, sourceRecallTarget, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallRequest, NativeSourceNomination, ObserverReaders } from "@do-soul/alaya-core";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 import type { SourceSemanticLease } from "./source-semantic-leases.js";
@@ -38,17 +38,22 @@ export class LibraryFieldObserver {
 
   public sourceRead(input: Parameters<SourceRead>[0], page: ReturnType<SourceRead>): void {
     const phase = input.purpose ?? "unclassified";
-    this.observer?.event("source_read", phase, () => ({ purpose: phase,
-      source_id: this.sourceIds.get(input.rootId), root_id: input.rootId,
-      start: input.offset ?? 0, end: page.row?.content_end ?? null,
+    // Bind extents to the native reader's requested revision, not a bare root id.
+    // The completion summary describes this same page; it cannot imply a full body.
+    const extent = () => ({ source_id: this.sourceIds.get(input.rootId), root_id: input.rootId,
+      target: input.revision === undefined || input.digest === undefined ? undefined : sourceRecallTarget({
+        workspace_id: input.workspaceId, root_kind: input.rootKind, root_id: input.rootId,
+        source_version: input.revision, content_digest: input.digest,
+        evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
+      }), start: input.offset ?? 0, end: page.row?.content_end ?? null });
+    this.observer?.event("source_read", phase, () => ({ purpose: phase, ...extent(),
       bytes: page.bytesRead, metadata_bytes: page.metadataBytes ?? 0,
       native_work: page.nativeWork ?? page.rowsRead, read_calls: 1,
       complete: page.row?.content_complete ?? null,
       resource_limited: page.resourceLimited === true, unavailable: page.unavailable === true,
       chronology: "source_extent_summary" }));
     if (phase === "observation") this.observer?.event("observation_read_complete", phase, () => ({
-      source_id: this.sourceIds.get(input.rootId), root_id: input.rootId,
-      complete: page.row?.content_complete ?? null, resource_limited: page.resourceLimited === true,
+      ...extent(), complete: page.row?.content_complete ?? null, resource_limited: page.resourceLimited === true,
       stop: page.unavailable ? "unavailable" : page.resourceLimited ? "budget"
         : page.row?.content_complete === false ? "bounded_extent" : "complete"
     }));

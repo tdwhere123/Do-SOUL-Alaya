@@ -101,11 +101,8 @@ export function acquireProfiledSourceSemanticIndex(input: Parameters<typeof acqu
       { captureReadTargets: true }),
       sha256: fieldContractSha256, workspace: input.workspace, original: { navigation: input.navigation, vector: input.vector },
       hint: input.supplemental, profile, budget: meter.remaining(),
-      ...(meter.observer === undefined ? {} : { observe: (invocation, capture, kind) => {
-        if (kind === "vector_inspected") meter.observer!.omitDiagnostic(`source_index_${invocation}_${kind}`);
-        else meter.observer!.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }),
-          kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
-      } }), admitScope: scope => {
+      ...(meter.observer === undefined ? {} : { observe: (invocation, capture, kind) =>
+        meter.observer?.sourceIndexAcquisition(invocation, meter.phase, capture, kind) }), admitScope: scope => {
         try { authorizeSemanticScope(scope, input.authorized); return "admitted"; } catch { return "denied"; }
       } });
     meter.absorbIndex(produced.phase.result!.resources);
@@ -155,13 +152,8 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
-      }, invocation, observer === undefined ? undefined : (capture, kind) => {
-        // Window inspections can outnumber the entire observation envelope. Keep only
-        // counts; finalized best-per-root ranks share the existing diagnostic quota.
-        if (kind === "vector_inspected") observer.omitDiagnostic(`source_index_${invocation}_${kind}`);
-        else observer.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }),
-          kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
-      });
+      }, invocation, observer === undefined ? undefined : (capture, kind) =>
+        observer.sourceIndexAcquisition(invocation, meter.phase, capture, kind));
     const { result } = captured;
     meter.absorbIndex(result.resources);
     retain(captured);

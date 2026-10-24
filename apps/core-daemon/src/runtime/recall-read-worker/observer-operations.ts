@@ -1,4 +1,5 @@
-import { sourceGoldRootIdentity, sourceRecallTarget, type SourceIndexQueryVector } from "@do-soul/alaya-protocol";
+import { sourceGoldRootIdentity, sourceRecallTarget, type SourceIndexQueryVector,
+  type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
   authorizeSemanticScope,
@@ -34,6 +35,8 @@ import { storedMeasurementReaders } from "./stored-measurement-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
+import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
+import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 
 const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
 
@@ -144,7 +147,7 @@ type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]
  * query-lease source restriction narrows the acquired membership, not only identity.
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
-  queryVector: SourceIndexQueryVector): NativeSourceNomination {
+  queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver): NativeSourceNomination {
   const acquisition = new SourceIndexAcquisition(
     new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true }), fieldContractSha256);
   const admit = (scope: Parameters<Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1]>[0]) => {
@@ -153,12 +156,25 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
     allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE, budget: input.budget };
-  const original = acquisition.nominateWithWitness({ ...fields, navigation_text: input.query }, admit);
-  const hint = input.hint === undefined || input.hint === input.query ? undefined
-    : acquisition.nominateWithWitness({ ...fields, navigation_text: input.hint, budget: {
-      work_units: Math.max(0, input.budget.work_units - original.result.resources.work),
-      memory_bytes: Math.max(0, input.budget.memory_bytes - original.result.resources.memory_bytes)
-    } }, admit, "hint");
+  const run = (navigation_text: string, budget: typeof input.budget, invocation: "original" | "hint") =>
+    acquisition.nominateWithWitness({ ...fields, navigation_text, budget }, admit, invocation,
+      observer === undefined ? undefined : (capture, kind) =>
+        observer.sourceIndexAcquisition(invocation, "field", capture, kind));
+  const original = run(input.query, input.budget, "original");
+  const hintBudget = {
+    work_units: Math.max(0, input.budget.work_units - original.result.resources.work),
+    memory_bytes: Math.max(0, input.budget.memory_bytes - original.result.resources.memory_bytes)
+  };
+  const hint = input.hint === undefined || input.hint === input.query ? undefined : run(input.hint, hintBudget, "hint");
+  observer?.event("source_index_routes", "field", () => {
+    const phase = (captured: NominationCapture, budget: typeof input.budget): SourceSemanticAcquisitionPhase => ({
+      policy: "source-index-interleaved-prefix.v1", ...sourceSemanticAcquisitionOutcome(captured.result),
+      allowance: fields.allowance, budget, result: captured.result
+    });
+    return { original: { ...phase(original, input.budget),
+      ...(hint === undefined ? {} : { supplemental: [phase(hint, hintBudget)] }) },
+      beyond_observed_prefix: "unknown_not_nomination_limit" };
+  });
   return nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId);
 }
 
@@ -212,7 +228,8 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
 }
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = [],
-  queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" }): ObserverReaders {
+  queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" },
+  observer?: SourceSemanticObserver): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
@@ -227,7 +244,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   );
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
-    nominateSources: input => nominateNativeSources(database, input, queryVector),
+    nominateSources: input => nominateNativeSources(database, input, queryVector, observer),
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,

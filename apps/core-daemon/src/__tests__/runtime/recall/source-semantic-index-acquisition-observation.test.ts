@@ -12,7 +12,9 @@ import { attributeObservation } from "../../../../../bench-runner/src/runs/longm
 import { scoreConsumerMessageVisibility } from "../../../../../bench-runner/src/runs/longmemeval-semantic/message-visibility.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { acquireSourceSemanticIndex } from "../../../runtime/recall-read-worker/source-semantic-index-acquisition.js";
-import { SourceSemanticObserver } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
+import { SourceSemanticObserver, readSourceSemanticObservation } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
+import { readSourceIndexSnapshotFact } from "../../../runtime/recall-read-worker/source-index-measurement.js";
+import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { WS, CLOCK, ORIGINAL, RAW, QUERY_BUDGET, SIMULATED_CONFIGURATION, digest, withIndexedSources, workerCall, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
@@ -21,6 +23,16 @@ const recall = { kind: "recall" as const, accepts_unreviewed_conditional_results
   original_query: ORIGINAL, semantic_correspondences: [], budget: QUERY_BUDGET, output_byte_limit: 1_000_000 };
 function runtime(fixture: IndexFixture) { return { database: fixture.database } as RecallReadWorkerRuntime; }
 function logical(work: { rss_bytes: number }) { const { rss_bytes: _rss, ...rest } = work; return rest; }
+function bindAcquisition(fixture: IndexFixture, observer?: SourceSemanticObserver) {
+  // Bind the direct native call after acquisition pinned this caller-owned snapshot,
+  // just as the worker entry does; an unbound event must not become bench evidence.
+  observer?.context(fixture.database, () => ({ operation: "recall", workspace_id: WS, as_of: CLOCK,
+    preparation: null, snapshot_revision: sourceSemanticRevision(runtime(fixture)),
+    index: readSourceIndexSnapshotFact(fixture.database, WS) }));
+}
+function jsonObservation(row: ReturnType<SourceSemanticObserver["finish"]>) {
+  return readSourceSemanticObservation(JSON.parse(JSON.stringify(row)), row.request_id);
+}
 function events(row: { events: readonly { kind: string; data: unknown }[] }, kind: string) {
   return row.events.filter(event => event.kind === kind);
 }
@@ -29,10 +41,14 @@ function acquire(fixture: IndexFixture, prepared: Awaited<ReturnType<IndexFixtur
   const meter = new SourceSemanticReadBudget(QUERY_BUDGET, observer);
   const metadataMeter = new SourceSemanticReadBudget(QUERY_BUDGET);
   const policy = createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", metadataMeter);
-  return fixture.database.connection.transaction(() => acquireSourceSemanticIndex({
-    runtime: runtime(fixture), workspace: WS, navigation: ORIGINAL, authorized: ["project"], meter, metadataMeter,
-    vector: prepared.vector, supplemental, canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost
-  }))();
+  return fixture.database.connection.transaction(() => {
+    const acquired = acquireSourceSemanticIndex({
+      runtime: runtime(fixture), workspace: WS, navigation: ORIGINAL, authorized: ["project"], meter, metadataMeter,
+      vector: prepared.vector, supplemental, canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost
+    });
+    bindAcquisition(fixture, observer);
+    return acquired;
+  })();
 }
 
 it("tags original and hint outside Core and keeps SQLite acquisition receipts identical with observer off", async () => {
@@ -136,7 +152,7 @@ it("transports native stale and resource_limited admission through observer JSON
     const observer = new SourceSemanticObserver(13, { max_events: 512, max_bytes: 262144 });
     const on = acquire(fixture, prepared, observer);
     try {
-      const row = observer.finish("success");
+      const row = jsonObservation(observer.finish("success"));
       const attempts = events(row, "source_index_acquisition")
         .map(event => event.data as Record<string, unknown>)
         .filter(data => data.kind === "nomination_attempt");
@@ -152,7 +168,7 @@ it("transports native stale and resource_limited admission through observer JSON
       const identity = stale!.target as typeof fixture.targets[number]["target"];
       const source = fixture.targets.find(target => target.target.root_id === identity.root_id)!;
       const snapshot = digest("observer-json-admission");
-      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: row.facts!.binding!.session_id,
         query_key: ORIGINAL, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
       const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
       const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
@@ -182,11 +198,11 @@ it("keeps both SQLite unicode61 and trigram lexical facts after vector interleav
     { id: "harbor-0", text: `${ORIGINAL} harbor 0`, vector: [1, 0, 0] as const },
     { id: "harbor-1", text: `${ORIGINAL} harbor 1`, vector: [1, 0, 0] as const }
   ];
-  const nominate = SourceIndexAcquisition.prototype.nominate;
-  vi.spyOn(SourceIndexAcquisition.prototype, "nominate").mockImplementation(function (
-    this: SourceIndexAcquisition, input, admitScope, control, observer) {
+  const nominate = SourceIndexAcquisition.prototype.nominateWithWitness;
+  vi.spyOn(SourceIndexAcquisition.prototype, "nominateWithWitness").mockImplementation(function (
+    this: SourceIndexAcquisition, input, admitScope, view, observer) {
     return nominate.call(this, { ...input, allowance: { ...input.allowance, max_attempts: 2, max_roots: 2 } },
-      admitScope, control, observer);
+      admitScope, view, observer);
   });
   await withIndexedSources(sources, async fixture => {
     const prepared = await fixture.prepareQuery({ navigation, signal: new AbortController().signal, remainingMs: () => 60_000 });
@@ -194,12 +210,16 @@ it("keeps both SQLite unicode61 and trigram lexical facts after vector interleav
     const meter = new SourceSemanticReadBudget(QUERY_BUDGET, observer);
     const metadataMeter = new SourceSemanticReadBudget(QUERY_BUDGET);
     const policy = createSourceSemanticAccessPolicy(navigation, undefined, "query-conditioned-v1", metadataMeter);
-    const on = fixture.database.connection.transaction(() => acquireSourceSemanticIndex({
-      runtime: runtime(fixture), workspace: WS, navigation, authorized: ["project"], meter, metadataMeter,
-      vector: prepared.vector, canonicalBytes: Buffer.byteLength(goldText), sourceCost: policy.sourceCost
-    }))();
+    const on = fixture.database.connection.transaction(() => {
+      const acquired = acquireSourceSemanticIndex({
+        runtime: runtime(fixture), workspace: WS, navigation, authorized: ["project"], meter, metadataMeter,
+        vector: prepared.vector, canonicalBytes: Buffer.byteLength(goldText), sourceCost: policy.sourceCost
+      });
+      bindAcquisition(fixture, observer);
+      return acquired;
+    })();
     try {
-      const row = JSON.parse(JSON.stringify(observer.finish("success"))) as ReturnType<SourceSemanticObserver["finish"]>;
+      const row = jsonObservation(observer.finish("success"));
       const source = fixture.targets.find(target => target.source_id === "gold-mixed")!;
       const lexicalHits = events(row, "source_index_acquisition")
         .map(event => event.data as Record<string, unknown>)
@@ -215,7 +235,7 @@ it("keeps both SQLite unicode61 and trigram lexical facts after vector interleav
       expect(receipt?.accounting?.attempted).toBe(2);
       expect(receiptLexical).toHaveLength(1);
       const snapshot = digest("multi-lane-collector-json");
-      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: row.facts!.binding!.session_id,
         query_key: navigation, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
       const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
       const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
@@ -244,7 +264,7 @@ it("preserves a thrown resource-exhaustion phase on the collector JSON route att
     { id: "harbor-0", text: `${ORIGINAL} harbor 0`, vector: [1, 0, 0] as const },
     { id: "harbor-1", text: `${ORIGINAL} harbor 1`, vector: [1, 0, 0] as const }
   ];
-  const phase = "source nomination retention";
+  const phase = "source nomination reference retention";
   const charge = SourceSemanticResourceLedger.prototype.charge;
   vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(
     function (this: SourceSemanticResourceLedger, work, bytes, reason) {
@@ -257,7 +277,7 @@ it("preserves a thrown resource-exhaustion phase on the collector JSON route att
     const observer = new SourceSemanticObserver(22, { max_events: 512, max_bytes: 262144 });
     const on = acquire(fixture, prepared, observer);
     try {
-      const row = JSON.parse(JSON.stringify(observer.finish("success"))) as ReturnType<SourceSemanticObserver["finish"]>;
+      const row = jsonObservation(observer.finish("success"));
       const captured = events(row, "source_index_acquisition")
         .map(event => event.data as Record<string, unknown>)
         .filter(data => data.kind === "nomination_attempt");
@@ -273,7 +293,7 @@ it("preserves a thrown resource-exhaustion phase on the collector JSON route att
       const identity = refusedEvent.target as typeof fixture.targets[number]["target"];
       const source = fixture.targets.find(target => target.target.root_id === identity.root_id)!;
       const snapshot = digest("thrown-refusal-collector-json");
-      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: row.facts!.binding!.session_id,
         query_key: ORIGINAL, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
       const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
       const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
@@ -305,8 +325,9 @@ it("keeps SQLite/worker delivery and debit parity with acquisition observation o
     const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal,
       remainingMs: () => 60_000 });
     fixture.prepareQuery.mockResolvedValue(prepared);
-    const client = await fixture.openClient();
-    const ordinary = await workerCall(client, recall);
+    // Each arm starts without another arm's retained continuation leases.
+    const offClient = await fixture.openClient(), client = await fixture.openClient(), overflowClient = await fixture.openClient();
+    const ordinary = await workerCall(offClient, recall);
     const observed = await client.observeSourceSemantics({}, () => workerCall(client, recall));
     expect(observed.status).toBe("available");
     if (observed.outcome.status !== "success") throw observed.outcome.error;
@@ -314,14 +335,16 @@ it("keeps SQLite/worker delivery and debit parity with acquisition observation o
     expect(diagnostic.index.entries.map(row => row.target)).toEqual(ordinary.index.entries.map(row => row.target));
     expect(diagnostic.previews).toEqual(ordinary.previews);
     expect(logical(diagnostic.work)).toEqual(logical(ordinary.work));
-    const stable = (value: typeof diagnostic.execution) => value === undefined ? undefined : JSON.parse(JSON.stringify(
-      sourceSemanticExecutionPhases(value), (key, item: unknown) => key === "elapsed_ms" ? null : item));
-    expect(stable(diagnostic.execution)).toEqual(stable(ordinary.execution));
+    // The same prepared receipt, including its measured time and byte price, serves
+    // every arm. Observer wall time/RSS remain separate from deterministic debits.
+    expect(diagnostic.execution).toEqual(ordinary.execution);
+    expect(sourceSemanticExecutionPhases(diagnostic.execution!).query_preparation).toEqual(prepared.receipt);
     const ordinaryEncoded = encodeSourceSemanticLibraryResponse(ordinary);
     const diagnosticEncoded = encodeSourceSemanticLibraryResponse(diagnostic);
     if (ordinaryEncoded.operation !== "recall" || diagnosticEncoded.operation !== "recall") throw new Error("encoded recall expected");
     expect(diagnosticEncoded.results).toEqual(ordinaryEncoded.results);
-    const row = observed.observations[0]!;
+    const row = jsonObservation(observed.observations[0]!);
+    expect(row.overhead.capture_ms).toBeGreaterThan(0);
     const captured = events(row, "source_index_acquisition");
     expect(captured.some(event => (event.data as { invocation: string }).invocation === "original")).toBe(true);
     const dispositions = new Set(captured.filter(event => (event.data as { kind: string }).kind === "nomination_attempt")
@@ -329,11 +352,16 @@ it("keeps SQLite/worker delivery and debit parity with acquisition observation o
     expect(dispositions.has("admitted")).toBe(true);
     expect(dispositions.has("duplicate")).toBe(true);
     expect(dispositions.has("nomination_limit")).toBe(true);
-    const overflow = await client.observeSourceSemantics({ max_events: 0, max_bytes: 0 }, () => workerCall(client, recall));
+    const overflow = await overflowClient.observeSourceSemantics({ max_events: 0, max_bytes: 0 }, () => workerCall(overflowClient, recall));
     if (overflow.outcome.status !== "success") throw overflow.outcome.error;
     expect(overflow.outcome.value.index.entries.map(row => row.target)).toEqual(ordinary.index.entries.map(row => row.target));
     expect(logical(overflow.outcome.value.work)).toEqual(logical(ordinary.work));
-    expect(events(overflow.observations[0]!, "source_index_acquisition")).toEqual([]);
+    expect(overflow.outcome.value.execution).toEqual(ordinary.execution);
+    expect(overflow.outcome.value.previews).toEqual(ordinary.previews);
+    const overflowRow = jsonObservation(overflow.observations[0]!);
+    expect(events(overflowRow, "source_index_acquisition")).toEqual([]);
+    expect(overflowRow.status).toBe("overflow");
+    expect(overflowRow.overhead.capture_ms).toBeGreaterThan(0);
   });
 }, 60_000);
 
@@ -356,7 +384,7 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
     const ordinary = await workerCall(offClient, request);
     const observed = await client.observeSourceSemantics({}, () => workerCall(client, request));
     if (observed.outcome.status !== "success") throw observed.outcome.error;
-    const diagnostic = observed.outcome.value, row = observed.observations[0]!;
+    const diagnostic = observed.outcome.value, row = jsonObservation(observed.observations[0]!);
     const acquisition = sourceSemanticExecutionPhases(diagnostic.execution!).acquisition.result!;
     expect(acquisition.vector).toMatchObject({ inspected_windows: 594, invalid_windows: 0, completion: "complete" });
     expect(acquisition.accounting).toMatchObject({ admitted: 16, duplicate: 16, nomination_limit: 4 });
@@ -374,7 +402,7 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
     expect(captured.filter(event => (event.data as { kind: string }).kind === "nomination_attempt")).toHaveLength(36);
     expect(captured.filter(event => (event.data as { kind: string }).kind === "lexical_candidate").length).toBeGreaterThan(0);
     expect(row.diagnostics?.omitted_counts?.source_index_original_lexical_candidate ?? 0).toBe(0);
-    for (const kind of ["source_index_routes", "source_read", "frozen_membership", "encoded_membership"]) {
+    for (const kind of ["source_index_routes", "source_read", "field_nomination", "encoded_membership"]) {
       expect(events(row, kind).length, kind).toBeGreaterThan(0);
     }
     expect(row.status).toBe("observed");
@@ -389,8 +417,13 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
       query_key: ORIGINAL, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
     const source = fixture.targets.find(target => target.source_id === "harbor-17")!;
     const { evidence_object_id: _evidence, kind: _kind, ...identity } = source.target;
-    const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
-      spans: [{ session_index: 0, message_index: 0, source_id: source.source_id, target: identity, start: 4096, end: 4100 }] };
+    // The ordinary reader returns a 4096-byte prefix, not this root's full 4224 bytes.
+    // Keep both sides of that boundary: unavailable tail visibility is not a known miss.
+    const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 2, complete: true,
+      spans: [
+        { session_index: 0, message_index: 0, source_id: source.source_id, target: identity, start: 4096, end: 4100 },
+        { session_index: 0, message_index: 1, source_id: source.source_id, target: identity, start: 4092, end: 4096 }
+      ] };
     const visibility = scoreConsumerMessageVisibility({ gold: answer, pages: [{ page: 1, status: "observed",
       reason: null, occupied_slots: encoded.results!.length, complete: true,
       continuation: diagnostic.index.continuation === null ? "none" : "present",
@@ -398,16 +431,22 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
         ? [{ rank: position + 1, target: result.target, start: 0, end: Buffer.byteLength(result.content_preview) }] : []),
       terminal_tail: { status: diagnostic.index.continuation === null ? "unknown" : "open",
         reason: diagnostic.index.continuation === null ? "native_access_or_computation_unresolved" : "native_continuation" } }] });
-    expect(visibility.any_at_5).toEqual({ status: "miss", reason: null });
     const attribution = attributeObservation({ question_id: "capacity", k: 5, call, frames: [{ call, observation: row }],
       frozen_index: null, admitted_roots_complete: true, admitted_roots: new Map([[identity.root_id,
         { record_id: identity.root_id, source_id: source.source_id, snapshot_id: snapshot, identity }]]),
       answer_gold: answer, visibility });
+    expect(diagnostic.protocol_version).toBe(10);
+    expect(diagnostic.index.result_version).toBe("ordinary-native-field.v1");
+    expect(encoded.results).toHaveLength(1);
+    expect(diagnostic.index.continuation).not.toBeNull();
+    expect(visibility.any_at_5).toEqual({ status: "unknown", reason: "second_page_not_observed" });
     expect(attribution.observation).toMatchObject({ complete: false, progress_complete: true, finite_union_complete: true });
-    expect(attribution.layer).toBe("L4");
+    expect(attribution.layer).toBe("U");
     const message = attribution.messages[0]!;
-    expect(message).toMatchObject({ candidate: "present", read: "whole", visibility: { delivery: "failed" } });
-    expect(message.read_intervals.some(interval => interval.start <= 4096 && interval.end >= 4100)).toBe(true);
+    expect(message).toMatchObject({ candidate: "present", read: "none", visibility: { delivery: "unknown" } });
+    expect(message.read_intervals).toHaveLength(2);
+    expect(message.read_intervals.every(interval => interval.start === 0 && interval.end === 4096)).toBe(true);
+    expect(attribution.messages[1]).toMatchObject({ candidate: "present", read: "whole", visibility: { delivery: "unknown" } });
     expect(message.routes.find(route => route.route === "index:original:vector")?.unknowns)
       .toContainEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
     expect(message.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable"
