@@ -209,7 +209,9 @@ describe("conditional-field producer-consumer counterexamples", () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     const planted = await plantNeedles(slice, 31, 601);
     const counted = countingReaders(slice);
-    const tight = runRecall(slice, {
+    // The exploration allowance is zero: work equals reserve plus the envelope
+    // minimum. Rejection still owes framing; it is not a free empty response.
+    expect(() => runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({
         work_units: 101,
@@ -218,8 +220,10 @@ describe("conditional-field producer-consumer counterexamples", () => {
         page_budget: 800
       }),
       readers: counted.readers
-    });
-    expect(counted.counters.nativeVisits).toBeLessThanOrEqual(101);
+    })).toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
+      outcome: "resource_exhausted", resource: "framing_work"
+    }) }));
+    expect(counted.counters.nativeVisits).toBe(0);
     expect(() => runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({
@@ -236,7 +240,6 @@ describe("conditional-field producer-consumer counterexamples", () => {
     const estimates = encoded.candidates.map((candidate) => candidate.token_estimate);
     expect(estimates).toHaveLength(31);
     expect(estimates.every((value) => value > 1)).toBe(true);
-    expect(tight.completeness.observed_coverage).not.toBeUndefined();
   });
 
   it("pin and preview are not mixed across snapshot commit", async () => {

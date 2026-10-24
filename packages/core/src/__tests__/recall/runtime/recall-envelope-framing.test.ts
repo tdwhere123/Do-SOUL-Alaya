@@ -51,19 +51,25 @@ function frame(envelope: unknown, work = 1000, maxBytes = 1_000_000) {
 it("charges surface metadata to the same fit owner and reports the whole field balance", () => {
   const execute = (work: number) => {
     let budgetWork: number | undefined;
+    let invocations = 0;
     const executed = runConditionalFieldRecallWithReceipt({ ...request,
       encode_page: (_index, _previews, _metadata, owner) => {
+        invocations++;
         owner.charge(work, work === 0 ? 0 : 13, "surface metadata");
         return { ok: true };
       }
     }, { issue: "defer", capture_budget_work: value => { budgetWork = value; } });
-    return { actual: executed.execution_receipt.actual!, budgetWork };
+    return { actual: executed.execution_receipt.actual!, budgetWork, invocations };
   };
   const baseline = execute(0), charged = execute(7);
   expect(baseline.budgetWork).toBeTypeOf("number");
-  expect(charged.budgetWork).toBe(baseline.budgetWork! + 7);
-  expect(charged.actual.phases.index.budget_work).toBe(baseline.actual.phases.index.budget_work! + 7);
-  expect(charged.actual.charged_retained_bytes).toBe(baseline.actual.charged_retained_bytes + 13);
+  // The paid progress envelope and final membership are real, separately charged
+  // codec invocations. A discarded prepared control is not free work.
+  expect(charged.invocations).toBe(2);
+  expect(charged.invocations).toBe(baseline.invocations);
+  expect(charged.budgetWork).toBe(baseline.budgetWork! + 7 * charged.invocations);
+  expect(charged.actual.phases.index.budget_work).toBe(baseline.actual.phases.index.budget_work! + 7 * charged.invocations);
+  expect(charged.actual.charged_retained_bytes).toBe(baseline.actual.charged_retained_bytes + 13 * charged.invocations);
   expect(charged.actual).not.toHaveProperty("budget_work");
 });
 

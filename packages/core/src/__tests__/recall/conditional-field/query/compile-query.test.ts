@@ -407,7 +407,7 @@ describe("conditional-field query compiler", () => {
     });
     expect(typed.status).toBe("resolved");
     expect(QueryInterpretationSchema.parse(typed).query_id.length).toBeGreaterThan(0);
-    expect(typed.view).toEqual(defaultView());
+    expect(typed.view).toEqual({ ...defaultView(), enumeration_policy: "canonical" });
   });
 
   it("does not treat Chinese ordinary text as malformed via ASCII stripping", () => {
@@ -552,7 +552,7 @@ describe("conditional-field query compiler", () => {
       result_version: "v1",
       expires_at: "2099-01-01T00:00:00.000Z",
       cursor: "offset-1",
-      enumeration_policy: "canonical" as const,
+      enumeration_policy: "native_query" as const,
       result_kind_view: "mixed" as const,
       claim_demands: associative.view.claim_demands
     };

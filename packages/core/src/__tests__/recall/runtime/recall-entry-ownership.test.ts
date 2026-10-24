@@ -4,6 +4,7 @@ import { indexEntryCacheKey, sourceIndexEntry, MemoryDimension, SourceSemanticRe
 import { executeRecall, runConditionalFieldRecallWithReceipt, type RecallExecutionParams } from "../../../recall/runtime/recall-service-runner.js";
 import { capableRecallConsumerDeclaration } from "../../../recall/runtime/recall-consumer-compatibility.js";
 import { captureIndexPreviews } from "../../../recall/runtime/recall-index-commit.js";
+import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
 import { encodeIndexResults, encodeRecallPageResponse } from "../../../recall/runtime/recall-page-encoding.js";
 import type { ObserverReaders } from "../../../recall/conditional-field/observers/observe-ports.js";
 import type { RecallServiceActiveConstraintsPort } from "../../../recall/runtime/recall-service-ports.js";
@@ -50,6 +51,16 @@ it.each(["clock", "snapshot", "governance", "default-snapshot"])("captures Core 
   expect(scopes).toContain("project");
   expect(Object.isFrozen(params)).toBe(false);
   expect(Object.isFrozen(scopes)).toBe(false);
+});
+
+it.each([false, true])("keeps the executed query identity stable across JSON when an optional context is explicit=%s", explicit => {
+  const result = runConditionalFieldRecallWithReceipt({ ...request,
+    ...(explicit ? { delivery_context: undefined } : {}) });
+  const receipt = result.execution_receipt;
+  expect(receipt.compile_input.view).not.toHaveProperty("delivery_context");
+  const transported = JSON.parse(JSON.stringify(receipt)) as typeof receipt;
+  expect(compileConditionalFieldQuery(transported.compile_input).query_id).toBe(receipt.query_id);
+  expect(transported.query_id).toBe(result.index.query_id);
 });
 
 it.each([false, true])("captures accounting callback before nomination with issuance mutation %s", mutateMode => {
@@ -103,12 +114,16 @@ it("holds empty delivery retention while a codec spends every available byte", (
   const baseline = runConditionalFieldRecallWithReceipt({ ...request, encode_page: () => ({ ok: true }) }, { issue: "defer" });
   let offered = 0;
   const result = runConditionalFieldRecallWithReceipt({ ...request, encode_page: (_index, _previews, _metadata, owner) => {
-    offered = owner.bytes; owner.charge(1, owner.bytes, "metadata consumes available memory"); return { ok: true };
+    offered += owner.bytes; owner.charge(1, owner.bytes, "metadata consumes available memory"); return { ok: true };
   } }, { issue: "defer" });
   expect(offered).toBeLessThan(budget.memory_bytes);
   expect(offered + baseline.execution_receipt.actual!.retained_bytes_current).toBe(budget.memory_bytes);
   expect(result.execution_receipt.actual?.retained_bytes_current).toBe(budget.memory_bytes);
-  expect(result.execution_receipt.actual!.charged_retained_bytes - baseline.execution_receipt.actual!.charged_retained_bytes).toBe(offered);
+  // Control admission precedes observation: a codec consuming that allowance
+  // prevents field allocation rather than inheriting baseline preparation costs.
+  expect(result.execution_receipt.actual!.phases.observe.charged_retained_bytes).toBe(0);
+  expect(result.execution_receipt.actual!.charged_retained_bytes)
+    .toBe(offered + baseline.execution_receipt.actual!.retained_bytes_current);
   expect(result.issue?.({ index: result.index, previews: new Map(), metadata: {} })).toBeTypeOf("string");
 });
 

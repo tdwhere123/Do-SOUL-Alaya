@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { createBenchDaemonConfigDirectoryLease, planBenchDaemonConfigDirectory } from
+  "../../../../bench-runner/src/harness/daemon/daemon-config-directory.js";
 
 const BIN_PATH = fileURLToPath(new URL("../../../../../bin/alaya.mjs", import.meta.url));
 const BRIDGE_DIST_PATH = fileURLToPath(
@@ -26,7 +28,9 @@ describe("built CLI smoke", () => {
       await assertBuiltCliAvailable();
       const tempRoot = await mkdtemp(join(tmpdir(), "alaya-built-cli-"));
       tempDirs.push(tempRoot);
-      const env = createBuiltCliEnv(tempRoot);
+      const config = createBenchDaemonConfigDirectoryLease(planBenchDaemonConfigDirectory(tempRoot));
+      await config.prepare();
+      const env = createBuiltCliEnv(tempRoot, config.path);
       const dbPath = join(tempRoot, "data", "alaya.db");
 
       const install = await runBuiltCli(
@@ -43,7 +47,7 @@ describe("built CLI smoke", () => {
         ],
         env
       );
-      expect(install.exitCode).toBe(0);
+      expect(install.exitCode, install.stderr).toBe(0);
       expect(parseJsonOutput<{ readonly ok: boolean; readonly config_dir: string }>(install.stdout)).toMatchObject({
         ok: true,
         config_dir: env.ALAYA_CONFIG_DIR
@@ -139,11 +143,11 @@ async function assertBuiltCliAvailable(): Promise<void> {
   }
 }
 
-function createBuiltCliEnv(tempRoot: string): NodeJS.ProcessEnv {
+function createBuiltCliEnv(tempRoot: string, configDirectory: string): NodeJS.ProcessEnv {
   const home = join(tempRoot, "home");
   return {
     ...process.env,
-    ALAYA_CONFIG_DIR: join(tempRoot, "config"),
+    ALAYA_CONFIG_DIR: configDirectory,
     DATA_DIR: join(tempRoot, "data"),
     HOME: home,
     USERPROFILE: home,

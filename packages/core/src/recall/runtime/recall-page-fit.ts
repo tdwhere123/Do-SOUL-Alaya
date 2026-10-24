@@ -23,6 +23,27 @@ export function framingReserve(entryCount: number): number {
  * while an encoded page that still cannot carry its membership is deterministic. */
 export type RecallPageInterruption = "work" | "memory" | "codec";
 
+/** No unmeasured page may be acknowledged; the incoming token remains unconsumed. */
+export function framingInterruption(resource: RecallPageInterruption): CoreError {
+  return new CoreError("CONFLICT", "Recall public envelope framing interrupted; delivery was not issued", {
+    details: { outcome: "resource_exhausted", resource: `framing_${resource}` }
+  });
+}
+
+/** A completed measurement, unlike a work interruption, proves encoded-size refusal. */
+export function pageResourceRefusal(input: Readonly<{
+  message: string; required_bytes?: number; result_count?: number;
+} & ({ request: ConditionalFieldRecallRequest } | { available_bytes: number })>): CoreError {
+  return new CoreError("CONFLICT", input.message, {
+    details: {
+      outcome: "resource_exhausted", resource: "encoded_page",
+      available_bytes: "request" in input ? deliveryBudgetOf(input.request).max_encoded_bytes : input.available_bytes,
+      ...(input.required_bytes === undefined ? {} : { required_bytes: input.required_bytes }),
+      ...(input.result_count === undefined ? {} : { result_count: input.result_count })
+    }
+  });
+}
+
 export type RecallPageFit = Readonly<{
   readonly index: InformationIndex;
   readonly previews: ReadonlyMap<string, string>;

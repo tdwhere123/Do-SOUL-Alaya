@@ -114,7 +114,12 @@ async function setup(options: { unknown?: boolean; usageMissing?: boolean; maxUs
 
 function launch(manifest: string, extraArgs: readonly string[] = []) {
   const child = spawn(process.execPath, ["--use-env-proxy", resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"),
-    "extraction-fill", "--batch-campaign", manifest, ...extraArgs], { cwd: process.cwd(), env: process.env });
+    "extraction-fill", "--batch-campaign", manifest, ...extraArgs], { cwd: process.cwd(), env: {
+      ...process.env,
+      // This CLI fixture explicitly needs its synthetic Garden identity after
+      // ambient credentials were removed by the no-sentinel unit entry.
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`
+    } });
   children.add(child);
   let output = "";
   child.stdout!.on("data", (part) => { output += String(part); });

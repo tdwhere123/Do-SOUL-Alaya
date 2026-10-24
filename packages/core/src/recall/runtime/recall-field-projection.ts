@@ -1,8 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
 import { nativeNavigationProjection, type NativeFieldNavigation } from "./native-navigation-projection.js";
-import { deliveryBudgetOf, fitProjectedRecallPage, framingReserve,
+import { deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
   type RecallPageInterruption } from "./recall-page-fit.js";
-import { CoreError } from "../../shared/errors.js";
+import type { RecallProgressDelivery } from "./recall-progress-delivery.js";
 import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger,
   CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema, sharedProductIdentity, indexEntryCacheKey,
   productStateKeyFromIndexEntry, sourceEvidenceRootTarget, stableCanonicalStringify,
@@ -14,10 +13,10 @@ import { orderedProjectionValues } from "../conditional-field/engine/field-solve
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { fieldProgressFingerprint } from "../conditional-field/index/facet-visit-accounting.js";
 import { BoundedIndexPayload } from "./index-payload.js";
-import { deliveredPayloadEntry, fieldResumeKey, issuedContinuationForState, issuedDeliveryRevoked,
+import { deliveredPayloadEntry, recallDeliveryIdentity, issuedContinuationForState, issuedDeliveryRevoked,
   invalidateFieldDelivery, replayIssuedDelivery, replayIssuedIndex, resumeIndexProjection,
   observationSettled, facetIndexStillOpen, type ProjectionProgress } from "./index-continuation.js";
-import { attachIndexSurfaces, commitPreparedIndex, prepareIndexCommit, replayIssuedSurfaces,
+import { attachIndexSurfaces, commitPreparedIndex, prepareIndexCommit, prepareFittedProgressCommit, replayIssuedSurfaces,
   stageIssuedDelivery } from "./recall-index-commit.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
@@ -35,6 +34,7 @@ type ProjectionContext = Readonly<{
   restored?: FieldEngineState;
   /** Reused across shrink attempts so a failed fit does not re-order the same capture. */
   navigation?: NativeFieldNavigation;
+  progress_delivery?: RecallProgressDelivery;
 }>;
 
 export function projectFromField(
@@ -43,7 +43,8 @@ export function projectFromField(
   interpretation: QueryInterpretation,
   retain: ((state: FieldEngineState) => void) | undefined,
   cost: RequestCostLedger,
-  restored?: FieldEngineState
+  restored?: FieldEngineState,
+  progressDelivery?: RecallProgressDelivery
 ): InformationIndex {
   const delta = projectFieldDelta(state);
   const snapshot = state.binding.kind === "bound"
@@ -63,14 +64,7 @@ export function projectFromField(
       && !input.governance.temporal_uncertain);
   const retained = state;
   const projectionProgress = resumeIndexProjection(state, snapshot);
-  const queryKey = fieldResumeKey(
-    interpretation.query_id,
-    interpretation.snapshot_id,
-    interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
-  );
-  const baseDigest = input.continuation == null ? `${queryKey}:root:${randomUUID()}` : input.continuation.continuation_id;
-  const requestDigest = input.payload_continuation === undefined ? baseDigest
-    : createHash("sha256").update(stableCanonicalStringify([baseDigest, input.payload_continuation])).digest("hex");
+  const { query_key: queryKey, request_digest: requestDigest } = progressDelivery ?? recallDeliveryIdentity(input, interpretation);
   const issued = input.continuation == null ? undefined : replayIssuedDelivery(requestDigest);
   if (issued !== undefined) {
     const eligible = new Set(snapshot.values
@@ -113,7 +107,8 @@ export function projectFromField(
     ...(input.payload_continuation === undefined
       ? {}
       : { payloadContinuation: input.payload_continuation }) });
-  const context = { state, input, interpretation, snapshot, payload, projectionProgress, queryKey, requestDigest, retain, cost, restored };
+  const context = { state, input, interpretation, snapshot, payload, projectionProgress, queryKey, requestDigest, retain, cost, restored,
+    progress_delivery: progressDelivery };
   return input.payload_continuation === undefined ? projectMembershipPage(context) : projectPayloadPage(context);
 }
 
@@ -152,6 +147,13 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
   // a larger budget. Only a page that kept failing to fit while work remained is a
   // deterministic encoded-size refusal.
   if (fitted.interruption !== undefined) {
+    if (context.progress_delivery?.control !== undefined) {
+      const control = context.progress_delivery.control;
+      attachIndexSurfaces(control, new Map(), {});
+      retain?.({ ...state, remaining_memory_bytes: fitted.remaining_memory_bytes,
+        memory_exhausted: fitted.interruption === "memory", ...remainingWorkFields(state, fitted.remaining_work) });
+      return control;
+    }
     payload.remainingMemoryBytes = fitted.remaining_memory_bytes;
     const interrupted = withInterruptedPayload(assembled);
     const controlMeter = new SourceSemanticResourceLedger({ work_units: fitted.remaining_work,
@@ -222,32 +224,6 @@ function fitPageEnvelope(context: ProjectionContext, assembled: InformationIndex
     remaining_work: meter.work, remaining_memory_bytes: meter.bytes };
 }
 
-/** No unmeasured page may be acknowledged. A refusal leaves the incoming token
- * unconsumed, so retry with sufficient work can recover the retained field. */
-function framingInterruption(resource: RecallPageInterruption): CoreError {
-  return new CoreError("CONFLICT", "Recall public envelope framing interrupted; delivery was not issued", {
-    details: { outcome: "resource_exhausted", resource: `framing_${resource}` }
-  });
-}
-
-/** The one terminal refusal for a page that cannot be framed inside its declared
- * encoded envelope. Work-ledger interruption is not this error: it is expressed as
- * an ordinary empty/interrupted page with retained progress and its continuation.
- */
-function pageResourceRefusal(input: Readonly<{
-  readonly message: string; readonly request: ConditionalFieldRecallRequest;
-  readonly required_bytes?: number; readonly result_count?: number;
-}>): CoreError {
-  return new CoreError("CONFLICT", input.message, {
-    details: {
-      outcome: "resource_exhausted", resource: "encoded_page",
-      available_bytes: deliveryBudgetOf(input.request).max_encoded_bytes,
-      ...(input.required_bytes === undefined ? {} : { required_bytes: input.required_bytes }),
-      ...(input.result_count === undefined ? {} : { result_count: input.result_count })
-    }
-  });
-}
-
 /** Preserve the resource split while carrying one cumulative remaining allowance. */
 function remainingWorkFields(
   state: FieldEngineState, total: number
@@ -260,6 +236,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
   let current = context;
   let width = context.input.budget.page_budget;
   let droppedNonEmpty = false;
+  let requiredMembershipBytes: number | undefined;
   for (;;) {
     const candidate = projectMembershipCandidate({ ...current,
       input: { ...current.input, budget: { ...current.input.budget, page_budget: width } } });
@@ -306,10 +283,13 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
       context.retain?.(committed.retained);
       return committed.index;
     }
-    if (candidate.index.entries.length > 0) droppedNonEmpty = true;
+    if (candidate.index.entries.length > 0) {
+      droppedNonEmpty = true;
+      requiredMembershipBytes = fitted.bytes;
+    }
     if (width === 0 || candidate.index.entries.length === 0 || fitted.result_count === 0) {
       throw pageResourceRefusal({ message: "Recall output budget cannot carry its required public envelope",
-        request: current.input, required_bytes: fitted.bytes });
+        request: current.input, required_bytes: requiredMembershipBytes ?? fitted.bytes });
     }
     // A failed fit commits nothing. Carry the post-fit remaining allowance into the
     // narrower retry so framing and hydration work is never restored or double-spent.
@@ -330,6 +310,25 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
  */
 function commitInterruptedMembership(context: ProjectionContext,
   candidate: ReturnType<typeof projectMembershipCandidate>, remaining: number): InformationIndex {
+  const paid = context.progress_delivery;
+  if (paid?.control !== undefined) {
+    const prepared = prepareFittedProgressCommit({ index: paid.control,
+      state: { ...candidate.retained, ...remainingWorkFields(candidate.retained, remaining) },
+      // Facet preparation is computation even when the candidate cannot ship.
+      // Only an empty candidate may advance its scan past nonmembers; unfitted
+      // members/updates must remain behind the acknowledged frontier.
+      progress: { ...context.projectionProgress,
+        facet_index: candidate.projectionProgress.facet_index ?? context.projectionProgress.facet_index,
+        ...(candidate.index.entries.length === 0 && (candidate.index.product_updates?.length ?? 0) === 0
+          ? { offset: candidate.projectionProgress.offset, facet_offset: candidate.projectionProgress.facet_offset } : {}) },
+      first_retention: candidate.first_retention,
+      generation: paid.control_generation!, available_bytes: candidate.payload.remainingMemoryBytes,
+      queryKey: context.queryKey, requestDigest: context.requestDigest, request: context.input.continuation });
+    const committed = commitPreparedIndex({ prepared, index: paid.control, previews: new Map(),
+      payload: candidate.payload, cost: context.cost });
+    context.retain?.(committed.retained);
+    return committed.index;
+  }
   const control = projectMembershipCandidate({ ...context,
     state: { ...candidate.retained, ...remainingWorkFields(candidate.retained, 0) },
     input: { ...context.input, budget: { ...context.input.budget, page_budget: 0 } },

@@ -113,13 +113,13 @@ describe("incremental projection and read-only recall", () => {
     expect(slice.indexProjection.freshness(WS, "missing-object")).toMatchObject({
       lexical: "missing", semantic: "unavailable", embedding: "unavailable"
     });
-    const truncated = await slice.runRecall({
+    await expect(slice.runRecall({
       text: "Where is the deployment checklist?",
       familyCaps: { embedding: "unavailable" },
       budget: { work_units: 1 }
-    });
-    expect(truncated.index.completeness.logical_index).not.toBe("complete");
-    expect(truncated.index.entries).toEqual([]);
+    })).rejects.toMatchObject({ code: "CONFLICT", details: {
+      outcome: "resource_exhausted", resource: "framing_work"
+    } });
     const missingCap = await slice.runRecall({
       text: "Who is working remotely?", familyCaps: { embedding: "unavailable" }
     });

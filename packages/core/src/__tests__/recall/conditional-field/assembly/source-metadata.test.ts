@@ -59,11 +59,12 @@ describe("bounded source metadata retention", () => {
     expect(encoded.candidates[0]?.scope_class).toBe(ScopeClass.PROJECT);
   });
 
-  it("refuses a delivery that cannot retain recovery and exposes no source metadata in its error", () => {
+  it("refuses an undersized public envelope and exposes no source metadata in its error", () => {
     let failure: unknown;
     try { recall(true, 100); } catch (error) { failure = error; }
     expect(failure).toMatchObject({ code: "CONFLICT", details: {
-      outcome: "resource_exhausted", resource: "delivery_retention"
+      outcome: "resource_exhausted", resource: "encoded_page", available_bytes: 100,
+      required_bytes: expect.any(Number)
     } });
     expect(JSON.stringify(failure)).not.toContain("capsule");
     expect(JSON.stringify(failure)).not.toContain("Source needs review");

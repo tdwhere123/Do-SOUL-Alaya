@@ -45,11 +45,12 @@ describe("outer recall snapshot native allowance", () => {
     const prepared = vi.spyOn(slice.database.connection, "prepare");
     const executed = vi.spyOn(slice.database.connection, "exec");
     const pin = vi.spyOn(SqliteIndexedRecallProjection.prototype, "observablePin");
-    const index = readers === undefined
+    expect(() => readers === undefined
       ? runConditionalFieldWorkerRecall(runtime(slice.database), workerPayload(request.budget)).index
-      : runConditionalFieldRecall({ ...request, readers });
-    expect(index.entries).toEqual([]);
-    expect(index.completeness.logical_index).not.toBe("complete");
+      : runConditionalFieldRecall({ ...request, readers }))
+      .toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
+        outcome: "resource_exhausted", resource: "framing_work"
+      }) }));
     expect(pin).not.toHaveBeenCalled();
     expect(prepared).not.toHaveBeenCalled();
     expect(executed).not.toHaveBeenCalled();

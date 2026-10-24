@@ -148,12 +148,14 @@ async function assertQaFailureArchive(
     merged.sidecar.questions, merged.failed_question_ids
   ));
   expect(mergedLedger.rows).toHaveLength(2);
-  expect(mergedLedger.rows[1]).toMatchObject({ question_id: "q002", evidence_status: "complete" });
+  // Mixed native Recall retains the delivered memory evidence, but an unwired
+  // source-index lane cannot certify a complete candidate population.
+  expect(mergedLedger.rows[1]).toMatchObject({ question_id: "q002", evidence_status: "partial" });
   expect(kpi.kpi.per_scenario[1]).toMatchObject({
     id: retained.question_id, hit_at_5: retained.hit_at_5, scorable: true
   });
   expect(cohort.rows[1]).toMatchObject({
-    question_id: "q002", evidence_status: "complete", candidate_pool_complete: true
+    question_id: "q002", evidence_status: "partial", candidate_pool_complete: false
   });
   expect(kpi.kpi.r_at_5).toBe(
     kpi.kpi.per_scenario.filter((row) => row.hit_at_5).length / 2

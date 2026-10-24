@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { canonicalProductIdentityOfEntry, MemoryDimension, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { runConditionalFieldRecall, captureIndexPreviews } from "../../../../recall/runtime/recall-service-runner.js";
+import { runConditionalFieldRecall, runConditionalFieldRecallWithReceipt, captureIndexPreviews } from "../../../../recall/runtime/recall-service-runner.js";
 import { toSourceObserverRow, type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { defaultBudget, INTERPRETATION_CLOCK, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import { openSourceSlice, WS } from "../vertical/source-slice.js";
@@ -52,13 +52,16 @@ describe("native lexical delivery at corpus scale", () => {
   });
 
   it.each([0, 1])("terminates an unserviceable %i-unit request without a replayable no-progress cursor", (work_units) => {
-    const readers: ObserverReaders = { lexical: () => { throw new Error("An unserviceable action must not read"); } };
-    const pages = collectPages(readers, defaultBudget({ work_units, finalization_reserve: 0,
-      min_envelope: 0, page_budget: 1 }), 2);
-    expect(pages).toHaveLength(1);
-    expect(pages[0]!.entries).toEqual([]);
-    expect(pages[0]!.continuation).toBeNull();
-    expect(pages[0]!.completeness.logical_index).not.toBe("complete");
+    const read = vi.fn(() => { throw new Error("An unserviceable action must not read"); });
+    let failure: unknown;
+    try {
+      collectPages({ lexical: read, snapshotPin: read }, defaultBudget({ work_units, finalization_reserve: 0,
+        min_envelope: 0, page_budget: 1 }), 2);
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "CONFLICT", details: { outcome: "resource_exhausted", resource: "framing_work",
+      execution_receipt: { requested_budget: { work_units }, actual: { native_visits: 0, native_rows: 0, native_bytes: 0 } } } });
+    expect(read).not.toHaveBeenCalled();
+    expect(JSON.stringify(failure)).not.toMatch(/continuation|delivery_id/u);
   });
 
   it("delivers and exhausts 180 grounded matches in a thousand-source corpus with the default reserve", async () => {
@@ -200,11 +203,16 @@ function collectPages(readers: ObserverReaders, budget: RequestBudget, maximum: 
   const pages: InformationIndex[] = [];
   let continuation: InformationIndex["continuation"] = null;
   for (let attempt = 0; attempt < maximum; attempt += 1) {
-    const index = runConditionalFieldRecall({ workspace_id: WS, query_text: query, budget,
+    let charged: number | undefined;
+    const executed = runConditionalFieldRecallWithReceipt({ workspace_id: WS, query_text: query, budget,
       result_kind_view: "memory_only",
       snapshot_id: SNAPSHOT_ID, interpretation_clock: clock, as_of: clock,
       expires_at: "2099-01-01T00:00:00.000Z", readers, continuation,
-      authorized_scopes: null });
+      authorized_scopes: null }, { capture_budget_work: value => { charged = value; } });
+    const index = executed.index;
+    expect(charged).toBeTypeOf("number");
+    expect(charged!).toBeLessThanOrEqual(budget.work_units);
+    expect(index.continuation?.emitted_revisions).toBeUndefined();
     pages.push(index);
     continuation = index.continuation;
     if (continuation === null) break;

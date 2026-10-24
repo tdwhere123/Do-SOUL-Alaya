@@ -11,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   CoreError, encodeIndexResults, frameEncodedIndex, preparedDeliveryId,
+  RecallEnvelopeFraming, recallFramingInterruption, recallPageResourceRefusal,
   type RecallPageSourceMetadata
 } from "@do-soul/alaya-core";
 import { workOf } from "./source-semantic-discovery.js";
@@ -143,6 +144,28 @@ export function libraryFieldDelivery(page: LibraryFieldPage, context: LibraryFie
   };
 }
 
+/** The pre-observation control fit cannot price native evidence that did not yet
+ * exist. Refit the complete library surface from its own protected finalization
+ * allowance before publishing a lease or acknowledging the Core preparation. */
+export function fitFinalLibraryFieldDelivery(page: LibraryFieldPage, context: LibraryFieldContext): Delivery {
+  const framing = new RecallEnvelopeFraming(context.meter);
+  try {
+    framing.begin();
+    for (const _entry of page.index.entries) framing.entry();
+    framing.enterCodec();
+    const delivery = libraryFieldDelivery(page, context, reservedLibraryWork(context.request_budget));
+    const bytes = framing.measure(libraryFitEnvelope(delivery));
+    if (bytes > context.output_byte_limit) throw recallPageResourceRefusal({
+      message: "Library output budget cannot carry its final public envelope",
+      available_bytes: context.output_byte_limit, required_bytes: bytes
+    });
+    return delivery;
+  } catch (error) {
+    if (framing.interrupted) throw recallFramingInterruption("work");
+    throw error;
+  }
+}
+
 /** The worker result keeps previews and its preparation handle private; the
  * public envelope is exactly the fitted delivery plus the operation tag. */
 export function libraryWorkerResult(delivery: Delivery, previews: ReadonlyMap<string, string>,
@@ -163,7 +186,7 @@ export function libraryFitEnvelope(delivery: Delivery): unknown {
  * delivery; the delivered envelope reports actual work and is never larger. */
 export function reservedLibraryWork(request_budget: RequestBudget): ReturnType<typeof workOf> {
   return { native_work: request_budget.work_units, index_work: request_budget.work_units,
-    native_accounting: "partial", logical_work: request_budget.work_units,
+    native_accounting: "complete", logical_work: request_budget.work_units,
     native_bytes: request_budget.memory_bytes, logical_memory_bytes: request_budget.memory_bytes,
     rss_bytes: Number.MAX_SAFE_INTEGER };
 }

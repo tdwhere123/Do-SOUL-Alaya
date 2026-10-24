@@ -120,26 +120,23 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect("delivery_path" in mcp).toBe(false);
   });
 
-  it("keeps enumeration_policy and result_kind_view through handler mapping", async () => {
+  it("maps native result views and rejects archived enumeration through the handler", async () => {
     const slice = await openPlantedSlice();
-    const canonical = await recallThroughHandler(slice, {
-      query: "yesterday failed deployment",
-      max_results: 800,
-      enumeration_policy: "canonical",
-      result_kind_view: "mixed"
-    });
-    const associative = await recallThroughHandler(slice, {
-      query: "yesterday failed deployment",
-      max_results: 800,
-      enumeration_policy: "associative",
-      result_kind_view: "mixed",
-      cap_contracts: [identityAssociationCap()]
-    });
-    expect(associative.index.query_id).not.toBe(canonical.index.query_id);
-    expect(new Set(associative.index.entries.map((entry) => entry.object_id)))
-      .toEqual(new Set(canonical.index.entries.map((entry) => entry.object_id)));
-    expect(associative.results.every((result) => result.target !== undefined)).toBe(true);
-    expect(canonical.results.every((result) => result.object_kind === "memory_entry")).toBe(true);
+    const request = { query: "yesterday failed deployment", max_results: 800,
+      cap_contracts: [identityAssociationCap()] };
+    for (const enumeration_policy of ["canonical", "associative"] as const) {
+      await expect(recallThroughHandler(slice, { ...request, enumeration_policy, result_kind_view: "mixed" }))
+        .rejects.toThrow("ordinary execution requires native_query");
+    }
+    const mixed = await recallThroughHandler(slice, { ...request,
+      enumeration_policy: "native_query", result_kind_view: "mixed" });
+    const memory = await recallThroughHandler(slice, { ...request,
+      enumeration_policy: "native_query", result_kind_view: "memory_only" });
+    expect(mixed.index.query_id).not.toBe(memory.index.query_id);
+    expect(new Set(mixed.index.entries.map((entry) => entry.object_id)))
+      .toEqual(new Set(memory.index.entries.map((entry) => entry.object_id)));
+    expect(mixed.results.every((result) => result.target !== undefined)).toBe(true);
+    expect(memory.results.every((result) => result.object_kind === "memory_entry")).toBe(true);
   });
 
   it("allows a complete logical index that still contains unknown cause", async () => {

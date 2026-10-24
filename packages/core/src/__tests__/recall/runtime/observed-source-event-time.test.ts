@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   sourceDisclosure, CONDITIONAL_FIELD_SCHEMA_VERSION,
   indexEntryCacheKey,
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe("observed source event time facts", () => {
-  it("keeps known, missing, and checked-null event time distinct through cached page metadata", () => {
+  it("keeps known, missing, and checked-null event time distinct through pinned then cached page metadata", () => {
     const { known, absent, missing } = plantedFacts();
     expect(known.facts.event_time).toBe(KNOWN_TIME);
     expect(absent.facts.event_time).toBeNull();
@@ -132,12 +132,19 @@ function pageSourceTime(
   bound: ReturnType<typeof boundPage>,
   mode: "cached" | "hydrate_fail"
 ) {
+  const target = bound.entry.target;
+  if (target.kind !== "source_evidence") throw new Error("source target required");
+  const hydrate = vi.fn(() => ({ row: { ...bound.facts,
+    kind: target.root_kind, workspace_id: target.workspace_id, root_id: target.root_id,
+    revision: target.source_version, digest: target.content_digest,
+    evidence_object_id: target.evidence_object_id, content: "pinned body", content_complete: true },
+    rowsRead: 1, bytesRead: 11, unavailable: false }));
   const payload = new BoundedIndexPayload({
     sourceFacts: new Map([[sourceFactKey(bound.entry.target), bound.facts]]),
     ...(mode === "cached"
       ? {
-        previewCache: { [indexEntryCacheKey(bound.entry)]: "cached body" },
-        readers: { sourceRoot: () => { throw new Error("cached preview must not rehydrate"); } }
+        previewCache: { [indexEntryCacheKey(bound.entry)]: "unbound cached body" },
+        readers: { sourceRoot: hydrate }
       }
       : { readers: {} }),
     workspaceId: "workspace-1",
@@ -146,6 +153,13 @@ function pageSourceTime(
     manifestationFor: () => "excerpt"
   });
   payload.finalize([bound.entry], 20);
+  payload.finalize([bound.entry], 20);
+  if (mode === "cached") {
+    // A preview without a retained source span is not delivery evidence. Hydrate
+    // once, then reuse that same payload owner's pinned span and metadata.
+    expect(hydrate).toHaveBeenCalledTimes(1);
+    expect(payload.previews.get(indexEntryCacheKey(bound.entry))).toBe("pinned body");
+  }
   const disclosure = payload.sourceMetadata[indexEntryCacheKey(bound.entry)]?.source_disclosure;
   return disclosure === undefined ? undefined : sourceDisclosure(disclosure).source_time;
 }

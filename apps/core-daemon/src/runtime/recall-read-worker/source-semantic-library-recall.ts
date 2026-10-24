@@ -23,7 +23,7 @@ import { readSemanticLease, issueSemanticLease, semanticLeaseExpiry, sourceSeman
 import { createConditionalFieldObserverReaders, NATIVE_SOURCE_NOMINATION_ALLOWANCE,
   nominationFromCaptures, runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import { observeSourceQueryProofs, proofSupportFor, type SourceQueryProofObservation } from "./source-query-proof-observation.js";
-import { LIBRARY_PAYLOAD_TOKENS, libraryFieldDelivery, libraryFitEnvelope, libraryWorkerResult,
+import { LIBRARY_PAYLOAD_TOKENS, fitFinalLibraryFieldDelivery, libraryFieldDelivery, libraryFitEnvelope, libraryWorkerResult,
   reservedLibraryWork, type LibraryFieldContext } from "./source-semantic-library-field-page.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
@@ -121,6 +121,7 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
   const readers = libraryReaders(runtime, payload, observation, meter, boundPool, observer,
     continuationLease?.field_page?.nomination);
   let execution: SourceSemanticExecution | undefined;
+  let executionAcquisition: ReturnType<Readers["acquisition"]>;
   const context: LibraryFieldContext = {
     request_identity: publicRequestIdentity, query_semantics_status: boundStatus,
     query_complete: (query?.gaps.length ?? 0) === 0, observation,
@@ -130,7 +131,16 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
     native_truncated: readers.nativeTruncated,
     pool_open: boundPool === undefined ? undefined
       : boundPool.access.unvisited_sources || boundPool.access.unvisited_interpretations,
-    execution: owner => execution ??= libraryExecution(payload, owner, readers)
+    execution: owner => {
+      const acquisition = readers.acquisition();
+      // A pre-observation control codec must not cache successful absence for
+      // the later, actually executed native acquisition on this request.
+      if (execution === undefined || acquisition !== executionAcquisition) {
+        execution = libraryExecution(payload, owner, readers);
+        executionAcquisition = acquisition;
+      }
+      return execution;
+    }
   };
   return executeLibraryField(runtime, meter, request.budget, () => readers.acquisition()?.resources.work ?? 0,
     captureBudgetWork => runConditionalFieldWorkerRecall(runtime,
@@ -293,8 +303,8 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   // progress here; delivering it would hand the caller a dead continuation.
   const index = executed.index.continuation?.continuation_id === "payload"
     ? { ...executed.index, continuation: null } : executed.index;
-  const delivery = libraryFieldDelivery({ index, previews,
-    metadata: executed.source_metadata ?? {} }, context, workOf(meter));
+  const delivery = fitFinalLibraryFieldDelivery({ index, previews,
+    metadata: executed.source_metadata ?? {} }, context);
   const admitted = SourceSemanticFieldLibraryWorkerResultSchema.parse(libraryWorkerResult(
     delivery, previews, executed.preparation_id, executed.execution_receipt));
   if (admitted.index.continuation !== null) {
@@ -309,8 +319,8 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   meter.observer?.event("delivered_membership", meter.phase, () => ({
     targets: admitted.index.entries.map(row => row.target),
     continuation: admitted.index.continuation !== null }));
-  // Qualification and lease publication are paid before reporting final work.
-  // Fitting used the declared maximum, so this measured replacement cannot grow it.
+  // Final fitting, qualification and lease publication are paid before reporting
+  // work. The fitted width quote covers both native-accounting states.
   return { ...admitted, work: workOf(meter) };
 }
 

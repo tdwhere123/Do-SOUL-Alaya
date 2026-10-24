@@ -61,6 +61,14 @@ it("measures bounded first/repeat/reopened local Recall including setup, final q
         reopenSetupMs = performance.now() - reopenStarted;
       }
       for (const workUnits of [1, 120, 512]) {
+        if (workUnits === 1) {
+          await expect(slice.runRecall({ text: "Who owns Vega?", budget: { work_units: workUnits } }))
+            .rejects.toMatchObject({ code: "CONFLICT", details: {
+              outcome: "resource_exhausted", resource: "framing_work"
+            } });
+          records.push({ stage, workUnits, outcome: "framing_work" });
+          continue;
+        }
         const result = await slice.runRecall({ text: "Who owns Vega?", budget: { work_units: workUnits } });
         expect(result.counters.row_visits).toBeLessThanOrEqual(workUnits);
         expect(result.counters.source_reads).toBeLessThanOrEqual(workUnits);
@@ -146,8 +154,12 @@ it("work or page budget truncates relation-backed index without native visit cou
     validity: { kind: "open", valid_from: "2025-01-01T00:00:00.000Z" },
     gist: "Alice owns Orion"
   });
-  const result = runLive(slice, { query_text: "Who owns Orion?", page_budget: 1, work_units: 12 });
-  expect(result.entries.length).toBeLessThanOrEqual(1);
+  expect(() => runLive(slice, { query_text: "Who owns Orion?", page_budget: 1, work_units: 12 }))
+    .toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({
+      outcome: "resource_exhausted", resource: "framing_work"
+    }) }));
+  const result = runLive(slice, { query_text: "Who owns Orion?", page_budget: 1 });
+  expect(result.entries.map(entry => entry.object_id)).toEqual([MEM.orion]);
   expect(result.representation.page_budget).toBe(1);
   expect(pageTruncated(result) || result.completeness.logical_index !== "complete").toBe(true);
   expect(slice.pendingGarden()).toHaveLength(0);

@@ -18,6 +18,7 @@ import { type ObserverReaders } from "../conditional-field/observers/observe.js"
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectFromField, annotatePublicIndex, invalidatedPublicIndex } from "./recall-field-projection.js";
 import { deliveryBudgetOf } from "./recall-page-fit.js";
+import { prepareRecallProgressDelivery, progressExecutionBudget, type RecallProgressDelivery } from "./recall-progress-delivery.js";
 import {
   captureEffectiveAsOf,
   normalizeQueryText,
@@ -240,9 +241,9 @@ export function runConditionalFieldRecallWithReceipt(
   input = withRecallEnvironment(captured, {
     ...(captured.environment.readers.snapshotPin === undefined
       ? {}
-      : { budget: issue === "defer"
-        ? reserveSnapshotPinWork(reserveSnapshotPinWork(capturedBudget).budget).budget
-        : reserveSnapshotPinWork(capturedBudget).budget }),
+      // Both immediate and deferred issuance validate the generation again.
+      // Neither validation may borrow work already spent by the field.
+      : { budget: reserveSnapshotPinWork(reserveSnapshotPinWork(capturedBudget).budget).budget }),
     requested_budget: requestedBudget
   });
   const compileInput = {
@@ -263,7 +264,7 @@ export function runConditionalFieldRecallWithReceipt(
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       requested_roles: ["requested", "associated"],
       enumeration_policy: input.enumeration_policy ?? "native_query",
-      delivery_context: input.delivery_context,
+      ...(input.delivery_context === undefined ? {} : { delivery_context: input.delivery_context }),
       delivery_budget: deliveryBudgetOf(input),
       result_kind_view: input.result_kind_view ?? "mixed",
       ...(input.cap_contracts === undefined ? {} : { cap_contracts: input.cap_contracts }),
@@ -356,11 +357,13 @@ function runCompiledConditionalFieldRecall(
       interpretationIdentity({ interpretation_clock: restored.interpretation.interpretation_clock })));
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
+  const progressDelivery = prepareRecallProgressDelivery(input, interpretation, restored, cost);
+  const executionBudget = progressExecutionBudget(input.budget, progressDelivery);
   let reusedCostOwner: FieldEngineState | undefined;
   const field = cost.time("observe", () => observeField(interpretation, {
     workspace_id: input.workspace_id,
     query_text: input.query_text,
-    budget: input.budget,
+    budget: executionBudget,
     as_of: input.as_of,
     readers: input.readers,
     cost,
@@ -374,10 +377,13 @@ function runCompiledConditionalFieldRecall(
   }));
   // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
   cost.add("observe", thisRequestObservedWork(reusedCostOwner, field, input.budget.memory_bytes));
-  const assessed = assessUnknownCause(field, input);
+  // Release the uncommitted retention hold into projection; its commit owner
+  // will debit it exactly once for whichever fitted response is acknowledged.
+  const assessed = assessUnknownCause({ ...field,
+    remaining_memory_bytes: field.remaining_memory_bytes + progressDelivery.retention_hold }, input);
   cost.add("index", { charged_retained_bytes: Math.max(0,
     (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });
-  const projected = projectMeasuredField(assessed, input, interpretation, cost, restored);
+  const projected = projectMeasuredField(assessed, input, interpretation, cost, restored, progressDelivery);
   const index = projected.index;
   let retained = projected.retained;
   if (restoredFieldFootprint(retained) <= input.budget.memory_bytes) {
@@ -416,9 +422,10 @@ function runCompiledConditionalFieldRecall(
 /** The field balance owns total budget expenditure; phase operation counters
  * cannot reconstruct it by adding visits, joins or partial ledger subtotals. */
 function projectMeasuredField(state: FieldEngineState, input: ConditionalFieldRecallRequest,
-  interpretation: QueryInterpretation, cost: RequestCostLedger, restored?: FieldEngineState) {
+  interpretation: QueryInterpretation, cost: RequestCostLedger, restored?: FieldEngineState,
+  progressDelivery?: RecallProgressDelivery) {
   let retained = state;
-  const index = projectFromField(state, input, interpretation, next => { retained = next; }, cost, restored);
+  const index = projectFromField(state, input, interpretation, next => { retained = next; }, cost, restored, progressDelivery);
   cost.addFieldBudgetWork(state.remaining_exploration + state.remaining_reserve
     - retained.remaining_exploration - retained.remaining_reserve);
   return { index, retained };

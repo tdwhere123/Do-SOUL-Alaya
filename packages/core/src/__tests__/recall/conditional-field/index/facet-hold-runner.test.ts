@@ -31,6 +31,7 @@ describe("runner facet hold does not trap a truncated-open index", () => {
     });
     const first = recall(readers, starved);
     expect(first.index.entries).toEqual([]);
+    expect(first.index.representation.page_budget).toBe(starved.page_budget);
     expect(first.index.completeness.logical_index).toBe("open");
     expect(first.index.continuation).not.toBeNull();
 

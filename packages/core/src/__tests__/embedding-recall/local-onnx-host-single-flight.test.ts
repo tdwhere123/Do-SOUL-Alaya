@@ -66,9 +66,10 @@ describe("local-onnx-host-single-flight", () => {
 
   it("creates the default lock inside a private per-user directory", async () => {
     const root = createRoot(roots);
-    await withDefaultLockTmp(root, async () => {
-      const lockPath = resolveLocalOnnxHostLockPath();
-      await withLocalOnnxHostSingleFlight(async () => undefined, { enabled: true });
+    const env = { TMPDIR: root };
+    {
+      const lockPath = resolveLocalOnnxHostLockPath(env);
+      await withLocalOnnxHostSingleFlight(async () => undefined, { enabled: true, env });
       const stats = statSync(dirname(lockPath));
       expect(stats.isDirectory()).toBe(true);
       expect(dirname(lockPath)).not.toBe(root);
@@ -78,24 +79,25 @@ describe("local-onnx-host-single-flight", () => {
       if (process.platform !== "win32") {
         expect(stats.mode & 0o777).toBe(0o700);
       }
-    });
+    }
   });
 
   it.skipIf(process.platform === "win32")(
     "rejects a symlink pre-created at the default private directory",
     async () => {
       const root = createRoot(roots);
-      await withDefaultLockTmp(root, async () => {
-        const lockPath = resolveLocalOnnxHostLockPath();
+      const env = { TMPDIR: root };
+      {
+        const lockPath = resolveLocalOnnxHostLockPath(env);
         const symlinkTarget = join(root, "attacker-controlled");
         mkdirSync(symlinkTarget, { mode: 0o700 });
         symlinkSync(symlinkTarget, dirname(lockPath), "dir");
 
         await expect(withLocalOnnxHostSingleFlight(async () => undefined, {
-          enabled: true
+          enabled: true, env
         })).rejects.toThrow(/not a directory/);
         expect(existsSync(join(symlinkTarget, basename(lockPath)))).toBe(false);
-      });
+      }
     }
   );
 
@@ -250,32 +252,13 @@ function spawnSqliteLockOwner(lockPath: string) {
     "const database = new DatabaseSync(process.argv[1], { timeout: 0 });",
     "database.exec('BEGIN IMMEDIATE');",
     "process.stdout.write('ready\\n');",
-    "setInterval(() => undefined, 1000);"
+    // Keep the actual transaction owner reachable until the parent kills it;
+    // a timer without this reference permits GC to release SQLite's lock early.
+    "setInterval(() => database.exec('SELECT 1'), 1000);"
   ].join("\n");
   return spawn(process.execPath, ["--input-type=module", "-e", script, lockPath], {
     stdio: ["ignore", "pipe", "ignore"]
   });
-}
-
-function restoreEnv(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-}
-
-async function withDefaultLockTmp<T>(tmp: string, operation: () => Promise<T>): Promise<T> {
-  const previousTmp = process.env.TMPDIR;
-  const previousOverride = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
-  process.env.TMPDIR = tmp;
-  delete process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
-  try {
-    return await operation();
-  } finally {
-    restoreEnv("TMPDIR", previousTmp);
-    restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousOverride);
-  }
 }
 
 function escapeRegExp(value: string): string {

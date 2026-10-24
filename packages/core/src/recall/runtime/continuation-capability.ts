@@ -47,6 +47,13 @@ export function sealIssuedContinuation(continuation: Continuation): Continuation
   };
 }
 
+/** FIELD_RESUME owns the emitted ledger for these capabilities. Keep stateless
+ * projector continuations intact; only retained runtime commits use this form. */
+export function sealRetainedContinuation(continuation: Continuation): Continuation {
+  const { emitted_revisions: _ledger, ...control } = continuation;
+  return sealIssuedContinuation(control);
+}
+
 export function issuedContinuationTampered(client: Continuation, issued: Continuation): boolean {
   for (const key of ISSUED_FIELDS) {
     const value = client[key];

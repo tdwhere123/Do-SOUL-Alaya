@@ -300,7 +300,7 @@ it("denies an out-of-scope source before delivery while keeping the admitted sou
   }, { prepareDatabase: indexed(sources) });
 }, 60_000);
 
-it("keeps measured worker cost on a refused ordinary page through the compiled worker", async () => {
+it("reports paid envelope refusal before source I/O through the compiled worker", async () => {
   const directory = await mkdtemp(join(tmpdir(), "alaya-refused-page-"));
   const filename = join(directory, "alaya.db");
   const budget = { schema_version: 1 as const, work_units: 200_000, memory_bytes: 4_000_000,
@@ -321,19 +321,21 @@ it("keeps measured worker cost on a refused ordinary page through the compiled w
     const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
     try {
       await client.ready();
-      // The public encoded envelope cannot carry the page: the field refuses after its reads.
+      // Even the required control cannot fit: refuse before source payload reads,
+      // while retaining the actual snapshot-pin and framing expenditure.
       const failure = await client.conditionalFieldPort!.recall(request).then(() => undefined,
         (error: unknown) => error as CoreError);
       expect(failure).toBeDefined();
       expect(failure!.code).toBe("CONFLICT");
       const details = failure!.details!;
-      expect(details.outcome).toBe("resource_exhausted");
-      // The reads that actually happened survive the refusal, sampled in the worker.
+      expect(details).toMatchObject({ outcome: "resource_exhausted", resource: "encoded_page", available_bytes: 1_024 });
+      expect(details.required_bytes).toBeGreaterThan(1_024);
+      // Native pin work is not a source-byte or source-row measurement.
       const worker = details.worker as { native_visits?: number; bytes_read?: number; row_visits?: number;
         elapsed_ms?: number; rss_bytes?: number; rss_sampling_method?: string };
       expect(Number.isFinite(worker.native_visits) && worker.native_visits! > 0).toBe(true);
-      expect(Number.isFinite(worker.bytes_read) && worker.bytes_read! > 0).toBe(true);
-      expect(Number.isFinite(worker.row_visits) && worker.row_visits! >= 0).toBe(true);
+      expect(worker.bytes_read).toBe(0);
+      expect(worker.row_visits).toBe(0);
       expect(Number.isFinite(worker.elapsed_ms) && worker.elapsed_ms! >= 0).toBe(true);
       expect(Number.isFinite(worker.rss_bytes) && worker.rss_bytes! > 0).toBe(true);
       expect(worker.rss_sampling_method).toBe("process.memoryUsage().rss");

@@ -143,7 +143,9 @@ it("refuses an unfit membership page instead of returning empty success and reta
 
 it("fits payload expansion pages to the same encoded envelope and keeps visible intervals exact", async () => {
   await withIndexedSources([
-    { id: "harbor", text: `${HARBOR} ${"Crane logs pile up. ".repeat(200)}`, vector: [1, 0, 0] }
+    // Escaping makes wire bytes independently larger than hydrated UTF-8 bytes;
+    // the refusal must not depend on shipping a cumulative continuation ledger.
+    { id: "harbor", text: `${HARBOR} ${'"'.repeat(4_000)}`, vector: [1, 0, 0] }
   ], async fixture => {
     const { request } = await fieldRequest(fixture, { page_budget: 10 });
     const membership = runConditionalFieldRecallWithReceipt(request).index;
@@ -180,8 +182,11 @@ it("fits payload expansion pages to the same encoded envelope and keeps visible 
     // A whole-body expansion exceeds the same encoded envelope: hydration is capped
     // by the delivery budget, and the resulting page still does not fit. Refuse it
     // with the incurred read cost rather than staging an over-budget page.
-    expect(() => runConditionalFieldRecallWithReceipt(expand(10_000, 6_500)))
-      .toThrow(/cannot fit its required public envelope/u);
+    let refusedBytes = 0;
+    expect(() => runConditionalFieldRecallWithReceipt({ ...expand(10_000, 6_500), observe_page_fit: fit => {
+      if (!fit.fits && fit.interruption === undefined) refusedBytes = fit.bytes;
+    } })).toThrow(/cannot fit its required public envelope/u);
+    expect(refusedBytes).toBeGreaterThan(6_500);
     // The refusal does not poison the pinned continuation: the deliverable range
     // remains readable, so a refused expansion is not a wedged cursor.
     const retried = runConditionalFieldRecallWithReceipt(expand(300)).index;

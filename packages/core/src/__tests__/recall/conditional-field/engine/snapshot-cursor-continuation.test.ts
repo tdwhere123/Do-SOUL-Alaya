@@ -16,7 +16,7 @@ import {
   toSourceObserverRow,
   type ObserverReaders
 } from "../../../../recall/conditional-field/observers/observe.js";
-import { runConditionalFieldRecall } from "../../../../recall/runtime/recall-service-runner.js";
+import { runConditionalFieldRecallWithReceipt } from "../../../../recall/runtime/recall-service-runner.js";
 import {
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
@@ -293,10 +293,12 @@ function runRecall(
     readonly budget?: ReturnType<typeof defaultBudget>;
   }>
 ): InformationIndex {
-  return runConditionalFieldRecall({
+  const budget = input.budget ?? defaultBudget({ page_budget: input.page_budget ?? 2 });
+  const capturedWork: (number | undefined)[] = [];
+  const result = runConditionalFieldRecallWithReceipt({
     workspace_id: WS,
     query_text: "needle",
-    budget: input.budget ?? defaultBudget({ page_budget: input.page_budget ?? 2 }),
+    budget,
     snapshot_id: SNAPSHOT_ID,
     interpretation_clock: INTERPRETATION_CLOCK,
     as_of: INTERPRETATION_CLOCK,
@@ -304,7 +306,13 @@ function runRecall(
     readers: readersFor(slice),
     continuation: input.continuation ?? null,
     authorized_scopes: null
-  });
+  }, { capture_budget_work: work => { capturedWork.push(work); } });
+  // Measurement callbacks isolate exceptions; assertions must run after recall.
+  expect(capturedWork).toHaveLength(1);
+  expect(capturedWork[0]).toBeTypeOf("number");
+  expect(capturedWork[0]).toBeGreaterThanOrEqual(0);
+  expect(capturedWork[0]).toBeLessThanOrEqual(budget.work_units);
+  return result.index;
 }
 
 function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): ObserverReaders {

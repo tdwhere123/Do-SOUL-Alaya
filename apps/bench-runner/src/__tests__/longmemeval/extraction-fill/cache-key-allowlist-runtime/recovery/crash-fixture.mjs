@@ -7,6 +7,10 @@ if (input === null || !["partial-result", "provider-failure"].includes(input.mod
     !["in-progress-result-manifest-published", "failure-manifest-published"].includes(phase)) {
   throw new Error("catalog refill crash fixture environment is incomplete");
 }
+// The crash fixture owns this synthetic identity after ambient-key isolation.
+process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:E0_TEST_GARDEN_KEY";
+process.env.E0_TEST_GARDEN_KEY = "test-key";
+
 // Requires a fresh pnpm build, as CI performs; no nested test runner or compiler.
 const { runExtractionFillWithDurableFailpoint } = await import(new URL(
   "../../../../../../dist/runs/extraction/extraction-fill.js", import.meta.url

@@ -171,6 +171,7 @@ function fieldValue(objectId: string, milligrades: number): FieldValue {
 function view(): QueryView {
   return {
     ...defaultView(),
+    enumeration_policy: "canonical",
     cap_contracts: [identityAssociationCap()]
   };
 }

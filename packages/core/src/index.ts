@@ -242,6 +242,8 @@ export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-sem
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 export { sourceSemanticSupportExtent, sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
 export { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex, type RecallPageSourceMetadata } from "./recall/runtime/recall-page-encoding.js";
+export { RecallEnvelopeFraming } from "./recall/runtime/recall-envelope-framing.js";
+export { framingInterruption as recallFramingInterruption, pageResourceRefusal as recallPageResourceRefusal } from "./recall/runtime/recall-page-fit.js";
 export { selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage,
   type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {

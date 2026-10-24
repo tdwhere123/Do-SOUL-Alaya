@@ -17,7 +17,7 @@ import {
   replayIssuedDelivery,
   rememberIssuedDelivery,
   retainCommittedRevisions,
-  sealIssuedContinuation,
+  sealRetainedContinuation,
   type ProjectionProgress
 } from "./index-continuation.js";
 import { BoundedIndexPayload } from "./index-payload.js";
@@ -203,14 +203,16 @@ export function prepareIndexCommit(input: Readonly<{
       interpretation_clock: input.request.interpretation_clock,
       authorized_scopes: input.request.authorized_scopes,
       enumeration_policy: view.enumeration_policy, result_kind_view: view.result_kind_view,
-      protocol_version: view.protocol_version, supported_result_kinds: view.supported_result_kinds,
-      cap_contracts: view.cap_contracts, claim_demands: view.claim_demands,
+      ...(view.protocol_version === undefined ? {} : { protocol_version: view.protocol_version }),
+      ...(view.supported_result_kinds === undefined ? {} : { supported_result_kinds: view.supported_result_kinds }),
+      ...(view.cap_contracts === undefined ? {} : { cap_contracts: view.cap_contracts }),
+      ...(view.claim_demands === undefined ? {} : { claim_demands: view.claim_demands }),
       emitted_revisions: committed
     } };
   }
   if (input.close_when?.(retained, index)) index = { ...index, continuation: null };
   if (index.continuation !== null) {
-    index = { ...index, continuation: sealIssuedContinuation(index.continuation) };
+    index = { ...index, continuation: sealRetainedContinuation(index.continuation) };
   }
   index = input.payload.applyDeliveredSpans(index);
   return { index, retained, retention_bytes: delivery.bytes, revisions, products,
@@ -218,6 +220,23 @@ export function prepareIndexCommit(input: Readonly<{
       ? { pending: { query_key: input.queryKey, request_digest: input.requestDigest,
         request: input.request.continuation } }
       : {}) };
+}
+
+/** The progress envelope was fitted before computation. Retain its newly computed
+ * field without changing or re-sealing that paid response, and without advancing
+ * any membership/component ledger from an unfitted candidate. */
+export function prepareFittedProgressCommit(input: Readonly<{
+  index: InformationIndex; state: FieldEngineState; progress: ProjectionProgress;
+  first_retention: boolean; generation: number; available_bytes: number;
+  queryKey: string; requestDigest: string; request: Continuation | null | undefined;
+}>): PreparedIndexCommit {
+  const delivery = retainCommittedRevisions(input.progress, input.progress.delivered_entries,
+    input.first_retention, input.progress.delivered_products);
+  assertDeliveryRetention(delivery.bytes, input.available_bytes);
+  return { index: input.index, retention_bytes: delivery.bytes,
+    retained: { ...input.state, projection_progress: { ...delivery.progress,
+      generation: input.generation, revision: `projection-generation:${input.generation}` } },
+    pending: { query_key: input.queryKey, request_digest: input.requestDigest, request: input.request } };
 }
 
 function assertDeliveryRetention(required: number, available: number): void {

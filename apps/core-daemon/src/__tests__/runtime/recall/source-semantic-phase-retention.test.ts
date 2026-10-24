@@ -7,12 +7,12 @@ afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks()
 afterAll(() => { isolation.restore(); });
 import { canonicalJson, canonicalJsonChunks, captureSourceSemanticAcquisition, captureSourceSemanticQueryPreparation,
   packSourceSemanticAcquisition, packSourceSemanticQueryPreparation, SourceSemanticAccessReceiptSchema,
-  sourceSemanticAccessPhases, type SourceSemanticAccessReceipt }
+  sourceSemanticAccessPhases, type SourceSemanticAccessReceipt, type SourceSemanticRetainedNominationWitness }
   from "@do-soul/alaya-protocol";
 import { fieldContractSha256, fieldContractSha256Chunks } from "@do-soul/alaya-core";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
-import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
+import { readSemanticLease, sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { SourceSemanticUnionCompletion } from "../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
@@ -33,7 +33,7 @@ function compactPhases(access: Readonly<{ phases: SourceSemanticAccessReceipt["p
 }
 
 function independentPoolMaterial(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime,
-  authorized: readonly string[] | null = ["project"]) {
+  authorized: readonly string[] | null = ["project"], retainedWitness?: SourceSemanticRetainedNominationWitness) {
   const expanded = sourceSemanticAccessPhases(access);
   const receipt = {
     contract: access.contract, policy: access.policy, input_id: access.input_id,
@@ -44,10 +44,12 @@ function independentPoolMaterial(access: Omit<SourceSemanticAccessReceipt, "trac
     unvisited_sources: access.unvisited_sources, unvisited_interpretations: access.unvisited_interpretations,
     stopping_reasons: access.stopping_reasons, ...expanded
   };
-  return { receipt, workspace: WS, authorized, revision: sourceSemanticRevision(worker) };
+  return { receipt, workspace: WS, authorized, revision: sourceSemanticRevision(worker),
+    ...(retainedWitness === undefined ? {} : { retained_witness: retainedWitness }) };
 }
-function independentPoolId(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime) {
-  return `sha256:${fieldContractSha256(canonicalJson(independentPoolMaterial(access, worker)))}`;
+function independentPoolId(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime,
+  retainedWitness?: SourceSemanticRetainedNominationWitness) {
+  return `sha256:${fieldContractSha256(canonicalJson(independentPoolMaterial(access, worker, ["project"], retainedWitness)))}`;
 }
 
 function scalarEncodingBytes(value: unknown): number {
@@ -104,7 +106,7 @@ it("hashes the expanded preimage independently while retaining compact phases an
       workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES, prepared_query: prepared, request: prepare
     }, ["project"], meter, ORIGINAL, undefined, "query-conditioned-v1", QUERY_BUDGET))();
     compactPhases(pool.access);
-    expect(independentPoolId(pool.access, worker)).toBe(pool.access.pool_id);
+    expect(independentPoolId(pool.access, worker, pool.retainedWitness)).toBe(pool.access.pool_id);
     const semantics = sourceSemanticAccessPhases(pool.access);
     expect(packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(semantics.preparation)))
       .toEqual(pool.access.phases[1]);
@@ -123,7 +125,7 @@ it("hashes the expanded preimage independently while retaining compact phases an
     for (const phase of ["canonical identity traversal", "canonical identity scalar encoding", "canonical identity hash handoff"]) {
       expect(charged.some(row => row.phase === phase && row.units > 0 && row.bytes > 0)).toBe(true);
     }
-    const material = independentPoolMaterial(pool.access, worker);
+    const material = independentPoolMaterial(pool.access, worker, ["project"], pool.retainedWitness);
     expect(charged.filter(row => row.phase === "canonical identity hash handoff").reduce((sum, row) => sum + row.bytes, 0))
       .toBe(Buffer.byteLength(canonicalJson(material), "utf8"));
     expect(charged.filter(row => row.phase === "canonical identity scalar encoding").reduce((sum, row) => sum + row.bytes, 0))
@@ -160,13 +162,17 @@ it("keeps compact access phases on the in-process public prepare path and the sa
     const prepared = await fixture.prepareQuery({ navigation: ORIGINAL,
       signal: new AbortController().signal, remainingMs: () => 60_000 });
     const worker = runtime(fixture);
-    const result = runSourceSemanticWorker(worker, { workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
-      prepared_query: prepared, request: prepare });
+    const payload = { workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
+      prepared_query: prepared, request: prepare };
+    const result = runSourceSemanticWorker(worker, payload);
     if (result.kind !== "prepare_query" || result.access === undefined) throw new Error("public preparation access expected");
     expect(SourceSemanticAccessReceiptSchema.safeParse(result.access).success).toBe(true);
     compactPhases(result.access);
     const { trace: _trace, ...identity } = result.access;
-    expect(independentPoolId(identity, worker)).toBe(result.access.pool_id);
+    if (result.query_handle === undefined) throw new Error("query handle expected");
+    const lease = readSemanticLease(worker, payload, result.query_handle, ["project"], "query", new SourceSemanticReadBudget(AMPLE));
+    expect(lease.access_pool?.retainedWitness).toBeDefined();
+    expect(independentPoolId(identity, worker, lease.access_pool!.retainedWitness)).toBe(result.access.pool_id);
     const semantics = sourceSemanticAccessPhases(result.access);
     expect(packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(semantics.preparation)))
       .toEqual(result.access.phases[1]);

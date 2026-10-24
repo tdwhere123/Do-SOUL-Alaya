@@ -3,7 +3,10 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-const entry = vi.hoisted(() => ({ observe: vi.fn(), phases: vi.fn() }));
+const entry = vi.hoisted(() => ({ observe: vi.fn(), phases: vi.fn(), library: vi.fn() }));
+vi.mock("../../../runtime/recall-read-worker/source-semantic-library-recall.js", () => ({
+  runSourceSemanticLibraryRecall: (...args: unknown[]) => entry.library(...args)
+}));
 // Inspect the split and phase ingress, before any native reader or worker runs.
 vi.mock("../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js", () => ({
   SourceSemanticUnionCompletion: class {
@@ -13,7 +16,7 @@ vi.mock("../../../runtime/recall-read-worker/source-semantic-empty-population-bu
     release() {}
   }
 }));
-afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); entry.observe.mockReset(); entry.phases.mockReset(); });
+afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); entry.observe.mockReset(); entry.phases.mockReset(); entry.library.mockReset(); });
 afterAll(() => { isolation.restore(); });
 import * as protocol from "@do-soul/alaya-protocol";
 import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
@@ -38,7 +41,7 @@ function fixture() {
   return { phase, runtime, payload };
 }
 
-it("has exactly the old parent cost and child allowance, with one execution tuple before the split", () => {
+it("charges catalog position ownership before the child split and captures execution once", () => {
   const { phase, runtime, payload } = fixture();
   // The unchanged public owners establish the old prefix, including its real
   // ownership entry, one execution tuple, buffer references and query features.
@@ -47,6 +50,7 @@ it("has exactly the old parent cost and child allowance, with one execution tupl
   protocol.sourceSemanticExecution(expected.preparation, undefined, expected);
   expected.charge(1, 80, "worker query vector buffer references");
   expected.retain(undefined, "query semantics admission");
+  expected.charge(1, 64, "source catalog position map");
   createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", expected, HINT);
   const ingress = vi.spyOn(protocol, "capturePackSourceSemanticPreparationForRequest");
   const charges = vi.spyOn(protocol.SourceSemanticResourceLedger.prototype, "charge");
@@ -76,23 +80,14 @@ it("has exactly the old parent cost and child allowance, with one execution tupl
   expect(Object.isFrozen(phase)).toBe(false);
 });
 
-it.each(["ordinary preparation", "library exploration", "direct observation"] as const)
-("preserves the nonfused split and pays capture ownership only after it for %s", path => {
+it.each(["ordinary preparation", "direct observation"] as const)
+("preserves the nonfused split after catalog ownership and pays capture ownership only after it for %s", path => {
   const { runtime, payload: preparedPayload } = fixture();
   const payload = { ...preparedPayload, prepared_query: undefined,
     request: { kind: "prepare_query" as const, original_query: ORIGINAL, budget: BUDGET } };
-  const libraryRequest = { kind: "recall" as const, original_query: ORIGINAL, budget: BUDGET,
-    accepts_unreviewed_conditional_results: true as const, output_byte_limit: 10000 };
-  let expected = new SourceSemanticReadBudget(BUDGET);
-  if (path === "library exploration") {
-    expected.retain(libraryRequest, "library request admission");
-    expected = new SourceSemanticReadBudget({
-      work_units: expected.work - Math.min(BUDGET.finalization_reserve, Math.floor(expected.work / 4)),
-      memory_bytes: expected.bytes - Math.min(Math.floor(expected.bytes / 4), libraryRequest.output_byte_limit * 8 + 65536)
-    });
-  } else if (path !== "direct observation") {
-    expected.retain(undefined, "query semantics admission");
-  }
+  const expected = new SourceSemanticReadBudget(BUDGET);
+  if (path !== "direct observation") expected.retain(undefined, "query semantics admission");
+  expected.charge(1, 64, "source catalog position map");
   createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", expected);
   const split = { work_units: Math.floor(expected.work / 2), memory_bytes: Math.floor(expected.bytes / 2) };
   const prefix = { work: expected.spentWork, bytes: expected.spentBytes };
@@ -117,12 +112,31 @@ it.each(["ordinary preparation", "library exploration", "direct observation"] as
   });
   const run = () => {
     if (path === "ordinary preparation") return runSourceSemanticWorker(runtime, payload);
-    if (path === "library exploration") return runSourceSemanticWorker(runtime, { ...payload, request: libraryRequest });
     return observeSourceSemanticAccess(runtime, payload, ["project"], new SourceSemanticReadBudget(BUDGET),
       ORIGINAL, undefined, "query-conditioned-v1", BUDGET);
   };
   expect(run).toThrow(STOP);
   expect(entry.observe).toHaveBeenCalledTimes(1); expect(entry.phases).toHaveBeenCalledTimes(1);
+});
+
+it("routes library recall to its field owner without a preparation-observer split", () => {
+  const { runtime, payload } = fixture();
+  const request = { kind: "recall" as const, original_query: ORIGINAL, budget: BUDGET,
+    accepts_unreviewed_conditional_results: true as const, output_byte_limit: 10000 };
+  const sent = { ...payload, prepared_query: undefined, request };
+  entry.library.mockImplementation((receivedRuntime, receivedPayload, authorized, meter: SourceSemanticReadBudget) => {
+    expect(receivedRuntime).toBe(runtime);
+    expect(receivedPayload).toBe(sent);
+    expect(authorized).toEqual(["project"]);
+    expect(meter.remaining()).toEqual({ work_units: BUDGET.work_units, memory_bytes: BUDGET.memory_bytes });
+    expect(meter.preparation).toBeUndefined();
+    expect(meter.acquisition).toBeUndefined();
+    throw STOP;
+  });
+  expect(() => runSourceSemanticWorker(runtime, sent)).toThrow(STOP);
+  expect(entry.library).toHaveBeenCalledOnce();
+  expect(entry.observe).not.toHaveBeenCalled();
+  expect(entry.phases).not.toHaveBeenCalled();
 });
 
 it("does not transfer ownership for a publicly captured compact preparation even with a request execution owner", () => {
@@ -131,6 +145,7 @@ it("does not transfer ownership for a publicly captured compact preparation even
   protocol.sourceSemanticExecution(expected.preparation, undefined, expected);
   expected.charge(1, 80, "worker query vector buffer references");
   expected.retain(undefined, "query semantics admission");
+  expected.charge(1, 64, "source catalog position map");
   createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", expected, HINT);
   // Substitute the real public ingress, which pays CAPTURED ownership but never
   // hands an omitted-charge capture to the transaction's actual execution owner.

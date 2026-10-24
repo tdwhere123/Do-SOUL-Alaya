@@ -8,6 +8,10 @@ if (mode === undefined || requestPath === undefined || scriptPath === undefined)
   throw new Error("query factor process fixture is not configured");
 }
 
+// Install the fixture's synthetic identity after pre-import credential isolation.
+process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:QUERY_FACTOR_PROCESS_KEY";
+process.env.QUERY_FACTOR_PROCESS_KEY = "fixture-key";
+
 globalThis.fetch = async (url, init) => {
   await writeFile(requestPath, JSON.stringify({ url: String(url), body: init?.body }), "utf8");
   if (mode === "provider-error") {

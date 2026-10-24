@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
@@ -65,13 +65,33 @@ describe("conditional-field actual request cost", () => {
   });
 
   it.each([0, 1])("rejects an unserviceable %i-unit request without a replayable cursor", (work_units) => {
-    const readers: ObserverReaders = { lexical: () => { throw new Error("unserviceable"); } };
-    const executed = recall(readers, defaultBudget({ work_units, finalization_reserve: 0, min_envelope: 0, page_budget: 1 }));
+    const read = vi.fn(() => { throw new Error("unserviceable requests must not read"); });
+    const encode = vi.fn(() => { throw new Error("unserviceable requests must not enter a codec"); });
+    const transfer = vi.fn();
+    let failure: unknown;
+    try {
+      runConditionalFieldRecallWithReceipt({ workspace_id: WS, query_text: QUERY,
+        budget: defaultBudget({ work_units, finalization_reserve: 0, min_envelope: 0, page_budget: 1 }),
+        result_kind_view: "memory_only", snapshot_id: SNAPSHOT_ID, interpretation_clock: CLOCK,
+        as_of: CLOCK, expires_at: FAR_FUTURE_EXPIRY, authorized_scopes: null,
+        readers: { lexical: read, snapshotPin: read }, encode_page: encode },
+      { issue: "defer", capture_budget_work: transfer });
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "CONFLICT", details: { outcome: "resource_exhausted", resource: "framing_work",
+      execution_receipt: { requested_budget: { work_units }, actual: { native_visits: 0, native_rows: 0, native_bytes: 0,
+        phases: { index: { budget_work: 0 } } } } } });
+    expect(read).not.toHaveBeenCalled(); expect(encode).not.toHaveBeenCalled(); expect(transfer).not.toHaveBeenCalled();
+    expect(JSON.stringify(failure)).not.toMatch(/continuation|delivery_id/u);
+  });
+
+  it("pays for a serviceable empty SQLite page without leaving a no-progress cursor", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const executed = recall(readersFor(slice), defaultBudget({ work_units: 48,
+      finalization_reserve: 12, min_envelope: 1, page_budget: 1 }));
     expect(executed.index.entries).toEqual([]);
     expect(executed.index.continuation).toBeNull();
-    expect(executed.index.completeness.logical_index).not.toBe("complete");
-    const actual = requireActual(executed.execution_receipt.actual);
-    expect(actual.native_visits).toBeLessThanOrEqual(work_units);
+    expect(executed.execution_receipt.actual!.phases.index.budget_work).toBeGreaterThan(0);
+    expect(executed.execution_receipt.actual!.native_visits).toBeGreaterThan(0);
   });
 
   it("keeps a continuation when a tiny budget interrupts facet indexing", async () => {

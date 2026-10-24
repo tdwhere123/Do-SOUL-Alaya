@@ -111,7 +111,7 @@ export function observeField(
     // An exhausted retained observation has no source-reader call left to make.
     // Rebuilding its frozen frontier would repay acquisition frames merely to
     // acknowledge an empty tail. Payload reads use their own original reader.
-    if (input.resume_field === undefined || !observationSettled(initial)) {
+    if (input.resume_field === undefined || (!observationSettled(initial) && !retainedProjectionHasPriority(initial, input))) {
       const bridge = new SourceSemanticResourceLedger({ work_units: initial.remaining_exploration,
         memory_bytes: initial.remaining_memory_bytes });
       try {
@@ -147,6 +147,13 @@ export function observeField(
     ? completed : stampRetainedFieldLevel(completed, input.budget.memory_bytes);
 }
 
+function retainedProjectionHasPriority(state: FieldEngineState, input: ObserveFieldInput): boolean {
+  return input.resume_field !== undefined && input.budget.page_budget > 0
+    && state.binding.kind === "bound" && state.projection_progress !== undefined
+    && state.projection_progress.offset < state.binding.snapshot.values.length
+    && state.pending_path_effects === undefined && state.remaining_work.length === 0;
+}
+
 function observeWithinMemory(
   interpretation: QueryInterpretation,
   input: ObserveFieldInput,
@@ -155,6 +162,11 @@ function observeWithinMemory(
   let state = initial;
   if (input.cancelled === true) return cancelledField(state);
   if (state.memory_exhausted) return interruptObservedField(state);
+  // A resumed, solved frontier already owes projection. Spend this page on that
+  // finite frontier before discovering another batch that would invalidate its
+  // unfinished facet/grounding scan. Native cursors remain retained and resume
+  // after the acknowledged projection frontier catches up.
+  if (retainedProjectionHasPriority(state, input)) return state;
   const runtime = runtimeProgram(interpretation.program);
   if (runtime !== "empty" && runtime !== "epsilon" && state.compiled_automaton === undefined) {
     let compilation;

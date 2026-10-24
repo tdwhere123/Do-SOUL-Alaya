@@ -3,10 +3,10 @@ import { createServer as createHttpsServer } from "node:https";
 import { readFileSync } from "node:fs";
 import { TLSSocket } from "node:tls";
 import type { Duplex } from "node:stream";
-import { connect, type AddressInfo } from "node:net";
+import { connect, Socket, type AddressInfo } from "node:net";
 import type { LookupAddress, LookupAllOptions } from "node:dns";
-import { Agent, EnvHttpProxyAgent, getGlobalDispatcher, type Dispatcher } from "undici";
-import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { Agent, EnvHttpProxyAgent, getGlobalDispatcher, fetch as fixtureFetch, type Dispatcher } from "undici";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { fetchProviderChatCompletion } from "../../provider/chat-completion/fetch-chat-completion.js";
 
 const { lookup } = vi.hoisted(() => ({
@@ -15,12 +15,32 @@ const { lookup } = vi.hoisted(() => ({
 vi.mock("node:dns/promises", () => ({ lookup }));
 const request = {
   providerUrl: "http://provider.example/v1", apiKey: "test-fixture-credential",
-  model: "fixture", systemPrompt: "system", userPrompt: "user", timeoutMs: 2_000
+  model: "fixture", systemPrompt: "system", userPrompt: "user", timeoutMs: 2_000,
+  // Exercise public-host address/SNI semantics through actual local sockets, not
+  // the generic URL-host test guard. The socket boundary below admits only this
+  // file's currently owned loopback listeners, never a real provider connection.
+  fetchImpl: fixtureFetch as unknown as typeof fetch
 };
 const originalDispatcher = getGlobalDispatcher();
 const certificate = readFileSync(new URL("./fixtures/loopback-provider-cert.pem", import.meta.url));
 const testKey = readFileSync(new URL("./fixtures/loopback-provider-key.pem", import.meta.url));
-afterEach(() => { expect(getGlobalDispatcher()).toBe(originalDispatcher); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.resetAllMocks(); });
+const fixturePorts = new Set<number>();
+beforeEach(() => {
+  const original = Socket.prototype.connect;
+  vi.spyOn(Socket.prototype, "connect").mockImplementation(function (this: Socket, ...args) {
+    const offered: unknown[] = Array.isArray(args[0]) ? args[0] : args;
+    const options = offered[0];
+    const host = options !== null && typeof options === "object" && "host" in options ? options.host
+      : typeof offered[1] === "string" ? offered[1] : "localhost";
+    const port = options !== null && typeof options === "object" && "port" in options ? options.port : options;
+    if (!["127.0.0.1", "localhost", "::1"].includes(String(host)) || !fixturePorts.has(Number(port))) {
+      throw new Error("Address-binding fixture refused a non-owned socket");
+    }
+    return Reflect.apply(original, this, args);
+  });
+});
+afterEach(() => { expect(getGlobalDispatcher()).toBe(originalDispatcher); expect(fixturePorts.size).toBe(0);
+  vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 
 type Received = { host?: string; authorization?: string; servername?: string };
 async function withServer(run: (port: number, received: Received[]) => Promise<void>, options: { secure?: boolean; delayMs?: number } = {}) {
@@ -36,8 +56,11 @@ async function withServer(run: (port: number, received: Received[]) => Promise<v
   };
   const server = options.secure ? createHttpsServer({ key: testKey, cert: certificate }, handle) : createServer(handle);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  try { await run((server.address() as AddressInfo).port, received); }
-  finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  const port = (server.address() as AddressInfo).port;
+  fixturePorts.add(port);
+  try { await run(port, received); }
+  finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    fixturePorts.delete(port); }
 }
 
 async function withProxy(targetPort: number, run: (url: string, tunnels: string[]) => Promise<void>) {
@@ -59,11 +82,18 @@ async function withProxy(targetPort: number, run: (url: string, tunnels: string[
     upstream.on("error", () => client.destroy());
   });
   await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
-  try { await run(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}`, tunnels); }
-  finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => proxy.close(() => resolve())); }
+  const port = (proxy.address() as AddressInfo).port;
+  fixturePorts.add(port);
+  try { await run(`http://127.0.0.1:${port}`, tunnels); }
+  finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => proxy.close(() => resolve()));
+    fixturePorts.delete(port); }
 }
 
 describe("provider address binding", () => {
+  it("refuses unowned loopback and public sockets before opening a connection", () => {
+    expect(() => connect({ host: "93.184.216.34", port: 443 })).toThrow("non-owned socket");
+    expect(() => connect({ host: "127.0.0.1", port: 1 })).toThrow("non-owned socket");
+  });
   it("falls back from an unreachable admitted IPv6 address to admitted IPv4 without resolving again", async () => {
     await withServer(async (port, received) => {
       lookup.mockResolvedValueOnce([{ address: "2606:4700:4700::1111", family: 6 }, { address: "93.184.216.34", family: 4 }])
@@ -130,7 +160,7 @@ describe("provider address binding", () => {
         owned = (init as RequestInit & { dispatcher: Dispatcher }).dispatcher;
         expect(owned).toBeInstanceOf(EnvHttpProxyAgent);
         closeSpy = vi.spyOn(owned, "close");
-        return fetch(url, init);
+        return request.fetchImpl(url, init);
       } });
       expect(tunnels).toEqual(["93.184.216.34:80"]);
       expect(received).toHaveLength(1);

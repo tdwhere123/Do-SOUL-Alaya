@@ -166,7 +166,11 @@ describe("native worker actual cost", () => {
     let failure: unknown;
     try {
       runConditionalFieldWorkerRecall(runtime(slice.database), { ...payload(budget, "needle"),
-        delivery_budget: { max_total_tokens: 2_000, max_encoded_bytes: 64 } });
+        delivery_budget: { max_total_tokens: 2_000, max_encoded_bytes: 64 } }, {
+        // This authored surface has a compact control frame, but its real index
+        // cannot fit. Force refusal after native work, not at control admission.
+        encode_page: index => index.entries.length === 0 ? { pending: true } : { index }
+      });
     } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(CoreError);
     if (!(failure instanceof CoreError)) throw new Error("encoded page refusal expected");

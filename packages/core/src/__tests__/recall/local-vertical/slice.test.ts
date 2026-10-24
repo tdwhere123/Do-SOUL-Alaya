@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { SqliteMemoryRecallReader, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createSliceHarness, CONTENT, MEM } from "./harness.js";
 
 const databases = new Set<StorageDatabase>();
@@ -55,9 +55,11 @@ describe("real local conditional-field recall", () => {
   it("rejects a resource envelope before source observation", async () => {
     const slice = await harness();
     await slice.plantLaunchCorpus();
-    const result = await slice.runRecall({ text: "deployment checklist", budget: { work_units: 1 } });
-    expect(result.index.entries).toEqual([]);
-    expect(result.index.completeness.logical_index).toBe("resource_rejected");
-    expect(result.counters.source_reads).toBe(0);
+    const source = vi.spyOn(SqliteMemoryRecallReader.prototype, "source");
+    await expect(slice.runRecall({ text: "deployment checklist", budget: { work_units: 1 } }))
+      .rejects.toMatchObject({ code: "CONFLICT", details: {
+        outcome: "resource_exhausted", resource: "framing_work"
+      } });
+    expect(source).not.toHaveBeenCalled();
   });
 });

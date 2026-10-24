@@ -1,6 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  stableCanonicalStringify,
   canonicalIndexEntryIdentity,
   guaranteedMilligradesOf,
   productStateKeyFromIndexEntry,
@@ -29,10 +31,11 @@ import type { RecallSourceMetadata } from "./recall-service-results.js";
 import {
   continuationCapabilityMatches,
   issuedContinuationTampered,
-  sealIssuedContinuation
+  sealIssuedContinuation,
+  sealRetainedContinuation
 } from "./continuation-capability.js";
 
-export { continuationCapabilityMatches, issuedContinuationTampered, sealIssuedContinuation };
+export { continuationCapabilityMatches, issuedContinuationTampered, sealIssuedContinuation, sealRetainedContinuation };
 
 export type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
 export type EmittedRevisions = Readonly<Record<string, string>>;
@@ -249,13 +252,9 @@ export function retainIndexDelivery(
   first: boolean
 ): Readonly<{ progress: ProjectionProgress; bytes: number }> {
   const delivered = { ...progress.delivered_entries };
-  let bytes = first ? 256 : 0;
-  for (const entry of entries) {
-    const key = productIdOfEntry(entry);
-    if (delivered[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
-    delivered[key] = indexEntryRevision(entry);
-  }
-  return { progress: { ...progress, delivered_entries: delivered }, bytes };
+  for (const entry of entries) delivered[productIdOfEntry(entry)] = indexEntryRevision(entry);
+  return { progress: { ...progress, delivered_entries: delivered },
+    bytes: revisionRetentionBytes(progress.delivered_entries, delivered, first) };
 }
 
 export function retainCommittedRevisions(
@@ -264,11 +263,7 @@ export function retainCommittedRevisions(
   first: boolean,
   products?: EmittedProductLedger
 ): Readonly<{ progress: ProjectionProgress; bytes: number }> {
-  let bytes = first ? 256 : 0;
-  for (const [key, revision] of Object.entries(committed)) {
-    if (progress.delivered_entries[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
-    else if (progress.delivered_entries[key] === revision) continue;
-  }
+  const bytes = revisionRetentionBytes(progress.delivered_entries, committed, first);
   return {
     progress: {
       ...progress,
@@ -277,6 +272,14 @@ export function retainCommittedRevisions(
     },
     bytes
   };
+}
+
+export function revisionRetentionBytes(prior: EmittedRevisions, committed: EmittedRevisions, first: boolean): number {
+  let bytes = first ? 256 : 0;
+  for (const key of Object.keys(committed)) {
+    if (prior[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
+  }
+  return bytes;
 }
 
 export function rememberIssuedDelivery(input: Readonly<{
@@ -363,6 +366,14 @@ export function replayIssuedIndex(issued: IssuedDelivery): InformationIndex {
   const replayed = { ...issued.index, page_purpose: "retry" as const };
   bindIssuedDeliveryId(replayed, issued.delivery_id);
   return replayed;
+}
+
+export function recallDeliveryIdentity(input: ConditionalFieldRecallRequest, interpretation: FieldEngineState["interpretation"]) {
+  const query_key = fieldResumeKey(interpretation.query_id, interpretation.snapshot_id,
+    interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock }));
+  const base = input.continuation == null ? `${query_key}:root:${randomUUID()}` : input.continuation.continuation_id;
+  return { query_key, request_digest: input.payload_continuation === undefined ? base
+    : createHash("sha256").update(stableCanonicalStringify([base, input.payload_continuation])).digest("hex") };
 }
 
 export function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {

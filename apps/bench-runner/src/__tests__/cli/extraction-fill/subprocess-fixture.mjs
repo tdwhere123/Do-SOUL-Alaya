@@ -6,6 +6,10 @@ if (fixtureRoot === undefined || mode === undefined) {
   throw new Error("extraction-fill subprocess fixture environment is incomplete");
 }
 
+// Own synthetic credentials after pre-import isolation, never inherit an operator key.
+process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:E0_SUBPROCESS_GARDEN_KEY";
+process.env.E0_SUBPROCESS_GARDEN_KEY = "test-key";
+
 // Requires a fresh pnpm build, as CI performs; use the actual runtime without a second compiler.
 const runtimeRoot = new URL("../../../../dist/", import.meta.url);
 const fill = await import(new URL("runs/extraction/extraction-fill.js", runtimeRoot));

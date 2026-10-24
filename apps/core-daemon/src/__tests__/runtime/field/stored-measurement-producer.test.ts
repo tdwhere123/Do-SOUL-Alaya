@@ -57,7 +57,7 @@ const NOW = "2026-09-06T12:00:00.000Z";
 const WORKSPACE = "workspace-1";
 
 describe("worker stored measurement producer", () => {
-  it("preserves unequal stored cosine grades and membership across canonical and associative native pages", async () => {
+  it("preserves unequal stored cosine grades through native pages and rejects archived policies", async () => {
     const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
     fixture.storage.memoryEmbeddingRepo.prepareBoundedRecallIndex();
     const vectors = [
@@ -97,15 +97,18 @@ describe("worker stored measurement producer", () => {
         budget: { ...defaultBudget(), work_units: 100000, memory_bytes: 4000000, page_budget: 1 },
         interpretation_proposal: { schema_version: 1 as const, original_query_digest: digestOriginalQuery(QUERY_TEXT),
           producer_id: "alaya.query.proposal.core.v1", stored_cosine_admission: admission([MODEL_B], -1) } };
-      const snapshots = new Set<string>();
       for (const enumeration_policy of ["canonical", "associative"] as const) {
+        await expect(service.recall({ ...request, enumeration_policy }))
+          .rejects.toThrow("ordinary execution requires native_query");
+      }
+      const snapshots = new Set<string>();
+      for (const enumeration_policy of ["native_query"] as const) {
         const complete = await service.recall({ ...request, enumeration_policy,
           budget: { ...request.budget, page_budget: 64 } });
         snapshots.add(complete.index.snapshot_id);
         expect(complete.index.completeness.order_coverage).toBe("complete");
         expect(complete.index.continuation).toBeNull();
-        expect(complete.index.entries.map((entry) => entry.object_id)).toEqual(enumeration_policy === "canonical"
-          ? [QUERY_ID, OBJECT_A, OBJECT_B, EXTRA_B[0]] : [QUERY_ID, OBJECT_B, OBJECT_A, EXTRA_B[0]]);
+        expect(complete.index.entries.map((entry) => entry.object_id)).toEqual([QUERY_ID, OBJECT_A, OBJECT_B, EXTRA_B[0]]);
         const entries = [];
         let page = await service.recall({ ...request, enumeration_policy });
         const snapshot = page.index.snapshot_id;
