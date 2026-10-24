@@ -43,7 +43,7 @@ async function recallPrepared({ execute, observe }: Pick<AccessLibrary, "execute
   expect(observation.totals?.debit_bytes).toBe(recalled.work.logical_memory_bytes);
   expect(observation.events.filter(row => row.kind === "pool_reuse").map(row => row.data))
     .toEqual([{ pool_id: poolId, discovery: "not_observed_this_request" }]);
-  expect(observation.facts?.pool?.pool_id).toBe(poolId);
+  expect(observation.facts?.pool).toMatchObject({ pool_id: poolId, use: "reused", origin: null });
   // The lease read precedes any new nomination. Preparation was not observed,
   // so its ancestry must remain unknown rather than inferred from equal pool IDs.
   expect(observation.facts?.lease_reads).toEqual([{ kind: "query",
