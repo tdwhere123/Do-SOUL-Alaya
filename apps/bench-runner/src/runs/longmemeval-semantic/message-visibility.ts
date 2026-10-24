@@ -112,8 +112,7 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
   const observation = deriveObservation(input.pages);
   // Unavailable delivery and malformed page facts invalidate their own interval claims, so a
   // per-message state must stay unknown with no attributable evidence.
-  const malformed = input.unavailableReason ?? (observation.reason !== null
-    && STRUCTURAL_REASONS.has(observation.reason) ? observation.reason : null);
+  const malformed = consumerVisibilityUnavailableReason(input);
   const intervals = malformed === null
     ? (input.pages ?? []).flatMap(page => page.status === "observed" ? page.intervals : [])
     : [];
@@ -157,6 +156,14 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
   // A first-page positive does not establish an observed ten-slot prefix; the terminal case is in
   // the shared gate above and any terminal delivery still proves its absent tail below.
   return result(anyAt(5), unobservedAt10 ?? anyAt(10), allAt(5), unobservedAt10 ?? allAt(10));
+}
+
+/** Shared structural admission for adapters of the same captured page sequence.
+ * An incomplete but well-formed prefix is not malformed. */
+export function consumerVisibilityUnavailableReason(input: ConsumerVisibilityInput): string | null {
+  const observation = deriveObservation(input.pages);
+  return input.unavailableReason ?? (observation.reason !== null
+    && STRUCTURAL_REASONS.has(observation.reason) ? observation.reason : null);
 }
 
 /** Evaluator-only fixed-byte page. A complete packed page closes this B comparison,
