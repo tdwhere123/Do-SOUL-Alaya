@@ -16,6 +16,7 @@ import {
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
 import { RSS_SAMPLE_METHOD, type RequestActualCost } from "../../../../recall/runtime/request-cost-ledger.js";
+import { restoreField } from "../../../../recall/runtime/index-continuation.js";
 import {
   FAR_FUTURE_EXPIRY,
   INTERPRETATION_CLOCK,
@@ -125,6 +126,78 @@ describe("conditional-field actual request cost", () => {
     const delivered = new Set(pages.flatMap((page) => page.entries.map((entry) => entry.object_id ?? "")));
     expect(pages.at(-1)!.continuation).toBeNull();
     expect([...delivered].sort()).toEqual(expect.arrayContaining(ids.slice(1)));
+  });
+
+  it("resumes ordinary grounding across acknowledged pages without repeating its prefix", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const ids = await plantHub(slice, 5);
+    const readers = readersFor(slice);
+    const small = defaultBudget({ work_units: 165, finalization_reserve: 12,
+      min_envelope: 1, page_budget: 1, memory_bytes: 10_000_000 });
+    const ample = defaultBudget({ work_units: 600, finalization_reserve: 512,
+      min_envelope: 1, page_budget: 8, memory_bytes: 10_000_000 });
+    const baseline = collect(readers, ample, 30, recall(readers, ample).index);
+    expect(baseline.at(-1)!.continuation).toBeNull();
+    const expected = new Set(baseline.flatMap(page => page.entries.map(entry => entry.object_id)));
+    expect(ids.slice(1).every(id => expected.has(id))).toBe(true);
+
+    const pages: InformationIndex[] = [];
+    const progress: number[] = [];
+    const charges: number[] = [];
+    const groundingCharges: number[] = [];
+    const groundingInputs: (readonly unknown[])[] = [];
+    const counts: number[][] = [];
+    let continuation: Continuation | null = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const transferred: (number | undefined)[] = [];
+      const executed = recall(readers, small, continuation, work => { transferred.push(work); });
+      expect(transferred).toHaveLength(1);
+      expect(transferred[0]).toBeGreaterThanOrEqual(0);
+      expect(transferred[0]).toBeLessThanOrEqual(small.work_units);
+      const page = executed.index;
+      pages.push(page);
+      const retained = restoreField(page.continuation);
+      const work = retained?.grounding_progress?.completed_work;
+      if (work !== undefined) {
+        progress.push(work);
+        const inputs = retained!.grounding_input_references;
+        expect(inputs).toBeDefined();
+        groundingInputs.push(inputs!);
+        counts.push([retained!.seeds.length, retained!.transitions.length, retained!.derivations.length]);
+      }
+      const actual = requireActual(executed.execution_receipt.actual);
+      charges.push(actual.phases.solve.relaxations);
+      if (work !== undefined) groundingCharges.push(actual.phases.solve.relaxations);
+      if (page.continuation === null) break;
+      continuation = page.continuation;
+    }
+    expect(progress.length).toBeGreaterThan(2);
+    expect(progress[0]).toBeGreaterThan(0);
+    const stablePair = (index: number) => index > 0 && counts[index]![1] === ids.length - 1
+      && groundingInputs[index]!.every((row, position) => row === groundingInputs[index - 1]![position]);
+    expect(progress.some((value, index) => stablePair(index) && value > progress[index - 1]!),
+      JSON.stringify({ progress, charges, counts, inputChanges: groundingInputs.map((inputs, index) =>
+        inputs.map((row, position) => index > 0 && row !== groundingInputs[index - 1]![position])) })).toBe(true);
+    expect(progress.every((value, index) => !stablePair(index)
+      || value - progress[index - 1]! === groundingCharges[index]!),
+    JSON.stringify({ progress, groundingCharges, counts })).toBe(true);
+    expect(charges.some(value => value > 0)).toBe(true);
+    expect(pages.at(-1)!.continuation).toBeNull();
+    const delivered = new Set(pages.flatMap(page => page.entries.map(entry => entry.object_id)));
+    expect(delivered).toEqual(expected);
+    expect(ids.slice(1).every(id => delivered.has(id))).toBe(true);
+
+    const prior = recall(readers, small);
+    expect(prior.index.continuation).not.toBeNull();
+    const newSpoke = mem(206);
+    await slice.writeMemory(newSpoke, "additional hub spoke", MemoryDimension.FACT);
+    await admit(slice, 206, ids[0]!, newSpoke);
+    const changed = recall(readers, small, prior.index.continuation);
+    expect(changed.index.completeness.logical_index).toBe("invalidated");
+    expect(changed.index.entries).toEqual([]);
+    const revised = collect(readers, ample, 30, recall(readers, ample).index);
+    expect(revised.at(-1)!.continuation).toBeNull();
+    expect(revised.flatMap(page => page.entries.map(entry => entry.object_id))).toContain(newSpoke);
   });
 
   it("delivers a hub and SCC from real SQLite without spinning", async () => {
@@ -371,7 +444,8 @@ describe("conditional-field actual request cost", () => {
   });
 });
 
-function recall(readers: ObserverReaders, budget: RequestBudget, continuation: Continuation | null = null) {
+function recall(readers: ObserverReaders, budget: RequestBudget, continuation: Continuation | null = null,
+  captureBudgetWork?: (work: number | undefined) => void) {
   return runConditionalFieldRecallWithReceipt({
     workspace_id: WS,
     query_text: QUERY,
@@ -384,7 +458,7 @@ function recall(readers: ObserverReaders, budget: RequestBudget, continuation: C
     readers,
     continuation,
     authorized_scopes: null
-  });
+  }, captureBudgetWork === undefined ? undefined : { capture_budget_work: captureBudgetWork });
 }
 
 function collect(

@@ -193,6 +193,8 @@ export type FieldEngineState = Readonly<{
   readonly source_fact_bytes?: number;
   readonly observed_relation_bytes?: number;
   readonly grounding_progress?: GroundingProgress;
+  /** Semantic input versions captured with grounding progress; adapter arrays are page-local copies. */
+  readonly grounding_input_references?: readonly unknown[];
   readonly explanation_progress?: import("../index/explanation-delivery.js").ExplanationDelivery;
   readonly explanation_completed_work?: number;
   readonly projection_progress?: Readonly<{

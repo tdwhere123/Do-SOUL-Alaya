@@ -404,6 +404,16 @@ function projectMembershipCandidate(context: ProjectionContext) {
   let retained = { ...state, ...remainingWorkFields(state, remaining - framing),
     remaining_memory_bytes: payload.remainingMemoryBytes };
   let projectionProgress = context.projectionProgress;
+  // The field retains immutable versions of these rows. The snapshot and derivation
+  // arrays below are fresh page-local captures, not semantic input revisions.
+  const priorGroundingReferences = state.grounding_input_references;
+  const groundingInputUnchanged = state.grounding_progress !== undefined
+    && priorGroundingReferences?.length === 4
+    && priorGroundingReferences[0] === state.seeds && priorGroundingReferences[1] === state.transitions
+    && priorGroundingReferences[2] === state.derivations
+    && priorGroundingReferences[3] === state.transition_derivations;
+  const groundingReferences = groundingInputUnchanged ? priorGroundingReferences
+    : [state.seeds, state.transitions, state.derivations, state.transition_derivations];
   const projected = cost.time("index", () => projectAcceptingIndex({
     snapshot,
     binding_contexts: state.binding_contexts,
@@ -442,6 +452,7 @@ function projectMembershipCandidate(context: ProjectionContext) {
     claim_propositions: state.claim_propositions,
     transition_derivations: state.transition_derivations,
     grounding_progress: state.grounding_progress,
+    ...(groundingInputUnchanged ? { grounding_input_revision: state.grounding_progress!.input_digest } : {}),
     remaining_memory_bytes: payload.remainingMemoryBytes,
     grounding_transitions: [...state.transitions],
     grounding_seeds: [...state.seeds],
@@ -449,7 +460,8 @@ function projectMembershipCandidate(context: ProjectionContext) {
     projection_facets: [...state.facets],
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
-      retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
+      retained = { ...retained, grounding_progress: progress, grounding_input_references: groundingReferences,
+        remaining_memory_bytes: payload.remainingMemoryBytes };
       projectionProgress = resumeIndexProjection(retained, snapshot);
     },
     on_remaining_reserve: (remaining) => {

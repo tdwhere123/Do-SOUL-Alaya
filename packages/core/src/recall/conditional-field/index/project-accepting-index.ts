@@ -147,6 +147,8 @@ export type AcceptingProjectionInput = Readonly<{
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
   readonly transition_derivations?: import("../engine/path-derivation.js").DerivationRootLookup;
   readonly grounding_progress?: GroundingProgress;
+  /** Revision of immutable grounding inputs, not of the page-local projection arrays. */
+  readonly grounding_input_revision?: string;
   readonly grounding_transitions?: FieldSnapshot["retained_transitions"];
   readonly grounding_seeds?: FieldSnapshot["seeds"];
   readonly grounding_derivations?: readonly Derivation[];
@@ -293,6 +295,7 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
     transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
     transition_derivations: input.transition_derivations ?? {},
     progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
+    ...(input.grounding_input_revision === undefined ? {} : { input_revision: input.grounding_input_revision }),
     allowance: groundingAllowance };
   const grounded = input.cost === undefined
     ? groundedOutputDerivations(groundingInput)
