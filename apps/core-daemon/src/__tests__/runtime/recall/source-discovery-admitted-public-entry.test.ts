@@ -43,6 +43,7 @@ import {
   SOURCE_DISCOVERY_CANARY,
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
+import { LIVE_ORDINARY_ENUMERATION } from "./source-discovery-public-consumption.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import {
   bindAdmittedActualModelShard,
@@ -390,13 +391,23 @@ describe("admitted public consumption entry", () => {
     expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
     const matrix = await runAdmittedPublicMatrix({ bind, sourceCorpus: corpus,
       evidenceDirectory: process.env.ALAYA_ADMISSION_EVIDENCE_DIRECTORY });
+    expect(matrix.selected.every((row) => row.enumeration === LIVE_ORDINARY_ENUMERATION)).toBe(true);
+    expect(matrix.selected).toHaveLength(36);
     expect(matrix.file_failed).toBe(false);
     expect(matrix.failed).toEqual([]);
     expect(matrix.completed).toHaveLength(matrix.selected.length);
-    expect(matrix.no_hint_controls).toHaveLength(24);
-    expect(matrix.traces).toHaveLength(72);
-    expect(matrix.no_hint_traces).toHaveLength(24);
-    expect(matrix.utility.no_hint_controls_complete).toBe(true);
+    expect(matrix.no_hint_controls).toHaveLength(12);
+    expect(matrix.traces).toHaveLength(matrix.selected.length);
+    expect(matrix.no_hint_traces).toHaveLength(matrix.no_hint_controls.length);
+    if (matrix.utility.no_hint_controls_complete !== true) {
+      throw new Error(`no_hint_controls incomplete: ${JSON.stringify(matrix.no_hint_controls.map((row) => ({
+        cell: row.cell, group: row.group, view: row.view, enumeration: row.enumeration, lookup: row.lookup,
+        state: row.state, reason: row.reason, source_id: row.source_id,
+        first_complete_step: row.score?.first_complete_step ?? null,
+        primary_native_visits: row.score?.primary_native_visits ?? null,
+        content: row.score?.content ?? null
+      })))}`);
+    }
     expect(matrix.utility.content_scope.every((group) => group.complete)).toBe(true);
     expect(aggregateAdmittedUtility(matrix.rows.slice(1), matrix.selected.length, false).accepted).toBe(false);
     expect(aggregateAdmittedUtility(matrix.rows, matrix.selected.length, true).accepted).toBe(false);
@@ -408,7 +419,7 @@ describe("admitted public consumption entry", () => {
     expect(matrix.rows.filter((row) => row.view !== "memory_only").every((row) =>
       typeof row.score?.primary_native_visits === "number")).toBe(true);
     const sourceOnly = matrix.rows.filter((row) => row.view === "source_only" && row.lookup === "proposal");
-    expect(sourceOnly).toHaveLength(12);
+    expect(sourceOnly).toHaveLength(6);
     expect(sourceOnly.every((row) => row.score?.first_complete_step === 0 &&
       row.score.consumption_attribution === "hit")).toBe(true);
     expect(matrix.utility).toMatchObject({ proposal_exposure_observed: false,

@@ -2,7 +2,12 @@ import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { SOURCE_DISCOVERY_CANARY, type CanaryCase } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
-import { PUBLIC_CONSUMPTION_PROTOCOL, publicSearchRequest, scoreConsumption } from "./source-discovery-public-consumption.js";
+import {
+  LIVE_ORDINARY_ENUMERATIONS,
+  PUBLIC_CONSUMPTION_PROTOCOL,
+  publicSearchRequest,
+  scoreConsumption
+} from "./source-discovery-public-consumption.js";
 import { boundTrace, caseKey, missingCases, persistRunEvidence, type CaseIdentity } from "./source-discovery-public-consumption-evidence.js";
 import { awaitWorkerAfterMainSqliteClose, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
 import { type BoundPublicReceive } from "./source-discovery-admitted-public-publication.js";
@@ -17,7 +22,7 @@ type MatrixRow = CaseIdentity & { readonly state: "completed" | "failed" | "not_
 export function admittedMatrixCases(): readonly CaseIdentity[] {
   return SOURCE_DISCOVERY_CANARY.flatMap((canary) =>
     (["source_only", "mixed", "memory_only"] as const).flatMap((view) =>
-      (["canonical", "associative"] as const).flatMap((enumeration) =>
+      LIVE_ORDINARY_ENUMERATIONS.flatMap((enumeration) =>
         (["physical-source-first", "physical-distractor-first"] as const).flatMap((cell) =>
           (["proposal", "source_text"] as const).map((lookup) => ({ cell, group: canary.group, view, enumeration, lookup }))))));
 }
@@ -55,7 +60,7 @@ export async function runAdmittedPublicMatrix(input: {
               planted.database.close();
               closeCachedDatabase(planted.filename);
               await awaitWorkerAfterMainSqliteClose(client);
-              for (const enumeration of ["canonical", "associative"] as const) {
+              for (const enumeration of LIVE_ORDINARY_ENUMERATIONS) {
                 for (const lookup of ["proposal", "source_text"] as const) {
                   const identity: CaseIdentity = { cell: sourceFirst ? "physical-source-first" : "physical-distractor-first",
                     group: canary.group, view, enumeration, lookup };
@@ -163,8 +168,9 @@ export function aggregateAdmittedUtility(rows: readonly MatrixRow[], expected: n
         ? p < s && p < n && witnessed : null };
   });
   const content = SOURCE_DISCOVERY_CANARY.map((canary: CanaryCase) => {
+    const expected = selected.filter((row) => row.group === canary.group && row.view !== "memory_only");
     const cells = rows.filter((row) => row.group === canary.group && row.view !== "memory_only");
-    return { group: canary.group, complete: cells.length === 16 &&
+    return { group: canary.group, complete: cells.length === expected.length &&
       cells.every((row) => row.score?.first_complete_step != null && row.score.content.has_full_intended === true && row.score.content.has_all_required_phrases &&
         !row.score.content.has_forbidden_distractor) };
   });

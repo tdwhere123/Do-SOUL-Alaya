@@ -4,6 +4,7 @@ import {
   locateSourceInterpretation,
   SoulMemorySearchRequestSchema,
   sourceRecallTarget,
+  type EnumerationPolicy,
   type SoulMemorySearchRequest,
   type SoulMemorySearchResponse,
   type SourceLocatedInterpretation
@@ -62,7 +63,10 @@ export const PUBLIC_CONSUMPTION_PROTOCOL = Object.freeze({
 
 export type LookupMode = "proposal" | "source_text";
 export type ResultView = "source_only" | "mixed" | "memory_only";
-export type Enumeration = "canonical" | "associative";
+/** Protocol enumeration identities; only `native_query` is a live ordinary execution route. */
+export type Enumeration = EnumerationPolicy;
+export const LIVE_ORDINARY_ENUMERATION = "native_query" as const satisfies Enumeration;
+export const LIVE_ORDINARY_ENUMERATIONS = [LIVE_ORDINARY_ENUMERATION] as const;
 export type Cost = number | "unavailable";
 export type ConsumptionStopReason =
   | "continuation_exhausted"

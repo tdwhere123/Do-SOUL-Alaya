@@ -6,11 +6,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import {
   RecallService,
+  SourceIndexLifecycle,
   type ConditionalFieldExecutionReceipt
 } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase,
   SqliteFieldSourceRecordRepo,
+  SqliteSourceIndexRepository,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import type { OfficialApiExtractionRequest } from "@do-soul/alaya-soul";
@@ -19,6 +21,10 @@ import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-rea
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
+import {
+  BUDGET as SOURCE_INDEX_BUDGET,
+  configuration as sourceIndexConfiguration
+} from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { MEM, NOW, RUN, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import {
@@ -29,6 +35,7 @@ import { publicIdentities } from "./source-discovery-public-consumer.js";
 import { bindNativeControl } from "./source-discovery-native-control.js";
 import {
   insertBoundGist,
+  LIVE_ORDINARY_ENUMERATION,
   publicSearchRequest,
   tapRecallReceipts,
   type ResultView
@@ -118,11 +125,11 @@ export async function withPlantedWorker(
   const slice = await openSourceSlice(() => {}, filename);
   const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
   const intended = records.insert({
-    ...hashedRecord(WS, canary.intended, "intended"),
+    ...governedSourceRecord(canary.intended, "intended"),
     ...(canary.event_time === undefined ? {} : { event_time: canary.event_time })
   });
   const distractorInput = Array.from({ length: 128 }, (_, index) =>
-    hashedRecord(WS, canary.distractor, `distractor-${index}`)).find((row) =>
+    governedSourceRecord(canary.distractor, `distractor-${index}`)).find((row) =>
       (intended.record_id < row.record_id) === intendedFirst);
   if (distractorInput === undefined) throw new Error("Could not plant requested physical order");
   const distractor = records.insert(distractorInput);
@@ -150,10 +157,10 @@ export async function withPlantedSourceWorker<T extends object>(
   let handedOff = false;
   try {
     const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-    const sourceRow = records.insert(hashedRecord(WS, sourceBody, options?.sourceId ?? "bound-source"));
+    const sourceRow = records.insert(governedSourceRecord(sourceBody, options?.sourceId ?? "bound-source"));
     const distractorInput = options?.sourceFirst === undefined
-      ? hashedRecord(WS, distractorBody, "distractor-source")
-      : Array.from({ length: 128 }, (_, index) => hashedRecord(WS, distractorBody, `distractor-${index}`))
+      ? governedSourceRecord(distractorBody, "distractor-source")
+      : Array.from({ length: 128 }, (_, index) => governedSourceRecord(distractorBody, `distractor-${index}`))
         .find((row) => (sourceRow.record_id < row.record_id) === options.sourceFirst);
     if (distractorInput === undefined) throw new Error("requested source order cannot be planted");
     const distractor = records.insert(distractorInput);
@@ -225,8 +232,8 @@ export async function withOmittedPairWorker(
   const filename = join(directory, "alaya.db");
   const slice = await openSourceSlice(() => {}, filename);
   const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
-  const first = records.insert(hashedRecord(WS, firstBody, "first-omitted"));
-  const second = records.insert(hashedRecord(WS, secondBody, "second-omitted"));
+  const first = records.insert(governedSourceRecord(firstBody, "first-omitted"));
+  const second = records.insert(governedSourceRecord(secondBody, "second-omitted"));
   insertBoundGist(slice.database, `gist-${first.record_id}`, canary.intended, first.record_id,
     first.content_digest, first.evidence_object_id, canary.sketch, WS, RUN, NOW);
   insertBoundGist(slice.database, `gist-${second.record_id}`, canary.intended, second.record_id,
@@ -257,7 +264,7 @@ export async function withPublicOrderedPairWorker(
         await awaitWorkerAfterMainSqliteClose(client);
         const probeAt = receipts.length;
         const firstPage = await handler(
-          publicSearchRequest(canary, "proposal", "source_only", "canonical"),
+          publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
           { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" }
         );
         lastObserved = publicIdentities(firstPage)[0] ?? "unavailable";
@@ -288,8 +295,8 @@ function publicPairAttempts(
     ...Array.from({ length: 12 }, (_, index) => [`src-a-${index}`, `src-b-${index}`] as const)
   ];
   return keys.map(([firstKey, laterKey]) => ({
-    publicFirst: hashedRecord(WS, publicFirstBody, firstKey),
-    later: hashedRecord(WS, laterBody, laterKey)
+    publicFirst: governedSourceRecord(publicFirstBody, firstKey),
+    later: governedSourceRecord(laterBody, laterKey)
   }));
 }
 
@@ -321,12 +328,59 @@ async function withInsertedPublicPair(
   }, run);
 }
 
+/** Native admission rejects unscoped sources; intended and distractor share the same governed class. */
+function governedSourceRecord(body: string, sourceId: string): ReturnType<typeof hashedRecord> {
+  return { ...hashedRecord(WS, body, sourceId), scope_class: "project" };
+}
+
+/** Native public membership reads source_index_text FTS, not source_records or gists.
+ * Prepare every captured current root equally so intended and distractor share the same prerequisite.
+ */
+function preparePlantedNativeLexicalIndex(database: StorageDatabase, workspaceId: string): void {
+  const repository = new SqliteSourceIndexRepository(database, fieldSha256);
+  const lifecycle = new SourceIndexLifecycle(repository, fieldSha256);
+  const generation = lifecycle.begin(lifecycle.select(workspaceId, sourceIndexConfiguration()));
+  let captured = lifecycle.capture(workspaceId, generation.generation_id, 128, SOURCE_INDEX_BUDGET);
+  while (!captured.generation.enumeration_complete) {
+    if (captured.added === 0) {
+      throw new Error(`planted native index capture stalled: ${JSON.stringify({
+        reason: captured.generation.reason,
+        status: captured.generation.status,
+        target_count: captured.generation.target_count
+      })}`);
+    }
+    captured = lifecycle.capture(workspaceId, generation.generation_id, 128, SOURCE_INDEX_BUDGET);
+  }
+  const targets: Array<ReturnType<SqliteSourceIndexRepository["listTargets"]>[number]> = [];
+  let afterRootKey: string | null = null;
+  for (;;) {
+    const page = repository.listTargets(workspaceId, generation.generation_id, afterRootKey, 128);
+    if (page.length === 0) break;
+    targets.push(...page);
+    afterRootKey = page.at(-1)!.root_key;
+  }
+  if (targets.length === 0) {
+    throw new Error("planted native index captured no current sources");
+  }
+  for (const target of targets) {
+    const prepared = lifecycle.prepare(workspaceId, generation.generation_id, target.root_key, SOURCE_INDEX_BUDGET);
+    if (prepared.status === "ready") continue;
+    if (prepared.status === "partial" && prepared.reason === "window_capacity") continue;
+    throw new Error(`planted native lexical prepare failed: ${JSON.stringify({
+      root_key: target.root_key,
+      status: prepared.status,
+      reason: "reason" in prepared ? prepared.reason : null
+    })}`);
+  }
+}
+
 async function runPlantedHandler<T extends { readonly database: StorageDatabase; readonly filename: string }>(
   filename: string,
   slice: Awaited<ReturnType<typeof openSourceSlice>>,
   planted: T,
   run: PlantedHandler<T>
 ): Promise<void> {
+  preparePlantedNativeLexicalIndex(slice.database, WS);
   const receipts: ConditionalFieldExecutionReceipt[] = [];
   const client = createRecallReadWorkerClient({
     databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1

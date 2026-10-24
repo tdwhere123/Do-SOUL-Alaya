@@ -11,6 +11,8 @@ import {
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import {
+  LIVE_ORDINARY_ENUMERATION,
+  LIVE_ORDINARY_ENUMERATIONS,
   PUBLIC_CONSUMPTION_PROTOCOL,
   compileCanarySketch,
   observePlantedDiscovery,
@@ -74,13 +76,13 @@ describe("public source consumption comparison", () => {
     async ({ canary, view }) => {
       await withPlantedWorker(canary, view, false, async (planted, handler, receipts, client) => {
         const native = {
-          proposal: observePlantedDiscovery(planted.database, WS, canary, "proposal", view, "canonical"),
-          source_text: observePlantedDiscovery(planted.database, WS, canary, "source_text", view, "canonical")
+          proposal: observePlantedDiscovery(planted.database, WS, canary, "proposal", view, LIVE_ORDINARY_ENUMERATION),
+          source_text: observePlantedDiscovery(planted.database, WS, canary, "source_text", view, LIVE_ORDINARY_ENUMERATION)
         };
         planted.database.close();
         closeCachedDatabase(planted.filename);
         await awaitWorkerAfterMainSqliteClose(client);
-        for (const enumeration of ["canonical", "associative"] as const) {
+        for (const enumeration of LIVE_ORDINARY_ENUMERATIONS) {
           const pair: Awaited<ReturnType<typeof runPair>>[] = [];
           for (const lookup of ["proposal", "source_text"] as const) {
             pair.push(await attemptCell({
@@ -100,10 +102,10 @@ describe("public source consumption comparison", () => {
         if (view === "source_only") {
           for (const lookup of ["proposal", "source_text"] as const) {
             const run = await attemptCell({
-              cell: "historical_page1", group: canary.group, view, enumeration: "canonical", lookup
+              cell: "historical_page1", group: canary.group, view, enumeration: LIVE_ORDINARY_ENUMERATION, lookup
             }, async () => {
               const result = await runPair({
-                canary, view, enumeration: "canonical", lookup, intendedId: planted.intendedId,
+                canary, view, enumeration: LIVE_ORDINARY_ENUMERATION, lookup, intendedId: planted.intendedId,
                 handler, receipts, maxResults: PUBLIC_CONSUMPTION_PROTOCOL.historical_max_results,
                 cell: "historical_page1"
               });
@@ -127,7 +129,7 @@ describe("public source consumption comparison", () => {
         planted.database.close();
         closeCachedDatabase(planted.filename);
         await awaitWorkerAfterMainSqliteClose(client);
-        for (const enumeration of ["canonical", "associative"] as const) {
+        for (const enumeration of LIVE_ORDINARY_ENUMERATIONS) {
           const pair: Awaited<ReturnType<typeof runPair>>[] = [];
           for (const lookup of ["proposal", "source_text"] as const) {
             pair.push(await attemptCell({
@@ -158,10 +160,10 @@ describe("public source consumption comparison", () => {
       for (const lookup of ["proposal", "source_text"] as const) {
         const scored = await attemptCell({
           cell: "memory_only", group: canary.group, view: "memory_only",
-          enumeration: "canonical", lookup
+          enumeration: LIVE_ORDINARY_ENUMERATION, lookup
         }, async () => {
           const run = await runPair({
-            canary, view: "memory_only", enumeration: "canonical", lookup,
+            canary, view: "memory_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup,
             intendedId: planted.intendedId, handler, receipts, maxResults: PUBLIC_CONSUMPTION_PROTOCOL.max_results,
             cell: "memory_only"
           });
@@ -179,8 +181,8 @@ describe("public source consumption comparison", () => {
 
   it("keeps lookup mode as the only compiled interpretation difference in a pair", () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
-    const proposal = compileCanarySketch(canary, "proposal", "source_only", "canonical");
-    const text = compileCanarySketch(canary, "source_text", "source_only", "canonical");
+    const proposal = compileCanarySketch(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION);
+    const text = compileCanarySketch(canary, "source_text", "source_only", LIVE_ORDINARY_ENUMERATION);
     expect(proposal.query_id).not.toBe(text.query_id);
     expect(proposal.interpretation_proposal?.original_query_digest)
       .toBe(text.interpretation_proposal?.original_query_digest);
@@ -196,7 +198,7 @@ describe("public source consumption comparison", () => {
       await awaitWorkerAfterMainSqliteClose(client);
       const identity: CaseIdentity = {
         cell: "public_first_complete_then_later_read", group: canary.group,
-        view: "source_only", enumeration: "canonical", lookup: "proposal"
+        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
@@ -232,7 +234,7 @@ describe("public source consumption comparison", () => {
     await withPublicOrderedPairWorker(canary, publicFirstBody, laterBody, async (planted, handler, receipts) => {
       const identity: CaseIdentity = {
         cell: "public_first_capped_then_later_complete", group: canary.group,
-        view: "source_only", enumeration: "canonical", lookup: "proposal"
+        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
@@ -282,6 +284,7 @@ async function runPair(input: Readonly<{
   readonly cell: string;
 }>) {
   const request = publicSearchRequest(input.canary, input.lookup, input.view, input.enumeration, input.maxResults);
+  expect(request.enumeration_policy).toBe(LIVE_ORDINARY_ENUMERATION);
   const started = input.receipts.length;
   const trace = await consumePublicSources({
     handler: input.handler,
@@ -389,7 +392,7 @@ async function consumePairTrace(
       return response;
     },
     context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
-    request: publicSearchRequest(canary, "proposal", "source_only", "canonical"),
+    request: publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
     receipts
   });
   expect(trace.steps[0]?.public_exchange.request.continuation).toBeNull();
@@ -400,26 +403,95 @@ async function consumePairTrace(
 function assertOmittedPairExposure(
   result: Awaited<ReturnType<typeof consumePairTrace>>, expectedRoots: readonly string[]
 ): Readonly<{ publicFirst: string; laterId: string }> {
-  const roots = result.initial.index?.entries.flatMap((entry) =>
+  const firstIndexRoots = result.initial.index?.entries.flatMap((entry) =>
     entry.target.kind === "source_evidence" ? [entry.target.root_id] : []) ?? [];
-  expect(roots).toHaveLength(2);
-  expect(roots).toEqual(expect.arrayContaining([...expectedRoots]));
-  const publicFirst = roots[0]!;
-  const laterId = roots[1]!;
-  // Both index identities are present, but source coverage remains unresolved.
-  // Omitting a public body must preserve that open transport state.
-  expect(result.initial.index?.completeness).toMatchObject({
-    logical_index: "open", observed_coverage: "unknown", interpretation_coverage: "open",
-    transport: "open", payload: "omitted"
-  });
-  expect(result.initial.index?.continuation?.capability).toEqual(expect.any(String));
-  expect(result.initial.results).toHaveLength(1);
+  const seen = publicPairIdentityOrder(result);
+  const publicFirst = result.trace.first_page_identities[0] ?? firstIndexRoots[0];
+  const laterId = seen.find((id) => id !== publicFirst);
+  if (publicFirst === undefined || laterId === undefined
+    || !expectedRoots.includes(publicFirst) || !expectedRoots.includes(laterId)
+    || expectedRoots.some((id) => !seen.includes(id))) {
+    throw new Error(`omitted-pair public source membership ${JSON.stringify({
+      publicFirst: publicFirst ?? null,
+      laterId: laterId ?? null,
+      seen,
+      expectedRoots,
+      first_index_roots: firstIndexRoots,
+      page_purpose: result.initial.page_purpose ?? result.initial.index?.page_purpose ?? null,
+      completeness: result.initial.index?.completeness ?? null,
+      continuation: continuationDiagnostic(result.initial.index?.continuation),
+      first_page_identities: result.trace.first_page_identities,
+      stop_reason: result.trace.termination.stop_reason ?? null,
+      membership_page: result.trace.termination.membership_page,
+      payload_expansions: result.trace.termination.payload_expansions,
+      steps: result.trace.steps.map((step) => ({
+        step_index: step.public_exchange.step_index,
+        purpose: step.purpose,
+        membership_page: step.membership_page,
+        identities: step.public_identities,
+        continuation: continuationDiagnostic(step.public_exchange.request.continuation),
+        payload_root: step.public_exchange.request.payload_continuation?.root_id ?? null,
+        payload_start: step.public_exchange.request.payload_continuation?.start_offset ?? null,
+        preview_complete: step.preview_complete
+      }))
+    })}`);
+  }
+  expect(new Set(seen)).toEqual(new Set(expectedRoots));
   expect(result.trace.first_page_identities).toEqual([publicFirst]);
   expect(result.trace.first_exposure?.initial?.slots.map((slot) =>
     slot.target.kind === "source_evidence" ? slot.target.root_id : slot.target.object_id)).toEqual([publicFirst]);
   expect(result.trace.steps[0]!.source_bodies[laterId]).toBeUndefined();
-  expect(payloadStepsFor(result.trace, laterId)[0]?.public_exchange.request.payload_continuation?.start_offset).toBe(0);
+  if (!firstIndexRoots.includes(laterId)) {
+    expect(result.initial.index?.continuation).not.toBeNull();
+    expect(result.trace.steps.some((step) => step.public_exchange.request.continuation !== null
+      && step.public_exchange.request.payload_continuation === null
+      && (step.public_identities.includes(laterId)
+        || Object.hasOwn(step.source_bodies, laterId)))).toBe(true);
+  }
+  const laterPayload = payloadStepsFor(result.trace, laterId);
+  if (laterPayload.length > 0) {
+    const start = laterPayload[0]!.public_exchange.request.payload_continuation?.start_offset;
+    expect(typeof start === "number" && start >= 0).toBe(true);
+    const priorBody = result.trace.steps.some((step) =>
+      step.public_exchange.step_index < laterPayload[0]!.public_exchange.step_index
+      && (step.source_bodies[laterId] ?? "").length > 0);
+    if (!priorBody) expect(start).toBe(0);
+  }
   return { publicFirst, laterId };
+}
+
+function publicPairIdentityOrder(
+  result: Awaited<ReturnType<typeof consumePairTrace>>
+): string[] {
+  const seen: string[] = [];
+  const add = (id: string | undefined): void => {
+    if (id === undefined || seen.includes(id)) return;
+    seen.push(id);
+  };
+  for (const entry of result.initial.index?.entries ?? []) {
+    if (entry.target.kind === "source_evidence") add(entry.target.root_id);
+  }
+  for (const id of result.trace.first_page_identities) add(id);
+  for (const step of result.trace.steps) {
+    for (const id of step.public_identities) add(id);
+    for (const id of Object.keys(step.source_bodies)) add(id);
+    for (const chunk of step.public_exchange.response.chunks) add(chunk.root_id);
+    for (const lookup of step.public_exchange.response.source_lookups) {
+      if (lookup.target.kind === "source_evidence") add(lookup.target.root_id);
+    }
+  }
+  return seen;
+}
+
+function continuationDiagnostic(
+  continuation: Readonly<{ continuation_id: string; cursor: string; capability?: string }> | null | undefined
+): null | Readonly<{ continuation_id: string; cursor: string; capability: string | null }> {
+  if (continuation === null || continuation === undefined) return null;
+  return {
+    continuation_id: continuation.continuation_id,
+    cursor: continuation.cursor,
+    capability: continuation.capability ?? null
+  };
 }
 
 function payloadStepsFor(trace: ConsumptionTrace, rootId: string): ConsumptionTrace["steps"] {
@@ -531,7 +603,7 @@ function selectedPublicConsumptionCases(): CaseIdentity[] {
   const cases: CaseIdentity[] = [];
   for (const canary of SOURCE_DISCOVERY_CANARY) {
     for (const view of ["source_only", "mixed"] as const) {
-      for (const enumeration of ["canonical", "associative"] as const) {
+      for (const enumeration of LIVE_ORDINARY_ENUMERATIONS) {
         for (const lookup of ["proposal", "source_text"] as const) {
           cases.push({ cell: "primary", group: canary.group, view, enumeration, lookup });
           cases.push({
@@ -543,23 +615,23 @@ function selectedPublicConsumptionCases(): CaseIdentity[] {
     for (const lookup of ["proposal", "source_text"] as const) {
       cases.push({
         cell: "historical_page1", group: canary.group, view: "source_only",
-        enumeration: "canonical", lookup
+        enumeration: LIVE_ORDINARY_ENUMERATION, lookup
       });
     }
   }
   for (const lookup of ["proposal", "source_text"] as const) {
     cases.push({
       cell: "memory_only", group: SOURCE_DISCOVERY_CANARY[0]!.group, view: "memory_only",
-      enumeration: "canonical", lookup
+      enumeration: LIVE_ORDINARY_ENUMERATION, lookup
     });
   }
   cases.push({
     cell: "public_first_complete_then_later_read", group: SOURCE_DISCOVERY_CANARY[1]!.group,
-    view: "source_only", enumeration: "canonical", lookup: "proposal"
+    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
   });
   cases.push({
     cell: "public_first_capped_then_later_complete", group: SOURCE_DISCOVERY_CANARY[1]!.group,
-    view: "source_only", enumeration: "canonical", lookup: "proposal"
+    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
   });
   return cases;
 }
