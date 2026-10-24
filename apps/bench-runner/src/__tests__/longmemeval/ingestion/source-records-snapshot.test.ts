@@ -7,6 +7,9 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteEventLogRepo } from "@do-soul/alaya-storage";
+import { SoulMemorySearchRequestSchema } from "@do-soul/alaya-protocol";
+import { buildLongMemEvalQuestionRuntimeIdentity } from "../../../runs/selection/question-runtime-identity.js";
+import { prepareSourceRecordLexicalIndex, recallSourcePages } from "../../harness/recall/source-records-worker-fixture.js";
 import * as daemonHarness from "../../../harness/daemon.js";
 import * as materialize from "../../../runs/snapshot/materialize.js";
 import Database from "better-sqlite3";
@@ -54,6 +57,41 @@ async function fixture() {
     dataDir, pinnedMetaRoot, offset: 0, limit: 1, recordedAt: CLOCK, producerCommit: "a".repeat(40) } };
 }
 
+async function readPreparedSnapshot(snapshotPath: string, root: string, maxResults = 20) {
+  const { manifest, sidecar } = readArtifact(snapshotPath);
+  const dataDirRoot = join(root, "restored-consumer");
+  materialize.restoreSnapshotToDataDir({ snapshotDbPath: snapshotPath, dataDirRoot, expectedSha256: manifest.db_sha256 });
+  const identity = buildLongMemEvalQuestionRuntimeIdentity("source-question");
+  const daemon = await daemonHarness.startBenchDaemon({ dataDirRoot, ...identity, embeddingMode: "disabled" });
+  try {
+    const db = new Database(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME), { readonly: true });
+    try {
+      for (const message of sidecar.messages) {
+        const row = db.prepare("SELECT source_body, content_digest, source_id, source_version, workspace_id FROM source_records WHERE record_id = ?")
+          .get(message.record.identity);
+        expect(row).toEqual({ source_body: message.content_state === "empty" ? "" : "A café source record.",
+          content_digest: message.record.content_digest, source_id: message.record.source_id,
+          source_version: message.record.source_version, workspace_id: identity.workspaceId });
+        expect((db.prepare("SELECT count(*) AS n FROM event_log WHERE entity_type = 'source_record' AND entity_id = ?")
+          .get(message.record.identity) as { n: number }).n).toBeGreaterThan(0);
+      }
+    } finally { db.close(); }
+    prepareSourceRecordLexicalIndex(daemon.dataDir, identity.workspaceId);
+    const read = await recallSourcePages(daemon, SoulMemorySearchRequestSchema.parse({
+      query: "source record", max_results: maxResults, result_kind_view: "source_only",
+      scope_class: null, dimension: null, domain_tags: null,
+      source_observed_at: QUESTION_CLOCK, protocol_version: 1, supports_source_evidence: true,
+      supported_result_kinds: ["source_evidence"], supports_product_updates: true
+    }), 100);
+    expect(new Set(read.results.flatMap(row => row.target.kind === "source_evidence" ? [row.target.root_id] : [])))
+      .toEqual(new Set(sidecar.messages.filter(message => message.content_state !== "empty").map(message => message.record.identity)));
+    expect(read.results.every(row => row.content_preview === "A café source record.")).toBe(true);
+    expect(read.pages.flatMap(page => page.index?.entries ?? []).every(entry => entry.navigation?.operator === "source_lexical")).toBe(true);
+    expect(hashRegularFileNoFollow(snapshotPath)).toBe(manifest.db_sha256);
+    return read;
+  } finally { await daemon.shutdown(); }
+}
+
 describe("source record snapshot preparation and consumer", () => {
   it("prepares through the actual CLI and restores original messages through MCP", async () => {
     const f = await fixture();
@@ -72,22 +110,20 @@ describe("source record snapshot preparation and consumer", () => {
     }
     const inspected = await inspectSourceRecordsSnapshot({ snapshotPath: f.input.snapshotPath,
       questionId: "source-question", query: "What was recorded?", maxResults: 1 });
-    expect(inspected.pages.flatMap((p) => p.index?.entries ?? []).length).toBeGreaterThan(0);
-    expect(inspected.pages.flatMap((p) => p.index?.entries ?? []).every((entry) => entry.target?.kind === "source_evidence")).toBe(true);
-    expect(new Set(inspected.pages.flatMap((page) => page.results).flatMap((result) =>
-      result.target.kind === "source_evidence" ? [result.target.root_id] : [])))
-      .toEqual(new Set(first.sidecar.messages.map((message) => message.record.identity)));
-    expect(new Set(inspected.pages.map((page) => page.index?.snapshot_id)).size).toBe(1);
-    expect(inspected.response.index?.completeness.interpretation_coverage).toBe("open");
-    expect(inspected.response.index?.completeness.logical_index).toBe("complete");
+    // A source snapshot seals audited records, not a prepared query index. No
+    // native nominations must not be mislabeled as complete source absence.
+    expect(inspected.pages.flatMap(page => page.results)).toEqual([]);
+    expect(inspected.response.index?.completeness.logical_index).toBe("open");
     expect(inspected.response.index?.as_of).toBe(QUESTION_CLOCK);
     expect(inspected.continuation_state).toBe("exhausted");
-    expect(inspected.pages.length).toBeGreaterThan(1);
-    const empty = inspected.pages.flatMap((page) => page.results).find((result) =>
-      result.target.kind === "source_evidence" && result.target.root_id === first.sidecar.messages[2]!.record.identity);
-    expect(empty?.content_preview).toBe("[empty source]");
-    expect(empty?.target).toMatchObject({ span: { content_start: 0, content_end: 0,
-      content_complete: true, original_complete: false, retained_extent: "body" } });
+    const prepared = await readPreparedSnapshot(f.input.snapshotPath, f.root, 1);
+    expect(new Set(prepared.pages.map(page => page.index?.snapshot_id)).size).toBe(1);
+    expect(prepared.response.index?.completeness.interpretation_coverage).toBe("open");
+    expect(prepared.response.index?.completeness.logical_index).toBe("open");
+    expect(prepared.response.index?.as_of).toBe(QUESTION_CLOCK);
+    expect(prepared.pages.length).toBeGreaterThan(1);
+    // Empty source bytes remain in the artifact and restored DB above. An empty
+    // body has no lexical hit; native_query is not an exhaustive catalog scan.
     const db = new Database(f.input.snapshotPath, { readonly: true });
     try {
       expect(db.prepare("SELECT count(*) AS n FROM memory_entries").get()).toMatchObject({ n: 0 });
@@ -99,7 +135,10 @@ describe("source record snapshot preparation and consumer", () => {
     const cli = await promisify(execFile)(process.execPath, [resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"),
       "source-snapshot", "inspect", "--snapshot", f.input.snapshotPath, "--question-id", "source-question",
       "--query", "What was recorded?", "--max-results", "1"], { timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
-    expect(cli.stdout).toContain('"continuation_state": "exhausted"');
+    const cliInspection = JSON.parse(cli.stdout);
+    expect(cliInspection.continuation_state).toBe("exhausted");
+    expect(cliInspection.response.results).toEqual([]);
+    expect(cliInspection.response.index.completeness.logical_index).toBe("open");
   }, 120000);
 
   it("reuses a sealed identical preparation and rejects a conflicting recorded time", async () => {
@@ -228,6 +267,9 @@ describe("source record snapshot preparation and consumer", () => {
     const ids = new Set(readArtifact(f.input.snapshotPath).sidecar.messages.map((message) => message.record.identity));
     for (const record of committed) expect(ids.has(record.record_id)).toBe(true);
     const inspected = await inspectSourceRecordsSnapshot({ snapshotPath: f.input.snapshotPath, questionId: "source-question", query: "What was recorded?" });
-    expect(inspected.response.index?.completeness.logical_index).toBe("complete");
+    expect(inspected.response.results).toEqual([]);
+    expect(inspected.response.index?.completeness.logical_index).toBe("open");
+    const prepared = await readPreparedSnapshot(f.input.snapshotPath, f.root);
+    expect(prepared.response.index?.completeness.logical_index).toBe("open");
   }, 120000);
 });
