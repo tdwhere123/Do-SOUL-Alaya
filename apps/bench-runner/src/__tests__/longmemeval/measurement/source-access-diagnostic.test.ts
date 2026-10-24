@@ -256,14 +256,11 @@ describe("source access diagnostic", () => {
     const frozen = readLongMemEvalSemanticFreeze(f.config.source_run_root);
     const sourceSessions = new Map(frozen.selected[0]!.source_manifest.map((source) => [source.source_id, source.session_id]));
     for (const [index, row] of observed.result.rows.entries()) {
-      // The canonical pool sees all 140 roots, but the shared finite work limit
-      // permits retaining only 128. Observed ranks survive that honest partial.
-      expect(row.status).toBe(row.policy === "canonical-v1" ? "partial" : "observed");
-      if (row.policy === "canonical-v1") {
-        expect(row.reason).toBe("logical_work_limit");
-        expect(row.retained_source_count).toBe(128);
-        expect(row.unretained_observed_sources).toBe(12);
-      }
+      expect(row.status).toBe("observed");
+      expect(row.reason).toBeNull();
+      expect(row.observed_source_count).toBe(140);
+      expect(row.retained_source_count).toBe(140);
+      expect(row.unretained_observed_sources).toBe(0);
       const orderedSessions = row.page_paths.flatMap((path) => {
         const page = readChainArtifact(join(f.root, "multi-round", path)) as { response: {
           access: { source_candidates: { source_id: string }[] } } };
@@ -277,6 +274,27 @@ describe("source access diagnostic", () => {
         session_rank_unit: "distinct_session", pool_k_unit: "source_root" });
     }
     expect(evaluated.result.rows.some((row) => row.first_gold_source_rank !== row.first_gold_session_rank)).toBe(true);
+  }, 120000);
+
+  it("retains observed multi-round roots when the next page exceeds shared work capacity", async () => {
+    const f = await fixture(false, 2);
+    const config = { ...f.config, limits: { ...f.config.limits, max_total_work: 1700000 } };
+    const observed = await observeSourceAccessDiagnostic(config, join(f.root, "multi-round-work-stop"));
+    const canonical = observed.result.rows.find(row => row.policy === "canonical-v1")!;
+    expect(canonical.status).toBe("partial");
+    expect(canonical.reason).toBe("logical_work_limit");
+    expect(canonical.observed_source_count).toBe(140);
+    expect(canonical.retained_source_count).toBeGreaterThan(0);
+    expect(canonical.retained_source_count).toBeLessThan(140);
+    expect(canonical.unretained_observed_sources).toBe(140 - canonical.retained_source_count);
+    expect(canonical.attempted_pages).toBe(canonical.settled_pages);
+    expect(observed.result.total_logical_work).toBeLessThanOrEqual(config.limits.max_total_work);
+    expect(observed.result.total_logical_work + config.budget.work_units).toBeGreaterThan(config.limits.max_total_work);
+    const evaluated = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "multi-round-work-evaluation"));
+    expect(evaluated.result.rows.find(row => row.policy === "canonical-v1"))
+      .toMatchObject({ status: "measured", observation_status: "partial", rank_censored: true });
+    expect(observed.result.provider_calls).toBe(0);
+    expect(evaluated.result.provider_calls).toBe(0);
   }, 120000);
 
   it("binds retained pages and settled receipts before scoring the frozen pool", async () => {
