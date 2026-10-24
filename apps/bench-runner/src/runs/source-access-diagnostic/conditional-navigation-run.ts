@@ -84,7 +84,7 @@ export async function runConditionalNavigation(value: unknown, output: string) {
   writeFileSync(join(root, "formations.json"), JSON.stringify(plans.map(({ row, arms }) => ({ ordinal: row.ordinal,
     arms: arms.map(item => ({ arm: item.arm, available: item.available, formation: item.formation,
       conditions: item.row.conditions, branches: item.row.branches,
-      shares: Object.fromEntries(formationQueryShares(item.row.conditions, config.comparison !== undefined || item.row.structural_navigation !== undefined)) })) }))));
+      shares: Object.fromEntries(formationQueryShares(item.row.conditions, config.comparison !== undefined || item.row.structural_navigation !== undefined, item.row.original)) })) }))));
   if (frozen) writeFileSync(join(root, "frozen-nominations.json"), JSON.stringify(frozen));
   const scratch = mkdtempSync(join(root, "scratch-"));
   const client = !frozen && config.channels === "dual" ? new LocalOnnxEmbeddingClient({ cacheDir: config.cache_root,
@@ -181,7 +181,7 @@ type ArmContext = {
 /** One arm observes its allocated inputs, solves the field, then reads and freezes literal delivery. */
 async function captureNavigationArm(ctx: ArmContext) {
   const { arm, name, prefix, root, scratch, started, config, repository, database, connection, selection, memo, client, acquired, metrics } = ctx;
-  const shares = formationQueryShares(arm.conditions, config.comparison !== undefined || arm.structural_navigation !== undefined);
+  const shares = formationQueryShares(arm.conditions, config.comparison !== undefined || arm.structural_navigation !== undefined, arm.original);
   const captures: { condition: string; preparation: unknown; phase: ReturnType<typeof acquire>["phase"];
     witness: ReturnType<typeof acquire>["witness"]; share?: Share; memoized?: boolean }[] = ctx.inherited ? [...ctx.inherited.captures] : [];
   for (const condition of ctx.inherited ? [] : arm.conditions) {

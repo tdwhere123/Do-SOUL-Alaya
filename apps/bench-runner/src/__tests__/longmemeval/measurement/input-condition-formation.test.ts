@@ -70,7 +70,7 @@ describe("input-only condition formation", () => {
     expect(solved.rows.map(row => [row.record_id, row.navigation.tier])).toEqual([["b", 1024], ["a", 1023]]);
     expect(solved.assessments.filter(row => row.record_id === "b").map(row => row.tier)).toEqual([null, 1022, 1024]);
     expect(solved.rows.every(row => row.read.status === "unobserved" && row.conditional_support.status === "unknown")).toBe(true);
-    const shares = formationQueryShares([original, ...result.conditions], true);
+    const shares = formationQueryShares([original, ...result.conditions], true, original.id);
     expect(shares.size).toBe(4);
     expect([...shares.values()].reduce((sum, row) => sum + row.allowance.max_attempts, 0)).toBe(127);
     expect(admitInputFormation(captured({ ...proposal(), conditions: [cue("red"), cue("round"), cue("small"), cue("bright")] }), input))
@@ -131,7 +131,7 @@ describe("input-only condition formation", () => {
     }
     // Existing genuinely unknown conditions are not promoted by the new producer adapter.
     const unknown = ["unknown", "unsupported", "rejected"] as const;
-    expect(formationQueryShares(unknown.map(status => ({ ...condition(status), status, provenance: "observed-fixture" })), true).size).toBe(0);
+    expect(formationQueryShares(unknown.map(status => ({ ...condition(status), status, provenance: "observed-fixture" })), true, "observed-original").size).toBe(0);
   });
   it("rejects historical captures and carriers rather than retroactively admitting their references", () => {
     for (const task of ["input-only-navigation-proposal.v1", "input-only-navigation-proposal.v2", "input-only-navigation-proposal.v3"]) {
@@ -171,19 +171,51 @@ describe("input-only condition formation", () => {
     expect(result.conditions.map(row => [row.id, row.object, row.hypothesis])).toEqual([
       ["formed-0", "target", "hypothesis"], ["formed-1", "other", "hypothesis"], ["formed-2", "target", "alternative"]]);
     expect(result.branches).toEqual([["formed-0"], ["formed-1"], ["formed-2"]]);
-    expect(formationQueryShares(result.conditions, true).size).toBe(3);
+    expect(formationQueryShares(result.conditions, true, "formed-0").size).toBe(3);
   });
-  it("shares one question allowance, reserves half for original and never recycles unused shares", () => {
-    const conditions = ["original", "a", "b", "c"].map(id => ({ ...condition(id), provenance: "fixture" }));
-    const shares = formationQueryShares(conditions, true);
-    expect(shares.get("original")!.allowance.max_roots).toBe(8);
-    expect([...shares.values()].reduce((sum, row) => sum + row.allowance.max_roots, 0)).toBe(14);
-    expect([...shares.values()].reduce((sums, row) => sums.map((sum, i) => sum + [row.allowance.max_attempts,
-      row.allowance.max_roots, row.allowance.max_vector_windows, row.budget.work_units, row.budget.memory_bytes][i]!), [0, 0, 0, 0, 0]))
-      .toEqual([127, 14, 4094, 49_999_999, 60_000_000]);
-    expect(formationQueryShares(conditions.slice(0, 1), true).get("original")).toEqual({
+  it("reserves half for the caller's original identity in any supplied or formed order and never recycles unused shares", () => {
+    const originalShare = { allowance: { max_attempts: 64, max_roots: 8, max_vector_windows: 2048 },
+      budget: { work_units: 25_000_000, memory_bytes: 30_000_000 } };
+    const extraShare = { allowance: { max_attempts: 21, max_roots: 2, max_vector_windows: 682 },
+      budget: { work_units: 8_333_333, memory_bytes: 10_000_000 } };
+    const totals = [127, 14, 4094, 49_999_999, 60_000_000];
+    const ready = (id: string, status: "ready" | "partial" = "ready") => ({ ...condition(id), status,
+      residual: status === "partial" ? "unresolved fragment" : null, provenance: "authored-share-fixture" });
+    const measure = (shares: ReturnType<typeof formationQueryShares>) => [...shares.values()].reduce((sums, row) => sums.map((sum, i) => sum +
+      [row.allowance.max_attempts, row.allowance.max_roots, row.allowance.max_vector_windows, row.budget.work_units, row.budget.memory_bytes][i]!), [0, 0, 0, 0, 0]);
+    const expectHalf = (rows: Parameters<typeof formationQueryShares>[0], originalId: string, extraIds: string[]) => {
+      const shares = formationQueryShares(rows, true, originalId);
+      expect(shares.get(originalId)).toEqual(originalShare);
+      expect(extraIds.map(id => shares.get(id))).toEqual(extraIds.map(() => extraShare));
+      expect(shares.size).toBe(1 + extraIds.length);
+      expect(measure(shares)).toEqual(totals);
+    };
+    const originalId = "question-cue", extraIds = ["red", "round", "small"];
+    const extras = () => [ready("red"), ready("round", "partial"), ready("small")];
+    const original = () => ready(originalId);
+    expectHalf([original(), ...extras()], originalId, extraIds);
+    expectHalf([extras()[0]!, original(), extras()[1]!, extras()[2]!], originalId, extraIds);
+    expectHalf([...extras(), original()], originalId, extraIds);
+    expectHalf([{ ...ready("time"), observation_window: { contract: "benchmark-session-window.v1" as const, coordinate: "normalized_session_coordinate" as const,
+      from: "2021-02-03T12:00:00.000Z", until: "2021-02-03T12:01:00.000Z" } }, { ...ready("dropped"), status: "unknown" as const },
+      ...extras(), original()], originalId, extraIds);
+    const formed = admitInputFormation(captured({ ...proposal(), conditions: extraIds.map(query => cue(query)) }), input).conditions;
+    expect(formed.map(row => row.id)).toEqual(["formed-0", "formed-1", "formed-2"]);
+    expectHalf([original(), ...formed], originalId, formed.map(row => row.id));
+    expectHalf([formed[0]!, original(), formed[1]!, formed[2]!], originalId, formed.map(row => row.id));
+    expectHalf([...formed, original()], originalId, formed.map(row => row.id));
+    const colliding = ready("formed-0");
+    const reserved = admitInputFormation(captured({ ...proposal(), conditions: extraIds.map(query => cue(query)) }), input, [colliding.id]);
+    expect(reserved.conditions.map(row => row.id)).toEqual(["formed-1", "formed-2", "formed-3"]);
+    expectHalf([reserved.conditions[0]!, colliding, reserved.conditions[1]!, reserved.conditions[2]!], colliding.id,
+      reserved.conditions.map(row => row.id));
+    expect(formationQueryShares([original()], true, originalId).get(originalId)).toEqual({
       allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 4096 },
       budget: { work_units: 50_000_000, memory_bytes: 60_000_000 } });
+  });
+  it("keeps an unbound original as admission failure rather than first-row share identity", () => {
+    expect(() => solveConditionalNavigation({ original: "absent", conditions: [{ ...condition("ready-cue"), provenance: "authored-admission-fixture" }],
+      branches: [], pool: [], occurrences: [] })).toThrow(/ambiguous navigation identity/u);
   });
   it("binds only question and clock and rejects corpus or extra contextual metadata", () => {
     const workset = { contract: "source-evidence-selection-workset-v1", model: "step-3.5-flash-2603",

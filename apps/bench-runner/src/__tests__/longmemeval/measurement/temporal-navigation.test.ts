@@ -74,7 +74,7 @@ it("preserves native equivalence and query shares when the time operator is abse
   expect(result.single_condition_equivalent).toBe(true);
   expect(result.rows.map(row => row.record_id)).toEqual(["b", "a", "c", "tail"]);
   expect(result.temporal_observations).toBeUndefined();
-  expect(formationQueryShares(fixture.conditions, true)).toEqual(formationQueryShares(native.conditions, true));
+  expect(formationQueryShares(fixture.conditions, true, fixture.original)).toEqual(formationQueryShares(native.conditions, true, native.original));
 });
 it("rejects invalid windows, metadata, native-time fabrication, and cross-object conjunctions", () => {
   for (const change of [{ until: window.from }, { from: window.until }, { from: "2021-02-30T00:00:00.000Z" },

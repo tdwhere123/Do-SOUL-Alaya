@@ -124,12 +124,12 @@ export function mechanicalFormation(input: z.infer<typeof FormationInputSchema>)
     provenance: "mechanical-literal-lines.v4", reason: null };
 }
 
-/** Fixed per-arm question budget, not a per-condition multiplier. No recycling unused portions. */
-export function formationQueryShares(conditions: readonly NavigationCondition[], shared: boolean) {
+/** Fixed per-arm question budget, not a per-condition multiplier. Shared half follows the caller's original identity. No recycling unused portions. */
+export function formationQueryShares(conditions: readonly NavigationCondition[], shared: boolean, original: string) {
   const active = conditions.filter(row => row.observation_window === undefined && (row.status === "ready" || row.status === "partial"));
   const total = { max_attempts: 128, max_roots: 16, max_vector_windows: 4096, work_units: 50_000_000, memory_bytes: 60_000_000 };
-  return new Map(active.map((row, i) => {
-    const fraction = !shared || active.length === 1 ? 1 : i === 0 ? 0.5 : 0.5 / (active.length - 1);
+  return new Map(active.map(row => {
+    const fraction = !shared || active.length === 1 ? 1 : row.id === original ? 0.5 : 0.5 / (active.length - 1);
     const share = Object.fromEntries(Object.entries(total).map(([key, value]) => [key, Math.floor(value * fraction)])) as typeof total;
     return [row.id, { allowance: { max_attempts: share.max_attempts, max_roots: share.max_roots, max_vector_windows: share.max_vector_windows },
       budget: { work_units: share.work_units, memory_bytes: share.memory_bytes } }];
