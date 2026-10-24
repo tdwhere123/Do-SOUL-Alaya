@@ -322,7 +322,7 @@ function queryHandleRecall(handler: Handler, context: Context, original: string,
   }, context);
 }
 
-it("preserves positive finite-domain and measured-comparison proofs through public interpretation after reopen", async () => {
+it("preserves finite-domain and multiply aligned measured-comparison proofs through public interpretation after reopen", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-finite-native-"));
   const filename = join(directory, "alaya.db");
   const source = "Alice and Bob are registered users, every registered user uses X, both have speed 2.1 ms in lab, Y is unused.";
@@ -376,6 +376,28 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
       expect(compared.proofs![0]!.evaluation).toMatchObject({ status: "supported" });
       expect(compared.proofs![0]!.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement")
         .map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
+      for (const subjects of [["rX", "rAlice"], ["rAlice", "rX"]]) {
+        const allAlignments = receiveCorrespondence(comparison, published!.interpretation, published!.interpretation_id, {
+          domains: correspondence.domains,
+          correspondences: [
+            ...subjects.map(referent => ({ relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
+              source_endpoint: { kind: "referent", referent }, query_support: { kind: "query_text", excerpt: "Alice" },
+              source_semantic_support: [] })),
+            { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "tools" },
+              source_endpoint: { kind: "referent", referent: "rBob" }, query_support: { kind: "query_text", excerpt: "Bob" },
+              source_semantic_support: [] }
+          ]
+        }, FINITE_QUERY);
+        const multiple = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison,
+          [allAlignments.semantic_correspondence], budget);
+        if (multiple.operation !== "recall") throw new Error("native multi-alignment comparison recall required");
+        expect(multiple.proofs).toHaveLength(1);
+        expect(multiple.proofs![0]!.evaluation?.status).toBe("supported");
+        expect(multiple.proofs![0]!.consumed_leaves).toEqual(expect.arrayContaining([
+          expect.objectContaining({ leaf_kind: "source_interpretation_numeric_order", measurement: "valueAlice",
+            other_measurement: "valueBob", value: "eq" })
+        ]));
+      }
       const withdrawn = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, comparison, [], budget);
       if (withdrawn.operation !== "recall") throw new Error("native source fallback required");
       expect(withdrawn.proofs ?? []).toHaveLength(0);

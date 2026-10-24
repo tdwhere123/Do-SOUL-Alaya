@@ -19,12 +19,6 @@ function semanticOwnerPath(sourceInterpretation: SourceSemanticInterpretation, o
 /** These are evidence atoms and arithmetic primitives, never selected answers or ranking seeds. */
 export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, sourceInterpretation: SourceSemanticInterpretation,
   semantic_correspondence: SourceSemanticCorrespondence): void {
-  const ownerPaths = new Map<string, string>();
-  for (const value of sourceInterpretation.measurements ?? []) {
-    if (ownerPaths.has(value.owner)) continue;
-    builder.input.meter.charge(sourceInterpretation.frames.length + sourceInterpretation.operators.length, 0, "measurement scope indexing");
-    ownerPaths.set(value.owner, canonicalJson(semanticOwnerPath(sourceInterpretation, value.owner)));
-  }
   for (const domain of sourceInterpretation.domains ?? []) {
     builder.node(domain.id);
     builder.self(domain.id, ["source_interpretation_domain", domain.id], { leaf_kind: "source_interpretation_domain", domain: domain.id });
@@ -80,16 +74,48 @@ export function populateSourceSemanticFiniteFacts(builder: PremiseBuilder, sourc
       builder.edge(value.subject, value.id, key("measurement_assumed_membership_inv", assumption.query_variable));
     }
   }
-  for (const left of sourceInterpretation.measurements ?? []) for (const right of sourceInterpretation.measurements ?? []) {
+  const query = builder.input.query, evaluation = query?.evaluation;
+  if (query === undefined || evaluation?.kind !== "comparison") return;
+  builder.input.meter.charge(semantic_correspondence.domains?.length ?? 0, 0, "numeric domain demand");
+  const population = semantic_correspondence.domains?.find((row) => row.query_domain === evaluation.domain)?.source_domain;
+  if (population === undefined) return;
+  // Only a named, aligned referent constrains an operand. Free operands and extrema
+  // still range over every measurement in the demanded population, including
+  // incompatible signatures needed for an incomparable conclusion.
+  const referents = (variable: string): ReadonlySet<string> | undefined => {
+    if (query.variables.find((row) => row.id === variable)?.reference === undefined) return undefined;
+    builder.input.meter.charge(semantic_correspondence.correspondences.length, 0, "numeric operand demand");
+    const aligned = new Set<string>();
+    for (const row of semantic_correspondence.correspondences) {
+      if (row.query_endpoint.kind === "referent" && row.query_endpoint.variable === variable
+        && row.source_endpoint.kind === "referent") aligned.add(row.source_endpoint.referent);
+    }
+    if (aligned.size === 0) return undefined;
+    builder.input.meter.retain([...aligned], "numeric operand alignment");
+    return aligned;
+  };
+  const leftSubjects = "right" in evaluation ? referents(evaluation.left) : undefined;
+  const rightSubjects = "right" in evaluation ? referents(evaluation.right) : undefined;
+  const values = (sourceInterpretation.measurements ?? []).filter((row) => {
+    builder.input.meter.charge(1, 0, "numeric comparison demand scan");
+    return row.population === population;
+  });
+  const leftValues = leftSubjects === undefined ? values : values.filter((row) => leftSubjects.has(row.subject));
+  const rightValues = rightSubjects === undefined ? values : values.filter((row) => rightSubjects.has(row.subject));
+  const ownerPaths = new Map<string, string>();
+  for (const value of [...leftValues, ...rightValues]) {
+    if (ownerPaths.has(value.owner)) continue;
+    builder.input.meter.charge(sourceInterpretation.frames.length + sourceInterpretation.operators.length, 0, "measurement scope indexing");
+    ownerPaths.set(value.owner, canonicalJson(semanticOwnerPath(sourceInterpretation, value.owner)));
+  }
+  for (const left of leftValues) for (const right of rightValues) {
     builder.input.meter.charge(1, 0, "numeric pair preparation");
-    if (left.population !== right.population) continue;
     const id = comparisonNodeId(left.id, right.id);
     builder.node(id); builder.self(id, ["accept"]);
     builder.self(id, [left.subject === right.subject ? "numeric_same_subject" : "numeric_distinct_subject"]);
     builder.derivedNodes.push({ kind: "comparison", node_id: id, left: left.id, right: right.id });
-    const expected = builder.input.query?.evaluation;
-    const matchesQuery = (row: SourceSemanticMeasurement) => expected?.kind !== "comparison"
-      || row.metric === expected.metric && row.unit === expected.unit && row.context === expected.context;
+    const matchesQuery = (row: SourceSemanticMeasurement) => row.metric === evaluation.metric
+      && row.unit === evaluation.unit && row.context === evaluation.context;
     const compatible = left.metric === right.metric && left.unit === right.unit && left.context === right.context
       && matchesQuery(left) && matchesQuery(right)
       && ownerPaths.get(left.owner) === ownerPaths.get(right.owner);
