@@ -5,6 +5,7 @@ import {
   canonicalJson, hashContentDigest, sourceIndexProfileId,
   unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
+  type SourceSemanticResourceBudget,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
   type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
@@ -79,6 +80,30 @@ export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisit
 export class SourceIndexAcquisition {
   /** Disabled-channel receipts; not infrastructure unavailability. Named consumers: nominate/prepareQuery/assertControl. */
   public static readonly channelNotRequested = "acquisition_channel_not_requested";
+
+  /** Planning quotation of envelope and input capture. Not a debit. Named consumer: acquireRoute. */
+  public static quoteEnvelopeAndInputCapture(
+    route: Readonly<{ navigation: string; vector: SourceIndexQueryVector; max_roots: number }>,
+    allowance: SourceSemanticResourceBudget, planner?: SourceSemanticResourceLedger
+  ): SourceSemanticResourceBudget {
+    const navigation = SourceSemanticResourceLedger.measureRetain(
+      route.navigation, planner?.remaining() ?? allowance, planner);
+    const vectorInput = SourceSemanticResourceLedger.measureRetain(
+      route.vector.status === "available" ? route.vector.profile : route.vector.reason,
+      planner?.remaining() ?? {
+        work_units: allowance.work_units - navigation.work_units,
+        memory_bytes: allowance.memory_bytes - navigation.memory_bytes
+      }, planner);
+    const envelope = acquisitionResultEnvelopeCost(route.max_roots);
+    const digest = acquisitionNavigationDigestCost(route.navigation);
+    const capture = acquisitionQueryVectorCaptureCost(route.vector);
+    return {
+      work_units: envelope.work_units + navigation.work_units + digest.work_units +
+        vectorInput.work_units + capture.work_units,
+      memory_bytes: envelope.memory_bytes + navigation.memory_bytes + digest.memory_bytes +
+        vectorInput.memory_bytes + capture.memory_bytes
+    };
+  }
 
   /** Fail closed before bind or SQL. Omitted control is production both-channels. */
   public static assertControl(input: Readonly<{
@@ -324,7 +349,8 @@ class AcquisitionQuery {
   run(captureOnly = false): SourceIndexAcquisitionResult {
     try {
       // Result envelope and per-nomination output references are admitted before discovery can exhaust the ledger.
-      this.meter.charge(1, 2048 + 8 * this.input.allowance.max_roots, "source acquisition result envelope");
+      const envelope = acquisitionResultEnvelopeCost(this.input.allowance.max_roots);
+      this.meter.charge(envelope.work_units, envelope.memory_bytes, "source acquisition result envelope");
       this.prepareInput();
       this.stage = "lexical";
       if (this.control === "vector") {
@@ -394,7 +420,8 @@ class AcquisitionQuery {
 
   private prepareInput(): void {
     this.meter.retain(this.input.navigation_text, "source navigation capture");
-    this.meter.charge(this.input.navigation_text.length, 0, "source navigation digest");
+    const digest = acquisitionNavigationDigestCost(this.input.navigation_text);
+    this.meter.charge(digest.work_units, digest.memory_bytes, "source navigation digest");
     this.navigationDigest = hashContentDigest(this.input.navigation_text, this.sha256);
     const vector = this.input.vector;
     if (this.control === "lexical") {
@@ -411,13 +438,15 @@ class AcquisitionQuery {
     this.meter.retain(vector.profile, "source query profile");
     const parsed = SourceIndexProfileSchema.safeParse(vector.profile);
     if (!parsed.success) { this.unavailableVector("invalid_profile"); return; }
-    this.meter.charge(1, 256, "source query binding");
+    const binding = acquisitionQueryBindingCost();
+    this.meter.charge(binding.work_units, binding.memory_bytes, "source query binding");
     if (sourceIndexProfileId(parsed.data, this.sha256) !== vector.profile_id) {
       this.unavailableVector("profile_binding_mismatch"); return;
     }
     if (vector.input_digest !== this.navigationDigest) { this.unavailableVector("input_binding_mismatch"); return; }
     const dimensions = parsed.data.dimensions;
-    this.meter.charge(3 * dimensions, 4 * dimensions, "source query vector capture, validation and norm");
+    const capture = acquisitionQueryVectorNormCost(dimensions);
+    this.meter.charge(capture.work_units, capture.memory_bytes, "source query vector capture, validation and norm");
     if (!(vector.embedding instanceof Float32Array) || vector.embedding.length !== dimensions || !isFiniteNonzeroVector(vector.embedding)) {
       this.unavailableVector("invalid_query_vector"); return;
     }
@@ -643,6 +672,25 @@ class AcquisitionQuery {
     this.meter.charge(resources.work, resources.memory_bytes, "source index bounded native phase");
     this.nativeBytes += resources.native_bytes;
   }
+}
+
+function acquisitionResultEnvelopeCost(maxRoots: number): SourceSemanticResourceBudget {
+  return { work_units: 1, memory_bytes: 2048 + 8 * maxRoots };
+}
+function acquisitionNavigationDigestCost(navigation: string): SourceSemanticResourceBudget {
+  return { work_units: navigation.length, memory_bytes: 0 };
+}
+function acquisitionQueryBindingCost(): SourceSemanticResourceBudget {
+  return { work_units: 1, memory_bytes: 256 };
+}
+function acquisitionQueryVectorNormCost(dimensions: number): SourceSemanticResourceBudget {
+  return { work_units: 3 * dimensions, memory_bytes: 4 * dimensions };
+}
+function acquisitionQueryVectorCaptureCost(vector: SourceIndexQueryVector): SourceSemanticResourceBudget {
+  if (vector.status !== "available") return { work_units: 0, memory_bytes: 0 };
+  const binding = acquisitionQueryBindingCost();
+  const norm = acquisitionQueryVectorNormCost(vector.profile.dimensions);
+  return { work_units: binding.work_units + norm.work_units, memory_bytes: binding.memory_bytes + norm.memory_bytes };
 }
 
 function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission, rootCeiling = 16): void {

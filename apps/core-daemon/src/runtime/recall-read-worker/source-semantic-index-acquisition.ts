@@ -1,4 +1,4 @@
-import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
+import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceExhausted,
   capturePackSourceSemanticAcquisitionForRequest, type SourceSemanticCompactAcquisition, type SourceSemanticAcquisitionPhase,
   packSourceSemanticAcquisition, SourceIndexQueryResourcesSchema, type SourceSemanticAccessProfile,
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
@@ -137,16 +137,12 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
   try {
     // Capture planning is expenditure, unlike the canonical hold. Actual query capture is
     // separately charged by the native owner, including every prepared vector it consumes.
-    const navigation = SourceSemanticResourceLedger.measureRetain(route.navigation, meter.remaining(), meter);
-    const vectorInput = SourceSemanticResourceLedger.measureRetain(route.vector.status === "available"
-      ? route.vector.profile : route.vector.reason, meter.remaining(), meter);
+    const quote = SourceIndexAcquisition.quoteEnvelopeAndInputCapture(
+      { navigation: route.navigation, vector: route.vector, max_roots: allowance.max_roots },
+      meter.remaining(), meter);
     const budget = meter.remaining();
     phase = { ...phase, budget };
-    const dimensions = route.vector.status === "available" ? route.vector.profile.dimensions : 0;
-    meter.reserve(1 + navigation.work_units + route.navigation.length + vectorInput.work_units +
-      (dimensions === 0 ? 0 : 1 + 3 * dimensions),
-      2048 + 8 * allowance.max_roots + navigation.memory_bytes + vectorInput.memory_bytes +
-      (dimensions === 0 ? 0 : 256 + 4 * dimensions), "source acquisition envelope and input capture");
+    meter.reserve(quote.work_units, quote.memory_bytes, "source acquisition envelope and input capture");
     const observer = meter.observer;
     const captured = acquisition.nominateWithWitness({ workspace_id: workspace, navigation_text: route.navigation,
       vector: route.vector, allowance, budget }, scope => {
