@@ -5,10 +5,11 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { createSourceSemanticAccessPolicy, fieldContractSha256 } from "@do-soul/alaya-core";
+import { createSourceSemanticAccessPolicy, fieldContractSha256, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { query as incompatibleQuery } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
-import { canonicalJson, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
+import { canonicalJson, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION,
+  SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
   sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted, SourceSemanticResourceLedger
 } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
@@ -42,7 +43,7 @@ it("unions an unannotated vector-only root outside the same-budget canonical cen
     const prepared = await preparedVector(fixture);
     expect(prepared.receipt).toMatchObject({ status: "ready", submitted_inputs: 1, token_count: 2,
       method: "local_inference", external_api_attempts: 0, binding_work: "unknown", execution_work: "unknown" });
-    expect(fixture.queryBinding.embedInputs.mock.calls[0]?.[0]).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL }]);
+    expect(fixture.queryBinding.embedInputs.mock.calls[0]?.[0]).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL, role: "query" }]);
     // The receipt's inference method describes the simulated binding; no real model was loaded.
     const meter = new SourceSemanticReadBudget(QUERY_BUDGET);
     const pool = fixture.database.connection.transaction(() => observeSourceSemanticAccess(runtime(fixture), {
@@ -98,30 +99,47 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
       query_handle: prepared.query_handle, semantic_correspondences: [], budget: QUERY_BUDGET,
       output_byte_limit: 1_000_000, authorized_scopes: SCOPES });
     if (leased.operation !== "recall") throw new Error("MCP recall expected");
-    expect(leased.protocol_version).toBe(8);
-    expect(leased.index?.result_version).toBe("source-semantic-library-v6");
-    expect(leased.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
-    expect(leased.discovery?.access?.phases[2]).toEqual(prepared.access?.phases[2]);
+    expect(leased.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
+    if (leased.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) throw new Error("field library delivery expected");
+    expect(leased.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+    // Live field delivery does not manufacture the archived discovery.access receipt.
+    // Frozen reuse binds the prepared request identity and still rejects an adjacent lease budget.
+    expect(leased.request_identity).toBe(sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK,
+      authorized_scopes: ["project"], original_query: ORIGINAL, query_semantics_status: prepared.query_semantics_status,
+      semantic_correspondences: [], budget: QUERY_BUDGET, output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1" }));
+    expect(leased.index.entries.filter(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
+      .toHaveLength(1);
+    expect(leased.total_count).toBe(leased.index.entries.length);
     expect(sourceSemanticExecutionPhases(leased.execution).acquisition).toMatchObject({ status: "not_run" });
     // Payload hydration may read native source bytes; frozen reuse must not rerun acquisition or inference.
     expect(sourceSemanticExecutionPhases(leased.execution).query_preparation).toMatchObject({ status: "not_requested", submitted_inputs: 0 });
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(1);
-    expect(leased.results?.find(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
-      .toMatchObject({ content_preview: RAW, source_channels: ["source_record"] });
+    expect(leased.results.find(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
+      .toMatchObject({ content_preview: RAW, source_channels: ["conditional_field"] });
+    const boundCaller = dispatch.mock.calls[0]![0];
+    await expect(client.sourceSemanticsPort!.execute({ ...boundCaller,
+      request: { ...recall, query_handle: prepared.query_handle!,
+        budget: { ...QUERY_BUDGET, memory_bytes: QUERY_BUDGET.memory_bytes - 1 } } }))
+      .rejects.toThrow(/access policy or budget changed/u);
     const direct = await workerCall(client, recall);
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(2);
-    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(direct.execution))).toMatchObject({ contract: "source-semantic-execution-v3",
+    expect(direct.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
+    if (direct.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) throw new Error("field library delivery expected");
+    expect(direct.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+    const executed = sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(direct.execution));
+    expect(executed).toMatchObject({ contract: "source-semantic-execution-v3",
       query_preparation: { status: "ready", submitted_inputs: 1 }, acquisition: { status: "executed", accounting: "complete" } });
-    expect(sourceSemanticAccessPhases(direct.discovery.access!).acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
+    expect(executed.acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
       .toMatchObject({ source: target, lexical: [], vector: { rank: 1, cosine: 1 } });
     expect(direct.index.entries.filter(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
       .toHaveLength(1);
+    expect(direct.results.find(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
+      .toMatchObject({ content_preview: RAW, source_channels: ["conditional_field"] });
     expect(direct.proofs ?? []).toEqual([]);
     expect(direct.coverage.conditional_computation).toBe("unexercised");
     expect(direct.work.logical_work).toBeLessThanOrEqual(QUERY_BUDGET.work_units);
     expect(direct.work.logical_memory_bytes).toBeLessThanOrEqual(QUERY_BUDGET.memory_bytes);
     // Reuse the actual MCP caller binding, changing only scope rather than accidentally changing principal.
-    const boundCaller = dispatch.mock.calls[0]![0];
     await expect(client.sourceSemanticsPort!.execute({ ...boundCaller,
       request: { ...recall, query_handle: prepared.query_handle! },
       authorized_scopes: { mode: "named", scopes: ["global_core"] } })).rejects.toThrow(/scope/u);
@@ -317,10 +335,29 @@ it.each(["absent", "refused"] as const)("retains original vector discovery under
     expect(result.access?.source_candidates.find(row => row.source_id === "z-vector")?.complete).toBe(true);
     expect(fixture.queryBinding.embedInputs.mock.calls.map(([inputs]) => inputs[0]?.text)).toEqual([ORIGINAL, hint]);
     const reused = await workerCall(client, { ...recall, query_handle: result.query_handle! });
-    expect(reused.discovery.access?.pool_id).toBe(result.access?.pool_id);
-    expect(reused.discovery.access?.phases).toEqual(result.access?.phases);
+    expect(reused.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
+    if (reused.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) throw new Error("field library delivery expected");
+    expect(reused.index.result_version).toBe(ORDINARY_NATIVE_FIELD_RESULT_VERSION);
+    // Live field delivery does not manufacture the archived discovery.access receipt.
+    // Request identity retains the frozen incompatible hint; the lease still enforces the exact budget.
+    const target = fixture.targets.find(row => row.source_id === "z-vector")!;
+    expect(reused.request_identity).toBe(sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK,
+      authorized_scopes: ["project"], original_query: ORIGINAL, query_semantics_status: result.query_semantics_status,
+      access_hint: hint, semantic_correspondences: [], budget: QUERY_BUDGET, output_byte_limit: 1_000_000,
+      access_policy: "query-conditioned-v1" }));
+    expect(reused.request_identity).not.toBe(sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK,
+      authorized_scopes: ["project"], original_query: ORIGINAL, query_semantics_status: result.query_semantics_status,
+      semantic_correspondences: [], budget: QUERY_BUDGET, output_byte_limit: 1_000_000, access_policy: "query-conditioned-v1" }));
+    expect(reused.index.entries.filter(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
+      .toHaveLength(1);
+    expect(reused.results.find(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
+      .toMatchObject({ content_preview: RAW, source_channels: ["conditional_field"] });
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(reused.execution)).acquisition.status).toBe("not_run");
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(reused.execution)).query_preparation.submitted_inputs).toBe(0);
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(2);
+    await expect(workerCall(client, { ...recall, query_handle: result.query_handle!,
+      budget: { ...QUERY_BUDGET, memory_bytes: QUERY_BUDGET.memory_bytes - 1 } }))
+      .rejects.toThrow(/access policy or budget changed/u);
   });
 }, 60_000);
 
