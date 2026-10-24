@@ -15,6 +15,7 @@ import { measureLongMemEvalAcquisition, summarizeLongMemEvalAcquisition } from "
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import type { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
+import { admitEmittedSourcePreview } from "../../../runs/recall-measurement/library-admission.js";
 import { assemble, sourceOnly, workerRecall, GOLD, DIGEST, REQUEST } from "./source-semantic-library-measurement-fixture.js";
 
 afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
@@ -85,6 +86,21 @@ describe("published answer-turn exposure", () => {
   it("uses emitted prefix bytes rather than the larger index span, including omission markers", () => {
     expect(score(observed(28, 43, "東京", false)).metrics["answer_span_exposure@5"].status).toBe("miss");
     expect(score(observed(28, 43, "[payload omitted]", false)).metrics["answer_span_exposure@5"].status).toBe("miss");
+  });
+
+  it("rejects same-length counterfeit archive bytes before visibility scoring", () => {
+    const value = observed(28, 43);
+    expect(score(value).metrics["answer_span_exposure@5"].status).toBe("hit");
+    const result = value.replay.response.results![0]!;
+    const target = result.target;
+    if (target?.kind !== "source_evidence") throw new Error("archived source target required");
+    expect(() => admitEmittedSourcePreview(target.span, result, undefined, target, content, false)).not.toThrow();
+    const forged = { ...result, content_preview: "偽物の本文" };
+    expect(Buffer.byteLength(forged.content_preview)).toBe(Buffer.byteLength(result.content_preview));
+    expect(forged.target).toEqual(result.target);
+    // Byte authenticity belongs to archive admission, before the visibility scorer.
+    expect(() => admitEmittedSourcePreview(target.span, forged, undefined, target, content, false))
+      .toThrow("emitted source preview differs from sealed source span");
   });
 
   it("reuses producer normalization, retains nonalternating round identity and rejects unmappable gold", () => {

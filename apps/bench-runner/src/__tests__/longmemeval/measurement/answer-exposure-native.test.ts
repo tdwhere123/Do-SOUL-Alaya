@@ -4,16 +4,25 @@ const isolation = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 import { createHash } from "node:crypto";
+import { SoulMemorySearchRequestSchema } from "@do-soul/alaya-protocol";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
-import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
+import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun, QuestionPublicationSchema } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 
+import { startBenchDaemon } from "../../../harness/daemon.js";
+import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
+import { censusCompleteSourceRecords, type LongMemEvalSourceCensusRecord } from "../../../runs/snapshot/source-records/census.js";
+import { prepareSourceRecordLexicalIndex, recallSourcePages } from "../../harness/recall/source-records-worker-fixture.js";
+import { expectArchivedFieldRefusal } from "../ingestion/source-records-publication.test-support.js";
+
+const BUDGET = { schema_version: 1 as const, work_units: 1000000, memory_bytes: 60000000,
+  page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
 const roots: string[] = [];
 afterAll(async () => {
   await settleActiveBenchDaemonTasks();
@@ -22,7 +31,35 @@ afterAll(async () => {
   expect(isolation.violations).toEqual([]);
 });
 
-it("scores exact public source exposure after SQLite reopen and immutable native replay, without Q/H/C or a provider", async () => {
+async function verifyNativeExposure(publicationPath: string, dataDir: string, original: LongMemEvalSourceCensusRecord, complete: boolean) {
+  const publication = QuestionPublicationSchema.parse(readChainArtifact(publicationPath));
+  await restoreSnapshotToDataDir({ snapshotDbPath: publication.snapshot_path, dataDirRoot: dataDir, expectedSha256: publication.db_sha256 });
+  prepareSourceRecordLexicalIndex(dataDir, publication.workspace_id);
+  const daemon = await startBenchDaemon({ dataDirRoot: dataDir, workspaceId: publication.workspace_id, runId: publication.run_id,
+    embeddingMode: "disabled" });
+  try {
+    const { results } = await recallSourcePages(daemon, SoulMemorySearchRequestSchema.parse({ query: "café",
+      max_results: 20, result_kind_view: "source_only", enumeration_policy: "native_query",
+      scope_class: null, dimension: null, domain_tags: null, source_observed_at: "2023-09-13T00:00:00.000Z",
+      protocol_version: 1, supports_source_evidence: true, supported_result_kinds: ["source_evidence"],
+      supports_product_updates: true }));
+    expect(results).toHaveLength(1);
+    const target = results[0]!.target;
+    if (target?.kind !== "source_evidence") throw new Error("native source exposure required");
+    expect(target).toMatchObject({ root_id: publication.sources[0]!.record_id, root_kind: "source_record",
+      workspace_id: publication.workspace_id, source_version: original.source_version, content_digest: original.content_digest,
+      span: { content_start: 0, content_complete: complete } });
+    const body = Buffer.from(original.content_bytes, "utf8");
+    const end = target.span.content_end;
+    expect(end).toBeGreaterThan(0);
+    expect(results[0]!.content_preview).toBe(body.subarray(0, end).toString("utf8"));
+    expect(Buffer.byteLength(results[0]!.content_preview!)).toBe(end);
+    if (complete) expect(end).toBe(body.length);
+    else expect(end).toBeLessThan(body.length);
+  } finally { await daemon.shutdown(); }
+}
+
+it("retains exact native source bytes after SQLite reopen while archived scoring explicitly refuses field pages", async () => {
   const root = await mkdtemp(join(tmpdir(), "answer-exposure-native-")); roots.push(root);
   const dataDir = join(root, "data"), meta = join(root, "meta"), run = join(root, "run"), evaluator = join(root, "evaluator");
   await mkdir(dataDir); await mkdir(meta);
@@ -44,8 +81,7 @@ it("scores exact public source exposure after SQLite reopen and immutable native
     model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1",
     query_cache_root: join(root, "absent-query-cache"), recorded_at: "2026-09-13T00:00:00.000Z", producer_commit: "a".repeat(40),
     max_output_tokens: 4096, output_byte_limit: 1000000,
-    budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
-      finalization_reserve: 10000, min_envelope: 10 } }, run);
+    budget: BUDGET }, run);
   expect(JSON.stringify(frozen)).not.toContain("has_answer");
   expect(JSON.stringify(frozen)).not.toContain("evaluator label");
   const prepared = await prepareLongMemEvalSemanticRun(run);
@@ -55,21 +91,30 @@ it("scores exact public source exposure after SQLite reopen and immutable native
   const producerPaths = [join(run, "freeze.json"), prepared.path, replay.path,
     ...replay.result.rows.flatMap(row => row.status !== "replayed" ? [] : [row.publication_path, row.replay_path])];
   const originalBytes = producerPaths.map(path => readFileSync(path));
+  const census = await censusCompleteSourceRecords({ dataDir, pinnedMetaRoot: meta, expectedDatasetSha256: digest,
+    expectedQuestionCount: questions.length });
+  for (const [index, row] of replay.result.rows.slice(0, 2).entries()) {
+    if (row.status !== "replayed") throw new Error("native replay required");
+    await verifyNativeExposure(row.publication_path, join(root, `native-${row.question_id}`),
+      census.records.find(record => record.question_id === row.question_id)!, index === 0);
+  }
   const measured = await measureLongMemEvalSemanticRun(run, replay.path, evaluator);
   expect(measured.result.route_scope).toMatchObject({ arm: "source_only_canonical", access_policy: "canonical-v1",
     embedding_configuration: { mode: "disabled" }, normal_production_capability_baseline: false });
-  expect(measured.result.rows[0]?.acquisition?.metrics["answer_span_exposure@5"].status).toBe("hit");
-  expect(measured.result.rows[1]?.acquisition?.metrics["source_bearing_any@5"].status).toBe("hit");
-  expect(measured.result.rows[1]?.acquisition?.metrics["answer_span_exposure@5"].status).toBe("miss");
+  for (const row of measured.result.rows.slice(0, 3)) {
+    expectArchivedFieldRefusal(row, replay.result);
+    expect(row.acquisition?.metrics["answer_span_exposure@5"]).toEqual({ status: "unknown", reason: "invalid_response" });
+    expect(row.acquisition?.metrics["source_bearing_any@5"]).toEqual({ status: "unknown", reason: "invalid_response" });
+  }
   expect(measured.result.rows[2]).toMatchObject({ outcome: "uncalibrated", acquisition: {
-    metrics: { "answer_span_exposure@5": { status: "unknown", reason: "abstention_requires_separate_calibration" } } } });
+    metrics: { "answer_span_exposure@5": { status: "unknown", reason: "invalid_response" } } } });
   expect(measured.result.rows[3]).toMatchObject({ selected: false, acquisition: null });
-  expect(measured.result.acquisition.metrics["answer_span_exposure@5"]).toMatchObject({ denominator: 3, hits: 1, misses: 1, unknown: 1 });
-  expect(measured.result.acquisition.metrics["source_bearing_any@5"]).toMatchObject({ denominator: 3, hits: 2, misses: 0, unknown: 1 });
+  expect(measured.result.acquisition.metrics["answer_span_exposure@5"]).toMatchObject({ denominator: 3, hits: 0, misses: 0, unknown: 3 });
+  expect(measured.result.acquisition.metrics["source_bearing_any@5"]).toMatchObject({ denominator: 3, hits: 0, misses: 0, unknown: 3 });
   expect(measured.result.acquisition.support_sufficiency).toEqual({ measured: 0, not_measured: 3 });
   expect(measured.result.acquisition.observed_costs.evaluator_proof_work).toMatchObject({ known: 3, unknown: 0, known_sum: 0 });
   expect(measured.result.rows[1]?.acquisition?.earliest_observable_loss).toMatchObject({ status: "unknown", stage: null,
-    earliest_unknown_stage: "deliverable_window", observed_failed_stage: "delivery" });
+    earliest_unknown_stage: "source_available", observed_failed_stage: null });
   for (const [index, path] of producerPaths.entries()) expect(readFileSync(path)).toEqual(originalBytes[index]);
   expect(await measureLongMemEvalSemanticRun(run, replay.path, evaluator)).toEqual(measured);
 
@@ -77,16 +122,9 @@ it("scores exact public source exposure after SQLite reopen and immutable native
   writeChainArtifact(refusedReplay, { ...replay.result, rows: replay.result.rows.map((row, index) => index === 0
     ? { question_id: row.question_id, status: "unavailable", reason: "refusal" } : row) });
   const refused = await measureLongMemEvalSemanticRun(run, refusedReplay, join(root, "refusal-evaluator"));
-  expect(refused.result.acquisition.metrics["answer_span_exposure@5"]).toMatchObject({ denominator: 3, hits: 0, misses: 1, unknown: 2 });
+  expect(refused.result.acquisition.metrics["answer_span_exposure@5"]).toMatchObject({ denominator: 3, hits: 0, misses: 0, unknown: 3 });
   expect(refused.result.rows[0]?.acquisition?.metrics["answer_span_exposure@5"]).toEqual({ status: "unknown", reason: "refusal" });
 
-  // A counterfeit preview cannot become exposure by preserving root IDs, span length and first-exposure hashes.
-  const first = replay.result.rows[0]!;
-  if (first.status !== "replayed") throw new Error("native replay required");
-  const aggregate = readChainArtifact(first.replay_path) as { rows: { response: { results: { content_preview: string }[] } }[] };
-  aggregate.rows[0]!.response.results[0]!.content_preview = "Counterfeit source preview";
-  writeFileSync(first.replay_path, JSON.stringify(aggregate));
-  const invalid = await measureLongMemEvalSemanticRun(run, replay.path, join(root, "invalid-evaluator"));
-  expect(invalid.result.rows[0]?.acquisition?.metrics["answer_span_exposure@5"].status).toBe("unknown");
-  expect(invalid.result.acquisition.metrics["answer_span_exposure@5"]).toMatchObject({ denominator: 3, hits: 0, misses: 1, unknown: 2 });
+  // Supported-archive scoring and counterfeit-preview rejection stay in answer-exposure.test.ts;
+  // refusing the native field family first cannot establish either of those guarantees.
 }, 120_000);
