@@ -45,7 +45,7 @@ async function verifyNativeExposure(publicationPath: string, dataDir: string, or
       supports_product_updates: true }));
     expect(results).toHaveLength(1);
     const target = results[0]!.target;
-    if (target?.kind !== "source_evidence") throw new Error("native source exposure required");
+    if (target?.kind !== "source_evidence" || target.span === undefined) throw new Error("native source extent required");
     expect(target).toMatchObject({ root_id: publication.sources[0]!.record_id, root_kind: "source_record",
       workspace_id: publication.workspace_id, source_version: original.source_version, content_digest: original.content_digest,
       span: { content_start: 0, content_complete: complete } });
@@ -91,8 +91,9 @@ it("retains exact native source bytes after SQLite reopen while archived scoring
   const producerPaths = [join(run, "freeze.json"), prepared.path, replay.path,
     ...replay.result.rows.flatMap(row => row.status !== "replayed" ? [] : [row.publication_path, row.replay_path])];
   const originalBytes = producerPaths.map(path => readFileSync(path));
-  const census = await censusCompleteSourceRecords({ dataDir, pinnedMetaRoot: meta, expectedDatasetSha256: digest,
-    expectedQuestionCount: questions.length });
+  const census = await censusCompleteSourceRecords({ population: "answer-exposure", dataDir, pinnedMetaRoot: meta });
+  expect(census.dataset_sha256).toBe(digest);
+  expect(census.records.map(record => record.question_id)).toEqual(questions.map(question => question.question_id));
   for (const [index, row] of replay.result.rows.slice(0, 2).entries()) {
     if (row.status !== "replayed") throw new Error("native replay required");
     await verifyNativeExposure(row.publication_path, join(root, `native-${row.question_id}`),
