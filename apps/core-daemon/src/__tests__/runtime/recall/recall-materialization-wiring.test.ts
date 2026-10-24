@@ -61,7 +61,7 @@ it("prepares only eligible active generations and preserves original/hint failur
       window_bytes: h.selection.configuration.profile.window_bytes,
       max_input_tokens: h.selection.configuration.profile.max_input_tokens
     });
-    expect(embedInputs.mock.calls[0]![0]).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL }]);
+    expect(embedInputs.mock.calls[0]![0]).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL, role: "query" }]);
     expect(prepared).toMatchObject({ receipt: { status: "ready", submitted_inputs: 1, token_count: 2,
       selected: { config_id: h.selection.config_id, profile_id: h.selection.profile_id } },
       vector: { status: "available", input_digest: digest(ORIGINAL) } });
