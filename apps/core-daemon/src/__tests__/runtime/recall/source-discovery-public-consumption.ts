@@ -193,6 +193,7 @@ export type NativeDiscovery = Readonly<{
   readonly candidate_scans: number;
   readonly hydrated_contexts: number;
   readonly lookup_kind: string | undefined;
+  readonly lookup_reasons: NonNullable<SoulMemorySearchResponse["results"][number]["source_lookup_reasons"]>;
 }>;
 
 export function compileCanarySketch(
@@ -417,6 +418,9 @@ export function insertBoundGist(
   );
 }
 
+/** Private proposal-observer mechanism probe; this bypasses ordinary native nomination.
+ * Its reasons are not evidence that a public worker exposed or used a proposal.
+ */
 export function observePlantedDiscovery(
   database: StorageDatabase,
   workspaceId: string,
@@ -461,7 +465,8 @@ export function observePlantedDiscovery(
     work_units: observed.work.work_units,
     candidate_scans: measurement.candidateScans,
     hydrated_contexts: measurement.hydratedContexts,
-    lookup_kind: observed.lookup_reasons?.[0]?.kind
+    lookup_kind: observed.lookup_reasons?.[0]?.kind,
+    lookup_reasons: observed.lookup_reasons ?? []
   };
 }
 

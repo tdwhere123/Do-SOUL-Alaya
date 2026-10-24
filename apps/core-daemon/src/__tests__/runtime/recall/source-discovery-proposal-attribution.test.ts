@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { closeCachedDatabase } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, initDatabase, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { buildOfficialApiSourceCorpus, buildOfficialApiSourceRequest } from "@do-soul/alaya-soul";
 import { indexOfficialApiSourceAssertions } from
   "../../../../../../packages/soul/src/garden/triage/grounding/source-locator.js";
@@ -11,8 +11,15 @@ import { aggregateAdmittedUtility, runAdmittedPublicMatrix } from "./source-disc
 import { awaitWorkerAfterMainSqliteClose, withBoundPublicWorker, withPlantedSourceWorker } from "./source-discovery-public-consumption-plant.js";
 import { publishCorePublicSources } from "./source-discovery-native-publication.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
-import { publicSearchRequest, scoreConsumption, type ConsumptionTrace } from "./source-discovery-public-consumption.js";
+import {
+  LIVE_ORDINARY_ENUMERATION,
+  observePlantedDiscovery,
+  publicSearchRequest,
+  scoreConsumption,
+  type ConsumptionTrace
+} from "./source-discovery-public-consumption.js";
 import { observePublishedProposalExposure } from "./source-discovery-proposal-attribution.js";
+import { historicalProposalAttributionFixture } from "./source-discovery-historical-attribution.fixture.js";
 
 const phrase = (text: string) => ({ text });
 const role = (name: string, text: string) => ({ role: name, phrase: phrase(text) });
@@ -49,8 +56,17 @@ it.skipIf(process.platform === "win32")(
     const matrix = await runAdmittedPublicMatrix({ bind, sourceCorpus });
     expect(matrix.failed).toEqual([]);
     expect(matrix.utility.complete).toBe(true);
-    expect(matrix.utility.content_scope.every((group) => group.complete)).toBe(true);
-    expect(matrix.utility.strict_improvement).toBe(true);
+    if (!matrix.utility.content_scope.every((group) => group.complete)) {
+      throw new Error(`content_scope incomplete: ${JSON.stringify({
+        content_scope: matrix.utility.content_scope,
+        rows: matrix.rows.map((row) => ({
+          cell: row.cell, group: row.group, view: row.view, lookup: row.lookup, state: row.state,
+          first_complete_step: row.score?.first_complete_step ?? null,
+          content: row.score?.content ?? null,
+          attribution: row.score?.consumption_attribution ?? null
+        }))
+      })}`);
+    }
     expect(matrix.utility.proposal_exposure_observed).toBe(false);
     expect(matrix.utility.witnessed_paired_improvement).toBe(false);
     expect(matrix.utility.accepted).toBe(false);
@@ -64,7 +80,7 @@ it.skipIf(process.platform === "win32")(
   } finally { globalThis.fetch = previousFetch; }
 }, 120_000);
 
-it("binds an exposed proposal to its published candidate, request and source before complete reading", async () => {
+it("binds historical proposal evidence to its published candidate, request and source without crediting native delivery", async () => {
   const canary = SOURCE_DISCOVERY_CANARY[1]!;
   const sourceCorpus = buildOfficialApiSourceCorpus(canary.intended, [{ role: "user", content: canary.intended }]);
   const request = buildOfficialApiSourceRequest(sourceCorpus, indexOfficialApiSourceAssertions(sourceCorpus).map((row) => row.assertion_id));
@@ -75,19 +91,28 @@ it("binds an exposed proposal to its published candidate, request and source bef
   })) });
   await withBoundPublicWorker({ sourceBody: sourceCorpus, distractorBody: canary.distractor, rawJson, request },
     async (planted, handler, receipts, client) => {
+      const privateDiscovery = observePlantedDiscovery(planted.database, WS, canary,
+        "proposal", "source_only", "canonical");
+      expect(privateDiscovery.lookup_reasons.length).toBeGreaterThan(0);
       planted.database.close();
       closeCachedDatabase(planted.filename);
       await awaitWorkerAfterMainSqliteClose(client);
-      const search = publicSearchRequest(canary, "proposal", "source_only", "canonical");
-      const trace = await consumePublicSources({ handler, receipts, request: search,
+      const search = publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION);
+      const liveTrace = await consumePublicSources({ handler, receipts, request: search,
         context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" } });
-      const score = scoreConsumption(canary, planted.sourceId, trace, "source_only", sourceCorpus);
-      const input = { trace, firstCompleteStep: score.first_complete_step, request: search,
+      const score = scoreConsumption(canary, planted.sourceId, liveTrace, "source_only", sourceCorpus);
+      expect(score.first_complete_step).not.toBeNull();
+      expect(observePublishedProposalExposure({ trace: liveTrace, firstCompleteStep: score.first_complete_step,
+        request: search, bind: planted.bind, source: planted.source, workspaceId: WS }).status).toBe("not_observed");
+      // Exercise the historical evidence reader independently; never add reasons to live lexical delivery.
+      const historicalRequest = { ...search, enumeration_policy: "canonical" as const };
+      const trace = historicalProposalAttributionFixture(historicalRequest, privateDiscovery.lookup_reasons);
+      const input = { trace, firstCompleteStep: 0, request: historicalRequest,
         bind: planted.bind, source: planted.source, workspaceId: WS };
       const observed = observePublishedProposalExposure(input);
       expect(observed.status).toBe("observed");
       expect(observed.witnesses.length).toBeGreaterThan(0);
-      expect(observed.witnesses.every((witness) => witness.step_index <= score.first_complete_step!)).toBe(true);
+      expect(observed.witnesses.every((witness) => witness.step_index <= input.firstCompleteStep)).toBe(true);
       const first = observed.witnesses[0]!;
       expect(first.reason.source_target.root_id).toBe(planted.sourceId);
       expect(first.reason.context_id).toBe(planted.bind.receive.located[0]!.assertion_binding.context_id);
@@ -127,7 +152,7 @@ function rewriteReasons(trace: ConsumptionTrace,
         reasons: row.reasons === "unavailable" ? row.reasons : row.reasons?.map(rewrite) })) } } })) };
 }
 
-it("retains source lookup witnesses from Core publication across SQLite reopen and the public worker", async () => {
+it("retains Core publication witnesses across SQLite reopen for private and historical consumers, not native attribution", async () => {
   const canary = SOURCE_DISCOVERY_CANARY[1]!;
   const text = `Résumé 🙂 — ${canary.intended}`;
   const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
@@ -151,21 +176,40 @@ it("retains source lookup witnesses from Core publication across SQLite reopen a
       .toBe(Buffer.byteLength(sourceCorpus.slice(0, sourceCorpus.indexOf("access")), "utf8"));
     planted.database.close();
     closeCachedDatabase(planted.filename);
+    const reopened = initDatabase({ filename: planted.filename });
+    let privateDiscovery;
+    try {
+      for (const published of planted.published) {
+        const evidence = await new SqliteEvidenceCapsuleRepo(reopened).findById(published.evidence.object_id);
+        expect(JSON.parse(evidence!.gist!)).toEqual(published.bound);
+      }
+      privateDiscovery = observePlantedDiscovery(reopened, WS, canary, "proposal", "source_only", "canonical");
+      expect(privateDiscovery.lookup_reasons.length).toBeGreaterThan(0);
+    } finally {
+      reopened.close();
+      closeCachedDatabase(planted.filename);
+    }
     await awaitWorkerAfterMainSqliteClose(client);
-    // One result leaves room for optional lookup witnesses beside required source disclosure.
-    const search = publicSearchRequest(canary, "proposal", "source_only", "canonical", 1);
+    const search = publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION, 1);
     const trace = await consumePublicSources({ handler, receipts, request: search,
       context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" } });
     const score = scoreConsumption(canary, planted.sourceId, trace, "source_only", sourceCorpus);
     const reasons = trace.steps.flatMap((step) => step.public_exchange.response.source_lookups
       .flatMap((row) => row.reasons === "unavailable" ? [] : row.reasons ?? []));
-    expect(reasons.length).toBeGreaterThan(0);
-    const exposureInput = { trace, firstCompleteStep: score.first_complete_step,
+    expect(score.first_complete_step).not.toBeNull();
+    expect(reasons).toEqual([]);
+    const liveInput = { trace, firstCompleteStep: score.first_complete_step,
       request: search, bind, source: planted.source, workspaceId: WS,
       publications: planted.published.map((row) => row.bound) };
-    expect(observePublishedProposalExposure(exposureInput).status).toBe("observed");
+    expect(observePublishedProposalExposure(liveInput).status).toBe("not_observed");
+    const historicalRequest = { ...search, enumeration_policy: "canonical" as const };
+    const historicalTrace = historicalProposalAttributionFixture(historicalRequest, privateDiscovery.lookup_reasons);
+    const exposureInput = { ...liveInput, trace: historicalTrace, firstCompleteStep: 0, request: historicalRequest };
+    const observed = observePublishedProposalExposure(exposureInput);
+    expect(observed.status).toBe("observed");
+    expect(observed.witnesses[0]!.reason.source_target).toEqual(planted.published[0]!.bound.source_target);
     for (const end of [1, Buffer.byteLength(sourceCorpus, "utf8") + 1]) {
-      const mutated = rewriteReasons(trace, (reason) => ({ ...reason,
+      const mutated = rewriteReasons(historicalTrace, (reason) => ({ ...reason,
         source_target: { ...reason.source_target, span: { ...reason.source_target.span!,
           content_start: 0, content_end: end } } }));
       expect(observePublishedProposalExposure({ ...exposureInput, trace: mutated }).status).toBe("not_observed");

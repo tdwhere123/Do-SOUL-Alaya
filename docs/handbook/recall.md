@@ -372,6 +372,13 @@ relations; tombstones and revocation cannot be bypassed by continuation.
 
 ## Bounded observation and delivery
 
+The proposal/text-hint nomination lanes described below are retained private
+observer mechanisms, not Protocol 21 ordinary enumeration. Their named regression
+consumer is `observePlantedDiscovery` in the daemon source-discovery fixtures;
+Core's source-discovery observer tests exercise the same matcher/storage boundary.
+Ordinary `native_query` uses native nomination only, as specified under
+[Ordinary native field delivery](#ordinary-native-field-delivery-protocol-21).
+
 Source sketches are partial query interpretations. Unsupported source revisions
 and unresolved alternatives remain explicit holes with bounded recoverable text
 in query identity. A hint is a discovery proposal, never proof of relevance.
@@ -400,8 +407,8 @@ Fixed-corpus local canaries measure scans, hydrated contexts, native bytes,
 retained memory and legal exposure separately. They establish mechanism behavior;
 semantic usefulness and the R02 quality gate remain unaccepted.
 
-Public source-consumption evidence uses `public-source-consumption-v2` and the
-`published-hint-utility-v2` evaluator. It retains request proposals, public
+The retained public source-consumption evidence reader uses
+`public-source-consumption-v2` and the `published-hint-utility-v2` evaluator. It retains request proposals, public
 lookup reasons, target identities, and receipt identities. An improvement can
 satisfy this evaluator only when the intended source has a published
 candidate/context witness at or before its first complete read. Missing or
@@ -417,8 +424,18 @@ reinterpreted or rewritten. The admitted matrix publishes through Core source
 observation publication, retains its returned UTF-8 bound interpretations, then
 reopens SQLite through the public worker. Witness comparison preserves the
 publication's exact assertion span and source alias. Direct gist fixtures prove
-only their explicitly scoped matcher mechanisms. Query matching, request
-admission and public wire contracts remain unchanged.
+only their explicitly scoped matcher mechanisms. The positive proposal-exposure
+contract remains exercised by `observePublishedProposalExposure` with explicitly
+artificial historical exchange fixtures carrying actual private SQLite observer
+reasons. Authored fixture receipt identities do not establish historical public
+execution, current public exposure, or utility. Publication tests retain Core's
+returned interpretation and compare its persisted gist after SQLite reopen before
+private observation; the reopened built worker is checked separately for native
+source consumption without proposal credit. Candidate, context, source revision,
+digest, exact assertion span, request, receipt and before-complete-read binding
+remain required by the evidence reader. Remove these historical fixture adapters
+only when the named v2 evidence reader and its recorded-artifact contract retire.
+They never enable `canonical` or `associative` ordinary execution.
 
 One request pins its interpretation clock, snapshot and generation. Native
 readers advance cursors within their allowances. Grounding, support, projection
@@ -1080,6 +1097,19 @@ native rank, and an optional half-open byte location. Navigation is not an
 association grade, a claim, assertion support, product identity material or the
 frozen historical `canonical`/`associative` value. Ordering under the live route
 is reported through this coordinate; the encoder must not relabel it.
+
+The migration retires ordinary proposal/text-hint enumeration, not source
+publication or its provenance. `nativeSourceReaders` suppresses those readers
+so a published interpretation cannot create a second nomination authority.
+A lexical/vector hit is not a proposal-discovery witness, even if its source has
+a matching published candidate or the request includes a proposal. Positive
+proposal-matcher and historical attribution checks belong to the named private
+observer/evidence-reader consumers above; they are not an ordinary public
+proposal-witness guarantee. Current public fixtures require complete source
+consumption through issued pages and keep absent reasons unobserved. Neither
+source appearance nor a private match can satisfy the published-hint utility gate.
+This is part of Protocol 21's authorized ranking/delivery major migration, not a
+new attribution producer or an optional-diagnostic waiver of a positive test.
 
 `QueryView` binds delivery with `delivery_context` (an identity digest) and
 `delivery_budget` (token/byte limits) so the delivered page is fitted to the same

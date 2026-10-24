@@ -26,6 +26,7 @@ import {
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import { consumePublicSources } from "./source-discovery-public-consumer.js";
 import {
+  LIVE_ORDINARY_ENUMERATION,
   observePlantedDiscovery,
   publicSearchRequest
 } from "./source-discovery-public-consumption.js";
@@ -88,19 +89,18 @@ describe("bound source interpretation public consumption", () => {
     expect(fetches).toBe(0);
   });
 
-  it("consumes a faithful payload control through public proposal attribution", async () => {
+  it("preserves a faithful payload's private proposal witness without attributing native public delivery to it", async () => {
     const corpus = officialCorpus(CANARY.intended);
     const request = packedRequest(corpus);
     const rawJson = faithfulPayloadControl(corpus);
     await withBoundPublicWorker({
       sourceBody: corpus, distractorBody: CANARY.distractor, rawJson, request
     }, async (planted, handler, receipts, client) => {
-      expectProposalUsedPublishedGists(planted);
+      expectPrivateProposalMatchesPublishedGists(planted);
       planted.database.close();
       closeCachedDatabase(planted.filename);
       await awaitWorkerAfterMainSqliteClose(client);
-      await consumePublic(handler, receipts, "proposal");
-      await expectPublicProposal(handler, planted.sourceId, true);
+      await expectNativePublicConsumption(handler, receipts, planted);
       expect(fetches).toBe(0);
     });
   }, 90_000);
@@ -120,7 +120,7 @@ describe("bound source interpretation public consumption", () => {
       expect(planted.gistObjectIds).toEqual([]);
       expect(readGists(planted.database)).toEqual([]);
       const native = observePlantedDiscovery(
-        planted.database, WS, CANARY, "proposal", "source_only", "canonical"
+        planted.database, WS, CANARY, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION
       );
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
@@ -155,7 +155,7 @@ describe("bound source interpretation public consumption", () => {
       return {};
     }, async (planted, handler, receipts, client) => {
       const native = observePlantedDiscovery(
-        planted.database, WS, CANARY, "proposal", "source_only", "canonical"
+        planted.database, WS, CANARY, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION
       );
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
@@ -210,7 +210,7 @@ describe("bound source interpretation public consumption", () => {
     }
   });
 
-  it("publishes a cache shard through the packed request and consumes proposal gists", async () => {
+  it("publishes a packed cache shard for private proposal matching and native public consumption", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "alaya-bound-shard-"));
     const corpus = officialCorpus(CANARY.intended);
     const request = packedRequest(corpus);
@@ -246,12 +246,11 @@ describe("bound source interpretation public consumption", () => {
         });
         return { bind, gistObjectIds: published.gist_object_ids };
       }, async (planted, handler, receipts, client) => {
-        expectProposalUsedPublishedGists(planted);
+        expectPrivateProposalMatchesPublishedGists(planted);
         planted.database.close();
         closeCachedDatabase(planted.filename);
         await awaitWorkerAfterMainSqliteClose(client);
-        await consumePublic(handler, receipts, "proposal");
-        await expectPublicProposal(handler, planted.sourceId, true);
+        await expectNativePublicConsumption(handler, receipts, planted);
         expect(fetches).toBe(0);
       });
     } finally {
@@ -272,7 +271,7 @@ describe("bound source interpretation public consumption", () => {
       expect(gists).toHaveLength(planted.gistObjectIds.length);
       expect(gists.every((gist) => gist?.outcome === "candidates")).toBe(true);
       const native = observePlantedDiscovery(
-        planted.database, WS, CANARY, "proposal", "source_only", "canonical"
+        planted.database, WS, CANARY, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION
       );
       expect(native.lookup_kind).not.toBe("proposal");
       planted.database.close();
@@ -419,7 +418,7 @@ function candidateKeys(
   ].join("|")));
 }
 
-function expectProposalUsedPublishedGists(planted: PlantedBound): void {
+function expectPrivateProposalMatchesPublishedGists(planted: PlantedBound): void {
   const located = planted.bind.receive.located;
   expect(located.length).toBeGreaterThan(0);
   const published = located.filter((row) => row.outcome === "candidates");
@@ -434,6 +433,28 @@ function expectProposalUsedPublishedGists(planted: PlantedBound): void {
   );
   expect(native.lookup_kind).toBe("proposal");
   expect(native.ids).toContain(planted.sourceId);
+  expect(native.lookup_reasons.length).toBeGreaterThan(0);
+  for (const reason of native.lookup_reasons) {
+    expect(reason.source_target.root_id).toBe(planted.sourceId);
+    expect(reason.source_target.content_digest).toBe(planted.source.digest);
+    expect(published.some((row) => row.assertion_binding.context_id === reason.context_id &&
+      row.candidates.some((candidate) => candidate.candidate_id === reason.candidate_id))).toBe(true);
+  }
+}
+
+async function expectNativePublicConsumption(
+  handler: Parameters<typeof consumePublicSources>[0]["handler"],
+  receipts: Parameters<typeof consumePublicSources>[0]["receipts"],
+  planted: PlantedBound
+): Promise<void> {
+  const trace = await consumePublic(handler, receipts, "proposal");
+  expect(trace.termination.preview_complete[planted.sourceId]).toBe(true);
+  expect(trace.termination.source_bodies[planted.sourceId]).toBe(planted.source.body);
+  expect(trace.steps.flatMap((step) => step.public_identities)).toContain(planted.sourceId);
+  // Native nomination cannot inherit the positive private observer's proposal reason.
+  const reasons = trace.steps.flatMap((step) => step.public_exchange.response.source_lookups
+    .flatMap((row) => row.reasons === "unavailable" ? [] : row.reasons ?? []));
+  expect(reasons).toEqual([]);
 }
 
 async function expectPublicProposal(
@@ -442,7 +463,7 @@ async function expectPublicProposal(
   required: boolean
 ): Promise<void> {
   const first = await handler(
-    publicSearchRequest(CANARY, "proposal", "source_only", "canonical"),
+    publicSearchRequest(CANARY, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
     CONTEXT
   );
   const row = first.results.find((result) => result.target?.kind === "source_evidence"
@@ -459,7 +480,7 @@ function consumePublic(
   return consumePublicSources({
     handler,
     context: CONTEXT,
-    request: publicSearchRequest(CANARY, lookup, "source_only", "canonical"),
+    request: publicSearchRequest(CANARY, lookup, "source_only", LIVE_ORDINARY_ENUMERATION),
     receipts
   });
 }
