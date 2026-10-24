@@ -7,6 +7,7 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
+  readExtractionCacheManifest,
   writeExtractionCacheManifest
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { LongMemEvalDiagnosticsSpool } from
@@ -22,6 +23,8 @@ import {
   stubOfflineExtractionEnv
 } from "./fixture.js";
 
+import { admitRunnerExtractionFixture } from "../runner/longmemeval-runner-fixture.js";
+
 let tmpRoot: string;
 
 beforeEach(async () => {
@@ -30,20 +33,35 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   await rm(tmpRoot, { recursive: true, force: true });
 });
 
 describe("LongMemEval-S effective extraction root", () => {
-  it.each(["explicit", "environment"])("binds the producer and provenance to the same %s v3 root", async source => {
+  it.each(["explicit", "environment"])("binds the producer and provenance to the same %s current cache root", async source => {
+    const questions = buildRunnerQuestions("q-recall-", 1).map(question => ({
+      ...question,
+      haystack_sessions: [
+        [{ role: "user" as const, content: "I prefer dark mode.", has_answer: true }],
+        [{ role: "user" as const, content: "I prefer short replies." }]
+      ]
+    }));
     const fixture = await createRunnerFixture({
       root: tmpRoot,
       label: "recall",
       variant: "longmemeval_s",
-      questions: buildRunnerQuestions("q-recall-", 1)
+      questions
     });
-    writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
+    // A successful preflight needs admitted shards, not just a provenance manifest.
+    await admitRunnerExtractionFixture(fixture.extractionCacheRoot, questions);
+    const manifest = readExtractionCacheManifest(fixture.extractionCacheRoot);
+    if (manifest === undefined) throw new Error("admitted extraction fixture manifest is missing");
+    writeExtractionCacheManifest(fixture.extractionCacheRoot, {
+      ...manifest, dataset: "longmemeval-s", dataset_revision: fixture.datasetSha256
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("cache preflight must remain offline"));
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
     const spool = await LongMemEvalDiagnosticsSpool.create();
     try {
@@ -58,6 +76,7 @@ describe("LongMemEval-S effective extraction root", () => {
       }, undefined, spool);
       const provenance = await provenanceFor(context, fixture.datasetSha256);
 
+      expect(fetchSpy).not.toHaveBeenCalled();
       expect(context.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
       expect(provenance.extraction_cache).toMatchObject({
         schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
