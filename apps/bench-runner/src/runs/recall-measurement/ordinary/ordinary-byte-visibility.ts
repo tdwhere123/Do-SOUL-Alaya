@@ -51,6 +51,9 @@ export function scoreOrdinaryByteVisibility(input: ConsumerVisibilityInput & Rea
     const full = score(total)[metric];
     if (full.status !== "hit") return { status: full.status === "unknown" || !complete ? "unknown" as const : "not_visible" as const,
       bytes: null, reason: full.reason ?? (!complete ? "ordinary_captured_stream_incomplete" : "not_visible_in_captured_stream") };
+    // A mapped positive bounds the first hit from above, but an unmapped answer
+    // turn may occur earlier. Preserve budget hits without inventing an exact minimum.
+    if (!input.gold?.complete) return { status: "unknown" as const, bytes: null, reason: "answer_turn_mapping_incomplete" };
     let low = 0, high = total;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
@@ -60,7 +63,8 @@ export function scoreOrdinaryByteVisibility(input: ConsumerVisibilityInput & Rea
   };
   return { contract: "ordinary-captured-source-byte-visibility-v1" as const,
     basis: "ordered_admitted_source_previews_not_wire_bytes" as const,
-    captured_source_utf8_bytes: unavailable === null ? total : null, captured_stream_complete: complete,
+    captured_source_utf8_bytes: unavailable === null ? total : null,
+    captured_stream_complete: unavailable === null ? complete : null,
     budgets: ORDINARY_VISIBILITY_BYTE_BUDGETS.map(score),
     first_hit_byte: threshold("any_at_budget"), last_hit_byte: threshold("all_at_budget") };
 }

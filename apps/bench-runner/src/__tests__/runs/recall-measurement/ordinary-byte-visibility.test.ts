@@ -45,18 +45,22 @@ it("distinguishes an uncaptured tail from not visible in the complete bounded ca
   expect(terminal.first_hit_byte.status).toBe("not_visible");
   expect(terminal.budgets.every(row => row.any_at_budget.status === "miss")).toBe(true);
 });
-it("keeps admitted positives but never fabricates a last hit from incomplete gold", () => {
-  const windows = [window("first", 1, "hello", 17)];
-  const result = scoreOrdinaryByteVisibility({ windows, pages: [page(windows, false)],
-    gold: { ...gold(windows), complete: false, annotated_turns: 2 } });
-  expect(result.first_hit_byte.bytes).toBe(5);
+it("keeps budget positives but not exact thresholds when an unmapped answer turn may precede the mapped hit", () => {
+  const windows = [window("earlier", 1, "x"), window("later", 2, "hello", 17)];
+  const result = scoreOrdinaryByteVisibility({ windows, pages: [page(windows)],
+    gold: { ...gold([windows[1]!]), complete: false, annotated_turns: 2 } });
+  expect(result.first_hit_byte).toEqual({ status: "unknown", bytes: null, reason: "answer_turn_mapping_incomplete" });
   expect(result.last_hit_byte.status).toBe("unknown");
   expect(result.budgets[0]!.any_at_budget.status).toBe("hit");
+  const resolved = scoreOrdinaryByteVisibility({ windows, pages: [page(windows)], gold: gold(windows) });
+  expect(resolved.first_hit_byte.bytes).toBe(1);
+  expect(resolved.last_hit_byte.bytes).toBe(6);
 });
 it("refuses duplicate-root fragments, literal mismatch, malformed pages and unobserved delivery", () => {
   const windows = [window("first", 1, "x"), window("first", 2, "y", 3)];
   const duplicate = scoreOrdinaryByteVisibility({ windows, pages: [page(windows)], gold: gold(windows) });
   expect(duplicate.first_hit_byte.status).toBe("unknown");
+  expect(duplicate.captured_stream_complete).toBeNull();
   const valid = [windows[0]!];
   for (const input of [
     { windows: [{ ...valid[0]!, text: "longer" }], pages: [page(valid)] },
