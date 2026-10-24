@@ -1,4 +1,5 @@
-import type { SourceSemanticResourceLedger, SourceSemanticReasoningResult, SourceEvidenceTarget, RequestBudget } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceExhausted, type SourceSemanticResourceLedger, type SourceSemanticReasoningResult,
+  type SourceEvidenceTarget, type RequestBudget } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
@@ -23,11 +24,20 @@ export function projectSourceSemanticState(input: Readonly<{
   if (state.binding.kind !== "bound") return {
     body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] } as SourceSemanticResultBody, index: null
   };
-  const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
+  // Observations and earlier groups have already spent the shared ledger. A state's
+  // observation-time allowance is only an upper bound, never a fresh grant.
+  const available = meter.remaining();
+  const beforeProjection = Math.min(Math.max(0, state.remaining_exploration + state.remaining_reserve), available.work_units);
+  const projectionBudget = { ...remaining, work_units: Math.min(state.remaining_exploration, available.work_units),
+    memory_bytes: Math.min(state.remaining_memory_bytes, available.memory_bytes) };
+  if (projectionBudget.work_units < remaining.finalization_reserve + remaining.min_envelope
+    || projectionBudget.memory_bytes < remaining.min_envelope) {
+    throw new SourceSemanticResourceExhausted("index projection allowance");
+  }
   let afterProjection = beforeProjection;
   const index = { ...projectAcceptingIndex({ snapshot: state.binding.snapshot, view: query.view, query_id: query.query_id,
     snapshot_id: snapshot, result_version: "source-interpretation-reasoning-v5",
-    budget: { ...remaining, work_units: state.remaining_exploration, memory_bytes: state.remaining_memory_bytes },
+    budget: projectionBudget,
     binding_contexts: state.binding_contexts,
     selected_semantics: { source_interpretation: admission.interpretation, context: admission.context, source_target: sourceTarget,
       compiled_nodes: population.coordinates },
@@ -37,7 +47,7 @@ export function projectSourceSemanticState(input: Readonly<{
     resource_work: state.memory_exhausted || state.remaining_work.length > 0 ? "open" : "complete",
     transition_derivations: state.transition_derivations, grounding_progress: state.grounding_progress,
     grounding_transitions: [...state.transitions], grounding_seeds: [...state.seeds], grounding_derivations: [...state.derivations],
-    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: state.remaining_memory_bytes }),
+    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: projectionBudget.memory_bytes }),
     as_of: query.interpretation_clock };
   meter.charge(Math.max(0, beforeProjection - afterProjection), 0, "index projection");
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {
