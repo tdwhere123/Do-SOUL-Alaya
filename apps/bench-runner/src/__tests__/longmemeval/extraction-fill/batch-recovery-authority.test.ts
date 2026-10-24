@@ -75,7 +75,7 @@ it("keeps native Batch admission readable after completion finalization and reop
         context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
         request: publicSearchRequest({ group: "capability", intended: sourceCorpus, distractor: "unrelated distractor",
           original_query: request.source_assertions[0]!.text, unknown: "native control only",
-          sketch: { predicate: request.source_assertions[0]!.text } }, "proposal", "source_only", "canonical") });
+          sketch: { predicate: request.source_assertions[0]!.text } }, "proposal", "source_only", "native_query") });
       expect(trace.termination.source_bodies[planted.sourceId]).toBe(sourceCorpus);
     });
     writeExtractionCacheManifest(cacheRoot, { ...manifest, dataset_revision: "foreign-dataset" });

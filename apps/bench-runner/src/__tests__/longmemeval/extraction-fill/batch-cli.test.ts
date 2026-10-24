@@ -1,10 +1,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { fieldContractSha256, SourceIndexLifecycle } from "@do-soul/alaya-core";
 import { initDatabase, SqliteSignalRepo, SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo, SqliteFieldProjectionGenerationRepo,
-  SqliteFieldFactorRepo, SqliteFieldSourceSpanRepo } from "@do-soul/alaya-storage";
+  SqliteFieldFactorRepo, SqliteFieldSourceSpanRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { configuration as sourceIndexConfiguration, BUDGET as SOURCE_INDEX_BUDGET } from
+  "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
@@ -137,9 +139,20 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
     const generation = new SqliteFieldProjectionGenerationRepo(db, fieldContractSha256)
       .readActive(daemon.workspaceId);
     expect(generation?.status).toBe("active");
+    // Field formation alone is not native query readiness. Prepare the lexical index
+    // for every captured source through its lifecycle owner, without embedding calls.
+    const index = new SqliteSourceIndexRepository(db, fieldContractSha256);
+    const lifecycle = new SourceIndexLifecycle(index, fieldContractSha256);
+    const native = lifecycle.begin(lifecycle.select(daemon.workspaceId, sourceIndexConfiguration()));
+    const captured = lifecycle.capture(daemon.workspaceId, native.generation_id, 128, SOURCE_INDEX_BUDGET);
+    expect(captured.generation.enumeration_complete).toBe(true);
+    const targets = index.listTargets(daemon.workspaceId, native.generation_id, null, 128);
+    expect(targets.length).toBeGreaterThan(0);
+    for (const target of targets) expect(lifecycle.prepare(daemon.workspaceId, native.generation_id,
+      target.root_key, SOURCE_INDEX_BUDGET).status).toBe("ready");
     for (const result_kind_view of ["source_only", "mixed"] as const) {
       const recalled = await daemon.recall("alpha", { result_kind_view,
-        enumeration_policy: "canonical", maxResults: 10 });
+        enumeration_policy: "native_query", maxResults: 10 });
       const delivered = recalled.results.find((row) => row.target.kind === "source_evidence" &&
         row.target.root_id === originalSource?.record_id);
       expect(delivered).toMatchObject({
