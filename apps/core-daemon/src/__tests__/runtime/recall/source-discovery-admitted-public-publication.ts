@@ -237,10 +237,9 @@ export function publishBoundPublicSources(input: Readonly<{
   const gistObjectIds: string[] = [];
   for (const located of input.bind.receive.located) {
     if (located.outcome !== "candidates") continue;
-    const objectId = boundGistObjectId(input.workspaceId, input.source.digest, located);
-    insertLocatedBoundGist(
+    const objectId = insertLocatedBoundGist(
       input.database,
-      objectId,
+      boundGistObjectKey(input.workspaceId, input.source.digest, located),
       input.source.body,
       input.source.rootId,
       input.source.digest,
@@ -418,7 +417,7 @@ function invalidBind(
   return { status: "invalid", reason: inspected.reason };
 }
 
-function boundGistObjectId(
+function boundGistObjectKey(
   workspaceId: string,
   contentDigest: string,
   located: SourceLocatedInterpretation

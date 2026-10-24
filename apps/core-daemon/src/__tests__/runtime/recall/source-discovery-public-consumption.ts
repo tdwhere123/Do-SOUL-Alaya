@@ -29,6 +29,7 @@ import {
 import type { FirstExposurePage } from
   "../../../../../../apps/bench-runner/src/runs/measurement/first-exposure-session.js";
 import { fieldContractSha256 } from "../../../../../../packages/core/src/shared/field-hash.js";
+import { uuidFromHex } from "../../../../../../packages/core/src/memory/evidence-create/source-observation-identity.js";
 import {
   canaryContentScopeCheck,
   type CanaryCase
@@ -327,7 +328,7 @@ export function scoreConsumption(
 
 export function insertLocatedBoundGist(
   database: StorageDatabase,
-  objectId: string,
+  objectKey: string,
   source: string,
   rootId: string,
   digest: string,
@@ -336,16 +337,35 @@ export function insertLocatedBoundGist(
   workspaceId: string,
   runId: string,
   now: string
-): void {
+): string {
+  const objectId = uuidFromHex(fieldContractSha256(objectKey));
   const bound = boundCandidateGist(
     source, rootId, digest, evidenceObjectId, located, workspaceId
   );
-  database.connection.prepare(`
-    INSERT INTO evidence_capsules (
-      object_id, created_at, updated_at, created_by, evidence_kind, semantic_anchor,
-      gist, excerpt, run_id, workspace_id
-    ) VALUES (?, ?, ?, 'test', 'conversation_excerpt', '{}', ?, ?, ?, ?)
-  `).run(objectId, now, now, JSON.stringify(bound), source, runId, workspaceId);
+  // Interpretation provenance is not a SourceRecord alias. Retain its own text
+  // through the capsule owner so native capture can admit this standalone root.
+  const capsules = new SqliteEvidenceCapsuleRepo(database);
+  database.connection.transaction(() => capsules.createInCurrentTransaction({
+    object_id: objectId,
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: now,
+    updated_at: now,
+    created_by: "test",
+    evidence_kind: "conversation_excerpt",
+    semantic_anchor: { topic: "source interpretation", keywords: [], summary: "Located proposal witness" },
+    event_anchor: null,
+    physical_anchor: null,
+    evidence_health_state: "verified",
+    gist: JSON.stringify(bound),
+    excerpt: source,
+    source_hash: null,
+    run_id: runId,
+    workspace_id: workspaceId,
+    surface_id: null
+  }))();
+  return objectId;
 }
 
 function boundCandidateGist(
@@ -390,7 +410,7 @@ export function insertBoundGist(
   workspaceId: string,
   runId: string,
   now: string
-): void {
+): string {
   const located = locateSourceInterpretation({
     source,
     artifactKey: objectId,
@@ -413,7 +433,7 @@ export function insertBoundGist(
   if (located.outcome !== "candidates") {
     throw new Error(`locate failed: ${JSON.stringify(located.diagnostics)}`);
   }
-  insertLocatedBoundGist(
+  return insertLocatedBoundGist(
     database, objectId, source, rootId, digest, evidenceObjectId, located, workspaceId, runId, now
   );
 }

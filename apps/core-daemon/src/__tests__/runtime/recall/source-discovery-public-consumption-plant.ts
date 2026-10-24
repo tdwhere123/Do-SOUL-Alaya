@@ -31,7 +31,6 @@ import {
   canaryDistractorRelation,
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
-import { publicIdentities } from "./source-discovery-public-consumer.js";
 import { bindNativeControl } from "./source-discovery-native-control.js";
 import {
   insertBoundGist,
@@ -62,6 +61,7 @@ export type PlantedOmittedPair = Readonly<{
   readonly second_id: string;
   readonly first_body: string;
   readonly second_body: string;
+  readonly gistObjectIds: readonly string[];
 }>;
 
 export type PlantedPublicPair = Readonly<{
@@ -71,6 +71,7 @@ export type PlantedPublicPair = Readonly<{
   readonly later_id: string;
   readonly public_first_body: string;
   readonly later_body: string;
+  readonly gistObjectIds: readonly string[];
 }>;
 
 export type PlantedSources = Readonly<{
@@ -234,9 +235,9 @@ export async function withOmittedPairWorker(
   const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
   const first = records.insert(governedSourceRecord(firstBody, "first-omitted"));
   const second = records.insert(governedSourceRecord(secondBody, "second-omitted"));
-  insertBoundGist(slice.database, `gist-${first.record_id}`, canary.intended, first.record_id,
+  const firstGist = insertBoundGist(slice.database, `gist-${first.record_id}`, canary.intended, first.record_id,
     first.content_digest, first.evidence_object_id, canary.sketch, WS, RUN, NOW);
-  insertBoundGist(slice.database, `gist-${second.record_id}`, canary.intended, second.record_id,
+  const secondGist = insertBoundGist(slice.database, `gist-${second.record_id}`, canary.intended, second.record_id,
     second.content_digest, second.evidence_object_id, canary.sketch, WS, RUN, NOW);
   await runPlantedHandler(filename, slice, {
     database: slice.database,
@@ -244,7 +245,8 @@ export async function withOmittedPairWorker(
     first_id: first.record_id,
     second_id: second.record_id,
     first_body: firstBody,
-    second_body: secondBody
+    second_body: secondBody,
+    gistObjectIds: [firstGist, secondGist]
   }, run);
 }
 
@@ -267,7 +269,12 @@ export async function withPublicOrderedPairWorker(
           publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
           { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" }
         );
-        lastObserved = publicIdentities(firstPage)[0] ?? "unavailable";
+        // Standalone interpretation capsules are legal public members too;
+        // plant the order of the two original records, not the whole population.
+        lastObserved = firstPage.results.flatMap((row) =>
+          row.target.kind === "source_evidence" && row.target.root_kind === "source_record"
+            ? [row.target.root_id] : []
+        )[0] ?? "unavailable";
         receipts.length = probeAt;
         if (lastObserved !== planted.public_first_id) return;
         matched = true;
@@ -276,7 +283,7 @@ export async function withPublicOrderedPairWorker(
     if (matched) return;
   }
   throw new Error(
-    `Could not plant public-first body as first_page_identities[0]; last observed ${lastObserved}`
+    `Could not plant public-first body as first public SourceRecord; last observed ${lastObserved}`
   );
 }
 
@@ -314,9 +321,9 @@ async function withInsertedPublicPair(
   const records = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
   const publicFirst = records.insert(publicFirstInput);
   const later = records.insert(laterInput);
-  insertBoundGist(slice.database, `gist-${publicFirst.record_id}`, canary.intended, publicFirst.record_id,
+  const firstGist = insertBoundGist(slice.database, `gist-${publicFirst.record_id}`, canary.intended, publicFirst.record_id,
     publicFirst.content_digest, publicFirst.evidence_object_id, canary.sketch, WS, RUN, NOW);
-  insertBoundGist(slice.database, `gist-${later.record_id}`, canary.intended, later.record_id,
+  const laterGist = insertBoundGist(slice.database, `gist-${later.record_id}`, canary.intended, later.record_id,
     later.content_digest, later.evidence_object_id, canary.sketch, WS, RUN, NOW);
   await runPlantedHandler(filename, slice, {
     database: slice.database,
@@ -324,7 +331,8 @@ async function withInsertedPublicPair(
     public_first_id: publicFirst.record_id,
     later_id: later.record_id,
     public_first_body: publicFirstBody,
-    later_body: laterBody
+    later_body: laterBody,
+    gistObjectIds: [firstGist, laterGist]
   }, run);
 }
 

@@ -4,7 +4,7 @@ import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { sourceDisclosure, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
-import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import {
   SOURCE_DISCOVERY_CANARY,
   type CanaryCase
@@ -188,7 +188,7 @@ describe("public source consumption comparison", () => {
       .toBe(text.interpretation_proposal?.original_query_digest);
   });
 
-  it("completes the first public target then reads a later omitted source through the worker", async () => {
+  it("completes the first public SourceRecord then reads a later omitted record alongside standalone capsules", async () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
     const firstBody = `${COMPLETE_SOURCE_MARKER} ${canary.intended} ${"y".repeat(8_000)}`;
     const secondBody = `${TRAILING_SOURCE_MARKER} ${canary.intended} ${"z".repeat(9_000)}`;
@@ -202,7 +202,9 @@ describe("public source consumption comparison", () => {
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
-        const { publicFirst, laterId } = assertOmittedPairExposure(result, [planted.first_id, planted.second_id]);
+        const { publicFirst, laterId } = assertOmittedPairExposure(
+          result, [planted.first_id, planted.second_id], planted.gistObjectIds, canary.intended
+        );
         const bodyById: Record<string, string> = {
           [planted.first_id]: planted.first_body,
           [planted.second_id]: planted.second_body
@@ -227,7 +229,7 @@ describe("public source consumption comparison", () => {
     });
   }, 90_000);
 
-  it("keeps the first public target incomplete at the per-target expansion cap then fully consumes a later public target", async () => {
+  it("caps the first public SourceRecord then fully consumes a later record without conflating capsule excerpts", async () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
     const publicFirstBody = cappedSourceBody(canary);
     const laterBody = completeSourceBody(canary);
@@ -238,7 +240,9 @@ describe("public source consumption comparison", () => {
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
-        const { publicFirst, laterId } = assertOmittedPairExposure(result, [planted.public_first_id, planted.later_id]);
+        const { publicFirst, laterId } = assertOmittedPairExposure(
+          result, [planted.public_first_id, planted.later_id], planted.gistObjectIds, canary.intended
+        );
         expect(publicFirst).toBe(planted.public_first_id);
         expect(laterId).toBe(planted.later_id);
         const cap = PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target;
@@ -401,13 +405,17 @@ async function consumePairTrace(
 }
 
 function assertOmittedPairExposure(
-  result: Awaited<ReturnType<typeof consumePairTrace>>, expectedRoots: readonly string[]
+  result: Awaited<ReturnType<typeof consumePairTrace>>, expectedRoots: readonly string[],
+  capsuleIds: readonly string[], capsuleExcerpt: string
 ): Readonly<{ publicFirst: string; laterId: string }> {
   const firstIndexRoots = result.initial.index?.entries.flatMap((entry) =>
     entry.target.kind === "source_evidence" ? [entry.target.root_id] : []) ?? [];
   const seen = publicPairIdentityOrder(result);
-  const publicFirst = result.trace.first_page_identities[0] ?? firstIndexRoots[0];
-  const laterId = seen.find((id) => id !== publicFirst);
+  const firstPageRecords = result.initial.results.flatMap((row) =>
+    row.target.kind === "source_evidence" && row.target.root_kind === "source_record"
+      ? [row.target.root_id] : []);
+  const publicFirst = firstPageRecords[0];
+  const laterId = seen.find((id) => expectedRoots.includes(id) && id !== publicFirst);
   if (publicFirst === undefined || laterId === undefined
     || !expectedRoots.includes(publicFirst) || !expectedRoots.includes(laterId)
     || expectedRoots.some((id) => !seen.includes(id))) {
@@ -436,10 +444,13 @@ function assertOmittedPairExposure(
       }))
     })}`);
   }
-  expect(new Set(seen)).toEqual(new Set(expectedRoots));
-  expect(result.trace.first_page_identities).toEqual([publicFirst]);
+  expect(new Set(seen)).toEqual(new Set([...expectedRoots, ...capsuleIds]));
+  expect(firstPageRecords).toEqual([publicFirst]);
+  expect(new Set(result.trace.first_page_identities)).toEqual(new Set([publicFirst, ...capsuleIds]));
   expect(result.trace.first_exposure?.initial?.slots.map((slot) =>
-    slot.target.kind === "source_evidence" ? slot.target.root_id : slot.target.object_id)).toEqual([publicFirst]);
+    slot.target.kind === "source_evidence" ? slot.target.root_id : slot.target.object_id))
+    .toEqual(result.trace.first_page_identities);
+  assertStandaloneCapsuleExposure(result, capsuleIds, capsuleExcerpt);
   expect(result.trace.steps[0]!.source_bodies[laterId]).toBeUndefined();
   if (!firstIndexRoots.includes(laterId)) {
     expect(result.initial.index?.continuation).not.toBeNull();
@@ -458,6 +469,27 @@ function assertOmittedPairExposure(
     if (!priorBody) expect(start).toBe(0);
   }
   return { publicFirst, laterId };
+}
+
+function assertStandaloneCapsuleExposure(
+  result: Awaited<ReturnType<typeof consumePairTrace>>, capsuleIds: readonly string[], excerpt: string
+): void {
+  const capsules = result.initial.results.filter((row) =>
+    row.target.kind === "source_evidence" && row.target.root_kind === "evidence_capsule");
+  expect(capsules).toHaveLength(capsuleIds.length);
+  for (const objectId of capsuleIds) {
+    const capsule = capsules.find((row) => row.target.kind === "source_evidence" && row.target.root_id === objectId);
+    expect(capsule?.target).toMatchObject({
+      kind: "source_evidence", root_kind: "evidence_capsule", root_id: objectId,
+      evidence_object_id: objectId, source_version: NOW,
+      content_digest: `sha256:${createHash("sha256").update(excerpt, "utf8").digest("hex")}`
+    });
+    expect(capsule?.source_lookup_reasons ?? []).toEqual([]);
+    expect(result.trace.steps[0]!.source_bodies[objectId]).toBe(excerpt);
+    expect(result.trace.termination.source_bodies[objectId]).toBe(excerpt);
+    expect(result.trace.termination.preview_complete[objectId]).toBe(true);
+    expect(payloadStepsFor(result.trace, objectId)).toEqual([]);
+  }
 }
 
 function publicPairIdentityOrder(
