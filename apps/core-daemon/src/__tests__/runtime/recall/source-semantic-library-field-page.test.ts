@@ -95,10 +95,29 @@ const indexed = (sources: readonly AccessFixtureSource[]) => async (database: St
   await publishIndexedGeneration(database, sources.map(row => ({ text: row.text })));
 };
 
+async function publicProofPage(port: Parameters<typeof callPublic>[0], ids: Parameters<typeof publicRecallRequest>[0]) {
+  const request = publicRecallRequest(ids);
+  let page = await callPublic(port, request);
+  const visited = new Set<string>();
+  // Source records and their retained capsules are distinct roots. A first page
+  // need not contain a proof; continue the same lease without increasing its budget.
+  for (let remaining = ids.size * 2; remaining > 0; remaining -= 1) {
+    if (page.slot_qualifiers.some(slot => slot.evidence_kind === "semantic_proof")) return page;
+    if (remaining === 1) break;
+    const continuation = page.index.continuation;
+    if (continuation == null) throw new Error("delivery ended without a positive proof witness");
+    const cursor = `${continuation.continuation_id}:${continuation.cursor}`;
+    expect(visited.has(cursor)).toBe(false);
+    visited.add(cursor);
+    page = await callPublic(port, { ...request, continuation });
+  }
+  throw new Error("proof witness was not delivered within the fixture's bounded pages");
+}
+
 it("delivers the tagged native field page with visible Q/H/C support and no private worker fields", async () => {
   const sources = fixtureSources();
   await withAccessLibrary(sources, async ({ ids, port, filename }) => {
-    const recalled = await callPublic(port, publicRecallRequest(ids));
+    const recalled = await publicProofPage(port, ids);
     expect(recalled.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
     expect(recalled.index.result_version).toBe("ordinary-native-field.v1");
     expect(recalled.results).toHaveLength(recalled.index.entries.length);
@@ -499,7 +518,7 @@ it("refuses the retired private comparison family instead of relabelling a field
 it("rejects a delivered field proof bound to a foreign field query", async () => {
   const sources = fixtureSources();
   await withAccessLibrary(sources, async ({ ids, port, filename }) => {
-    const recalled = await callPublic(port, publicRecallRequest(ids));
+    const recalled = await publicProofPage(port, ids);
     const slot = recalled.slot_qualifiers.find(row => row.evidence_kind === "semantic_proof");
     if (slot === undefined) throw new Error("proof slot required");
     const entry = recalled.index.entries[slot.index];
