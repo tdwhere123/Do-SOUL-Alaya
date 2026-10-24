@@ -108,7 +108,9 @@ export interface VerifiedLocalOnnxArtifacts {
 /** Per-loaded-session private copy. Never hash a mutable cache then load it later. */
 export async function snapshotLocalOnnxArtifacts(cacheRoot: string, modelId: string): Promise<VerifiedLocalOnnxArtifacts> {
   const root = await artifactRoot(cacheRoot, modelId);
-  const privateRoot = await mkdtemp(join(tmpdir(), "alaya-onnx-"));
+  // The fork host owns this directory until the child has actually exited. An
+  // interrupted copy/load cannot execute this module's normal finally cleanup.
+  const privateRoot = await mkdtemp(join(process.env.ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT ?? tmpdir(), "alaya-onnx-"));
   const stage = join(privateRoot, "staging");
   try {
     await mkdir(stage, { mode: 0o700 });
@@ -166,8 +168,11 @@ async function sealTree(root: string): Promise<void> {
   }
   await chmod(root, 0o500);
 }
-async function removePrivateTree(root: string): Promise<void> {
+// Both the snapshot disposer and the fork host use this owner after exit. Never
+// chmod through a symlink: a partial copy may contain one beside sealed dirs.
+export async function removePrivateTree(root: string): Promise<void> {
   async function unseal(directory: string): Promise<void> {
+    if (!(await lstat(directory)).isDirectory()) throw new Error("Local ONNX private tree root is not a directory");
     await chmod(directory, 0o700);
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.isDirectory()) await unseal(join(directory, entry.name));

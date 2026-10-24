@@ -140,6 +140,21 @@ describe("local ONNX artifact snapshot", () => {
       });
   });
 
+  it("allocates the copy beneath the fork-owned parent without disposing its siblings", async () => {
+    const original = writeEncoderTree({ onnx: selfContainedOnnx() });
+    const parent = makeCache();
+    const sibling = join(parent, "unrelated");
+    writeFileSync(sibling, "keep");
+    vi.stubEnv("ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT", parent);
+    try {
+      const snapshot = await takeSnapshot(original.cacheRoot, original.modelId);
+      expect(dirname(dirname(snapshot.modelRoot))).toBe(parent);
+      await snapshot.dispose();
+      expect(readFileSync(sibling, "utf8")).toBe("keep");
+      expect(existsSync(parent)).toBe(true);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("removes the private tree after a normal dispose", async () => {
     const original = writeEncoderTree({ onnx: selfContainedOnnx() });
     const snapshot = await takeSnapshot(original.cacheRoot, original.modelId);

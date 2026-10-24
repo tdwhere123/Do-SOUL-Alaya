@@ -1,7 +1,10 @@
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { fork, type ChildProcess } from "node:child_process";
 import { CoreError } from "../../shared/errors.js";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { removePrivateTree } from "../local-onnx-artifacts.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isLocalOnnxEmbeddingIpcResponse,
@@ -21,6 +24,7 @@ type SourceIpcPayload = Pick<LocalOnnxEmbeddingIpcRequest, "bindingOptions" | "b
 export interface LocalOnnxEmbeddingIpcProcess {
   readonly pid?: number;
   readonly exitCode?: number | null;
+  readonly signalCode?: NodeJS.Signals | null;
   readonly channel?: Readonly<{ ref?(): void; unref?(): void }> | null;
   send(message: unknown, callback?: (error: Error | null) => void): boolean;
   on(event: "message", listener: (message: unknown) => void): unknown;
@@ -105,10 +109,13 @@ export class LocalOnnxEmbeddingIpcSession {
   private childEpoch = 0;
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: LocalOnnxEmbeddingChildExitedError | null = null;
+  private retirementError: Error | null = null;
+  private cleanupFailureReported = false;
+  private readonly failedCleanups = new Set<LocalOnnxEmbeddingIpcProcess>();
   private closed = false;
   private inflightEnsure = 0;
   private readonly reaps = new Set<Promise<void>>();
-  private readonly drainResolvers: Array<() => void> = [];
+  private readonly drainResolvers = new Set<() => void>();
 
   public constructor(input: LocalOnnxEmbeddingIpcSessionInput) {
     this.modelId = input.modelId;
@@ -190,6 +197,23 @@ export class LocalOnnxEmbeddingIpcSession {
       this.trackReap(child);
     }
     await this.waitForIdle();
+    if (this.retirementError !== null) {
+      if (!this.cleanupFailureReported) {
+        this.cleanupFailureReported = true;
+        throw this.retirementError;
+      }
+      // Only this session owns recovery of its failed private-tree cleanup.
+      // A second close retries after the first has reported the failure.
+      for (const failed of this.failedCleanups) {
+        const owner = ownedChildCleanup.get(failed);
+        if (owner === undefined) throw this.retirementError;
+        const retry = owner.retry();
+        recordRetirement(failed, retry);
+        await retry;
+        this.failedCleanups.delete(failed);
+      }
+      this.retirementError = null;
+    }
   }
 
   private async request(
@@ -201,7 +225,8 @@ export class LocalOnnxEmbeddingIpcSession {
     expectedEpoch?: number
   ): Promise<LocalOnnxEmbeddingIpcSuccess> {
     if (signal.aborted) throw ipcAbortError(signal);
-    await this.waitForReaps();
+    await this.waitForReaps(signal);
+    if (this.retirementError !== null) throw this.retirementError;
     if (signal.aborted) throw ipcAbortError(signal);
     if (expectedEpoch !== undefined && expectedEpoch !== this.childEpoch) throw new CoreError("CONFLICT", "stale local ONNX child binding", { subCode: "CONCURRENT_MODIFICATION" });
     if (this.closed || this.exitError !== null) {
@@ -272,14 +297,18 @@ export class LocalOnnxEmbeddingIpcSession {
     exitSignal: NodeJS.Signals | null
   ): void {
     if (epoch !== this.childEpoch) return;
+    const child = this.child;
     this.child = null;
+    if (child !== null) this.trackReap(child, true);
     this.exitError = new LocalOnnxEmbeddingChildExitedError(code, exitSignal);
     rejectPendingIpc(this.pending, this.exitError);
   }
 
   private onSpawnError(epoch: number, error: Error): void {
     if (epoch !== this.childEpoch) return;
+    const child = this.child;
     this.child = null;
+    if (child !== null) this.trackReap(child);
     this.exitError = new LocalOnnxEmbeddingChildExitedError(null, null);
     this.exitError.cause = error;
     rejectPendingIpc(this.pending, this.exitError);
@@ -312,8 +341,13 @@ export class LocalOnnxEmbeddingIpcSession {
     this.notifyDrain();
   }
 
-  private trackReap(child: LocalOnnxEmbeddingIpcProcess): void {
-    const reap = waitForLocalOnnxChildExit(child).finally(() => {
+  private trackReap(child: LocalOnnxEmbeddingIpcProcess, exitObserved = false): void {
+    const settled = exitObserved ? ownedChildCleanup.get(child)?.settled ?? Promise.resolve() : waitForLocalOnnxChildExit(child);
+    recordRetirement(child, settled);
+    const reap = settled.catch(error => {
+      this.retirementError = error instanceof Error ? error : new Error("Local ONNX child cleanup failed", { cause: error });
+      if (ownedChildCleanup.has(child)) this.failedCleanups.add(child);
+    }).finally(() => {
       this.reaps.delete(reap);
       this.notifyDrain();
     });
@@ -322,19 +356,39 @@ export class LocalOnnxEmbeddingIpcSession {
 
   private notifyDrain(): void {
     if (this.inflightEnsure > 0 || this.reaps.size > 0) return;
-    for (const resolve of this.drainResolvers.splice(0)) resolve();
+    for (const resolve of this.drainResolvers) resolve();
+    this.drainResolvers.clear();
   }
 
   private waitForIdle(): Promise<void> {
-    return new Promise((resolve) => {
-      this.drainResolvers.push(resolve);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.drainResolvers.delete(finish);
+        reject(new Error("Local ONNX child exit was not observed after retirement grace."));
+      }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS + LOCAL_ONNX_CHILD_KILL_GRACE_MS);
+      const finish = () => { clearTimeout(timer); resolve(); };
+      this.drainResolvers.add(finish);
       this.notifyDrain();
     });
   }
 
-  private async waitForReaps(): Promise<void> {
-    while (this.reaps.size > 0) {
-      await Promise.all([...this.reaps]);
+  private async waitForReaps(signal: AbortSignal): Promise<void> {
+    // Retirement is a fork-lifetime admission fence, not a per-client health
+    // lock. Healthy independent isolates remain concurrent; only a child being
+    // reaped prevents a successor from loading until its exit is observed.
+    while (retiringChildren.size > 0) {
+      if (signal.aborted) throw ipcAbortError(signal);
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => { signal.removeEventListener("abort", onAbort); reject(ipcAbortError(signal)); };
+        signal.addEventListener("abort", onAbort, { once: true });
+        void Promise.all([...retiringChildren.values()]).then(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, error => {
+          signal.removeEventListener("abort", onAbort);
+          reject(error);
+        });
+      });
     }
   }
 
@@ -356,50 +410,88 @@ export class LocalOnnxEmbeddingIpcSession {
   }
 }
 
+// Shared by sessions in this host process; not a cross-process lock or an
+// inference mutex. A failed cleanup remains registered until its original
+// session retries close successfully; an unobserved exit never releases it.
+const retiringChildren = new Map<LocalOnnxEmbeddingIpcProcess, Promise<void>>();
+
+function recordRetirement(child: LocalOnnxEmbeddingIpcProcess, settled: Promise<void>): void {
+  retiringChildren.set(child, settled);
+  void settled.then(() => {
+    if (retiringChildren.get(child) === settled) retiringChildren.delete(child);
+  }, () => { /* Preserve the rejection for successor admission and owner retry. */ });
+}
+
 const LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS = 5_000;
 const LOCAL_ONNX_CHILD_KILL_GRACE_MS = 1_000;
 
 function waitForLocalOnnxChildExit(child: LocalOnnxEmbeddingIpcProcess): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
-    let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
-    let hardTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (settled) return;
       settled = true;
-      if (sigkillTimer !== undefined) clearTimeout(sigkillTimer);
-      if (hardTimer !== undefined) clearTimeout(hardTimer);
-      resolve();
+      clearTimeout(sigkillTimer);
+      void (ownedChildCleanup.get(child)?.settled ?? Promise.resolve()).then(resolve, reject);
     };
-    child.on("exit", () => finish());
-    if (child.exitCode !== null && child.exitCode !== undefined) {
+    child.on("exit", finish);
+    const sigkillTimer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* Exit remains unobserved. */ }
+    }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS);
+    if (child.exitCode !== null && child.exitCode !== undefined || child.signalCode != null || unspawnedChildren.has(child)) {
       finish();
       return;
     }
-    sigkillTimer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Child may already be gone.
-      }
-    }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS);
-    hardTimer = setTimeout(finish, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS + LOCAL_ONNX_CHILD_KILL_GRACE_MS);
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      finish();
-    }
+    try { child.kill("SIGTERM"); } catch { /* Exit remains unobserved. */ }
   });
 }
 
+// Only the fork host allocates this parent; child messages never authorize removal.
+const ownedChildCleanup = new WeakMap<LocalOnnxEmbeddingIpcProcess, {
+  readonly settled: Promise<void>;
+  retry(): Promise<void>;
+}>();
+const unspawnedChildren = new WeakSet<LocalOnnxEmbeddingIpcProcess>();
+
 function spawnLocalOnnxEmbeddingChild(scriptPath: string): ChildProcess {
-  const env = { ...process.env };
+  const snapshotParent = mkdtempSync(join(tmpdir(), "alaya-onnx-child-"));
+  const env: NodeJS.ProcessEnv = { ...process.env, ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT: snapshotParent };
   // Inherited inspect/loader flags would pull the pager's tooling into ORT.
   delete env.NODE_OPTIONS;
-  const child = fork(scriptPath, [], {
-    execArgv: [],
-    stdio: ["ignore", "inherit", "inherit", "ipc"],
-    env
+  let child: ChildProcess;
+  try {
+    child = fork(scriptPath, [], {
+      execArgv: [],
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      env
+    });
+  } catch (error) {
+    rmSync(snapshotParent, { recursive: true, force: true });
+    throw error;
+  }
+  let resolveCleanup!: () => void;
+  let rejectCleanup!: (error: unknown) => void;
+  const cleanup = new Promise<void>((resolve, reject) => { resolveCleanup = resolve; rejectCleanup = reject; });
+  // Spontaneous exits also clean up; tracked retirement awaits this cleanup.
+  void cleanup.catch(() => undefined);
+  let retrying: Promise<void> | undefined;
+  ownedChildCleanup.set(child, {
+    settled: cleanup,
+    retry: () => retrying ??= removePrivateTree(snapshotParent).catch(error => {
+      retrying = undefined;
+      throw error;
+    })
+  });
+  const removeOwnedTree = () => {
+    void removePrivateTree(snapshotParent).then(resolveCleanup, rejectCleanup);
+  };
+  child.once("exit", removeOwnedTree);
+  child.once("error", () => {
+    if (child.pid === undefined) {
+      // Failed to spawn: no process can own the directory or emit an exit.
+      unspawnedChildren.add(child);
+      removeOwnedTree();
+    }
   });
   // Process-handle unref is not enough: the IPC pipe still refs the event loop.
   child.unref();

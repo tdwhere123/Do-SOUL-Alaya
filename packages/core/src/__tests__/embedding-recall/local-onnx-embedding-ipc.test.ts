@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -8,11 +10,16 @@ import {
 import {
   LocalOnnxEmbeddingChildExitedError,
   createForkLocalOnnxEmbeddingHost,
-  type LocalOnnxEmbeddingIpcHost
+  LocalOnnxEmbeddingIpcSession,
+  type LocalOnnxEmbeddingIpcHost,
+  type LocalOnnxEmbeddingIpcProcess
 } from "../../embedding-recall/local-onnx-process/ipc-client.js";
 
 const stubChildPath = fileURLToPath(
   new URL("./local-onnx-embedding-ipc-stub-child.mjs", import.meta.url)
+);
+const loadingChildPath = fileURLToPath(
+  new URL("./local-onnx-loading-ipc-stub-child.mjs", import.meta.url)
 );
 
 describe("LocalOnnxEmbeddingClient IPC isolation", () => {
@@ -47,6 +54,162 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     await client.close();
     await warmup.catch(() => undefined);
     expect(tracking.live).toBe(0);
+  });
+
+  it("removes only its owned temporary tree after interruption during loading", async () => {
+    const original = createForkLocalOnnxEmbeddingHost(loadingChildPath);
+    let signalStage!: (paths: { root: string; outside: string }) => void;
+    const staged = new Promise<{ root: string; outside: string }>(resolve => { signalStage = resolve; });
+    const host: LocalOnnxEmbeddingIpcHost = { spawn() {
+      const child = original.spawn();
+      child.on("message", message => {
+        if (typeof message === "object" && message !== null && "fixtureRoot" in message &&
+            typeof message.fixtureRoot === "string" && "fixtureOutside" in message &&
+            typeof message.fixtureOutside === "string") signalStage({ root: message.fixtureRoot, outside: message.fixtureOutside });
+      });
+      return child;
+    } };
+    const session = new LocalOnnxEmbeddingIpcSession({ modelId: "fixture", cacheDir: null, schemaVersion: 1, host });
+    const warmup = session.warmup(new AbortController().signal);
+    const warmupFailure = expect(warmup).rejects.toBeInstanceOf(LocalOnnxEmbeddingChildExitedError);
+    const { root, outside } = await staged;
+    try {
+      expect(existsSync(root)).toBe(true);
+      await session.close();
+      await warmupFailure;
+      expect(existsSync(root)).toBe(false);
+      expect(existsSync(dirname(root))).toBe(false);
+      expect(readFileSync(`${outside}/canary`, "utf8")).toBe("outside");
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  }, 10_000);
+
+  it("retains a failed owned-tree cleanup across sessions until the original close retries it", async () => {
+    const inner = createForkLocalOnnxEmbeddingHost(loadingChildPath);
+    const healthy = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    let spawns = 0;
+    let signalStage!: (paths: { root: string; outside: string }) => void;
+    const staged = new Promise<{ root: string; outside: string }>(resolve => { signalStage = resolve; });
+    const host: LocalOnnxEmbeddingIpcHost = { spawn() {
+      const child = ++spawns === 1 ? inner.spawn() : healthy.spawn();
+      child.on("message", message => {
+        if (typeof message === "object" && message !== null && "fixtureRoot" in message &&
+            typeof message.fixtureRoot === "string" && "fixtureOutside" in message &&
+            typeof message.fixtureOutside === "string") signalStage({ root: message.fixtureRoot, outside: message.fixtureOutside });
+      });
+      return child;
+    } };
+    const first = new LocalOnnxEmbeddingIpcSession({ modelId: "fixture", cacheDir: null, schemaVersion: 1, host });
+    const successor = new LocalOnnxEmbeddingIpcSession({ modelId: "fixture", cacheDir: null, schemaVersion: 1, host });
+    const warmupFailure = expect(first.warmup(new AbortController().signal)).rejects.toBeInstanceOf(LocalOnnxEmbeddingChildExitedError);
+    const { root, outside } = await staged;
+    const parent = dirname(root), parked = `${parent}-parked`;
+    let displaced = false;
+    try {
+      renameSync(parent, parked);
+      symlinkSync(parked, parent);
+      displaced = true;
+      await expect(first.close()).rejects.toThrow("private tree root is not a directory");
+      await warmupFailure;
+      await expect(successor.warmup(new AbortController().signal)).rejects.toThrow("private tree root is not a directory");
+      expect(spawns).toBe(1);
+      expect(existsSync(root)).toBe(true);
+      unlinkSync(parent);
+      renameSync(parked, parent);
+      displaced = false;
+      await expect(first.close()).resolves.toBeUndefined();
+      expect(existsSync(root)).toBe(false);
+      await expect(successor.warmup(new AbortController().signal)).resolves.toBeUndefined();
+      expect(spawns).toBe(2);
+    } finally {
+      if (displaced) { unlinkSync(parent); renameSync(parked, parent); }
+      await first.close().catch(() => first.close());
+      await successor.close();
+      rmSync(outside, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it("does not release an unobserved exit after the kill grace or spawn a replacement", async () => {
+    const unexiting = new NeverExitingChild();
+    let spawns = 0;
+    const host: LocalOnnxEmbeddingIpcHost = { spawn() {
+      spawns++;
+      return spawns === 1 ? unexiting : createForkLocalOnnxEmbeddingHost(stubChildPath).spawn();
+    } };
+    const session = new LocalOnnxEmbeddingIpcSession({ modelId: "fixture", cacheDir: null, schemaVersion: 1, host });
+    const first = new AbortController();
+    const pending = session.embedTexts(["ignored"], first.signal, 20_000);
+    await unexiting.sent;
+    first.abort(new Error("cancelled"));
+    await expect(pending).rejects.toThrow("cancelled");
+    await new Promise(resolve => setTimeout(resolve, 6_100));
+    expect(unexiting.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    const next = new AbortController();
+    const blocked = session.embedTexts(["ok"], next.signal, 5_000);
+    next.abort(new Error("waiting caller cancelled"));
+    await expect(blocked).rejects.toThrow("waiting caller cancelled");
+    expect(spawns).toBe(1);
+    unexiting.observeExit();
+    await expect(session.embedTexts(["ok"], new AbortController().signal, 5_000)).resolves.toHaveLength(1);
+    await session.close();
+    expect(spawns).toBe(2);
+  }, 12_000);
+
+  it("reports an unobserved exit on close and retains its retirement until exit", async () => {
+    const child = new NeverExitingChild();
+    const session = new LocalOnnxEmbeddingIpcSession({
+      modelId: "fixture", cacheDir: null, schemaVersion: 1, host: { spawn: () => child }
+    });
+    const pending = session.warmup(new AbortController().signal);
+    const failedWarmup = expect(pending).rejects.toBeInstanceOf(LocalOnnxEmbeddingChildExitedError);
+    await child.sent;
+    await expect(session.close()).rejects.toThrow("exit was not observed");
+    await failedWarmup;
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    child.observeExit();
+    await expect(session.close()).resolves.toBeUndefined();
+  }, 9_000);
+
+  it("fences a successor client after an unobserved close until exit, with bounded cancellation", async () => {
+    const child = new NeverExitingChild();
+    const live = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    let spawns = 0;
+    const host: LocalOnnxEmbeddingIpcHost = { spawn() {
+      return ++spawns === 1 ? child : live.spawn();
+    } };
+    const first = openClient(host);
+    const loading = first.warmup();
+    const failedLoading = expect(loading).rejects.toBeInstanceOf(LocalOnnxEmbeddingChildExitedError);
+    await child.sent;
+    await expect(first.close()).rejects.toThrow("exit was not observed");
+    await failedLoading;
+
+    const successor = openClient(host);
+    const aborted = new AbortController();
+    const waiting = successor.embedTexts(["ok"], { timeoutMs: 5_000, signal: aborted.signal });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(spawns).toBe(1);
+    aborted.abort(new Error("caller cancelled while retiring"));
+    await expect(waiting).rejects.toThrow("caller cancelled while retiring");
+    const deadline = AbortSignal.timeout(40);
+    await expect(successor.embedTexts(["ok"], { timeoutMs: 5_000, signal: deadline })).rejects.toThrow();
+    expect(spawns).toBe(1);
+    child.observeExit();
+    await expect(successor.embedTexts(["ok"], { timeoutMs: 5_000 })).resolves.toHaveLength(1);
+    expect(spawns).toBe(2);
+    await first.close();
+  }, 12_000);
+
+  it("allows independent healthy clients to warm up concurrently", async () => {
+    const stalled = new NeverExitingChild();
+    const first = openClient({ spawn: () => stalled });
+    const loading = first.warmup();
+    const failedLoading = expect(loading).rejects.toBeInstanceOf(LocalOnnxEmbeddingChildExitedError);
+    await stalled.sent;
+    const second = openClient();
+    await expect(second.warmup()).resolves.toBeUndefined();
+    stalled.observeExit();
+    await failedLoading;
+    await first.close();
   });
 
   it("does not charge isolate load against the embed timeout", async () => {
@@ -242,6 +405,21 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     };
   }
 });
+
+class NeverExitingChild extends EventEmitter implements LocalOnnxEmbeddingIpcProcess {
+  public readonly exitCode = null;
+  public signalCode: NodeJS.Signals | null = null;
+  public readonly signals: NodeJS.Signals[] = [];
+  private notifySent!: () => void;
+  public readonly sent: Promise<void>;
+  public constructor() {
+    super();
+    this.sent = new Promise(resolve => { this.notifySent = resolve; });
+  }
+  public send(): boolean { this.notifySent(); return true; }
+  public kill(signal: NodeJS.Signals = "SIGTERM"): boolean { this.signals.push(signal); return true; }
+  public observeExit(): void { this.signalCode = "SIGKILL"; this.emit("exit", null, "SIGKILL"); }
+}
 
 interface TrackingHost {
   readonly host: LocalOnnxEmbeddingIpcHost;
