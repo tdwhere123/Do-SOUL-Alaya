@@ -1011,6 +1011,13 @@ or replace utterance attribution.
 
 ### Versioned source access foundation
 
+**Historical Protocol 20 scope:** the default/candidate terminology and version
+matrix below describe that migration, not today's ordinary producer. Current
+execution is owned by [ordinary native field delivery](#ordinary-native-field-delivery-protocol-21).
+Its retired comparison execution entry is not revived by retained archive
+schemas or readers. This section preserves the old identity/admission context;
+it is not a pending-cutover instruction.
+
 Protocol 20.0.0 declares the authorized Source access migration major under
 invariant §25. The separately versioned family is executable only through a
 runtime-bound private comparison closure. This is not a default change, measured

@@ -53,17 +53,19 @@ See [the migration contract](../../docs/handbook/recall.md#ordinary-native-field
 
 ## Source access compatibility
 
-Protocol 20.0.0 is the explicitly versioned Source access migration major under
-[handbook invariant §25](../../docs/handbook/invariants.md). The new schemas and
-Core identity material are unwired foundations, not a default cutover. The current
-MCP/worker request and response producers still use access v2 / acquisition 1 /
-expanded execution v3 / library v6 / protocol 8. Separate profiled schemas admit
-access v3 / acquisition 2 / expanded execution v4 / library v7 / protocol 9; both
-retain outer phase/execution tuple 2. Do not dispatch by the outer version alone.
-Old schemas serve the current default until accepted cutover, not arbitrary past
-decoding. No public policy enum values or gateway tool contracts changed.
-Details and remaining bridge obligations are in the
-[handbook migration](../../docs/handbook/recall.md#versioned-source-access-foundation).
+Protocol 20.0.0 introduced separately versioned Source access families under
+[handbook invariant §25](../../docs/handbook/invariants.md). Their retained
+v2/v3 access, 1/2 acquisition and v3/v4 expanded-execution schemas share outer
+phase/execution tuple 2; readers must dispatch the nested versions, not the outer
+version alone. These historical families do not describe the current public page.
+
+Ordinary MCP/worker recall now uses the
+[native field delivery contract](../../docs/handbook/recall.md#ordinary-native-field-delivery-protocol-21),
+including library field pages and their continuation. The old comparison
+execution entry is retired; retained archive readers do not authorize its replay.
+The [Protocol 20 foundation record](../../docs/handbook/recall.md#versioned-source-access-foundation)
+explains historical identities, not an unwired implementation or a pending
+ordinary cutover.
 
 ## EventLog compatibility
 
