@@ -153,10 +153,14 @@ export async function executeProviderRequestLine(
       if (isLocalPersistenceFailure(cause)) throw cause;
       const transport = readLiveTransportFailure(cause);
       if (transport === undefined || transport.transportFailures.length === 0) throw cause;
-      appendFileSync(join(context.cacheRoot, "interactive-extract-errors.log"),
-        `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
       const settled = persistFailedProviderRequest(context, line, transport, ordinal, used,
         readGeminiFailureResponse(cause), readNativeChatFailureResponse(cause), lastAttempt);
+      try {
+        appendFileSync(join(context.cacheRoot, "interactive-extract-errors.log"),
+          `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
+      } catch {
+        // Auxiliary diagnostic log is optional after raw/ledger settlement.
+      }
       if (settled.classified !== "retryable" || lastAttempt) return settled;
       continue;
     }
