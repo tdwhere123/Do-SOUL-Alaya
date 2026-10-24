@@ -1,11 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installOfflineReconciliationFixture } from "../../support/offline-reconciliation-fixture.js";
 import { indexEntryCacheKey, InformationIndexSchema, type IndexEntry, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
 
 const handles: BenchDaemonHandle[] = [];
+let isolation: Awaited<ReturnType<typeof installOfflineReconciliationFixture>>;
+beforeEach(async () => { isolation = await installOfflineReconciliationFixture(); });
 afterEach(async () => {
-  for (const handle of handles.splice(0)) await handle.shutdown();
+  try {
+    for (const handle of handles.splice(0)) await handle.shutdown();
+    await isolation.close();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 const budget: RequestBudget = {
@@ -22,6 +30,9 @@ describe("bench target recall request options", () => {
       const seed = await daemon.proposeMemory(`Needle ${label} reference.`, `evidence-${label}`);
       ids.push(seed.memoryId);
     }
+    expect(isolation.requests).toHaveLength(2);
+    expect(isolation.decisions.filter(decision => decision.reason === "offline fixture: distinct planted facts"))
+      .toHaveLength(2);
     const interpretationClock = new Date().toISOString();
     const full = await daemon.recall("needle", { budget: { ...budget, page_budget: 20 }, interpretationClock });
     const expected = InformationIndexSchema.parse(full.index);

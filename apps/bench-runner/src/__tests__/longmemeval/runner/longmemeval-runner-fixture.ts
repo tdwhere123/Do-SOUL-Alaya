@@ -1,10 +1,57 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createLongMemEvalSelectionContractIdentity,
   type KpiPayload
 } from "@do-soul/alaya-eval";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus,
+  collectOfficialApiExtractionCoverage, stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
+import { createCachingSignalExtractor } from "../../../runs/compile-seed.js";
+import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
+import { fixtureAttemptAuthority, providerBackedResponseResult, writeExtractionCacheTestManifest } from
+  "../extraction/extraction-cache-test-fixture.js";
+
+/** Bind local responses to the same trusted-role requests used by runner preflight and seeding. */
+export async function admitRunnerExtractionFixture(
+  cacheRoot: string,
+  questions: readonly LongMemEvalQuestion[]
+): Promise<void> {
+  const config = {
+    model: "test-extraction-model", requestProfile: "provider-default-v1" as const,
+    providerUrl: "https://fixture-provider.invalid/v1", apiKey: "fixture-only"
+  };
+  writeExtractionCacheTestManifest({ cacheRoot, ...config, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
+  const turns = inspectTurnContentKeySpace(questions);
+  // One ledger owns the whole cache, not a fresh one-shard allowance per turn.
+  const authority = fixtureAttemptAuthority({ cacheRoot, ...config,
+    startingMissing: turns.distinctExtractionRequestCount });
+  const manifestPath = join(cacheRoot, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  await writeFile(manifestPath, JSON.stringify({ ...manifest,
+    requested_turns: turns.distinctExtractionRequestCount,
+    cached_turns: turns.distinctExtractionRequestCount, coverage: 1 }));
+  for (const turn of turns.distinctExtractionTurns) {
+    const sourceCorpus = buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages);
+    for (const request of collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages).requests) {
+      if (request.source_assertions.length !== 1 ||
+          !request.source_assertions[0]!.text.startsWith("User: I prefer ")) {
+        throw new Error("runner preference fixture requires one current source-bound assertion per request");
+      }
+      const rawJson = interpretationsEnvelope(request.source_assertions.map(assertion => ({
+        assertionId: assertion.assertion_id, matched: "prefer"
+      })));
+      const extractor = createCachingSignalExtractor({ cacheRoot, config, ...authority,
+        delegate: { extract: attempt => providerBackedResponseResult(attempt, rawJson) } });
+      const userPrompt = stringifyOfficialApiExtractionRequest(request);
+      console.log("[offline extraction fixture]", JSON.stringify({ request, rawJson }));
+      await extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, userPrompt, sourceCorpus });
+    }
+  }
+}
 
 export function buildMockQuestion(
   id: string,

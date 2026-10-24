@@ -37,28 +37,34 @@ import {
 } from "../../../datasets/longmemeval/runner.js";
 
 import {
+  admitRunnerExtractionFixture,
   buildLongMemEvalArchivePayload,
   buildMockQuestion,
   withEligibleMeasurementContract,
   writeArchiveEntry
 } from "./longmemeval-runner-fixture.js";
 
+import { installOfflineReconciliationFixture } from "../../support/offline-reconciliation-fixture.js";
+
 let tmpDir: string;
+let isolation: Awaited<ReturnType<typeof installOfflineReconciliationFixture>>;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
-  // These runs take the no-credentials offline seed path; the model value is
-  // never used for a live call. Each run below passes an isolated
-  // extractionCacheRoot (no manifest -> first-ever-build preflight), so this
-  // model is arbitrary and the tests are decoupled from the production
-  // extraction-cache manifest's model.
+  isolation = await installOfflineReconciliationFixture();
+  // The mandatory bootstrap supplies synthetic credentials. Seed through the
+  // real cache-only compiler with request-bound, admitted fixture responses.
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
 });
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
-  await rm(tmpDir, { recursive: true, force: true });
+  try {
+    await isolation.close();
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 describe("LongMemEval runner", () => {
@@ -73,7 +79,15 @@ describe("LongMemEval runner", () => {
       const mockQuestions: LongMemEvalQuestion[] = [
         buildMockQuestion("q001", "session-a"),
         buildMockQuestion("q002", "session-b")
-      ];
+      ].map(question => ({ ...question,
+        // The old deictic "stored here" sentence has no current catalog assertion.
+        // Plant supported source statements so gold memories still traverse propose+review.
+        haystack_sessions: [
+          [{ role: "user" as const, content: `I prefer topic ${question.question_id}.`, has_answer: true },
+            { role: "assistant" as const, content: "Acknowledged." }],
+          [{ role: "user" as const, content: "I prefer cooking pasta." }]
+        ]
+      }));
 
       const variant = "longmemeval_oracle";
       const datasetRaw = JSON.stringify(mockQuestions);
@@ -177,6 +191,7 @@ describe("LongMemEval runner", () => {
 
       const extractionCacheRoot = join(tmpDir, "extraction-cache");
       await mkdir(extractionCacheRoot);
+      await admitRunnerExtractionFixture(extractionCacheRoot, mockQuestions);
 
       const result = await runLongMemEval({
         variant,
@@ -218,11 +233,15 @@ describe("LongMemEval runner", () => {
       expect(report).toContain(
         "Seed policy: label_independent_open_vocabulary_extraction (label-independent)"
       );
-      expect(report).toContain("Release evidence blockers");
-      expect(report).toContain("seed_extraction_path no_credentials_fallback");
-      const findings = await readFile(result.findingsPath, "utf8");
-      expect(findings).toContain("seed_extraction_path no_credentials_fallback");
-      expect(findings).toContain("offline_fallbacks=");
+      expect(report).not.toContain("Release evidence blockers");
+      expect(report).not.toContain("seed_extraction_path no_credentials_fallback");
+      // A clean cache-backed run has no degradation findings artifact.
+      await expect(readFile(result.findingsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      expect(result.payload.kpi.seed_extraction_path).toMatchObject({
+        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        llm_calls: 0, offline_fallbacks: 0, live_extraction_failures: 0,
+        cached_extraction_failures: 0, signals_dropped: 0, parse_dropped: 0
+      });
 
       // Structural assertions
       expect(result.payload.bench_name).toBe("public");
@@ -297,8 +316,8 @@ describe("LongMemEval runner", () => {
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.seed_extraction_path).toMatchObject({
-        path: "no_credentials_fallback",
-        offline_fallbacks: 4
+        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        llm_calls: 0, offline_fallbacks: 0
       });
       expect(diagnostics.report_usage.mode).toBe("mixed");
       expect(diagnostics.report_usage.reports_attempted).toBe(2);
@@ -376,8 +395,8 @@ describe("LongMemEval runner", () => {
         sha7: expect.stringMatching(/^[0-9a-f]{7}$/iu)
       });
       expect(fullDiagnostics.seed_extraction_path).toMatchObject({
-        path: "no_credentials_fallback",
-        offline_fallbacks: 4
+        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        llm_calls: 0, offline_fallbacks: 0
       });
       expect(fullDiagnostics.report_side_effects?.snapshots).toHaveLength(2);
       expect(fullDiagnostics.questions).toHaveLength(2);
@@ -385,7 +404,7 @@ describe("LongMemEval runner", () => {
       expect(fullDiagnostics.questions[0]?.gold_memory_ids.length).toBeGreaterThan(0);
       expect(fullDiagnostics.questions[0]?.recall_diagnostics_present).toBe(false);
       expect(fullDiagnostics.questions[0]?.recall_diagnostics_keys).toEqual([]);
-      expect(JSON.stringify(diagnostics)).not.toContain("correct fact");
+      expect(JSON.stringify(diagnostics)).not.toContain("I prefer topic");
       const comparison = JSON.parse(
         await readFile(
           join(dirname(result.kpiPath), LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME),
