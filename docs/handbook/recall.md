@@ -1960,6 +1960,11 @@ build failure: it retires generations, clears active eligibility and advances th
 selection revision to fence old work. Query preparation requires an eligible active
 generation. Producer stop/deadlines end local waiting without cancelling shared
 inference; native occupancy remains owned until settlement or provider close.
+Producer traversal is a retained prefix, not a fairness queue: an unfinished or
+refused root retains its cursor position, remains pending, and can block later
+roots until it resumes. No later-root coverage or ready generation is inferred
+from that stop. Skipping such roots would require a separately specified deferred
+population and cannot be introduced as an invisible retry optimization.
 
 Access progressively interleaves source-text observation, bounded header pages
 through the existing capsule cursor index, and whole interpretation verification

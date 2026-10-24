@@ -318,6 +318,35 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     }
   );
 
+  it("keeps a persistently refused root pending until it can resume, without claiming later-root coverage", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "first", "refused-source");
+    publishSource(environment, "second", "later-source");
+    const producer = producerFor(environment, labeledBind().bind);
+    const step = vi.spyOn(SourceIndexBackfill.prototype, "step").mockResolvedValue({
+      status: "resource_exhausted", reason: "bounded_root_refusal", accepted_vectors: 0,
+      resources: { work: 7, native_bytes: 11, native_accounting: "partial", sql_internal_work: "unknown",
+        model_inputs_submitted: 0, model_input_bytes_submitted: 0, token_count_observed: 0,
+        inputs_without_token_count: 0, model_execution_work: "unknown" }
+    });
+    for (let pass = 0; pass < 2; pass++) {
+      const receipt = await producer.runPass();
+      expect(receipt).toMatchObject({ status: "resource_exhausted", reason: "bounded_root_refusal" });
+      expect(receipt.resources.work).toBeGreaterThanOrEqual(7);
+    }
+    expect(step).toHaveBeenCalledTimes(2);
+    expect(step.mock.calls[1]![0].root_key).toBe(step.mock.calls[0]![0].root_key);
+    const generation = step.mock.calls[0]![0].generation_id;
+    expect(environment.index.generation(WORKSPACE, generation)).toMatchObject({
+      enumeration_complete: true, target_count: 2, completed_count: 0
+    });
+    expect(environment.index.state(WORKSPACE)).toMatchObject({ active_generation_id: null });
+    step.mockRestore();
+    await producer.runPass();
+    expect(environment.index.state(WORKSPACE)).toMatchObject({ status: "ready" });
+    expect(environment.index.generation(WORKSPACE, generation)).toMatchObject({ completed_count: 2 });
+  });
+
   it("resumes pending windows after interrupted backfill and file-backed reopen", async () => {
     const environment = fileEnvironment();
     publishSource(environment, "Alpha猫\nβeta!終");
