@@ -6,7 +6,7 @@ const isolation = await vi.hoisted(async () => {
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { hashContentDigest, hashSourceRecordId, SOURCE_SPAN_IDENTITY_OPERATOR_ID, UNKNOWN_UTTERANCE_ATTRIBUTION,
@@ -14,6 +14,7 @@ import { hashContentDigest, hashSourceRecordId, SOURCE_SPAN_IDENTITY_OPERATOR_ID
 import { SemanticChainConfigSchema, readChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import { OrdinaryRecallExecutionSchema } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { executeOrdinaryRecallEntry } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
+import { admitOrdinaryFrozenExecution } from "../../../runs/recall-measurement/ordinary/ordinary-frozen-replay.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { publishIndexedGeneration } from "../../../../../core-daemon/src/__tests__/runtime/recall/recall-storage.test-support.js";
@@ -58,7 +59,7 @@ async function fixture(count: number) {
     max_output_tokens: 1024, discovery_page_cap: 1, correspondence_pair_cap: 0, access_policy: "query-conditioned-v1",
     budget: { schema_version: 1, work_units: 10000000, memory_bytes: 60000000, page_budget: 10000, finalization_reserve: 50000, min_envelope: 10 },
     authorized_scopes: { mode: "named", scopes: ["project"] }, output_byte_limit: 1000000 });
-  const outputRoot = join(root, "execution"); mkdirSync(outputRoot);
+  const outputRoot = join(root, "execution", "ordinary"); mkdirSync(outputRoot, { recursive: true });
   return { root: outputRoot, config, queries: [query] };
 }
 
@@ -91,6 +92,11 @@ it.each([8, 10])("retains authenticated first exposure across a fresh %i-root SQ
   }
   expect(row.costs.latency_ms).toMatchObject({ status: "available", source: "client_mcp_elapsed" });
   expect(row.costs.latency_ms.status === "available" && row.costs.latency_ms.value > 0).toBe(true);
+  const replay = admitOrdinaryFrozenExecution({ executionRoot: dirname(input.root), config: input.config, query: input.queries[0]! });
+  expect(replay.capture_contract).toBe("ordinary-recall-public-entry-v3");
+  expect(replay.pages.map(page => page.occupied_slots)).toEqual(count === 8 ? [5, 3, 0] : [5, 5]);
+  expect(replay.windows).toHaveLength(count);
+  expect(replay.windows.every(window => window.text === "Synthetic π preview. Synthetic source body.")).toBe(true);
   expect(hashRegularFileNoFollow(input.config.snapshot_path)).toBe(input.config.snapshot_sha256);
   expect(await executeOrdinaryRecallEntry(input)).toEqual(execution);
 }, 120000);

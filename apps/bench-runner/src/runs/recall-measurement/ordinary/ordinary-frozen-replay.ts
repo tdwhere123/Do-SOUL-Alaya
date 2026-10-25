@@ -12,9 +12,9 @@ import type { ConsumerVisibilityPage } from "../../longmemeval-semantic/message-
 import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../contract.js";
 import { assertSemanticChainSourceIndex } from "../source-index-binding.js";
 import { hashRegularFileNoFollow } from "../../snapshot/bound-file.js";
-import { OrdinaryRecallExecutionSchema, mapOrdinaryRecallScope, buildOrdinaryRecallRequest,
+import { OrdinaryRecallArchiveSchema, ORDINARY_RECALL_ENTRY_CONTRACT, mapOrdinaryRecallScope, buildOrdinaryRecallRequest,
   type OrdinaryRecallQueryRow } from "./ordinary-entry-contract.js";
-import { admitOrdinaryEntryCursor } from "./ordinary-entry-execution.js";
+import { admitOrdinaryEntryCursor, ordinaryEntryStopCause } from "./ordinary-entry-policy.js";
 import { verifyExposure } from "./ordinary-recall-delivery.js";
 import { admitOrdinarySourceDelivery, admitOrdinarySourceResults } from "./ordinary-source-admission.js";
 import { ordinaryLiteralWindows, ordinaryUnmappedSources, type OrdinarySourcePreview } from "./ordinary-preview-stream.js";
@@ -34,8 +34,12 @@ export function admitOrdinaryFrozenExecution(input: Readonly<{
   check(hashRegularFileNoFollow(config.snapshot_path) === config.snapshot_sha256, "ordinary replay snapshot changed");
   if (config.source_index !== undefined) assertSemanticChainSourceIndex(config);
   const raw = readChainArtifact(join(input.executionRoot, "ordinary/ordinary-entry.json"));
-  const execution = OrdinaryRecallExecutionSchema.parse(raw);
+  const execution = OrdinaryRecallArchiveSchema.parse(raw);
   check(equal(execution, raw), "ordinary archive cannot be normalized");
+  if (execution.contract === ORDINARY_RECALL_ENTRY_CONTRACT) {
+    check(execution.input_identity === chainIdentity({ contract: execution.contract, config,
+      mapping: execution.mapping, queries: [input.query] }), "ordinary capture policy/config/query identity mismatch");
+  }
   check(execution.config_identity === chainIdentity(config) && execution.rows.length === 1
     && execution.rows[0]!.query_key === input.query.query_key
     && execution.rows[0]!.original_query === input.query.original_query, "ordinary archive/config/query binding mismatch");
@@ -55,9 +59,11 @@ export function admitOrdinaryFrozenExecution(input: Readonly<{
     const rowIntervals: OrdinaryRecallQueryRow["source_intervals"] = [];
     const seen = { deliveries: new Set<string>(), continuations: new Set<string>(), positions: new Set<string>() };
     let occupied = 0, first: FirstExposurePage | null = null;
+    let policyStop: OrdinaryRecallQueryRow["stop_cause"] | null = null;
     let identity: OrdinaryRecallQueryRow["snapshot_identity"] = null, previous: OrdinaryRecallQueryRow["pages"][number] | null = null;
     for (const [position, page] of row.pages.entries()) {
       check(page.ordinal === position + 1 && (previous === null || previous.observation === "observed"), "ordinary page sequence mismatch");
+      check(execution.contract !== ORDINARY_RECALL_ENTRY_CONTRACT || policyStop === null, "ordinary capture continued after its policy stop");
       const request = position === 0 ? firstRequest : SoulMemorySearchRequestSchema.parse({ ...firstRequest,
         continuation: previous?.output?.index?.continuation });
       check(position === 0 || previous?.output?.index?.continuation != null, "ordinary continuation was not issued");
@@ -99,13 +105,20 @@ export function admitOrdinaryFrozenExecution(input: Readonly<{
           intervals: ordinaryLiteralWindows(admitted).map(({ text: _text, ...interval }) => interval),
           unmapped_sources: ordinaryUnmappedSources(admitted) });
         occupied += projected.slots;
+        policyStop = ordinaryEntryStopCause(index, occupied, page.ordinal);
       }
       previous = page;
     }
     check(equal(row.first_exposure, first), "ordinary row first-exposure projection mismatch");
     check(equal(row.snapshot_identity, identity), "ordinary row snapshot projection mismatch");
     check(equal(row.source_intervals, rowIntervals), "ordinary row source interval projection mismatch");
-    return { pages, previews, windows: ordinaryLiteralWindows(previews) };
+    if (execution.contract === ORDINARY_RECALL_ENTRY_CONTRACT && previous?.observation === "observed") {
+      check(policyStop !== null && row.stop_cause === policyStop, "ordinary capture stop differs from bounded-progress policy");
+      const complete = policyStop === "observed_ten_slot_prefix" || policyStop === "occupancy_tail_exhausted";
+      check(row.status === (complete ? "complete" : "partial"), "ordinary capture status differs from bounded-progress policy");
+    }
+    // The caller must retain this stratum when comparing historical and forward captures.
+    return { capture_contract: execution.contract, pages, previews, windows: ordinaryLiteralWindows(previews) };
   } finally {
     database.close();
     check(hashRegularFileNoFollow(config.snapshot_path) === config.snapshot_sha256, "ordinary replay snapshot changed");

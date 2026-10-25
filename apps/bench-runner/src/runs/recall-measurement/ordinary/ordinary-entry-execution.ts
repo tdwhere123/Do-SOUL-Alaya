@@ -19,7 +19,8 @@ import {
 import { semanticChainCacheInputPaths } from "../inputs.js";
 import { OrdinaryRecallEnvelopeSchema, OrdinaryRecallRequestRecordSchema, type OrdinaryRecallEnvelope } from "./ordinary-recall-contract.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
-import { terminal, verifyExposure } from "./ordinary-recall-delivery.js";
+import { verifyExposure } from "./ordinary-recall-delivery.js";
+import { admitOrdinaryEntryCursor, ordinaryEntryStopCause, type OrdinaryEntryCursorSeen } from "./ordinary-entry-policy.js";
 import { admittedSourceDeliveryTail } from "../../measurement/source-delivery-visibility.js";
 import {
   OrdinaryRecallEntryInputSchema, OrdinaryRecallExecutionSchema, OrdinaryRecallQueryRowSchema,
@@ -155,6 +156,7 @@ async function executeOrdinaryQuery(
   let stopCause: OrdinaryRecallQueryRow["stop_cause"] = "membership_page_bound";
   try {
     for (let ordinal = 1; ordinal <= ORDINARY_RECALL_PUBLIC_PAGE_LIMIT; ordinal += 1) {
+      refuseBenchWorkAfterCancel();
       const started = performance.now();
       const page = await recallPublicMembershipPage(daemon, request, ordinal, session, firstExposure);
       elapsedMs += performance.now() - started;
@@ -178,11 +180,8 @@ async function executeOrdinaryQuery(
         break;
       }
       occupied += page.occupied_slots;
-      if (terminal(index)) { stopCause = "terminal_index"; break; }
-      if (page.terminal_tail.status === "exhausted") { stopCause = "occupancy_tail_exhausted"; break; }
-      if (occupied >= ORDINARY_RECALL_OBSERVED_SLOT_TARGET) { stopCause = "observed_ten_slot_prefix"; break; }
-      if (index.continuation == null) { stopCause = "no_issued_continuation"; break; }
-      if (ordinal === ORDINARY_RECALL_PUBLIC_PAGE_LIMIT) { stopCause = "membership_page_bound"; break; }
+      const stopped = ordinaryEntryStopCause(index, occupied, ordinal);
+      if (stopped !== null) { stopCause = stopped; break; }
       request = SoulMemorySearchRequestSchema.parse({ ...firstRequest, continuation: index.continuation });
     }
   } catch (error) {
@@ -459,35 +458,6 @@ function ordinaryCosts(elapsedCalls: number, elapsedMs: number): OrdinaryRecallQ
       ? { status: "unavailable", reason: "no_public_call_elapsed" }
       : { status: "available", value: elapsedMs, source: "client_mcp_elapsed" }
   };
-}
-
-export type OrdinaryEntryCursorSeen = {
-  readonly deliveries: Set<string>;
-  readonly continuations: Set<string>;
-  readonly positions: Set<string>;
-};
-
-/** Fail closed on a repeated request, delivery, issued continuation, or position. Does not mutate `seen` on replay. */
-export function admitOrdinaryEntryCursor(
-  seen: OrdinaryEntryCursorSeen,
-  facts: Readonly<{
-    delivery_id: string; request_continuation: unknown; issued_continuation: unknown; positions: readonly string[];
-  }>
-): string | null {
-  if (facts.request_continuation != null && !seen.continuations.has(canonicalJson(facts.request_continuation))) {
-    return "ordinary public membership used a continuation that was not issued";
-  }
-  if (seen.deliveries.has(facts.delivery_id)) return "ordinary public membership repeated a delivery identity";
-  if (new Set(facts.positions).size !== facts.positions.length || facts.positions.some(key => seen.positions.has(key))) {
-    return "ordinary public membership repeated a delivery position";
-  }
-  if (facts.issued_continuation != null && seen.continuations.has(canonicalJson(facts.issued_continuation))) {
-    return "ordinary public membership repeated an issued continuation";
-  }
-  seen.deliveries.add(facts.delivery_id);
-  for (const key of facts.positions) seen.positions.add(key);
-  if (facts.issued_continuation != null) seen.continuations.add(canonicalJson(facts.issued_continuation));
-  return null;
 }
 
 function ordinaryEntryPositionKey(target: SoulMemorySearchResponse["results"][number]["target"]): string {

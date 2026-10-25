@@ -18,9 +18,10 @@ import {
   buildOrdinaryRecallRequest, mapOrdinaryRecallScope
 } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import {
-  admitOrdinaryEntryCursor, executeOrdinaryRecallEntry, ordinaryEntryStatusReason,
-  type OrdinaryEntryCursorSeen
+  executeOrdinaryRecallEntry, ordinaryEntryStatusReason
 } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
+import { admitOrdinaryEntryCursor, type OrdinaryEntryCursorSeen }
+  from "../../../runs/recall-measurement/ordinary/ordinary-entry-policy.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { HIDDEN_GOLD, QUESTION } from "./native-recall.test-support.js";
 

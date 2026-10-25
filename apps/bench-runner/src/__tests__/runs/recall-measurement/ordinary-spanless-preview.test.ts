@@ -13,7 +13,7 @@ import { SoulMemorySearchResponseSchema, sourceRecallTarget, sourceIndexEntry, e
   type SourceEvidenceTarget, type MemorySearchResult, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { seedWorkspaces, hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { SemanticChainConfigSchema, chainIdentity, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
-import { OrdinaryRecallExecutionSchema, buildOrdinaryRecallRequest, UNOBSERVED_ORDINARY_COUNTERS }
+import { OrdinaryRecallArchiveSchema, buildOrdinaryRecallRequest, UNOBSERVED_ORDINARY_COUNTERS }
   from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { admitOrdinaryFrozenExecution } from "../../../runs/recall-measurement/ordinary/ordinary-frozen-replay.js";
 import { admitOrdinarySourceDelivery } from "../../../runs/recall-measurement/ordinary/ordinary-source-admission.js";
@@ -85,7 +85,7 @@ function archive(f: ReturnType<typeof fixture>, results: ReturnType<typeof resul
     ? [{ slot_index, target: row.target, span: row.target.span }] : []);
   const recorded = corrupt?.(output) ?? output;
   const cost = { status: "unavailable", reason: "authored fixture has no public query" };
-  const execution = OrdinaryRecallExecutionSchema.parse({ contract: "ordinary-recall-public-entry-v2", input_identity: "c".repeat(64),
+  const execution = OrdinaryRecallArchiveSchema.parse({ contract: "ordinary-recall-public-entry-v2", input_identity: "c".repeat(64),
     config_identity: chainIdentity(f.config), mapping: { status: "mapped", scope_class: "project", max_results: 5,
       observed_slot_target: 10, unmapped_dimensions: [] }, consumer_model_calls: 0,
     rows: [{ ...query, status: "partial", snapshot_identity: { query_id: index.query_id, snapshot_id: index.snapshot_id,

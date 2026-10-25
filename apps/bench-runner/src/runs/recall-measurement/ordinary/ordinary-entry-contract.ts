@@ -6,8 +6,9 @@ import {
 import { FirstExposurePageSchema } from "../../measurement/first-exposure-session.js";
 import { OrdinaryRecallEnvelopeSchema } from "./ordinary-recall-contract.js";
 
-/** Live public `soul.recall` execution evidence, not an offline capture-operator archive. */
-export const ORDINARY_RECALL_ENTRY_CONTRACT = "ordinary-recall-public-entry-v2" as const;
+/** Live bounded-progress capture policy. Historical v2 stopped on interrupted/unavailable
+ * before following issued tokens; its observations must never be relabelled as v3. */
+export const ORDINARY_RECALL_ENTRY_CONTRACT = "ordinary-recall-public-entry-v3" as const;
 /** Public membership width. Not `SemanticChainConfig.budget.page_budget`. */
 export const ORDINARY_RECALL_PUBLIC_PAGE_SLOTS = SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET;
 /** Occupied delivery slots needed for a resolved @10 prefix. */
@@ -117,6 +118,12 @@ export const OrdinaryRecallExecutionSchema = z.object({
   consumer_model_calls: z.literal(0),
   rows: z.array(OrdinaryRecallQueryRowSchema)
 }).strict();
+/** Read-only adapter for sealed original observations 0–33. Remove when that archive
+ * consumer retires; live execution accepts/writes only the current contract. */
+export const OrdinaryRecallArchiveSchema = z.union([
+  OrdinaryRecallExecutionSchema,
+  OrdinaryRecallExecutionSchema.extend({ contract: z.literal("ordinary-recall-public-entry-v2") })
+]);
 export type OrdinaryRecallEntryInput = z.infer<typeof OrdinaryRecallEntryInputSchema>;
 export type OrdinaryRecallExecution = z.infer<typeof OrdinaryRecallExecutionSchema>;
 export type OrdinaryRecallQueryRow = z.infer<typeof OrdinaryRecallQueryRowSchema>;
