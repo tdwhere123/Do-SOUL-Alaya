@@ -90,6 +90,7 @@ export class SourceIndexLifecycle {
     }
     if (signal?.aborted) throw new AlayaError("CANCELLED", "source lexical preparation cancelled before selection");
     const store = this.repository.lexical;
+    if (store === undefined) throw new AlayaError("UNAVAILABLE", "source lexical preparation is not wired");
     const selection = store.selectLexical(workspaceId, representation);
     const resources = { work: 0, native_bytes: 0 };
     let analysis = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
