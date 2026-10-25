@@ -174,7 +174,12 @@ describe("native worker actual cost", () => {
     } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(CoreError);
     if (!(failure instanceof CoreError)) throw new Error("encoded page refusal expected");
-    expect(failure.details).toMatchObject({ outcome: "resource_exhausted", resource: "encoded_page" });
+    expect(failure.details).toMatchObject({ outcome: "resource_exhausted", resource: "encoded_page",
+      reason: "encoded_byte_overflow", page_fit: { measurement: "complete", byte_overflow: true } });
+    // The final empty shrink attempt must not overwrite the failed nonempty fit.
+    const fit = failure.details?.page_fit as { expected_result_count: number; measured_bytes: number };
+    expect(fit.expected_result_count).toBeGreaterThan(0);
+    expect(fit.measured_bytes).toBeGreaterThan(64);
     const receipt = failure.details?.execution_receipt as { actual: RequestActualCost };
     expect(receipt.actual.phases.observe.budget_work).toBeGreaterThan(0);
     expect(receipt.actual.phases.observe.budget_work).toBeLessThan(budget.work_units);

@@ -23,11 +23,19 @@ export type RecallPageSourceMetadata = Readonly<Record<string, Readonly<{
   source_disclosure?: RecallCandidate["source_disclosure"];
 }>>>;
 
+/** Numeric evidence from the existing encoder decisions, never a second fit policy. */
+export type RecallResultEncodingObservation = Readonly<{
+  candidate_count: number; result_count: number; used_tokens: number;
+  count_limited_entries: number;
+  metadata_block: Readonly<{ essential_bytes: number; remaining_tokens: number }> | null;
+}>;
+
 /** The field and its public adapter use this exact codec. Preview shortening is
  * a UTF-8 prefix operation: displayed source intervals never count decoration.
  */
 export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMap<string, string> = new Map(),
-  maxTotalTokens = 2_000, sourceMetadata: RecallPageSourceMetadata = {}, onEntry?: () => void): readonly MemorySearchResult[] {
+  maxTotalTokens = 2_000, sourceMetadata: RecallPageSourceMetadata = {}, onEntry?: () => void,
+  observe?: (observation: RecallResultEncodingObservation) => void): readonly MemorySearchResult[] {
   if (index.entries.some(entry => entry.interpretation_node !== undefined)) {
     throw new AlayaError("CONFLICT", "conditional interpretation results require the qualified interpretation result capability");
   }
@@ -55,6 +63,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     sum + Math.max(1, Buffer.byteLength(row.preview) + row.essentialBytes), 0));
   const encoded: MemorySearchResult[] = [];
   let usedTokens = 0;
+  let metadataBlock: RecallResultEncodingObservation["metadata_block"] = null;
   for (const row of rows) {
     const { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
       essentialBytes, reasonedBytes } = row;
@@ -64,7 +73,10 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       && reasonedBytes < maxTotalTokens - usedTokens ? reasons : undefined;
     const metadataBytes = retainedReasons === undefined ? essentialBytes : reasonedBytes;
     if (retainedReasons !== undefined) optionalAllowance -= optionalBytes;
-    if (metadataBytes > maxTotalTokens - usedTokens) break;
+    if (metadataBytes > maxTotalTokens - usedTokens) {
+      metadataBlock = { essential_bytes: essentialBytes, remaining_tokens: maxTotalTokens - usedTokens };
+      break;
+    }
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
     const content = fitted?.preview ?? "[payload omitted]", tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
     usedTokens += tokenEstimate;
@@ -81,6 +93,8 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
         remaining_tokens: Math.max(0, maxTotalTokens - usedTokens), within_budget: true } });
   }
+  observe?.({ candidate_count: rows.length, result_count: encoded.length, used_tokens: usedTokens,
+    count_limited_entries: index.entries.length - rows.length, metadata_block: metadataBlock });
   return encoded;
 }
 

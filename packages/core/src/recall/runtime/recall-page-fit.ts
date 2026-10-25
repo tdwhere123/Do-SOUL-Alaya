@@ -2,7 +2,8 @@ import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, indexEnt
   type InformationIndex } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
-import { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex } from "./recall-page-encoding.js";
+import { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex,
+  type RecallResultEncodingObservation } from "./recall-page-encoding.js";
 import { PAYLOAD_OMITTED_PREVIEW } from "./recall-result-encoding.js";
 import { preparedDeliveryId } from "./index-continuation.js";
 import { RecallEnvelopeFraming } from "./recall-envelope-framing.js";
@@ -24,22 +25,48 @@ export function framingReserve(entryCount: number): number {
 export type RecallPageInterruption = "work" | "memory" | "codec";
 
 /** No unmeasured page may be acknowledged; the incoming token remains unconsumed. */
-export function framingInterruption(resource: RecallPageInterruption): CoreError {
+export function framingInterruption(resource: RecallPageInterruption, fit?: RecallPageFitObservation): CoreError {
   return new CoreError("CONFLICT", "Recall public envelope framing interrupted; delivery was not issued", {
-    details: { outcome: "resource_exhausted", resource: `framing_${resource}` }
+    details: { outcome: "resource_exhausted", resource: `framing_${resource}`,
+      reason: "framing_interrupted", ...(fit === undefined ? {} : { page_fit: fit }) }
   });
 }
 
-/** A completed measurement, unlike a work interruption, proves encoded-size refusal. */
-export function pageResourceRefusal(input: Readonly<{
-  message: string; required_bytes?: number; result_count?: number;
-} & ({ request: ConditionalFieldRecallRequest } | { available_bytes: number })>): CoreError {
+/** Bounded private facts about one attempt. No source identities, text, index or
+ * previews cross this diagnostic boundary. Null means not measured, not zero. */
+export type RecallPageFitObservation = Readonly<{
+  measurement: "complete" | "interrupted";
+  expected_result_count: number;
+  representation_page_budget: number;
+  max_total_tokens: number;
+  max_encoded_bytes: number;
+  measured_bytes: number;
+  byte_overflow: boolean | null;
+  encoding: RecallResultEncodingObservation | null;
+  codec_invocations: number;
+  spent_work: number;
+  spent_memory_bytes: number;
+}>;
+
+/** Completed byte measurements and encoded membership are independent fit gates.
+ * A replay can also refuse an otherwise fitted but changed page. */
+export function pageResourceRefusal(input: Readonly<{ message: string } & (
+  { fit: RecallPageFitObservation } | { available_bytes: number; required_bytes: number }
+)>): CoreError {
+  const fit = "fit" in input ? input.fit : undefined;
+  const omitted = fit?.encoding !== null && fit?.encoding !== undefined
+    && fit.encoding.result_count !== fit.expected_result_count;
+  const overflow = fit === undefined || fit.byte_overflow === true;
   return new CoreError("CONFLICT", input.message, {
     details: {
-      outcome: "resource_exhausted", resource: "encoded_page",
-      available_bytes: "request" in input ? deliveryBudgetOf(input.request).max_encoded_bytes : input.available_bytes,
-      ...(input.required_bytes === undefined ? {} : { required_bytes: input.required_bytes }),
-      ...(input.result_count === undefined ? {} : { result_count: input.result_count })
+      outcome: "resource_exhausted",
+      resource: omitted ? "encoded_members" : overflow ? "encoded_page" : "replay_page",
+      reason: omitted ? "encoded_member_omission" : overflow ? "encoded_byte_overflow" : "replay_changed",
+      ...(fit === undefined && "available_bytes" in input
+        ? { available_bytes: input.available_bytes, required_bytes: input.required_bytes }
+        : fit?.byte_overflow === true
+          ? { available_bytes: fit.max_encoded_bytes, required_bytes: fit.measured_bytes } : {}),
+      ...(fit === undefined ? {} : { page_fit: fit })
     }
   });
 }
@@ -52,6 +79,7 @@ export type RecallPageFit = Readonly<{
   readonly bytes: number;
   readonly result_count: number;
   readonly fits: boolean;
+  readonly observation: RecallPageFitObservation;
   /** Set only when the resource owner refused the attempt; `fits` is then false. */
   readonly interruption?: RecallPageInterruption;
 }>;
@@ -74,10 +102,21 @@ export function fitProjectedRecallPage(input: Readonly<{
 }>): RecallPageFit {
   const budget = deliveryBudgetOf(input.request);
   let codecInvocations = 0;
-  const finish = (fit: RecallPageFit): RecallPageFit => {
-    try { input.request.observe_page_fit?.(structuredClone({ ...fit, codec_invocations: codecInvocations })); }
+  let encoding: RecallResultEncodingObservation | null = null;
+  const initialWork = input.meter.spentWork, initialBytes = input.meter.spentBytes;
+  const finish = (fit: Omit<RecallPageFit, "observation">): RecallPageFit => {
+    const observed = { ...fit, observation: {
+      measurement: fit.interruption === undefined ? "complete" as const : "interrupted" as const,
+      expected_result_count: input.index.entries.length,
+      representation_page_budget: input.index.representation.page_budget,
+      max_total_tokens: budget.max_total_tokens, max_encoded_bytes: budget.max_encoded_bytes,
+      measured_bytes: fit.bytes, byte_overflow: fit.interruption === undefined ? fit.bytes > budget.max_encoded_bytes : null,
+      encoding, codec_invocations: codecInvocations,
+      spent_work: input.meter.spentWork - initialWork, spent_memory_bytes: input.meter.spentBytes - initialBytes
+    } };
+    try { input.request.observe_page_fit?.(structuredClone({ ...observed, codec_invocations: codecInvocations })); }
     catch { /* Diagnostics cannot change fitting, resource refusal or issuance. */ }
-    return fit;
+    return observed;
   };
   // No page is framed for free: below the envelope floor the attempt is refused
   // before the codec runs.
@@ -101,7 +140,7 @@ export function fitProjectedRecallPage(input: Readonly<{
   try {
     framing.begin();
     const results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
-      () => framing.entry());
+      () => framing.entry(), observation => { encoding = observation; });
     const index = frameEncodedIndex(input.index, results);
     // An omission placeholder is not a captured preview; keeping it out of the surface
     // cache lets a zero-payload page prove that it exposed no text.

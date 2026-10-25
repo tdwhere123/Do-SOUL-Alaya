@@ -1,6 +1,6 @@
 import { nativeNavigationProjection, type NativeFieldNavigation } from "./native-navigation-projection.js";
 import { deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
-  type RecallPageInterruption } from "./recall-page-fit.js";
+  type RecallPageInterruption, type RecallPageFitObservation } from "./recall-page-fit.js";
 import type { RecallProgressDelivery } from "./recall-progress-delivery.js";
 import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger,
   CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema, sharedProductIdentity, indexEntryCacheKey,
@@ -88,12 +88,12 @@ export function projectFromField(
     } finally {
       cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
     }
-    if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption);
+    if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption, fitted.observation);
     if (!fitted.fits || stableCanonicalStringify(fitted.index) !== stableCanonicalStringify(replayed)
       || replayed.entries.some(entry => fitted.previews.get(indexEntryCacheKey(entry))
         !== surface?.previews.get(indexEntryCacheKey(entry)))) {
       throw pageResourceRefusal({ message: "Recall replay cannot fit its unchanged public envelope",
-        request: input, required_bytes: fitted.bytes });
+        fit: fitted.observation });
     }
     attachIndexSurfaces(replayed, fitted.previews, surface?.metadata ?? {});
     retain?.({ ...retained, remaining_memory_bytes: meter.bytes, ...remainingWorkFields(retained, meter.work) });
@@ -145,7 +145,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
   // A work or memory interruption is an ordinary recoverable page: the membership,
   // its continuation and the incurred cost are retained so the caller can resume with
   // a larger budget. Only a page that kept failing to fit while work remained is a
-  // deterministic encoded-size refusal.
+  // deterministic fit refusal (encoded bytes or missing encoded members).
   if (fitted.interruption !== undefined) {
     if (context.progress_delivery?.control !== undefined) {
       const control = context.progress_delivery.control;
@@ -165,9 +165,9 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
     } finally {
       cost.add("index", { budget_work: controlMeter.spentWork, charged_retained_bytes: controlMeter.spentBytes });
     }
-    if (control.interruption !== undefined) throw framingInterruption(control.interruption);
+    if (control.interruption !== undefined) throw framingInterruption(control.interruption, control.observation);
     if (!control.fits) throw pageResourceRefusal({ message: "Recall interruption cannot fit its public envelope",
-      request: input, required_bytes: control.bytes });
+      fit: control.observation });
     payload.remainingMemoryBytes = controlMeter.bytes;
     attachIndexSurfaces(interrupted, new Map(), {});
     // An interrupted expansion delivers no membership, so it is not staged as an
@@ -195,9 +195,8 @@ function withInterruptedPayload(index: InformationIndex): InformationIndex {
     continuation: index.continuation ?? null };
 }
 
-/** One payload-envelope fit. Resource interruption and deterministic size refusal stay
- * separate facts: only a page that was actually encoded and still exceeds its declared
- * encoded allowance is terminal. */
+/** One payload-envelope fit. Interrupted measurement is distinct from a completed
+ * attempt that exceeds the byte cap or cannot encode every selected member. */
 function fitPageEnvelope(context: ProjectionContext, assembled: InformationIndex, work_units: number): Readonly<{
   index: InformationIndex; previews: ReadonlyMap<string, string>;
   interruption?: RecallPageInterruption; remaining_work: number; remaining_memory_bytes: number;
@@ -218,7 +217,7 @@ function fitPageEnvelope(context: ProjectionContext, assembled: InformationIndex
   }
   if (!fitted.fits) {
     throw pageResourceRefusal({ message: "Recall page cannot fit its required public envelope",
-      request: input, required_bytes: fitted.bytes, result_count: fitted.result_count });
+      fit: fitted.observation });
   }
   return { index: fitted.index, previews: fitted.previews,
     remaining_work: meter.work, remaining_memory_bytes: meter.bytes };
@@ -236,7 +235,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
   let current = context;
   let width = context.input.budget.page_budget;
   let droppedNonEmpty = false;
-  let requiredMembershipBytes: number | undefined;
+  let refusedMembershipFit: RecallPageFitObservation | undefined;
   for (;;) {
     const candidate = projectMembershipCandidate({ ...current,
       input: { ...current.input, budget: { ...current.input.budget, page_budget: width } } });
@@ -285,11 +284,11 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     }
     if (candidate.index.entries.length > 0) {
       droppedNonEmpty = true;
-      requiredMembershipBytes = fitted.bytes;
+      refusedMembershipFit = fitted.observation;
     }
     if (width === 0 || candidate.index.entries.length === 0 || fitted.result_count === 0) {
       throw pageResourceRefusal({ message: "Recall output budget cannot carry its required public envelope",
-        request: current.input, required_bytes: requiredMembershipBytes ?? fitted.bytes });
+        fit: refusedMembershipFit ?? fitted.observation });
     }
     // A failed fit commits nothing. Carry the post-fit remaining allowance into the
     // narrower retry so framing and hydration work is never restored or double-spent.
@@ -351,9 +350,9 @@ function commitInterruptedMembership(context: ProjectionContext,
   } finally {
     context.cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
   }
-  if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption);
+  if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption, fitted.observation);
   if (!fitted.fits) throw pageResourceRefusal({ message: "Recall interruption cannot fit its public envelope",
-    request: context.input, required_bytes: fitted.bytes });
+    fit: fitted.observation });
   control.payload.remainingMemoryBytes = meter.bytes + prepared.retention_bytes;
   const committed = commitPreparedIndex({ prepared: { ...prepared, retained: {
     ...prepared.retained, ...remainingWorkFields(prepared.retained, meter.work) } },

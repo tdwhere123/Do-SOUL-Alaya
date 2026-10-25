@@ -48,9 +48,9 @@ export function prepareRecallProgressDelivery(input: ConditionalFieldRecallReque
     cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
     cost.addFieldBudgetWork(meter.spentWork);
   }
-  if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption);
+  if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption, fitted.observation);
   if (!fitted.fits) throw pageResourceRefusal({ message: "Recall output budget cannot carry its required public envelope",
-    request: input, required_bytes: fitted.bytes });
+    fit: fitted.observation });
   return { ...identity, control: fitted.index, spent_work: meter.spentWork,
     spent_memory: meter.spentBytes, retention_hold: retention, control_generation: generation };
 }

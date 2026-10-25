@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { SourceSemanticResourceLedger, sourceIndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { encodeRecallResult } from "../../../recall/runtime/recall-result-encoding.js";
 import { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex } from "../../../recall/runtime/recall-page-encoding.js";
-import { fitProjectedRecallPage } from "../../../recall/runtime/recall-page-fit.js";
+import { fitProjectedRecallPage, framingInterruption, pageResourceRefusal } from "../../../recall/runtime/recall-page-fit.js";
 import { runConditionalFieldRecallWithReceipt } from "../../../recall/runtime/recall-service-runner.js";
 import type { ConditionalFieldRecallRequest } from "../../../recall/runtime/recall-service-runner-types.js";
 import { defaultBudget, FAR_FUTURE_EXPIRY } from "../conditional-field/reference/deployment.fixture.js";
@@ -38,6 +38,43 @@ it.each(["interrupted", "unknown", "invalidated", "unavailable", "resource_rejec
     expect(response.results[0]?.content_preview).toBe("[payload omitted]");
     expect(response.results[0]?.target.kind === "source_evidence" ? response.results[0].target.span : undefined).toBeUndefined();
   });
+
+it.each(["count", "metadata", "both fit gates"])("distinguishes %s omission from a fitted empty page", kind => {
+  const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "private-source",
+    source_version: "1", content_digest: `sha256:${"c".repeat(64)}`, evidence_object_id: null,
+    association_milligrades: 500, hypothesis_id: "source", output_binding: "source", program_state: "matched", time_state: "current" });
+  const page = { ...index, entries: [entry], as_of: request.as_of,
+    representation: { ...index.representation, page_budget: kind === "count" ? 0 : 1 } };
+  const meter = new SourceSemanticResourceLedger({ work_units: 10_000, memory_bytes: 1_000_000 });
+  const fitRequest = { ...request,
+    delivery_budget: { max_total_tokens: kind === "count" ? 2_000 : 1,
+      max_encoded_bytes: kind === "both fit gates" ? 1 : 1_000_000 } };
+  const fitted = fitProjectedRecallPage({ index: page, previews: new Map(), metadata: {}, meter,
+    request_digest: "omission", request: fitRequest });
+  expect(fitted.fits).toBe(false);
+  expect(fitted.index.entries).toHaveLength(1);
+  expect(fitted.result_count).toBe(0);
+  expect(fitted.index.completeness.transport).toBe("partial");
+  expect(fitted.interruption).toBeUndefined();
+  const refusal = pageResourceRefusal({ message: "refused", fit: fitted.observation });
+  expect(refusal.details).toMatchObject({ resource: "encoded_members", reason: "encoded_member_omission",
+    page_fit: { measurement: "complete", expected_result_count: 1,
+      byte_overflow: kind === "both fit gates", encoding: { candidate_count: kind === "count" ? 0 : 1,
+        result_count: 0, used_tokens: 0, count_limited_entries: kind === "count" ? 1 : 0 } } });
+  if (kind === "count") expect(fitted.observation.encoding?.metadata_block).toBeNull();
+  else {
+    expect(fitted.observation.encoding?.metadata_block?.remaining_tokens).toBe(1);
+    expect(fitted.observation.encoding?.metadata_block?.essential_bytes).toBeGreaterThan(1);
+  }
+  if (kind !== "both fit gates") {
+    expect(fitted.bytes).toBeLessThan(fitRequest.delivery_budget.max_encoded_bytes);
+    expect(refusal.details).not.toHaveProperty("required_bytes");
+  }
+  expect(fitted.observation.spent_work).toBe(meter.spentWork);
+  expect(meter.spentWork).toBeGreaterThan(0);
+  expect(JSON.stringify(refusal.details)).not.toContain("private-source");
+  expect(Buffer.byteLength(JSON.stringify(refusal.details))).toBeLessThan(1_024);
+});
 
 function frame(envelope: unknown, work = 1000, maxBytes = 1_000_000) {
   const meter = new SourceSemanticResourceLedger({ work_units: work, memory_bytes: 1_000_000 });
@@ -118,6 +155,8 @@ it("measures JSON escaping and UTF-8 exactly without allocating an enclosing JSO
   const measured = frame(envelope);
   expect(measured.fit.bytes).toBe(expected);
   expect(measured.fit.fits).toBe(true);
+  expect(measured.fit.observation).toMatchObject({ measurement: "complete", byte_overflow: false,
+    expected_result_count: 0, encoding: { result_count: 0, metadata_block: null }, measured_bytes: expected });
   expect(measured.encode).toHaveBeenCalledTimes(1);
   expect(measured.meter.spentWork).toBeGreaterThan(2);
   expect(measured.meter.spentBytes).toBe(0);
@@ -129,6 +168,11 @@ it("stops a large empty envelope at the work boundary instead of clipping its re
   expect(limited.encode).toHaveBeenCalledTimes(1);
   expect(limited.fit).toMatchObject({ fits: false, interruption: "work" });
   expect(limited.meter.spentWork).toBe(2);
+  expect(framingInterruption(limited.fit.interruption!, limited.fit.observation).details).toMatchObject({
+    resource: "framing_work", reason: "framing_interrupted", page_fit: {
+      measurement: "interrupted", byte_overflow: null, spent_work: 2, codec_invocations: 1
+    }
+  });
   const complete = frame(envelope, 100);
   expect(complete.fit.fits).toBe(true);
   expect(complete.fit.bytes).toBe(Buffer.byteLength(JSON.stringify(envelope)));
@@ -147,6 +191,11 @@ it("records an oversized empty envelope as measured size refusal, not valid-empt
   expect(measured.fit.fits).toBe(false);
   expect(measured.fit.interruption).toBeUndefined();
   expect(measured.fit.bytes).toBe(100_012);
+  expect(pageResourceRefusal({ message: "refused", fit: measured.fit.observation }).details).toMatchObject({
+    resource: "encoded_page", reason: "encoded_byte_overflow", available_bytes: 64, required_bytes: 100_012,
+    page_fit: { measurement: "complete", byte_overflow: true, expected_result_count: 0,
+      encoding: { result_count: 0, metadata_block: null } }
+  });
   expect(measured.meter.spentWork).toBe(100);
 });
 
@@ -155,6 +204,8 @@ it("refuses before invoking a codec when even its entry cannot be paid", () => {
   expect(measured.encode).not.toHaveBeenCalled();
   expect(measured.fit.interruption).toBe("work");
   expect(measured.meter.spentWork).toBe(0);
+  expect(measured.fit.observation).toMatchObject({ measurement: "interrupted", encoding: null,
+    codec_invocations: 0, byte_overflow: null, spent_work: 0 });
 });
 
 it("charges codec entry before a thrown callback and preserves its cause", () => {
