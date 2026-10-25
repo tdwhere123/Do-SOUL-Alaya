@@ -173,16 +173,16 @@ export class SourceIndexProducer {
       throw new AlayaError("CONFLICT", this.stopping ? "producer_stopped" : "producer_occupied");
     }
     const limits = restrictPassLimits(this.limits, remaining);
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), limits.stepDeadlineMs);
-    const signal = AbortSignal.any([this.signal.signal, deadline.signal]);
+    // A timer cannot interrupt synchronous SQLite/Jieba work. Core checks the actual clock
+    // between bounded operations and yields between batches; occupancy lasts through settlement.
+    const deadlineMs = Date.now() + limits.stepDeadlineMs, signal = this.signal.signal;
     const work = Promise.resolve().then(() => this.lifecycle.prepareLexical(workspaceId, representation, {
       work: limits.work, native_bytes: limits.nativeBytes, capture_page: limits.capturePage,
       max_capture_pages: limits.maxCapturePages, max_roots: limits.maxRootsPerPass, max_body_bytes: limits.maxBodyBytes
-    }, signal));
+    }, signal, deadlineMs));
     this.inFlight = work;
     try { return await work; }
-    finally { clearTimeout(timer); if (this.inFlight === work) this.inFlight = null; }
+    finally { if (this.inFlight === work) this.inFlight = null; }
   }
 
   private trackNative<T>(operation: () => Promise<T>): Promise<T> {

@@ -349,6 +349,14 @@ SQLite-internal work, process memory or model cost. Failed operations report low
 accounting. Bounded selection/generation bookkeeping is administrative work, outside
 these native-source read counters. Worker warmup uses a separate indexed administrative selector probe, not
 source enumeration; native analyzer load cost is not measured by the query ledger.
+Lexical preparation checks the producer's absolute wall-clock deadline around bounded
+operations and before publication, and yields between census/root batches so queued
+cancellation can run. After selection, interruption returns partial with its reason,
+incurred resources and the last observed generation snapshot; it does not reread state
+after stopping. An already stopped call is rejected before selection.
+Persisted work remains resumable. Neither a timer nor these checks preempt an individual
+SQLite/Jieba call; a publication already committed by an in-flight activation is not
+rolled back or relabeled unpublished. Producer stop retains occupancy until settlement.
 
 Protocol 23.2.0 adds optional lexical generation/representation binding to captured
 tokenization and its compact tuple (invariant §25 minor). Existing policy tags and

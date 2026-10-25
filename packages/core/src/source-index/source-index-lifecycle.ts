@@ -1,3 +1,4 @@
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import {
   SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexCapacityExceeded, SourceIndexConfigurationSchema, SourceIndexOperationError,
   AlayaError, BoundedIdSchema, canonicalJson, SourceIndexLexicalRepresentationSchema,
@@ -78,17 +79,26 @@ export class SourceIndexLifecycle {
 
   /** Explicit model-independent pass. Warming precedes native reads, never a query snapshot/backfill.
    * Selection changes withdraw prior lexical eligibility just as vector selection does for vectors.
-   * Pending-target anti-join and captured census cursors are durable; restarts need no caller cursor. */
+   * Pending-target anti-join and captured census cursors are durable; restarts need no caller cursor.
+   * deadlineMs is an optional absolute wall-clock deadline, as in SourceIndexBackfill. Checks do not
+   * preempt a native call; batch yields admit queued cancellation. Interruption retains the last
+   * observed generation snapshot and all consumed resources, never inventing a post-stop readback. */
   public async prepareLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation,
-    budget: SourceIndexLexicalPassBudget, signal?: AbortSignal): Promise<SourceIndexLexicalPassResult> {
+    budget: SourceIndexLexicalPassBudget, signal?: AbortSignal, deadlineMs?: number): Promise<SourceIndexLexicalPassResult> {
     BoundedIdSchema.parse(workspaceId); SourceIndexLexicalRepresentationSchema.parse(representation);
     const limits = structuredClone(budget);
     if ([limits.work, limits.native_bytes, limits.capture_page, limits.max_capture_pages, limits.max_roots, limits.max_body_bytes]
         .some(value => !Number.isSafeInteger(value) || value < 0) || limits.capture_page < 1 ||
-        limits.capture_page > SOURCE_INDEX_MAX_PAGE_ROWS || limits.max_body_bytes > SOURCE_INDEX_MAX_BODY_BYTES) {
+        limits.capture_page > SOURCE_INDEX_MAX_PAGE_ROWS || limits.max_body_bytes > SOURCE_INDEX_MAX_BODY_BYTES ||
+        deadlineMs !== undefined && !Number.isSafeInteger(deadlineMs)) {
       throw new AlayaError("VALIDATION", "invalid source lexical preparation budget");
     }
-    if (signal?.aborted) throw new AlayaError("CANCELLED", "source lexical preparation cancelled before selection");
+    const cancelled = new AlayaError("CANCELLED", "cancelled"), expired = new AlayaError("TIMEOUT", "deadline_exceeded");
+    const checkpoint = () => {
+      if (signal?.aborted) throw cancelled;
+      if (deadlineMs !== undefined && Date.now() >= deadlineMs) throw expired;
+    };
+    checkpoint();
     const store = this.repository.lexical;
     if (store === undefined) throw new AlayaError("UNAVAILABLE", "source lexical preparation is not wired");
     const selection = store.selectLexical(workspaceId, representation);
@@ -100,35 +110,43 @@ export class SourceIndexLifecycle {
       accounting: "complete" | "lower_bound" = "complete"): SourceIndexLexicalPassResult =>
       ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0 });
     try {
-      if (signal?.aborted) return result("partial", "cancelled");
-      if (representation === "segmented-unicode61.v1" &&
-          (!await warmCjkSegmentation() || readSourceIndexLexicalAnalysisStatus() !== "ready")) return result("unavailable", "segmenter_unavailable");
-      if (signal?.aborted) return result("partial", "cancelled");
+      checkpoint();
+      const warmed = representation !== "segmented-unicode61.v1" || await warmCjkSegmentation();
+      checkpoint();
+      if (!warmed || representation === "segmented-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
+        return result("unavailable", "segmenter_unavailable");
+      }
       generation = store.beginLexical(selection);
-      for (let page = 0; page < limits.max_capture_pages && !generation.enumeration_complete && !signal?.aborted; page++) {
+      checkpoint();
+      for (let page = 0; page < limits.max_capture_pages && !generation.enumeration_complete; page++) {
         const captured = store.captureLexicalPage(workspaceId, generation.generation_id, limits.capture_page, left());
         debit(captured.resources); generation = captured.generation;
+        checkpoint();
+        await yieldToEventLoop(); checkpoint();
         if (captured.resources.work === 0) break;
       }
-      for (let root = 0; root < limits.max_roots && !signal?.aborted; root++) {
+      for (let root = 0; root < limits.max_roots; root++) {
         const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());
-        debit(pending.resources);
+        debit(pending.resources); checkpoint();
         if (pending.source === null) {
           if (!pending.complete) return result("partial", "read_budget");
           break;
         }
         const read = store.readLexicalDocument(workspaceId, generation.generation_id, pending.source.root_key, limits.max_body_bytes, left());
-        debit(read.resources);
+        debit(read.resources); checkpoint();
         if (read.status !== "ready") return result(read.status, read.reason);
         const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body, left());
         debit(write.resources); analysis += write.analysis_units;
+        checkpoint();
         if (write.status !== "accepted") {
           const rejected = preparationRejection(write.reason, resources);
           return result(rejected.status, rejected.reason);
         }
+        await yieldToEventLoop(); checkpoint();
       }
+      await yieldToEventLoop(); checkpoint();
       generation = store.lexicalGeneration(workspaceId, generation.generation_id);
-      if (signal?.aborted) return result("partial", "cancelled");
+      checkpoint();
       if (generation === null) return result("unbound", "missing_generation");
       const publish = store.activateLexical(workspaceId, generation.generation_id);
       generation = store.lexicalGeneration(workspaceId, generation.generation_id);
@@ -136,6 +154,8 @@ export class SourceIndexLifecycle {
       const rejected = preparationRejection(publish.reason, resources);
       return result(rejected.status, rejected.reason);
     } catch (error) {
+      if (error === cancelled) return result("partial", cancelled.message);
+      if (error === expired) return result("partial", expired.message);
       if (error instanceof SourceIndexOperationError) debit(error.resources);
       return result("unavailable", error instanceof Error ? error.message : "lexical_preparation_failed", "lower_bound");
     }
