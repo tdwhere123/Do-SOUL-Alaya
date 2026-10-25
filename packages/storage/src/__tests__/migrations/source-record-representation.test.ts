@@ -12,6 +12,7 @@ import { SqliteFieldEraseBarrierRepo } from "../../repos/field/erase-repo.js";
 import { sourceRecordFromRow } from "../../repos/field/mappers/field-receipts.js";
 import type { FieldSourceRecordRow } from "../../repos/field/ports.js";
 import { fieldSha256, hashedRecord, seedWorkspaces } from "../repos/field/field-contract-fixture.js";
+import { writeRetainedSourceChunks } from "../../repos/field/retained-source-chunks.js";
 import { applyBaselineSql } from "./apply-baseline.js";
 
 const databases: StorageDatabase[] = [], directories: string[] = [];
@@ -134,7 +135,17 @@ it("reads a sealed pre-representation schema as unknown and adds only nullable m
   const filename = join(directory, "legacy.sqlite"), connection = new BetterSqlite3(filename);
   const database = new StorageDatabase(filename, connection); databases.push(database);
   applyBaselineSql(connection, 19); seedWorkspaces(database);
-  const records = new SqliteFieldSourceRecordRepo(database, fieldSha256), row = records.insert(source("legacy", "unchanged text"));
+  const records = new SqliteFieldSourceRecordRepo(database, fieldSha256), row = source("legacy", "unchanged text");
+  expect(() => records.insert(row)).toThrow(/current host-capable/);
+  connection.prepare(`INSERT INTO source_records (record_id, workspace_id, source_id, source_version,
+    content_digest, evidence_object_id, recorded_at, event_time, valid_from, valid_to, operator_id, speaker,
+    scope_class, attribution_context_json, source_body, retained_content_bytes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(row.record_id, row.workspace_id, row.source_id, row.source_version, row.content_digest, row.evidence_object_id,
+      row.recorded_at, row.event_time, row.valid_from, row.valid_to, row.operator_id, row.speaker, row.scope_class,
+      JSON.stringify(row.attribution_context), row.source_body, Buffer.byteLength(row.source_body!));
+  writeRetainedSourceChunks(database, { workspaceId: row.workspace_id, kind: "source_record", rootId: row.record_id,
+    revision: row.source_version, digest: row.content_digest }, row.source_body!);
   const before = connection.prepare("SELECT * FROM source_records").all();
   connection.pragma("query_only = ON");
   expect(new SqliteFieldSourceRecordRepo(database, fieldSha256).findByIdBounded("workspace-1", row.record_id, 4096, 0)?.record).toEqual(row);

@@ -1,10 +1,13 @@
+import { readHostInventory, type HostInventoryReadInput, type HostInventoryReadResult } from "./host-inventory-read.js";
 import { StorageError } from "../../shared/errors.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
-import { canonicalJson, IsoDatetimeStringSchema, sameSourceRecordFields as sameRecord } from "@do-soul/alaya-protocol";
+import { HOST_OCCURRENCE_LIMITS, bindHostOccurrenceInventory, describeHostStructure, canonicalJson, IsoDatetimeStringSchema, sameSourceRecordFields as sameRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
-import { readSourceProjectionDependencies, type SourceRecordReadAllowance } from "./source-representation-read.js";
+import { readSourceProjectionDependencies, SOURCE_RECORD_METADATA_BYTE_MAX as SOURCE_METADATA_BYTE_MAX,
+  SOURCE_RECORD_METADATA_COLUMNS as SOURCE_METADATA_COLUMNS, CURRENT_SOURCE_RECORD_ORDER as CURRENT_RECORD_ORDER,
+  type SourceRecordReadAllowance } from "./source-representation-read.js";
 import {
   parseOptionalRow,
   parseRows,
@@ -35,16 +38,12 @@ import type {
 
 const SOURCE_RECORD_PAGE_MAX = 512;
 const SOURCE_BODY_BYTE_MAX = 65_536;
-const SOURCE_METADATA_BYTE_MAX = 7864;
-const SOURCE_METADATA_COLUMNS = ["record_id", "workspace_id", "source_id", "source_version", "content_digest",
-  "evidence_object_id", "recorded_at", "event_time", "valid_from", "valid_to", "operator_id", "speaker", "scope_class",
-  "attribution_context_json", "source_representation_json"] as const;
-const CURRENT_RECORD_ORDER = "alaya_utc_order_key(source_records.recorded_at) DESC, source_records.record_id DESC";
 
 // The canonical body is never selected by a Recall read. Even BLOB substr
 // materializes a complete TEXT value inside SQLite before returning its prefix.
-function sourceRecordReadSql(representationColumn: boolean) {
-  const value = (column: string) => column === "source_representation_json" && !representationColumn ? "NULL" : column;
+function sourceRecordReadSql(representationColumn: boolean, hostStructureColumn: boolean) {
+  const value = (column: string) => (column === "source_representation_json" && !representationColumn ||
+    column === "host_structure_json" && !hostStructureColumn) ? "NULL" : column;
   const metadataBytes = SOURCE_METADATA_COLUMNS.map(column => `COALESCE(octet_length(${value(column)}), 0)`).join(" + ");
   return {
     full: `SELECT ${SOURCE_METADATA_COLUMNS.map(column => `${value(column)} AS ${column}`).join(", ")}, source_body FROM source_records`,
@@ -86,6 +85,7 @@ const SPAN_SELECT = `
 
 export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly representationColumn: boolean;
+  private readonly hostStructureColumn: boolean;
   private readonly recordReadSql;
   private readonly nextCurrentBoundedStatement;
   private readonly currentBoundedStatement;
@@ -104,7 +104,9 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   ) {
     this.representationColumn = database.connection.prepare("PRAGMA table_info(source_records)").all()
       .some(column => (column as { name: string }).name === "source_representation_json");
-    this.recordReadSql = sourceRecordReadSql(this.representationColumn);
+    this.hostStructureColumn = database.connection.prepare("PRAGMA table_info(source_records)").all()
+      .some(column => (column as { name: string }).name === "host_structure_json");
+    this.recordReadSql = sourceRecordReadSql(this.representationColumn, this.hostStructureColumn);
     this.nextCurrentBoundedStatement = new RefreshableStatementHolder(database, (activeDatabase) =>
       activeDatabase.connection.prepare(`${this.recordReadSql.bounded}
         INDEXED BY idx_source_records_current
@@ -119,8 +121,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-        operator_id, speaker, scope_class, attribution_context_json, ${this.representationColumn ? "source_representation_json," : ""} source_body, retained_content_bytes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${this.representationColumn ? "?," : ""} ?, ?)
+        operator_id, speaker, scope_class, attribution_context_json, ${this.representationColumn ? "source_representation_json," : ""} ${this.hostStructureColumn ? "host_structure_json," : ""} source_body, retained_content_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${this.representationColumn ? "?," : ""} ${this.hostStructureColumn ? "?," : ""} ?, ?)
       ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(
@@ -164,6 +166,9 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     if (row.source_representation !== undefined && !this.representationColumn) {
       throw new StorageError("VALIDATION_FAILED", "source representation requires the current storage schema");
     }
+    if (!this.hostStructureColumn) {
+      throw new StorageError("VALIDATION_FAILED", "source writes require the current host-capable storage schema");
+    }
     verifyPersistedSourceRecord(row, this.sha256);
     if (this.findById(row.workspace_id, row.record_id) === null) {
       assertSubjectNotErased(this.database, row.workspace_id, "source_record", row.record_id);
@@ -183,6 +188,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
           row.valid_from, row.valid_to, row.operator_id, row.speaker, row.scope_class,
           row.attribution_context === null ? null : canonicalJson(row.attribution_context),
           ...(this.representationColumn ? [row.source_representation === undefined ? null : canonicalJson(row.source_representation)] : []),
+          ...(this.hostStructureColumn ? [row.host_structure === undefined ? null : canonicalJson(row.host_structure)] : []),
           row.source_body, row.source_body === null ? null : Buffer.byteLength(row.source_body, "utf8")
         ),
         () => this.findById(row.workspace_id, row.record_id),
@@ -203,6 +209,36 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       }
       return persisted;
     }, "source record with evidence binding");
+  }
+
+  public readHostInventory(input: HostInventoryReadInput): HostInventoryReadResult {
+    return readHostInventory(this.database, input, this.sha256,
+      { hostStructure: this.hostStructureColumn, representation: this.representationColumn });
+  }
+
+  public getHostInventory(workspaceId: string, recordId: string): string | null {
+    if (!this.hostStructureColumn) return null;
+    const row = this.database.connection.prepare(`SELECT canonical_inventory FROM source_host_inventories
+      WHERE workspace_id = ? AND record_id = ? AND octet_length(canonical_inventory) <= ?`)
+      .get(workspaceId, recordId, HOST_OCCURRENCE_LIMITS.inventoryBytes) as
+      { canonical_inventory: string } | undefined;
+    return row?.canonical_inventory ?? null;
+  }
+
+  public putHostInventory(workspaceId: string, recordId: string, canonicalInventory: string): void {
+    const record = this.findById(workspaceId, recordId);
+    if (record?.source_body == null || record.host_structure === undefined) {
+      throw new StorageError("VALIDATION_FAILED", "host inventory requires a retained captured source");
+    }
+    const inventory = bindHostOccurrenceInventory(JSON.parse(canonicalInventory), record.source_body);
+    if (canonicalJson(inventory) !== canonicalInventory ||
+        canonicalJson(describeHostStructure(record, inventory, this.sha256)) !== canonicalJson(record.host_structure)) {
+      throw new StorageError("VALIDATION_FAILED", "host inventory binding differs from source");
+    }
+    const existing = this.getHostInventory(workspaceId, recordId);
+    if (existing !== null && existing !== canonicalInventory) throw new StorageError("VALIDATION_FAILED", "host inventory replay mismatch");
+    this.database.connection.prepare(`INSERT INTO source_host_inventories VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id, record_id) DO NOTHING`).run(workspaceId, recordId, canonicalInventory);
   }
 
   public verifiedEvidenceBinding(workspaceId: string, evidenceObjectId: string): boolean {

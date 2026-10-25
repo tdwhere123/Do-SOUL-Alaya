@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 22.0.0, engine gateway 2.0.0
+## Unreleased — protocol 22.1.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,16 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 22.1.0 adds optional source-bound host-occurrence descriptors and the
+non-discriminator `message` span purpose (invariant §25, minor). Core captures
+ordered byte-bound host facts through trusted admission context or exactly retains
+an existing inventory; SQLite migration 024 preserves it separately and erasure
+scrubs its payload. Product reports remain excerpts, not authenticated authors or
+complete upstream messages. Explicit complete-message captures alone derive message
+spans. Ordinary delivery, legacy attribution, root speaker, model bytes and factor
+formation semantics are unchanged; new source revisions still invalidate dependent
+indexes and preparation state. Inventory reads are opt-in and separately bounded.
 
 Protocol 22.0.0 expands native SourceIndex nomination to retained evidence-capsule
 roots under invariant §25 (major). Capsule `source_id` is explicitly null;

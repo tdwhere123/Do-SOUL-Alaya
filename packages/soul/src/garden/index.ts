@@ -149,6 +149,7 @@ export {
 export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
+  renderOfficialApiSourceCorpus,
   buildOfficialApiVerifiedUserAssertionSource,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   parseOfficialApiSourceLocator,

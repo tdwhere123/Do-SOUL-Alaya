@@ -7,6 +7,7 @@ import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   createSourceAdmissionPort,
+  appendSourceRecordAdmitted,
   createAuditedSourceAdmission,
   createAuditedSourceReplacement,
   fieldContractSha256,
@@ -69,7 +70,10 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     fieldSource: new SqliteSourceRootRecallReader(input.fieldComposition.fieldRepos.records, input.evidenceCapsuleRepo),
     sourceAdmission: createSourceAdmissionPort({
       sha256: fieldContractSha256,
-      stores: input.fieldComposition.stores
+      stores: input.fieldComposition.stores,
+      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+        producer: "post-turn", basis: "reported_excerpt" }),
+      audit: record => appendSourceRecordAdmitted(input.eventLogRepo, record, input.runtimeNotifier)
     }),
     objectAnchorGate: input.pathRelationProposalService,
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),

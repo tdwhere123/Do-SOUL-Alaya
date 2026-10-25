@@ -13,6 +13,7 @@ import {
   MemoryService,
   SignalService,
   createSourceAdmissionPort,
+  appendSourceRecordAdmitted,
   createSignalEmissionWriter,
   fieldContractSha256
 } from "@do-soul/alaya-core";
@@ -83,7 +84,10 @@ describe("ordinary extraction source interpretation adapters", () => {
         })
       });
       const sourceAdmission = createSourceAdmissionPort({
-        stores: field.stores, sha256: fieldContractSha256
+        stores: field.stores, sha256: fieldContractSha256,
+        hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+          producer: "post-turn", basis: "reported_excerpt" }),
+        audit: record => appendSourceRecordAdmitted(eventLogRepo, record, notifier)
       });
       const router = createMaterializationRouter({
         wiring: {
@@ -130,7 +134,7 @@ describe("ordinary extraction source interpretation adapters", () => {
           turn_digest: { last_messages: [{ role: "user", content_excerpt: LONG_ASSERTION }] } },
         { workspaceId: "workspace-1", runId: "run-1", agentTarget: "codex", sessionId: "session-1" },
         createDeliveryRecord({ delivered_at: CLOCK }));
-      if (mode === "post-turn") { enqueue(); enqueue(); }
+      if (mode === "post-turn") { await enqueue(); await enqueue(); }
       const taskId = gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10)[0]?.id;
       let signalOrdinal = 0;
       const provider = new OfficialApiGardenProvider({

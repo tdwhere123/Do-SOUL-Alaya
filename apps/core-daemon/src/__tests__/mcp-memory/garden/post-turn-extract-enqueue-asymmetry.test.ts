@@ -54,16 +54,16 @@ describe("post-turn extract enqueue", () => {
     expect("buildRecallExtractTaskId" in postTurnExtractQueue).toBe(false);
   });
 
-  it("report enqueue THROWS on a non-duplicate enqueue failure", () => {
+  it("report enqueue rejects on a non-duplicate enqueue failure", async () => {
     const deps = { gardenTaskRepo: failingGardenTaskRepo() } as unknown as RecallUsageHandlerDependencies;
 
-    expect(() =>
+    await expect(
       enqueuePostTurnExtractTask(
         { deps, now: () => "2026-06-23T00:00:00.000Z" },
         reportRequest,
         context,
         linkedDelivery
       )
-    ).toThrow("storage unavailable");
+    ).rejects.toThrow("storage unavailable");
   });
 });

@@ -1,5 +1,8 @@
+import { isHostOccurrenceResourceLimit } from "@do-soul/alaya-protocol";
 import type {
   SourceAdmissionPort,
+  SourceAdmissionRequest,
+  HostOccurrence,
   SourceRecordIdentity,
   SourceRepresentation,
   SourceScopeClass,
@@ -27,11 +30,12 @@ export function admitPostTurnSourceRoot(input: Readonly<{
   readonly speaker?: SourceSpeakerRole;
   readonly scope_class?: SourceScopeClass;
   readonly source_representation?: SourceRepresentation;
-}>): SourceRecordIdentity | null {
+  readonly host_occurrences?: readonly HostOccurrence[];
+}>): Readonly<{ record: SourceRecordIdentity; hostCapture: "captured" | "unknown" | "uncaptured_resource_limit" }> | null {
   if (input.content.length === 0 && input.source_representation?.kind !== "retained_excerpt") {
     return null;
   }
-  return input.admission.admit({
+  const request: SourceAdmissionRequest = {
     workspace_id: input.workspaceId,
     source_id: input.sourceId,
     source_version: "1",
@@ -51,5 +55,25 @@ export function admitPostTurnSourceRoot(input: Readonly<{
         purpose: "native_structure"
       }
     ]
-  }).record;
+  };
+  const context = { workspaceId: input.workspaceId };
+  if (input.admission.findRetained === undefined) throw new Error("post-turn capture requires retained source recovery");
+  const retained = input.admission.findRetained(request, context);
+  // An automatic retry retains facts, including historical unknown; only an explicit revision can enrich them.
+  if (retained !== null) {
+    const record = input.admission.admit({ ...request, recorded_at: retained.recorded_at,
+      attribution_context: retained.attribution_context ?? null,
+      ...(retained.host_structure === undefined ? {} : { host_structure: retained.host_structure }) }, context).record;
+    return { record, hostCapture: record.host_structure === undefined ? "unknown" : "captured" };
+  }
+  try {
+    const record = input.admission.admit({ ...request,
+      ...(input.host_occurrences === undefined ? {} : { host_occurrences: input.host_occurrences }) }, context).record;
+    return { record, hostCapture: record.host_structure === undefined ? "unknown" : "captured" };
+  } catch (error) {
+    // Core rolls back the refused capture. Only its canonical resource refusal is optional;
+    // invalid facts, authority failures and persistence errors must still escape.
+    if (input.host_occurrences === undefined || !isHostOccurrenceResourceLimit(error)) throw error;
+    return { record: input.admission.admit(request, context).record, hostCapture: "uncaptured_resource_limit" };
+  }
 }

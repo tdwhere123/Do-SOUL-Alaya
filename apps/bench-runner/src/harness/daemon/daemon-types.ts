@@ -115,7 +115,8 @@ export interface BenchDaemonHandle {
   readonly workspaceId: string;
   readonly runId: string;
   readonly dataDir: string;
-  importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">): Promise<import("@do-soul/alaya-protocol").SourceAdmissionResult>;
+  importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">,
+    hostCapture?: import("@do-soul/alaya-protocol").SourceAdmissionContext["hostCapture"]): Promise<import("@do-soul/alaya-protocol").SourceAdmissionResult>;
   dispatchCli(argv: readonly string[]): Promise<{ exitCode: number; json?: unknown }>;
   recall(
     query: string,

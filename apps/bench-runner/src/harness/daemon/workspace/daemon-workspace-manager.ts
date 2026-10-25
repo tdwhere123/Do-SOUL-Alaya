@@ -156,11 +156,11 @@ function buildBenchWorkspaceHandle(
   return {
     workspaceId: workspace.workspaceId,
     runId: workspace.runId,
-    importSourceRecord: async (request) => {
+    importSourceRecord: async (request, hostCapture) => {
       if (activeContext.workspaceId !== workspace.workspaceId || activeContext.runId !== workspace.runId) {
         throw new Error("source import workspace handle is no longer active");
       }
-      return bindings.importSourceRecord(request);
+      return bindings.importSourceRecord(request, hostCapture);
     },
     recall: bindings.recall,
     warmEmbeddingCache: bindings.warmEmbeddingCache,

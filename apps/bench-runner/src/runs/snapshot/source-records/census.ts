@@ -1,3 +1,5 @@
+import { createLongMemEvalHostCapturePolicy, type LongMemEvalHostCapture } from "../../../datasets/longmemeval/ingestion/host-occurrences.js";
+import type { HostStructureDescriptor } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, retainedSourceSpeaker } from "@do-soul/alaya-core";
 import { AlayaError, hashContentDigest, type UtteranceAttribution } from "@do-soul/alaya-protocol";
 import {
@@ -35,6 +37,8 @@ export type SourceCensusRecord = Readonly<{
   speaker?: "user" | "assistant" | "system";
   source_role?: SourceCensusUnit["source_role"];
   attribution_context?: UtteranceAttribution;
+  host_structure?: HostStructureDescriptor;
+  host_capture?: LongMemEvalHostCapture;
   units: readonly SourceCensusUnit[];
   repeated_assertion_text: boolean;
 }>;
@@ -69,6 +73,7 @@ export function censusNativeSourceRecords(input: Readonly<{ population: string; 
       ...(row.record.speaker == null ? {} : { speaker: row.record.speaker }),
       ...(row.source_role === undefined ? {} : { source_role: row.source_role }),
       ...(row.record.attribution_context == null ? {} : { attribution_context: row.record.attribution_context }),
+      ...(row.record.host_structure === undefined ? {} : { host_structure: row.record.host_structure }),
       roles: Object.freeze([]) as readonly ("user" | "assistant")[], units,
       repeated_assertion_text: hasRepeatedAssertionText(units)
     });
@@ -91,14 +96,16 @@ export async function censusCompleteSourceRecords(input: Readonly<{
   return Object.freeze({
     population: input.population,
     dataset_sha256: loaded.sha256,
-    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.sha256, loaded.questions))
+    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.sha256, loaded.questions,
+      loaded.promotionAuthority === null ? undefined : createLongMemEvalHostCapturePolicy(loaded)))
   });
 }
 
 function collectCompleteSourceRecords(
   population: string,
   sourceVersion: string,
-  questions: readonly LongMemEvalQuestion[]
+  questions: readonly LongMemEvalQuestion[],
+  hostPolicy?: ReturnType<typeof createLongMemEvalHostCapturePolicy>
 ): readonly LongMemEvalSourceCensusRecord[] {
   const seen = new Set<string>();
   const records: LongMemEvalSourceCensusRecord[] = [];
@@ -131,6 +138,8 @@ function collectCompleteSourceRecords(
           session_index: sessionIndex, round_index: roundIndex,
           source_id: sourceId,
           source_version: sourceVersion, content_bytes: contentBytes,
+          ...(hostPolicy === undefined ? {} : { host_capture: hostPolicy({ questionId: question.question_id,
+            sessionIndex, roundIndex, sourceId, sourceVersion }) }),
           content_digest: hashContentDigest(contentBytes, fieldContractSha256),
           corpus_digest: fieldContractSha256(contentBytes),
           source_observed_at: sourceObservedAt, roles, units,

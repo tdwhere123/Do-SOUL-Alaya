@@ -16,6 +16,7 @@ import type {
 } from "./projection-generation.js";
 import type { QueryCondition, QueryConditionReceipt } from "./query-condition.js";
 import type { CausalUsageReceipt } from "./causal-usage.js";
+import type { HostCaptureIssuer, HostOccurrence, HostStructureDescriptor } from "../../conversation/host-occurrence.js";
 import type { UtteranceAttribution } from "../../conversation/utterance-attribution.js";
 import type { EffectDecisionReceipt, EffectRequest } from "./proof-effect.js";
 
@@ -34,6 +35,10 @@ export type SourceAdmissionRequest = Readonly<{
   /** Null only re-admits an exact existing historical record to attach spans. */
   readonly attribution_context?: UtteranceAttribution | null;
   readonly source_representation?: SourceRepresentation;
+  /** Fresh capture requires the admission composition's trusted issuer. */
+  readonly host_occurrences?: readonly HostOccurrence[];
+  /** Exact retention only; cannot import provenance into an empty store. */
+  readonly host_structure?: HostStructureDescriptor;
   readonly spans: readonly Readonly<{
     readonly start_offset: number;
     readonly end_offset: number;
@@ -46,8 +51,19 @@ export type SourceAdmissionResult = Readonly<{
   readonly spans: readonly AddressableSourceSpan[];
 }>;
 
+export type SourceAdmissionContext = Readonly<{
+  workspaceId: string;
+  /** Host composition only; functions cannot arrive through request JSON. */
+  hostCapture?: (request: SourceAdmissionRequest) => HostCaptureIssuer;
+}>;
+
 export interface SourceAdmissionPort {
-  admit(input: SourceAdmissionRequest): SourceAdmissionResult;
+  admit(input: SourceAdmissionRequest, context?: SourceAdmissionContext): SourceAdmissionResult;
+  /** Exact receipt lookup for producer recovery, not permission to enrich or bypass admission. */
+  findRetained?(input: Pick<SourceAdmissionRequest, "workspace_id" | "source_id" | "source_version" |
+    "content_bytes" | "source_representation">, context: SourceAdmissionContext): SourceRecordIdentity | null;
+  /** Receipt-first orchestration must await this before publishing/enqueuing captured sources. */
+  audit?(record: SourceRecordIdentity): Promise<void>;
 }
 
 export interface FactorIncidencePort {

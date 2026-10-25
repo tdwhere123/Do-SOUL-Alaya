@@ -306,6 +306,12 @@ function readNativeInventory(snapshotPath: string, workspaceId: string, maximumR
       if (offset !== header.bodyBytes || hashContentDigest(content_bytes, fieldContractSha256) !== record.content_digest) {
         throw new AlayaError("CONFLICT", "native source snapshot bytes differ from sealed original");
       }
+      if (record.host_structure !== undefined) {
+        const host = records.readHostInventory({ workspaceId, recordId: record.identity,
+          sourceVersion: record.source_version, contentDigest: record.content_digest, authorizedScopes: ["project"],
+          nativeByteLimit: 131072, memoryLimit: 262144, workLimit: 262144 });
+        if (host.status !== "captured") throw new AlayaError("CONFLICT", "native source host inventory is unavailable or invalid");
+      }
       return { record, content_bytes };
     });
   } finally { database.close({ optimize: false }); }

@@ -15,11 +15,13 @@ import {
   type FieldContractSha256
 } from "./canonical-identity.js";
 import { SOURCE_SPAN_IDENTITY_OPERATOR_ID } from "./operator-manifest.js";
+import { HostStructureDescriptorSchema } from "../../conversation/host-occurrence.js";
 import { UtteranceAttributionSchema } from "../../conversation/utterance-attribution.js";
 import { canonicalJson } from "../selection/capture/canonical-json.js";
 
 export const AddressableSourceSpanPurposeSchema = z.enum([
   "native_structure",
+  "message",
   "sentence",
   "line",
   "proposed_subspan",
@@ -57,7 +59,8 @@ export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.exten
   speaker: SourceSpeakerRoleSchema.nullable().optional(),
   scope_class: SourceScopeClassSchema.nullable().optional(),
   attribution_context: UtteranceAttributionSchema.nullable().optional(),
-  source_representation: SourceRepresentationSchema.optional()
+  source_representation: SourceRepresentationSchema.optional(),
+  host_structure: HostStructureDescriptorSchema.optional()
 }).strict().superRefine((record, context) => {
   if (record.valid_from === null && record.valid_to !== null) {
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
@@ -116,7 +119,7 @@ export type AddressableSourceSpan = z.infer<typeof AddressableSourceSpanSchema>;
 
 type ImmutableSourceFields = Pick<SourceRecordIdentity, "source_id" | "source_version" | "content_digest" |
   "operator_id" | "event_time" | "valid_from" | "valid_to" | "speaker" | "scope_class" |
-  "attribution_context" | "source_representation">;
+  "attribution_context" | "source_representation" | "host_structure">;
 
 /** Evidence bindings may accumulate; a replay cannot requalify the retained source. */
 export function sameSourceRecordFields(existing: ImmutableSourceFields, incoming: ImmutableSourceFields): boolean {
@@ -124,6 +127,7 @@ export function sameSourceRecordFields(existing: ImmutableSourceFields, incoming
     existing.content_digest === incoming.content_digest && existing.operator_id === incoming.operator_id &&
     existing.event_time === incoming.event_time && existing.valid_from === incoming.valid_from && existing.valid_to === incoming.valid_to &&
     (existing.speaker ?? null) === (incoming.speaker ?? null) && (existing.scope_class ?? null) === (incoming.scope_class ?? null) &&
+    canonicalJson(existing.host_structure ?? null) === canonicalJson(incoming.host_structure ?? null) &&
     canonicalJson(existing.source_representation ?? null) === canonicalJson(incoming.source_representation ?? null) &&
     canonicalJson(existing.attribution_context ?? null) === canonicalJson(incoming.attribution_context ?? null);
 }

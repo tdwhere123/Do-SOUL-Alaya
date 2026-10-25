@@ -252,6 +252,8 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         clearFactor.run(root.workspace_id, subject.subject_id);
       } else if (subject.subject_kind === "source_record") {
         clearRecord.run(root.workspace_id, subject.subject_id);
+        connection.prepare("DELETE FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?")
+          .run(root.workspace_id, subject.subject_id);
       }
     }
   }

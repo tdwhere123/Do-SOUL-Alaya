@@ -5,6 +5,7 @@ import {
   GardenTier,
   type ContextDeliveryRecord,
   type SoulReportContextUsageRequest,
+  type HostOccurrence,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import {
@@ -13,7 +14,7 @@ import {
   type ConversationGardenCompileEnqueueResult
 } from "@do-soul/alaya-core";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
-import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
+import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
   admitPostTurnSourceRoot
 } from "../../garden/post-turn-extract/admitted-source-root.js";
@@ -26,12 +27,12 @@ import type {
   RecallUsageToolCallContext
 } from "../recall/recall-usage-handlers.js";
 
-export function enqueuePostTurnExtractTask(
+export async function enqueuePostTurnExtractTask(
   params: Readonly<{ readonly deps: Pick<RecallUsageHandlerDependencies, "gardenTaskRepo" | "sourceAdmission">; readonly now: () => string }>,
   request: SoulReportContextUsageRequest,
   context: RecallUsageToolCallContext,
   linkedDelivery: Readonly<ContextDeliveryRecord> | null
-): void {
+): Promise<void> {
   const attribution = resolveReportSideEffectAttribution(linkedDelivery, context);
   if (
     params.deps.gardenTaskRepo === undefined ||
@@ -54,7 +55,7 @@ export function enqueuePostTurnExtractTask(
   const sourceObservation = linkedDelivery === null
     ? null
     : createVerifiedDeliverySourceObservation([linkedDelivery]);
-  const admittedSourceRootId = persistAdmittedTurnRoot(params.deps.sourceAdmission, {
+  const sourceCapture = await persistAdmittedTurnRoot(params.deps.sourceAdmission, {
     taskId,
     workspaceId,
     createdAt,
@@ -78,7 +79,7 @@ export function enqueuePostTurnExtractTask(
         sourceObservation,
         turnIndex,
         lastMessages,
-        admittedSourceRootId
+        sourceCapture
       }),
       created_at: createdAt
     });
@@ -92,7 +93,7 @@ export function enqueuePostTurnExtractTask(
   }
 }
 
-export function enqueueConversationGardenCompileTask(
+export async function enqueueConversationGardenCompileTask(
   params: Readonly<{
     readonly gardenTaskRepo: {
       enqueue(input: Parameters<NonNullable<RecallUsageHandlerDependencies["gardenTaskRepo"]>["enqueue"]>[0]): {
@@ -104,7 +105,7 @@ export function enqueueConversationGardenCompileTask(
     readonly sourceAdmission?: SourceAdmissionPort;
   }>,
   input: ConversationGardenCompileEnqueueInput
-): ConversationGardenCompileEnqueueResult {
+): Promise<ConversationGardenCompileEnqueueResult> {
   const taskId = buildConversationCompileTaskId(
     input.workspaceId,
     input.runId,
@@ -128,7 +129,7 @@ export function enqueueConversationGardenCompileTask(
       message_id: input.assistantMessage.message_id
     })
   ]);
-  const admittedSourceRootId = persistAdmittedTurnRoot(params.sourceAdmission, {
+  const sourceCapture = await persistAdmittedTurnRoot(params.sourceAdmission, {
     taskId,
     workspaceId: input.workspaceId,
     createdAt,
@@ -156,7 +157,7 @@ export function enqueueConversationGardenCompileTask(
           input.assistantMessage.message_id
         ),
         lastMessages,
-        admittedSourceRootId
+        sourceCapture
       }),
       created_at: createdAt
     });
@@ -198,7 +199,7 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
   return Object.freeze([...new Set(ids)]);
 }
 
-function persistAdmittedTurnRoot(
+async function persistAdmittedTurnRoot(
   admission: SourceAdmissionPort | undefined,
   input: Readonly<{
     readonly taskId: string;
@@ -207,12 +208,13 @@ function persistAdmittedTurnRoot(
     readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string; readonly event_time?: string }[];
     readonly eventTime: string | null;
   }>
-): string | undefined {
-  if (admission === undefined) {
-    return undefined;
-  }
+): Promise<{ rootId: string | undefined; resourceLimitedRecordIds: readonly string[] }> {
+  if (admission === undefined) return { rootId: undefined, resourceLimitedRecordIds: [] };
+  if (admission.audit === undefined) throw new Error("post-turn capture requires receipt-first source audit");
   const speaker = retainedSourceSpeaker(input.lastMessages.map((message) => message.role));
-  const sourceRecordIds = input.lastMessages.flatMap((message, index) => {
+  const sourceRecordIds: string[] = [];
+  const resourceLimitedRecordIds: string[] = [];
+  for (const [index, message] of input.lastMessages.entries()) {
     const role = retainedSourceSpeaker([message.role]);
     const raw = admitPostTurnSourceRoot({
       admission,
@@ -223,26 +225,45 @@ function persistAdmittedTurnRoot(
       eventTime: message.event_time ?? null,
       ...(role === undefined ? {} : { speaker: role }),
       scope_class: "project",
-      source_representation: { kind: "retained_excerpt" }
+      source_representation: { kind: "retained_excerpt" },
+      host_occurrences: [reportedOccurrence(input.taskId, index, message.role,
+        [0, Buffer.byteLength(message.content_excerpt, "utf8")], "original_bytes")]
     });
-    return raw === null ? [] : [raw.identity];
-  });
-  if (sourceRecordIds.length === 0) return undefined;
+    if (raw !== null) {
+      await admission.audit(raw.record);
+      sourceRecordIds.push(raw.record.identity);
+      if (raw.hostCapture === "uncaptured_resource_limit") resourceLimitedRecordIds.push(raw.record.identity);
+    }
+  }
+  if (sourceRecordIds.length === 0) return { rootId: undefined, resourceLimitedRecordIds };
+  const rendered = renderOfficialApiSourceCorpus("", input.lastMessages.map(message => ({
+    role: message.role, content: message.content_excerpt
+  })));
   const record = admitPostTurnSourceRoot({
     admission,
     workspaceId: input.workspaceId,
     sourceId: `post-turn:${input.taskId}`,
-    content: buildOfficialApiSourceCorpus("", input.lastMessages.map((message) => ({
-      role: message.role as "user" | "assistant",
-      content: message.content_excerpt
-    }))),
+    content: rendered.content,
+    host_occurrences: rendered.occurrences.map(row => reportedOccurrence(input.taskId, row.message_index,
+      input.lastMessages[row.message_index]!.role, row.utf8_span, row.fidelity)),
     recordedAt: input.createdAt,
     eventTime: input.eventTime,
     ...(speaker === undefined ? {} : { speaker }),
     scope_class: "project",
     source_representation: { kind: "canonical_projection", source_record_ids: sourceRecordIds }
   });
-  return record?.identity;
+  if (record !== null) {
+    await admission.audit(record.record);
+    if (record.hostCapture === "uncaptured_resource_limit") resourceLimitedRecordIds.push(record.record.identity);
+  }
+  return { rootId: record?.record.identity, resourceLimitedRecordIds };
+}
+
+function reportedOccurrence(taskId: string, index: number, role: string, utf8_span: readonly [number, number],
+  fidelity: HostOccurrence["fidelity"]): HostOccurrence {
+  return { occurrence_id: `post-turn:${taskId}:message:${index}`, utf8_span, role, channel: null,
+    author_ref: null, container_ref: null, upstream_message_ref: null, upstream_position: null,
+    completeness: "excerpt", fidelity };
 }
 
 function normalizeTurnDigestMessages(
@@ -272,7 +293,7 @@ function buildPostTurnExtractPayload(input: {
     readonly content_excerpt: string;
     readonly message_id?: string;
   }[];
-  readonly admittedSourceRootId: string | undefined;
+  readonly sourceCapture: Awaited<ReturnType<typeof persistAdmittedTurnRoot>>;
 }) {
   return Object.freeze({
     task_id: input.taskId,
@@ -284,9 +305,15 @@ function buildPostTurnExtractPayload(input: {
     created_at: input.createdAt,
     ...(input.sourceObservation === null ? {} : { source_observation: input.sourceObservation }),
     ...(input.sourceObservedAt === undefined ? {} : { source_observed_at: input.sourceObservedAt }),
-    ...(input.admittedSourceRootId === undefined
+    ...(input.sourceCapture.rootId === undefined
       ? {}
-      : { admitted_source_root_id: input.admittedSourceRootId }),
+      : { admitted_source_root_id: input.sourceCapture.rootId }),
+    // Operational capture outcome only; absent inventories remain unknown, never known-empty.
+    ...(input.sourceCapture.resourceLimitedRecordIds.length === 0 ? {} : {
+      host_capture_limitations: input.sourceCapture.resourceLimitedRecordIds.map(record_id => ({
+        record_id, status: "uncaptured", reason: "resource_limit"
+      }))
+    }),
     turn_index: input.turnIndex,
     workspace_id: input.workspaceId,
     turn_digest: Object.freeze({

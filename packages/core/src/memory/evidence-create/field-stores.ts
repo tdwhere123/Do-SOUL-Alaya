@@ -31,6 +31,8 @@ export interface FieldFormationStores {
   getCurrentRecord(workspaceId: string, sourceId: string): SourceRecordIdentity | null;
   getStoredRecord(workspaceId: string, recordId: string): StoredSourceRecord | null;
   putRecord(record: SourceRecordIdentity, contentBytes: string): SourceRecordIdentity;
+  getHostInventory(workspaceId: string, recordId: string): string | null;
+  putHostInventory(workspaceId: string, recordId: string, canonicalInventory: string): void;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
   putSpan(span: AddressableSourceSpan): AddressableSourceSpan;
   getDescriptor(workspaceId: string, factorId: string): FactorDescriptor | null;
@@ -72,6 +74,7 @@ export function createInMemoryFieldStores(): FieldFormationStores {
   return bindFieldStores({
     records: new Map<string, SourceRecordIdentity>(),
     recordBodies: new Map<string, string>(),
+    hostInventories: new Map<string, string>(),
     spans: new Map<string, AddressableSourceSpan>(),
     factors: new Map<string, FactorDescriptor>(),
     incidences: new Map<string, FactorIncidence>(),
@@ -88,6 +91,7 @@ function bindFieldStores(maps: Readonly<{
   readonly incidences: Map<string, FactorIncidence>;
   readonly jobs: Map<string, DerivationJobReceipt>;
   readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
+  readonly hostInventories: Map<string, string>;
 }>): FieldFormationStores {
   let atomicDepth = 0;
   const runAtomic = <T>(work: () => T): T => {
@@ -112,6 +116,10 @@ function bindFieldStores(maps: Readonly<{
     getCurrentRecord: (workspaceId, sourceId) => currentRecord(maps.records, workspaceId, sourceId),
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
     putRecord: (record, contentBytes) => putRecordWithBinding(maps, record, contentBytes),
+    getHostInventory: (workspaceId, recordId) => maps.hostInventories.get(key(workspaceId, recordId)) ?? null,
+    putHostInventory: (workspaceId, recordId, canonicalInventory) => {
+      putSame(maps.hostInventories, key(workspaceId, recordId), canonicalInventory, (a, b) => a === b, "host inventory");
+    },
     getSpan: (workspaceId, spanId) => maps.spans.get(key(workspaceId, spanId)) ?? null,
     putSpan: (span) => putSame(
       maps.spans,

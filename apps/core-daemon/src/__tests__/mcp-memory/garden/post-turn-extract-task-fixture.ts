@@ -12,10 +12,12 @@ import {
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
   type LegacyCandidateMemorySignal,
-  type RuntimeGardenComputeConfig
+  type RuntimeGardenComputeConfig,
+  type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import {
   createSourceAdmissionPort,
+  appendSourceRecordAdmitted,
   EventPublisher,
   fieldContractSha256,
   SignalService
@@ -139,8 +141,11 @@ export interface PostTurnPayload {
 
 export async function createHandlerHarness(options: {
   readonly delivery?: ContextDeliveryRecord | null;
+  readonly filename?: string;
+  readonly sourceAdmissionTransform?: (port: SourceAdmissionPort) => SourceAdmissionPort;
+  readonly beforeSourceAudit?: () => void;
 } = {}): Promise<HandlerHarness> {
-  const base = await createSqliteHarnessBase();
+  const base = await createSqliteHarnessBase(options.filename);
   const handler = createMcpMemoryToolHandler(createMcpDeps(base, options));
   const harness = {
     ...base,
@@ -239,8 +244,8 @@ export async function createRoutingHarness(options: {
   return harness;
 }
 
-async function createSqliteHarnessBase() {
-  const database = initDatabase({ filename: ":memory:" });
+async function createSqliteHarnessBase(filename = ":memory:") {
+  const database = initDatabase({ filename });
   const workspaceRepo = new SqliteWorkspaceRepo(database);
   const runRepo = new SqliteRunRepo(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
@@ -309,6 +314,8 @@ export function createMcpDeps(base: {
   readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
 }, options: {
   readonly delivery?: ContextDeliveryRecord | null;
+  readonly sourceAdmissionTransform?: (port: SourceAdmissionPort) => SourceAdmissionPort;
+  readonly beforeSourceAudit?: () => void;
 } = {}): McpMemoryToolHandlerDependencies {
   const signalService = new SignalService({
     eventLogRepo: base.eventLogRepo,
@@ -355,13 +362,19 @@ export function createMcpDeps(base: {
     },
     eventPublisher: base.eventPublisher,
     gardenTaskRepo: base.gardenTaskRepo,
-    sourceAdmission: createSourceAdmissionPort({
+    sourceAdmission: (options.sourceAdmissionTransform ?? (port => port))(createSourceAdmissionPort({
       sha256: fieldContractSha256,
+      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+        producer: "post-turn", basis: "reported_excerpt" }),
+      audit: async record => {
+        options.beforeSourceAudit?.();
+        await appendSourceRecordAdmitted(base.eventLogRepo, record, { notifyEntry: () => undefined });
+      },
       stores: createSqliteFieldFormationStores({
         repos: createDaemonFieldRepos({ database: base.database }),
         database: base.database
       })
-    })
+    }))
   };
 }
 

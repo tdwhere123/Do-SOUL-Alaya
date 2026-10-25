@@ -76,6 +76,7 @@ export {
   createSourceAdmissionPort,
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
+export { appendSourceRecordAdmitted } from "./memory/evidence-create/source-admission-audit.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
 export {
   createAuditedSourceReplacement,

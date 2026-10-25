@@ -1,3 +1,4 @@
+import { createLongMemEvalHostCapturePolicy } from "../../../datasets/longmemeval/ingestion/host-occurrences.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -52,6 +53,7 @@ export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsIn
   const loaded = await loadDatasetWindowWithIdentity("longmemeval_s", {
     dataDir: input.dataDir, pinnedMetaRoot: input.pinnedMetaRoot, offset: input.offset, limit: input.limit
   });
+  const hostPolicy = loaded.promotionAuthority === null ? undefined : createLongMemEvalHostCapturePolicy(loaded);
   // Reject surplus/missing dates as well as malformed values before any durable effects.
   loaded.questions.forEach(assertLongMemEvalTimeline);
   const dataset = SourceRecordsDatasetSchema.parse({ variant: "longmemeval_s", sha256: loaded.sha256,
@@ -72,7 +74,7 @@ export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsIn
       fieldProjectionAdmissionMode: "explicit_checkpoint" });
     let sidecar: SourceRecordsSidecar;
     try {
-      sidecar = await importMessages(daemon, loaded.questions, dataset, input.recordedAt, snapshotPath, successor);
+      sidecar = await importMessages(daemon, loaded.questions, dataset, input.recordedAt, snapshotPath, successor, hostPolicy);
       await daemon.checkpointFieldProjection();
     } finally {
       await daemon.shutdown();
@@ -106,7 +108,8 @@ function bindPreparation(dataDir: string, snapshotPath: string, dataset: SourceR
 
 async function importMessages(daemon: BenchDaemonHandle, questions: readonly LongMemEvalQuestion[],
   dataset: SourceRecordsDataset, recordedAt: string, snapshotPath: string,
-  successor?: PreparedPersonaSuccessor): Promise<SourceRecordsSidecar> {
+  successor?: PreparedPersonaSuccessor,
+  hostPolicy?: ReturnType<typeof createLongMemEvalHostCapturePolicy>): Promise<SourceRecordsSidecar> {
   const writer = createSourceRecordsSidecarWriter(snapshotPath, {
     schema_version: 2, artifact_domain: "source_records", dataset, recorded_at: recordedAt,
     ...(successor === undefined ? {} : { persona_successor: successor.binding }),
@@ -133,11 +136,14 @@ async function importMessages(daemon: BenchDaemonHandle, questions: readonly Lon
             });
             const attribution = successor?.persona.source({ questionId: question.question_id, sessionIndex,
               messageIndex, role: message.role, content: message.content });
+            const host = hostPolicy?.({ questionId: question.question_id, sessionIndex, roundIndex, messageIndex,
+              sourceId: message.message_id, sourceVersion: successor?.binding.source_version ?? dataset.sha256 });
             const admitted = await workspace.importSourceRecord({ source_id: message.message_id,
               source_version: successor?.binding.source_version ?? dataset.sha256,
               content_bytes: message.content, recorded_at: recordedAt, event_time: null, valid_from: null, valid_to: null,
               ...(attribution === undefined ? {} : { attribution_context: attribution }),
-              speaker: message.role, scope_class: "project", spans: deriveAddressableSpanViews(message.content) });
+              ...(host === undefined ? {} : { host_occurrences: host.occurrences }),
+              speaker: message.role, scope_class: "project", spans: deriveAddressableSpanViews(message.content) }, host?.authorize);
             if (predecessor !== undefined && predecessor.content_digest !== admitted.record.content_digest) {
               throw new AlayaError("CONFLICT", "persona successor changed original source bytes");
             }

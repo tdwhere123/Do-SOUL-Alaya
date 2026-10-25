@@ -385,7 +385,7 @@ export function createReportContextUsageHandler(params: Readonly<{
       }
     );
     throwIfAborted(context.abortSignal);
-    enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
+    await enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,
       usageState,

@@ -56,6 +56,7 @@ const UNINITIALIZED_DATABASE_PROBE_TIMEOUT_MS = 50;
 const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
 const OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION = 17;
+const SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION = 24;
 const EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION = 15;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
@@ -379,7 +380,12 @@ function runMigrations(
   const later = afterRebuild.filter((fileName) => parseMigrationVersion(fileName) > OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION);
   applyMigrationBatch(database, migrationsDirectory, beforeObservation, temporalMode, false, busyTimeoutMs);
   applyMigrationBatch(database, migrationsDirectory, observation, temporalMode, true, busyTimeoutMs);
-  applyMigrationBatch(database, migrationsDirectory, later, temporalMode, false, busyTimeoutMs);
+  const beforeHost = later.filter(fileName => parseMigrationVersion(fileName) < SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION);
+  const host = later.filter(fileName => parseMigrationVersion(fileName) === SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION);
+  const afterHost = later.filter(fileName => parseMigrationVersion(fileName) > SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION);
+  applyMigrationBatch(database, migrationsDirectory, beforeHost, temporalMode, false, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, host, temporalMode, true, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, afterHost, temporalMode, false, busyTimeoutMs);
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {
@@ -452,17 +458,16 @@ function applyMigrationBatch(
   migrationsDirectory: string,
   fileNames: readonly string[],
   temporalMode: TemporalDatabaseMode,
-  rebuildsMemoryEntries: boolean,
+  rebuildsReferencedTable: boolean,
   busyTimeoutMs: number
 ): void {
   if (fileNames.length === 0) {
     return;
   }
-  if (rebuildsMemoryEntries) {
+  if (rebuildsReferencedTable) {
     // PRAGMA foreign_keys is a no-op inside a transaction; DROP/rename of
-    // memory_entries needs incoming FKs disabled for the official rebuild.
-    // Do not fail-closed on pre-existing FK violations: this batch only
-    // adds enum CHECKs. Illegal enum rows still fail the rebuilt CHECK.
+    // referenced tables needs incoming FKs disabled for the official rebuild.
+    // Existing rows still pass each rebuilt table's CHECK constraints.
     database.pragma("foreign_keys = OFF");
   }
   try {
@@ -487,7 +492,7 @@ function applyMigrationBatch(
       error
     );
   } finally {
-    if (rebuildsMemoryEntries) {
+    if (rebuildsReferencedTable) {
       database.pragma("foreign_keys = ON");
     }
   }

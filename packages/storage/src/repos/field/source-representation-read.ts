@@ -3,8 +3,14 @@ import { sourceProjectionDependenciesAvailable, type SourceProjectionDependencyS
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "./retained-source-chunks.js";
 
+export const SOURCE_RECORD_METADATA_BYTE_MAX = 7864;
+export const SOURCE_RECORD_METADATA_COLUMNS = ["record_id", "workspace_id", "source_id", "source_version", "content_digest",
+  "evidence_object_id", "recorded_at", "event_time", "valid_from", "valid_to", "operator_id", "speaker", "scope_class",
+  "attribution_context_json", "source_representation_json", "host_structure_json"] as const;
+export const CURRENT_SOURCE_RECORD_ORDER = "alaya_utc_order_key(source_records.recorded_at) DESC, source_records.record_id DESC";
+
 export type SourceRecordReadAllowance = Readonly<{ workLimit?: number; nativeByteLimit?: number }>;
-const DEPENDENCY_METADATA_RESERVATION = 1024;
+export const SOURCE_DEPENDENCY_METADATA_RESERVATION = 1024;
 
 /** SQLite supplies bounded facts; the shared source contract owns dependency eligibility. */
 export function readSourceProjectionDependencies(database: StorageDatabase, source: Pick<SourceRecordIdentity,
@@ -15,7 +21,7 @@ allowance: SourceRecordReadAllowance = {}) {
     return { available: true, work: 0, metadataBytes: 0, resourceLimited: false, unavailable: false };
   }
   const requiredWork = 2 * representation.source_record_ids.length;
-  const requiredBytes = DEPENDENCY_METADATA_RESERVATION * representation.source_record_ids.length;
+  const requiredBytes = SOURCE_DEPENDENCY_METADATA_RESERVATION * representation.source_record_ids.length;
   if ((allowance.workLimit ?? Infinity) < 5 + requiredWork ||
       (allowance.nativeByteLimit ?? Infinity) < RETAINED_SOURCE_READ_RESERVATION + requiredBytes) {
     return { available: false, work: 0, metadataBytes: 0, resourceLimited: true, unavailable: false };

@@ -7,7 +7,7 @@ import type {
   ProjectionGenerationPort,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
-import type { SourceRepresentation, UtteranceAttribution } from "@do-soul/alaya-protocol";
+import type { HostStructureDescriptor, SourceRepresentation, UtteranceAttribution } from "@do-soul/alaya-protocol";
 
 export type FieldSourceRecordRow = Readonly<{
   readonly record_id: string;
@@ -25,6 +25,7 @@ export type FieldSourceRecordRow = Readonly<{
   readonly scope_class: "project" | "global_domain" | "global_core" | null;
   readonly attribution_context: UtteranceAttribution | null;
   readonly source_representation?: SourceRepresentation;
+  readonly host_structure?: HostStructureDescriptor;
   readonly source_body: string | null;
 }>;
 

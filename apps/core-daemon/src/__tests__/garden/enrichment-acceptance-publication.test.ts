@@ -13,6 +13,7 @@ import {
   MemoryService,
   SignalService,
   createSourceAdmissionPort,
+  appendSourceRecordAdmitted,
   createSignalEmissionWriter,
   fieldContractSha256
 } from "@do-soul/alaya-core";
@@ -88,7 +89,10 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
         })
       });
       const sourceAdmission = createSourceAdmissionPort({
-        stores: field.stores, sha256: fieldContractSha256
+        stores: field.stores, sha256: fieldContractSha256,
+        hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+          producer: "post-turn", basis: "reported_excerpt" }),
+        audit: record => appendSourceRecordAdmitted(eventLogRepo, record, notifier)
       });
       const router = createMaterializationRouter({
         wiring: {
@@ -130,7 +134,7 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
         }
       });
       const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
-      enqueuePostTurnExtractTask({ deps: { gardenTaskRepo, sourceAdmission }, now: () => CLOCK },
+      await enqueuePostTurnExtractTask({ deps: { gardenTaskRepo, sourceAdmission }, now: () => CLOCK },
         { delivery_id: "delivery-1", usage_state: "used", turn_index: 0,
           turn_digest: { last_messages: [{ role: "user", content_excerpt: LONG_ASSERTION }] } },
         { workspaceId: "workspace-1", runId: "run-1", agentTarget: "codex", sessionId: "session-1" },

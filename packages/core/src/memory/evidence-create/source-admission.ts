@@ -18,6 +18,7 @@ import {
   type SourceScopeClass,
   type SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
+import { captureHostStructure, type HostCaptureBinding } from "./host-occurrence-capture.js";
 import { CoreError } from "../../shared/errors.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import {
@@ -32,19 +33,46 @@ export function createSourceAdmissionPort(input: Readonly<{
   readonly sha256: FieldContractSha256;
   readonly stores: FieldFormationStores;
   readonly admitHook?: () => void;
+  readonly hostCaptureBinding?: HostCaptureBinding;
+  readonly audit?: (record: SourceRecordIdentity) => Promise<void>;
 }>): SourceAdmissionPort {
   return {
-    admit(request) {
-      input.admitHook?.();
-      const record = persistRecord(request, input.sha256, input.stores);
-      const spans = request.spans.map((span) => persistSpan(
-        request,
-        record.identity,
-        assertSpanInContent(request.content_bytes, span),
-        input.sha256,
-        input.stores
-      ));
-      return Object.freeze({ record, spans: Object.freeze(spans) });
+    ...(input.audit === undefined ? {} : { audit: input.audit }),
+    findRetained(request, context) {
+      if (request.workspace_id !== context.workspaceId || context.workspaceId.length === 0) {
+        throw new CoreError("VALIDATION", "source recovery requires workspace-bound caller context");
+      }
+      const { identity } = sourceIdentity(request, input.sha256);
+      const record = input.stores.getRecord(request.workspace_id, identity);
+      if (record === null) return null;
+      const stored = input.stores.getStoredRecord(request.workspace_id, identity);
+      if (stored === null || stored.content_bytes !== request.content_bytes) {
+        throw new CoreError("VALIDATION", "source recovery requires the exact available retained body");
+      }
+      return record;
+    },
+    admit(incoming, context) {
+      // Capture once before validation and any composition callback; caller mutation cannot change the write.
+      const request = structuredClone(incoming);
+      if ((context !== undefined && context.workspaceId !== request.workspace_id) ||
+          (request.host_occurrences !== undefined && context === undefined)) {
+        throw new CoreError("VALIDATION", "host capture requires workspace-bound caller context");
+      }
+      const hostBinding = input.hostCaptureBinding ?? context?.hostCapture;
+      if (request.spans.some(span => span.purpose === "message")) {
+        throw new CoreError("VALIDATION", "message spans must be derived from captured complete occurrences");
+      }
+      return input.stores.runAtomic(() => {
+        input.admitHook?.();
+        const { record, messageSpans } = persistRecord(request, input.sha256, input.stores, hostBinding);
+        const spans = [...request.spans, ...messageSpans].map((span) => persistSpan(
+          request, record.identity, assertSpanInContent(request.content_bytes, span), input.sha256, input.stores
+        ));
+        if (input.stores.getStoredRecord(request.workspace_id, record.identity) === null) {
+          throw new CoreError("VALIDATION", "retired source record cannot be admitted");
+        }
+        return Object.freeze({ record, spans: Object.freeze(spans) });
+      });
     }
   };
 }
@@ -52,18 +80,11 @@ export function createSourceAdmissionPort(input: Readonly<{
 function persistRecord(
   request: SourceAdmissionRequest,
   sha256: FieldContractSha256,
-  stores: FieldFormationStores
-): SourceRecordIdentity {
-  const contentDigest = hashContentDigest(request.content_bytes, sha256);
-  const representation = request.source_representation === undefined ? undefined
-    : SourceRepresentationSchema.parse(request.source_representation);
+  stores: FieldFormationStores,
+  hostCaptureBinding?: HostCaptureBinding
+): Readonly<{ record: SourceRecordIdentity; messageSpans: readonly SourceSpanDraft[] }> {
+  const { identity, contentDigest, representation } = sourceIdentity(request, sha256);
   verifyProjectionSources(request, stores);
-  const identity = hashSourceRecordId({
-    source_id: request.source_id,
-    source_version: request.source_version,
-    content_digest: contentDigest,
-    ...(representation === undefined ? {} : { source_representation: representation })
-  }, sha256);
   const speaker = retainedSourceSpeaker(
     request.speaker === undefined || request.speaker === null ? [] : [request.speaker]
   );
@@ -71,10 +92,12 @@ function persistRecord(
   const attribution = request.attribution_context === null ? null : bindUtteranceAttribution(
     request.attribution_context === undefined ? UNKNOWN_UTTERANCE_ATTRIBUTION : request.attribution_context,
     request.content_bytes);
+  const host = captureHostStructure(request, identity, contentDigest, stores, sha256, hostCaptureBinding);
   const current = stores.getCurrentRecord(request.workspace_id, request.source_id);
   const retained = stores.getStoredRecord(request.workspace_id, identity);
   if (retained === null && current !== null &&
-      (canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) ||
+      (canonicalJson(current.host_structure ?? null) !== canonicalJson(host?.descriptor ?? null) ||
+        canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) ||
         canonicalJson(current.source_representation ?? null) !== canonicalJson(representation ?? null)) &&
       (current.source_version === request.source_version ||
         compareUtcInstants(request.recorded_at, current.recorded_at) !== 1)) {
@@ -96,7 +119,8 @@ function persistRecord(
     ...(speaker === undefined ? {} : { speaker }),
     ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
     attribution_context: attribution,
-    ...(representation === undefined ? {} : { source_representation: representation })
+    ...(representation === undefined ? {} : { source_representation: representation }),
+    ...(host === undefined ? {} : { host_structure: host.descriptor })
   }), sha256);
   if (attribution === null) {
     if (retained === null || (retained.record.attribution_context !== null &&
@@ -105,7 +129,22 @@ function persistRecord(
       throw new CoreError("VALIDATION", "null attribution is reserved for an exact retained source record");
     }
   }
-  return stores.putRecord(record, request.content_bytes);
+  const persisted = stores.putRecord(record, request.content_bytes);
+  if (host !== undefined) stores.putHostInventory(request.workspace_id, identity, host.canonical);
+  return { record: persisted, messageSpans: host?.inventory.occurrences.flatMap(row =>
+    row.completeness === "complete" && row.utf8_span[1] > row.utf8_span[0]
+      ? [{ start_offset: row.utf8_span[0], end_offset: row.utf8_span[1], purpose: "message" as const }] : []) ?? [] };
+}
+
+function sourceIdentity(request: Pick<SourceAdmissionRequest, "source_id" | "source_version" |
+  "content_bytes" | "source_representation">, sha256: FieldContractSha256) {
+  const contentDigest = hashContentDigest(request.content_bytes, sha256);
+  const representation = request.source_representation === undefined ? undefined
+    : SourceRepresentationSchema.parse(request.source_representation);
+  const identity = hashSourceRecordId({ source_id: request.source_id, source_version: request.source_version,
+    content_digest: contentDigest,
+    ...(representation === undefined ? {} : { source_representation: representation }) }, sha256);
+  return { identity, contentDigest, representation };
 }
 
 function verifyProjectionSources(request: SourceAdmissionRequest, stores: FieldFormationStores): void {

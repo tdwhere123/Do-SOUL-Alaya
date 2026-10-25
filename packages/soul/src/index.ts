@@ -149,6 +149,7 @@ export {
   buildSourceVerificationText,
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
+  renderOfficialApiSourceCorpus,
   buildOfficialApiVerifiedUserAssertionSource,
   computeOfficialApiSourceCorpusIdentity,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,

@@ -24,12 +24,15 @@ function createRepo(): SqliteGardenTaskRepo {
 }
 
 describe("conversation garden compile queue", () => {
-  it("dates each retained message with its own observation time", () => {
+  it("dates each retained message with its own observation time", async () => {
     const stores = createInMemoryFieldStores();
     const queue = createConversationGardenCompileQueue({ gardenTaskRepo: createRepo(),
-      now: () => "2026-09-16T01:00:00.000Z", sourceAdmission: createSourceAdmissionPort({ stores, sha256: fieldContractSha256 }) });
+      now: () => "2026-09-16T01:00:00.000Z", sourceAdmission: createSourceAdmissionPort({ stores, sha256: fieldContractSha256,
+        audit: async () => undefined,
+        hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+          producer: "post-turn", basis: "reported_excerpt" }) }) });
     const userAt = "2026-09-16T00:00:00.000Z", assistantAt = "2026-09-16T00:00:10.000Z";
-    queue.enqueue({ workspaceId: "workspace-1", runId: "run-1",
+    await queue.enqueue({ workspaceId: "workspace-1", runId: "run-1",
       userMessage: { ...createMessage("msg-user", "user", "  Question?\r\n"), created_at: userAt },
       assistantMessage: { ...createMessage("msg-assistant", "assistant", "  Answer.\n"), created_at: assistantAt } });
     const sources = stores.listStoredRecords("workspace-1");
@@ -40,7 +43,7 @@ describe("conversation garden compile queue", () => {
     expect(sources.find(row => row.record.source_representation?.kind === "canonical_projection")?.record.event_time).toBe(userAt);
   });
 
-  it("persists a POST_TURN_EXTRACT task and treats a second enqueue as duplicate", () => {
+  it("persists a POST_TURN_EXTRACT task and treats a second enqueue as duplicate", async () => {
     const gardenTaskRepo = createRepo();
     const queue = createConversationGardenCompileQueue({
       gardenTaskRepo,
@@ -53,8 +56,8 @@ describe("conversation garden compile queue", () => {
       assistantMessage: createMessage("msg-assistant", "assistant", "Noted.")
     };
 
-    expect(queue.enqueue(input)).toEqual({ status: "enqueued" });
-    expect(queue.enqueue(input)).toEqual({ status: "duplicate" });
+    expect(await queue.enqueue(input)).toEqual({ status: "enqueued" });
+    expect(await queue.enqueue(input)).toEqual({ status: "duplicate" });
 
     const pending = gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10);
     expect(pending).toHaveLength(1);
@@ -74,9 +77,9 @@ describe("conversation garden compile queue", () => {
     ]);
   });
 
-  it("does not collide with a report_context_usage turn_index 0 task", () => {
+  it("does not collide with a report_context_usage turn_index 0 task", async () => {
     const gardenTaskRepo = createRepo();
-    enqueuePostTurnExtractTask(
+    await enqueuePostTurnExtractTask(
       { deps: { gardenTaskRepo }, now: () => "2026-09-16T00:00:00.000Z" },
       {
         delivery_id: "delivery-1",
@@ -92,7 +95,7 @@ describe("conversation garden compile queue", () => {
       now: () => "2026-09-16T00:00:00.000Z"
     });
 
-    expect(queue.enqueue({
+    expect(await queue.enqueue({
       workspaceId: "workspace-1",
       runId: "run-1",
       userMessage: createMessage("msg-user", "user", "conversation turn"),
@@ -102,7 +105,7 @@ describe("conversation garden compile queue", () => {
     expect(gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10)).toHaveLength(2);
   });
 
-  it("does not persist a task when the repo throws", () => {
+  it("does not persist a task when the repo throws", async () => {
     const inner = createRepo();
     const gardenTaskRepo = {
       enqueue: () => {
@@ -115,14 +118,14 @@ describe("conversation garden compile queue", () => {
       now: () => "2026-09-16T00:00:00.000Z"
     });
 
-    expect(() =>
+    await expect(
       queue.enqueue({
         workspaceId: "workspace-1",
         runId: "run-1",
         userMessage: createMessage("msg-user", "user", "remember this"),
         assistantMessage: createMessage("msg-assistant", "assistant", "noted")
       })
-    ).toThrow("SQLITE_BUSY");
+    ).rejects.toThrow("SQLITE_BUSY");
     expect(inner.peekPending(GardenRole.LIBRARIAN, "workspace-1", 10)).toEqual([]);
   });
 });

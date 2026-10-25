@@ -2,6 +2,7 @@ import {
   compareUtcInstants,
   type EventLogEntry,
   type SourceAdmissionRequest,
+  type SourceAdmissionContext,
   type SourceAdmissionResult,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
@@ -42,7 +43,7 @@ export type SourceReplacementOutcome =
 
 export type AuditedSourceReplacement = Readonly<{
   replaceCurrent(request: SourceReplacementRequest,
-    context: Readonly<{ workspaceId: string }>): Promise<SourceReplacementOutcome>;
+    context: SourceAdmissionContext): Promise<SourceReplacementOutcome>;
 }>;
 
 /** Trusted Node capability for core-daemon. Possession is authority; not an agent write surface. */
@@ -69,7 +70,7 @@ export function createAuditedSourceReplacement(input: AuditedSourceWriterInput):
             compareUtcInstants(captured.replacement.recorded_at, predecessor.recorded_at) !== 1) {
           throw new CoreError("CONFLICT", "source replacement requires a new revision and strictly later ingestion time");
         }
-        const replacement = admitRetainedSource(input, admission, captured.replacement, workspaceId);
+        const replacement = admitRetainedSource(input, admission, captured.replacement, workspaceId, context);
         assertExpectedCurrent(input.stores.getCurrentRecord(workspaceId, replacement.record.source_id), replacement.record);
         return Object.freeze({ predecessor, replacement });
       });

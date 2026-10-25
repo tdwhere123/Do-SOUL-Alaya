@@ -75,7 +75,7 @@ export type ConversationGardenCompileEnqueueResult =
   | { readonly status: "duplicate" };
 
 export interface ConversationGardenCompileQueuePort {
-  enqueue(input: ConversationGardenCompileEnqueueInput): ConversationGardenCompileEnqueueResult;
+  enqueue(input: ConversationGardenCompileEnqueueInput): ConversationGardenCompileEnqueueResult | Promise<ConversationGardenCompileEnqueueResult>;
 }
 
 export interface ConversationGovernanceLeasePort {

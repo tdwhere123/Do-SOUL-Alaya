@@ -1,5 +1,5 @@
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
-import { createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
+import { appendSourceRecordAdmitted, createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
 import {
   createDaemonCoreServices,
@@ -164,7 +164,10 @@ function buildCoreServiceInput(
     database: bootstrap.database,
     sourceAdmission: createSourceAdmissionPort({
       stores: repositories.fieldComposition.stores,
-      sha256: fieldContractSha256
+      sha256: fieldContractSha256,
+      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
+        producer: "post-turn", basis: "reported_excerpt" }),
+      audit: record => appendSourceRecordAdmitted(repositories.eventLogRepo, record, bootstrap.runtimeNotifier)
     })
   };
 }

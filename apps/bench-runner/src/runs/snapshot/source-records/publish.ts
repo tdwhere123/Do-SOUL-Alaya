@@ -354,8 +354,11 @@ async function admitOneSource(
       source_id: source.source_id, source_version: source.source_version, content_bytes: source.content_bytes,
       recorded_at: recordedAt, event_time: source.source_observed_at, valid_from: null, valid_to: null,
       scope_class: "project", spans: deriveAddressableSpanViews(source.content_bytes),
-      ...(source.speaker === undefined ? {} : { speaker: source.speaker })
-    });
+      ...(source.speaker === undefined ? {} : { speaker: source.speaker }),
+      ...(source.attribution_context === undefined ? {} : { attribution_context: source.attribution_context }),
+      ...(source.host_structure === undefined ? {} : { host_structure: source.host_structure }),
+      ...(source.host_capture === undefined ? {} : { host_occurrences: source.host_capture.occurrences })
+    }, source.host_capture?.authorize);
     return { ...base, admission: "admitted", record_id: admitted.record.identity, source_record: admitted.record, source_interpretation: "absent", publication: "not_attempted" };
   } catch (error) {
     refuseBenchWorkAfterCancel();

@@ -46,6 +46,7 @@ export function sourceRecordFromRow(row: FieldSourceRecordRow): SourceRecordIden
     ...(row.speaker === null ? {} : { speaker: row.speaker }),
     ...(row.scope_class === null ? {} : { scope_class: row.scope_class }),
     attribution_context: row.attribution_context,
+    ...(row.host_structure === undefined ? {} : { host_structure: row.host_structure }),
     ...(row.source_representation === undefined ? {} : { source_representation: row.source_representation })
   });
 }

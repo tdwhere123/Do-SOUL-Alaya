@@ -40,19 +40,18 @@ export class GardenComputeCoordinator {
   public constructor(private readonly deps: GardenComputeCoordinatorDependencies) {}
 
   public triggerCompile(input: GardenCompileInput): void {
-    const outcome = this.enqueueCompile(input);
-    void this.afterEnqueue(input, outcome).catch((error: unknown) => {
+    void this.enqueueCompile(input).then(outcome => this.afterEnqueue(input, outcome)).catch((error: unknown) => {
       this.deps.warn("Garden compile enqueue crashed.", { error });
     });
   }
 
-  private enqueueCompile(input: GardenCompileInput): GardenCompileEnqueueOutcome {
+  private async enqueueCompile(input: GardenCompileInput): Promise<GardenCompileEnqueueOutcome> {
     const queue = this.deps.gardenCompileQueue;
     if (queue === undefined) {
       return { status: "unavailable" };
     }
     try {
-      return queue.enqueue({
+      return await queue.enqueue({
         workspaceId: input.workspace.workspace_id,
         runId: input.run.run_id,
         userMessage: input.userMessage,

@@ -218,6 +218,54 @@ provider permission. Current exact wire/schema versions live with their
 to make it executable. This is an opt-in mechanism, not measured natural-corpus
 benefit or an admission gate for ordinary source reads.
 
+## Host occurrence capture
+
+[Protocol host occurrences](../../packages/protocol/src/conversation/host-occurrence.ts)
+owns optional `SourceRecordIdentity.host_structure`: a contract, equality digest,
+occurrence count and encoded-byte descriptor. Inventory is retained separately,
+never ordinary source hydration, attribution or model input. Missing capture is
+unknown; a captured empty list is known-empty. Ordered occurrences may have empty
+UTF-8 content intervals, open role/channel, independently scoped author/container
+references and upstream positions. Local order does not prove upstream order;
+complete normalized content is not original-byte fidelity or complete history.
+
+[Core admission](../../packages/core/src/memory/evidence-create/source-admission.ts)
+atomically captures source, inventory and nonempty `message` spans from complete
+occurrences only. Independently supplied message spans are refused. Trusted host
+composition binds issuer/workspace; product post-turn capture attests only reported
+excerpts, not authenticated humans or upstream identities. Structured benchmark
+capture uses its existing opaque pinned-membership capability and exact coordinates.
+The existing renderer returns intervals alongside unchanged bytes. Receipt-first
+source audit completes before product extraction enqueue; audit failure retains the
+committed source and does not enqueue. Both product producers recover the exact
+retained receipt before attempting optional capture, then re-admit through Core and
+retry audit/enqueue. Legacy committed unknown remains unknown; captured retries
+retain the original inventory and issuer. Recovery cannot restore erased bodies.
+
+Automatic product capture is optional independently of primary source admission.
+A canonical encoded-size refusal rolls back that capture; the producer admits the
+primary source without host facts and records an explicit `uncaptured` /
+`resource_limit` task diagnostic. It never truncates roles or records captured-empty.
+Only this resource refusal is optional: invalid facts, authority failures and storage
+errors escape. Explicit Core capture requests remain strict and atomic.
+
+Exact retention requires the existing source and verified matching inventory;
+a descriptor cannot import provenance into an empty store. Lossless transfer uses
+sealed SQLite copies. Changes require a new source revision and later recorded
+clock; the source-ID formula is unchanged. Source supersession invalidates affected
+index state and preparation leases. Governed erasure removes inventory payload while
+retaining its unavailable equality descriptor. Startup's newer-schema fence applies.
+
+[Source-owned inventory reads](../../packages/storage/src/repos/field/host-inventory-read.ts)
+check workspace, authorization, currentness, retention and binding. They reserve full
+metadata/payload/validation/memory allowances before materializing a complete result,
+and distinguish unknown, captured-empty, unavailable, invalid and resource-limited.
+No prefix is successful inventory. Admission ceilings are 256 occurrences, 65,536
+canonical bytes total and 16,384 per occurrence, with bounded decoded strings.
+The ordinary 64-KiB source allowance is not raised. `native_structure`, legacy
+attribution, root speaker and existing model/factor extraction retain their meanings;
+message spans do not enter factor emission or first-span host selection.
+
 ## Source disclosure
 
 Every permitted retained-source display qualifies what was actually read:

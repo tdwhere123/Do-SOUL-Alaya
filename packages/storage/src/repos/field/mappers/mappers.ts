@@ -6,6 +6,7 @@ import {
   ProjectionEraseSubjectKindSchema,
   ProjectionGenerationStatusSchema,
   SourceRepresentationSchema,
+  HostStructureDescriptorSchema,
   UtteranceAttributionSchema
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
@@ -52,6 +53,8 @@ export const fieldSourceRecordParser: RowParser<FieldSourceRecordRow> = {
         ? null : UtteranceAttributionSchema.parse(JSON.parse(readNonEmptyStringField(row, "attribution_context_json"))),
       ...(row.source_representation_json == null ? {} : { source_representation:
         SourceRepresentationSchema.parse(JSON.parse(readNonEmptyStringField(row, "source_representation_json"))) }),
+      ...(row.host_structure_json == null ? {} : { host_structure:
+        HostStructureDescriptorSchema.parse(JSON.parse(readNonEmptyStringField(row, "host_structure_json"))) }),
       source_body: readNullableStringField(row, "source_body")
     });
   }

@@ -41,11 +41,13 @@ export function emitDeterministicIncidences(
 ): EmittedFactorFormation {
   const factors = new Map<string, FactorDescriptor>();
   const incidences: FactorIncidence[] = [];
-  for (const span of input.spans) {
+  // Host capture is addressing metadata, not a new semantic extraction unit.
+  const formationSpans = input.spans.filter(span => span.purpose !== "message");
+  for (const span of formationSpans) {
     emitExactSurface(input, span, factors, incidences);
     emitNormalizedTokens(input, span, factors, incidences);
   }
-  const host = input.spans[0];
+  const host = formationSpans[0];
   if (host !== undefined) {
     emitViewFactors(input, host, factors, incidences);
     emitContextFactors(input, host, factors, incidences);

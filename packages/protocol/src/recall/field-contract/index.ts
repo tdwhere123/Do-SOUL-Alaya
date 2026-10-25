@@ -153,6 +153,7 @@ export type {
   ProjectionGenerationPort,
   ProofEffectPort,
   QueryConditionPort,
+  SourceAdmissionContext,
   SourceAdmissionPort,
   SourceAdmissionRequest,
   SourceAdmissionResult

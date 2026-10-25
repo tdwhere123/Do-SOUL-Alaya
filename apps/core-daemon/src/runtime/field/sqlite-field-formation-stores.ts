@@ -46,6 +46,8 @@ export function createSqliteFieldFormationStores(input: Readonly<{
     },
     putRecord: (record, contentBytes) =>
       sourceRecordFromRow(repos.records.insert(recordToRow(record, contentBytes))),
+    getHostInventory: (workspaceId, recordId) => repos.records.getHostInventory(workspaceId, recordId),
+    putHostInventory: (workspaceId, recordId, inventory) => repos.records.putHostInventory(workspaceId, recordId, inventory),
     getSpan: (workspaceId, spanId) => {
       const row = repos.spans.findById(workspaceId, spanId);
       return row === null ? null : sourceSpanFromRow(row);
@@ -135,6 +137,7 @@ function recordToRow(
     scope_class: record.scope_class ?? null,
     attribution_context: record.attribution_context ?? null,
     ...(record.source_representation === undefined ? {} : { source_representation: record.source_representation }),
+    ...(record.host_structure === undefined ? {} : { host_structure: record.host_structure }),
     source_body: contentBytes
   };
 }

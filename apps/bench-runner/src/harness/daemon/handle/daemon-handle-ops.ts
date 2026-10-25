@@ -120,9 +120,9 @@ export function createBenchDaemonOps(
 > {
   const seedOps = createBenchSeedOperations(input);
   return {
-    importSourceRecord: (request) => input.activeRuntime.services.sourceRecordAdmission.admit({
+    importSourceRecord: (request, hostCapture) => input.activeRuntime.services.sourceRecordAdmission.admit({
       ...request, workspace_id: input.activeContext.workspaceId, evidence_object_id: null
-    }, { workspaceId: input.activeContext.workspaceId }),
+    }, { workspaceId: input.activeContext.workspaceId, ...(hostCapture === undefined ? {} : { hostCapture }) }),
     recall: createBenchRecallOperation(input),
     warmEmbeddingCache: createWarmEmbeddingCacheOperation(input),
     warmQueryEmbeddingCache: createWarmQueryEmbeddingCacheOperation(input),
