@@ -10,7 +10,7 @@ import * as daemonOwner from "../../../harness/daemon.js";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
-import { assertLongMemEvalRoundSourceRevision, createLongMemEvalRoundProjection } from "../../../runs/snapshot/source-records/round-projection.js";
+import { assertLongMemEvalRoundSourceRevision, createLongMemEvalRoundProjection, bindPublishedLongMemEvalRoundCensus } from "../../../runs/snapshot/source-records/round-projection.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { createTestLongMemEvalDatasetAuthority } from "./test-dataset-authority.js";
 
@@ -51,6 +51,7 @@ function fixture() {
 it("publishes fresh structured round revisions through actual Core admission and sealed SQLite without altering legacy facts", async () => {
   const f = fixture(), loader = vi.spyOn(datasetOwner, "loadDatasetWindowWithIdentity");
   loader.mockResolvedValue({ ...f.loaded, promotionAuthority: null });
+  const legacyCensus = await censusCompleteSourceRecords({ population: f.population.name, dataDir: f.root, pinnedMetaRoot: f.root });
   const legacy = await f.publish("legacy", "2026-09-13T00:00:00.000Z");
   const legacyDigest = hashRegularFileNoFollow(legacy.snapshot_path);
   loader.mockResolvedValue(f.loaded);
@@ -60,6 +61,16 @@ it("publishes fresh structured round revisions through actual Core admission and
   expect(report).toMatchObject({ census_count: 2, admitted_count: 2, rejected_count: 0, published_count: 0 });
   expect(hashRegularFileNoFollow(report.snapshot_path)).toBe(report.db_sha256);
   expect(hashRegularFileNoFollow(legacy.snapshot_path)).toBe(legacyDigest);
+  const bound = bindPublishedLongMemEvalRoundCensus(legacyCensus, report);
+  expect(bound.records.map(row => row.source_version)).toEqual(report.sources.map(row => row.source_version));
+  expect(bound.records.every(row => row.host_capture === undefined)).toBe(true);
+  expect(legacyCensus.records.every(row => row.source_version === f.loaded.sha256)).toBe(true);
+  for (const changed of [
+    { ...report, sources: report.sources.slice(1) },
+    { ...report, sources: report.sources.map(row => ({ ...row, content_digest: "sha256:" + "0".repeat(64) })) },
+    { ...report, sources: report.sources.map(row => ({ ...row, round_index: 99 })) },
+    { ...report, sources: report.sources.map(row => ({ ...row, source_version: f.loaded.sha256 })) }
+  ]) expect(() => bindPublishedLongMemEvalRoundCensus(legacyCensus, changed)).toThrow();
   const db = openReadOnlyDatabase(report.snapshot_path);
   try {
     const records = new SqliteFieldSourceRecordRepo(db, fieldContractSha256), spans = new SqliteFieldSourceSpanRepo(db, fieldContractSha256);
@@ -104,9 +115,9 @@ it("refuses source/byte overruns before daemon startup and never grants custom p
   for (const sourceLimits of [{ maxSources: 1, maxContentBytes: 10000 }, { maxSources: 2, maxContentBytes: 1 }])
     await expect(f.publish("bounded", "2026-09-14T00:00:00.000Z", sourceLimits)).rejects.toThrow(/source\/byte limits/);
   expect(start).not.toHaveBeenCalled(); expect(existsSync(join(f.root, "bounded.sqlite"))).toBe(false);
-  const unknown = createLongMemEvalRoundProjection({ ...f.loaded, promotionAuthority: null });
+  const unknown = await createLongMemEvalRoundProjection({ ...f.loaded, promotionAuthority: null });
   expect(unknown.sourceVersion).toBe(f.loaded.sha256); expect(unknown.capture).toBeUndefined();
-  const captured = createLongMemEvalRoundProjection(f.loaded).capture!({ questionId: "authored-round", sessionIndex: 0, roundIndex: 0,
+  const captured = (await createLongMemEvalRoundProjection(f.loaded)).capture!({ questionId: "authored-round", sessionIndex: 0, roundIndex: 0,
     sourceId: "longmemeval_s:authored-round-s0-r0" });
   expect(() => captured.authorize({ workspace_id: "authored-round-workspace", source_id: "longmemeval_s:authored-round-s0-r0",
     source_version: f.loaded.sha256, content_bytes: "User: café 雪\nAssistant: User: quoted Assistant: still quoted",

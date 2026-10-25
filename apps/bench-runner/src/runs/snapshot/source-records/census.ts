@@ -97,14 +97,14 @@ export async function censusCompleteSourceRecords(input: Readonly<{
   return Object.freeze({
     population: input.population,
     dataset_sha256: loaded.sha256,
-    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.questions, createLongMemEvalRoundProjection(loaded)))
+    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.questions, await createLongMemEvalRoundProjection(loaded)))
   });
 }
 
 function collectCompleteSourceRecords(
   population: string,
   questions: readonly LongMemEvalQuestion[],
-  projection: ReturnType<typeof createLongMemEvalRoundProjection>
+  projection: Awaited<ReturnType<typeof createLongMemEvalRoundProjection>>
 ): readonly LongMemEvalSourceCensusRecord[] {
   const seen = new Set<string>();
   const records: LongMemEvalSourceCensusRecord[] = [];
