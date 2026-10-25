@@ -25,6 +25,15 @@ generations, retaining historical IDs while requiring a fresh bounded capture.
 Record-only semantic consumers explicitly reject capsule nominations. This is
 an invariant §25 major, not query-time indexing or automatic model preparation.
 
+## Opt-in SourceIndex message windows
+
+Protocol 23.1.0 adds `recorded-message-windows.v1` as a new profile identity
+(invariant §25 minor). It preserves bounded complete recorded messages, splits
+oversized messages at UTF-8 boundaries, and balances the last two windows where
+legal without overlap or increasing the byte cap. The embedding runtime still
+counts prepared tokens and refuses over-limit inputs. Raw profiles/defaults and
+old manifests retain their meaning. See the [window policy](../../docs/handbook/recall.md#source-index-window-representations).
+
 ## Ordinary field delivery compatibility
 
 Protocol 23.0.0 versions recorded-boundary delivery as `ordinary-native-field.v2`
@@ -36,7 +45,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `23.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `23.1.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

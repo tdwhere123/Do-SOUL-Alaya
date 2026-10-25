@@ -4,7 +4,12 @@ import { SourceEvidenceTargetSchema, sourceGoldRootIdentity, type SourceEvidence
 import { canonicalJson } from "./selection/capture/canonical-json.js";
 import { FieldContractDigestSchema, hashContentDigest, type FieldContractSha256 } from "./field-contract/canonical-identity.js";
 
+import { messageWindowIntervals, SourceIndexMessageStructureSchema, type SourceIndexMessageStructure } from "./source-index-message-windows.js";
+export type { SourceIndexMessageStructure } from "./source-index-message-windows.js";
+
 const Revision = z.string().min(1).max(256);
+export const SourceIndexWindowingSchema = z.enum(["utf8-byte-windows.v1", "recorded-message-windows.v1"]);
+export type SourceIndexWindowing = z.infer<typeof SourceIndexWindowingSchema>;
 export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const SOURCE_INDEX_MAX_WINDOWS = 4096;
 /** Expanded retained-root enumeration; historical record-only generations cannot serve it. */
@@ -29,7 +34,7 @@ export const SourceIndexProfileSchema = z.object({
   /** Absent is the historical raw-string contract, not an unknown paired transform. */
   representation: SourceEmbeddingRepresentationSchema.optional(),
   max_input_tokens: z.number().int().min(1).max(1048576),
-  windowing: z.literal("utf8-byte-windows.v1"),
+  windowing: SourceIndexWindowingSchema,
   window_bytes: z.number().int().min(4).max(65536)
 }).strict().readonly();
 export const SourceIndexConfigurationSchema = z.object({
@@ -74,6 +79,8 @@ export type SourceIndexCaptureResult = Readonly<{
 /** Unbound identifies missing generation/target membership, not a native-source currentness change. */
 export type SourceIndexReadResult = Readonly<{
   status: "ready"; source: SourceIndexTarget; body: string; resources: SourceIndexResources;
+  /** Present only for a recorded-message profile; failed reads never become unknown. */
+  message_structure?: SourceIndexMessageStructure;
 }> | Readonly<{ status: "partial" | "stale" | "superseded" | "unbound"; reason: string; resources: SourceIndexResources }>;
 export type SourceIndexWriteResult = Readonly<{ status: "accepted" }> |
   Readonly<{ status: "rejected"; reason: "stale" | "superseded" | "missing_generation" | "missing_target" | "incomplete" }>;
@@ -85,6 +92,7 @@ export type SourceIndexWindow = Readonly<{
 }>;
 export type SourceIndexDocument = Readonly<{
   source: SourceIndexTarget; profile_id: string; body: string; windows: readonly SourceIndexWindow[];
+  message_structure?: SourceIndexMessageStructure;
 }>;
 export type SourceIndexVector = Readonly<{
   window_id: string; input_digest: string; embedding: Float32Array;
@@ -190,25 +198,40 @@ export function prepareSourceIndexLexical(input: { source: SourceIndexTarget; bo
 }
 
 /** Captured input only. Complete bytes or an explicit capacity refusal; never a clipped window list. */
-export function prepareSourceIndexDocument(input: { source: SourceIndexTarget; body: string; profile: SourceIndexProfile },
+export function prepareSourceIndexDocument(input: { source: SourceIndexTarget; body: string; profile: SourceIndexProfile;
+  message_structure?: SourceIndexMessageStructure },
   sha256: FieldContractSha256): SourceIndexDocument {
   const captured = structuredClone(input);
   const { source, body, bytes } = prepareSourceIndexLexical(captured, sha256);
   const profile = SourceIndexProfileSchema.parse(captured.profile);
   const profileId = sourceIndexProfileId(profile, sha256);
+  const structure = profile.windowing === "recorded-message-windows.v1"
+    ? SourceIndexMessageStructureSchema.parse(captured.message_structure) : undefined;
+  const intervals = structure === undefined ? rawWindowIntervals(bytes, profile.window_bytes)
+    : messageWindowIntervals(bytes, profile.window_bytes, structure, SOURCE_INDEX_MAX_WINDOWS);
+  if (intervals === null) throw new SourceIndexCapacityExceeded();
   const windows: SourceIndexWindow[] = [];
-  for (let start = 0; start < bytes.length;) {
-    if (windows.length >= SOURCE_INDEX_MAX_WINDOWS) throw new SourceIndexCapacityExceeded();
-    let end = Math.min(bytes.length, start + profile.window_bytes);
-    while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+  for (const [start, end] of intervals) {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(start, end));
     const contentDigest = hashContentDigest(text, sha256);
     windows.push(Object.freeze({ ordinal: windows.length, start_byte: start, end_byte: end, text,
       content_digest: contentDigest,
       window_id: digest(["source-index-window.v1", source.root_key, profileId, start, end, contentDigest], sha256) }));
-    start = end;
   }
-  return Object.freeze({ source, profile_id: profileId, body, windows: Object.freeze(windows) });
+  return Object.freeze({ source, profile_id: profileId, body, windows: Object.freeze(windows),
+    ...(structure === undefined ? {} : { message_structure: structure }) });
+}
+
+/** Existing raw-profile generations/control only; remove only when their readability is retired. */
+function rawWindowIntervals(bytes: Uint8Array, cap: number): readonly (readonly [number, number])[] | null {
+  const intervals: [number, number][] = [];
+  for (let start = 0; start < bytes.length;) {
+    if (intervals.length >= SOURCE_INDEX_MAX_WINDOWS) return null;
+    let end = Math.min(bytes.length, start + cap);
+    while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+    intervals.push([start, end]); start = end;
+  }
+  return intervals;
 }
 
 function digest(material: unknown, sha256: FieldContractSha256): string { return `sha256:${sha256(canonicalJson(material))}`; }

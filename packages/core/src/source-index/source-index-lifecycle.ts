@@ -55,7 +55,8 @@ export class SourceIndexLifecycle {
       let document: SourceIndexDocument | undefined;
       try {
         document = prepareSourceIndexDocument({ source: read.source, body: read.body,
-          profile: generation.selection.configuration.profile }, this.sha256);
+          profile: generation.selection.configuration.profile,
+          ...(read.message_structure === undefined ? {} : { message_structure: read.message_structure }) }, this.sha256);
       } catch (error) {
         if (!(error instanceof SourceIndexCapacityExceeded)) throw error;
       }

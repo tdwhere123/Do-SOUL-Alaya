@@ -70,6 +70,15 @@ function expectReceipt(receipt: SourceSemanticQueryPreparation, expected: Record
 }
 
 describe("simulated query-preparation adapters, no native inference", () => {
+  it("rebinds the selected message strategy rather than silently requesting the raw default", async () => {
+    const selected = selectionFor(profile({ windowing: "recorded-message-windows.v1" }));
+    const bind = vi.fn(async () => readyBind(selected, async inputs => embedded(inputs)));
+    const result = await prepare({ selection: selected, bind });
+    expect(bind).toHaveBeenCalledExactlyOnceWith({ window_bytes: 64, max_input_tokens: 32, windowing: "recorded-message-windows.v1" });
+    expect(result.receipt.status).toBe("ready");
+    expect(result.vector).toMatchObject({ status: "available", profile_id: selected.profile_id });
+  });
+
   it("captures one selection and binding for distinct original/hint vectors and retains failed hint submissions", async () => {
     const selected = selectionFor(profile()), originalSelection = structuredClone(selected);
     const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {

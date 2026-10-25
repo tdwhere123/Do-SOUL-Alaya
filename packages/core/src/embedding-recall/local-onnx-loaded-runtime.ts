@@ -111,7 +111,7 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
         preprocessing: `${captured.representation === undefined ? "raw-string" : "paired-prefix"}.special-tokens.no-truncation.v1;${runtimeVersion}`,
         ...(captured.representation === undefined ? {} : { representation: captured.representation }),
         normalization: "attention-mask-mean.l2.q8.v1", max_input_tokens: Math.min(maxTokens, captured.max_input_tokens ?? maxTokens),
-        windowing: "utf8-byte-windows.v1", window_bytes: captured.window_bytes });
+        windowing: captured.windowing ?? "utf8-byte-windows.v1", window_bytes: captured.window_bytes });
       const profileId = sourceIndexProfileId(profile, sourceEmbeddingSha256);
       return Object.freeze<SourceEmbeddingBinding>({ status: "ready", profile, profile_id: profileId,
         embedInputs: (inputs, callOptions) => {

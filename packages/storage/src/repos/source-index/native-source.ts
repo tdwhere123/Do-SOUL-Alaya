@@ -1,6 +1,7 @@
 import {
   SOURCE_INDEX_MAX_BODY_BYTES, SourceIndexOperationError, sourceIndexTarget,
-  type SourceIndexBudget, type SourceIndexReadResult, type SourceIndexResources, type SourceIndexTarget
+  type SourceIndexBudget, type SourceIndexReadResult, type SourceIndexResources, type SourceIndexTarget,
+  type SourceIndexMessageStructure
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
@@ -72,6 +73,28 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
   } catch (error) {
     throw new SourceIndexOperationError(error, resources);
   }
+}
+
+/** Uses the existing source-owned bounded inventory reader, with all work and bytes charged.
+ * Unavailable/invalid/incomplete reads refuse preparation; only genuine unknown uses the fallback.
+ */
+export function readSourceIndexMessageStructure(records: SqliteFieldSourceRecordRepo, source: SourceIndexTarget,
+  budget: SourceIndexBudget): { status: "ready"; structure: SourceIndexMessageStructure; resources: SourceIndexResources } |
+    { status: "partial"; reason: string; resources: SourceIndexResources } {
+  assertIndexBudget(budget);
+  if (source.target.root_kind === "evidence_capsule") return { status: "ready", structure: { status: "not_applicable" },
+    resources: { work: 0, native_bytes: 0 } };
+  const read = records.readHostInventory({ workspaceId: source.target.workspace_id, recordId: source.target.root_id,
+    sourceVersion: source.target.source_version, contentDigest: source.target.content_digest, authorizedScopes: null,
+    workLimit: budget.work, nativeByteLimit: budget.native_bytes,
+    memoryLimit: Math.min(3 * budget.native_bytes, 3 * (SOURCE_INDEX_MAX_BODY_BYTES + 8192)) });
+  const resources = { work: read.work, native_bytes: read.nativeBytes };
+  if (read.status === "unknown") return { status: "ready", structure: { status: "unknown" }, resources };
+  if (read.status !== "captured" || read.inventory === undefined) return { status: "partial",
+    reason: read.status === "resource_limited" ? "read_budget" : `message_structure_${read.status}`, resources };
+  return { status: "ready", structure: { status: "captured", occurrences: read.inventory.occurrences.map(row => ({
+    utf8_span: row.utf8_span, completeness: row.completeness
+  })) }, resources };
 }
 
 /** Bounded complete-body assembly for Core's projection computation, never a successful prefix. */

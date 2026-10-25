@@ -34,7 +34,7 @@ async function handle(message) {
       artifact_digest: `sha256:${"a".repeat(64)}`, tokenizer_revision: "fork-fixture-tokenizer",
       dimensions: DIMENSIONS, preprocessing: "fixture-raw", normalization: "fixture-unit",
       max_input_tokens: message.bindingOptions.max_input_tokens ?? 32,
-      windowing: "utf8-byte-windows.v1", window_bytes: message.bindingOptions.window_bytes
+      windowing: message.bindingOptions.windowing ?? "utf8-byte-windows.v1", window_bytes: message.bindingOptions.window_bytes
     };
     const binding = { status: "ready", profile,
       profile_id: `sha256:${sha256(JSON.stringify(["source-index-profile.v1", Object.fromEntries(Object.entries(profile).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))]))}`,

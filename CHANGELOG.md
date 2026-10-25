@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 23.0.0, engine gateway 2.0.0
+## Unreleased — protocol 23.1.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,16 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 23.1.0 adds the opt-in `recorded-message-windows.v1` SourceIndex profile
+strategy (invariant §25 minor). The shared planner protects bounded complete recorded
+messages, explicitly splits oversized/unstructured intervals, and rebalances the last
+two windows at legal UTF-8 boundaries. Native inventory reads are bounded and charged;
+Storage recomputes the same manifest from admitted facts. Actual prepared-token limits
+remain enforced without truncation. Existing raw profiles/manifests and deployed defaults
+are unchanged. Selecting the new profile creates a distinct generation and retires prior
+eligibility; rollback selects raw anew, never revives a retired generation. No lexical,
+ranking, delivery, natural-data efficacy or default-promotion change is claimed.
 
 Protocol 22.1.0 added optional source-bound host-occurrence descriptors and the
 non-discriminator `message` span purpose (invariant §25, minor). Core captures

@@ -236,6 +236,7 @@ export class SourceIndexAcquisition {
       signal.throwIfAborted();
       receipt = { ...receipt, binding_work: "unknown", external_api_attempts: null };
       const binding = await bind({ window_bytes: profile.window_bytes, max_input_tokens: profile.max_input_tokens,
+        ...(profile.windowing === "utf8-byte-windows.v1" ? {} : { windowing: profile.windowing }),
         ...(profile.representation === undefined ? {} : { representation: profile.representation }) });
       // Binding may not support cancellation. Discard anything arriving after the inherited deadline.
       signal.throwIfAborted();

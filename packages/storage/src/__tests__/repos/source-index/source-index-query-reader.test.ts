@@ -12,7 +12,7 @@ import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-
 import { initDatabase, StorageDatabase } from "../../../sqlite/db.js";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../../sqlite/temporal-cutover-gate.js";
 import { applyBaselineSql, currentSchemaVersion } from "../../migrations/apply-baseline.js";
-import { CLOCK, fieldSha256, seedWorkspaces } from "../field/field-contract-fixture.js";
+import { CLOCK, fieldSha256, seedWorkspaces, hashedOriginalRecord } from "../field/field-contract-fixture.js";
 import {
   BUDGET, QUERY_BUDGET, WORKSPACE, LEXICAL_LIMITATIONS, expectQueryResources, fixture, laneMatch,
   publishIndexed, rankedLane, rankedUnicode61Unscoped, targetFor, vectorWindowIds, type Fixture
@@ -248,14 +248,15 @@ describe("source index CJK trigram migration rebuild and mutation", () => {
     for (let version = 1; version <= 21; version += 1) mark.run(version, CLOCK);
     seedWorkspaces(old);
     old.connection.pragma("foreign_keys = ON");
-    const foundation: Fixture = {
-      database: old, records: new SqliteFieldSourceRecordRepo(old, fieldSha256),
-      index: new SqliteSourceIndexRepository(old, fieldSha256),
-      erase: new SqliteFieldEraseBarrierRepo(old, fieldSha256)
-    };
     const originalBody = "部署流水线配置说明";
-    // Author the historical 021 projection layout, not today's expanded-root writer.
-    const record = publishSource(foundation, originalBody, "cjk-root");
+    // Author historical rows directly: the current host-capable writer must refuse this old schema.
+    const record = hashedOriginalRecord(WORKSPACE, originalBody, "cjk-root");
+    old.connection.prepare(`INSERT INTO source_records (workspace_id, record_id, source_id, source_version,
+      content_digest, evidence_object_id, recorded_at, event_time, valid_from, valid_to, operator_id, speaker,
+      scope_class, attribution_context_json, source_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(record.workspace_id, record.record_id, record.source_id, record.source_version, record.content_digest,
+        record.evidence_object_id, record.recorded_at, record.event_time, record.valid_from, record.valid_to,
+        record.operator_id, record.speaker, record.scope_class, JSON.stringify(record.attribution_context), originalBody);
     const published = { record, source: targetFor(record) };
     old.connection.prepare(`INSERT INTO source_index_roots(workspace_id,root_key,record_id,source_id,target_json)
       VALUES(?,?,?,?,?)`).run(WORKSPACE, published.source.root_key, record.record_id, record.source_id, JSON.stringify(published.source));

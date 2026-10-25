@@ -31,6 +31,25 @@ afterEach(async () => {
 });
 
 describe("loaded local ONNX Source embedding runtime (controlled tokenizer/model seams)", () => {
+  it("binds the opt-in message strategy but keeps prepared-token refusal before model execution", async () => {
+    const seam = createControlledSeam();
+    const { binding, runtime } = await loadBoundRuntime(seam, { window_bytes: 8,
+      windowing: "recorded-message-windows.v1", max_input_tokens: 8,
+      representation: { kind: "paired-prefix.v1", query_prefix: "Q: ", passage_prefix: "P: " } });
+    expect(binding.profile.windowing).toBe("recorded-message-windows.v1");
+    const raw = runtime.bind({ window_bytes: 8, max_input_tokens: 8,
+      representation: binding.profile.representation });
+    expect(raw.status).toBe("ready");
+    if (raw.status !== "ready") throw new Error("raw binding required");
+    expect(raw.profile_id).not.toBe(binding.profile_id);
+    const results = await binding.embedInputs([{ input_id: "bounded", text: "abc", role: "passage" },
+      { input_id: "over-limit", text: "abcd", role: "passage" }], { profile_id: binding.profile_id, timeoutMs: 5000 });
+    expect(results).toMatchObject([{ status: "embedded", token_count: 8, truncated: false },
+      { status: "not_embedded", reason: "input_token_limit", token_count: 9 }]);
+    expect(seam.modelCalls).toHaveLength(1);
+    expect(seam.tokenizerCalls.map(row => row.texts)).toEqual([["P: abc"], ["P: abcd"]]);
+  });
+
   it("binds both prefixes, prepares exactly once, and preserves raw identity evidence", async () => {
     const seam = createControlledSeam();
     const options: SourceEmbeddingBindingOptions = { window_bytes: 1024, representation: {

@@ -280,6 +280,38 @@ The ordinary 64-KiB source allowance is not raised. `native_structure`, legacy
 attribution, root speaker and existing model/factor extraction retain their meanings;
 message spans do not enter factor emission or first-span host selection.
 
+## SourceIndex window representations
+
+The [Protocol planner](../../packages/protocol/src/recall/source-index.ts) owns exact
+byte coverage and window identity. `utf8-byte-windows.v1` remains the default and the
+reader/control contract for existing generations. The explicit preparation option
+`windowing: "recorded-message-windows.v1"` selects a new profile/generation (Protocol
+23.1.0, invariant §25 minor); it changes neither query ranking nor delivery policy.
+
+The message strategy protects nonempty complete host-occurrence intervals no larger
+than `window_bytes`. These are the same admitted facts that produce message spans;
+newlines, role markers and excerpts do not create boundaries. Greedy contiguous windows
+end at the farthest legal UTF-8 offset within the byte cap. Gaps and oversized messages
+may split; bounded complete messages may not. The final two windows move their shared
+boundary to minimize byte-length imbalance where legal, retaining the existing boundary
+on ties. A short tail remains when whole-message constraints prevent improvement.
+There is no overlap, missing content, byte-cap increase or universal whole-message claim.
+
+The source-owned inventory reader supplies separately metered, bounded facts for both
+Core preparation and Storage's transactional manifest recomputation. Captured-empty,
+empty complete messages, excerpts, unknown capture and non-applicable capsule structure
+remain explicit; unknown/non-applicable structure uses the same strategy's UTF-8 fallback.
+Unavailable, invalid or budget-incomplete reads refuse preparation, not fallback. No
+ordinary source hydration or preparation budget is increased. Structure changes still
+require a new source revision; same-generation retries reproduce identical manifests.
+
+Byte windows are not a token estimate. The existing local embedding owner prepares
+prefix/special tokens, counts with the loaded tokenizer and refuses `input_token_limit`
+before model execution, without truncation. A bounded byte fragment may still exceed
+the token cap and leave a partial generation. This opt-in representation is not an
+empirically chosen default. Old persisted generations remain readable under their own
+profile, but selection/unbind fencing never revives retired eligibility.
+
 ## Source disclosure
 
 Every permitted retained-source display qualifies what was actually read:

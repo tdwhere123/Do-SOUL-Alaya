@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { CoreError } from "../shared/errors.js";
 import {
-  SourceIndexProfileSchema, SourceEmbeddingRepresentationSchema, SourceEmbeddingRoleSchema,
+  SourceIndexProfileSchema, SourceIndexWindowingSchema, SourceEmbeddingRepresentationSchema, SourceEmbeddingRoleSchema,
   hashContentDigest, sourceIndexProfileId,
-  type SourceIndexProfile, type SourceEmbeddingRepresentation, type SourceEmbeddingRole
+  type SourceIndexProfile, type SourceIndexWindowing, type SourceEmbeddingRepresentation, type SourceEmbeddingRole
 } from "@do-soul/alaya-protocol";
 
 /** Private runtime evidence; not a second Source profile or durable index authority. */
@@ -19,6 +19,8 @@ export interface SourceEmbeddingOptions {
 }
 export interface SourceEmbeddingBindingOptions {
   readonly window_bytes: number;
+  /** Explicit opt-in; omission preserves historical raw windows. */
+  readonly windowing?: SourceIndexWindowing;
   /** May lower, never raise, the loaded model/tokenizer limit. */
   readonly max_input_tokens?: number;
   readonly representation?: SourceEmbeddingRepresentation;
@@ -73,8 +75,9 @@ export function captureSourceEmbeddingInputs(inputs: readonly SourceEmbeddingInp
 export function captureSourceEmbeddingBindingOptions(options: SourceEmbeddingBindingOptions): SourceEmbeddingBindingOptions {
   const captured = structuredClone(options);
   if (!captured || typeof captured !== "object" || Array.isArray(captured) ||
-      Object.keys(captured).some(key => !["window_bytes", "max_input_tokens", "representation"].includes(key)) ||
+      Object.keys(captured).some(key => !["window_bytes", "windowing", "max_input_tokens", "representation"].includes(key)) ||
       !SourceIndexProfileSchema.unwrap().shape.window_bytes.safeParse(captured.window_bytes).success ||
+      (captured.windowing !== undefined && !SourceIndexWindowingSchema.safeParse(captured.windowing).success) ||
       (captured.max_input_tokens !== undefined && (!Number.isSafeInteger(captured.max_input_tokens) || captured.max_input_tokens < 1))) {
     throw new CoreError("VALIDATION", "Invalid Source embedding binding options");
   }

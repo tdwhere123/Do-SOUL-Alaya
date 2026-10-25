@@ -13,7 +13,7 @@ import { StorageError } from "../../shared/errors.js";
 import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { encodeEmbeddingBlob, isFiniteNonzeroEmbedding } from "../memory/embedding-vector-validity.js";
 import { readBufferField, readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
-import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument,
+import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument, readSourceIndexMessageStructure,
 } from "./native-source.js";
 import { captureSourceIndexTargets, persistSourceIndexRoot } from "./capture-targets.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
@@ -169,7 +169,17 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
       if (generation.status === "failed") return { status: "partial", reason: "incomplete", resources };
       const source = this.target(input.workspaceId, input.generationId, input.rootKey);
       if (source === null) return { status: "unbound", reason: "missing_target", resources };
-      return readSourceIndexDocument(this.database, this.records, source, input.maxBytes, input.budget);
+      const read = readSourceIndexDocument(this.database, this.records, source, input.maxBytes, input.budget);
+      if (read.status !== "ready" || generation.selection.configuration.profile.windowing === "utf8-byte-windows.v1") return read;
+      try {
+        const structure = readSourceIndexMessageStructure(this.records, source, {
+          work: input.budget.work - read.resources.work, native_bytes: input.budget.native_bytes - read.resources.native_bytes
+        });
+        const resources = { work: read.resources.work + structure.resources.work,
+          native_bytes: read.resources.native_bytes + structure.resources.native_bytes };
+        return structure.status === "ready" ? { ...read, message_structure: structure.structure, resources }
+          : { status: "partial", reason: structure.reason, resources };
+      } catch (error) { throw new SourceIndexOperationError(error, read.resources); }
     }, "read");
   }
 
@@ -219,17 +229,27 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
         const source = this.target(input.workspaceId, input.generationId, input.document.source.root_key);
         if (source === null) return { status: "rejected", reason: "missing_target", resources };
         if (canonicalJson(source) !== canonicalJson(input.document.source)) return { status: "rejected", reason: "stale", resources };
-        const expected = prepareSourceIndexDocument({ source, body: input.document.body,
-          profile: generation.selection.configuration.profile }, this.sha256);
+        const profile = generation.selection.configuration.profile;
+        // Reread admitted facts inside this write transaction; caller-supplied boundaries are not authority.
+        const structure = profile.windowing === "recorded-message-windows.v1"
+          ? readSourceIndexMessageStructure(this.records, source, input.budget) : undefined;
+        if (structure !== undefined) Object.assign(resources, structure.resources);
+        completed = resources;
+        if (structure?.status === "partial") return { status: "rejected",
+          reason: structure.reason === "read_budget" ? "read_budget" : "native_source_unavailable", resources };
+        const expected = prepareSourceIndexDocument({ source, body: input.document.body, profile,
+          ...(structure === undefined ? {} : { message_structure: structure.structure }) }, this.sha256);
         if (canonicalJson(expected) !== canonicalJson(input.document)) {
           throw new StorageError("VALIDATION_FAILED", "source index window manifest mismatch");
         }
-        const guard = guardSourceIndexTarget(this.database, this.records, source, input.budget);
-        completed = guard.resources;
+        const guard = guardSourceIndexTarget(this.database, this.records, source, {
+          work: input.budget.work - resources.work, native_bytes: input.budget.native_bytes - resources.native_bytes
+        });
+        resources.work += guard.resources.work; resources.native_bytes += guard.resources.native_bytes;
         if (guard.status !== "ready") return { status: "rejected",
-          reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
-        if (!this.persistLexical(source, expected.body, guard.dependencies, input.budget, guard.resources)) {
-          return { status: "rejected", reason: "read_budget", resources: guard.resources };
+          reason: guard.status === "partial" ? guard.reason : "stale", resources };
+        if (!this.persistLexical(source, expected.body, guard.dependencies, input.budget, resources)) {
+          return { status: "rejected", reason: "read_budget", resources };
         }
         const insert = this.database.connection.prepare(`INSERT INTO source_index_windows
           (workspace_id,generation_id,root_key,window_id,ordinal,start_byte,end_byte,content_digest,body)
@@ -241,7 +261,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
           WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(expected.windows.length,
           input.workspaceId, input.generationId, source.root_key);
         verifySourceIndexTargetCoverage(this.database, input.workspaceId, input.generationId, source.root_key);
-        return { status: "accepted", resources: guard.resources };
+        return { status: "accepted", resources };
       });
     } catch (error) {
       throw new SourceIndexOperationError(error, completed);

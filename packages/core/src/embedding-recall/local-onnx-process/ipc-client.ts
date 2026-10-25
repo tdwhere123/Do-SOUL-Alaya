@@ -154,6 +154,7 @@ export class LocalOnnxEmbeddingIpcSession {
       const profile = captureSourceEmbeddingProfile(binding.profile, binding.profile_id);
       if (profile.model_id !== this.modelId || profile.provider_kind !== "local_onnx" || profile.dimensions !== 384 ||
           profile.window_bytes !== captured.window_bytes ||
+          profile.windowing !== (captured.windowing ?? "utf8-byte-windows.v1") ||
           canonicalJson(profile.representation ?? null) !== canonicalJson(captured.representation ?? null) ||
           (captured.max_input_tokens !== undefined && profile.max_input_tokens > captured.max_input_tokens)) {
         throw new CoreError("OBLIGATION_VIOLATION", "Child Source profile configuration mismatch");

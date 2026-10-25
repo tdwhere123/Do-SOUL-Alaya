@@ -32,6 +32,11 @@ export const HostOccurrenceSchema = z.object({
 }).readonly();
 export type HostOccurrence = z.infer<typeof HostOccurrenceSchema>;
 
+/** Shared admission/index meaning: empty and incomplete occurrences are not addressable messages. */
+export function hostOccurrenceIsMessage(row: Pick<HostOccurrence, "completeness" | "utf8_span">): boolean {
+  return row.completeness === "complete" && row.utf8_span[1] > row.utf8_span[0];
+}
+
 export const HostCaptureIssuerSchema = z.object({
   namespace: Id, workspace_id: Id, producer: Id,
   basis: z.enum(["reported_excerpt", "pinned_dataset"])

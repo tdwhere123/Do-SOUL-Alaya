@@ -80,7 +80,8 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
         if (unsupported) return { status: "unsupported", reason: "cached_model_unavailable" };
         // Deterministic fixture binding, not real-model evidence. The offline test owns native loading.
         const profile = configuration({ provider_kind: "local_onnx", model_id: modelId,
-          window_bytes: input.window_bytes, max_input_tokens: input.max_input_tokens ?? 512 }).profile;
+          window_bytes: input.window_bytes, max_input_tokens: input.max_input_tokens ?? 512,
+          windowing: input.windowing ?? "utf8-byte-windows.v1" }).profile;
         return { status: "ready", profile, profile_id: sourceIndexProfileId(profile, fieldContractSha256),
           embedInputs: async (inputs): Promise<readonly SourceEmbeddingResult[]> => {
             submitted += inputs.length;
@@ -94,9 +95,11 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
           } };
       } });
     const shutdown = vi.fn(async () => { await producer.stop(); database.close(); });
-    const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining) => {
+    const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining,
+      representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
+      windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing) => {
       producerPassRemaining.push(remaining);
-      return producer.runPass(remaining);
+      return producer.runPass(remaining, representation, windowing);
     } },
       checkpointFieldProjection: checkpoint,
       shutdown };
@@ -106,6 +109,17 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
   });
   return checkpoint;
 }
+
+it("explicitly prepares and seals a new message-window profile without promoting it to the default", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, { ...execution, windowing: "recorded-message-windows.v1" }, join(root, "message-windows"));
+  expect(result.config?.source_index).toMatchObject({ windowing: "recorded-message-windows.v1",
+    index: { configuration: { profile: { windowing: "recorded-message-windows.v1" } } } });
+  expect(result.report.execution).toMatchObject({ windowing: "recorded-message-windows.v1" });
+  expect(result.report.setup.status).toBe("settled");
+  expect(config).not.toHaveProperty("source_index");
+});
 
 it("keeps standalone freeze closure and explicitly preserves the live SQLite owner when sealing", () => {
   const { root } = setup();

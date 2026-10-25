@@ -81,7 +81,7 @@ describe("Source embedding (real fork transport, fixture capability)", () => {
       reason: kind === "missing" ? "child_source_evidence_unavailable" : "fixture_no_tokenizer" });
   });
 
-  it.each(["profile digest", "model", "provider", "dimensions", "window", "token ceiling", "artifact digest"])("rejects a child's invalid bound %s", async (fault) => {
+  it.each(["profile digest", "model", "provider", "dimensions", "window", "window strategy", "token ceiling", "artifact digest"])("rejects a child's invalid bound %s", async (fault) => {
     const tracking = forkFixture({ response(response, request) {
       if (request.op !== "bind_source" || response.sourceBinding?.status !== "ready") return;
       const binding = response.sourceBinding;
@@ -91,6 +91,7 @@ describe("Source embedding (real fork transport, fixture capability)", () => {
       if (fault === "provider") profile.provider_kind = "openai";
       if (fault === "dimensions") profile.dimensions = 383;
       if (fault === "window") profile.window_bytes = 2048;
+      if (fault === "window strategy") profile.windowing = "recorded-message-windows.v1";
       if (fault === "token ceiling") profile.max_input_tokens = 33;
       if (fault === "artifact digest") { response.sourceBinding = { ...binding, profile: { ...profile, artifact_digest: "not-a-digest" } }; return; }
       response.sourceBinding = { ...binding, profile, profile_id: sourceIndexProfileId(profile, sha256) };

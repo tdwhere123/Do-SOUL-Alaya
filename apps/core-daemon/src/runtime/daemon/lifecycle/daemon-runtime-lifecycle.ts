@@ -64,7 +64,8 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   closeEmbeddingProvider?: () => Promise<void>;
   sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void>;
     runPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-      representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation):
+      representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
+      windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing):
       Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt> }>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
@@ -96,7 +97,8 @@ const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
   runSourceIndexPass(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-    representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
+    representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
+    windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   runGardenEmbeddingBackfillPass(
@@ -123,14 +125,14 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 
   return Object.freeze({
     startBackgroundServices,
-    runSourceIndexPass: async (remaining, representation) => {
+    runSourceIndexPass: async (remaining, representation, windowing) => {
       if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runPass === undefined) {
         throw new AlayaError(
           "UNAVAILABLE",
           "Source-only preparation requires an idle, unscheduled daemon producer"
         );
       }
-      return await input.sourceIndexProducer.runPass(remaining, representation);
+      return await input.sourceIndexProducer.runPass(remaining, representation, windowing);
     },
     runGardenBackgroundPass: async () => {
       await awaitStartupBackgroundPassInFlight(state);

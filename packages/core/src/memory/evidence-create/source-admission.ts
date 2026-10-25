@@ -2,7 +2,7 @@ import {
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   SourceRecordIdentitySchema,
   SourceRepresentationSchema,
-  sourceProjectionDependenciesAvailable,
+  sourceProjectionDependenciesAvailable, hostOccurrenceIsMessage,
   fieldReceiptContractFields,
   hashAddressableSourceSpanId,
   hashContentDigest,
@@ -132,7 +132,7 @@ function persistRecord(
   const persisted = stores.putRecord(record, request.content_bytes);
   if (host !== undefined) stores.putHostInventory(request.workspace_id, identity, host.canonical);
   return { record: persisted, messageSpans: host?.inventory.occurrences.flatMap(row =>
-    row.completeness === "complete" && row.utf8_span[1] > row.utf8_span[0]
+    hostOccurrenceIsMessage(row)
       ? [{ start_offset: row.utf8_span[0], end_offset: row.utf8_span[1], purpose: "message" as const }] : []) ?? [] };
 }
 
