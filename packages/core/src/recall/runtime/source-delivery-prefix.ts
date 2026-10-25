@@ -6,7 +6,7 @@ import type { SourceDeliveryBoundaries } from "@do-soul/alaya-protocol";
  */
 export function sourceDeliveryEnds(boundaries: SourceDeliveryBoundaries | undefined, start = 0): readonly number[] | undefined {
   if (boundaries?.status !== "available") return undefined;
-  const unit = boundaries.spans.some(span => ["message"].includes(span.purpose)) ? "message" : "line";
+  const unit = boundaries.spans.some(span => span.purpose === "message") ? "message" : "line";
   return boundaries.spans.filter(span => span.purpose === unit).map(span => span.end_offset - start);
 }
 

@@ -81,6 +81,32 @@ it("commits source/inventory/message spans atomically, replays after audit failu
   expect(f.database.connection.prepare("SELECT count(*) AS n FROM source_host_inventories").get()).toEqual({ n: 2 });
 });
 
+it("requires a new revision for legacy-source enrichment and withdraws the old prepared index eligibility", async () => {
+  const f = fixture();
+  const legacy = await f.admission.admit(request({ host_occurrences: undefined }), { workspaceId: WS });
+  expect(read(f, legacy.record).status).toBe("unknown");
+  const index = new SqliteSourceIndexRepository(f.database, fieldContractSha256);
+  const ready = buildReady({ database: f.database, records: f.field.fieldRepos.records, erase: f.field.fieldRepos.erase, index });
+  await expect(f.admission.admit(request(), context)).rejects.toThrow();
+  expect(read(f, legacy.record).status).toBe("unknown");
+  expect(index.generation(WS, ready.generation.generation_id)?.status).toBe("ready");
+  const runtime = { database: f.database }, caller = { workspace_id: WS, as_of: CLOCK };
+  const lease = issueSemanticLease(runtime, { ...caller, principal: "", kind: "query", authorized: ["project"],
+    revision: sourceSemanticRevision(runtime), expires_at: "2026-09-13T00:10:00Z" },
+  new SourceSemanticReadBudget({ work_units: 10000, memory_bytes: 100000 }));
+  const changed = await createAuditedSourceReplacement(f.input).replaceCurrent({ expected_current: legacy.record,
+    replacement: request({ source_version: "2", recorded_at: "2026-09-13T00:00:01Z" }) }, context);
+  expect(changed.status).toBe("committed_projection_deferred");
+  const current = f.field.stores.getCurrentRecord(WS, "record")!;
+  expect(current.identity).not.toBe(legacy.record.identity);
+  expect(current.content_digest).toBe(legacy.record.content_digest);
+  expect(read(f, current).inventory?.occurrences).toEqual(request().host_occurrences);
+  expect(index.generation(WS, ready.generation.generation_id)).toMatchObject({ status: "partial", completed_count: 0 });
+  expect(f.database.connection.prepare("SELECT * FROM source_index_text").all()).toEqual([]);
+  expect(f.database.connection.prepare("SELECT * FROM source_index_vectors").all()).toEqual([]);
+  expect(() => readSemanticLease(runtime, caller, lease, ["project"], "query")).toThrow(/no longer current/);
+});
+
 it("preserves exact inventory through close/reopen and SQLite copy, then scrubs payload without resurrection", async () => {
   const f = fixture(), first = await f.admission.admit(request(), context);
   f.database.close({ optimize: false }); closeCachedDatabase(f.filename);

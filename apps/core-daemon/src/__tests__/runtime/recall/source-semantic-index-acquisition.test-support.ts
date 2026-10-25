@@ -71,8 +71,11 @@ function simulatedBinding(selection: SourceIndexSelection, axis: (text: string) 
 }
 
 export async function withIndexedSources(sources: readonly IndexedSource[], body: (fixture: IndexFixture) => Promise<void>,
-  configuration: SourceIndexConfiguration = SIMULATED_CONFIGURATION) {
+  configuration: SourceIndexConfiguration = SIMULATED_CONFIGURATION,
+  importSources?: (directory: string) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-index-")), filename = join(directory, "alaya.db");
+  try { await importSources?.(directory); }
+  catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   const { database } = await createRecallRealStorage(() => undefined, filename);
   prepareIndexedRecallProjection(database);
   const clients: RecallReadWorkerClient[] = [];
@@ -87,7 +90,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
       speaker: "user", scope_class: source.scope ?? "project", spans: source.spans ?? []
     }, { workspaceId: WS })).record;
     const indexed = sources.filter(source => source.indexed !== false);
-    for (const source of indexed) await admit(source);
+    if (importSources === undefined) for (const source of indexed) await admit(source);
     const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
     const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
     const selection = lifecycle.select(WS, configuration), generation = lifecycle.begin(selection);

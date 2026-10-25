@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
+import { startBenchDaemon } from "../../../../../bench-runner/src/harness/daemon.js";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
   return installProviderFreeBoundary();
@@ -124,6 +125,88 @@ it("refits aligned payload after an actual encoded-envelope shrink without losin
     expect(rows[0]?.target).toMatchObject({ span: { content_end: lineEnd, content_complete: false } });
     expect(() => encodeIndexResults({ ...shrunk.index, result_version: "ordinary-native-field.v1" }))
       .toThrow("ordinary field result version is unsupported");
+  });
+});
+
+it("prefers imported complete multiline messages over fitting lines in both MCP surfaces and resumes literal bytes", async () => {
+  // Independent byte coordinates: first message ends at 715, but a later line ends
+  // at 916. Both fit the initial allowance; the next complete message ends at 3717.
+  const firstMessage = `${firstLine}inside\n`;
+  const body = `${firstMessage}${"tail ".repeat(40)}\n${"tail ".repeat(560)}\n`;
+  expect(Buffer.byteLength(firstMessage)).toBe(715);
+  expect(Buffer.byteLength(body)).toBe(3717);
+  const imported = ["host-first", "host-second"].map(id => ({ id, text: body, vector: [1, 0, 0] }));
+  await withIndexedSources(imported, async fixture => {
+    const client = await fixture.openClient(), library = publicMcp(client);
+    const libraryRequest = { operation: "recall", accepts_unreviewed_conditional_results: true,
+      original_query: "needle", semantic_correspondences: [], authorized_scopes: SCOPES,
+      budget: { ...QUERY_BUDGET, page_budget: 1 }, output_byte_limit: 100_000 };
+    const firstLibrary = await library(libraryRequest);
+    if (firstLibrary.operation !== "recall" || firstLibrary.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
+      throw new Error("current field delivery required");
+    }
+    expect(firstLibrary.results[0]?.content_preview).toBe(firstMessage);
+    expect(firstLibrary.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: 715, content_complete: false } });
+    expect(firstLibrary.index.continuation).not.toBeNull();
+    const nextRequest = { ...libraryRequest, continuation: firstLibrary.index.continuation };
+    const next = await library(nextRequest), replay = await library(nextRequest);
+    if (next.operation !== "recall" || next.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION
+      || replay.operation !== "recall" || replay.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
+      throw new Error("current recall required");
+    }
+    expect(next.results[0]?.content_preview).toBe(firstMessage);
+    expect(replay.results).toEqual(next.results);
+    expect(replay.index).toEqual({ ...next.index, page_purpose: "retry" });
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
+      readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
+      activeConstraintsPort: client.activeConstraintsPort });
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
+    const request = { ...capableRecallConsumerDeclaration(), query: "needle", max_results: 1,
+      scope_class: "project", dimension: null, domain_tags: null, result_kind_view: "source_only" };
+    const call = async (args: object) => {
+      const result = await handler.call({ toolName: "soul.recall", arguments: args,
+        context: { workspaceId: WS, runId: "run-1", sessionId: "host-message", agentTarget: "codex" } });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      return SoulMemorySearchResponseSchema.parse(result.output);
+    };
+    const first = await call(request), target = first.results[0]?.target;
+    expect(first.results[0]?.content_preview).toBe(firstMessage);
+    expect(target).toMatchObject({ span: { content_start: 0, content_end: 715, content_complete: false } });
+    if (target?.kind !== "source_evidence") throw new Error("source target required");
+    const expansion = { ...request, continuation: first.index?.continuation,
+      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target, start_offset: 715, byte_budget: 400 } };
+    const expanded = await call(expansion), expandedReplay = await call(expansion);
+    // No positive message end fits: keep the UTF-8 prefix, not the line at 916.
+    expect(expanded.results[0]?.content_preview).toBe(Buffer.from(body).subarray(715, 1115).toString("utf8"));
+    expect(expanded.results[0]?.target).toMatchObject({ span: { content_start: 715, content_end: 1115, content_complete: false } });
+    expect(expandedReplay.results).toEqual(expanded.results);
+    const middle = await call({ ...request, continuation: expanded.index?.continuation,
+      payload_continuation: { ...expansion.payload_continuation, target: expanded.results[0]!.target,
+        start_offset: 1115, byte_budget: 1000 } });
+    expect(middle.results[0]?.content_preview).toBe(Buffer.from(body).subarray(1115, 2115).toString("utf8"));
+    expect(middle.results[0]?.target).toMatchObject({ span: { content_start: 1115, content_end: 2115, content_complete: false } });
+    const final = await call({ ...request, continuation: middle.index?.continuation,
+      payload_continuation: { ...expansion.payload_continuation, target: middle.results[0]!.target,
+        start_offset: 2115, byte_budget: 4000 } });
+    expect(final.results[0]?.content_preview).toBe(Buffer.from(body).subarray(2115).toString("utf8"));
+    expect(final.results[0]?.target).toMatchObject({ span: { content_start: 2115, content_end: 3717, content_complete: true } });
+  }, undefined, async directory => {
+    const daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId: WS, runId: "run-1",
+      configDirectoryRoot: directory, embeddingMode: "disabled", sqliteWriteQueue: "disabled",
+      embeddingStartupProbe: "omit", gardenCompute: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+    try {
+      for (const source of imported) {
+        const result = await daemon.importSourceRecord({ source_id: source.id, source_version: "1", content_bytes: body,
+          recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null, scope_class: "project",
+          spans: [0, 708, 715, 916].map((start, i) => ({ start_offset: start, end_offset: [708, 715, 916, 3717][i]!, purpose: "line" })),
+          host_occurrences: [[0, 715], [715, 3717]].map(([start, end], i) => ({ occurrence_id: `authored-${i}`,
+            utf8_span: [start!, end!], role: "tool", channel: null, author_ref: null, container_ref: null,
+            upstream_message_ref: null, upstream_position: i, completeness: "complete", fidelity: "original_bytes" }))
+        }, request => ({ namespace: "authored-host", workspace_id: request.workspace_id,
+          producer: "multiline-fixture", basis: "pinned_dataset" }));
+        expect(result.spans.filter(span => span.purpose === "message").map(span => span.end_offset)).toEqual([715, 3717]);
+      }
+    } finally { await daemon.shutdown(); }
   });
 });
 
