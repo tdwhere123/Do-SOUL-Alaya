@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { AlayaError, IsoDatetimeStringSchema } from "@do-soul/alaya-protocol";
 import { deriveAddressableSpanViews } from "@do-soul/alaya-core";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
-import { resolveBenchDaemonConfigRoot } from "../../../harness/daemon/daemon-config-directory.js";
+import { resolveSourceRecordsImportEffects, type SourceRecordsImportEffects } from "./import-effects.js";
 import { preparePersonaSuccessor, personaPredecessor, type PersonaSuccessorInput,
   type PreparedPersonaSuccessor } from "./persona-successor.js";
 import { LongMemEvalPersonaSuccessorSchema, type LongMemEvalPersonaSuccessor } from
@@ -30,11 +30,6 @@ export type PrepareSourceRecordsInput = Readonly<{
   /** Private execution effects, not retained source identity or reasoning/model setup. */
   importEffects?: SourceRecordsImportEffects;
 }>;
-const ImportEffectsSchema = z.object({
-  configDirectoryRoot: z.string().min(1), sqliteWriteQueue: z.literal("disabled"),
-  embeddingStartupProbe: z.literal("omit"), gardenCompute: z.literal("disabled")
-}).strict();
-export type SourceRecordsImportEffects = Readonly<z.infer<typeof ImportEffectsSchema>>;
 const PreparationSchema = z.object({
   artifact_domain: z.literal("source_records"), dataset: SourceRecordsDatasetSchema,
   recorded_at: IsoDatetimeStringSchema, snapshot_path: z.string().min(1),
@@ -42,9 +37,7 @@ const PreparationSchema = z.object({
 }).strict();
 
 export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsInput): Promise<SourceRecordsManifest> {
-  const parsedEffects = input.importEffects === undefined ? undefined : ImportEffectsSchema.parse(input.importEffects);
-  const importEffects = parsedEffects === undefined ? undefined : { ...parsedEffects,
-    configDirectoryRoot: resolveBenchDaemonConfigRoot(parsedEffects.configDirectoryRoot) };
+  const importEffects = resolveSourceRecordsImportEffects(input.importEffects);
   const snapshotPath = resolve(input.snapshotPath);
   const dataDirRoot = resolve(input.dataDirRoot);
   if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new Error("snapshot must differ from live DB");

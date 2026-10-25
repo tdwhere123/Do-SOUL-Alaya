@@ -1,4 +1,4 @@
-import { createLongMemEvalHostCapturePolicy, type LongMemEvalHostCapture } from "../../../datasets/longmemeval/ingestion/host-occurrences.js";
+import { type LongMemEvalHostCapture } from "../../../datasets/longmemeval/ingestion/host-occurrences.js";
 import type { HostStructureDescriptor } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, retainedSourceSpeaker } from "@do-soul/alaya-core";
 import { AlayaError, hashContentDigest, type UtteranceAttribution } from "@do-soul/alaya-protocol";
@@ -11,6 +11,7 @@ import {
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { requireLongMemEvalTimestamp } from "../../../datasets/longmemeval/ingestion/source-time.js";
 import { readVerifiedNativeSourceSnapshot } from "./native.js";
+import { createLongMemEvalRoundProjection } from "./round-projection.js";
 
 export type SourceCensusUnit = Readonly<{
   assertion_id: number;
@@ -96,16 +97,14 @@ export async function censusCompleteSourceRecords(input: Readonly<{
   return Object.freeze({
     population: input.population,
     dataset_sha256: loaded.sha256,
-    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.sha256, loaded.questions,
-      loaded.promotionAuthority === null ? undefined : createLongMemEvalHostCapturePolicy(loaded)))
+    records: Object.freeze(collectCompleteSourceRecords(input.population, loaded.questions, await createLongMemEvalRoundProjection(loaded)))
   });
 }
 
 function collectCompleteSourceRecords(
   population: string,
-  sourceVersion: string,
   questions: readonly LongMemEvalQuestion[],
-  hostPolicy?: ReturnType<typeof createLongMemEvalHostCapturePolicy>
+  projection: Awaited<ReturnType<typeof createLongMemEvalRoundProjection>>
 ): readonly LongMemEvalSourceCensusRecord[] {
   const seen = new Set<string>();
   const records: LongMemEvalSourceCensusRecord[] = [];
@@ -137,9 +136,9 @@ function collectCompleteSourceRecords(
           population, question_id: question.question_id, session_id: sessionId,
           session_index: sessionIndex, round_index: roundIndex,
           source_id: sourceId,
-          source_version: sourceVersion, content_bytes: contentBytes,
-          ...(hostPolicy === undefined ? {} : { host_capture: hostPolicy({ questionId: question.question_id,
-            sessionIndex, roundIndex, sourceId, sourceVersion }) }),
+          source_version: projection.sourceVersion, content_bytes: contentBytes,
+          ...(projection.capture === undefined ? {} : { host_capture: projection.capture({ questionId: question.question_id,
+            sessionIndex, roundIndex, sourceId }) }),
           content_digest: hashContentDigest(contentBytes, fieldContractSha256),
           corpus_digest: fieldContractSha256(contentBytes),
           source_observed_at: sourceObservedAt, roles, units,

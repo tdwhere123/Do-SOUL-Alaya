@@ -78,6 +78,57 @@ mismatched, or unverifiable checkpoint blocks the run with exit status 1 and
 starts no replacement bench; remove it or rerun without `--resume` to run the
 step explicitly.
 
+## Structured round-source publication
+
+The private benchmark round producer is
+[`census.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/census.ts) →
+[`publish.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/publish.ts).
+It admits records through Core and seals fresh SQLite, never enriching an old receipt
+or reusing an old index.
+
+[`round-projection.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/round-projection.ts)
+owns the deterministic revision. Captured rounds use
+`bench-round-host-v1:<dataset-sha256>`; unknown-host rounds retain the dataset hash.
+The prefix versions added structured facts, not the original bytes. The existing
+pin binds the structured inputs; no second content hash, registry or caller-selected
+revision is needed. The same projection owner supplies the version to the existing
+host-capture closure, which checks exact source ID/version, rendered bytes and
+occurrence coordinates under the opaque verified-dataset capability. Custom pins
+remain unknown-host; tests use the existing explicitly authored capability only.
+
+Logical IDs, rendered bytes, root speaker, unknown attribution, observation and
+validity times remain unchanged. Fresh publication has its own recorded time and
+new record identities requiring fresh preparation. The historical dataset-hash
+revision is the projection predecessor, not proof of an in-place database replacement.
+Comparisons must bind actual historical configuration/inventory and new receipts;
+existing-database replacement still belongs to Core's predecessor-bound owner.
+Retained native readers and separate per-message/persona source families retain
+their existing contracts. This is benchmark-private, with no invariant25 MCP,
+EventLog payload or runtime-config schema change and no Protocol version bump.
+
+Read-only evaluators intentionally have no capture capability for isolated dataset
+copies. `bindPublishedLongMemEvalRoundCensus` binds their complete, byte-identical
+census to the already verified publication's revisions and coordinates. It strips
+capture closures and grants no write authority. Callers also verify the publication
+against the actual sealed snapshot. Frozen metric owners can consume this same
+staged pure projection without changing scoring formulas or granting copied pins
+production capture authority.
+
+Publication accepts explicit `sourceLimits: { maxSources, maxContentBytes }`, checked
+against the complete census before daemon startup/source writes. These are allocation
+limits, not model allowances. `importEffects` shares message import's strict owner:
+isolated configuration root, disabled SQLite write queue, omitted embedding startup
+probe and disabled Garden compute. Embedding remains disabled. Native publication
+owns admission, checkpoint, copy and shutdown; callers separately supervise deadlines
+and retain failure/cleanup evidence. Timeout is not a successful seal or refundable
+attempt. The strict source-import guard can persist per-thread state and observe
+actual worker exit, because `Worker.terminate()` need not run a JS exit callback.
+
+`round-source-publication.test.ts` exercises real publisher→Core→sealed SQLite,
+independent UTF-8 intervals, preserved legacy facts, read-only publication binding,
+custom-pin unknown state and pre-start count/byte refusal. It uses authored data,
+not natural questions, inference, provider traffic or scores.
+
 ## Metrics and comparisons
 
 - `sample_size` identifies the dataset population; `evaluated_count` records the
