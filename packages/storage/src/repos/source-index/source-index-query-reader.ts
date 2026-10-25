@@ -7,7 +7,7 @@ import {
   type SourceIndexVectorBinding, type SourceIndexVectorCandidate, type SourceIndexVectorCursor,
   type SourceIndexVectorQueryState, type SourceIndexVectorRead, type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
-import { analyzeSourceIndexLexical, readCjkSegmentationStatus, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
+import { analyzeSourceIndexLexical, isCjkSegmentationCandidate, readCjkSegmentationStatus, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
@@ -121,8 +121,8 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
     meter.ledger.retain(bindingMaterial, "source tokenization binding");
     meter.ledger.charge(bindingMaterial.length, 256, "source tokenization digest");
     tokenization = { ...material, binding_digest: hashContentDigest(bindingMaterial, sha256) };
-    shortCjk = !segmented && split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
-      Array.from(token).length < TRIGRAM_MIN_CODEPOINTS);
+    shortCjk = split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
+      Array.from(token).length < TRIGRAM_MIN_CODEPOINTS && (!segmented || !isCjkSegmentationCandidate(token)));
     const lanes = [
       { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts",
         tokens: split.porterTokens, offset: 0, done: false },

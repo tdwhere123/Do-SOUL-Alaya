@@ -79,6 +79,8 @@ it("prepares fresh admitted bytes without binding a model, matches embedded word
       lexical_binding: { representation: "segmented-unicode61.v1", generation_id: prepared.generation!.generation_id } } });
     expect(query.candidates.map(row => row.source.target.root_id)).toEqual([source.record.identity]);
     expect(index.readLexicalCandidates(WORKSPACE, "维护", 8, queryBudget).candidates).toHaveLength(1);
+    expect(index.readLexicalCandidates(WORKSPACE, "배포", 8, queryBudget)).toMatchObject({
+      completion: "partial", reason: "short_cjk_exact_tokens_only", limitations: expect.arrayContaining(["short_cjk_unicode61_exact_tokens_only"]) });
     expect(index.readLexicalCandidates(WORKSPACE, "alpha BETA", 8, queryBudget).candidates).toHaveLength(1);
     expect(index.readLexicalCandidates(WORKSPACE, "流水线", 8, queryBudget).candidates.some(row => row.lexical.lane === "trigram")).toBe(true);
     expect(database.connection.prepare("SELECT body,content_digest FROM source_index_text").get())
