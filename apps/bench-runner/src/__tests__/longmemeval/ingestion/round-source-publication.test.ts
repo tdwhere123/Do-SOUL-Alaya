@@ -89,6 +89,12 @@ it("publishes fresh structured round revisions through actual Core admission and
     }
     expect(spans.listByWorkspace(report.workspace_id).filter(row => row.purpose === "message")).toHaveLength(3);
   } finally { db.close({ optimize: false }); }
+  const operations = isolation.receipt().operations;
+  const created = operations.filter((row: { operation: string }) => row.operation === "worker.create.allowed");
+  const closed = operations.filter((row: { operation: string }) => row.operation === "worker.exit");
+  expect(created).toHaveLength(2);
+  expect(closed.map((row: { worker_id: number }) => row.worker_id)).toEqual(created.map((row: { worker_id: number }) => row.worker_id));
+  expect(closed.every((row: { code: number }) => row.code === 0 || row.code === 1)).toBe(true);
   if (evidence !== undefined) console.log(`Authored structured publication: ${report.snapshot_path}.publication.json`);
 });
 

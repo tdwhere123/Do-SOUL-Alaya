@@ -10,6 +10,7 @@ import tls from "node:tls";
 import workers from "node:worker_threads";
 import { createRequire, registerHooks, syncBuiltinESMExports } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isAbsolute, join } from "node:path";
 import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
 import { createReadOnlyGitExecutionPolicy } from "./read-only-git-boundary.mjs";
 import { authorityGitRefusalDiagnostic, createAuthorityRevisionGitPolicy } from "./authority-revision-git-boundary.mjs";
@@ -42,9 +43,22 @@ for (const name of Object.keys(jiebaPackage.optionalDependencies ?? {})) {
   try { nativePins.add(fs.realpathSync(jiebaRequire.resolve(name))); } catch { /* Other platforms are not installed. */ }
 }
 const forbiddenModule = value => /(?:@huggingface[+/]transformers|onnxruntime|@ai-sdk[+/](?:openai|anthropic|google)|(?:^|[/])(?:openai|@anthropic-ai)(?:[/]|$))/iu.test(value);
+// Native supervisors may retain each thread's guard state. Worker.terminate() does
+// not run the worker's process exit callback, so stderr-at-exit alone loses denials.
+const receiptDirectory = process.env.SOURCE_ONLY_RECEIPTS_DIRECTORY;
+if (receiptDirectory !== undefined && !isAbsolute(receiptDirectory)) throw new Error("absolute source-import receipt directory required");
+const receiptPath = receiptDirectory === undefined ? undefined : join(receiptDirectory, `source-import-${process.pid}-${workers.threadId}.json`);
+let receiptState = "installing";
+function persistReceipt() {
+  if (receiptPath === undefined) return;
+  const fd = fs.openSync(receiptPath, "w");
+  try { fs.writeFileSync(fd, JSON.stringify({ ...receipt(), state: receiptState })); fs.fsyncSync(fd); }
+  finally { fs.closeSync(fd); }
+}
 const record = (operation, detail = {}) => {
   const row = { operation, ...detail, stack: new Error(operation).stack };
   operations.push(row);
+  persistReceipt();
   return row;
 };
 const pushViolation = shared.violations.push.bind(shared.violations);
@@ -117,8 +131,11 @@ replace(workers, "Worker", class extends NativeWorker {
   constructor(url, options = {}) {
     const workerURL = url instanceof URL ? url.href : String(url);
     if (workerURL !== readWorker || options.eval) deny("worker.create", { workerURL });
-    record("worker.create.allowed", { workerURL });
     super(url, { ...options, execArgv: ["--import", import.meta.url] });
+    const workerId = this.threadId;
+    record("worker.create.allowed", { workerURL, worker_id: workerId });
+    this.on("error", error => record("worker.error", { worker_id: workerId, blocked: true, message: String(error) }));
+    this.on("exit", code => record("worker.exit", { worker_id: workerId, code }));
   }
 });
 const hooks = registerHooks({
@@ -145,6 +162,7 @@ const monitor = error => {
   process.stderr.write(`[source-import-guard] uncaught ${error.stack ?? String(error)}\n`);
 };
 const onExit = () => {
+  receiptState = "closed"; persistReceipt();
   process.stderr.write(`[source-import-guard-receipt] ${JSON.stringify(receipt())}\n`);
   if (shared.violations.length > 0 || operations.some(row => row.blocked)) {
     process.exitCode = 1;
@@ -152,6 +170,7 @@ const onExit = () => {
 };
 process.on("uncaughtExceptionMonitor", monitor);
 process.on("exit", onExit);
+receiptState = "installed"; persistReceipt();
 
 /** Vitest callers restore process-wide effects after their isolated file. Child
  * fixture imports retain the guard until exit, as before. */
