@@ -12,7 +12,7 @@ import { SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { startBenchDaemon } from "../../harness/daemon.js";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 
-it("exposes public protocol10 over real daemon MCP without a private comparison execution handle", async () => {
+it("exposes the current field protocol over real daemon MCP without a private comparison execution handle", async () => {
   const root = await mkdtemp(join(tmpdir(), "alaya-public-library-")), clock = "2026-10-21T00:00:00.000Z";
   const request = { operation: "recall" as const, accepts_unreviewed_conditional_results: true as const,
     original_query: "synthetic empty corpus", semantic_correspondences: [], authorized_scopes: { mode: "named", scopes: ["project"] },
@@ -28,8 +28,8 @@ it("exposes public protocol10 over real daemon MCP without a private comparison 
       if (observed.outcome.status === "failure") throw observed.outcome.error;
       expect(mcp).toHaveBeenCalledTimes(1);
       const ordinary = SoulInterpretationResponseSchema.parse(observed.outcome.value);
-      expect(ordinary).toMatchObject({ operation: "recall", protocol_version: 10,
-        index: { result_version: "ordinary-native-field.v1" } });
+      expect(ordinary).toMatchObject({ operation: "recall", protocol_version: 11,
+        index: { result_version: "ordinary-native-field.v2" } });
       expect(observed.status).toBe("available");
       expect(observed.observations).toHaveLength(2);
       expect(observed.observations[1]).toMatchObject({ execution: "success", status: "observed",

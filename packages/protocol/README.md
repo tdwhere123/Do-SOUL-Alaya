@@ -27,9 +27,16 @@ an invariant §25 major, not query-time indexing or automatic model preparation.
 
 ## Ordinary field delivery compatibility
 
+Protocol 23.0.0 versions recorded-boundary delivery as `ordinary-native-field.v2`
+and library field protocol 11 (invariant §25 major). Old live continuations are
+incompatible; upgrade clients and daemon together and start fresh requests. Frozen
+ordinary captures remain historical evidence, never a second execution policy.
+No source or index rewrite is required. Rollback uses the retained previous binary
+with fresh handles, not a relabeled current page.
+
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `22.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `23.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than
@@ -44,7 +51,7 @@ renamed historical enumeration value. `QueryView` adds `delivery_context` and
 `ORDINARY_NATIVE_FIELD_RESULT_VERSION`.
 
 Library recall reuses that page through `SourceSemanticFieldLibraryDeliverySchema`
-(protocol 10): tagged mixed results, Q/H/C evidence only on source targets, and a
+(protocol 11): tagged mixed results, Q/H/C evidence only on source targets, and a
 field continuation that both the public recall request and the worker recall
 request can replay. Frozen v6/v7 library
 deliveries stay readable through `SourceSemanticLibraryDeliverySchema` and the

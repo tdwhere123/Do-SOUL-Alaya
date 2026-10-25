@@ -160,8 +160,22 @@ explicit principal and lifetime admission, not a reusable ordinary worker key.
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (see
-[Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts)).
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v2`, Protocol
+23.0.0; library field protocol 11). Ordinary delivery is a semantic major under
+invariant §25: old continuations cannot execute the new policy (see the
+[cutover and rollback entry](../../CHANGELOG.md)). Source previews keep the same
+order, shares, slots and budgets. Within the fitted allowance, they end at the
+largest recorded boundary of the coarsest available unit: an admitted `message`
+span where recorded, otherwise a `line` span. No positive fitting end means the
+existing UTF-8 prefix, not an empty result. Role markers and inferred messages
+are not boundaries. Verified retained-source reads precede the bounded structural
+lookup; native lookup work and metadata share the payload request ledger.
+Unavailable, unreadable and bounded-out lookup states remain distinct from a
+successful empty span set. Framing retains the actual delivered end and
+completeness; payload continuation starts at that end. Replay reuses the fitted
+page and its recorded facts, not a new selection or uncharged source scan.
+
+See [Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts).
 `RecallNavigationWitness` records original/hint view, native operator,
 ordinal, optional access rank and byte location; it is discovery provenance,
 not a renamed canonical or associative ranking. `delivery_context` and

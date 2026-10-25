@@ -81,6 +81,7 @@ export type SourceRootObserverRow = Readonly<{
   readonly content_end?: number;
   readonly retained_extent?: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
+  readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly original_complete?: boolean;
   readonly scope_class?: string;

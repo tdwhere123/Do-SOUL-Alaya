@@ -47,7 +47,8 @@ export const SIMULATED_CONFIGURATION: SourceIndexConfiguration = { revision: "si
 } };
 export const digest = (text: string) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 export type IndexedSource = Readonly<{ id: string; text: string; scope?: "project" | "global_core";
-  vector?: readonly number[]; indexed?: false }>;
+  vector?: readonly number[]; indexed?: false;
+  spans?: import("@do-soul/alaya-protocol").SourceAdmissionRequest["spans"] }>;
 
 /** Explicit simulation: independently authored axes, not a provider, tokenizer, ONNX model or recorded cache.
  * The production backfill/preparation owners still validate every input digest, profile and accepted vector.
@@ -83,7 +84,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
       workspace_id: WS, source_id: source.id, source_version: version, content_bytes: source.text,
       evidence_object_id: null, recorded_at: version === "1" ? CLOCK : "2026-09-18T00:00:01.000Z",
       event_time: null, valid_from: null, valid_to: null,
-      speaker: "user", scope_class: source.scope ?? "project", spans: []
+      speaker: "user", scope_class: source.scope ?? "project", spans: source.spans ?? []
     }, { workspaceId: WS })).record;
     const indexed = sources.filter(source => source.indexed !== false);
     for (const source of indexed) await admit(source);

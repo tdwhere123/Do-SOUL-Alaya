@@ -1,6 +1,7 @@
-import { AlayaError, MILLIGRADE_TOP, SoulMemorySearchResponseSchema, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
+import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulMemorySearchResponseSchema, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
   type InformationIndex, type MemorySearchResult, type RecallCandidate, type StagedWarningArray } from "@do-soul/alaya-protocol";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+import { sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
 import { displayRecallPreview, projectPayloadCompleteness } from "./recall-result-encoding.js";
 
 /** The same complete envelope is sized by the field and returned by MCP. */
@@ -21,6 +22,7 @@ export type RecallPageSourceMetadata = Readonly<Record<string, Readonly<{
   staged_warnings?: StagedWarningArray;
   source_lookup_reasons?: RecallCandidate["source_lookup_reasons"];
   source_disclosure?: RecallCandidate["source_disclosure"];
+  delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
 }>>>;
 
 /** Numeric evidence from the existing encoder decisions, never a second fit policy. */
@@ -30,12 +32,16 @@ export type RecallResultEncodingObservation = Readonly<{
   metadata_block: Readonly<{ essential_bytes: number; remaining_tokens: number }> | null;
 }>;
 
-/** The field and its public adapter use this exact codec. Preview shortening is
- * a UTF-8 prefix operation: displayed source intervals never count decoration.
+/** The field and its public adapter use this exact codec. Recorded structural
+ * ends shorten literal previews only; unavailable boundaries retain UTF-8 prefixes.
  */
 export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMap<string, string> = new Map(),
   maxTotalTokens = 2_000, sourceMetadata: RecallPageSourceMetadata = {}, onEntry?: () => void,
   observe?: (observation: RecallResultEncodingObservation) => void): readonly MemorySearchResult[] {
+  if (index.result_version.startsWith("ordinary-native-field.")
+    && index.result_version !== ORDINARY_NATIVE_FIELD_RESULT_VERSION) {
+    throw new AlayaError("CONFLICT", "ordinary field result version is unsupported for delivery");
+  }
   if (index.entries.some(entry => entry.interpretation_node !== undefined)) {
     throw new AlayaError("CONFLICT", "conditional interpretation results require the qualified interpretation result capability");
   }
@@ -57,7 +63,11 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings })));
     const reasonedBytes = reasons === undefined ? essentialBytes : disclosureBytes
       + Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: reasons }));
-    return { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure, essentialBytes, reasonedBytes };
+    const span = entry.target.kind === "source_evidence" ? entry.target.span : undefined;
+    const boundaryEnds = span === undefined || retainedPreview === undefined ? undefined
+      : sourceDeliveryEnds(metadata?.delivery_boundaries, span.content_start);
+    return { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
+      essentialBytes, reasonedBytes, boundaryEnds };
   });
   let optionalAllowance = Math.max(0, maxTotalTokens - rows.reduce((sum, row) =>
     sum + Math.max(1, Buffer.byteLength(row.preview) + row.essentialBytes), 0));
@@ -66,7 +76,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
   let metadataBlock: RecallResultEncodingObservation["metadata_block"] = null;
   for (const row of rows) {
     const { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
-      essentialBytes, reasonedBytes } = row;
+      essentialBytes, reasonedBytes, boundaryEnds } = row;
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const optionalBytes = reasonedBytes - essentialBytes;
     const retainedReasons = reasons !== undefined && optionalBytes <= optionalAllowance
@@ -77,7 +87,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       metadataBlock = { essential_bytes: essentialBytes, remaining_tokens: maxTotalTokens - usedTokens };
       break;
     }
-    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
+    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens, boundaryEnds);
     const content = fitted?.preview ?? "[payload omitted]", tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
     usedTokens += tokenEstimate;
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
@@ -134,15 +144,12 @@ function deliveredTarget(target: MemorySearchResult["target"], content: string, 
     content_complete: span.content_complete && hasPayload && bytes === span.content_end - span.content_start } };
 }
 
-function fitEncodedPreview(preview: string, metadataBytes: number, remaining: number) {
-  const tokenEstimate = Math.max(1, Buffer.byteLength(preview) + metadataBytes);
-  if (tokenEstimate <= remaining) return { preview, tokenEstimate };
-  const maxPreviewBytes = remaining - metadataBytes;
-  if (maxPreviewBytes < 1 || remaining <= 1) return null;
-  const bytes = Buffer.from(preview);
-  let end = Math.min(bytes.length, maxPreviewBytes);
-  while (end > 0 && end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end -= 1;
-  const truncated = bytes.subarray(0, end).toString("utf8");
+function fitEncodedPreview(preview: string, metadataBytes: number, remaining: number,
+  boundaryEnds?: readonly number[]) {
+  const cost = (text: string) => Math.max(1, Buffer.byteLength(text) + metadataBytes);
+  if (cost(preview) <= remaining && boundaryEnds === undefined) return { preview, tokenEstimate: cost(preview) };
+  if (remaining - metadataBytes < 1 || remaining <= 1) return null;
+  const truncated = sourceDeliveryPrefix(preview, text => cost(text) <= remaining, boundaryEnds);
   if (truncated.length < 1) return null;
-  return { preview: truncated, tokenEstimate: Math.max(1, Buffer.byteLength(truncated) + metadataBytes) };
+  return { preview: truncated, tokenEstimate: cost(truncated) };
 }

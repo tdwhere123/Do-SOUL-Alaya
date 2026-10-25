@@ -11,7 +11,7 @@ export function captureFieldProofRequests(port: Port | undefined) {
   return {
     port: { ...port, execute: async (...args: Parameters<Port["execute"]>) => {
       const result = await port.execute(...args);
-      if (result.kind === "recall" && result.protocol_version === 10) {
+      if (result.kind === "recall" && result.protocol_version === 11) {
         const receipt = result.field_execution_receipt as ConditionalFieldExecutionReceipt | undefined;
         if (receipt?.compile_input?.source !== "ordinary") throw new Error("worker compile witness required");
         receipts.set(result.delivery_id, receipt);

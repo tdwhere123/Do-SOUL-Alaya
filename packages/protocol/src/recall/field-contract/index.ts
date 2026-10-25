@@ -1,3 +1,4 @@
+export type { SourceDeliveryBoundaries } from "./source-delivery-boundaries.js";
 export {
   FIELD_CONTRACT_DIGEST_PATTERN,
   FIELD_CONTRACT_DIGEST_PREFIX,

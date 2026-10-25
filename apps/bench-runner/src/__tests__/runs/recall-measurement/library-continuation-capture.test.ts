@@ -58,7 +58,7 @@ function secondPage(path: string) {
   return { recallResult: SoulInterpretationResponseSchema.parse(value.response), firstExposurePage: FirstExposurePageSchema.parse(value.first_exposure) };
 }
 
-/** Schema-admitted protocol 10 field page: the live ordinary family, not the archived producer.
+/** Schema-admitted current field page: the live ordinary family, not the archived producer.
  * It intentionally carries no archived access-pool/discovery fields, which is why the family
  * decision cannot depend on those acceptance prerequisites. */
 function fieldFamilyPage(f: Awaited<ReturnType<typeof fixture>>) {
@@ -211,7 +211,7 @@ it("records a delivered unsupported family as the refusal cause at the live capt
   const f = await fixture();
   const output = join(f.root, "family-refusal");
   const original = mcp.callMcpTool;
-  // The daemon surface is replaced by a schema-admitted protocol 10 page, so no native read,
+  // The daemon surface is replaced by a schema-admitted current field page, so no native read,
   // model or index activity happens; the writer under test is the compiled consumer entry.
   const spy = vi.spyOn(mcp, "callMcpTool").mockImplementation(async (client, name, args, capture) => {
     // Preparation keeps its real daemon path; only the recall delivery is the field family.

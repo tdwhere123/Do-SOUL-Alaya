@@ -20,6 +20,7 @@ import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
 import { makeTokenEstimator } from "./recall-service-port-helpers.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+import { sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
 
 export { sourceGoldRootIdentity, proofForLibraryEntry, proofForLibraryQualifier } from "@do-soul/alaya-protocol";
 
@@ -64,9 +65,12 @@ export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {
 const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
 
 /** Raw fallback reserves a fair root share; semantic support may use any remaining space atomically. */
-export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number): string {
-  return previewWithinTokens(text, Math.floor(SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS
-    / Math.max(1, Math.min(occupiedRoots, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET))), makeTokenEstimator());
+export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number,
+  boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries): string {
+  const allowance = Math.floor(SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS
+    / Math.max(1, Math.min(occupiedRoots, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)));
+  const estimator = makeTokenEstimator();
+  return sourceDeliveryPrefix(text, prefix => estimator.estimate(prefix) <= allowance, sourceDeliveryEnds(boundaries));
 }
 
 export function sourceSemanticLibrarySourceEntry(input: Readonly<{
@@ -232,7 +236,8 @@ export function encodeSourceSemanticLibraryResults(
       material_kind: "original_body", evaluated_as_of: sourceClock(index),
       proof_use: proof ? "conditional_support" : "source_only"
     });
-    const prefix = payload.available ? atomic || proof ? payload.text : previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
+    const prefix = payload.available ? atomic || proof ? payload.text
+      : sourceDeliveryPrefix(payload.text, text => estimator.estimate(text) <= allowances[offset]!) : "";
     const content = prefix.length === 0 ? "[payload omitted]" : prefix;
     const tokenEstimate = estimator.estimate(content);
     usedTokens += tokenEstimate;
@@ -289,18 +294,6 @@ function allocatePreviewTokens(required: readonly number[], limit: number): numb
     pending = pending.filter((index) => allocated[index]! < required[index]!);
   }
   return allocated;
-}
-
-function previewWithinTokens(text: string, allowance: number, estimator: ReturnType<typeof makeTokenEstimator>): string {
-  let low = 0, high = text.length;
-  while (low < high) {
-    const end = Math.ceil((low + high) / 2);
-    if (estimator.estimate(text.slice(0, end)) <= allowance) low = end;
-    else high = end - 1;
-  }
-  // UTF-16 slicing must not turn a source character into a replacement character.
-  if (low > 0 && low < text.length && /[\uD800-\uDBFF]/u.test(text[low - 1]!) && /[\uDC00-\uDFFF]/u.test(text[low]!)) low -= 1;
-  return text.slice(0, low);
 }
 
 /** The worker's byte check and MCP delivery encode the exact same public envelope. */

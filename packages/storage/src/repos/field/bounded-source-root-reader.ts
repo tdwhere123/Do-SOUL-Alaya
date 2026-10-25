@@ -41,6 +41,7 @@ export type SourceRootRow = Readonly<{
   readonly original_complete: boolean;
   readonly retained_extent: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
+  readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
   readonly scope_class?: string;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
@@ -167,12 +168,22 @@ export class SqliteSourceRootRecallReader {
     byteLimit = DEFAULT_BYTE_LIMIT,
     offset = 0,
     nativeByteLimit = byteLimit,
-    workLimit = Number.MAX_SAFE_INTEGER
+    workLimit = Number.MAX_SAFE_INTEGER,
+    deliveryBoundaries = false
   ): SourceRootHydratePage {
     if (!Number.isSafeInteger(nativeByteLimit) || nativeByteLimit < 0) throw new Error("invalid source-root native byte limit");
     if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION || workLimit < 5) return {
       row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
-    return this.read(workspaceId, target, byteLimit, offset, { nativeByteLimit, workLimit });
+    const page = this.read(workspaceId, target, byteLimit, offset, { nativeByteLimit, workLimit });
+    if (!deliveryBoundaries || page.row === null || page.unavailable) return page;
+    const read = target.root_kind === "source_record"
+      ? this.records.readDeliveryBoundaries(workspaceId, target.root_id,
+        Math.max(0, workLimit - (page.nativeWork ?? page.rowsRead)),
+        Math.max(0, nativeByteLimit - page.bytesRead - (page.metadataBytes ?? 0)))
+      : { boundaries: { status: "available" as const, spans: [] }, nativeWork: 0, metadataBytes: 0, rowsRead: 0 };
+    return { ...page, row: { ...page.row, delivery_boundaries: read.boundaries }, rowsRead: page.rowsRead + read.rowsRead,
+      metadataBytes: (page.metadataBytes ?? 0) + read.metadataBytes,
+      nativeWork: (page.nativeWork ?? page.rowsRead) + read.nativeWork };
   }
 
   private read(

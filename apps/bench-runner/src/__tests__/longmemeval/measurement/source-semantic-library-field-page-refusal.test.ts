@@ -51,7 +51,7 @@ function sourceRow() {
     program_state: "accept", time_state: "as_of" });
 }
 
-/** A protocol 10 library page: tagged memory + source targets in delivered order. */
+/** A current field library page: tagged memory + source targets in delivered order. */
 function fieldDelivery() {
   return {
     delivery_id: "field-delivery", request_identity: DIGEST,
@@ -95,7 +95,7 @@ function fieldPublicPage() {
   return SoulInterpretationFieldRecallDeliverySchema.parse({ operation: "recall", ...fieldDelivery() });
 }
 
-describe("protocol 10 tagged field pages are unsupported by the v3/v4 measurement", () => {
+describe("current tagged field pages are unsupported by the v3/v4 measurement", () => {
   it("refuses a schema-admitted worker field page as an invalid response", () => {
     const page = fieldWorkerPage();
     const exposure = recordSourceSemanticLibraryFirstExposure({ delivery_id: page.delivery_id,

@@ -407,7 +407,7 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecallParse {
   const worker = SourceSemanticWorkerResultSchema.safeParse(raw);
   if (worker.success) {
     if (worker.data.kind !== "recall") return null;
-    // This evaluator owns the source-gold delivery contract only. The protocol 10
+    // This evaluator owns the source-gold delivery contract only. The current field
     // tagged field page is a different delivered shape; refusing it keeps it from
     // being scored as an empty, unknown or source-gold measurement.
     if (worker.data.protocol_version !== SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION) {

@@ -499,7 +499,7 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   request_budget: RequestBudgetSchema.optional()
 }).strict().superRefine(refineSourceSemanticLibraryDelivery);
 
-export const SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION = 10 as const;
+export const SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION = 11 as const;
 
 /** A library query carries Q/H/C evidence beside the same tagged field page used
  * by ordinary recall. Native field derivations are not conditional proof claims.

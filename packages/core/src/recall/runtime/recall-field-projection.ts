@@ -128,7 +128,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
   const allowance = Math.min(total, input.budget.finalization_reserve);
   const finalized = cost.time("payload", () => payload.finalize([entry], allowance));
   const work = payload.takeWork();
-  cost.add("payload", { ...work, native_rows: 1 });
+  cost.add("payload", work);
   const assembled = payload.applyDeliveredSpans({
     ...delivered.index,
     entries: [entry],
@@ -476,8 +476,7 @@ function projectMembershipCandidate(context: ProjectionContext) {
     finalize_payload: (entries, allowance) => cost.time("payload", () => {
       const result = payload.finalize(entries, allowance);
       const work = payload.takeWork();
-      cost.add("payload", { native_visits: work.native_visits, native_bytes: work.native_bytes,
-        charged_retained_bytes: work.charged_retained_bytes, native_rows: entries.length });
+      cost.add("payload", work);
       return result;
     }),
     prior_continuation: input.continuation == null

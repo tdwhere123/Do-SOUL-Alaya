@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 22.1.0, engine gateway 2.0.0
+## Unreleased — protocol 23.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,7 +17,7 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
-Protocol 22.1.0 adds optional source-bound host-occurrence descriptors and the
+Protocol 22.1.0 added optional source-bound host-occurrence descriptors and the
 non-discriminator `message` span purpose (invariant §25, minor). Core captures
 ordered byte-bound host facts through trusted admission context or exactly retains
 an existing inventory; SQLite migration 024 preserves it separately and erasure
@@ -26,6 +26,15 @@ complete upstream messages. Explicit complete-message captures alone derive mess
 spans. Ordinary delivery, legacy attribution, root speaker, model bytes and factor
 formation semantics are unchanged; new source revisions still invalidate dependent
 indexes and preparation state. Inventory reads are opt-in and separately bounded.
+
+Protocol 23.0.0 changes ordinary source delivery under invariant §25 (major).
+`ordinary-native-field.v2` and library field protocol 11 identify recorded-boundary
+alignment; old identifiers never execute the new policy. Upgrade the daemon and
+clients together, discard prior live continuation handles, and issue fresh queries.
+Frozen captures retain their recorded identities; archive parsing does not authorize
+execution or replay. Source/index data is not rewritten or re-embedded by this
+cutover. Rollback requires the previous binary and fresh handles, not relabeling a
+current result. See [delivery semantics](docs/handbook/recall.md#ordinary-native-field-delivery).
 
 Protocol 22.0.0 expands native SourceIndex nomination to retained evidence-capsule
 roots under invariant §25 (major). Capsule `source_id` is explicitly null;

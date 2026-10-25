@@ -38,7 +38,7 @@ it.each([512, 0])("preserves final acknowledgment separately from fitted prepara
     if (observed.outcome.status !== "success") throw observed.outcome.error;
     const result = observed.outcome.value;
     if (!result.ok) throw new Error(JSON.stringify(result.error));
-    if (prepared?.kind !== "recall" || prepared.protocol_version !== 10 || prepared.preparation_id === undefined) {
+    if (prepared?.kind !== "recall" || prepared.protocol_version !== 11 || prepared.preparation_id === undefined) {
       throw new Error("prepared library field page expected");
     }
     const ack = acknowledgments[0]!;

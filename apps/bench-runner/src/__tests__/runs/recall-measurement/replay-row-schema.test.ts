@@ -15,7 +15,7 @@ import { CLOCK, DIGEST, assemble, sourceOnly, workerRecall } from "../../longmem
 
 // The recorded replay row keeps one response rule: the public interpretation
 // response family. These fixtures are the archived producer (protocol 8) and the
-// current tagged field page (protocol 10); nothing here re-ranks either delivery.
+// current tagged field page; nothing here re-ranks either delivery.
 const archivedResponse = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], [])));
 
 const fieldEntry = sourceIndexEntry({ workspace_id: "ws", root_kind: "source_record", root_id: "record-1",

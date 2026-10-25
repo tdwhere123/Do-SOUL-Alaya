@@ -25,7 +25,7 @@ it("ordinary Core entry prepares the original query before its compiled worker s
       ...capableRecallConsumerDeclaration(), result_kind_view: "mixed" });
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(1);
     expect(fixture.queryBinding.embedInputs.mock.calls[0]?.[0]?.[0]?.text).toBe("Harbor");
-    expect(result.index.result_version).toBe("ordinary-native-field.v1");
+    expect(result.index.result_version).toBe("ordinary-native-field.v2");
     expect(result.index.entries[0]).toMatchObject({ target: { kind: "source_evidence" },
       navigation: { operator: "source_lexical" }, claim: "unknown" });
     expect(result.candidates[0]?.content_preview).toContain("Harbor opening");

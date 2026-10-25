@@ -25,6 +25,7 @@ export class BoundedIndexPayload {
   public readonly sourceMetadata: Record<string, RecallSourceMetadata> = {};
   public remainingMemoryBytes: number;
   private nativeVisits = 0;
+  private nativeRows = 0;
   private nativeBytes = 0;
   private admittedBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
@@ -135,6 +136,7 @@ export class BoundedIndexPayload {
         byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes)) });
       remaining -= Math.max(1, page.rowsRead) + 2;
       this.nativeVisits += Math.max(1, page.rowsRead);
+      this.nativeRows += page.rowsRead;
       this.nativeBytes += page.bytesRead;
       this.consumeMemory(page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
@@ -154,11 +156,12 @@ export class BoundedIndexPayload {
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
   }
 
-  public takeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number;
+  public takeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number; readonly native_rows: number;
     readonly charged_retained_bytes: number }> {
-    const work = { native_visits: this.nativeVisits, native_bytes: this.nativeBytes,
+    const work = { native_visits: this.nativeVisits, native_rows: this.nativeRows, native_bytes: this.nativeBytes,
       charged_retained_bytes: this.admittedBytes };
     this.nativeVisits = 0;
+    this.nativeRows = 0;
     this.nativeBytes = 0;
     this.admittedBytes = 0;
     return work;
@@ -214,6 +217,7 @@ export class BoundedIndexPayload {
     });
     const nextRemaining = remaining - Math.max(1, page.nativeWork ?? page.rowsRead) - 2;
     this.nativeVisits += Math.max(1, page.nativeWork ?? page.rowsRead);
+    this.nativeRows += page.rowsRead;
     this.nativeBytes += page.bytesRead + (page.metadataBytes ?? 0);
     this.consumeMemory(page.bytesRead + (page.metadataBytes ?? 0));
     if (page.row?.content === undefined || page.unavailable) {
@@ -330,12 +334,14 @@ function sourceMetadataFrom(row: Readonly<{
   readonly scope_class?: string;
   readonly retained_extent?: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
+  readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
 }>, asOf?: string, rootKind?: "source_record" | "evidence_capsule"): RecallSourceMetadata {
   const dimension = knownEnum(row.dimension, MemoryDimension);
   const scopeClass = knownEnum(row.scope_class, ScopeClass);
   return {
+    ...(row.delivery_boundaries === undefined ? {} : { delivery_boundaries: row.delivery_boundaries }),
     ...(row.source_lookup_reasons === undefined ? {} : { source_lookup_reasons: row.source_lookup_reasons }),
     ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
     ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings }),

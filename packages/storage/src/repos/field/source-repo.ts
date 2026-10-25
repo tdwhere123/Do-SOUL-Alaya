@@ -1,5 +1,6 @@
 import { readHostInventory, type HostInventoryReadInput, type HostInventoryReadResult } from "./host-inventory-read.js";
 import { StorageError } from "../../shared/errors.js";
+import { readSourceDeliveryBoundaries } from "./source-delivery-boundaries.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import { HOST_OCCURRENCE_LIMITS, bindHostOccurrenceInventory, describeHostStructure, canonicalJson, IsoDatetimeStringSchema, sameSourceRecordFields as sameRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -97,6 +98,10 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly boundedSelectStatement;
   private readonly insertEvidenceBindingStatement;
   private readonly listEvidenceBindingsStatement;
+
+  public readDeliveryBoundaries(workspaceId: string, recordId: string, workLimit: number, byteLimit: number) {
+    return readSourceDeliveryBoundaries(this.database, this.sha256, workspaceId, recordId, workLimit, byteLimit);
+  }
 
   public constructor(
     private readonly database: StorageDatabase,
