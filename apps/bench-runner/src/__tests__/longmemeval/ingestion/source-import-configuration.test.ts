@@ -8,7 +8,8 @@ import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestio
 const boundary = vi.hoisted(() => ({ load: vi.fn(), start: vi.fn() }));
 vi.mock("../../../datasets/longmemeval/ingestion/fetch.js", () => ({ loadDatasetWindowWithIdentity: boundary.load }));
 vi.mock("../../../harness/daemon.js", () => ({ startBenchDaemon: boundary.start }));
-import { prepareSourceRecordsSnapshot, type SourceRecordsImportEffects } from "../../../runs/snapshot/source-records/prepare.js";
+import { prepareSourceRecordsSnapshot } from "../../../runs/snapshot/source-records/prepare.js";
+import type { SourceRecordsImportEffects } from "../../../runs/snapshot/source-records/import-effects.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -51,7 +52,7 @@ it("pins a relative config root before asynchronous dataset loading can change c
     const rejection = expect(prepared).rejects.toThrow("captured launch boundary");
     expect(boundary.load).toHaveBeenCalledOnce();
     process.chdir(after);
-    release({ sha256: "b".repeat(64), questions: [{
+    release({ sha256: "b".repeat(64), promotionAuthority: null, questions: [{
       question_id: "captured-root-question", question_type: "single-session-user",
       question: "Where is the notebook stored?", answer: "On the shelf.",
       question_date: "2026-09-13T00:00:00.000Z",

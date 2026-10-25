@@ -25,6 +25,8 @@ import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
 import { readVerifiedNativeSourceSnapshot } from "./native.js";
+import { assertLongMemEvalRoundSourceRevision } from "./round-projection.js";
+import { resolveSourceRecordsImportEffects, type SourceRecordsImportEffects } from "./import-effects.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
   type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
@@ -187,7 +189,10 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   producerCommit: string;
   workspaceId?: string;
   runId?: string;
+  sourceLimits?: Readonly<{ maxSources: number; maxContentBytes: number }>;
+  importEffects?: SourceRecordsImportEffects;
 }>): Promise<SourcePublicationReport> {
+  const importEffects = resolveSourceRecordsImportEffects(input.importEffects);
   const scope = currentBenchScope();
   const publishSnapshot = async (): Promise<SourcePublicationReport> => {
     refuseBenchWorkAfterCancel();
@@ -199,6 +204,7 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
     const workspaceId = input.workspaceId ?? "source-semantic-library";
     const runId = input.runId ?? "source-semantic-library-run";
     const census = await loadCensus(input.populations);
+    assertPublicationCensus(census, input.sourceLimits);
     refuseBenchWorkAfterCancel();
     const nativePopulation = input.populations.find(population => population.nativeSnapshotPath !== undefined);
     if (nativePopulation !== undefined && (input.populations.length !== 1 ||
@@ -217,7 +223,7 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
       bindIsolatedSnapshot(dataDirRoot, snapshotPath);
       const dispositions = nativePopulation === undefined
         ? await admitCensusSources(dataDirRoot, snapshotPath, census, preparations, {
-          recordedAt: input.recordedAt, workspaceId, runId
+          recordedAt: input.recordedAt, workspaceId, runId, importEffects
         })
         : copyAdmittedNativeSources(nativePopulation.nativeSnapshotPath!, snapshotPath, census[0]!, preparations,
           workspaceId, runId);
@@ -234,6 +240,20 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
     }));
   };
   return scope === undefined ? publishSnapshot() : trackBenchOperation(scope, publishSnapshot);
+}
+
+function assertPublicationCensus(census: readonly SourceCensus[], limits: Readonly<{ maxSources: number; maxContentBytes: number }> | undefined): void {
+  let sources = 0, contentBytes = 0;
+  for (const population of census) for (const source of population.records) {
+    sources += 1; contentBytes += Buffer.byteLength(source.content_bytes, "utf8");
+    if (source.question_id !== undefined) assertLongMemEvalRoundSourceRevision({ datasetSha256: population.dataset_sha256,
+      sourceVersion: source.source_version, hostCaptured: source.host_capture !== undefined });
+  }
+  if (limits !== undefined && (!Number.isSafeInteger(limits.maxSources) || limits.maxSources < 1 ||
+      !Number.isSafeInteger(limits.maxContentBytes) || limits.maxContentBytes < 1 ||
+      sources > limits.maxSources || contentBytes > limits.maxContentBytes)) {
+    throw new AlayaError("VALIDATION", "source publication census exceeds its declared source/byte limits");
+  }
 }
 
 function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]) {
@@ -314,10 +334,10 @@ function bindIsolatedSnapshot(dataDirRoot: string, snapshotPath: string): void {
 async function admitCensusSources(
   dataDirRoot: string, snapshotPath: string, census: readonly SourceCensus[],
   preparations: ReadonlyMap<string, HostPreparation>,
-  input: Readonly<{ recordedAt: string; workspaceId: string; runId: string }>
+  input: Readonly<{ recordedAt: string; workspaceId: string; runId: string; importEffects: SourceRecordsImportEffects | undefined }>
 ): Promise<SourcePublicationDisposition[]> {
   const daemon = await startBenchDaemon({
-    dataDirRoot, workspaceId: input.workspaceId, runId: input.runId,
+    ...input.importEffects, dataDirRoot, workspaceId: input.workspaceId, runId: input.runId,
     embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint"
   });
   const dispositions: SourcePublicationDisposition[] = [];
@@ -359,6 +379,10 @@ async function admitOneSource(
       ...(source.host_structure === undefined ? {} : { host_structure: source.host_structure }),
       ...(source.host_capture === undefined ? {} : { host_occurrences: source.host_capture.occurrences })
     }, source.host_capture?.authorize);
+    if (admitted.record.source_version !== source.source_version ||
+        (admitted.record.host_structure !== undefined) !== (source.host_capture !== undefined || source.host_structure !== undefined)) {
+      throw new AlayaError("CONFLICT", "admitted source differs from the declared source projection");
+    }
     return { ...base, admission: "admitted", record_id: admitted.record.identity, source_record: admitted.record, source_interpretation: "absent", publication: "not_attempted" };
   } catch (error) {
     refuseBenchWorkAfterCancel();

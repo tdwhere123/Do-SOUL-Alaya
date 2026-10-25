@@ -7,6 +7,8 @@ ignored artifacts. A fresh checkout may have none of them.
 
 Current recall behavior is defined by the [recall handbook](../handbook/recall.md).
 Historical reports describe the candidate and configuration that produced them.
+[Structured round-source publication](round-source-publication.md) documents its
+private revision, trusted capture and bounded import contract.
 
 ## Storage
 
