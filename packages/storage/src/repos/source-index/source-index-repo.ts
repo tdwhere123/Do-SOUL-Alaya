@@ -15,7 +15,8 @@ import { encodeEmbeddingBlob, isFiniteNonzeroEmbedding } from "../memory/embeddi
 import { readBufferField, readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
 import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument, readSourceIndexMessageStructure,
 } from "./native-source.js";
-import { captureSourceIndexTargets, persistSourceIndexRoot } from "./capture-targets.js";
+import { captureSourceIndexTargets, persistSourceIndexLexical } from "./capture-targets.js";
+import { SqliteSourceIndexLexicalStore } from "./lexical-generation.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
@@ -30,11 +31,13 @@ const SOURCE_INDEX_MEASUREMENT: unique symbol = Symbol.for("@do-soul/alaya-stora
 export class SqliteSourceIndexRepository implements SourceIndexRepository, SourceIndexQueryRepository {
   static readonly [SOURCE_INDEX_MEASUREMENT] = Object.freeze({ statuses: SOURCE_INDEX_QUALIFICATION_STATUSES,
     readSnapshot: readSourceIndexSnapshotFact, readRoot: readSourceIndexRootQualification });
+  public readonly lexical: SqliteSourceIndexLexicalStore;
   private records: SqliteFieldSourceRecordRepo;
   private connectionVersion: number;
   private readonly targetCapture: SourceIndexTargetCapture | undefined;
   public constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256,
     options: Readonly<{ captureReadTargets?: boolean }> = {}) {
+    this.lexical = new SqliteSourceIndexLexicalStore(database, sha256);
     this.targetCapture = options.captureReadTargets ? new SourceIndexTargetCapture() : undefined;
     this.records = new SqliteFieldSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
@@ -194,7 +197,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
         completed = guard.resources;
         if (guard.status !== "ready") return { status: "rejected",
           reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
-        if (!this.persistLexical(lexical.source, lexical.body, guard.dependencies, captured.budget, guard.resources)) {
+        if (!persistSourceIndexLexical(this.database, lexical.source, lexical.body, guard.dependencies, captured.budget, guard.resources)) {
           return { status: "rejected", reason: "read_budget", resources: guard.resources };
         }
         return { status: "accepted", resources: guard.resources };
@@ -202,16 +205,6 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     } catch (error) {
       throw new SourceIndexOperationError(error, completed);
     }
-  }
-
-  private persistLexical(source: SourceIndexTarget, body: string, dependencies: readonly string[], budget: SourceIndexBudget,
-    resources: { work: number; native_bytes: number }): boolean {
-    if (!persistSourceIndexRoot(this.database, source, dependencies, budget, resources)) return false;
-    this.database.connection.prepare(`INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
-      VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
-      body_bytes=excluded.body_bytes,body=excluded.body`).run(source.target.workspace_id, source.root_key,
-      source.target.content_digest, source.body_bytes, body);
-    return true;
   }
 
   public writeDocument(workspaceId: string, generationId: string, document: SourceIndexDocument,
@@ -248,7 +241,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
         resources.work += guard.resources.work; resources.native_bytes += guard.resources.native_bytes;
         if (guard.status !== "ready") return { status: "rejected",
           reason: guard.status === "partial" ? guard.reason : "stale", resources };
-        if (!this.persistLexical(source, expected.body, guard.dependencies, input.budget, resources)) {
+        if (!persistSourceIndexLexical(this.database, source, expected.body, guard.dependencies, input.budget, resources)) {
           return { status: "rejected", reason: "read_budget", resources };
         }
         const insert = this.database.connection.prepare(`INSERT INTO source_index_windows

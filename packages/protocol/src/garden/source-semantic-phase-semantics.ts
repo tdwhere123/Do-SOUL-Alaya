@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceIndexLexicalBindingSchema } from "../recall/source-index-lexical.js";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
@@ -33,7 +34,8 @@ export const SourceSemanticQueryWindowSchema = z.object({ window_id: Sha256Diges
   end_byte: NonNegativeIntSchema, content_digest: Sha256DigestSchema }).strict().readonly();
 const Tokenization = z.object({ policy: z.literal("source-index-fts.v1"), binding_digest: Sha256DigestSchema,
   cjk_state: z.enum(["uninitialized", "loading", "ready", "unavailable"]), terms: z.array(z.string()).readonly(),
-  unicode61_terms: z.array(z.string()).readonly(), trigram_terms: z.array(z.string()).readonly() }).strict().readonly();
+  unicode61_terms: z.array(z.string()).readonly(), trigram_terms: z.array(z.string()).readonly(),
+  lexical_binding: SourceIndexLexicalBindingSchema.optional() }).strict().readonly();
 export const SourceSemanticAcquisitionSchema = z.object({
   policy: z.literal("source-index-interleaved-prefix.v1"), navigation_digest: Sha256DigestSchema.nullable(),
   completion: Completion,

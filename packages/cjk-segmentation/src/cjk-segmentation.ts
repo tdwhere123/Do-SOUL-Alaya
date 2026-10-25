@@ -1,4 +1,5 @@
 import {
+  AlayaError, projectSegmentedFtsSource, tokenizeFtsQuery,
   fallbackCjkRunPieces,
   isCjkSegmentationCandidate,
   readErrorMessage
@@ -47,6 +48,7 @@ let jiebaState:
   | { readonly kind: "unavailable" } = { kind: "uninitialized" };
 let loadJiebaOverrideForTests: CjkSegmenterLoader | null = null;
 let emittedColdFallbackWarning = false;
+let sourceIndexAnalysisFailed = false;
 
 async function loadJieba(): Promise<CjkSegmenter | null> {
   try {
@@ -145,15 +147,46 @@ export function segmentCjkRun(text: string, options: Readonly<{ initialize?: boo
   return fallbackCjkRunPieces(text);
 }
 
+/** Strict analyzer failure does not redefine the unrelated legacy fail-soft segmenter. */
+export function readSourceIndexLexicalAnalysisStatus(): CjkSegmentationStatus {
+  return sourceIndexAnalysisFailed ? "unavailable" : jiebaState.kind;
+}
+
+/** Strict SourceIndex variant: never initializes or falls back inside a read snapshot. */
+export function analyzeSourceIndexLexical(text: string, purpose: "source"): string;
+export function analyzeSourceIndexLexical(text: string, purpose: "query"): readonly string[];
+export function analyzeSourceIndexLexical(text: string, purpose: "source" | "query"): string | readonly string[] {
+  if (jiebaState.kind !== "ready" || sourceIndexAnalysisFailed) {
+    throw new AlayaError("SOURCE_INDEX_FAILED", `segmenter_${readSourceIndexLexicalAnalysisStatus()}`);
+  }
+  const cut = jiebaState.cut;
+  const segment = (token: string): readonly string[] => {
+    const pieces = cut(token);
+    if (pieces.length === 0 || pieces.some(piece => typeof piece !== "string" || piece.trim().length === 0)) {
+      throw new AlayaError("SOURCE_INDEX_FAILED", "segmenter_invalid_output");
+    }
+    return pieces;
+  };
+  try {
+    return purpose === "source" ? projectSegmentedFtsSource(text, isCjkSegmentationCandidate, segment)
+      : tokenizeFtsQuery(text, { shouldSegmentToken: isCjkSegmentationCandidate, segmentToken: segment });
+  } catch (error) {
+    sourceIndexAnalysisFailed = true;
+    throw error;
+  }
+}
+
 /** Internal-only: reset cached jieba state between test scenarios. */
 export function __resetCjkSegmentationStateForTests(): void {
   jiebaState = { kind: "uninitialized" };
   loadJiebaOverrideForTests = null;
   emittedColdFallbackWarning = false;
+  sourceIndexAnalysisFailed = false;
 }
 
 export function __setCjkSegmentationLoaderForTests(loader: CjkSegmenterLoader): void {
   loadJiebaOverrideForTests = loader;
+  sourceIndexAnalysisFailed = false;
   jiebaState = { kind: "uninitialized" };
   emittedColdFallbackWarning = false;
 }

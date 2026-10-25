@@ -24,6 +24,17 @@ export function persistSourceIndexRoot(database: StorageDatabase, source: Source
   return true;
 }
 
+/** Exact retained bytes shared by all vector profiles and the raw/default lexical reader. */
+export function persistSourceIndexLexical(database: StorageDatabase, source: SourceIndexTarget, body: string,
+  dependencies: readonly string[], budget: SourceIndexBudget, resources: { work: number; native_bytes: number }): boolean {
+  if (!persistSourceIndexRoot(database, source, dependencies, budget, resources)) return false;
+  database.connection.prepare(`INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
+    VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
+    body_bytes=excluded.body_bytes,body=excluded.body`).run(source.target.workspace_id, source.root_key,
+    source.target.content_digest, source.body_bytes, body);
+  return true;
+}
+
 /** Both physical families resume durably; rejected and empty reads spend the same capture ledger. */
 export function captureSourceIndexTargets(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
   input: { workspaceId: string; generationId: string; limit: number; budget: SourceIndexBudget },
@@ -32,8 +43,26 @@ export function captureSourceIndexTargets(database: StorageDatabase, records: Sq
   if (sourceIndexBuildGuard(database, generation) !== null || generation.enumeration_complete || generation.status === "failed") {
     return { generation, added: 0, resources };
   }
-  let cursor = generation.after_source_id, capsulesCursor = generation.after_capsule_cursor;
-  let recordsDone = generation.records_complete, added = 0, complete = false, reason: string | null = null;
+  const page = enumerateSourceIndexTargets(database, records, { ...input, ...generation }, resources, source =>
+    database.connection.prepare(`INSERT INTO source_index_targets
+      (workspace_id,generation_id,root_key) VALUES(?,?,?) ON CONFLICT DO NOTHING`)
+      .run(input.workspaceId, input.generationId, source.root_key).changes);
+  database.connection.prepare(`UPDATE source_index_generations SET after_source_id=?, after_capsule_cursor=?, records_complete=?,
+    enumeration_complete=?,status=?,reason=? WHERE workspace_id=? AND generation_id=?`)
+    .run(page.after_source_id, page.after_capsule_cursor, page.records_complete ? 1 : 0,
+      page.enumeration_complete ? 1 : 0, page.enumeration_complete ? "building" : "partial", page.reason,
+      input.workspaceId, input.generationId);
+  generation = requireSourceIndexGeneration(database, input.workspaceId, input.generationId);
+  return { generation, added: page.added, resources };
+}
+
+/** One bounded native census for lexical and vector preparation; bookkeeping belongs to each generation. */
+export function enumerateSourceIndexTargets(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
+  input: { workspaceId: string; limit: number; budget: SourceIndexBudget; after_source_id: string | null;
+    after_capsule_cursor: string | null; records_complete: boolean },
+  resources: { work: number; native_bytes: number }, accept: (source: SourceIndexTarget) => number) {
+  let cursor = input.after_source_id, capsulesCursor = input.after_capsule_cursor;
+  let recordsDone = input.records_complete, added = 0, complete = false, reason: string | null = null;
   const remaining = () => ({ work: input.budget.work - resources.work, native_bytes: input.budget.native_bytes - resources.native_bytes });
   for (let index = 0; index < input.limit; index++) {
     if (remaining().work < 320 || remaining().native_bytes < 262144) { reason = "enumeration_budget"; break; }
@@ -65,18 +94,13 @@ export function captureSourceIndexTargets(database: StorageDatabase, records: Sq
       }
       if (available.status === "ready") {
         if (!persistSourceIndexRoot(database, source, available.dependencies, input.budget, resources)) { reason = "enumeration_budget"; break; }
-        added += database.connection.prepare(`INSERT INTO source_index_targets
-          (workspace_id,generation_id,root_key) VALUES(?,?,?) ON CONFLICT DO NOTHING`)
-          .run(input.workspaceId, input.generationId, source.root_key).changes;
+        added += accept(source);
       }
     }
     cursor = nextRecord; capsulesCursor = nextCapsule;
   }
   if (!complete && reason === null) reason = "enumeration_page";
-  database.connection.prepare(`UPDATE source_index_generations SET after_source_id=?, after_capsule_cursor=?, records_complete=?,
-    enumeration_complete=?,status=?,reason=? WHERE workspace_id=? AND generation_id=?`)
-    .run(cursor, capsulesCursor, recordsDone ? 1 : 0, complete ? 1 : 0, complete ? "building" : "partial", reason,
-      input.workspaceId, input.generationId);
-  generation = requireSourceIndexGeneration(database, input.workspaceId, input.generationId);
-  return { generation, added, resources };
+  return { after_source_id: cursor, after_capsule_cursor: capsulesCursor, records_complete: recordsDone,
+    enumeration_complete: complete, added, reason };
+
 }

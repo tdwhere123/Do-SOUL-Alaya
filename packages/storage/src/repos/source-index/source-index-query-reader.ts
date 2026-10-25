@@ -7,7 +7,7 @@ import {
   type SourceIndexVectorBinding, type SourceIndexVectorCandidate, type SourceIndexVectorCursor,
   type SourceIndexVectorQueryState, type SourceIndexVectorRead, type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
-import { readCjkSegmentationStatus } from "@do-soul/alaya-cjk-segmentation";
+import { analyzeSourceIndexLexical, readCjkSegmentationStatus, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
@@ -16,6 +16,7 @@ import { buildFtsMatchExpression, tokenizeFtsQuery } from "../shared/fts-lane-ro
 import { readBufferField, readIntegerField, readJsonColumn, readFiniteNumberField, readRecord, readStringField } from "../shared/parse-row.js";
 import { readSourceIndexQueryState, sourceIndexEpoch, SOURCE_INDEX_LEXICAL_CURRENT } from "./generation-state.js";
 import { assertIndexPageLimit, guardSourceIndexTarget } from "./native-source.js";
+import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
 // Only schema-owned immutable targets whose canonical identity was checked here
@@ -88,6 +89,7 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
   const meter = new QueryReadMeter(budget), candidates: SourceIndexLexicalCandidate[] = [];
   let tokenization: SourceIndexLexicalRead["tokenization"] = null, shortCjk = false;
   let resourceRefusal: QueryResourceRefusal | null = null;
+  let partialGeneration = false;
   const result = (completion: SourceIndexLexicalRead["completion"], reason: string | null): SourceIndexLexicalRead => ({
     candidates, completion, reason, resources: meter.resources(), index_coverage: "partial", tokenization,
     resource_refusal: resourceRefusal, limitations: shortCjk
@@ -97,19 +99,33 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
     const captured = capture?.begin(database, workspaceId, meter) === true;
     meter.ledger.retain(navigationText); meter.ledger.charge(navigationText.length, 0, "source query tokenization");
     // The synchronous capture cannot transition loading -> ready. Reads never initiate native loading.
-    const cjkState = readCjkSegmentationStatus();
-    const tokens = tokenizeFtsQuery(navigationText, { initializeCjk: false }), split = splitFtsLanes(tokens);
+    const selected = readSourceIndexLexicalBinding(database, workspaceId, meter.remaining());
+    meter.absorb(selected.resources);
+    if (selected.state.status === "unavailable") {
+      if (selected.state.reason === "read_budget") resourceRefusal = { stage: "lexical", phase: "source lexical binding read" };
+      return result(selected.state.reason === "read_budget" ? "partial" : "unavailable", selected.state.reason);
+    }
+    const binding = "binding" in selected.state ? selected.state.binding : undefined;
+    partialGeneration = selected.state.status === "partial";
+    const segmented = binding?.representation === "segmented-unicode61.v1";
+    const cjkState = segmented ? readSourceIndexLexicalAnalysisStatus() : readCjkSegmentationStatus();
+    if (segmented && cjkState !== "ready") return result("unavailable", `segmenter_${cjkState}`);
+    const tokens = segmented ? analyzeSourceIndexLexical(navigationText, "query")
+      : tokenizeFtsQuery(navigationText, { initializeCjk: false });
+    const split = splitFtsLanes(tokens);
     const material = { policy: "source-index-fts.v1" as const, cjk_state: cjkState, terms: tokens,
-      unicode61_terms: split.porterTokens, trigram_terms: split.trigramTokens };
+      unicode61_terms: split.porterTokens, trigram_terms: split.trigramTokens,
+      ...(binding === undefined ? {} : { lexical_binding: binding }) };
     meter.ledger.retain(material, "source tokenization capture");
     const bindingMaterial = canonicalJson(material);
     meter.ledger.retain(bindingMaterial, "source tokenization binding");
     meter.ledger.charge(bindingMaterial.length, 256, "source tokenization digest");
     tokenization = { ...material, binding_digest: hashContentDigest(bindingMaterial, sha256) };
-    shortCjk = split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
+    shortCjk = !segmented && split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
       Array.from(token).length < TRIGRAM_MIN_CODEPOINTS);
     const lanes = [
-      { lane: "unicode61" as const, table: "source_index_fts", tokens: split.porterTokens, offset: 0, done: false },
+      { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts",
+        tokens: split.porterTokens, offset: 0, done: false },
       { lane: "trigram" as const, table: "source_index_fts_trigram", tokens: split.trigramTokens, offset: 0, done: false }
     ].filter(lane => lane.tokens.length > 0).map(lane => ({ ...lane, match: buildFtsMatchExpression(lane.tokens) }));
     meter.ledger.retain(lanes.map(lane => lane.match));
@@ -118,12 +134,22 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
       for (const lane of lanes) {
         if (lane.done || candidates.length >= limit) continue;
         meter.ledger.reserve(1, 24); meter.read(1, 0);
+        const projected = lane.table === "source_index_lexical_fts";
+        const projectionJoin = projected
+          ? `JOIN source_index_lexical_projections p ON p.id=${lane.table}.rowid AND p.workspace_id=?
+             JOIN source_index_text x ON x.workspace_id=p.workspace_id AND x.root_key=p.root_key`
+          : `JOIN source_index_text x ON x.id=${lane.table}.rowid AND x.workspace_id=?`;
+        const generationJoin = binding === undefined ? "" : `${projected ? "" : `JOIN source_index_lexical_projections p
+          ON p.workspace_id=x.workspace_id AND p.root_key=x.root_key`}
+          JOIN source_index_lexical_targets t ON t.workspace_id=p.workspace_id AND t.generation_id=p.generation_id
+            AND t.root_key=p.root_key AND t.complete=1`;
         const raw = database.connection.prepare(`SELECT x.id,bm25(${lane.table}) AS score,r.root_key,
-          octet_length(r.target_json) AS metadata_bytes FROM ${lane.table}
-          JOIN source_index_text x ON x.id=${lane.table}.rowid AND x.workspace_id=?
+          octet_length(r.target_json) AS metadata_bytes FROM ${lane.table} ${projectionJoin} ${generationJoin}
           JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
           WHERE ${lane.table} MATCH ? AND ${SOURCE_INDEX_LEXICAL_CURRENT}
-          ORDER BY score ASC,x.root_key ASC LIMIT 1 OFFSET ?`).get(workspaceId, lane.match, lane.offset);
+          ${binding === undefined ? "" : "AND p.generation_id=? AND p.content_digest=x.content_digest AND p.body_bytes=x.body_bytes"}
+          ORDER BY score ASC,x.root_key ASC LIMIT 1 OFFSET ?`).get(workspaceId, lane.match,
+            ...(binding === undefined ? [] : [binding.generation_id]), lane.offset);
         if (raw === undefined) { lane.done = true; continue; }
         const row = readRecord(raw, "source lexical candidate"), bytes = readIntegerField(row, "metadata_bytes");
         const rootKey = readStringField(row, "root_key");
@@ -148,7 +174,8 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
       }
     }
     return lanes.every(lane => lane.done)
-      ? result(shortCjk ? "partial" : "complete", shortCjk ? "short_cjk_exact_tokens_only" : null)
+      ? result(shortCjk || partialGeneration ? "partial" : "complete",
+        partialGeneration ? "lexical_generation_partial" : shortCjk ? "short_cjk_exact_tokens_only" : null)
       : result("partial", "candidate_limit");
   } catch (error) {
     if (error instanceof SourceSemanticResourceExhausted) resourceRefusal = { stage: "lexical", phase: error.phase };

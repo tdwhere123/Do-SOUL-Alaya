@@ -34,6 +34,14 @@ legal without overlap or increasing the byte cap. The embedding runtime still
 counts prepared tokens and refuses over-limit inputs. Raw profiles/defaults and
 old manifests retain their meaning. See the [window policy](../../docs/handbook/recall.md#source-index-window-representations).
 
+## Opt-in SourceIndex lexical representation
+
+Protocol 23.2.0 adds optional `lexical_binding` to acquisition tokenization and its
+compact encoding (invariant §25 minor). The binding identifies an independently
+selected lexical generation and `segmented-unicode61.v1` or `raw-unicode61.v1`.
+Absent binding retains the historical raw/default reader. Exact source bytes and
+vector profiles are unchanged. See the [lexical policy](../../docs/handbook/recall.md#source-index-lexical-representations).
+
 ## Ordinary field delivery compatibility
 
 Protocol 23.0.0 versions recorded-boundary delivery as `ordinary-native-field.v2`
@@ -45,7 +53,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `23.1.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `23.2.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

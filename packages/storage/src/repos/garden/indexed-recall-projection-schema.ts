@@ -143,7 +143,8 @@ export function initializeObservableMutationGeneration(db: SqliteConnection): vo
     "event_log", "source_records", "source_record_evidence_refs", "evidence_capsules",
     "source_index_epochs", "source_index_selections", "source_index_generations", "source_index_roots",
     "source_index_dependencies", "source_index_targets", "source_index_text", "source_index_windows",
-    "source_index_vectors"]) installMutationTriggers(db, table);
+    "source_index_vectors", "source_index_lexical_selections", "source_index_lexical_generations",
+    "source_index_lexical_targets", "source_index_lexical_projections"]) installMutationTriggers(db, table);
 }
 
 function installMutationTriggers(db: SqliteConnection, table: string): void {

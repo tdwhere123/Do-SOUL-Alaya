@@ -232,6 +232,7 @@ function createFinalizedDaemonRuntime(
     services,
     startBackgroundServices: lifecycleControls.startBackgroundServices,
     runSourceIndexPass: lifecycleControls.runSourceIndexPass,
+    runSourceIndexLexicalPass: lifecycleControls.runSourceIndexLexicalPass,
     runGardenBackgroundPass: lifecycleControls.runGardenBackgroundPass,
     runGardenBulkEnrichPass: lifecycleControls.runGardenBulkEnrichPass,
     runGardenEmbeddingBackfillPass: lifecycleControls.runGardenEmbeddingBackfillPass,

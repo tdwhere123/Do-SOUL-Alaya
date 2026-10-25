@@ -8,7 +8,8 @@ import {
   type SourceIndexBackfillResult,
   type SourceIndexConfiguration,
   type SourceIndexGeneration,
-  type SourceIndexSelection
+  type SourceIndexSelection,
+  type SourceIndexLexicalRepresentation, type SourceIndexLexicalPassResult
 } from "@do-soul/alaya-protocol";
 import {
   SourceIndexBackfill,
@@ -102,7 +103,7 @@ export class SourceIndexProducer {
   private started = false;
   private stopping = false;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private inFlight: Promise<SourceIndexProducerPassReceipt> | null = null;
+  private inFlight: Promise<SourceIndexProducerPassReceipt | SourceIndexLexicalPassResult> | null = null;
   private signal = new AbortController();
   // A caller timeout is not native settlement. Only the shared provider lifecycle can kill it.
   private readonly nativeWork = new Set<Promise<unknown>>();
@@ -163,6 +164,25 @@ export class SourceIndexProducer {
     this.inFlight = work;
     try { return await work; }
     finally { if (this.inFlight === work) this.inFlight = null; }
+  }
+
+  /** Explicit existing preparation entry; never scheduled by start() and never binds an embedding model. */
+  public async runLexicalPass(workspaceId: string, representation: SourceIndexLexicalRepresentation,
+    remaining?: SourceIndexProducerPassRemaining): Promise<SourceIndexLexicalPassResult> {
+    if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping) {
+      throw new AlayaError("CONFLICT", this.stopping ? "producer_stopped" : "producer_occupied");
+    }
+    const limits = restrictPassLimits(this.limits, remaining);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), limits.stepDeadlineMs);
+    const signal = AbortSignal.any([this.signal.signal, deadline.signal]);
+    const work = Promise.resolve().then(() => this.lifecycle.prepareLexical(workspaceId, representation, {
+      work: limits.work, native_bytes: limits.nativeBytes, capture_page: limits.capturePage,
+      max_capture_pages: limits.maxCapturePages, max_roots: limits.maxRootsPerPass, max_body_bytes: limits.maxBodyBytes
+    }, signal));
+    this.inFlight = work;
+    try { return await work; }
+    finally { clearTimeout(timer); if (this.inFlight === work) this.inFlight = null; }
   }
 
   private trackNative<T>(operation: () => Promise<T>): Promise<T> {

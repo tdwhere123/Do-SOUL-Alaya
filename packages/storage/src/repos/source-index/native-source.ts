@@ -1,5 +1,5 @@
 import {
-  SOURCE_INDEX_MAX_BODY_BYTES, SourceIndexOperationError, sourceIndexTarget,
+  SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexOperationError, sourceIndexTarget,
   type SourceIndexBudget, type SourceIndexReadResult, type SourceIndexResources, type SourceIndexTarget,
   type SourceIndexMessageStructure
 } from "@do-soul/alaya-protocol";
@@ -19,7 +19,7 @@ export function assertIndexBudget(budget: SourceIndexBudget): void {
   }
 }
 export function assertIndexPageLimit(limit: number): void {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 128) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > SOURCE_INDEX_MAX_PAGE_ROWS) {
     throw new StorageError("VALIDATION_FAILED", "invalid source index page limit");
   }
 }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceIndexLexicalBindingSchema } from "../recall/source-index-lexical.js";
 import { NonNegativeIntSchema as N } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
@@ -39,7 +40,8 @@ const Resources = z.tuple([N, N, N]).readonly();
 // Known codes are scalars; every unknown string is an escaped local reference, even "0" or "1".
 const Limitation = z.union([z.literal([0, 1, 2, 3, 4, 5, 6, 7]), z.tuple([Ref]).readonly()]);
 const Limitations = z.array(Limitation).readonly();
-const Tokenization = z.tuple([Ref, C4, z.array(Ref).readonly(), z.array(Ref).readonly(), z.array(Ref).readonly()]).readonly().nullable();
+const Tokenization = z.tuple([Ref, C4, z.array(Ref).readonly(), z.array(Ref).readonly(), z.array(Ref).readonly(),
+  SourceIndexLexicalBindingSchema.optional()]).readonly().nullable();
 const VectorState = z.union([
   z.tuple([C3, SourceSemanticVectorBindingSchema]).readonly(),
   z.tuple([z.literal([3, 4, 5]), Ref]).readonly()

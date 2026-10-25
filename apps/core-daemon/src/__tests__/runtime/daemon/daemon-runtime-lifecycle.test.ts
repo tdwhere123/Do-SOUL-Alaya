@@ -121,20 +121,26 @@ function createControls(
 describe("createDaemonLifecycleControls", () => {
   it("runs one Source-only pass without Garden and refuses preparation once scheduling or shutdown begins", async () => {
     const sourceIndexProducer = { start: vi.fn(), stop: vi.fn(async () => undefined),
-      runPass: vi.fn<NonNullable<NonNullable<Parameters<typeof createDaemonLifecycleControls>[0]["sourceIndexProducer"]>["runPass"]>>() };
+      runPass: vi.fn<NonNullable<NonNullable<Parameters<typeof createDaemonLifecycleControls>[0]["sourceIndexProducer"]>["runPass"]>>(),
+      runLexicalPass: vi.fn<NonNullable<NonNullable<Parameters<typeof createDaemonLifecycleControls>[0]["sourceIndexProducer"]>["runLexicalPass"]>>() };
     const { controls, runBackgroundPass, runBulkEnrichPass, runEmbeddingBackfillPass } = createControls("env", { sourceIndexProducer });
     await controls.runSourceIndexPass();
+    await controls.runSourceIndexLexicalPass("workspace-1", "segmented-unicode61.v1", { maxRootsPerPass: 1 });
+    expect(sourceIndexProducer.runLexicalPass).toHaveBeenCalledWith("workspace-1", "segmented-unicode61.v1", { maxRootsPerPass: 1 });
     expect(sourceIndexProducer.runPass).toHaveBeenCalledTimes(1);
     expect(sourceIndexProducer.start).not.toHaveBeenCalled();
     expect(runBackgroundPass).not.toHaveBeenCalled();
     expect(runBulkEnrichPass).not.toHaveBeenCalled();
     expect(runEmbeddingBackfillPass).not.toHaveBeenCalled();
     controls.startBackgroundServices();
+    await expect(controls.runSourceIndexLexicalPass("workspace-1", "segmented-unicode61.v1")).rejects.toThrow(/idle, unscheduled/u);
     await expect(controls.runSourceIndexPass()).rejects.toThrow(/idle, unscheduled/u);
     await controls.shutdown();
     await expect(controls.runSourceIndexPass()).rejects.toThrow(/idle, unscheduled/u);
     expect(sourceIndexProducer.runPass).toHaveBeenCalledTimes(1);
     expect(sourceIndexProducer.stop).toHaveBeenCalledTimes(1);
+    await expect(controls.runSourceIndexLexicalPass("workspace-1", "segmented-unicode61.v1")).rejects.toThrow(/idle, unscheduled/u);
+    expect(sourceIndexProducer.runLexicalPass).toHaveBeenCalledTimes(1);
   });
 
   it("refuses Source preparation when no producer is wired", async () => {

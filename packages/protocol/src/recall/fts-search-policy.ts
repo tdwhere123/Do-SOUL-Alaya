@@ -1,6 +1,9 @@
 export const TRIGRAM_MIN_CODEPOINTS = 3;
 export const DEFAULT_FTS_QUERY_TOKEN_LIMIT = 16;
 export const DEFAULT_FTS_QUERY_MIN_TOKEN_LENGTH = 2;
+const FTS_SURFACE_CHARACTERS = String.raw`\p{L}\p{N}_`;
+const FTS_SURFACE_TOKEN_PATTERN = new RegExp(`[${FTS_SURFACE_CHARACTERS}]+`, "gu");
+const FTS_SURFACE_SEPARATOR_PATTERN = new RegExp(`[^${FTS_SURFACE_CHARACTERS}]+`, "u");
 
 export const CJK_SCRIPT_PATTERN =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -82,22 +85,28 @@ export function tokenizeFtsQuery(
 ): readonly string[] {
   const minTokenLength = options.minTokenLength ?? DEFAULT_FTS_QUERY_MIN_TOKEN_LENGTH;
   const maxTokens = options.maxTokens ?? DEFAULT_FTS_QUERY_TOKEN_LIMIT;
-  const surfaceTokens = queryText
-    .split(/[^\p{L}\p{N}_]+/u)
+  const surfaceTokens = queryText.split(FTS_SURFACE_SEPARATOR_PATTERN)
     .filter((token) => token.length >= minTokenLength);
   const expanded: string[] = [];
   for (const token of surfaceTokens) {
     expanded.push(token);
     if (options.shouldSegmentToken?.(token) === true && options.segmentToken !== undefined) {
-      for (const piece of options.segmentToken(token)) {
-        const trimmed = piece.trim();
-        if (trimmed.length >= minTokenLength && trimmed !== token) {
-          expanded.push(trimmed);
-        }
-      }
+      for (const piece of ftsSegmentedPieces(token, options.segmentToken, minTokenLength)) expanded.push(piece);
     }
   }
   return Object.freeze(Array.from(new Set(expanded)).slice(0, maxTokens));
+}
+
+/** Shared word expansion for query terms and the separately retained source search projection. */
+function ftsSegmentedPieces(token: string, segment: (token: string) => readonly string[], minLength: number): readonly string[] {
+  return segment(token).map(piece => piece.trim()).filter(piece => piece.length >= minLength && piece !== token);
+}
+
+/** No query term cap, deduplication, case folding or rewriting of non-CJK source text. */
+export function projectSegmentedFtsSource(body: string, shouldSegment: (token: string) => boolean,
+  segment: (token: string) => readonly string[]): string {
+  return body.replace(FTS_SURFACE_TOKEN_PATTERN, token => shouldSegment(token)
+    ? [token, ...ftsSegmentedPieces(token, segment, 1)].join(" ") : token);
 }
 
 export function rankFtsLaneRows(rows: readonly FtsLaneRankRow[]): readonly FtsLaneHit[] {

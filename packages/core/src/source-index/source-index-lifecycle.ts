@@ -1,11 +1,14 @@
 import {
-  SOURCE_INDEX_MAX_BODY_BYTES, SourceIndexCapacityExceeded, SourceIndexConfigurationSchema, SourceIndexOperationError,
-  BoundedIdSchema, canonicalJson,
+  SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexCapacityExceeded, SourceIndexConfigurationSchema, SourceIndexOperationError,
+  AlayaError, BoundedIdSchema, canonicalJson, SourceIndexLexicalRepresentationSchema,
+  type SourceIndexLexicalRepresentation, type SourceIndexLexicalPassBudget, type SourceIndexLexicalPassResult,
   prepareSourceIndexDocument,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexConfiguration, type SourceIndexDocument,
   type SourceIndexGuardedWriteResult, type SourceIndexReadResult, type SourceIndexRepository, type SourceIndexResources,
   type SourceIndexSelection, type SourceIndexVector, type SourceIndexWriteResult
 } from "@do-soul/alaya-protocol";
+
+import { readSourceIndexLexicalAnalysisStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 
 /** Owns Source projection build intent. No inference, provider, worker, or query side effects. */
 export class SourceIndexLifecycle {
@@ -70,6 +73,70 @@ export class SourceIndexLifecycle {
         : { status: "ready" as const, document, resources };
     } catch (error) {
       throw new SourceIndexOperationError(error, completed);
+    }
+  }
+
+  /** Explicit model-independent pass. Warming precedes native reads, never a query snapshot/backfill.
+   * Selection changes withdraw prior lexical eligibility just as vector selection does for vectors.
+   * Pending-target anti-join and captured census cursors are durable; restarts need no caller cursor. */
+  public async prepareLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation,
+    budget: SourceIndexLexicalPassBudget, signal?: AbortSignal): Promise<SourceIndexLexicalPassResult> {
+    BoundedIdSchema.parse(workspaceId); SourceIndexLexicalRepresentationSchema.parse(representation);
+    const limits = structuredClone(budget);
+    if ([limits.work, limits.native_bytes, limits.capture_page, limits.max_capture_pages, limits.max_roots, limits.max_body_bytes]
+        .some(value => !Number.isSafeInteger(value) || value < 0) || limits.capture_page < 1 ||
+        limits.capture_page > SOURCE_INDEX_MAX_PAGE_ROWS || limits.max_body_bytes > SOURCE_INDEX_MAX_BODY_BYTES) {
+      throw new AlayaError("VALIDATION", "invalid source lexical preparation budget");
+    }
+    if (signal?.aborted) throw new AlayaError("CANCELLED", "source lexical preparation cancelled before selection");
+    const store = this.repository.lexical;
+    const selection = store.selectLexical(workspaceId, representation);
+    const resources = { work: 0, native_bytes: 0 };
+    let analysis = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
+    const left = () => ({ work: limits.work - resources.work, native_bytes: limits.native_bytes - resources.native_bytes });
+    const debit = (cost: SourceIndexResources) => { resources.work += cost.work; resources.native_bytes += cost.native_bytes; };
+    const result = (status: SourceIndexLexicalPassResult["status"], reason: string | null,
+      accounting: "complete" | "lower_bound" = "complete"): SourceIndexLexicalPassResult =>
+      ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0 });
+    try {
+      if (signal?.aborted) return result("partial", "cancelled");
+      if (representation === "segmented-unicode61.v1" &&
+          (!await warmCjkSegmentation() || readSourceIndexLexicalAnalysisStatus() !== "ready")) return result("unavailable", "segmenter_unavailable");
+      if (signal?.aborted) return result("partial", "cancelled");
+      generation = store.beginLexical(selection);
+      for (let page = 0; page < limits.max_capture_pages && !generation.enumeration_complete && !signal?.aborted; page++) {
+        const captured = store.captureLexicalPage(workspaceId, generation.generation_id, limits.capture_page, left());
+        debit(captured.resources); generation = captured.generation;
+        if (captured.resources.work === 0) break;
+      }
+      for (let root = 0; root < limits.max_roots && !signal?.aborted; root++) {
+        const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());
+        debit(pending.resources);
+        if (pending.source === null) {
+          if (!pending.complete) return result("partial", "read_budget");
+          break;
+        }
+        const read = store.readLexicalDocument(workspaceId, generation.generation_id, pending.source.root_key, limits.max_body_bytes, left());
+        debit(read.resources);
+        if (read.status !== "ready") return result(read.status, read.reason);
+        const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body, left());
+        debit(write.resources); analysis += write.analysis_units;
+        if (write.status !== "accepted") {
+          const rejected = preparationRejection(write.reason, resources);
+          return result(rejected.status, rejected.reason);
+        }
+      }
+      generation = store.lexicalGeneration(workspaceId, generation.generation_id);
+      if (signal?.aborted) return result("partial", "cancelled");
+      if (generation === null) return result("unbound", "missing_generation");
+      const publish = store.activateLexical(workspaceId, generation.generation_id);
+      generation = store.lexicalGeneration(workspaceId, generation.generation_id);
+      if (publish.status === "accepted") return result("ready", null);
+      const rejected = preparationRejection(publish.reason, resources);
+      return result(rejected.status, rejected.reason);
+    } catch (error) {
+      if (error instanceof SourceIndexOperationError) debit(error.resources);
+      return result("unavailable", error instanceof Error ? error.message : "lexical_preparation_failed", "lower_bound");
     }
   }
 

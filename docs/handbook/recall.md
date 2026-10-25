@@ -312,6 +312,52 @@ the token cap and leave a partial generation. This opt-in representation is not 
 empirically chosen default. Old persisted generations remain readable under their own
 profile, but selection/unbind fencing never revives retired eligibility.
 
+## SourceIndex lexical representations
+
+The explicit `SourceIndexLifecycle.prepareLexical` entry and the idle daemon's
+`runSourceIndexLexicalPass(workspaceId, representation, remaining)` prepare native
+records and standalone capsules with no embedding binding or dispatch. They share
+the bounded native census, source guards and dependency closure with vector
+preparation, but have independent selection, generation, pending roots and activation.
+No selector is installed by startup. The absent-selector raw/default reader remains
+the named consumer of historical exact-text rows. Explicit `raw-unicode61.v1` and
+`segmented-unicode61.v1` selections activate only after matching coverage publishes.
+Changing the selection withdraws prior lexical eligibility immediately; incomplete
+preparation is unavailable, not a silent mixture. Model changes/unbind do not affect
+lexical selection, and lexical selection does not retire vector generations.
+
+The segmented variant requires the pinned Node Jieba analyzer to be ready; cold,
+loading, unavailable and failed analysis cannot publish or serve a ready identity.
+Workers warm before snapshot acquisition, not inside reads. Existing unrelated
+fail-soft consumers retain their fallback. Source and query expansion share the
+Protocol FTS policy; source projection has no query-term cap. Non-CJK source bytes
+are preserved in the search projection; raw trigram still indexes exact native text.
+The separately stored word projection appends supported CJK pieces without changing
+`source_index_text.body`, digest, spans, evidence bytes or embedding inputs. Jieba's
+Han/Hiragana/Katakana path is not Hangul segmentation or uniform multilingual quality.
+There is no English natural-efficacy claim, stemming, synonyms or stop-word policy.
+
+Migration 025 is additive, with no automatic backfill. Selection/epoch CAS fences
+superseded producers; durable pending targets allow bounded restart and payload repair.
+Source/dependency mutation and erasure scrub affected historical search projections
+through the existing invalidation closure. Activated coverage becomes partial after
+payload loss or source changes; changed epochs require a fresh explicitly prepared
+generation. Valid-empty is only published after complete enumeration. Preparation
+work includes instrumented native reads and one analysis unit per UTF-16 source code
+unit analyzed; native bytes exclude search-output allocation. Neither is measured CPU,
+SQLite-internal work, process memory or model cost. Failed operations report lower-bound
+accounting. Bounded selection/generation bookkeeping is administrative work, outside
+these native-source read counters. Worker warmup uses a separate indexed administrative selector probe, not
+source enumeration; native analyzer load cost is not measured by the query ledger.
+
+Protocol 23.2.0 adds optional lexical generation/representation binding to captured
+tokenization and its compact tuple (invariant §25 minor). Existing policy tags and
+ordinary ranking/delivery meanings stay unchanged. Continuations retain captured
+terms/binding; mutations invalidate their existing snapshot lease rather than
+retokenizing under a new selector. Rollback within the current binary explicitly
+prepares raw anew; running an older binary requires a retained pre-migration database
+copy under the existing newer-schema fence.
+
 ## Source disclosure
 
 Every permitted retained-source display qualifies what was actually read:

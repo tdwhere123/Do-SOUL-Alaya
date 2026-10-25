@@ -25,6 +25,7 @@
  */
 export type { EnvLookup } from "./config/env-lookup.js";
 export * from "./recall/source-index.js";
+export * from "./recall/source-index-lexical.js";
 export type * from "./recall/source-index-query.js";
 export { SourceIndexQueryResourcesSchema } from "./recall/source-index-query.js";
 export { SOURCE_DISCLOSURE_CODEC_VERSION, SourceDisclosureSchema, SourceDisclosureSemanticSchema,

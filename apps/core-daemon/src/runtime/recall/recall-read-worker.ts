@@ -1,5 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
+import { readCjkSegmentationStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import type { RecallReadWorkerResponse } from "../recall-read-worker/protocol.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import {
@@ -58,6 +59,17 @@ async function handleRequest(message: unknown): Promise<void> {
     // Chunked window bypasses runOperation; reject closed before a reopenable statement.
     if (active.closed && message.operation !== "close") {
       throw new Error("recall read worker database is closed");
+    }
+    // Native module initialization must settle before BEGIN, never from a snapshot-bound tokenizer.
+    // This indexed one-row administrative probe is not source enumeration or query-time repair.
+    // Unavailable initialization stays explicit at the strict reader; raw/default consumers remain fail-soft.
+    if ((message.operation === "ready" || message.operation === "snapshot.beginDeferred" ||
+        message.operation === "conditionalField.sourceSemantics" || message.operation === "conditionalField.recall") &&
+        !active.database.connection.inTransaction &&
+        readCjkSegmentationStatus() === "uninitialized" && active.database.connection.prepare(
+          `SELECT 1 FROM source_index_lexical_selections WHERE representation='segmented-unicode61.v1'
+            AND active_generation_id IS NOT NULL LIMIT 1`).get() !== undefined) {
+      await warmCjkSegmentation();
     }
     if (message.operation === "memory.findRecallTierWindow") {
       const payload: WorkerOperationPayload<"memory.findRecallTierWindow"> =

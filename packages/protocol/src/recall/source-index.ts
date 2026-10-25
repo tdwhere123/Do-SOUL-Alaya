@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SourceIndexLexicalRepository } from "./source-index-lexical.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import { SourceEvidenceTargetSchema, sourceGoldRootIdentity, type SourceEvidenceTarget } from "./conditional-field/product-identity.js";
 import { canonicalJson } from "./selection/capture/canonical-json.js";
@@ -12,6 +13,7 @@ export const SourceIndexWindowingSchema = z.enum(["utf8-byte-windows.v1", "recor
 export type SourceIndexWindowing = z.infer<typeof SourceIndexWindowingSchema>;
 export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const SOURCE_INDEX_MAX_WINDOWS = 4096;
+export const SOURCE_INDEX_MAX_PAGE_ROWS = 128;
 /** Expanded retained-root enumeration; historical record-only generations cannot serve it. */
 export const SOURCE_INDEX_PREPARATION_REVISION = 2;
 
@@ -137,6 +139,7 @@ export class SourceIndexOperationError extends AlayaError {
 
 /** Imminent consumer: Core SourceIndexLifecycle, followed by native acquisition backfill/query preparation. */
 export interface SourceIndexRepository {
+  readonly lexical: SourceIndexLexicalRepository;
   select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection;
   state(workspaceId: string): SourceIndexState;
   /** Revoke configuration eligibility without declaring a build failure. Retains history and fences old work. */

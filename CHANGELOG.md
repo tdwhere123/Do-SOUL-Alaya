@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 23.1.0, engine gateway 2.0.0
+## Unreleased — protocol 23.2.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,18 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 23.2.0 adds optional SourceIndex lexical selection/generation provenance to
+acquisition tokenization and its compact tuple (invariant §25 minor). Explicit
+`segmented-unicode61.v1` preparation uses the pinned native CJK segmenter, independent
+of embedding profiles. Migration 025 adds separate search projections and bounded
+resumable lexical generations; it performs no corpus/model work or default activation.
+Original source bytes, raw trigram, default raw readers, vector generations and ordinary
+ranking/delivery meanings remain unchanged. Selection changes withdraw prior lexical
+eligibility until the matching generation publishes. Rollback selects and prepares
+`raw-unicode61.v1` anew; older binaries require a retained pre-migration database copy
+under the existing incompatible-schema fence. Failed/cold segmentation cannot publish
+or serve the variant. This is not uniform CJK quality or natural-English efficacy evidence.
 
 Protocol 23.1.0 adds the opt-in `recorded-message-windows.v1` SourceIndex profile
 strategy (invariant §25 minor). The shared planner protects bounded complete recorded
