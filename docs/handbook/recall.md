@@ -266,6 +266,20 @@ transport, response and settlement proof before reuse. Failed, truncated,
 invalid-accounting, pending and unattempted states are not interchangeable;
 recovery cannot grant a new call by relabeling history.
 
+Accepted worker RPC rejections emit best-effort private operator diagnostics at
+[`RecallReadWorkerLifecycle`](../../apps/core-daemon/src/runtime/recall/recall-read-worker-lifecycle.ts),
+using the existing warning sink (daemon stderr). The record correlates worker
+thread, request and operation and copies the authoritative worker error under
+`failure.error`, including its Core/non-Core classification and available
+measurements. This intentionally raw, private evidence can contain sensitive
+error text; it is not a public MCP response, prompt input, source record or
+execution receipt. Logger secret-field redaction still applies. Diagnostic text
+is capped at 8,192 UTF-16 units per field and each details object at 32,768 JSON
+UTF-8 bytes; `truncated_fields` and details status distinguish omission from
+absence. No failure history is retained in the lifecycle. Sink failure cannot
+replace the rejection or quarantine a healthy worker. A missing/disabled sink
+or lost log is missing evidence, not zero cost or a recovered historic error.
+
 Currentness, cancellation, retry and deletion remain owned effects. A caller
 abort/deadline may end waiting without proving an in-flight native or provider
 operation stopped; shared work retains occupancy until actual settlement or

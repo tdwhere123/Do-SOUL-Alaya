@@ -3,6 +3,7 @@ import { Worker } from "node:worker_threads";
 import { CoreError, type RecallReadSnapshotPort } from "@do-soul/alaya-core";
 import { isPathAffinityOperation, isRecallReadWorkerResponse } from "../recall-read-worker/client-config.js";
 import { parseWorkerOperationResult } from "../recall-read-worker/operation-schemas.js";
+import { warnWorkerRequestFailure } from "../recall-read-worker/request-failure-diagnostic.js";
 import { RECALL_READ_WORKER_PROTOCOL_VERSION, type RecallReadWorkerOperation,
   type RecallReadWorkerRequest } from "../recall-read-worker/protocol.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
@@ -409,6 +410,8 @@ export class RecallReadWorkerLifecycle {
         pending.observe?.(message.observation);
         // A worker-reported domain rejection is known failure, not a broken transport.
         pending.reject(error);
+        warnWorkerRequestFailure(this.options.warn, resource.worker.threadId,
+          message.id, pending.operation, message.error);
       }
     } catch (error) {
       this.quarantine(resource, error);
