@@ -15,6 +15,9 @@ export type ConsumerVisibilityInterval = Readonly<{
   end: number;
 }>;
 
+/** An observed source display whose bytes have no admitted body mapping. */
+export type ConsumerVisibilityUnmappedSource = Readonly<Pick<ConsumerVisibilityInterval, "rank" | "target">>;
+
 /** Label-independent occupancy-tail proof. A null public continuation is not exhaustion. */
 export type ConsumerVisibilityTerminalTail = Readonly<{
   status: "exhausted" | "open" | "unknown";
@@ -37,6 +40,8 @@ export type ConsumerVisibilityPage = Readonly<{
   terminal_tail: ConsumerVisibilityTerminalTail;
   /** Source-body intervals only; this array need not have one entry per occupied slot. */
   intervals: readonly ConsumerVisibilityInterval[];
+  /** Omitted means no unmapped source display was observed, not missing page evidence. */
+  unmapped_sources?: readonly ConsumerVisibilityUnmappedSource[];
 }>;
 
 export type ConsumerVisibilityMetric = Readonly<{
@@ -120,8 +125,9 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
   // prefix is unknown even for a visible first-page message, and its reason outranks incomplete gold.
   const unobservedAt10 = malformed === null && !observedAt(observation, 10)
     ? unknown(observation.reason ?? "delivery_position_not_observed") : null;
+  const unmapped = (input.pages ?? []).flatMap(page => page.status === "observed" ? page.unmapped_sources ?? [] : []);
   const messages = (gold?.spans ?? []).map(span =>
-    messageVisibility(span, intervals, observation, malformed, unobservedAt10));
+    messageVisibility(span, intervals, unmapped, observation, malformed, unobservedAt10));
   const result = (anyAt5: ConsumerVisibilityMetric, anyAt10: ConsumerVisibilityMetric,
     allAt5: ConsumerVisibilityMetric, allAt10: ConsumerVisibilityMetric): ConsumerVisibilityScore => ({
       contract: CONSUMER_MESSAGE_VISIBILITY_CONTRACT, any_at_5: anyAt5, any_at_10: anyAt10,
@@ -142,7 +148,7 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
     if (statesAt(messages, k).some(state => state.status === "hit")) return hit;
     if (!observedAt(observation, k)) return unknown(observation.reason ?? "delivery_position_not_observed");
     if (gold === undefined || !gold.complete) return unknown(MAPPING_INCOMPLETE);
-    return miss;
+    return statesAt(messages, k).find(state => state.status === "unknown") ?? miss;
   };
   // Complete coverage cannot claim a hit without complete nonempty annotation and mapping.
   const allAt = (k: number): ConsumerVisibilityMetric => {
@@ -151,7 +157,7 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
     if (states.length === 0) return unknown("no_annotated_answer_turn");
     if (states.every(state => state.status === "hit")) return hit;
     if (!observedAt(observation, k)) return unknown(observation.reason ?? "delivery_position_not_observed");
-    return miss;
+    return states.some(state => state.status === "miss") ? miss : states.find(state => state.status === "unknown") ?? miss;
   };
   // A first-page positive does not establish an observed ten-slot prefix; the terminal case is in
   // the shared gate above and any terminal delivery still proves its absent tail below.
@@ -172,6 +178,7 @@ export function consumerVisibilityUnavailableReason(input: ConsumerVisibilityInp
 export function scoreConsumerByteVisibility(input: {
   gold: AnswerTurnGold | undefined; windows: readonly (ConsumerVisibilityInterval & { text: string })[];
   byte_budget: number; unique_utf8_bytes: number; unavailableReason?: string;
+  unmapped_sources?: readonly ConsumerVisibilityUnmappedSource[];
 }) {
   // This private page protocol admits one contiguous window per full source identity.
   // Callers cannot substitute an estimated size or count the same bytes twice.
@@ -182,10 +189,13 @@ export function scoreConsumerByteVisibility(input: {
     || input.windows.some(w => !Number.isSafeInteger(w.start) || w.start < 0 || w.end - w.start !== Buffer.byteLength(w.text))
     ? "invalid_byte_page" : null);
   if (invalid) return { any_at_budget: unknown(invalid), all_at_budget: unknown(invalid) };
-  const gold = input.gold, states = (gold?.spans ?? []).map(span => spanVisible(input.windows, span, Infinity));
-  return { any_at_budget: states.some(Boolean) ? hit : gold?.complete ? miss : unknown(MAPPING_INCOMPLETE),
-    all_at_budget: !gold?.complete ? unknown(MAPPING_INCOMPLETE) : states.length === 0
-      ? unknown("no_annotated_answer_turn") : states.every(Boolean) ? hit : miss };
+  const gold = input.gold, states = (gold?.spans ?? []).map(span => spanVisible(input.windows, span, Infinity) ? hit
+    : unmappedMessage(input.unmapped_sources ?? [], span, Infinity) ? unknown("source_preview_mapping_unavailable") : miss);
+  return { any_at_budget: states.some(state => state.status === "hit") ? hit : !gold?.complete ? unknown(MAPPING_INCOMPLETE)
+    : states.find(state => state.status === "unknown") ?? miss,
+    all_at_budget: !gold?.complete ? unknown(MAPPING_INCOMPLETE) : states.length === 0 ? unknown("no_annotated_answer_turn")
+      : states.every(state => state.status === "hit") ? hit : states.some(state => state.status === "miss") ? miss
+        : states.find(state => state.status === "unknown") ?? miss };
 }
 
 function statesAt(messages: readonly ConsumerVisibilityMessage[], k: number): readonly ConsumerVisibilityMetric[] {
@@ -194,15 +204,15 @@ function statesAt(messages: readonly ConsumerVisibilityMessage[], k: number): re
 
 /** Identity and span of one mapped gold message plus its own @5/@10 states. */
 function messageVisibility(span: AnswerTurnSpan, intervals: readonly ConsumerVisibilityInterval[],
-  observation: ObservationState, malformed: string | null, unobservedAt10: ConsumerVisibilityMetric | null):
+  unmapped: readonly ConsumerVisibilityUnmappedSource[], observation: ObservationState, malformed: string | null, unobservedAt10: ConsumerVisibilityMetric | null):
   ConsumerVisibilityMessage {
   const mapped = { session_index: span.session_index, message_index: span.message_index,
     source_id: span.source_id, target: span.target, start: span.start, end: span.end };
   if (malformed !== null) return { ...mapped, at_5: unknown(malformed), at_10: unknown(malformed),
     visible_intervals: [] };
   return { ...mapped,
-    at_5: messageMetric(span, intervals, observation, 5),
-    at_10: unobservedAt10 ?? messageMetric(span, intervals, observation, 10),
+    at_5: messageMetric(span, intervals, unmapped, observation, 5),
+    at_10: unobservedAt10 ?? messageMetric(span, intervals, unmapped, observation, 10),
     visible_intervals: intervalsJoining(intervals, span)
       .filter(interval => interval.start < span.end && interval.end > span.start)
       .sort((left, right) => left.rank - right.rank || left.start - right.start || left.end - right.end) };
@@ -211,10 +221,14 @@ function messageVisibility(span: AnswerTurnSpan, intervals: readonly ConsumerVis
 /** A known visible positive survives incomplete gold mapping; only this message's own absence needs
  * a complete cutoff prefix. Unmapped answer turns belong to gold_messages. */
 function messageMetric(span: AnswerTurnSpan, intervals: readonly ConsumerVisibilityInterval[],
-  observation: ObservationState, k: number): ConsumerVisibilityMetric {
+  unmapped: readonly ConsumerVisibilityUnmappedSource[], observation: ObservationState, k: number): ConsumerVisibilityMetric {
   if (spanVisible(intervals, span, k)) return hit;
   if (!observedAt(observation, k)) return unknown(observation.reason ?? "delivery_position_not_observed");
-  return miss;
+  return unmappedMessage(unmapped, span, k) ? unknown("source_preview_mapping_unavailable") : miss;
+}
+function unmappedMessage(unmapped: readonly ConsumerVisibilityUnmappedSource[], span: AnswerTurnSpan, k: number): boolean {
+  return unmapped.some(source => source.rank <= k && sourceTargetJoinsGold({ rank: source.rank, object_kind: "source_evidence",
+    target: sourceRecallTarget({ ...source.target, evidence_object_id: null }) }, span.target));
 }
 
 function observedAt(observation: ObservationState, k: number): boolean {
@@ -298,7 +312,7 @@ function validatePageFacts(ordered: readonly ConsumerVisibilityPage[]): string |
     if (page.continuation === "present" && page.terminal_tail.status !== "open") return "delivery_page_state_invalid";
     if (page.continuation === "unknown" && page.terminal_tail.status !== "unknown") return "delivery_page_state_invalid";
     if (page.status !== "observed") {
-      if (page.intervals.length > 0 || page.complete || page.terminal_tail.status === "exhausted") {
+      if (page.intervals.length > 0 || (page.unmapped_sources?.length ?? 0) > 0 || page.complete || page.terminal_tail.status === "exhausted") {
         return "delivery_page_state_invalid";
       }
     } else {
@@ -306,7 +320,8 @@ function validatePageFacts(ordered: readonly ConsumerVisibilityPage[]): string |
         return "delivery_page_state_invalid";
       }
       if (page.intervals.some(interval => !validInterval(interval))) return "delivery_interval_invalid";
-      const ranks = page.intervals.map(interval => interval.rank).sort((left, right) => left - right);
+      if (page.unmapped_sources?.some(source => !Number.isSafeInteger(source.rank))) return "delivery_rank_order_invalid";
+      const ranks = [...page.intervals, ...page.unmapped_sources ?? []].map(interval => interval.rank).sort((left, right) => left - right);
       if (ranks.some((rank, index) => rank < start || rank > end
         || (index > 0 && ranks[index - 1] === rank))) return "delivery_rank_order_invalid";
     }

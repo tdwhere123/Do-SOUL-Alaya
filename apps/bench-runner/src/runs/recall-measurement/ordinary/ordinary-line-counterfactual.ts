@@ -1,10 +1,12 @@
-import { fieldContractSha256, hydrateUtf8Chunk } from "@do-soul/alaya-core";
-import { hashAddressableSourceSpanId, sourceGoldRootIdentity } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { AlayaError, hashAddressableSourceSpanId, sourceGoldRootIdentity } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, SqliteFieldSourceSpanRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import type { AnswerTurnGold } from "../../longmemeval-semantic/answer-spans.js";
 import { scoreConsumerByteVisibility, type ConsumerVisibilityInput } from "../../longmemeval-semantic/message-visibility.js";
 import type { SourceGoldUnit } from "../../measurement/source-gold-join.js";
-import { scoreOrdinaryByteVisibility, type OrdinaryLiteralWindow } from "./ordinary-byte-visibility.js";
+import { scoreOrdinaryByteVisibility } from "./ordinary-byte-visibility.js";
+import { clipOrdinaryPreview, ordinaryBodyStreamUnavailableReason, ordinaryLiteralWindows, ordinaryUnmappedSources, type OrdinarySourcePreview }
+  from "./ordinary-preview-stream.js";
 
 type LineFact = Readonly<{ target: SourceGoldUnit } & (
   { status: "available"; ends: readonly number[] } | { status: "unavailable"; reason: string }
@@ -51,58 +53,59 @@ export function readOrdinaryLineFacts(database: StorageDatabase, targets: readon
 /** Label-blind single-budget packing over captured units only. Each unit's cap is
  * its admitted preview length, not an invented full-body allowance. No new root,
  * source read, or native page is supplied by this counterfactual. */
-export function packOrdinaryLinePrefixes(windows: readonly OrdinaryLiteralWindow[],
+export function packOrdinaryLinePreviews(previews: readonly OrdinarySourcePreview[],
   lineEnds: ReadonlyMap<string, readonly number[]>, budget: number) {
-  if (!Number.isSafeInteger(budget) || budget < 0) throw new Error("invalid counterfactual byte budget");
-  const packed: OrdinaryLiteralWindow[] = [];
+  if (!Number.isSafeInteger(budget) || budget < 0) throw new AlayaError("CONFLICT", "invalid counterfactual byte budget");
+  if (ordinaryBodyStreamUnavailableReason(previews) !== null) throw new AlayaError("UNAVAILABLE", "source-body stream mapping unavailable");
+  const packed: OrdinarySourcePreview[] = [];
   let remaining = budget;
-  for (const window of windows) {
-    if (remaining === 0) return { windows: packed, may_extend: false };
-    const cap = Math.min(Buffer.byteLength(window.text), remaining);
-    const fitting = (lineEnds.get(rootKey(window.target)) ?? []).filter(value => value > 0 && value <= cap);
+  for (const preview of previews) {
+    if (preview.source.status === "not_delivered") continue;
+    if (remaining === 0) return { previews: packed, may_extend: false };
+    const cap = Math.min(Buffer.byteLength(preview.text), remaining);
+    // Only literal body bytes enter B. Unmapped displays were refused above.
+    const fitting = preview.source.status === "literal"
+      ? (lineEnds.get(rootKey(preview.target)) ?? []).filter(value => value > 0 && value <= cap) : [];
     const end = fitting.length === 0 ? undefined : Math.max(...fitting);
-    const chunk = hydrateUtf8Chunk(window.text, { byteLimit: end ?? cap });
-    if (chunk.status === "chunk" && chunk.end_offset > 0) {
-      packed.push({ ...window, text: chunk.text, end: chunk.end_offset });
-      remaining -= chunk.end_offset;
-    }
-    // With no fitting structure boundary, retain the fixed-stream UTF-8 prefix:
-    // a clipped codepoint's slack must not expose a later root in the control.
-    if (end === undefined && cap < Buffer.byteLength(window.text)) return { windows: packed, may_extend: false };
+    const clipped = clipOrdinaryPreview(preview, end ?? cap);
+    if (clipped.text.length > 0) { packed.push(clipped); remaining -= Buffer.byteLength(clipped.text); }
+    // A clipped codepoint's slack must not expose a later root in the control.
+    if (end === undefined && cap < Buffer.byteLength(preview.text)) return { previews: packed, may_extend: false };
   }
-  return { windows: packed, may_extend: remaining > 0 };
+  return { previews: packed, may_extend: remaining > 0 };
 }
 
 /** Post-freeze comparison, not a production replay. Fresh packing at each B can
  * be non-monotone, so no repacked FHB/LHB is inferred or reported. */
 export function scoreOrdinaryLineCounterfactual(input: ConsumerVisibilityInput & Readonly<{
-  windows: readonly OrdinaryLiteralWindow[]; line_facts: readonly LineFact[];
+  previews: readonly OrdinarySourcePreview[]; line_facts: readonly LineFact[];
 }>) {
-  const baseline = scoreOrdinaryByteVisibility(input);
+  const baseline = scoreOrdinaryByteVisibility(input), literal = ordinaryLiteralWindows(input.previews ?? []);
   const facts = new Map(input.line_facts.map(fact => [rootKey(fact.target), fact]));
   const duplicateFacts = facts.size !== input.line_facts.length;
   const unavailable = baseline.captured_source_utf8_bytes === null ? "ordinary_captured_stream_unavailable"
     : duplicateFacts ? "line_metadata_ambiguous"
-      : input.windows.some(window => window.start !== 0) ? "counterfactual_requires_source_zero_prefixes"
-        : input.windows.some(window => facts.get(rootKey(window.target))?.status !== "available")
+      : literal.some(window => window.start !== 0) ? "counterfactual_requires_source_zero_prefixes"
+        : literal.some(window => facts.get(rootKey(window.target))?.status !== "available")
           ? "line_metadata_unavailable" : null;
   const lineEnds = new Map([...facts].flatMap(([key, fact]) => fact.status === "available" ? [[key, fact.ends] as const] : []));
   const budgets = baseline.budgets.map(control => {
-    const packed = unavailable === null ? packOrdinaryLinePrefixes(input.windows, lineEnds, control.byte_budget)
-      : { windows: [], may_extend: false };
-    const windows = packed.windows;
+    const packed = unavailable === null ? packOrdinaryLinePreviews(input.previews, lineEnds, control.byte_budget)
+      : { previews: [], may_extend: false };
+    const windows = ordinaryLiteralWindows(packed.previews);
     const bytes = windows.reduce((total, window) => total + Buffer.byteLength(window.text), 0);
     const score = scoreConsumerByteVisibility({ gold: input.gold, windows, byte_budget: control.byte_budget,
-      unique_utf8_bytes: bytes, ...(unavailable === null ? {} : { unavailableReason: unavailable }) });
+      unique_utf8_bytes: bytes, unmapped_sources: ordinaryUnmappedSources(packed.previews),
+      ...(unavailable === null ? {} : { unavailableReason: unavailable }) });
     const retain = (metric: typeof score.any_at_budget) => metric.status === "miss"
       && baseline.captured_stream_complete === false && packed.may_extend
       ? { status: "unknown" as const, reason: "ordinary_captured_stream_incomplete" } : metric;
     return { byte_budget: control.byte_budget, prefix: control,
       aligned: { source_utf8_bytes: unavailable === null ? bytes : null,
         any_at_budget: retain(score.any_at_budget), all_at_budget: retain(score.all_at_budget),
-        intervals: windows.map(({ text: _text, ...interval }) => interval) } };
+        intervals: windows.map(({ text: _text, ...interval }) => interval), unmapped_sources: ordinaryUnmappedSources(packed.previews) } };
   });
-  return { contract: "ordinary-captured-line-counterfactual-v1" as const,
+  return { contract: "ordinary-captured-line-counterfactual-v2" as const,
     domain: "captured_preview_units_same_order_and_caps_not_native_page_replay" as const,
     status: unavailable === null ? "available" as const : "unavailable" as const, reason: unavailable,
     premise: lineEndPremise(input.gold, duplicateFacts ? new Map() : facts), budgets };

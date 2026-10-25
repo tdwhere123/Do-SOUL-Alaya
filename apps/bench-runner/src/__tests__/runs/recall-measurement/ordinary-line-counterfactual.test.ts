@@ -11,12 +11,18 @@ import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { hashAddressableSourceSpanId, hashContentDigest, hashSourceRecordId,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID, sourceGoldRootIdentity } from "@do-soul/alaya-protocol";
 import { initDatabase, openReadOnlyDatabase, SqliteFieldSourceRecordRepo, SqliteFieldSourceSpanRepo, SqliteWorkspaceRepo } from "@do-soul/alaya-storage";
-import { packOrdinaryLinePrefixes, readOrdinaryLineFacts, scoreOrdinaryLineCounterfactual }
+import { packOrdinaryLinePreviews, readOrdinaryLineFacts, scoreOrdinaryLineCounterfactual as scorePreviews }
   from "../../../runs/recall-measurement/ordinary/ordinary-line-counterfactual.js";
-import type { OrdinaryLiteralWindow } from "../../../runs/recall-measurement/ordinary/ordinary-byte-visibility.js";
+import { ordinaryLiteralWindows, type OrdinaryLiteralWindow, type OrdinarySourcePreview }
+  from "../../../runs/recall-measurement/ordinary/ordinary-preview-stream.js";
 import type { AnswerTurnGold } from "../../../runs/longmemeval-semantic/answer-spans.js";
-import type { ConsumerVisibilityPage } from "../../../runs/longmemeval-semantic/message-visibility.js";
+import type { ConsumerVisibilityInput, ConsumerVisibilityPage } from "../../../runs/longmemeval-semantic/message-visibility.js";
 
+const literalPreviews = (windows: readonly OrdinaryLiteralWindow[]): OrdinarySourcePreview[] =>
+  windows.map(({ start, end, ...preview }) => ({ ...preview, source: { status: "literal", start, end } }));
+const scoreOrdinaryLineCounterfactual = (input: ConsumerVisibilityInput & {
+  windows: readonly OrdinaryLiteralWindow[]; line_facts: ReturnType<typeof readOrdinaryLineFacts>;
+}) => scorePreviews({ ...input, previews: literalPreviews(input.windows) });
 const databases: ReturnType<typeof initDatabase>[] = [];
 const directories: string[] = [];
 afterEach(() => {
@@ -143,7 +149,7 @@ it("preserves every prefix-visible boundary-ended evidence interval over generat
     const windows = [unit("one", 1, "a".repeat(n)), unit("two", 2, "b".repeat(m))];
     const ends = new Map([[key(windows[0]!), [boundaryEnd, n]], [key(windows[1]!), [m]]]);
     for (let budget = 0; budget <= n + m; budget++) {
-      const packed = packOrdinaryLinePrefixes(windows, ends, budget).windows;
+      const packed = ordinaryLiteralWindows(packOrdinaryLinePreviews(literalPreviews(windows), ends, budget).previews);
       const first = packed.find(window => window.rank === 1)?.end ?? 0;
       const second = packed.find(window => window.rank === 2)?.end ?? 0;
       if (budget >= boundaryEnd) expect(first).toBeGreaterThanOrEqual(boundaryEnd);

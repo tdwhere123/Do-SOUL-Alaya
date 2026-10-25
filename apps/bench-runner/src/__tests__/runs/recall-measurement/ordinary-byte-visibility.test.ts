@@ -4,10 +4,14 @@ const boundary = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 afterAll(() => { expect(boundary.violations).toEqual([]); boundary.restore(); });
-import { scoreOrdinaryByteVisibility, type OrdinaryLiteralWindow } from "../../../runs/recall-measurement/ordinary/ordinary-byte-visibility.js";
-import type { ConsumerVisibilityPage } from "../../../runs/longmemeval-semantic/message-visibility.js";
+import { scoreOrdinaryByteVisibility as scorePreviews } from "../../../runs/recall-measurement/ordinary/ordinary-byte-visibility.js";
+import type { OrdinaryLiteralWindow } from "../../../runs/recall-measurement/ordinary/ordinary-preview-stream.js";
+import type { ConsumerVisibilityInput, ConsumerVisibilityPage } from "../../../runs/longmemeval-semantic/message-visibility.js";
 import type { AnswerTurnGold } from "../../../runs/longmemeval-semantic/answer-spans.js";
 
+const scoreOrdinaryByteVisibility = (input: ConsumerVisibilityInput & { windows: readonly OrdinaryLiteralWindow[] }) =>
+  scorePreviews({ ...input, previews: input.windows.map(({ start, end, ...preview }) =>
+    ({ ...preview, source: { status: "literal", start, end } })) });
 const window = (root: string, rank: number, text: string, start = 0): OrdinaryLiteralWindow => ({
   rank, text, start, end: start + Buffer.byteLength(text), target: { workspace_id: "workspace",
     root_kind: "source_record", root_id: root, source_version: "1", content_digest: `sha256:${"a".repeat(64)}` }

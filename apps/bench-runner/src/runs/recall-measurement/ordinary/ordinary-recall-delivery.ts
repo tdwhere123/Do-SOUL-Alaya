@@ -149,7 +149,8 @@ function verifyCallRequest(config: OrdinaryRecallCaptureConfig, call: CapturedOr
   }
 }
 
-export function verifyExposure(call: CapturedOrdinaryRecallCall, index: ResponseIndex, first: FirstExposurePage | null): void {
+export function verifyExposure(call: Pick<CapturedOrdinaryRecallCall, "output" | "firstExposure">
+  & { request: Pick<CapturedOrdinaryRecallCall["request"], "arguments"> }, index: ResponseIndex, first: FirstExposurePage | null): void {
   const page = call.firstExposure;
   if (page === null || firstExposureMismatch(page, { query_id: index.query_id, snapshot_id: index.snapshot_id,
     interpretation_id: index.interpretation_id!, as_of: index.as_of! }, exposureSlots(call.output!), call.output!.delivery_id)) {

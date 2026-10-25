@@ -6,16 +6,45 @@ import { SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo, SqliteSourceRoo
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { admitEmittedSourcePreview } from "../library-admission.js";
+import { admittedSourcePreviewInterval } from "../../measurement/source-delivery-visibility.js";
+import { sourceGoldUnitFromPublishedRoot } from "../../measurement/source-gold-join.js";
+import type { OrdinarySourcePreview } from "./ordinary-preview-stream.js";
+
+export type OrdinarySourceObservation = Readonly<{ status: "root_observed" }>
+  | Readonly<{ status: "preview_observed"; preview: Omit<OrdinarySourcePreview, "rank"> }>;
 
 /** Label-blind frozen ordinary admission. Retained capsules use their native kind,
  * revision, digest and retained extent, never a fabricated SourceRecord alias. */
 export function admitOrdinarySourceDelivery(database: StorageDatabase, workspace: string,
-  scopes: readonly string[] | null, target: SourceEvidenceTarget, result?: MemorySearchResult): void {
+  scopes: readonly string[] | null, target: SourceEvidenceTarget, result?: MemorySearchResult): OrdinarySourceObservation {
   if (target.workspace_id !== workspace) throw new AlayaError("CONFLICT", "ordinary source workspace changed");
-  if (target.root_kind === "evidence_capsule") {
-    admitCapsule(database, workspace, scopes, target, result);
-    return;
+  if (result !== undefined && canonicalJson(result.target) !== canonicalJson(target)) {
+    throw new AlayaError("CONFLICT", "ordinary source result target changed");
   }
+  if (target.root_kind === "evidence_capsule") admitCapsule(database, workspace, scopes, target, result);
+  else admitRecord(database, workspace, scopes, target, result);
+  if (result === undefined) return { status: "root_observed" };
+  const interval = admittedSourcePreviewInterval(target, result);
+  const source: OrdinarySourcePreview["source"] = interval === null
+    ? { status: "unmapped", reason: target.span === undefined ? "source_span_unavailable" : "source_extent_not_body" }
+    : interval.start === interval.end ? { status: "not_delivered", reason: "empty_or_omitted_source_preview" }
+      : { status: "literal", ...interval };
+  return { status: "preview_observed", preview: {
+    target: sourceGoldUnitFromPublishedRoot(target), text: result.content_preview, source } };
+}
+
+/** Every result retains its actual occupied position; only the admission owner can classify bytes. */
+export function admitOrdinarySourceResults(database: StorageDatabase, workspace: string, scopes: readonly string[] | null,
+  results: readonly MemorySearchResult[], occupied: number): OrdinarySourcePreview[] {
+  return results.flatMap((result, slot) => {
+    if (result.target.kind !== "source_evidence") return [];
+    const admitted = admitOrdinarySourceDelivery(database, workspace, scopes, result.target, result);
+    return admitted.status === "preview_observed" ? [{ ...admitted.preview, rank: occupied + slot + 1 }] : [];
+  });
+}
+
+function admitRecord(database: StorageDatabase, workspace: string, scopes: readonly string[] | null,
+  target: SourceEvidenceTarget, result?: MemorySearchResult): void {
   const stores = sourceLookupStores(database), stored = stores.getStoredRecord(workspace, target.root_id);
   if (stored === null) throw new AlayaError("CONFLICT", "ordinary source unbound");
   const current = resolveCurrentSource(stores, workspace, { artifact_key: stored.record.source_id,
@@ -25,7 +54,11 @@ export function admitOrdinarySourceDelivery(database: StorageDatabase, workspace
   if (canonicalJson(sourceEvidenceRootTarget(target)) !== canonicalJson(expected)) {
     throw new AlayaError("CONFLICT", "ordinary source identity changed");
   }
-  if (result !== undefined) admitEmittedSourcePreview(target.span, result, undefined, target, current.content_bytes, false);
+  // The ordinary producer can retain a decorated display after hydration fails.
+  // Root identity and scope remain mandatory, but spanless text is not byte evidence.
+  if (result !== undefined && target.span !== undefined) {
+    admitEmittedSourcePreview(target.span, result, undefined, target, current.content_bytes, false);
+  }
 }
 
 function admitCapsule(database: StorageDatabase, workspace: string, scopes: readonly string[] | null,
@@ -42,8 +75,8 @@ function admitCapsule(database: StorageDatabase, workspace: string, scopes: read
     throw new AlayaError("CONFLICT", "ordinary retained capsule identity changed");
   }
   authorizeSourceIndexScope(row.scope_class ?? null, sourceIndexTarget(sourceEvidenceRootTarget(target), null, row.content_end), scopes);
-  if (result === undefined) return;
-  if (canonicalJson(result.target) !== canonicalJson(target) || span === undefined || span.retained_extent !== row.retained_extent
+  if (result === undefined || span === undefined) return;
+  if (canonicalJson(result.target) !== canonicalJson(target) || span.retained_extent !== row.retained_extent
     || span.content_end > row.content_end || row.content === undefined) {
     throw new AlayaError("CONFLICT", "ordinary retained capsule span changed or exceeds admitted native read");
   }
