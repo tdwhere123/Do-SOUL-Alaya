@@ -5,7 +5,7 @@ import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPai
   type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
-import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
+import { deliveredProofFixture, executeSemanticFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFixture, deliveredInputNumbers,
   deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget
 } from "./source-semantic-selection-fixture.js";
@@ -250,29 +250,30 @@ it("finishes this source's statements inside the default reasoning allowance", (
     .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
 });
 
-it("retains an ordered open prefix when the work allowance stops early", () => {
-  // A quarter of the default allowance stops before the last statement with indexed row deltas.
-  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 4) };
-  const original = coverageSelectionFixture(allowance), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
-  const proof = partial.proofs[0]!;
-  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 50_000, memory_bytes: 20_000_000,
+it("keeps raw source access distinct from proof eligibility when projection is unfunded", () => {
+  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: 50_000 };
+  const complete = coverageTask.pool[0]!, proof = complete.proofs[0]!;
+  const { executed } = executeSemanticFixture({ interpretation: proof.interpretation, semantics: proof.query,
+    correspondence: proof.semantic_correspondence, original: proof.original_query, budget: allowance });
+  expect(allowance).toMatchObject({ schema_version: 1, work_units: 50_000, memory_bytes: 20_000_000,
     page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
-  expect(root(partial)).toBe(root(complete));
-  expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
-  expect(proof.query_semantics_id).toBe(complete.proofs[0]!.query_semantics_id);
-  expect(proof.semantic_correspondence_id).toBe(complete.proofs[0]!.semantic_correspondence_id);
-  expect(proof.outcome).toEqual({ status: "resource_exhausted" });
-  expect(proof.completeness).toMatchObject({ logical_index: "partial", observed_coverage: "open", order_coverage: "partial" });
-  const executed = executedInputNumbers(partial);
-  expect(executed.length).toBeGreaterThanOrEqual(4);
-  expect(executed.length).toBeLessThan(7);
-  expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
-  expect(deliveredInputNumbers(original, [partial])).toEqual([1, 2, 3, 4, 5, 6, 7]);
-  expect(proof.resource_usage!.work_units).toBeLessThanOrEqual(allowance.work_units);
-  expect(proof.resource_usage!.memory_bytes).toBeLessThan(allowance.memory_bytes);
-  expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
-    .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
-  // Coverage must not put this fixture back on the production allowance, which now finishes the prefix.
+  expect(executed.result.source_interpretation_id).toBe(proof.source_interpretation_id);
+  expect(executed.result.query_semantics_id).toBe(proof.query_semantics_id);
+  expect(executed.result.semantic_correspondence_id).toBe(proof.semantic_correspondence_id);
+  expect(executed.result.outcome).toEqual({ status: "resource_exhausted" });
+  expect(executed.index).toBeNull();
+  expect(executed.result.binding_results).toBeUndefined();
+  expect(executed.result.completeness).toBeUndefined();
+  expect(executed.result.resource_usage!.work_units).toBeLessThanOrEqual(allowance.work_units);
+  expect(executed.result.resource_usage!.memory_bytes).toBeLessThan(allowance.memory_bytes);
+  // The same source still carries its seven literal statements, not thirteen proved inputs.
+  const sourceOnly = { ...rawSourceTwin(complete), payload_support: "not_applicable" as const };
+  expect(sourceOnly.entry.target).toEqual(executed.result.source_target);
+  const selected = selectSourceSemanticLibraryPage({ candidates: [sourceOnly], meter: budget(), fits: () => true });
+  expect(selected).toHaveLength(1);
+  expect(selected[0]!.selection_basis).toBe("source_access");
+  expect(selected[0]!.proofs).toEqual([]);
+  expect(deliveredInputNumbers(coverageTask, selected)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 }, 30_000);
 
 it("executes only the distinct source-bound deployment inputs without claiming task completion", () => {

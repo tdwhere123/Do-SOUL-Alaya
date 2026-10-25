@@ -89,9 +89,12 @@ export function run(interpretation: SourceSemanticInterpretation, semantics: Sou
 import { sourceSemanticCorrespondenceIdentity } from "@do-soul/alaya-protocol";
 function correspondenceId(correspondence: SourceSemanticCorrespondence) { return sourceSemanticCorrespondenceIdentity(correspondence, sha); }
 
-export function deliveredProofFixture(input: { interpretation?: SourceSemanticInterpretation; semantics?: SourceSemanticQuery;
+type SemanticFixtureInput = { interpretation?: SourceSemanticInterpretation; semantics?: SourceSemanticQuery;
   correspondence?: SourceSemanticCorrespondence; original?: string; library?: boolean; budget?: RequestBudget; workspaceId?: string;
-  assertionLocations?: SourceSemanticInterpretation["source"]["assertion_locations"] } = {}) {
+  assertionLocations?: SourceSemanticInterpretation["source"]["assertion_locations"] };
+
+/** Capture native execution even when the remaining budget cannot produce a delivery index. */
+export function executeSemanticFixture(input: SemanticFixtureInput = {}) {
   const base = input.interpretation ?? source();
   const interpretation = input.assertionLocations === undefined ? base
     : { ...base, source: { ...base.source, assertion_locations: input.assertionLocations } };
@@ -117,7 +120,13 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
       source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
       semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: original,
       budget: input.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, output_byte_limit: 1_000_000 } });
-  if (executed.index === null) throw new Error("fixture must produce native proof");
+  return { record, target, admitted, executed, interpretation, semantics, correspondence, original };
+}
+
+export function deliveredProofFixture(input: SemanticFixtureInput = {}) {
+  const { record, target, admitted, executed, interpretation, semantics, correspondence, original } = executeSemanticFixture(input);
+  if (executed.index === null) throw new Error(`fixture must produce native proof: ${JSON.stringify({
+    outcome: executed.result.outcome, usage: executed.result.resource_usage, completeness: executed.result.completeness })}`);
   const delivered = input.library ? scopeSourceSemanticLibraryBranch(executed.index, executed.result) : { ...executed, index: executed.index };
   const proof: SourceSemanticLibraryProof = { ...delivered.result, original_query: original, interpretation,
     query: semantics, semantic_correspondence: correspondence, context: admitted.context, source_record: record };

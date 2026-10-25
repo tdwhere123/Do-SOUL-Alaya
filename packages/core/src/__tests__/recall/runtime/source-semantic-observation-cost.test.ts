@@ -4,17 +4,20 @@ import * as observation from "../../../recall/runtime/conditional-field-observe.
 import * as projection from "../../../recall/runtime/source-semantic-projection.js";
 import { RequestCostLedger } from "../../../recall/runtime/request-cost-ledger.js";
 import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
-import { deliveredProofFixture } from "./source-semantic-proof-fixture.js";
-import { coverageSelectionFixture, executedInputNumbers, selectionExecutionBudget } from "./source-semantic-selection-fixture.js";
+import { executeSemanticFixture } from "./source-semantic-proof-fixture.js";
+import { coverageSelectionFixture, selectionExecutionBudget } from "./source-semantic-selection-fixture.js";
 
-it("attributes bounded observation cost while retaining its source-supported input prefix", () => {
+it("retains observation charges when the shared allowance cannot fund proof projection", () => {
   const complete = coverageSelectionFixture(selectionExecutionBudget).pool[0]!;
   const proof = complete.proofs[0]!;
   const ledgers = new Map<SourceSemanticResourceLedger, {
     id: number; initial_work: number; initial_bytes: number;
     phases: Map<string, { calls: number; work: number; bytes: number }>;
   }>();
-  const groups: unknown[] = [], projections: unknown[] = [], failures: unknown[] = [];
+  type Capacity = ReturnType<SourceSemanticResourceLedger["remaining"]>;
+  const groups: unknown[] = [], failures: unknown[] = [];
+  const projections: { query: string; before: Capacity; after: Capacity;
+    failed?: boolean; error?: string; outcome?: unknown; bindings?: number; entries?: number }[] = [];
   const identify = (ledger: SourceSemanticResourceLedger) => {
     let value = ledgers.get(ledger);
     if (value === undefined) {
@@ -54,18 +57,25 @@ it("attributes bounded observation cost while retaining its source-supported inp
         bindings: value.body.binding_results?.length ?? 0, entries: value.index?.entries.length ?? 0 });
       return value;
     } catch (error) {
-      projections.push({ ...row, after: input.meter.remaining(), failed: true });
+      projections.push({ ...row, after: input.meter.remaining(), failed: true,
+        error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   });
   try {
-    // A quarter of the default allowance stops before the last statement with indexed row deltas.
-    const actual = deliveredProofFixture({ interpretation: proof.interpretation, semantics: proof.query,
+    // Observation progress is not proof progress: both phases spend the same allowance.
+    const { executed } = executeSemanticFixture({ interpretation: proof.interpretation, semantics: proof.query,
       correspondence: proof.semantic_correspondence, original: proof.original_query,
       library: true, budget: { ...SOURCE_SEMANTIC_REASONING_BUDGET,
-        work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 4) } });
+        work_units: 50_000 } });
     expect(groups.length).toBeGreaterThan(0);
-    expect(projections.length).toBeGreaterThan(0);
+    expect(projections).toHaveLength(1);
+    const firstProjection = projections[0]!;
+    expect(firstProjection).toMatchObject({ failed: true,
+      error: "source semantic index projection allowance budget exhausted" });
+    expect(firstProjection.before.work_units).toBeLessThan(
+      SOURCE_SEMANTIC_REASONING_BUDGET.finalization_reserve + SOURCE_SEMANTIC_REASONING_BUDGET.min_envelope);
+    expect(firstProjection.after).toEqual(firstProjection.before);
     const charges = [...ledgers].map(([ledger, value]) => {
       const phases = [...value.phases].map(([phase, delta]) => ({ phase, ...delta }));
       expect(phases.reduce((sum, row) => sum + row.work, 0)).toBe(ledger.spentWork);
@@ -74,13 +84,18 @@ it("attributes bounded observation cost while retaining its source-supported inp
         spent_work: ledger.spentWork, spent_bytes: ledger.spentBytes, phases };
     });
     console.log(`SOURCE_OBSERVATION_COST ${JSON.stringify({ source_id: proof.interpretation.source.source_id,
-      outcome: actual.proof.outcome, resource_usage: actual.proof.resource_usage, groups, projections, charges, failures })}`);
-    expect(actual.proof.outcome).toEqual({ status: "resource_exhausted" });
-    expect(actual.proof.completeness).toMatchObject({ logical_index: "partial", observed_coverage: "open" });
-    const executed = executedInputNumbers({ ...complete, proofs: [actual.proof] });
-    expect(executed.length).toBeGreaterThanOrEqual(4);
-    expect(executed.length).toBeLessThan(7);
-    expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
+      outcome: executed.result.outcome, resource_usage: executed.result.resource_usage,
+      index_entries: executed.index?.entries.length ?? null, groups, projections, charges, failures })}`);
+    expect(charges).toHaveLength(1);
+    expect(executed.result.resource_usage).toEqual({
+      work_units: charges[0]!.spent_work, memory_bytes: charges[0]!.spent_bytes });
+    expect(executed.result.resource_usage!.work_units + firstProjection.before.work_units).toBe(50_000);
+    expect(executed.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(SOURCE_SEMANTIC_REASONING_BUDGET.memory_bytes);
+    expect(executed.result.outcome).toEqual({ status: "resource_exhausted" });
+    expect(executed.index).toBeNull();
+    expect(executed.result.binding_results).toBeUndefined();
+    expect(executed.source_dependencies).toBeUndefined();
+    expect(charges[0]!.phases.some(row => row.phase === "engine" && row.work > 0)).toBe(true);
+    expect(charges[0]!.phases.some(row => row.phase === "index projection")).toBe(false);
   } finally { projected.mockRestore(); observed.mockRestore(); charged.mockRestore(); }
-  // Coverage must not put this fixture back on the production allowance, which now finishes the prefix.
 }, 30_000);
