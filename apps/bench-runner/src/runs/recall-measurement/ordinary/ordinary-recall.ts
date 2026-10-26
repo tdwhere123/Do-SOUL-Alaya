@@ -11,10 +11,11 @@ import { hashRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import { FirstExposurePageSchema, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
 import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch } from "../../measurement/conditional-field-request-binding.js";
 import {
-  OrdinaryRecallArchiveConfigSchema, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
+  OrdinaryRecallArchiveConfigSchema, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT,
+  ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
   OrdinaryRecallObservationSchema, OrdinaryRecallPreparationSchema, OrdinaryRecallProcessResultSchema,
   OrdinaryRecallRequestRecordSchema, OrdinaryRecallReservationSchema, OrdinaryRecallShutdownSchema,
-  OrdinaryRecallWireRecordSchema, OrdinaryRecallMultiSourceObservationSchema, ordinaryRecallReaderProtocolVersion, type OrdinaryRecallArchiveConfig, type OrdinaryRecallContext,
+  OrdinaryRecallWireRecordSchema, OrdinaryRecallMultiSourceObservationSchema, installedRecallProtocolVersion, type OrdinaryRecallArchiveConfig, type OrdinaryRecallContext,
   type OrdinaryRecallEnvelope, type OrdinaryRecallRequestRecord, type OrdinaryRecallWireRecord
 } from "./ordinary-recall-contract.js";
 import { terminal, verifyOrdinaryRecallDelivery } from "./ordinary-recall-delivery.js";
@@ -68,7 +69,7 @@ export function inspectOrdinaryRecallObservation(observationRoot: string) {
       producer_revision: config.implementation_revision, producer_candidate: config.candidate,
       capture_contract: config.capture_contract, public_semantics: config.public_semantics,
       protocol_package_version: config.protocol_package_version,
-      reader_protocol_package_version: ordinaryRecallReaderProtocolVersion(),
+      reader_protocol_package_version: installedRecallProtocolVersion(),
       verification_revision: readCurrentExtractionAuthorityRevision() } };
 }
 
@@ -241,7 +242,15 @@ function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError:
         decodeHistoricalSourceDisclosure(row.source_disclosure, major as 14 | 15 | 16 | 17 | 18)) }) })) };
   }
   const output = SoulMemorySearchResponseSchema.parse(current);
-  same(output, current, "public output cannot be normalized during historical admission");
+  same(output, current, "public output cannot be normalized during archive admission");
+  if (protocolVersion === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION) {
+    const index = output.index, continuation = index?.continuation;
+    if (output.protocol_version !== 1 || index?.result_version !== ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS ||
+        continuation != null && (continuation.result_version !== index.result_version ||
+          continuation.enumeration_policy !== "native_query" || continuation.result_kind_view !== "source_only")) {
+      conflict("native producer output does not match its supported public contract");
+    }
+  }
   return { responseState: "success" as const, output, transportError: null };
 }
 

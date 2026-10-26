@@ -495,3 +495,13 @@ policy lives in [bench history](../bench-history/README.md); old ranking prose
 lives in the
 [historical recall archive](../archive/recall-before-retirement-2026-09-08.md).
 Neither is live runtime authority.
+
+The local ordinary capture reader admits the explicit historical producer versions
+14.1.0–20.0.0 listed in its schema, plus a separately qualified 27.0.0 branch.
+Historical captures retain `conditional-field-source-only-v1` and their canonical
+request policy; 27.0.0 requires `ordinary-native-field.v4`, `native_query`, current
+compact disclosures and the matching result/continuation version. This is offline
+source-record delivery validation, not support for intervening majors, capsule
+captures or historical execution. Installed reader provenance is recorded separately
+from the untouched producer version. Authored historical-format tests demonstrate
+reader qualification/refusal rules, not genuine historical producer execution.

@@ -8,7 +8,7 @@ const isolation = await vi.hoisted(async () => {
 import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { encodeSourceDisclosure, sourceDisclosure, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
-import { nativeRecallFixture } from "./native-recall.test-support.js";
+import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { captureMultipleSources } from "./ordinary-multi-source.test-support.js";
 import { admitOrdinaryRecallObservation } from "../../../runs/recall-measurement/ordinary/ordinary-recall.js";
 import { readJson, writeJson, type RecallResponseCase } from "./ordinary-capture.test-support.js";
@@ -20,7 +20,7 @@ import { capturedCalls } from "./ordinary-multi-source.test-support.js";
 import { inspectOrdinaryRecallObservation } from "../../../runs/recall-measurement/ordinary/ordinary-recall.js";
 
 
-let base: Awaited<ReturnType<typeof nativeRecallFixture>>;
+let base: Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>;
 let capture: Awaited<ReturnType<typeof captureMultipleSources>>;
 let largeBase: typeof base;
 let emptyBase: typeof base;
@@ -30,15 +30,16 @@ let failed: typeof capture;
 let empty: typeof capture;
 const stateCaptures = {} as Record<RecallResponseCase, typeof capture>;
 beforeAll(async () => {
-  base = await nativeRecallFixture([`Project Aster was mentioned. ${"Aster context. ".repeat(10)}`,
+  simulateIndexedQueryPreparation();
+  base = await ordinaryIndexedSnapshot([`Project Aster was mentioned. ${"Aster context. ".repeat(10)}`,
     `Project Birch was mentioned. ${"Birch context. ".repeat(12)}`]);
   capture = await captureMultipleSources(base, "complete");
-  largeBase = await nativeRecallFixture([`Project Aster was mentioned. ${"Aster context. ".repeat(250)}`,
+  largeBase = await ordinaryIndexedSnapshot([`Project Aster was mentioned. ${"Aster context. ".repeat(250)}`,
     `Project Birch was mentioned. ${"Birch context. ".repeat(260)}`]);
   large = await captureMultipleSources(largeBase, "complete");
   partial = await captureMultipleSources(largeBase, "prefix");
   failed = await captureMultipleSources(largeBase, "prefix_error");
-  emptyBase = await nativeRecallFixture([]);
+  emptyBase = await ordinaryIndexedSnapshot([]);
   empty = await captureMultipleSources(emptyBase, "complete");
   for (const state of ["invalidated", "resource_rejected", "interrupted", "open", "unknown", "transport_partial", "complete_empty"] as const) {
     stateCaptures[state] = await captureMultipleSources(emptyBase, "complete", state);
@@ -46,6 +47,7 @@ beforeAll(async () => {
   stateCaptures.indexed_without_preview = await captureMultipleSources(base, "complete", "indexed_without_preview");
 }, 120000);
 afterAll(() => {
+  vi.restoreAllMocks();
   for (const fixture of [base, largeBase, emptyBase]) if (fixture !== undefined) rmSync(fixture.root, { recursive: true, force: true });
   isolation.restore(); expect(isolation.violations).toEqual([]);
 });
@@ -54,18 +56,27 @@ it("admits actual multiple source roots and each contiguous targeted expansion f
   expect(capture.observation.source_states).toHaveLength(2);
   expect(capture.observation.source_states.every(source => source.source_complete)).toBe(true);
   expect(capture.delivered).toEqual(capture.bodies);
-  expect(admitOrdinaryRecallObservation(capture.root).state).toBe("complete");
+  const admitted = admitOrdinaryRecallObservation(capture.root);
+  expect(admitted.state).toBe("complete");
+  expect(admitted.binding).toMatchObject({ protocol_package_version: "27.0.0", reader_protocol_package_version: "27.0.0",
+    public_semantics: "ordinary-native-field.v4", producer_revision: capture.config.implementation_revision });
+  expect(capturedCalls(capture).every(call => call.output?.index?.result_version === "ordinary-native-field.v4")).toBe(true);
 });
 
-it("delivers both large sources through actual membership and targeted payload continuations", () => {
+it("defers the second large source to a new membership page and expands both through issued payload continuations", () => {
   expect(large.observation.source_states).toHaveLength(2);
   expect(large.observation.source_states.every(source => source.source_complete)).toBe(true);
   expect(large.delivered).toEqual(large.bodies);
   expect(admitOrdinaryRecallObservation(large.root).state).toBe("complete");
   const calls = capturedCalls(large), initial = calls[0]!;
-  expect(initial.output?.index?.entries).toHaveLength(2);
+  expect(initial.output?.index?.entries).toHaveLength(1);
   expect(initial.output?.results).toHaveLength(1);
-  expect(calls.some(call => call.request.arguments.payload_continuation?.start_offset === 0)).toBe(true);
+  const membership = calls.filter(call => call.request.phase === "membership");
+  expect(membership).toHaveLength(2);
+  expect(membership[1]!.output!.index!.entries).toHaveLength(1);
+  expect(membership[1]!.output!.index!.entries[0]!.target).not.toEqual(initial.output!.index!.entries[0]!.target);
+  expect(calls.filter(call => call.request.phase === "payload")
+    .every(call => call.request.arguments.payload_continuation!.start_offset! > 0)).toBe(true);
   for (const call of calls) expect(call.firstExposure?.initial).toEqual(initial.firstExposure?.initial);
 });
 
@@ -82,11 +93,11 @@ it("retains the historical single-source archive refusal for a real multi-source
   expect(() => admitOrdinaryRecallObservation(root)).toThrow("selected source population");
 });
 
-it("preserves indexed membership, unexposed bodies, partial bytes, and terminal public errors separately", () => {
+it("retains the delivered prefix without inventing membership for a deferred root, and preserves public errors", () => {
   const admitted = admitOrdinaryRecallObservation(partial.root);
   expect(admitted.state).toBe("partial");
-  expect(admitted.sources).toHaveLength(2);
-  expect(admitted.sources?.map(source => source.contiguous_delivered_bytes).filter(bytes => bytes === 0)).toHaveLength(1);
+  expect(admitted.sources).toHaveLength(1);
+  expect(admitted.sources?.every(source => source.contiguous_delivered_bytes > 0)).toBe(true);
   expect(admitted.sources?.every(source => !source.source_complete)).toBe(true);
   expect(admitOrdinaryRecallObservation(failed.root).evidence.calls.at(-1)?.response_state).toBe("public_error");
   const unknown = join(largeBase.root, "unknown-capture"); cpSync(partial.root, unknown, { recursive: true });
@@ -125,6 +136,7 @@ it.each(["open", "unknown", "transport_partial", "indexed_without_preview"] as c
   expect(observation.state).toBe("unknown");
   expect(observation.successfulExposures).toBe(0);
   expect(observation.sources).toHaveLength(state === "indexed_without_preview" ? 2 : 0);
+  expect(observation.sources?.every(source => source.contiguous_delivered_bytes === 0 && !source.source_complete)).toBe(true);
 });
 
 it("shares payload and total call allowances across all indexed sources", () => {
@@ -161,7 +173,7 @@ it.each(["invalidated", "resource_rejected", "interrupted"] as const)("retains p
   const delivered = verifyOrdinaryMultiSourceDelivery(OrdinaryRecallMultiSourceConfigSchema.parse(large.config), [initial, terminalCall], undefined);
   expect(delivered.complete).toBe(false);
   expect(delivered.successfulExposures).toBe(1);
-  expect(delivered.sources).toHaveLength(2);
+  expect(delivered.sources).toHaveLength(1);
 });
 
 it.each(["workspace", "digest", "disclosure", "source_state"] as const)("rejects changed multi-source %s evidence", field => {

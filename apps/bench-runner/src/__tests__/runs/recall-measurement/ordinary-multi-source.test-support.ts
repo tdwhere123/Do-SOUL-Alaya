@@ -15,8 +15,8 @@ import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js"
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { FirstExposureSession, FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { OrdinaryRecallContextSchema, OrdinaryRecallRequestRecordSchema, OrdinaryRecallEnvelopeSchema,
-  ordinaryRecallReaderProtocolVersion } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
-import type { nativeRecallFixture } from "./native-recall.test-support.js";
+  installedRecallProtocolVersion } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
+import type { ordinaryIndexedSnapshot } from "./ordinary-indexed-snapshot.test-support.js";
 import { observeTransport, readJson, writeJson, type RecallResponseCase } from "./ordinary-capture.test-support.js";
 
 type Mode = "complete" | "prefix" | "prefix_error";
@@ -24,20 +24,20 @@ type SourceState = { target: SourceEvidenceTarget; contiguous_delivered_bytes: n
   source_complete: boolean; remaining_tail_bytes: number };
 
 /** The operator follows actual returned membership and spans; it never preselects an expected source. */
-export async function captureMultipleSources(base: Awaited<ReturnType<typeof nativeRecallFixture>>, mode: Mode,
+export async function captureMultipleSources(base: Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>, mode: Mode,
   responseCase?: RecallResponseCase) {
   const root = join(base.root, `multi-${responseCase ?? mode}`), execution = join(root, "execution");
   mkdirSync(execution, { recursive: true });
-  const plan = base.admitted.plan.config;
+  const plan = base.config;
   const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
-  const config = { capture_contract: "ordinary-recall-local-capture-v2", public_semantics: "conditional-field-source-only-v1",
-    protocol_package_version: ordinaryRecallReaderProtocolVersion(), candidate, tree,
+  const config = { capture_contract: "ordinary-recall-local-capture-v2", public_semantics: "ordinary-native-field.v4",
+    protocol_package_version: installedRecallProtocolVersion(), candidate, tree,
     implementation_revision: readCurrentExtractionAuthorityRevision(), snapshot_path: plan.snapshot_path,
     snapshot_sha256: plan.snapshot_sha256, workspace_id: plan.workspace_id, run_id: plan.run_id,
     first_request: { query: "project", scope_class: "project", dimension: null,
       domain_tags: null, max_results: 8, source_observed_at: plan.interpretation_clock,
-      enumeration_policy: "canonical", result_kind_view: "source_only", protocol_version: 1,
+      enumeration_policy: "native_query", result_kind_view: "source_only", protocol_version: 1,
       supports_source_evidence: true } satisfies SoulMemorySearchRequest,
     bounds: { membership_calls: 2, payload_expansion_calls: 8, total_recall_calls: 10,
       payload_byte_budget: 4096, public_envelope_observation_bytes: 1048576,

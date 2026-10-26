@@ -8,20 +8,23 @@ const isolation = await vi.hoisted(async () => {
 import { cpSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { sourceDisclosure, SourceDisclosureSchema, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, sourceDisclosure, SourceDisclosureSchema, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "../../../runs/recall-measurement/contract.js";
 import { admitOrdinaryRecallObservation, inspectOrdinaryRecallObservation } from "../../../runs/recall-measurement/ordinary/ordinary-recall.js";
-import { OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema, OrdinaryRecallObservationSchema,
+import { installedRecallProtocolVersion, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema, OrdinaryRecallObservationSchema,
   OrdinaryRecallPreparationSchema, OrdinaryRecallRequestRecordSchema,
   OrdinaryRecallWireRecordSchema } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
-import { nativeRecallFixture, HIDDEN_GOLD, HIDDEN_SOURCE } from "./native-recall.test-support.js";
+import { HIDDEN_GOLD, HIDDEN_SOURCE } from "./native-recall.test-support.js";
+import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { captureFailedCallFixture, captureOrdinaryFixture, readJson, writeJson } from "./ordinary-capture.test-support.js";
+import { authorHistoricalOrdinaryCapture } from "./historical-ordinary-capture.test-support.js";
 
-let base: Awaited<ReturnType<typeof nativeRecallFixture>>;
+let base: Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>;
 const captures = {} as Record<"complete" | "prefix" | "prefix_error" | "error", Awaited<ReturnType<typeof captureOrdinaryFixture>>>;
 beforeAll(async () => {
-  base = await nativeRecallFixture(`Project Aster was mentioned. ${"Other project context. ".repeat(160)}${HIDDEN_SOURCE}`);
+  simulateIndexedQueryPreparation();
+  base = await ordinaryIndexedSnapshot([`Project Aster was mentioned. ${"Other project context. ".repeat(160)}${HIDDEN_SOURCE}`]);
   for (const mode of ["complete", "prefix", "prefix_error", "error"] as const) captures[mode] = await captureOrdinaryFixture(base, mode);
 }, 120000);
 afterAll(() => {
@@ -30,27 +33,8 @@ afterAll(() => {
   isolation.restore(); expect(isolation.violations).toEqual([]);
 });
 
-function captureWithProtocolVersion(name: string, protocolVersion: string) {
-  const root = join(base.root, name); cpSync(captures.prefix.root, root, { recursive: true });
-  const config = readJson(join(root, "config.json")); config.protocol_package_version = protocolVersion;
-  writeJson(join(root, "config.json"), config);
-  for (const path of ["preparation.json", "execution/reservation.json"]) {
-    const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
-  }
-  if (!["19.0.0", "19.1.0", "20.0.0"].includes(protocolVersion)) {
-    // Historical producers emitted named objects; pre-18 records predate representation metadata.
-    rewriteCapturedEnvelope(root, 1, envelope => {
-      const block = envelope.content.find(value => value.type === "text")!;
-      const payload = JSON.parse(String(block.text));
-      for (const row of payload.output.results) {
-        row.source_disclosure = sourceDisclosure(SourceDisclosureSchema.parse(row.source_disclosure));
-        if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) row.source_disclosure.material_kind = "original_body";
-      }
-      return { ...envelope, structuredContent: payload,
-        content: envelope.content.map(value => value === block ? { ...block, text: JSON.stringify(payload) } : value) };
-    });
-  }
-  return { root, config };
+function authoredHistoricalCapture(name: string, protocolVersion: string) {
+  return authorHistoricalOrdinaryCapture(captures.prefix, join(base.root, name), protocolVersion);
 }
 
 function rewriteCapturedEnvelope(root: string, ordinal: number,
@@ -67,6 +51,10 @@ function rewriteCapturedEnvelope(root: string, ordinal: number,
 it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ordered %s public envelopes without consumer execution", mode => {
   const capture = captures[mode], observation = admitOrdinaryRecallObservation(capture.root);
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
+  expect(installedRecallProtocolVersion()).toBe("27.0.0");
+  expect(observation.binding).toMatchObject({ protocol_package_version: "27.0.0", reader_protocol_package_version: "27.0.0",
+    public_semantics: "ordinary-native-field.v4", producer_revision: capture.config.implementation_revision });
+  expect(capture.config.first_request.enumeration_policy).toBe("native_query");
   expect(observation.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
     (_, index) => readJson(join(capture.execution, `${String(index + 1).padStart(2, "0")}-public-envelope.json`))));
   expect(JSON.stringify(observation.evidence)).not.toContain(HIDDEN_GOLD);
@@ -74,12 +62,12 @@ it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ord
   if (mode === "prefix_error") expect(observation.evidence.calls.at(-1)).toMatchObject({ response_state: "public_error" });
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("admits a %s archive without rewriting producer provenance", protocolVersion => {
-  const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("admits an authored %s format control without rewriting its declared provenance", protocolVersion => {
+  const { root, config } = authoredHistoricalCapture(`authored-historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
   const originalEnvelope = readFileSync(join(root, "execution/01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "20.0.0",
+  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "27.0.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision });
   expect(observation.state).toBe("partial");
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
@@ -87,7 +75,7 @@ it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "
 });
 
 it.each(["18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
-  const { root, config } = captureWithProtocolVersion(`original-overclaim-${protocolVersion}`, "17.0.0");
+  const { root, config } = authoredHistoricalCapture(`original-overclaim-${protocolVersion}`, "17.0.0");
   config.protocol_package_version = protocolVersion; writeJson(join(root, "config.json"), config);
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
@@ -96,6 +84,40 @@ it.each(["18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("refuses legacy orig
     expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
   } else expect(() => admitOrdinaryRecallObservation(root)).toThrow(z.ZodError);
 });
+
+it.each(["semantics", "enumeration"] as const)("refuses current producer with historical %s despite recomputed binding", field => {
+  const root = join(base.root, `native-historical-${field}`); cpSync(captures.prefix.root, root, { recursive: true });
+  const config = readJson(join(root, "config.json"));
+  if (field === "semantics") config.public_semantics = "conditional-field-source-only-v1";
+  else config.first_request.enumeration_policy = "canonical";
+  writeJson(join(root, "config.json"), config);
+  for (const path of ["preparation.json", "execution/reservation.json"]) {
+    const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
+  }
+  expect(() => admitOrdinaryRecallObservation(root)).toThrow("unsupported ordinary Recall producer");
+});
+
+it.each(["result_version", "continuation_version", "continuation_policy", "object_disclosure", "original_overclaim", "unknown_field"] as const)(
+  "refuses current %s even when both public wire representations agree", field => {
+    const root = join(base.root, `native-invalid-${field}`); cpSync(captures.prefix.root, root, { recursive: true });
+    rewriteCapturedEnvelope(root, 1, envelope => {
+      const payload = JSON.parse(String(envelope.content[0]!.text));
+      const output = payload.output;
+      if (field === "result_version") output.index.result_version = "ordinary-native-field.v3";
+      else if (field === "continuation_version") output.index.continuation.result_version = "ordinary-native-field.v3";
+      else if (field === "continuation_policy") output.index.continuation.enumeration_policy = "canonical";
+      else if (field === "unknown_field") output.unreviewed_extra_field = true;
+      else {
+        const disclosure = sourceDisclosure(SourceDisclosureSchema.parse(output.results[0].source_disclosure));
+        output.results[0].source_disclosure = field === "object_disclosure" ? disclosure
+          : encodeSourceDisclosure({ ...disclosure, material_kind: "original_body" });
+      }
+      return { ...envelope, structuredContent: payload, content: [{ type: "text", text: JSON.stringify(payload) }] };
+    });
+    expect(() => admitOrdinaryRecallObservation(root)).toThrow(field === "original_overclaim"
+      ? /qualifications differ/u : field === "object_disclosure" || field === "unknown_field"
+        ? z.ZodError : /supported public contract/u);
+  });
 
 it("reports a terminal public error without claiming source exposure", () => {
   expect(inspectOrdinaryRecallObservation(captures.error.root)).toMatchObject({ state: "failed", successfulExposures: 0 });
@@ -205,8 +227,8 @@ it.each([
   writeJson(join(root, path), change(readJson(join(root, path))));
   expect(() => admitOrdinaryRecallObservation(root)).toThrow();
 });
-it.each(["15.0.1", "18.2.0", "21.0.0"])("refuses unsupported producer version %s despite recomputed binding", protocolVersion => {
-  const { root } = captureWithProtocolVersion(`unsupported-${protocolVersion}`, protocolVersion);
+it.each(["15.0.1", "18.2.0", "20.1.0", "21.0.0", "22.0.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "27.0.1", "28.0.0", "99.0.0"])("refuses unsupported producer version %s despite recomputed binding", protocolVersion => {
+  const { root } = authoredHistoricalCapture(`unsupported-${protocolVersion}`, protocolVersion);
   expect(() => admitOrdinaryRecallObservation(root)).toThrow();
 });
 it("rejects a replacement preview even when its retained MCP reply agrees", () => {

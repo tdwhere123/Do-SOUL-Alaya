@@ -14,8 +14,9 @@ import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js"
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
 import { OrdinaryRecallCaptureConfigSchema, OrdinaryRecallEnvelopeSchema,
-  ordinaryRecallReaderProtocolVersion } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
-import type { nativeRecallFixture } from "./native-recall.test-support.js";
+  installedRecallProtocolVersion } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
+import type { ordinaryIndexedSnapshot } from "./ordinary-indexed-snapshot.test-support.js";
+type IndexedFixture = Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>;
 
 export const writeJson = (path: string, value: unknown) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 export const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
@@ -49,10 +50,10 @@ export function captureFailedCallFixture(capture: Awaited<ReturnType<typeof capt
   return { root, execution, observation };
 }
 
-function prepareCapture(base: Awaited<ReturnType<typeof nativeRecallFixture>>, mode: Mode) {
+function prepareCapture(base: IndexedFixture, mode: Mode) {
   const root = join(base.root, `ordinary-${mode}`), execution = join(root, "execution");
   mkdirSync(execution, { recursive: true });
-  const plan = base.admitted.plan.config, response = base.admitted.replay.rows[0]!.response;
+  const plan = base.config, response = base.native.admitted.replay.rows[0]!.response;
   assert(response?.operation === "recall");
   const target = response.results?.[0]?.target;
   assert(target?.kind === "source_evidence");
@@ -62,13 +63,13 @@ function prepareCapture(base: Awaited<ReturnType<typeof nativeRecallFixture>>, m
   const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
   const config = OrdinaryRecallCaptureConfigSchema.parse({ capture_contract: "ordinary-recall-local-capture-v1",
-    public_semantics: "conditional-field-source-only-v1", protocol_package_version: ordinaryRecallReaderProtocolVersion(),
+    public_semantics: "ordinary-native-field.v4", protocol_package_version: installedRecallProtocolVersion(),
     candidate, tree, implementation_revision: readCurrentExtractionAuthorityRevision(),
     snapshot_path: plan.snapshot_path, snapshot_sha256: plan.snapshot_sha256,
     workspace_id: plan.workspace_id, run_id: plan.run_id,
-    first_request: { query: base.admitted.plan.queries[0]!.original_query, scope_class: "project", dimension: null,
+    first_request: { query: base.queries[0]!.original_query, scope_class: "project", dimension: null,
       domain_tags: null, max_results: 8, source_observed_at: plan.interpretation_clock,
-      enumeration_policy: "canonical", result_kind_view: "source_only", protocol_version: 1, supports_source_evidence: true },
+      enumeration_policy: "native_query", result_kind_view: "source_only", protocol_version: 1, supports_source_evidence: true },
     expected_target: sourceEvidenceRootTarget(target), expected_source_bytes: Buffer.byteLength(stored.content_bytes),
     bounds: { membership_calls: 1, payload_expansion_calls: 6, total_recall_calls: 7,
       payload_byte_budget: 4096, public_envelope_observation_bytes: 1048576,
@@ -86,7 +87,7 @@ function prepareCapture(base: Awaited<ReturnType<typeof nativeRecallFixture>>, m
 }
 
 /** The fixture captures the physical SDK transport and the handler context of real daemon calls. */
-export async function captureOrdinaryFixture(base: Awaited<ReturnType<typeof nativeRecallFixture>>, mode: Mode) {
+export async function captureOrdinaryFixture(base: IndexedFixture, mode: Mode) {
   const { root, execution, config, stored } = prepareCapture(base, mode);
   const working = join(root, "working");
   restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: working });

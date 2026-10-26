@@ -9,16 +9,21 @@ import { isAuthorityRevision } from "../../extraction/authority/receipt.js";
 export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v1";
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
-export const RepresentationAwareRecallProtocolVersionSchema = z.enum(["18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"]);
+/** Pinned offline admission: later package/result versions need their own compatibility review. */
+export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "27.0.0";
+export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v4";
+export const RepresentationAwareRecallProtocolVersionSchema = z.enum([
+  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
+]);
 export const OrdinaryRecallProtocolVersionSchema = z.enum([
   "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options
 ]);
 
-/** Historical captures retain their original qualification; version 18 records explicit source representation. */
-export function ordinaryRecallReaderProtocolVersion() {
+/** Installed provenance is independent of the explicitly supported archive producers. */
+export function installedRecallProtocolVersion(): string {
   const entry = fileURLToPath(import.meta.resolve("@do-soul/alaya-protocol"));
   const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8")) as { version?: unknown };
-  return OrdinaryRecallProtocolVersionSchema.parse(manifest.version);
+  return z.string().min(1).parse(manifest.version);
 }
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const Commit = z.string().regex(/^[a-f0-9]{40}$/u);
@@ -27,7 +32,7 @@ const Count = z.number().int().nonnegative();
 
 export const OrdinaryRecallCaptureConfigSchema = z.object({
   capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT),
-  public_semantics: z.literal(ORDINARY_RECALL_PUBLIC_SEMANTICS),
+  public_semantics: z.enum([ORDINARY_RECALL_PUBLIC_SEMANTICS, ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS]),
   protocol_package_version: OrdinaryRecallProtocolVersionSchema,
   candidate: Commit, tree: Commit, implementation_revision: z.string().refine(isAuthorityRevision),
   snapshot_path: z.string().min(1), snapshot_sha256: Digest,
@@ -65,9 +70,12 @@ export const OrdinaryRecallArchiveConfigSchema = z.discriminatedUnion("capture_c
 ]);
 export type OrdinaryRecallArchiveConfig = z.infer<typeof OrdinaryRecallArchiveConfigSchema>;
 
-function validInitialContract(config: Pick<OrdinaryRecallCaptureConfig, "first_request" | "implementation_revision" | "candidate">): boolean {
+function validInitialContract(config: Pick<OrdinaryRecallCaptureConfig,
+  "first_request" | "implementation_revision" | "candidate" | "protocol_package_version" | "public_semantics">): boolean {
   const request = config.first_request;
-  return request.result_kind_view === "source_only" && request.enumeration_policy === "canonical" &&
+  const native = config.protocol_package_version === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION;
+  return config.public_semantics === (native ? ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS : ORDINARY_RECALL_PUBLIC_SEMANTICS) &&
+    request.result_kind_view === "source_only" && request.enumeration_policy === (native ? "native_query" : "canonical") &&
     request.protocol_version === 1 && request.supports_source_evidence === true &&
     request.continuation == null && request.payload_continuation == null &&
     request.scope_class === "project" && Time.safeParse(request.source_observed_at).success &&

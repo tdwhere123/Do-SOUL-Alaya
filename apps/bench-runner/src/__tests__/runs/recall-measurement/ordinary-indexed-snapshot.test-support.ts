@@ -29,7 +29,7 @@ export async function ordinaryIndexedSnapshot(sourceText: readonly string[]) {
   expect(hashRegularFileNoFollow(plan.config.snapshot_path)).toBe(plan.config.snapshot_sha256);
   const config = SemanticChainConfigSchema.parse({ ...plan.config,
     snapshot_path: snapshot, snapshot_sha256: hashRegularFileNoFollow(snapshot) });
-  return { root: native.root, config, queries: plan.queries };
+  return { root: native.root, config, queries: plan.queries, native };
 }
 
 /** Only embedding preparation is simulated; the selected generation, bounded
