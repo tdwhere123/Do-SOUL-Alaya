@@ -179,8 +179,10 @@ export type NativeSourceNomination = Readonly<{
   admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
   catalog_positions?: Readonly<Record<string, number>>;
   navigation_digests?: Readonly<{ original: string; hint?: string }>;
-  /** The outer library request already absorbed acquisition; do not debit it again. */
+  /** Acquisition was paid outside field exploration; an explicit retained_bytes still belongs to field memory. */
   charged_by_caller?: true;
+  /** Fresh work funded by the ordinary acquisition allowance; absent on a prepaid library capture. */
+  acquisition_resources?: SourceIndexAcquisitionResult["resources"];
   retained_bytes?: number;
 }>;
 

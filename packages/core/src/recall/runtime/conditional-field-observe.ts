@@ -41,6 +41,7 @@ import {
 } from "./observe-field-residuals.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
 import { restoredFieldFootprint, restoredFieldRemainingMemory, stampRetainedFieldLevel } from "./request-cost-engine-snapshot.js";
+import { CoreError } from "../../shared/errors.js";
 import {
   RELATION_ROUTING,
   interruptObservedField,
@@ -90,23 +91,7 @@ export function observeField(
     && interpretation.view.result_kind_view !== "memory_only" && input.authorized_scopes !== undefined
     && input.readers.nominateSources !== undefined) {
     if (initial.native_sources === undefined) {
-      const captured = input.readers.nominateSources?.({ workspaceId: input.workspace_id,
-        query: input.query_text, authorizedScopes: nominationScopes(input.authorized_scopes),
-        ...(input.source_id === undefined ? {} : { sourceId: input.source_id }),
-        ...(input.access_hint === undefined ? {} : { hint: input.access_hint }),
-        budget: { work_units: initial.remaining_exploration,
-          memory_bytes: initial.remaining_memory_bytes } }) ?? null;
-      const resources = captured?.result?.resources;
-      const work = captured?.charged_by_caller ? 0 : resources?.work ?? 0;
-      const bytes = captured?.charged_by_caller ? 0 : resources?.memory_bytes ?? 0;
-      initial = { ...initial, native_sources: captured,
-        native_source_retained_bytes: captured?.retained_bytes ?? resources?.memory_bytes ?? 0,
-        remaining_exploration: initial.remaining_exploration - work,
-        remaining_memory_bytes: initial.remaining_memory_bytes - bytes,
-        admitted_allocation_bytes: initial.admitted_allocation_bytes + bytes };
-      // Engine allocation deltas own these bytes. The acquisition receipt's mixed
-      // work units cannot truthfully be relabelled as native visits or joins.
-      input.cost?.add("observe", { budget_work: work, native_bytes: captured?.charged_by_caller ? 0 : resources?.native_bytes ?? 0 });
+      initial = acquireNativeSources(initial, input);
     }
     // An exhausted retained observation has no source-reader call left to make.
     // Rebuilding its frozen frontier would repay acquisition frames merely to
@@ -145,6 +130,32 @@ export function observeField(
   input.cost?.addFieldBudgetWork(initialWork - completed.remaining_exploration - completed.remaining_reserve);
   return restoredFieldFootprint(completed) > input.budget.memory_bytes
     ? completed : stampRetainedFieldLevel(completed, input.budget.memory_bytes);
+}
+
+function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInput): FieldEngineState {
+  const acquire = () => input.readers.nominateSources?.({ workspaceId: input.workspace_id,
+    query: input.query_text, authorizedScopes: nominationScopes(input.authorized_scopes),
+    ...(input.source_id === undefined ? {} : { sourceId: input.source_id }),
+    ...(input.access_hint === undefined ? {} : { hint: input.access_hint }),
+    budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
+  const captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
+  const resources = captured?.result?.resources;
+  const fresh = captured?.acquisition_resources ?? (captured?.charged_by_caller ? undefined : resources);
+  input.cost?.add("acquire", { budget_work: fresh?.work ?? 0, native_bytes: fresh?.native_bytes ?? 0 });
+  const work = captured?.charged_by_caller ? 0 : resources?.work ?? 0;
+  const retained = captured?.retained_bytes ?? resources?.memory_bytes ?? 0;
+  const bytes = captured?.charged_by_caller ? captured.retained_bytes ?? 0 : resources?.memory_bytes ?? 0;
+  // Acquisition scratch is gone. Only the frozen nomination survives into the field.
+  // Do not turn an unretained nomination into cached unavailability. No page or
+  // continuation is issued; a caller can start again with enough field memory.
+  if (bytes > initial.remaining_memory_bytes) throw new CoreError("CONFLICT", "Recall acquisition cannot fit retained nominations", {
+    details: { outcome: "resource_exhausted", resource: "acquisition_memory",
+      available_bytes: initial.remaining_memory_bytes, required_bytes: bytes }
+  });
+  return { ...initial, native_sources: captured, native_source_retained_bytes: retained,
+    remaining_exploration: initial.remaining_exploration - work,
+    remaining_memory_bytes: initial.remaining_memory_bytes - bytes,
+    admitted_allocation_bytes: initial.admitted_allocation_bytes + bytes };
 }
 
 function retainedProjectionHasPriority(state: FieldEngineState, input: ObserveFieldInput): boolean {

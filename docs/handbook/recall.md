@@ -105,7 +105,17 @@ and [native root reader](../../packages/storage/src/repos/field/bounded-source-r
 
 One ordinary request pins its snapshot, mutation generation and interpretation
 clock; native readers have bounded scans and byte reads, not free enumeration of
-an entire library. The complete source census and current-source ordering are
+an entire library. Native nomination runs once under its own acquisition ledger:
+the allowance bounds lexical attempts, retained roots and inspected vector windows;
+the active snapshot's metadata sizes and dimensions fund the native read/decode
+reservations, currentness guards and exact scoring. It does not spend the first
+delivery page's exploration work. The `acquire` receipt phase records actual work,
+native bytes and elapsed time, while retained nominations consume field memory.
+An over-cap window-id prefix stays partial and is not an exact whole-generation
+ranking. Missing/unbound generations remain unavailable, independently of lexical
+discovery. Protocol 24.0.0 versions this ordinary membership/ranking change under
+invariant §25; existing queries must restart after upgrading.
+The complete source census and current-source ordering are
 separate from a selected prefix: currentness uses the greatest exact UTC
 recorded instant then record identity before scope/retention checks, and cannot
 resurrect an older revision. A scanned, unavailable, stale or unvisited root is

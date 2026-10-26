@@ -1,9 +1,10 @@
 import {
-  CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema,
+  CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema, SOURCE_INDEX_MAX_WINDOWS,
   SourceIndexOperationError, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
   sourceGoldRootIdentity, splitFtsLanes,
   type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
   type SourceIndexQueryResources, type SourceIndexResources, type SourceIndexTarget,
+  type SourceIndexNominationAllowance, type SourceIndexQueryCapacity,
   type SourceIndexVectorBinding, type SourceIndexVectorCandidate, type SourceIndexVectorCursor,
   type SourceIndexVectorQueryState, type SourceIndexVectorRead, type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
@@ -16,7 +17,7 @@ import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js
 import { buildFtsMatchExpression, tokenizeFtsQuery } from "../shared/fts-lane-routing.js";
 import { readBufferField, readIntegerField, readJsonColumn, readFiniteNumberField, readRecord, readStringField } from "../shared/parse-row.js";
 import { readSourceIndexQueryState, sourceIndexEpoch, SOURCE_INDEX_LEXICAL_CURRENT } from "./generation-state.js";
-import { assertIndexPageLimit, guardSourceIndexTarget } from "./native-source.js";
+import { assertIndexPageLimit, guardSourceIndexTarget, SOURCE_INDEX_STANDALONE_BUDGET } from "./native-source.js";
 import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
@@ -98,6 +99,57 @@ const LEXICAL_ROW_WORK_ESTIMATE = 512;
 const LEXICAL_LIMITATIONS = Object.freeze([
   "database_wide_bm25_statistics", "short_or_unadmitted_tokens_are_not_absence", "lexical_corpus_coverage_untracked"
 ]);
+
+/** Fund bounded native acquisition from the active snapshot, independently of a field page.
+ * The quotation uses the reader's decode reservations and existing native guard allowance.
+ * SQL-internal work remains unknown; only the returned sizing scalars are native bytes.
+ */
+export function quoteSourceIndexQueryCapacity(database: StorageDatabase, workspaceId: string,
+  allowance: SourceIndexNominationAllowance): SourceIndexQueryCapacity {
+  assertIndexPageLimit(allowance.max_attempts);
+  if (!Number.isSafeInteger(allowance.max_vector_windows) || allowance.max_vector_windows < 0
+    || allowance.max_vector_windows > SOURCE_INDEX_MAX_WINDOWS) {
+    throw new StorageError("VALIDATION_FAILED", "invalid source acquisition window allowance");
+  }
+  const read = readSourceIndexQueryState(database, workspaceId, SOURCE_INDEX_STANDALONE_BUDGET);
+  const roots = readRecord(cachedReadStatement(database, `SELECT
+    COALESCE(MAX(octet_length(target_json)),0) AS target_bytes,
+    COALESCE(MAX(octet_length(root_key)),0) AS key_bytes
+    FROM source_index_roots WHERE workspace_id=?`).get(workspaceId), "source acquisition root capacity");
+  const targetBytes = readIntegerField(roots, "target_bytes"), keyBytes = readIntegerField(roots, "key_bytes");
+  const binding = "binding" in read.state ? read.state.binding : undefined;
+  const windows = binding === undefined ? undefined : readRecord(cachedReadStatement(database, `SELECT COUNT(*) AS n,
+    COALESCE(MAX(window_bytes),0) AS window_bytes FROM (
+      SELECT octet_length(window_id)+octet_length(content_digest)+24 AS window_bytes
+      FROM source_index_windows WHERE workspace_id=? AND generation_id=? ORDER BY window_id LIMIT ?
+    )`).get(workspaceId, binding.generation_id, allowance.max_vector_windows), "source acquisition window capacity");
+  const count = windows === undefined ? 0 : readIntegerField(windows, "n");
+  const windowBytes = windows === undefined ? 0 : readIntegerField(windows, "window_bytes");
+  const dimensions = binding?.dimensions ?? 0, attempts = allowance.max_attempts;
+  const target = targetDecodeReservation(targetBytes), vector = vectorDecodeReservation(targetBytes + windowBytes, dimensions);
+  // Each page may read/capture a binding and each attempt may run the currentness/erase guard.
+  const nativeOperations = 1 + attempts + Math.ceil(count / 128);
+  return { vector_windows: count, dimensions, root_key_bytes: keyBytes,
+    budget: {
+      work_units: attempts * (1 + target.work_units) + count * (1 + vector.work_units)
+        + nativeOperations * SOURCE_INDEX_STANDALONE_BUDGET.work,
+      memory_bytes: attempts * (24 + keyBytes + targetBytes + target.memory_bytes)
+        + count * (40 + keyBytes + targetBytes + windowBytes + dimensions * 4 + vector.memory_bytes)
+        + nativeOperations * SOURCE_INDEX_STANDALONE_BUDGET.native_bytes
+    },
+    resources: { work: read.resources.work + 1 + Number(windows !== undefined),
+      native_bytes: read.resources.native_bytes + 16 + (windows === undefined ? 0 : 16),
+      memory_bytes: read.resources.native_bytes + 16 + (windows === undefined ? 0 : 16), sql_internal_work: "unknown" }
+  };
+}
+
+function targetDecodeReservation(bytes: number): SourceSemanticResourceBudget {
+  return { work_units: 129 + bytes, memory_bytes: 4096 + 5 * bytes };
+}
+function vectorDecodeReservation(bytes: number, dimensions: number): SourceSemanticResourceBudget {
+  const target = targetDecodeReservation(bytes);
+  return { work_units: target.work_units + dimensions, memory_bytes: target.memory_bytes + 64 + dimensions * 8 };
+}
 
 /** Lane-local BM25 ascending/root-key ties; unicode61/trigram lanes alternate, not raw-score fusion.
  * Every join is workspace-bound before LIMIT. Source FTS has body only, not content/workspace columns.
@@ -234,7 +286,8 @@ function lexicalCandidate(lane: LexicalLane, row: LexicalRow, rank: number, work
   capture: SourceIndexTargetCapture | undefined): SourceIndexLexicalCandidate {
   const owned = capture?.get(row.rootKey, meter);
   // Reserve actual target decoding only when no paid snapshot-owned target exists.
-  meter.ledger.reserve(129 + (owned === undefined ? row.bytes : 0), 4096 + 5 * row.bytes);
+  const reservation = targetDecodeReservation(row.bytes);
+  meter.ledger.reserve(reservation.work_units - (owned === undefined ? 0 : row.bytes), reservation.memory_bytes);
   if (owned === undefined) meter.ledger.charge(row.bytes, 0, "source target decode");
   const source = owned ?? parseTarget(row.raw, workspaceId, meter);
   const candidate = { source, lexical: { rank, lane: lane.lane, lane_rank: lane.consumed, bm25: readFiniteNumberField(row.raw, "score") } };
@@ -327,7 +380,9 @@ export function readSourceIndexVectorCandidates(database: StorageDatabase, works
         // A known target needs neither another native JSON transfer nor JSON decoding. The cached branch reads five
         // typed window/vector fields; native window bytes and the embedding BLOB remain fully charged.
         const decodeWork = known === undefined ? payloadBytes : 5;
-        meter.ledger.reserve(129 + decodeWork + dims, 4160 + 5 * payloadBytes + row.blob.length + dims * 4);
+        const reservation = vectorDecodeReservation(payloadBytes, dims);
+        meter.ledger.reserve(reservation.work_units - payloadBytes + decodeWork,
+          reservation.memory_bytes - dims * 4 + row.blob.length);
         meter.ledger.charge(decodeWork, 0, known === undefined ? "source target decode" : "source vector window fields");
         const window = { window_id: readStringField(row.raw, "window_id"), start_byte: readIntegerField(row.raw, "start_byte"),
           end_byte: readIntegerField(row.raw, "end_byte"), content_digest: readStringField(row.raw, "content_digest") };

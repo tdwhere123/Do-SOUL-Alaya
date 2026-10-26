@@ -169,7 +169,7 @@ function libraryReaders(runtime: RecallReadWorkerRuntime, payload: SourceSemanti
   boundPool: SourceSemanticLease["access_pool"], observer: LibraryFieldObserver,
   retainedNomination?: NativeSourceNomination | null) {
   const base = createConditionalFieldObserverReaders(runtime.database, [],
-    payload.prepared_query?.vector ?? { status: "unavailable", reason: "embedding_preparation_unwired" }, meter.observer);
+    payload.prepared_query?.vector ?? { status: "unavailable", reason: "embedding_preparation_unwired" }, meter.observer, "request");
   const capture: { roots: readonly SourceEvidenceTarget[];
     nomination?: NativeSourceNomination | null;
     result?: NonNullable<SourceSemanticAcquisitionPhase["result"]> } = {

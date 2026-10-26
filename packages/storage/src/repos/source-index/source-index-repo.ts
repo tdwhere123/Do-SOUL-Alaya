@@ -4,7 +4,7 @@ import {
   sourceIndexProfileId, type FieldContractSha256, type SourceIndexBudget, type SourceIndexCaptureResult,
   type SourceIndexConfiguration, type SourceIndexDocument, type SourceIndexGeneration, type SourceIndexGuardedWriteResult,
   type SourceIndexReadResult, type SourceIndexQueryRepository, type SourceIndexVectorBinding,
-  type SourceIndexVectorCursor, type SourceSemanticResourceBudget,
+  type SourceIndexVectorCursor, type SourceSemanticResourceBudget, type SourceIndexNominationAllowance,
   type SourceIndexRepository, type SourceIndexSelection, type SourceIndexState, type SourceIndexTarget,
   type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult
 } from "@do-soul/alaya-protocol";
@@ -20,7 +20,7 @@ import { SqliteSourceIndexLexicalStore } from "./lexical-generation.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
-  readSourceIndexVectorCandidates } from "./source-index-query-reader.js";
+  readSourceIndexVectorCandidates, quoteSourceIndexQueryCapacity } from "./source-index-query-reader.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
@@ -41,6 +41,11 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     this.targetCapture = options.captureReadTargets ? new SourceIndexTargetCapture() : undefined;
     this.records = new SqliteFieldSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
+  }
+
+  public quoteQueryCapacity(workspaceId: string, allowance: SourceIndexNominationAllowance) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.atomic(() => quoteSourceIndexQueryCapacity(this.database, workspaceId, allowance), "read");
   }
 
   public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget) {

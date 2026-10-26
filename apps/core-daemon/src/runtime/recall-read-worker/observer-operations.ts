@@ -1,5 +1,5 @@
-import { sourceGoldRootIdentity, sourceRecallTarget, type SourceIndexQueryVector,
-  type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
+import { sourceGoldRootIdentity, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
+  type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
   authorizeSourceIndexScope,
@@ -141,41 +141,69 @@ export function runConditionalFieldWorkerRecall(
 
 type NominationCapture = ReturnType<SourceIndexAcquisition["nominateWithWitness"]>;
 type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]>>[0];
+type AcquisitionFunding = "allowance" | "request";
 
 /** Native acquisition is the only source filter and cost owner. A prepared hint is a
  * second route under the same allowance, never a replacement for original work; a
  * query-lease source restriction narrows the acquired membership, not only identity.
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
-  queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver): NativeSourceNomination {
-  const acquisition = new SourceIndexAcquisition(
-    new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true }), fieldContractSha256);
+  queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver,
+  funding: AcquisitionFunding = "allowance"): NativeSourceNomination {
+  const repository = new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true });
+  const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
   const admit: Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1] = (scope, source) => {
     try { authorizeSourceIndexScope(scope, source, input.authorizedScopes); return "admitted" as const; }
     catch { return "denied" as const; }
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
-    allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE, budget: input.budget };
-  const run = (navigation_text: string, budget: typeof input.budget, invocation: "original" | "hint") =>
-    acquisition.nominateWithWitness({ ...fields, navigation_text, budget }, admit, invocation,
+    allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE };
+  const capacity = funding === "allowance" ? repository.quoteQueryCapacity(input.workspaceId, fields.allowance) : undefined;
+  const budget = capacity === undefined ? input.budget
+    : SourceIndexAcquisition.quoteAllowanceBudget({ ...fields, navigation_text: input.query }, capacity);
+  const meter = new SourceSemanticResourceLedger(budget);
+  if (capacity !== undefined) meter.charge(capacity.resources.work, capacity.resources.memory_bytes, "source acquisition capacity reads");
+  const run = (navigation_text: string, allowance: SourceIndexNominationAllowance, invocation: "original" | "hint") => {
+    const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining() }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
         observer.sourceIndexAcquisition(invocation, "field", capture, kind));
-  const original = run(input.query, input.budget, "original");
-  const hintBudget = {
-    work_units: Math.max(0, input.budget.work_units - original.result.resources.work),
-    memory_bytes: Math.max(0, input.budget.memory_bytes - original.result.resources.memory_bytes)
+    meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
+    return capture;
   };
-  const hint = input.hint === undefined || input.hint === input.query ? undefined : run(input.hint, hintBudget, "hint");
+  const originalBudget = meter.remaining(), original = run(input.query, fields.allowance, "original");
+  const hintBudget = meter.remaining(), hintAllowance = {
+    max_attempts: fields.allowance.max_attempts - original.result.accounting.attempted,
+    max_roots: Math.min(fields.allowance.max_roots - original.result.nominations.length,
+      fields.allowance.max_attempts - original.result.accounting.attempted),
+    max_vector_windows: fields.allowance.max_vector_windows - original.result.vector.inspected_windows
+  };
+  const hint = input.hint === undefined || input.hint === input.query || hintAllowance.max_attempts === 0
+    || hintAllowance.max_roots === 0 ? undefined : run(input.hint, hintAllowance, "hint");
   observer?.event("source_index_routes", "field", () => {
-    const phase = (captured: NominationCapture, budget: typeof input.budget): SourceSemanticAcquisitionPhase => ({
+    const phase = (captured: NominationCapture, budget: typeof input.budget,
+      allowance: SourceIndexNominationAllowance): SourceSemanticAcquisitionPhase => ({
       policy: "source-index-interleaved-prefix.v1", ...sourceSemanticAcquisitionOutcome(captured.result),
-      allowance: fields.allowance, budget, result: captured.result
+      allowance, budget, result: captured.result
     });
-    return { original: { ...phase(original, input.budget),
-      ...(hint === undefined ? {} : { supplemental: [phase(hint, hintBudget)] }) },
+    return { original: { ...phase(original, originalBudget, fields.allowance),
+      ...(hint === undefined ? {} : { supplemental: [phase(hint, hintBudget, hintAllowance)] }) },
       beyond_observed_prefix: "unknown_not_nomination_limit" };
   });
-  return nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId);
+  const captured = nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId,
+    capacity === undefined ? undefined : { charged_by_caller: true });
+  // Library requests already have an explicit outer resource ledger; their field
+  // must continue paying acquisition from that request, without an ordinary allowance.
+  if (capacity === undefined) return captured;
+  const result = captured.result!;
+  const beforeRetention = meter.spentBytes;
+  meter.retain({ ...captured, retained_bytes: 0, acquisition_resources: result.resources }, "source retained nomination");
+  const resources = {
+    ...result.resources, work: meter.spentWork,
+    native_bytes: result.resources.native_bytes + capacity.resources.native_bytes,
+    memory_bytes: meter.spentBytes
+  };
+  return { ...captured, retained_bytes: meter.spentBytes - beforeRetention, acquisition_resources: resources,
+    result: { ...result, resources } };
 }
 
 /** Frozen captures are already paid; reuse reports their real membership and totals. */
@@ -229,7 +257,7 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = [],
   queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" },
-  observer?: SourceSemanticObserver): ObserverReaders {
+  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance"): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
@@ -244,7 +272,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   );
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
-    nominateSources: input => nominateNativeSources(database, input, queryVector, observer),
+    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding),
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,

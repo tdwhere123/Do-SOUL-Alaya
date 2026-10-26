@@ -5,7 +5,7 @@ import {
   canonicalJson, hashContentDigest, sourceIndexProfileId,
   unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
-  type SourceSemanticResourceBudget,
+  type SourceSemanticResourceBudget, type SourceIndexQueryCapacity,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
   type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
@@ -34,6 +34,12 @@ type SourceQueryPreparationInput = Readonly<{
 type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
+
+// The capacity quotation and executed debits share these logical vector prices.
+const VECTOR_COST = Object.freeze({ validation_per_dimension: 2, lookup_work: 1,
+  replacement_work: 1, replacement_bytes: 128, key_bytes_per_character: 4,
+  ordering_work: 1, ordering_bytes: 64, ordering_reference_bytes: 8,
+  comparison_work: 1, rank_work: 1, rank_bytes: 128 });
 
 type NativeAdmissionFact =
   | Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>, "status" | "reason">
@@ -269,6 +275,26 @@ export class SourceIndexAcquisition {
   }
 
   public constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256) {}
+
+  /** Ordinary acquisition is funded by its bounded native reads, not a delivery page's remainder.
+   * The conservative ordering bound permits every comparison of the inspected roots;
+   * receipts still report only executed debits. Native guards can refuse on their own bounds.
+   */
+  public static quoteAllowanceBudget(input: Omit<SourceIndexAcquisitionInput, "budget">,
+    native: SourceIndexQueryCapacity): SourceSemanticResourceBudget {
+    const captured = SourceIndexAcquisition.quoteEnvelopeAndInputCapture({ navigation: input.navigation_text,
+      vector: input.vector, max_roots: input.allowance.max_roots }, native.budget);
+    const windows = native.vector_windows;
+    return {
+      work_units: native.budget.work_units + captured.work_units + native.resources.work
+        + VECTOR_COST.ordering_work + windows * (VECTOR_COST.validation_per_dimension * native.dimensions
+          + VECTOR_COST.lookup_work + VECTOR_COST.replacement_work + VECTOR_COST.rank_work)
+        + windows * windows * VECTOR_COST.comparison_work,
+      memory_bytes: native.budget.memory_bytes + captured.memory_bytes + native.resources.memory_bytes
+        + VECTOR_COST.ordering_bytes + windows * (VECTOR_COST.replacement_bytes
+          + VECTOR_COST.key_bytes_per_character * native.root_key_bytes + VECTOR_COST.rank_bytes + VECTOR_COST.ordering_reference_bytes)
+    };
+  }
 
   /** Private comparison producer: real captured pages, not observer diagnostics. */
   public captureNative(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -509,15 +535,16 @@ class AcquisitionQuery {
       if (this.vector.invalid_windows > 0 && this.vector.completion === "complete") {
         this.vector = { ...this.vector, completion: "partial", reason: "invalid_vectors" };
       }
-      this.meter.charge(1, 64 + best.size * 8, "source vector root ordering");
+      this.meter.charge(VECTOR_COST.ordering_work, VECTOR_COST.ordering_bytes
+        + best.size * VECTOR_COST.ordering_reference_bytes, "source vector root ordering");
       const ranked = [...best.values()];
       ranked.sort((left, right) => {
-        this.meter.charge(1, 0, "source vector root comparison");
+        this.meter.charge(VECTOR_COST.comparison_work, 0, "source vector root comparison");
         return right.vector.cosine - left.vector.cosine || compareKey(left.source.root_key, right.source.root_key) ||
           compareKey(left.vector.window.window_id, right.vector.window.window_id);
       });
       const retained = ranked.map((candidate, index) => {
-        this.meter.charge(1, 128, "source vector rank retention");
+        this.meter.charge(VECTOR_COST.rank_work, VECTOR_COST.rank_bytes, "source vector rank retention");
         return { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
       });
       // Publish only after the whole ranked set is retained. A later meter refusal discards this map.
@@ -542,7 +569,7 @@ class AcquisitionQuery {
 
   private considerVector(best: Map<string, ScoredRoot>, candidate: SourceIndexVectorCandidate): void {
     const dimensions = this.queryVector!.length;
-    this.meter.charge(2 * dimensions, 0, "source vector validation and cosine");
+    this.meter.charge(VECTOR_COST.validation_per_dimension * dimensions, 0, "source vector validation and cosine");
     if (candidate.embedding.length !== dimensions || !isFiniteNonzeroVector(candidate.embedding)) {
       this.vector = { ...this.vector, completion: "partial", reason: "invalid_vectors",
         invalid_windows: this.vector.invalid_windows + 1 }; return;
@@ -554,11 +581,12 @@ class AcquisitionQuery {
     const key = this.candidate?.grouped === true ? candidate.window.window_id : candidate.source.root_key;
     // Both keys are captured by the native reader. Reuse their identities rather
     // than reconstructing the same canonical root for every vector window.
-    this.meter.charge(1, 0, "source vector root lookup");
+    this.meter.charge(VECTOR_COST.lookup_work, 0, "source vector root lookup");
     const previous = best.get(key);
     if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
         compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return;
-    this.meter.charge(1, 128 + 4 * key.length, "source vector best-window retention");
+    this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
+      + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
   }
 

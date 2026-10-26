@@ -142,7 +142,8 @@ for (const id of ids) {
       }
       const query = result.rows[0];
       Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
-        workspace: config.workspace_id, intervals: query.source_intervals, pages: query.page_count });
+        workspace: config.workspace_id, intervals: query.source_intervals, pages: query.page_count,
+        first_page_slots: query.pages[0]?.occupied_slots ?? null });
     } catch (error) {
       Object.assign(row, { status: "error", error: error instanceof Error ? error.message : String(error) });
     }

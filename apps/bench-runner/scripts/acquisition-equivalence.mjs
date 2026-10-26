@@ -2,7 +2,7 @@
 // Native source acquisition fingerprint over prepared harness snapshots, for old-vs-new equivalence.
 //
 //   node apps/bench-runner/scripts/acquisition-equivalence.mjs --dist ROOT --out DUMP.json --vectors VECTORS.json
-//        [--cache DIR] [--ids a,b] [--limit N] [--reps 3]
+//        [--cache DIR] [--ids a,b] [--limit N] [--reps 3] [--ordinary]
 //   node apps/bench-runner/scripts/acquisition-equivalence.mjs --diff OLD.json NEW.json
 //
 // ROOT is a built worktree root. Query vectors are embedded once (production prepareQuery path, local model)
@@ -19,16 +19,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "../../..");
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   dist: { type: "string" }, out: { type: "string" }, vectors: { type: "string" }, cache: { type: "string" },
-  ids: { type: "string" }, limit: { type: "string" }, reps: { type: "string" }, diff: { type: "boolean" }
+  ids: { type: "string" }, limit: { type: "string" }, reps: { type: "string" }, diff: { type: "boolean" },
+  ordinary: { type: "boolean" }
 } });
 
-const BUDGETS = { large: { work_units: 4_000_000, memory_bytes: 40_000_000 }, small: { work_units: 9884, memory_bytes: 933818 } };
+const BUDGETS = { large: { work_units: 4_000_000, memory_bytes: 40_000_000 }, small: { work_units: 9884, memory_bytes: 933818 },
+  ...(values.ordinary ? { ordinary: { work_units: 10_000, memory_bytes: 1_000_000 } } : {}) };
 
 if (values.diff) process.exit(diff(positionals[0], positionals[1]));
 
 const root = resolve(values.dist ?? ""), load = (path) => import(pathToFileURL(join(root, path)).href);
 const core = await load("packages/core/dist/index.js"), storage = await load("packages/storage/dist/index.js");
-const { NATIVE_SOURCE_NOMINATION_ALLOWANCE: allowance } = await load("apps/core-daemon/dist/runtime/recall-read-worker/observer-operations.js");
+const { NATIVE_SOURCE_NOMINATION_ALLOWANCE: allowance, nominateNativeSources } = await load("apps/core-daemon/dist/runtime/recall-read-worker/observer-operations.js");
 const Database = createRequire(join(root, "packages/storage/package.json"))("better-sqlite3");
 const cacheRoot = resolve(values.cache ?? join(repo, "../../.do-it/bench-runs/recall-harness/cache"));
 const cohort = JSON.parse(readFileSync(join(repo, "docs/bench-history/datasets/longmemeval_s.stratified-100.v1.json"), "utf8")).question_ids;
@@ -72,13 +74,18 @@ async function queryVector(snapshot, db) {
   return { ...vectors[name], embedding };
 }
 
-function acquire(db, vector, navigation, budget, observed) {
+function acquire(db, vector, navigation, budget, observed, ordinary = false) {
   const repository = new storage.SqliteSourceIndexRepository(db.database, fieldSha, { captureReadTargets: true });
   const acquisition = new core.SourceIndexAcquisition(repository, fieldSha);
   const facts = {};
   const observer = observed ? (capture, kind) => { (facts[kind] ??= []).push(capture()); } : undefined;
   return db.connection.transaction(() => {
     const started = performance.now();
+    if (ordinary) {
+      const { result, witness, retained_bytes } = nominateNativeSources(db.database, { workspaceId: db.workspace,
+        query: navigation, authorizedScopes: ["project"], budget }, vector);
+      return { ms: performance.now() - started, result, witness, retained_bytes, facts };
+    }
     const { result, witness } = acquisition.nominateWithWitness({ workspace_id: db.workspace, navigation_text: navigation,
       vector, allowance, budget }, () => "admitted", "original", observer);
     return { ms: performance.now() - started, result, witness, facts };
@@ -108,8 +115,9 @@ try {
       if (Object.keys(dump).length === 0) for (let i = 0; i < 5; i++) acquire(db, vector, navigation, BUDGETS.large, false);
       for (const [label, budget] of Object.entries(BUDGETS)) {
         // Observed run fingerprints every fact; timing runs have no observer so cloning does not dominate.
-        const timed = Array.from({ length: reps }, () => acquire(db, vector, navigation, budget, false));
-        entry[label] = { ...fingerprint(acquire(db, vector, navigation, budget, true)), ms: median(timed.map(run => run.ms)) };
+        const timed = Array.from({ length: reps }, () => acquire(db, vector, navigation, budget, false, label === "ordinary"));
+        entry[label] = { ...fingerprint(acquire(db, vector, navigation, budget, true, label === "ordinary")),
+          ms: median(timed.map(run => run.ms)), ...(label === "ordinary" ? { retained_bytes: timed[0].retained_bytes } : {}) };
       }
       dump[`${snapshot.id}/${snapshot.key}`] = entry;
     } finally { db.close(); }
@@ -119,6 +127,12 @@ mkdirSync(dirname(vectorsPath), { recursive: true });
 writeFileSync(vectorsPath, JSON.stringify(vectors));
 writeFileSync(resolve(values.out), JSON.stringify(dump));
 console.log(`${Object.keys(dump).length} snapshots -> ${values.out}`);
+if (values.ordinary) {
+  const entries = Object.values(dump);
+  console.log(JSON.stringify({ ordinary_vector_complete: entries.filter(row => row.ordinary.identity.vector.completion === "complete").length,
+    nominations_equal_large: entries.filter(row => JSON.stringify(row.ordinary.identity.nominations) === JSON.stringify(row.large.identity.nominations)).length,
+    snapshots: entries.length }));
+}
 process.exit(0);
 
 function diff(oldPath, newPath) {

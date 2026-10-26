@@ -4,6 +4,7 @@ import type { RetainedFieldLevels } from "./request-cost-engine-snapshot.js";
 
 export const REQUEST_COST_PHASES = [
   "compile",
+  "acquire",
   "observe",
   "seed",
   "adjacency",
@@ -58,7 +59,9 @@ export type RequestActualCost = Readonly<{
   // Retained cardinality/bytes are levels; they must not roll into phase work sums.
   readonly retained_states_current: number;
   readonly retained_bytes_current: number;
-  readonly phases: Readonly<Record<RequestCostPhase, RequestPhaseCost>>;
+  /** Historical receipts predate acquire; absence is unmeasured, never zero. Live snapshots include it. */
+  readonly phases: Readonly<Record<Exclude<RequestCostPhase, "acquire">, RequestPhaseCost>
+    & Partial<Record<"acquire", RequestPhaseCost>>>;
   readonly rss: Readonly<{
     readonly method: typeof RSS_SAMPLE_METHOD;
     readonly start_bytes: number;
@@ -69,7 +72,7 @@ export type RequestActualCost = Readonly<{
 
 // Inclusive timing nests children; visits/bytes stay exclusive to the emitting phase.
 const NESTED_PHASES: Readonly<Partial<Record<RequestCostPhase, readonly RequestCostPhase[]>>> = {
-  observe: ["seed", "adjacency", "measurement"],
+  observe: ["acquire", "seed", "adjacency", "measurement"],
   index: ["solve", "payload"]
 };
 

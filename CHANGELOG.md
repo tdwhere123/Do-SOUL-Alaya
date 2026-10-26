@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 23.2.0, engine gateway 2.0.0
+## Unreleased — protocol 24.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,7 +17,17 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
-Protocol 23.2.0 adds optional SourceIndex lexical selection/generation provenance to
+Protocol 24.0.0 funds ordinary native acquisition from its declared attempts, roots
+and active-generation window allowance, independently of the field page budget
+(invariant §25 major: ordinary membership and ranking can change). Acquisition runs
+once per query and reports measured work, native bytes and time in the `acquire`
+receipt phase. Retained nominations still consume field memory. Historical receipts
+without `acquire` remain readable as unmeasured. Vector window caps remain partial
+scans; scope, currentness and erasure guards still apply. Window representation and
+payload anchoring defaults are unchanged in this step. Upgrade callers and daemon
+together and start new queries; do not carry pre-upgrade continuations across it.
+
+Protocol 23.2.0 added optional SourceIndex lexical selection/generation provenance to
 acquisition tokenization and its compact tuple (invariant §25 minor). Explicit
 `segmented-unicode61.v1` preparation uses the pinned native CJK segmenter, independent
 of embedding profiles. Migration 025 adds separate search projections and bounded

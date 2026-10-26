@@ -44,7 +44,7 @@ const ActualReceipt = z.object({
   charged_retained_bytes: NonNegInt,
   retained_states_current: NonNegInt, retained_bytes_current: NonNegInt,
   phases: z.object({
-    compile: PhaseCost, observe: PhaseCost, seed: PhaseCost, adjacency: PhaseCost,
+    compile: PhaseCost, acquire: PhaseCost.optional(), observe: PhaseCost, seed: PhaseCost, adjacency: PhaseCost,
     measurement: PhaseCost, solve: PhaseCost, index: PhaseCost, payload: PhaseCost
   }).strict().readonly(),
   rss: z.object({

@@ -12,6 +12,14 @@ export type SourceIndexQueryVector = Readonly<{
 export type SourceIndexNominationAllowance = Readonly<{
   max_attempts: number; max_roots: number; max_vector_windows: number;
 }>;
+/** Snapshot-local native read capacity; quotation is separate from measured consumption. */
+export type SourceIndexQueryCapacity = Readonly<{
+  budget: SourceSemanticResourceBudget;
+  resources: SourceIndexQueryResources;
+  vector_windows: number;
+  dimensions: number;
+  root_key_bytes: number;
+}>;
 /** Includes returned native bytes, decoded vectors and logical retention, not RSS or SQLite CPU. */
 export const SourceIndexQueryResourcesSchema = SourceSemanticAcquisitionSchema.unwrap().shape.resources;
 export type SourceIndexQueryResources = SourceSemanticAcquisition["resources"];
