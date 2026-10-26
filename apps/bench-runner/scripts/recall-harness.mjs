@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+// Lightweight paired recall harness: publish sources, prepare the index once per (question, arm
+// preparation), query every arm through the ordinary soul.recall entry, write one JSONL row per
+// question x arm. Scoring is separate (recall-harness-score.mjs). Local embedding only.
+//
+//   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b]
+//
+// ARMS.json: [{ "name": "line", "host": false }, { "name": "message", "host": true,
+//              "windowing": "recorded-message-windows.v1" }, ...]
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const dist = join(here, "../dist");
+const repo = resolve(here, "../../..");
+const { publishSourceSemanticSnapshot } = await import(join(dist, "runs/snapshot/source-records/publish.js"));
+const { prepareSemanticChainSourceIndex } = await import(join(dist, "runs/recall-measurement/source-index-binding.js"));
+const { executeOrdinaryRecallEntry } = await import(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js"));
+const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs/extraction/authority/inspection.js"));
+
+const { values } = parseArgs({ options: {
+  out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
+  cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }
+} });
+if (!values.out || !values.arms) throw new Error("--out and --arms are required");
+const out = resolve(values.out);
+const arms = JSON.parse(readFileSync(values.arms, "utf8"));
+const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data/longmemeval/longmemeval_s.json"));
+const pinnedMeta = join(repo, "docs/bench-history/datasets");
+const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
+const cacheRoot = resolve(values.cache ?? join(repo, "../../.do-it/bench-runs/recall-harness/cache"));
+const execution = { cache_root: join(process.env.HOME, ".cache/do-soul-alaya/models"),
+  model_id: values.model ?? "Xenova/paraphrase-multilingual-MiniLM-L12-v2" };
+const revision = readCurrentExtractionAuthorityRevision();
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+// Without the repository pin the loader withholds host capture, so sources fall back to lines.
+const unpinnedMeta = join(cacheRoot, "unpinned-meta");
+if (!existsSync(join(unpinnedMeta, "longmemeval_s.meta.json"))) {
+  mkdirSync(unpinnedMeta, { recursive: true });
+  copyFileSync(join(pinnedMeta, "longmemeval_s.meta.json"), join(unpinnedMeta, "longmemeval_s.meta.json"));
+}
+
+const dataset = JSON.parse(readFileSync(datasetPath, "utf8"));
+const datasetSha = sha256(readFileSync(datasetPath));
+const byId = new Map(dataset.map((question, index) => [question.question_id, { question, index }]));
+let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
+if (values.limit) ids = ids.slice(0, Number(values.limit));
+
+mkdirSync(out, { recursive: true });
+const rowsPath = join(out, "rows.jsonl");
+const done = new Set(existsSync(rowsPath)
+  ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(line => { const r = JSON.parse(line); return `${r.question_id}:${r.arm}`; })
+  : []);
+
+function clockOf(questionDate) {
+  const m = /^(\d{4})\/(\d{2})\/(\d{2}) \(\w+\) (\d{2}):(\d{2})$/u.exec(questionDate);
+  if (!m) throw new Error(`unparsed question_date ${questionDate}`);
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00.000Z`;
+}
+
+function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
+  const clock = clockOf(question.question_date);
+  return {
+    snapshot_path: snapshot, snapshot_sha256: snapshotSha, implementation_revision: revision,
+    interpretation_clock: clock, workspace_id: workspace, run_id: workspace,
+    query_workset: { contract: "source-semantic-proposal-workset-v3", kind: "query", model: "gemini-3.1-flash-lite",
+      provider_url: "https://generativelanguage.googleapis.com", request_profile: "gemini-3.1-minimal-v1",
+      items: [{ original_query: question.question, approved_fixed_context: {
+        context_id: `longmemeval_s:${question.question_id}:${datasetSha}`,
+        notes: `Question date: ${question.question_date}. Interpretation clock: ${clock}.` } }] },
+    query_cache_root: caches.query, correspondence_cache_root: caches.correspondence,
+    max_output_tokens: 16384, discovery_page_cap: 4, correspondence_pair_cap: 0,
+    access_policy: "query-conditioned-v1",
+    budget: { schema_version: 1, work_units: 10_000_000, memory_bytes: 60_000_000, page_budget: 10_000,
+      finalization_reserve: 50_000, min_envelope: 10 },
+    authorized_scopes: { mode: "named", scopes: ["project"] }, output_byte_limit: 1_000_000
+  };
+}
+
+function prepKey(arm) {
+  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? "utf8-byte-windows.v1"])).slice(0, 16);
+}
+
+/** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
+async function prepared(question, index, arm) {
+  const dir = join(cacheRoot, question.question_id, prepKey(arm));
+  const configPath = join(dir, "prepare", "chain-config.json");
+  if (existsSync(configPath)) return JSON.parse(readFileSync(configPath, "utf8"));
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const workspace = `harness-${question.question_id}`;
+  const snapshot = join(dir, "source.sqlite");
+  const publication = await publishSourceSemanticSnapshot({ snapshotPath: snapshot, dataDirRoot: join(dir, "publish"),
+    populations: [{ name: "longmemeval_s", dataDir: dirname(datasetPath),
+      pinnedMetaRoot: arm.host === false ? unpinnedMeta : pinnedMeta,
+      questionWindow: { offset: index, limit: 1 }, model: "gemini-3.1-flash-lite",
+      requestProfile: "gemini-3.1-minimal-v1", cacheRoots: [] }],
+    recordedAt: "2026-10-26T00:00:00.000Z", producerCommit: revision.split(":")[1], workspaceId: workspace, runId: workspace,
+    importEffects: { configDirectoryRoot: dir, sqliteWriteQueue: "disabled", embeddingStartupProbe: "omit", gardenCompute: "disabled" } });
+  if (publication.admitted_count !== publication.census_count) throw new Error(`publication admitted ${publication.admitted_count}/${publication.census_count}`);
+  rmSync(join(dir, "publish"), { recursive: true, force: true });
+  const caches = { query: join(dir, "empty-query-cache"), correspondence: join(dir, "empty-correspondence-cache") };
+  mkdirSync(caches.query); mkdirSync(caches.correspondence);
+  const config = baseConfig({ question, snapshot, snapshotSha: publication.db_sha256, workspace, caches });
+  const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}) };
+  const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined, { maxPasses: 10_000 });
+  if (result.config === null) throw new Error(`preparation failed: ${result.report.reason}`);
+  return result.config;
+}
+
+for (const id of ids) {
+  const entry = byId.get(id);
+  if (!entry) throw new Error(`unknown question ${id}`);
+  const { question, index } = entry;
+  for (const arm of arms) {
+    if (done.has(`${id}:${arm.name}`)) continue;
+    const started = performance.now();
+    const row = { question_id: id, question_type: question.question_type, arm: arm.name };
+    try {
+      const config = await prepared(question, index, arm);
+      const root = join(out, "runs", id, arm.name);
+      rmSync(root, { recursive: true, force: true });
+      const result = await executeOrdinaryRecallEntry({ config, root,
+        queries: [{ query_key: sha256(question.question), original_query: question.question }] });
+      const query = result.rows[0];
+      Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
+        workspace: config.workspace_id, intervals: query.source_intervals, pages: query.page_count });
+    } catch (error) {
+      Object.assign(row, { status: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+    row.elapsed_ms = Math.round(performance.now() - started);
+    appendFileSync(rowsPath, `${JSON.stringify(row)}\n`);
+    process.stdout.write(`${id} ${arm.name} ${row.status} ${row.elapsed_ms}ms${row.error ? ` ${row.error}` : ""}\n`);
+  }
+}
