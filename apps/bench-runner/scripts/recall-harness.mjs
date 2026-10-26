@@ -3,10 +3,12 @@
 // preparation), query every arm through the ordinary soul.recall entry, write one JSONL row per
 // question x arm. Scoring is separate (recall-harness-score.mjs). Local embedding only.
 //
-//   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b]
+//   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b] [--shard i/n]
 //
 // ARMS.json: [{ "name": "line", "host": false }, { "name": "message", "host": true,
 //              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1" }, ...]
+// Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
+// --shard i/n keeps every n-th question; shards may share --out and --cache.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,7 +25,7 @@ const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs
 
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
-  cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }
+  cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" }
 } });
 if (!values.out || !values.arms) throw new Error("--out and --arms are required");
 const out = resolve(values.out);
@@ -49,6 +51,10 @@ const datasetSha = sha256(readFileSync(datasetPath));
 const byId = new Map(dataset.map((question, index) => [question.question_id, { question, index }]));
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
 if (values.limit) ids = ids.slice(0, Number(values.limit));
+if (values.shard) {
+  const [shard, shards] = values.shard.split("/").map(Number);
+  ids = ids.filter((_, offset) => offset % shards === shard);
+}
 
 mkdirSync(out, { recursive: true });
 const rowsPath = join(out, "rows.jsonl");
@@ -125,8 +131,15 @@ for (const id of ids) {
       const config = await prepared(question, index, arm);
       const root = join(out, "runs", id, arm.name);
       rmSync(root, { recursive: true, force: true });
-      const result = await executeOrdinaryRecallEntry({ config, root,
-        queries: [{ query_key: sha256(question.question), original_query: question.question }] });
+      const saved = Object.fromEntries(Object.keys(arm.env ?? {}).map(key => [key, process.env[key]]));
+      Object.assign(process.env, arm.env ?? {});
+      let result;
+      try {
+        result = await executeOrdinaryRecallEntry({ config, root,
+          queries: [{ query_key: sha256(question.question), original_query: question.question }] });
+      } finally {
+        for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+      }
       const query = result.rows[0];
       Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
         workspace: config.workspace_id, intervals: query.source_intervals, pages: query.page_count });
