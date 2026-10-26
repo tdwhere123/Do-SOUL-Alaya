@@ -28,8 +28,8 @@ it("exposes the current field protocol over real daemon MCP without a private co
       if (observed.outcome.status === "failure") throw observed.outcome.error;
       expect(mcp).toHaveBeenCalledTimes(1);
       const ordinary = SoulInterpretationResponseSchema.parse(observed.outcome.value);
-      expect(ordinary).toMatchObject({ operation: "recall", protocol_version: 11,
-        index: { result_version: "ordinary-native-field.v2" } });
+      expect(ordinary).toMatchObject({ operation: "recall", protocol_version: 12,
+        index: { result_version: "ordinary-native-field.v3" } });
       expect(observed.status).toBe("available");
       expect(observed.observations).toHaveLength(2);
       expect(observed.observations[1]).toMatchObject({ execution: "success", status: "observed",

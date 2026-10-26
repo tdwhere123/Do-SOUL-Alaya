@@ -21,7 +21,7 @@ import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
 import { SemanticChainConfigSchema, assertChainSnapshot, readChainArtifact, withSemanticChainDaemon } from "../../../runs/recall-measurement/contract.js";
-import { inspectSemanticChainSourceIndex, prepareSemanticChainSourceIndex } from "../../../runs/recall-measurement/source-index-binding.js";
+import { assertSemanticChainSourceIndex, inspectSemanticChainSourceIndex, prepareSemanticChainSourceIndex } from "../../../runs/recall-measurement/source-index-binding.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/freeze/db-copy.js";
 import { createSourceIndexProducer, type SourceIndexProducerPassRemaining } from "../../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
 import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProgressBindingMatches } from "../../../runs/recall-measurement/source-index-progress.js";
@@ -112,15 +112,18 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
   return checkpoint;
 }
 
-it("explicitly prepares and seals a new message-window profile without promoting it to the default", async () => {
+it.each([undefined, "recorded-message-windows.v1"] as const)(
+  "seals the producer's resolved window strategy for requested %s without reinterpreting receipt defaults", async windowing => {
   const { root, config, execution } = setup();
   bindProducer(false);
-  const result = await prepareSemanticChainSourceIndex(config, { ...execution, windowing: "recorded-message-windows.v1" }, join(root, "message-windows"));
-  expect(result.config?.source_index).toMatchObject({ windowing: "recorded-message-windows.v1",
-    index: { configuration: { profile: { windowing: "recorded-message-windows.v1" } } } });
-  expect(result.report.execution).toMatchObject({ windowing: "recorded-message-windows.v1" });
+  const result = await prepareSemanticChainSourceIndex(config, { ...execution, windowing }, join(root, "resolved-windows"));
+  const resolved = windowing ?? "utf8-byte-windows.v1"; // This controlled producer declares raw as its default.
+  expect(result.config?.source_index).toMatchObject({ windowing: resolved,
+    index: { configuration: { profile: { windowing: resolved } } } });
+  expect(result.report.execution).toMatchObject({ windowing: resolved });
   expect(result.report.setup.status).toBe("settled");
   expect(config).not.toHaveProperty("source_index");
+  expect(() => assertSemanticChainSourceIndex(result.config!)).not.toThrow();
 });
 
 it("prepares and seals an opt-in segmented lexical generation", async () => {

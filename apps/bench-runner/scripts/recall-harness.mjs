@@ -88,7 +88,7 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? "utf8-byte-windows.v1", arm.lexical ?? null])).slice(0, 16);
+  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? null, arm.lexical ?? null])).slice(0, 16);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */

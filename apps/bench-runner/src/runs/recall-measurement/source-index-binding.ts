@@ -213,7 +213,7 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   result.report.setup_elapsed_ms = performance.now() - started;
   writeChainArtifact(join(root, "preparation.json"), result.report);
   if (result.config === null) return result;
-  const prepared = bindPreparation(config, execution, result.report, join(root, "preparation.json"));
+  const prepared = bindPreparation(config, result.report, join(root, "preparation.json"));
   assertChainSnapshot(prepared);
   refuseBenchWorkAfterCancel();
   // Publication is synchronous; a frozen success receipt is not rewritten if the clock expires here.
@@ -249,7 +249,7 @@ async function prepareLiveSourceIndex(input: {
     observed.complete && observed.index !== null && binding.profile_id === observed.index.profile_id &&
     binding.profile.provider_kind === "local_onnx" && binding.profile.model_id === execution.model_id &&
     canonicalJson(binding.profile.representation ?? null) === canonicalJson(execution.representation ?? null) &&
-    binding.profile.windowing === (execution.windowing ?? "utf8-byte-windows.v1") &&
+    (execution.windowing === undefined || binding.profile.windowing === execution.windowing) &&
     canonicalJson(binding.profile) === canonicalJson(observed.index.configuration.profile);
   const candidate = inspectSemanticChainSourceIndex(filename, config.workspace_id, config.budget);
   if (!usable(candidate)) return failure(candidate.complete ? "source_profile_mismatch" : "source_index_incomplete");
@@ -267,19 +267,22 @@ async function prepareLiveSourceIndex(input: {
     contract: "semantic-chain-source-preparation-v1", label: "explicit_normal_producer_diagnostic",
     input_snapshot_path: config.snapshot_path, input_snapshot_sha256: config.snapshot_sha256,
     implementation_revision: config.implementation_revision, workspace_id: config.workspace_id,
-    execution, ...setupReport(run, allowance, performance.now() - started), index_status: observed.status, index: observed.index,
+    // Persist the producer's resolved choice. Omission on archived bindings still
+    // means their historical raw windows; new receipts never depend on a default.
+    execution: { ...execution, windowing: binding.profile.windowing },
+    ...setupReport(run, allowance, performance.now() - started), index_status: observed.status, index: observed.index,
     inspection: observed.inspection, before_inspection: before.inspection, admission: reuse ? "reused_complete" : "prepared_complete",
     snapshot_path: snapshotPath, snapshot_sha256: hashRegularFileNoFollow(snapshotPath) };
   // The optional live consumer gets a separate provisional receipt. External publication follows cleanup.
   if (consume !== undefined) {
     const path = join(root, "live-preparation.json"), provisional = { ...report, preparation_state: "live_before_cleanup" };
     writeChainArtifact(path, provisional);
-    const liveConfig = bindPreparation(config, execution, provisional, path);
+    const liveConfig = bindPreparation(config, provisional, path);
     assertChainSnapshot(liveConfig);
     await consume(liveConfig, live);
     refuseBenchWorkAfterCancel();
   }
-  return { config: bindPreparation(config, execution, report, join(root, "preparation.json")), report };
+  return { config: bindPreparation(config, report, join(root, "preparation.json")), report };
 }
 
 /** Model-free lexical generation; runs after vector setup so it binds the final source epoch. Null = active and ready. */
@@ -305,10 +308,10 @@ async function runLexicalPreparation(live: BenchDaemonHandle, workspace: string,
   return "setup_pass_exhausted";
 }
 
-function bindPreparation(config: SemanticChainConfig, execution: z.infer<typeof CachedLocalSourceExecutionSchema>,
+function bindPreparation(config: SemanticChainConfig,
   report: SourceIndexPreparationSuccess["report"] | (SourceIndexPreparationSuccess["report"] & { preparation_state: string }), path: string) {
   return SemanticChainConfigSchema.parse({ ...config, snapshot_path: report.snapshot_path,
-    snapshot_sha256: report.snapshot_sha256, source_index: { ...execution, kind: "cached_local", index: report.index,
+    snapshot_sha256: report.snapshot_sha256, source_index: { ...report.execution, kind: "cached_local", index: report.index,
       preparation_path: path, preparation_identity: chainIdentity(report) } });
 }
 

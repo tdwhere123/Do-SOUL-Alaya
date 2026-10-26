@@ -44,8 +44,12 @@ vector profiles are unchanged. See the [lexical policy](../../docs/handbook/reca
 
 ## Ordinary field delivery compatibility
 
-Protocol 23.0.0 versions recorded-boundary delivery as `ordinary-native-field.v2`
-and library field protocol 11 (invariant §25 major). Old live continuations are
+Protocol 25.0.0 versions root-start delivery as `ordinary-native-field.v3`
+and library field protocol 12 (invariant §25 major). Vector locations remain
+navigation evidence; ordinary payloads begin at the root start while explicit
+proof ranges and payload continuations keep their own coordinates. New embedding
+bindings default to recorded-message windows; explicit raw profiles remain supported.
+Old live continuations are
 incompatible; upgrade clients and daemon together and start fresh requests. Frozen
 ordinary captures remain historical evidence, never a second execution policy.
 No source or index rewrite is required. Rollback uses the retained previous binary
@@ -53,7 +57,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `23.2.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `25.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

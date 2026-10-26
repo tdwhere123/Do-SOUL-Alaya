@@ -37,9 +37,9 @@ it("captures public request and principal before asynchronous admission and excl
     expect(admission).toHaveBeenLastCalledWith(WS, "soul.interpretation");
     if (!result.ok) throw new Error(JSON.stringify(result.error));
     const delivered = SoulInterpretationResponseSchema.parse(result.output);
-    expect(delivered).toMatchObject({ operation: "recall", protocol_version: 11,
-      index: { result_version: "ordinary-native-field.v2" } });
-    if (delivered.operation !== "recall" || delivered.protocol_version !== 11) throw new Error("field recall expected");
+    expect(delivered).toMatchObject({ operation: "recall", protocol_version: 12,
+      index: { result_version: "ordinary-native-field.v3" } });
+    if (delivered.operation !== "recall" || delivered.protocol_version !== 12) throw new Error("field recall expected");
     expect(delivered.index.entries).toHaveLength(2);
     expect(delivered.index.entries.every(row => row.target.kind === "source_evidence" && row.target.workspace_id === WS)).toBe(true);
     expect(fixture.prepareQuery).toHaveBeenLastCalledWith(expect.objectContaining({ workspace_id: WS, navigation: "needle" }));
@@ -68,11 +68,11 @@ it("reuses public query and continuation leases and refuses retargeting, princip
     await expect(call(bound, { ...context(), sessionId: "foreign" })).rejects.toThrow(/principal/);
     await expect(call({ ...bound, budget: { ...budget, work_units: budget.work_units - 1 } })).rejects.toThrow(/budget changed/);
     const initial = await call(bound), equal = await call(bound);
-    if (initial.kind !== "recall" || initial.protocol_version !== 11 || equal.kind !== "recall") throw new Error("field recall required");
-    expect(initial.protocol_version).toBe(11); expect(equal.request_identity).toBe(initial.request_identity);
+    if (initial.kind !== "recall" || initial.protocol_version !== 12 || equal.kind !== "recall") throw new Error("field recall required");
+    expect(initial.protocol_version).toBe(12); expect(equal.request_identity).toBe(initial.request_identity);
     expect(initial.index.continuation).not.toBeNull();
     const continued = await call({ ...bound, continuation: initial.index.continuation });
-    expect(continued).toMatchObject({ kind: "recall", protocol_version: 11, request_identity: initial.request_identity });
+    expect(continued).toMatchObject({ kind: "recall", protocol_version: 12, request_identity: initial.request_identity });
     expect(fixture.prepareQuery.mock.calls).toHaveLength(before);
     now = "2026-09-18T00:20:00.000Z";
     await expect(call(bound)).rejects.toThrow(/expired/);
@@ -92,7 +92,7 @@ it("admits an actual current field worker result with one coverage getter read",
       request: { kind: operation, ...input } });
     let coverageReads = 0;
     const observed = { ...result, get coverage() { coverageReads++; return result.coverage; } };
-    expect(parseWorkerOperationResult("conditionalField.sourceSemantics", observed)).toMatchObject({ kind: "recall", protocol_version: 11 });
+    expect(parseWorkerOperationResult("conditionalField.sourceSemantics", observed)).toMatchObject({ kind: "recall", protocol_version: 12 });
     expect(coverageReads).toBe(1);
   });
 });

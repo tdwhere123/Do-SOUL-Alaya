@@ -91,7 +91,7 @@ describe("Source embedding (real fork transport, fixture capability)", () => {
       if (fault === "provider") profile.provider_kind = "openai";
       if (fault === "dimensions") profile.dimensions = 383;
       if (fault === "window") profile.window_bytes = 2048;
-      if (fault === "window strategy") profile.windowing = "recorded-message-windows.v1";
+      if (fault === "window strategy") profile.windowing = "utf8-byte-windows.v1";
       if (fault === "token ceiling") profile.max_input_tokens = 33;
       if (fault === "artifact digest") { response.sourceBinding = { ...binding, profile: { ...profile, artifact_digest: "not-a-digest" } }; return; }
       response.sourceBinding = { ...binding, profile, profile_id: sourceIndexProfileId(profile, sha256) };

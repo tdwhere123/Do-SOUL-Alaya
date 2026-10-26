@@ -59,7 +59,7 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
       }
       const page = readers.sourceRoot({ purpose: "observation", workspaceId: input.workspaceId, rootKind: target.root_kind,
         rootId: target.root_id, revision: target.source_version, digest: target.content_digest,
-        evidenceObjectId: target.evidence_object_id, offset: navigation?.location?.start_byte ?? 0,
+        evidenceObjectId: target.evidence_object_id, offset: 0,
         byteLimit: input.byteLimit, nativeByteLimit: input.nativeByteLimit, workLimit: input.workLimit });
       const retry = page.resourceLimited === true && page.row === null;
       return { rows: page.row === null ? [] : [{ ...page.row, navigation }],

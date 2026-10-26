@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 24.0.0, engine gateway 2.0.0
+## Unreleased — protocol 25.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,17 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 25.0.0 makes recorded-message vector windows the default for new embedding
+bindings and delivers ordinary native roots from byte zero in document order
+(invariant §25 major). Vector hit locations remain navigation witnesses, never
+payload bounds; explicit proof-support ranges and payload continuations retain their
+own coordinates. `ordinary-native-field.v3` and library field protocol 12 identify
+the changed delivery. Upgrade clients and daemon together and start fresh queries;
+old live handles and result identifiers cannot execute the new policy. Existing
+profiles retain their identity; preparation selects a distinct generation before
+serving the new default. Explicit `utf8-byte-windows.v1` remains a supported control
+and rollback selection; retired generations are never revived by relabeling them.
 
 Protocol 24.0.0 funds ordinary native acquisition from its declared attempts, roots
 and active-generation window allowance, independently of the field page budget

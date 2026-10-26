@@ -47,7 +47,7 @@ export const SIMULATED_CONFIGURATION: SourceIndexConfiguration = { revision: "si
 } };
 export const digest = (text: string) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 export type IndexedSource = Readonly<{ id: string; text: string; scope?: "project" | "global_core";
-  vector?: readonly number[]; indexed?: false;
+  vector?: readonly number[] | ((text: string) => readonly number[]); indexed?: false;
   spans?: import("@do-soul/alaya-protocol").SourceAdmissionRequest["spans"] }>;
 
 /** Explicit simulation: independently authored axes, not a provider, tokenizer, ONNX model or recorded cache.
@@ -106,8 +106,9 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     });
     expect(targets).toHaveLength(indexed.length);
     const outsideTransaction = () => { expect(database.connection.inTransaction).toBe(false); };
-    let backfillAxis: readonly number[] = [0, 1, 0];
-    const backfillBinding = simulatedBinding(selection, () => backfillAxis, outsideTransaction);
+    let backfillAxis: NonNullable<IndexedSource["vector"]> = [0, 1, 0];
+    const backfillBinding = simulatedBinding(selection,
+      text => typeof backfillAxis === "function" ? backfillAxis(text) : backfillAxis, outsideTransaction);
     for (const target of targets) {
       // Bind the root's authored axis even when different roots have identical window text.
       backfillAxis = sources.find(source => source.id === target.source_id)?.vector ?? [0, 1, 0];

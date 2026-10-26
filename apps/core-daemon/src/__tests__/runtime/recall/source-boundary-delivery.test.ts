@@ -17,7 +17,7 @@ import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixtur
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo, SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
-import { CLOCK, QUERY_BUDGET, SCOPES, WS, publicMcp, withIndexedSources } from "./source-semantic-index-acquisition.test-support.js";
+import { CLOCK, QUERY_BUDGET, SCOPES, WS, SIMULATED_CONFIGURATION, publicMcp, withIndexedSources } from "./source-semantic-index-acquisition.test-support.js";
 
 const firstLine = `needle ${"é".repeat(350)}\n`;
 const text = `${firstLine}${"tail ".repeat(600)}\n`;
@@ -26,6 +26,59 @@ const sources = ["first", "second"].map(id => ({ id, text, vector: [1, 0, 0], sp
   { start_offset: 0, end_offset: lineEnd, purpose: "line" as const },
   { start_offset: lineEnd, end_offset: Buffer.byteLength(text), purpose: "line" as const }
 ] }));
+
+it("delivers a later vector hit from the root start through the built worker and MCP, preserving navigation and explicit continuation", async () => {
+  const prefix = `${"é".repeat(127)}\n\n`, body = `${prefix}HIT ${"tail ".repeat(600)}`;
+  expect(Buffer.byteLength(prefix)).toBe(256);
+  const roots = ["vector-first", "vector-second"].map(id => ({ id, text: body,
+    vector: (window: string) => window.startsWith("HIT ") ? [1, 0, 0] : [0, 1, 0],
+    spans: [{ start_offset: 0, end_offset: 256, purpose: "line" as const },
+      { start_offset: 256, end_offset: Buffer.byteLength(body), purpose: "line" as const }] }));
+  await withIndexedSources(roots, async fixture => {
+    const client = await fixture.openClient();
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
+      readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
+      activeConstraintsPort: client.activeConstraintsPort });
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
+    const request = { ...capableRecallConsumerDeclaration(), query: "needle", max_results: 1,
+      scope_class: "project", dimension: null, domain_tags: null, result_kind_view: "source_only" };
+    const call = async (args: object) => {
+      const response = await handler.call({ toolName: "soul.recall", arguments: args,
+        context: { workspaceId: WS, runId: "run", sessionId: "vector-root", agentTarget: "codex" } });
+      if (!response.ok) throw new Error(JSON.stringify(response.error));
+      return SoulMemorySearchResponseSchema.parse(response.output);
+    };
+    const first = await call(request);
+    expect(first.index?.result_version).toBe("ordinary-native-field.v3");
+    expect(first.index?.entries[0]?.navigation).toMatchObject({ operator: "source_vector",
+      location: { start_byte: 256, end_byte: 384 } });
+    expect(first.results[0]?.content_preview).toBe(prefix);
+    expect(first.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: 256, content_complete: false } });
+    expect(first.index?.continuation).not.toBeNull();
+    const continuation = { ...request, continuation: first.index?.continuation };
+    const next = await call(continuation), replay = await call(continuation);
+    expect(next.results[0]?.content_preview).toBe(prefix);
+    expect(replay.results).toEqual(next.results);
+    expect(next.results[0]?.target).not.toEqual(first.results[0]?.target);
+    const target = next.results[0]!.target;
+    const expansion = { ...request, continuation: next.index?.continuation,
+      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target, start_offset: 256, byte_budget: 64 } };
+    const expanded = await call(expansion), repeated = await call(expansion);
+    expect(expanded.results[0]?.content_preview).toBe(Buffer.from(body).subarray(256, 320).toString("utf8"));
+    expect(expanded.results[0]?.target).toMatchObject({ span: { content_start: 256, content_end: 320, content_complete: false } });
+    expect(repeated.results).toEqual(expanded.results);
+    const obsolete = await call({ ...continuation,
+      continuation: { ...first.index!.continuation, result_version: "ordinary-native-field.v2" } });
+    expect(obsolete).toMatchObject({ results: [], index: { continuation: null,
+      completeness: { logical_index: "invalidated" } } });
+    // The same native hit in the library uses the new identity; explicit semantic
+    // proof ranges are covered separately by the library computation tests.
+    const library = await publicMcp(client)({ operation: "recall", accepts_unreviewed_conditional_results: true,
+      original_query: "needle", semantic_correspondences: [], authorized_scopes: SCOPES,
+      budget: { ...QUERY_BUDGET, page_budget: 1 }, output_byte_limit: 100_000 });
+    expect(library).toMatchObject({ protocol_version: 12, results: [{ content_preview: prefix }] });
+  }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, window_bytes: 128 } });
+});
 
 it("delivers recorded lines through SQLite, built worker and MCP and replays the next page exactly", async () => {
   await withIndexedSources(sources, async fixture => {
@@ -37,7 +90,7 @@ it("delivers recorded lines through SQLite, built worker and MCP and replays the
     if (first.operation !== "recall" || first.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
       throw new Error("current field delivery required");
     }
-    expect(first.index.result_version).toBe("ordinary-native-field.v2");
+    expect(first.index.result_version).toBe("ordinary-native-field.v3");
     expect(first.results).toHaveLength(1);
     expect(first.results[0]?.content_preview).toBe(firstLine);
     expect(first.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: lineEnd, content_complete: false } });

@@ -435,8 +435,8 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
       frozen_index: null, admitted_roots_complete: true, admitted_roots: new Map([[identity.root_id,
         { record_id: identity.root_id, source_id: source.source_id, snapshot_id: snapshot, identity }]]),
       answer_gold: answer, visibility });
-    expect(diagnostic.protocol_version).toBe(11);
-    expect(diagnostic.index.result_version).toBe("ordinary-native-field.v2");
+    expect(diagnostic.protocol_version).toBe(12);
+    expect(diagnostic.index.result_version).toBe("ordinary-native-field.v3");
     expect(encoded.results).toHaveLength(1);
     expect(diagnostic.index.continuation).not.toBeNull();
     expect(visibility.any_at_5).toEqual({ status: "unknown", reason: "second_page_not_observed" });

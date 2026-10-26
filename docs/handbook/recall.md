@@ -170,11 +170,15 @@ explicit principal and lifetime admission, not a reusable ordinary worker key.
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v2`, Protocol
-23.0.0; library field protocol 11). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v3`, Protocol
+25.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
-[cutover and rollback entry](../../CHANGELOG.md)). Source previews keep the same
-order, shares, slots and budgets. Within the fitted allowance, they end at the
+[cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
+root; observation and initial payload reading start at byte zero in document order.
+The navigation witness retains the actual matched window, but does not cap or
+anchor ordinary payload bytes. Explicit semantic proof-support ranges and payload
+continuation offsets remain authoritative for their respective reads. Source
+previews keep the same order, shares, slots and budgets. Within the fitted allowance, they end at the
 largest recorded boundary of the coarsest available unit: an admitted `message`
 span where recorded, otherwise a `line` span. No positive fitting end means the
 existing UTF-8 prefix, not an empty result. Role markers and inferred messages
@@ -293,10 +297,13 @@ message spans do not enter factor emission or first-span host selection.
 ## SourceIndex window representations
 
 The [Protocol planner](../../packages/protocol/src/recall/source-index.ts) owns exact
-byte coverage and window identity. `utf8-byte-windows.v1` remains the default and the
-reader/control contract for existing generations. The explicit preparation option
-`windowing: "recorded-message-windows.v1"` selects a new profile/generation (Protocol
-23.1.0, invariant §25 minor); it changes neither query ranking nor delivery policy.
+byte coverage and window identity. New embedding bindings default to
+`recorded-message-windows.v1` (Protocol 25.0.0, invariant §25 major).
+`utf8-byte-windows.v1` remains an explicit control and the reader contract for
+existing raw generations. Selection creates a distinct profile/generation and
+withdraws prior eligibility until preparation publishes; changing the default
+does not relabel or rewrite stored profiles. Rollback explicitly selects and
+prepares raw windows anew. The message strategy was introduced as an opt-in in 23.1.0.
 
 The message strategy protects nonempty complete host-occurrence intervals no larger
 than `window_bytes`. These are the same admitted facts that produce message spans;

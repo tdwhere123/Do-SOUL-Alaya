@@ -64,7 +64,9 @@ const arms = [...new Set(scored.map(s => s.arm))];
 const table = [];
 for (const arm of arms) {
   const mine = scored.filter(s => s.arm === arm && s.scored);
-  const line = { arm, scored: mine.length, failed: scored.filter(s => s.arm === arm && !s.scored && s.gold > 0).length,
+  const line = { arm, total: scored.filter(s => s.arm === arm).length, scored: mine.length,
+    partial: scored.filter(s => s.arm === arm && s.status === "partial").length,
+    failed: scored.filter(s => s.arm === arm && !s.scored && s.gold > 0).length,
     bytes: mine.reduce((n, s) => n + s.delivered_bytes, 0) };
   for (const m of metrics) line[m] = `${mine.filter(s => s[m].any).length}/${mine.filter(s => s[m].all).length}`;
   table.push(line);

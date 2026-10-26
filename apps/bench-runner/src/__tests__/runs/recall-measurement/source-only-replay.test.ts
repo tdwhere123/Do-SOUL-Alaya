@@ -53,7 +53,7 @@ it("preserves disabled source preparation and refuses native field scoring befor
     // Native field pages cannot acquire an archived source-gold exposure credential.
     // Historical accepted delivery remains covered by private-library-archive.test.ts.
     expect(row.first_exposure).toBeNull();
-    expect(row.response).toMatchObject({ operation: "recall", protocol_version: 11 });
+    expect(row.response).toMatchObject({ operation: "recall", protocol_version: 12 });
     if (row.response?.operation !== "recall") throw new Error("Disabled replay did not return native recall");
     expect(row.response.proofs ?? []).toEqual([]);
     const replayPreparation = sourceSemanticAccessPhases(row.preparation_trace![0]!.access).preparation;

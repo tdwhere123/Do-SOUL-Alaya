@@ -31,13 +31,13 @@ afterEach(async () => {
 });
 
 describe("loaded local ONNX Source embedding runtime (controlled tokenizer/model seams)", () => {
-  it("binds the opt-in message strategy but keeps prepared-token refusal before model execution", async () => {
+  it("defaults to message windows but keeps prepared-token refusal before model execution", async () => {
     const seam = createControlledSeam();
     const { binding, runtime } = await loadBoundRuntime(seam, { window_bytes: 8,
-      windowing: "recorded-message-windows.v1", max_input_tokens: 8,
+      max_input_tokens: 8,
       representation: { kind: "paired-prefix.v1", query_prefix: "Q: ", passage_prefix: "P: " } });
     expect(binding.profile.windowing).toBe("recorded-message-windows.v1");
-    const raw = runtime.bind({ window_bytes: 8, max_input_tokens: 8,
+    const raw = runtime.bind({ window_bytes: 8, max_input_tokens: 8, windowing: "utf8-byte-windows.v1",
       representation: binding.profile.representation });
     expect(raw.status).toBe("ready");
     if (raw.status !== "ready") throw new Error("raw binding required");
@@ -115,7 +115,7 @@ describe("loaded local ONNX Source embedding runtime (controlled tokenizer/model
       dimensions: DIMENSIONS,
       preprocessing: "raw-string.special-tokens.no-truncation.v1;transformers-4.3.1.ort-1.30.0.cpu",
       normalization: "attention-mask-mean.l2.q8.v1",
-      windowing: "utf8-byte-windows.v1",
+      windowing: "recorded-message-windows.v1",
       max_input_tokens: LOADED_TOKEN_CAP
     });
     expect(profile.model_revision).toMatch(/^sha256:[0-9a-f]{64}$/u);

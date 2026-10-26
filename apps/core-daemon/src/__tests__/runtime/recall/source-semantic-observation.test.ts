@@ -114,7 +114,7 @@ it("keeps SQLite/worker delivery and debit parity with diagnostics off and on, a
     expect(events(row, "encoding_attempt").length).toBeGreaterThan(0);
     expect(events(row, "encoded_membership")[0]?.data).toMatchObject({
       results: [expect.objectContaining({ preview_bytes: Buffer.byteLength(text) })] });
-    if (diagnostic.protocol_version !== 11) throw new Error("field recall required");
+    if (diagnostic.protocol_version !== 12) throw new Error("field recall required");
     const receipt = diagnostic.field_execution_receipt as ConditionalFieldExecutionReceipt | undefined;
     expect(receipt?.actual?.phases.index.budget_work).toBeGreaterThan(0);
     expect(diagnostic.work.native_work).toBeGreaterThan(0);

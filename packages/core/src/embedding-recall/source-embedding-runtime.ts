@@ -19,7 +19,7 @@ export interface SourceEmbeddingOptions {
 }
 export interface SourceEmbeddingBindingOptions {
   readonly window_bytes: number;
-  /** Explicit opt-in; omission preserves historical raw windows. */
+  /** Omission selects recorded-message windows; explicit raw windows remain supported. */
   readonly windowing?: SourceIndexWindowing;
   /** May lower, never raise, the loaded model/tokenizer limit. */
   readonly max_input_tokens?: number;
@@ -72,7 +72,8 @@ export function captureSourceEmbeddingInputs(inputs: readonly SourceEmbeddingInp
 }
 
 /** Admission before any load/wait; nested representation is copied and frozen by its authority. */
-export function captureSourceEmbeddingBindingOptions(options: SourceEmbeddingBindingOptions): SourceEmbeddingBindingOptions {
+export function captureSourceEmbeddingBindingOptions(options: SourceEmbeddingBindingOptions):
+  SourceEmbeddingBindingOptions & Readonly<{ windowing: SourceIndexWindowing }> {
   const captured = structuredClone(options);
   if (!captured || typeof captured !== "object" || Array.isArray(captured) ||
       Object.keys(captured).some(key => !["window_bytes", "windowing", "max_input_tokens", "representation"].includes(key)) ||
@@ -81,7 +82,8 @@ export function captureSourceEmbeddingBindingOptions(options: SourceEmbeddingBin
       (captured.max_input_tokens !== undefined && (!Number.isSafeInteger(captured.max_input_tokens) || captured.max_input_tokens < 1))) {
     throw new CoreError("VALIDATION", "Invalid Source embedding binding options");
   }
-  return Object.freeze({ ...captured, ...(captured.representation === undefined ? {} : {
+  return Object.freeze({ ...captured, windowing: captured.windowing ?? "recorded-message-windows.v1",
+    ...(captured.representation === undefined ? {} : {
     representation: SourceEmbeddingRepresentationSchema.parse(captured.representation)
   }) });
 }

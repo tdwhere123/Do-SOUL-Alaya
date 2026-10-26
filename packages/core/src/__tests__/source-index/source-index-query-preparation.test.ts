@@ -70,11 +70,12 @@ function expectReceipt(receipt: SourceSemanticQueryPreparation, expected: Record
 }
 
 describe("simulated query-preparation adapters, no native inference", () => {
-  it("rebinds the selected message strategy rather than silently requesting the raw default", async () => {
-    const selected = selectionFor(profile({ windowing: "recorded-message-windows.v1" }));
+  it.each(["utf8-byte-windows.v1", "recorded-message-windows.v1"] as const)(
+    "rebinds the selected %s strategy independently of the runtime default", async windowing => {
+    const selected = selectionFor(profile({ windowing }));
     const bind = vi.fn(async () => readyBind(selected, async inputs => embedded(inputs)));
     const result = await prepare({ selection: selected, bind });
-    expect(bind).toHaveBeenCalledExactlyOnceWith({ window_bytes: 64, max_input_tokens: 32, windowing: "recorded-message-windows.v1" });
+    expect(bind).toHaveBeenCalledExactlyOnceWith({ window_bytes: 64, max_input_tokens: 32, windowing });
     expect(result.receipt.status).toBe("ready");
     expect(result.vector).toMatchObject({ status: "available", profile_id: selected.profile_id });
   });
@@ -163,7 +164,7 @@ describe("simulated query-preparation adapters, no native inference", () => {
     const opened = deferred(), release = deferred();
     const bind = vi.fn(async (options: { window_bytes: number; max_input_tokens?: number }) => {
       opened.resolve(); await release.promise;
-      expect(options).toEqual({ window_bytes: 64, max_input_tokens: 32 });
+      expect(options).toEqual({ window_bytes: 64, max_input_tokens: 32, windowing: "utf8-byte-windows.v1" });
       return readyBind(mutated, embed);
     });
     const pending = prepare({ selection: selected, bind });

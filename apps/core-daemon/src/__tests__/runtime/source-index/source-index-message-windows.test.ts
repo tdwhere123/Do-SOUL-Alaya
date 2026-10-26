@@ -71,7 +71,7 @@ it("prepares admitted message windows through real SQLite and guarded child IPC,
     expect(source.spans.map(row => [row.start_offset, row.end_offset, row.purpose]))
       .toEqual([[0, 4, "message"], [4, 10, "message"]]);
     let lifecycle = new SourceIndexLifecycle(index, fieldSha256);
-    const rawBinding = await client.bindSourceEmbedding({ window_bytes: 8, max_input_tokens: 16 });
+    const rawBinding = await client.bindSourceEmbedding({ window_bytes: 8, max_input_tokens: 16, windowing: "utf8-byte-windows.v1" });
     if (rawBinding.status !== "ready") throw new Error(rawBinding.reason);
     const config: SourceIndexConfiguration = { revision: "authored-window-comparison", profile: rawBinding.profile };
     const old = lifecycle.begin(lifecycle.select(WORKSPACE, config));
@@ -86,7 +86,7 @@ it("prepares admitted message windows through real SQLite and guarded child IPC,
       signal: new AbortController().signal, deadline_ms: Date.now() + 10_000 });
     expect(rawStep).toMatchObject({ status: "root_complete", accepted_vectors: 2, resources: { model_inputs_submitted: 2 } });
     expect(lifecycle.publish(WORKSPACE, old.generation_id)).toEqual({ status: "accepted" });
-    const binding = await client.bindSourceEmbedding({ window_bytes: 8, max_input_tokens: 16, windowing: "recorded-message-windows.v1" });
+    const binding = await client.bindSourceEmbedding({ window_bytes: 8, max_input_tokens: 16 });
     if (binding.status !== "ready") throw new Error(binding.reason);
     const selection = lifecycle.select(WORKSPACE, { ...config, profile: binding.profile });
     const generation = lifecycle.begin(selection);
