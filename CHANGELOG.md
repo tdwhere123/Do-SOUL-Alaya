@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 25.0.0, engine gateway 2.0.0
+## Unreleased — protocol 26.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,21 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 26.0.0 makes segmented lexical text (`segmented-unicode61.v1`, exported as
+`SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`) the default lexical representation
+(invariant §25 major: ordinary lexical candidates and their ranking change). The idle
+daemon prepares it for every workspace without an explicit lexical selection, independent
+of embedding availability, sharing each pass allowance with vector work (neither takes
+more than half first). Until a workspace's first segmented generation publishes, recall
+keeps reading the raw index; it no longer reports `lexical_generation_unpublished`. A
+new source epoch's generation copies the projections of roots whose key and content
+digest are unchanged and analyzes only new or changed roots. An explicit selection, such
+as a `raw-unicode61.v1` rollback, is honored and never overridden. A cold or failed
+segmenter still reports the lexical lane unavailable rather than silently mixing
+tokenization. Upgrade the daemon and clients together; no source or index rewrite is
+required, and old binaries need a retained pre-migration database copy only if the
+schema fence applies.
 
 Protocol 25.0.0 makes recorded-message vector windows the default for new embedding
 bindings and delivers ordinary native roots from byte zero in document order

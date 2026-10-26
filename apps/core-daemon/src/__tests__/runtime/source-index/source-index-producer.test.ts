@@ -294,7 +294,10 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     });
     const receipt = await producerFor(environment, labeledBind().bind).runPass();
     expect(receipt).toMatchObject({ status: "failed", reason: "capture_page_unavailable", accounting: "lower_bound",
-      resources: { work: 17, native_bytes: 23, model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+      resources: { model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+    // The shared allowance also carries the lexical preparation that ran first in the same pass.
+    expect(receipt.resources.work).toBeGreaterThan(17);
+    expect(receipt.resources.native_bytes).toBeGreaterThan(23);
   });
 
   it.each(["partial", "resource_exhausted", "token_limit", "unsupported", "stale", "superseded", "unbound", "cancelled", "deadline"] as const)(

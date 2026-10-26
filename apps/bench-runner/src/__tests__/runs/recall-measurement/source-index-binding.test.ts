@@ -134,7 +134,7 @@ it("prepares and seals an opt-in segmented lexical generation", async () => {
   expect(result.config?.source_index).toMatchObject({ lexical: "segmented-unicode61.v1" });
   const sealed = new BetterSqlite3(result.config!.snapshot_path, { readonly: true });
   try {
-    expect(sealed.prepare("SELECT representation,status FROM source_index_lexical_generations WHERE status != 'retired'").all())
+    expect(sealed.prepare("SELECT representation,status FROM source_index_lexical_generations WHERE status != 'retired' AND workspace_id=?").all(WORKSPACE))
       .toEqual([{ representation: "segmented-unicode61.v1", status: "ready" }]);
   } finally { sealed.close(); }
   expect(() => assertChainSnapshot(result.config!)).not.toThrow();

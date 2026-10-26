@@ -196,7 +196,9 @@ it("resumes a bounded generation, fences stale writers, repairs lost payloads, a
     let lifecycle = new SourceIndexLifecycle(index, fieldSha256);
     const first = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", { ...limits, max_roots: 1 });
     expect(first).toMatchObject({ status: "partial", generation: { target_count: 2, completed_count: 1 } });
-    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "unavailable", reason: "lexical_generation_unpublished" });
+    // Before the first publish the raw index keeps serving (no lexical binding), never an outage.
+    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "partial", tokenization: { cjk_state: expect.any(String) } });
+    expect(index.readLexicalCandidates(WORKSPACE, "alpha BETA", 8, queryBudget).candidates).toHaveLength(1);
     database.close({ optimize: false }); database = initDatabase({ filename });
     index = new SqliteSourceIndexRepository(database, fieldSha256);
     const repos = createDaemonFieldRepos({ database });
@@ -221,7 +223,7 @@ it("resumes a bounded generation, fences stale writers, repairs lost payloads, a
     const selection = index.lexical.selectLexical(WORKSPACE, "raw-unicode61.v1");
     expect(index.lexical.writeLexicalDocument(WORKSPACE, ready.generation!.generation_id, target, body, BUDGET))
       .toMatchObject({ status: "rejected", reason: "superseded" });
-    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "unavailable" });
+    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "partial", tokenization: expect.not.objectContaining({ lexical_binding: expect.anything() }) });
     expect(await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", limits)).toMatchObject({ status: "ready", selection });
     expect(vectorRows()).toEqual(before);
     const resumed = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", limits);
