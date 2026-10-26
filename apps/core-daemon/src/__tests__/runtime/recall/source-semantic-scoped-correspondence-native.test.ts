@@ -30,6 +30,9 @@ const isolation = await vi.hoisted(async () => {
         throw new Error("Credential environment reads forbidden in authored mechanism test");
       }
       return Reflect.get(target, key);
+    }, set(target, key, value) {
+      // Native process.env rejects proxy-receiver updates to existing keys such as NODE_OPTIONS.
+      return Reflect.set(target, key, value);
     } });
     restores.push(() => { process.env = environment; });
     for (const owner of [fs, fsp]) {
