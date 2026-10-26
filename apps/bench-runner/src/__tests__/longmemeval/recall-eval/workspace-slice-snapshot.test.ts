@@ -78,7 +78,7 @@ describe("workspace slice snapshot identity", () => {
     expect(digestWorkspaceSliceSnapshotIdentity({
       workspaceId: WORKSPACE_A,
       sqliteMainFileSha256: fileHash,
-      recipeVersion: "v3"
+      recipeVersion: "different-recipe"
     })).not.toBe(first);
     expect(digestWorkspaceSliceSnapshotIdentity({
       workspaceId: WORKSPACE_A,

@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { SourceIndexLifecycle } from "@do-soul/alaya-core";
 import {
   closeCachedDatabase,
   initDatabase,
@@ -76,6 +77,17 @@ describe("workspace slice source index explode", () => {
   it("seals a single-workspace copy that restores lexical rowid binding and labelled vectors", async () => {
     populatePackedSourceIndexes(packedPath);
     const packed = initDatabase({ filename: packedPath });
+    const lifecycle = new SourceIndexLifecycle(new SqliteSourceIndexRepository(packed, fieldContractSha256), fieldContractSha256);
+    for (const workspace of [WORKSPACE_A, WORKSPACE_B]) {
+      expect(await lifecycle.prepareLexical(workspace, "segmented-unicode61.v1", {
+        work: 1_000_000, native_bytes: 16 * 1024 * 1024, capture_page: 128,
+        max_capture_pages: 8, max_roots: 128, max_body_bytes: 1_000_000
+      })).toMatchObject({ status: "ready", generation: { status: "ready" }, model_inputs: 0 });
+    }
+    const lexicalA = snapshotLexicalIndex(packed, WORKSPACE_A);
+    const lexicalB = snapshotLexicalIndex(packed, WORKSPACE_B);
+    expect(lexicalA.source_index_lexical_projections.length).toBeGreaterThan(0);
+    expect(lexicalB.source_index_lexical_projections.length).toBeGreaterThan(0);
     const packedA = snapshotSourceIndex(packed, WORKSPACE_A);
     const packedB = snapshotSourceIndex(packed, WORKSPACE_B);
     const packedIds = sourceIndexTextIds(packed);
@@ -98,6 +110,10 @@ describe("workspace slice source index explode", () => {
     try {
       expect(snapshotSourceIndex(sliceA, WORKSPACE_A)).toEqual(packedA);
       expect(snapshotSourceIndex(sliceB, WORKSPACE_B)).toEqual(packedB);
+      expect(snapshotLexicalIndex(sliceA, WORKSPACE_A)).toEqual(lexicalA);
+      expect(snapshotLexicalIndex(sliceB, WORKSPACE_B)).toEqual(lexicalB);
+      expect(snapshotLexicalIndex(sliceA, WORKSPACE_B)).toEqual(snapshotLexicalIndex(sliceA, "absent"));
+      expect(snapshotLexicalIndex(sliceB, WORKSPACE_A)).toEqual(snapshotLexicalIndex(sliceB, "absent"));
       expect(snapshotSourceIndex(sliceA, WORKSPACE_B)).toEqual(snapshotSourceIndex(sliceA, "absent"));
       expect(sourceIndexTextIds(sliceA).every((id) => id > SOURCE_INDEX_TEXT_ID_GAP)).toBe(true);
       assertLaneHits(sliceA, WORKSPACE_A, SOURCE_LATIN_A, SOURCE_TRIGRAM_A);
@@ -115,6 +131,8 @@ describe("workspace slice source index explode", () => {
     const restored = initDatabase({ filename: workingAlayaDbPath(dataDir) });
     try {
       expect(snapshotSourceIndex(restored, WORKSPACE_A)).toEqual(packedA);
+      expect(snapshotLexicalIndex(restored, WORKSPACE_A)).toEqual(lexicalA);
+      expect(snapshotLexicalIndex(restored, WORKSPACE_B)).toEqual(snapshotLexicalIndex(restored, "absent"));
       expect(snapshotSourceIndex(restored, WORKSPACE_B)).toEqual(snapshotSourceIndex(restored, "absent"));
       assertLaneHits(restored, WORKSPACE_A, SOURCE_LATIN_A, SOURCE_TRIGRAM_A);
       assertLaneMisses(restored, WORKSPACE_A, SOURCE_LATIN_B, SOURCE_TRIGRAM_B);
@@ -152,8 +170,8 @@ describe("workspace slice source index explode", () => {
     ))).toBe(false);
   });
 
-  it("refuses a v1 sidecar instead of relabelling it v2", async () => {
-    const dataDir = join(root, "v1-data");
+  it.each(["v1", "v2"])("refuses a %s sidecar instead of relabelling it as a lexical-complete snapshot", async (recipeVersion) => {
+    const dataDir = join(root, `${recipeVersion}-data`);
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(first).not.toBeNull();
@@ -168,11 +186,11 @@ describe("workspace slice source index explode", () => {
     expect(sidecar.recipe_version).toBe(WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION);
     writeFileSync(sidecarPath(sliceA), `${JSON.stringify({
       ...sidecar,
-      recipe_version: "v1",
+      recipe_version: recipeVersion,
       snapshot_digest: digestWorkspaceSliceSnapshotIdentity({
         workspaceId: WORKSPACE_A,
         sqliteMainFileSha256: sidecar.sqlite_main_file_sha256,
-        recipeVersion: "v1"
+        recipeVersion
       })
     })}\n`);
     expect(readValidWorkspaceSliceSnapshotDigest({
@@ -181,7 +199,7 @@ describe("workspace slice source index explode", () => {
     })).toBeNull();
     expect(JSON.parse(readFileSync(sidecarPath(sliceA), "utf8"))).toMatchObject({
       schema_version: 1,
-      recipe_version: "v1"
+      recipe_version: recipeVersion
     });
   });
 });
@@ -196,6 +214,13 @@ function assertLaneHits(
   latin: string,
   trigram: string
 ): void {
+  const lexical = lexicalHits(database, latin);
+  expect(lexical.length).toBeGreaterThan(0);
+  for (const row of lexical) {
+    expect(row.workspace_id).toBe(workspaceId);
+    expect(row.fts_rowid).toBe(row.id);
+    expect(row.projection).toContain(latin);
+  }
   const unicode61 = matchSourceIndexLane(database, "source_index_fts", latin, workspaceId);
   const trigramHits = matchSourceIndexLane(database, "source_index_fts_trigram", trigram, workspaceId);
   expect(unicode61.length).toBeGreaterThan(0);
@@ -218,8 +243,30 @@ function assertLaneMisses(
   latin: string,
   trigram: string
 ): void {
+  expect(lexicalHits(database, latin)).toEqual([]);
   expect(matchSourceIndexLane(database, "source_index_fts", latin, workspaceId)).toEqual([]);
   expect(matchSourceIndexLane(database, "source_index_fts_trigram", trigram, workspaceId)).toEqual([]);
+}
+
+function snapshotLexicalIndex(database: StorageDatabase, workspace: string) {
+  const rows = (table: string, order: string) => database.connection.prepare(
+    `SELECT * FROM ${table} WHERE workspace_id = ? ORDER BY ${order}`
+  ).all(workspace);
+  return {
+    source_index_lexical_selections: rows("source_index_lexical_selections", "workspace_id"),
+    source_index_lexical_generations: rows("source_index_lexical_generations", "generation_id"),
+    source_index_lexical_targets: rows("source_index_lexical_targets", "generation_id, root_key"),
+    source_index_lexical_projections: rows("source_index_lexical_projections", "id")
+  };
+}
+
+function lexicalHits(database: StorageDatabase, term: string) {
+  return database.connection.prepare(`SELECT p.id, source_index_lexical_fts.rowid AS fts_rowid,
+    p.workspace_id, p.projection FROM source_index_lexical_fts
+    JOIN source_index_lexical_projections p ON p.id = source_index_lexical_fts.rowid
+    WHERE source_index_lexical_fts MATCH ? ORDER BY p.id`).all(term) as {
+      id: number; fts_rowid: number; workspace_id: string; projection: string
+    }[];
 }
 
 function assertNativeVectorCurrentness(

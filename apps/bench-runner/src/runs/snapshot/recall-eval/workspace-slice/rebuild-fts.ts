@@ -92,6 +92,11 @@ const FTS_REBUILDS: readonly FtsRebuildSpec[] = Object.freeze([
     fts: "source_index_fts_trigram",
     mode: "native_rebuild",
     sql: "INSERT INTO source_index_fts_trigram(source_index_fts_trigram) VALUES('rebuild')"
+  },
+  {
+    fts: "source_index_lexical_fts",
+    mode: "native_rebuild",
+    sql: "INSERT INTO source_index_lexical_fts(source_index_lexical_fts) VALUES('rebuild')"
   }
 ]);
 
