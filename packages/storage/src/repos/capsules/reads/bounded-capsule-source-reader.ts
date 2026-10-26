@@ -26,6 +26,7 @@ const COLUMNS = `${["object_id", "workspace_id", "updated_at", "created_at"].map
   CASE WHEN retained_content_bytes = COALESCE(octet_length(excerpt), octet_length(gist))
     THEN retained_content_bytes ELSE NULL END AS body_bytes`;
 
+/** Bound evidence aliases and provenance of an admitted source body are not standalone roots. */
 const EXCLUDED_CAPSULE = `CASE WHEN lifecycle_state != 'active' THEN 1 ELSE EXISTS (
   SELECT 1 FROM source_record_evidence_refs ref JOIN source_records r
     ON r.workspace_id = ref.workspace_id AND r.record_id = ref.record_id
@@ -33,6 +34,10 @@ const EXCLUDED_CAPSULE = `CASE WHEN lifecycle_state != 'active' THEN 1 ELSE EXIS
     AND ref.record_id = (SELECT active.record_id FROM source_record_active_evidence_refs active
       WHERE active.workspace_id = e.workspace_id AND active.evidence_object_id = e.object_id
       ORDER BY active.record_id LIMIT 1) AND octet_length(r.source_body) IS NOT NULL LIMIT 1
+) OR EXISTS (
+  SELECT 1 FROM source_records r
+  WHERE r.workspace_id = e.workspace_id AND r.content_digest = e.source_hash
+    AND octet_length(r.source_body) IS NOT NULL LIMIT 1
 ) END`;
 
 /** Reads one indexed candidate before applying capsule-only membership. */

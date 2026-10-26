@@ -102,6 +102,24 @@ describe("native retained capsule SourceIndex roots", () => {
     expect(env.index.writeLexical(source, documents[0]!.body, BUDGET).status).toBe("rejected");
   });
 
+  it("does not index a provenance capsule whose source_hash is an admitted source body", async () => {
+    const env = setup();
+    const record = publishSource(env, "Harbor opening was put off.");
+    await new SqliteEvidenceCapsuleRepo(env.database).create({
+      object_id: randomUUID(), object_kind: "evidence_capsule", schema_version: 1, lifecycle_state: "active",
+      created_at: CLOCK, updated_at: CLOCK, created_by: "user_action", evidence_kind: "conversation_excerpt",
+      semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
+      event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "provenance gist",
+      excerpt: "Harbor opening was put off.", source_hash: record.content_digest, run_id: "run-1",
+      workspace_id: WORKSPACE, surface_id: null
+    });
+    const { generation, documents } = buildReady(env);
+    expect(generation).toMatchObject({ enumeration_complete: true, target_count: 1 });
+    expect(documents).toHaveLength(1);
+    expect(documents[0]!.source).toMatchObject({ source_id: record.source_id, target: { root_kind: "source_record",
+      root_id: record.record_id } });
+  });
+
   it("retains paid reads on native admission failure and rolls capture progress back", async () => {
     const env = setup(); await capsule(env); const { documents } = buildReady(env);
     env.index.unbind(WORKSPACE);

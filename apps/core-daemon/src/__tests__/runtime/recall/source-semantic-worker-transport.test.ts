@@ -254,7 +254,9 @@ describe("source semantic worker snapshot and preparation ownership", () => {
       await expect(h.client.sourceSemanticsPort!.execute(validate))
         .rejects.toMatchObject({ code: "VALIDATION", details: { admission: "expired" } });
       expect(new Set(posts.calls().map(call => call.worker))).toEqual(new Set([worker]));
-      expect(h.warn).not.toHaveBeenCalled();
+      // Accepted domain rejections keep this worker; they still emit private operator evidence.
+      expect(h.warn).toHaveBeenCalledTimes(4);
+      expect(h.warn.mock.calls.map(([message]) => message)).toEqual(Array(4).fill("recall read worker request failed"));
     } finally { posts.restore(); await h.cleanup(); }
   });
 
@@ -284,7 +286,8 @@ describe("source semantic worker snapshot and preparation ownership", () => {
       await expect(h.client.sourceSemanticsPort!.execute(request)).rejects.toMatchObject({ code: "VALIDATION", details: { admission: "expired" } });
       expect(posts.calls().every(call => call.worker === owner)).toBe(true);
       expect(owner.threadId).toBeGreaterThan(0);
-      expect(h.warn).not.toHaveBeenCalled();
+      expect(h.warn).toHaveBeenCalledTimes(3);
+      expect(h.warn.mock.calls.map(([message]) => message)).toEqual(Array(3).fill("recall read worker request failed"));
     } finally { release.resolve(); await holder.catch(() => undefined); posts.restore(); await h.cleanup(); }
   });
 
