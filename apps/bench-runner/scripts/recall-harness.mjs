@@ -6,7 +6,8 @@
 //   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b] [--shard i/n]
 //
 // ARMS.json: [{ "name": "line", "host": false }, { "name": "message", "host": true,
-//              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1" }, ...]
+//              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1",
+//              "representation": { "kind": "paired-prefix.v1", "query_prefix": "query: ", "passage_prefix": "passage: " } }, ...]
 // Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
 import { createHash } from "node:crypto";
@@ -88,7 +89,7 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? null, arm.lexical ?? null])).slice(0, 16);
+  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? null, arm.lexical ?? null, ...(arm.representation ? [arm.representation] : [])])).slice(0, 16);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
@@ -113,7 +114,7 @@ async function prepared(question, index, arm) {
   mkdirSync(caches.query); mkdirSync(caches.correspondence);
   const config = baseConfig({ question, snapshot, snapshotSha: publication.db_sha256, workspace, caches });
   const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}),
-    ...(arm.lexical ? { lexical: arm.lexical } : {}) };
+    ...(arm.lexical ? { lexical: arm.lexical } : {}), ...(arm.representation ? { representation: arm.representation } : {}) };
   const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined, { maxPasses: 10_000 });
   if (result.config === null) throw new Error(`preparation failed: ${result.report.reason}`);
   return result.config;
