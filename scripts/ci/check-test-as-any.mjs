@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { strictEqual } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "@typescript/typescript6";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
@@ -19,6 +21,20 @@ if (selfTest) {
 }
 
 function runSelfTest() {
+  const cases = [
+    ["export type Fixture = Record<string, any>;", 1],
+    ["const erased = value as any; const angle = <any>value;", 2],
+    ["let values: any[]; type Result = Promise<any> | any;", 3],
+    ["type Choice<T> = T extends string ? any : never;", 1],
+    ["type Fields = { any: any; [key: string]: any };", 2],
+    ["const result = { any: false, all: false }; expect(result).toEqual({ any: true });", 0],
+    ["type Score = { any: boolean }; type Key = keyof Score;", 0],
+    ["const any = false; const result = { any }; expect.any(String);", 0],
+    ["// as any\nconst text = 'any'; const template = `any`; /* Record<string, any> */", 0],
+    ["const template = `value: ${value as any}`;", 1],
+    ["const element = <div any={value as any}>any</div>;", 1, "fixture.test.tsx"]
+  ];
+  for (const [source, count, file] of cases) strictEqual(countTypeAny(source, file), count, source);
   const dir = mkdtempSync(path.join(tmpdir(), "alaya-test-as-any-"));
   const fixture = path.join(dir, "record-string-any.test.ts");
   writeFileSync(fixture, "export type Fixture = Record<string, any>;\n");
@@ -45,7 +61,7 @@ function scanTypeAny(root) {
   const matches = [];
   for (const file of files) {
     const source = readFileSync(file, "utf8");
-    const count = countTypeAny(source);
+    const count = countTypeAny(source, file);
     if (count > 0) {
       matches.push({ file: path.relative(root, file).split(path.sep).join("/"), count });
     }
@@ -86,37 +102,16 @@ function listTestFiles(root) {
   }
 }
 
-function countTypeAny(source) {
-  const stripped = stripCommentsAndStrings(source);
-  const pattern = /(?<![\w$])any(?![\w$])/g;
+function countTypeAny(source, filename = "test.ts") {
+  // Property names such as { any: false } are identifiers, not type erasure.
+  const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest);
   let count = 0;
-  let match;
-  while ((match = pattern.exec(stripped)) !== null) {
-    if (isTypeAny(stripped, match.index)) count += 1;
+  function visit(node) {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) count += 1;
+    ts.forEachChild(node, visit);
   }
+  visit(file);
   return count;
-}
-
-function stripCommentsAndStrings(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (block) => " ".repeat(block.length))
-    .replace(/(^|[^:])\/\/.*$/gm, (line, prefix) => `${prefix}${" ".repeat(line.length - prefix.length)}`)
-    .replace(/`(?:\\.|[^\\`])*`/g, (block) => " ".repeat(block.length))
-    .replace(/"(?:\\.|[^"\\])*"/g, (block) => " ".repeat(block.length))
-    .replace(/'(?:\\.|[^'\\])*'/g, (block) => " ".repeat(block.length));
-}
-
-function isTypeAny(source, index) {
-  const before = source.slice(0, index).trimEnd();
-  const after = source.slice(index + 3).trimStart();
-  const beforeChar = before.slice(-1);
-  const afterChar = after.slice(0, 1);
-  return (
-    /\bas$/u.test(before) ||
-    ":<|&,=([".includes(beforeChar) ||
-    ":>|&,)][".includes(afterChar) ||
-    after.startsWith("[]")
-  );
 }
 
 function reportTypeAny(matches, allowlist, rootLabel) {

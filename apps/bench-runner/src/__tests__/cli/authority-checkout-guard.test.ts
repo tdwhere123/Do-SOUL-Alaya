@@ -139,7 +139,7 @@ const revisionProgram = (app: string) => `
 it("retains the pinned public-template blob for a CRLF fixture checkout", () => {
   const f = fixture("crlf");
   expect(git(f.root, ["rev-parse", ":.env.example"]).toString().trim())
-    .toBe("8473b1cedbcd8483b87b6a5c9978ed804cbd4438");
+    .toBe("184e6881eae958c98afd5a5716fb4a022153ea51");
   const result = run(f, revisionProgram(f.app));
   expect(result.error, result.stderr).toBeUndefined();
   expect(result.status, result.stderr).toBe(0);
