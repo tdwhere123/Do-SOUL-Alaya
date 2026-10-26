@@ -468,6 +468,7 @@ it("captures the allocation before startup awaits and retains each receipt befor
   expect(startBenchDaemon).toHaveBeenCalledTimes(1);
   expect(result.report).toMatchObject({ setup_passes: 2, setup_stop_reason: "settled",
     setup_resources: { model_inputs: 3 }, setup_allowance: { maxPasses: 2, leftover: { modelInputs: 3 } } });
+  expect(result.report.setup_history.map(entry => entry.receipt.limits.modelInputs)).toEqual([2, 1]);
   const total = { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 };
   for (const entry of result.report.setup_history) {
     for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += entry.receipt.resources[key];
@@ -476,7 +477,7 @@ it("captures the allocation before startup awaits and retains each receipt befor
       ["modelInputs", "model_inputs"], ["inputBytes", "input_bytes"]] as const) {
       expect(entry.remaining_after![allowanceKey]).toBe(entry.remaining_before![allowanceKey]! - entry.receipt.resources[receiptKey]);
     }
-    expect(entry.receipt.limits).toMatchObject({ work: 50000, nativeBytes: 4194304, modelInputs: 2, inputBytes: 262144 });
+    expect(entry.receipt.limits).toMatchObject({ work: 50000, nativeBytes: 4194304, inputBytes: 262144 });
     expect(entry.after.cost.pending_reads).toBeLessThanOrEqual(16);
     expect(entry.after.pending.every(row => row.result.status !== "ready" || row.result.ordinals.length <= 1)).toBe(true);
   }
