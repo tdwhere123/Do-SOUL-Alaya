@@ -138,10 +138,9 @@ function buildContiguousMetric(
 export function scoreContiguousReadVisibility(input: {
   readonly gold: AnswerTurnGold;
   readonly slots: readonly DeliveredIntervalSlot[];
-  readonly textChunkMatches?: readonly boolean[];
-  readonly budgets?: readonly number[];
+  readonly textChunkMatches?: readonly boolean[] | ((span: AnswerTurnSpan, index: number) => boolean);
 }): RecallVisibilityDiagnostics {
-  const { gold, slots, textChunkMatches = [] } = input;
+  const { gold, slots, textChunkMatches } = input;
   const at5Slots = slots.filter(s => s.slot < 5);
   const at10Slots = slots.filter(s => s.slot < 10);
   const b2048Slots = clipDeliveredSlotsByBudget(slots, 2048);
@@ -154,6 +153,10 @@ export function scoreContiguousReadVisibility(input: {
   const b4096Covered = gold.spans.map(s => spanIsCoveredByIntervals(b4096Slots, s));
   const b8192Covered = gold.spans.map(s => spanIsCoveredByIntervals(b8192Slots, s));
 
+  const isTextMatch = typeof textChunkMatches === "function"
+    ? (span: AnswerTurnSpan, index: number) => textChunkMatches(span, index)
+    : (span: AnswerTurnSpan, index: number) => Array.isArray(textChunkMatches) ? (textChunkMatches[index] ?? false) : false;
+
   const messages: MessageContiguousDiagnostic[] = gold.spans.map((span, index) => {
     const joining = slots.filter(s => sourceTargetsJoinGold(s.target, span.target));
     return {
@@ -163,7 +166,7 @@ export function scoreContiguousReadVisibility(input: {
       target: span.target,
       start: span.start,
       end: span.end,
-      text_chunk_match: textChunkMatches[index] ?? false,
+      text_chunk_match: isTextMatch(span, index),
       at5: at5Covered[index] ?? false,
       at10: at10Covered[index] ?? false,
       b2048: b2048Covered[index] ?? false,

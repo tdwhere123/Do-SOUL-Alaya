@@ -359,4 +359,233 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it.each(["failed", "error", "unavailable"] as const)(
+    "preserves exact old primary shape on %s rows with only additive diagnostics and no fake primary metrics",
+    (status) => {
+      const question: LongMemEvalQuestion = {
+        question_id: "q-fail",
+        question_type: "single-session-user",
+        question: "Where?",
+        answer: "there",
+        question_date: "2023/04/01 00:00",
+        haystack_session_ids: ["s0"],
+        haystack_dates: ["2023/04/01 00:00"],
+        answer_session_ids: ["s0"],
+        haystack_sessions: [
+          [
+            { role: "user", content: "fact", has_answer: true },
+            { role: "assistant", content: "ok" }
+          ]
+        ]
+      };
+      const dataset = new Map([["q-fail", question]]);
+      const row = {
+        question_id: "q-fail",
+        question_type: "single-session-user",
+        arm: "any-arm",
+        status
+      };
+
+      const result = scoreRecallHarnessRow(row, dataset);
+
+      // Exact old primary shape
+      expect(result.question_id).toBe("q-fail");
+      expect(result.question_type).toBe("single-session-user");
+      expect(result.arm).toBe("any-arm");
+      expect(result.status).toBe(status);
+      expect(result.scored).toBe(false);
+      expect(result.gold).toBe(1);
+
+      // Must NOT fabricate primary metrics or slot/byte counts
+      expect(result).not.toHaveProperty("delivered_bytes");
+      expect(result).not.toHaveProperty("slots");
+      expect(result).not.toHaveProperty("msg5");
+      expect(result).not.toHaveProperty("msg10");
+      expect(result).not.toHaveProperty("root5");
+      expect(result).not.toHaveProperty("root10");
+      expect(result).not.toHaveProperty("b2048");
+      expect(result).not.toHaveProperty("b4096");
+      expect(result).not.toHaveProperty("b8192");
+
+      // ONLY additive diagnostics
+      expect(result.read_gold).toEqual({ annotated: 1, mapped: 0, complete: false });
+      expect(result.read5).toMatchObject({ status: "unknown", any: false, all: false, reason: `row_status_${status}` });
+      expect(result.read10).toMatchObject({ status: "unknown", any: false, all: false, reason: `row_status_${status}` });
+      expect(result.read_b2048).toMatchObject({ status: "unknown", any: false, all: false, reason: `row_status_${status}` });
+      expect(result.source_diagnostics).toMatchObject({ reason: `row_status_${status}`, messages: [] });
+    }
+  );
+
+  it("throws on missing question, non-failed row missing intervals, or missing/corrupt snapshot", () => {
+    const dataset = new Map<string, LongMemEvalQuestion>();
+
+    // Missing question in dataset
+    expect(() =>
+      scoreRecallHarnessRow({ question_id: "nonexistent", question_type: "t", arm: "a", status: "complete" }, dataset)
+    ).toThrow(/not found in dataset/);
+
+    const question: LongMemEvalQuestion = {
+      question_id: "q-real",
+      question_type: "single-session-user",
+      question: "Q?",
+      answer: "A",
+      question_date: "2023/04/01 00:00",
+      haystack_session_ids: ["s0"],
+      haystack_dates: ["2023/04/01 00:00"],
+      answer_session_ids: ["s0"],
+      haystack_sessions: [[{ role: "user", content: "fact", has_answer: true }]]
+    };
+    dataset.set("q-real", question);
+
+    // Nonfailed row missing intervals
+    expect(() =>
+      scoreRecallHarnessRow({ question_id: "q-real", question_type: "t", arm: "a", status: "complete" }, dataset)
+    ).toThrow(/requires intervals array/);
+
+    // Nonfailed row pointing to nonexistent SQLite snapshot
+    expect(() =>
+      scoreRecallHarnessRow(
+        {
+          question_id: "q-real",
+          question_type: "t",
+          arm: "a",
+          status: "complete",
+          snapshot: "/nonexistent/db.sqlite",
+          workspace: "ws",
+          intervals: []
+        },
+        dataset
+      )
+    ).toThrow();
+  });
+
+  it("correctly maps per-span text_chunk_match when an earlier gold turn is unmapped (gap-before-mapped-turn)", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "recall-gap-test-"));
+    try {
+      const dbPath = join(tempDir, "source-index.sqlite");
+      const db = new Database(dbPath);
+      db.exec(`
+        CREATE TABLE source_records (
+          workspace_id TEXT,
+          record_id TEXT,
+          source_id TEXT,
+          source_version TEXT,
+          content_digest TEXT,
+          source_body TEXT
+        );
+      `);
+
+      // Turn 0 is in session 0 ("AlphaSecretCode12345")
+      // Turn 1 is in session 1 ("BetaSecretCode67890")
+      // SQLite snapshot ONLY has session 1 (round 0). Session 0 is NOT published in source_records.
+      // So Turn 0 is UNMAPPED (gap before Turn 1).
+      const contentTurn1 = "User: BetaSecretCode67890\nAssistant: Response for beta";
+      const recordId1 = "sha256:bbbb000000000000000000000000000000000000000000000000000000000002";
+      const digest1 = "sha256:2222000000000000000000000000000000000000000000000000000000000002";
+      db.prepare("INSERT INTO source_records VALUES (?, ?, ?, ?, ?, ?)").run(
+        "ws-gap",
+        recordId1,
+        "longmemeval_s:q-gap-s1-r0",
+        "bench-v1",
+        digest1,
+        contentTurn1
+      );
+      db.close();
+
+      const question: LongMemEvalQuestion = {
+        question_id: "q-gap",
+        question_type: "multi-session",
+        question: "What are alpha and beta codes?",
+        answer: "codes",
+        question_date: "2023/04/01 00:00",
+        haystack_session_ids: ["s0", "s1"],
+        haystack_dates: ["2023/04/01 00:00", "2023/04/01 01:00"],
+        answer_session_ids: ["s0", "s1"],
+        haystack_sessions: [
+          [{ role: "user", content: "AlphaSecretCode12345", has_answer: true }],
+          [
+            { role: "user", content: "BetaSecretCode67890", has_answer: true },
+            { role: "assistant", content: "Response for beta" }
+          ]
+        ]
+      };
+      const dataset = new Map([["q-gap", question]]);
+
+      // Delivered intervals:
+      // Slot 0 delivers an unmapped source that happens to contain "AlphaSecretCode12345" substring!
+      // Slot 1 delivers a partial interval of Turn 1 ("User: BetaSe") that does NOT contain "BetaSecretCode67890"
+      // Therefore, in chunk matching:
+      // Turn 0 ("AlphaSecretCode12345") is matched in slot 0 text!
+      // Turn 1 ("BetaSecretCode67890") is NOT matched in any chunk!
+      const dummyId = "sha256:dddd000000000000000000000000000000000000000000000000000000000004";
+      const db2 = new Database(dbPath);
+      db2.prepare("INSERT INTO source_records VALUES (?, ?, ?, ?, ?, ?)").run(
+        "ws-gap",
+        dummyId,
+        "longmemeval_s:dummy",
+        "bench-v1",
+        "sha256:4444000000000000000000000000000000000000000000000000000000000004",
+        "Some text containing AlphaSecretCode12345 exactly"
+      );
+      db2.close();
+
+      const row = {
+        question_id: "q-gap",
+        question_type: "multi-session",
+        arm: "gap-arm",
+        status: "complete",
+        snapshot: dbPath,
+        workspace: "ws-gap",
+        intervals: [
+          {
+            slot_index: 0,
+            target: {
+              kind: "source_evidence",
+              workspace_id: "ws-gap",
+              root_kind: "source_record",
+              root_id: dummyId,
+              source_version: "bench-v1",
+              content_digest: "sha256:4444000000000000000000000000000000000000000000000000000000000004",
+              span: { content_start: 0, content_end: 49 }
+            },
+            span: { content_start: 0, content_end: 49 }
+          },
+          {
+            slot_index: 1,
+            target: {
+              kind: "source_evidence",
+              workspace_id: "ws-gap",
+              root_kind: "source_record",
+              root_id: recordId1,
+              source_version: "bench-v1",
+              content_digest: digest1,
+              span: { content_start: 0, content_end: 12 } // "User: BetaSe"
+            },
+            span: { content_start: 0, content_end: 12 }
+          }
+        ]
+      };
+
+      const result = scoreRecallHarnessRow(row, dataset);
+
+      // Turn 0 is unmapped, so mapped = 1 while annotated = 2
+      expect(result.read_gold).toEqual({ annotated: 2, mapped: 1, complete: false });
+
+      // There is only 1 mapped message in diagnostics: Turn 1
+      expect(result.source_diagnostics.messages).toHaveLength(1);
+      const mappedMsg = result.source_diagnostics.messages[0]!;
+      expect(mappedMsg.source_id).toBe("longmemeval_s:q-gap-s1-r0");
+      expect(mappedMsg.session_index).toBe(1);
+
+      // CRITICAL: Turn 1's text_chunk_match must be FALSE (not falsely inheriting Turn 0's true match at index 0)
+      expect(mappedMsg.text_chunk_match).toBe(false);
+
+      // Incomplete gold is reported as unknown, not miss:
+      expect(result.read5.status).toBe("unknown");
+      expect(result.read5.reason).toBe("answer_turn_mapping_incomplete");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

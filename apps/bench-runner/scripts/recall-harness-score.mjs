@@ -24,25 +24,24 @@ export const BUDGETS = [2048, 4096, 8192];
 export const norm = text => text.replace(/\s+/gu, " ").trim();
 
 export function loadSnapshotSources(snapshot, workspace) {
+  const db = new Database(snapshot, { readonly: true, fileMustExist: true });
   try {
-    const db = new Database(snapshot, { readonly: true, fileMustExist: true });
-    try {
-      const rows = db.prepare(
-        "SELECT record_id, source_id, source_version, content_digest, source_body FROM source_records WHERE workspace_id=?"
-      ).all(workspace);
-      const bodyMap = new Map(rows.map(row => [row.record_id, Buffer.from(row.source_body, "utf8")]));
-      return { bodyMap, sourceRows: rows, error: null };
-    } finally {
-      db.close();
-    }
-  } catch (err) {
-    return { bodyMap: new Map(), sourceRows: [], error: err };
+    const rows = db.prepare(
+      "SELECT record_id, source_id, source_version, content_digest, source_body FROM source_records WHERE workspace_id=?"
+    ).all(workspace);
+    const bodyMap = new Map(rows.map(row => [row.record_id, Buffer.from(row.source_body, "utf8")]));
+    return { bodyMap, sourceRows: rows };
+  } finally {
+    db.close();
   }
 }
 
 export function scoreRecallHarnessRow(row, dataset) {
   const question = dataset.get(row.question_id);
-  const gold = question?.haystack_sessions?.flat().filter(turn => turn.has_answer).map(turn => norm(turn.content)).filter(Boolean) ?? [];
+  if (!question) {
+    throw new Error(`Question ${row.question_id} not found in dataset`);
+  }
+  const gold = question.haystack_sessions.flat().filter(turn => turn.has_answer).map(turn => norm(turn.content)).filter(Boolean);
   const baseData = { question_id: row.question_id, question_type: row.question_type, arm: row.arm, status: row.status };
 
   if (row.status === "error" || row.status === "failed" || row.status === "unavailable") {
@@ -51,19 +50,16 @@ export function scoreRecallHarnessRow(row, dataset) {
       ...baseData,
       scored: false,
       gold: gold.length,
-      delivered_bytes: 0,
-      slots: 0,
-      msg5: { any: false, all: false },
-      msg10: { any: false, all: false },
-      root5: { any: false, all: false },
-      root10: { any: false, all: false },
-      ...Object.fromEntries(BUDGETS.map(B => [`b${B}`, { any: false, all: false }])),
       ...unavail
     };
   }
 
+  if (!Array.isArray(row.intervals)) {
+    throw new Error(`Row ${row.question_id} (${row.arm}) status "${row.status}" requires intervals array`);
+  }
+
   const { bodyMap, sourceRows } = loadSnapshotSources(row.snapshot, row.workspace);
-  const slots = (row.intervals ?? []).filter(i => i.span !== null).map(i => {
+  const slots = row.intervals.filter(i => i.span !== null).map(i => {
     const bytes = bodyMap.get(i.target.root_id) ?? Buffer.alloc(0);
     const text = bytes.subarray(i.span.content_start, i.span.content_end);
     return {
@@ -96,8 +92,8 @@ export function scoreRecallHarnessRow(row, dataset) {
   const anyAll = v => ({ any: v.some(Boolean), all: v.length > 0 && v.every(Boolean) });
 
   let diagnostics;
-  if (gold.length === 0 || !question) {
-    diagnostics = unavailableRecallRowDiagnostics("no_annotated_answer_turn", gold.length);
+  if (gold.length === 0) {
+    diagnostics = unavailableRecallRowDiagnostics("no_annotated_answer_turn", 0);
   } else {
     const answerGold = joinSnapshotAnswerSpans(question, row.workspace, sourceRows);
     const deliveredIntervals = slots.map(s => ({
@@ -114,11 +110,19 @@ export function scoreRecallHarnessRow(row, dataset) {
         content_end: s.span.content_end
       }
     }));
+    const at10Chunks = at(10, s => s.map(x => norm(x.bytes.toString("utf8"))));
+    const textChunkMatches = answerGold.spans.map(span => {
+      const turnContent = question.haystack_sessions[span.session_index]?.[span.message_index]?.content;
+      const turnText = turnContent ? norm(turnContent) : null;
+      const bodyBytes = bodyMap.get(span.target.root_id);
+      const spanText = bodyBytes ? norm(bodyBytes.subarray(span.start, span.end).toString("utf8")) : null;
+      const matchText = turnText || spanText;
+      return matchText ? at10Chunks.some(t => t.includes(matchText)) : false;
+    });
     diagnostics = scoreContiguousReadVisibility({
       gold: answerGold,
       slots: deliveredIntervals,
-      textChunkMatches: flags.at10.msg,
-      budgets: BUDGETS
+      textChunkMatches
     });
   }
 
