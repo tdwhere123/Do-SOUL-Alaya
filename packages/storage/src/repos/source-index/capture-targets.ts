@@ -8,7 +8,7 @@ import { requireSourceIndexGeneration, sourceIndexBuildGuard } from "./generatio
 import { guardSourceIndexTarget, sourceReadCost, sourceTargetFromRead } from "./native-source.js";
 
 /** Persist roots/dependencies in the enclosing lifecycle transaction. Identity keys include root kind. */
-export function persistSourceIndexRoot(database: StorageDatabase, source: SourceIndexTarget, dependencies: readonly string[],
+function persistSourceIndexRoot(database: StorageDatabase, source: SourceIndexTarget, dependencies: readonly string[],
   budget: SourceIndexBudget, resources: { work: number; native_bytes: number }): boolean {
   if (budget.work - resources.work < dependencies.length) return false;
   database.connection.prepare(`INSERT INTO source_index_roots
