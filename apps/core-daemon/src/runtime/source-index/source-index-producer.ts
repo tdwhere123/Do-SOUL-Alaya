@@ -3,6 +3,7 @@ import {
   SOURCE_INDEX_MAX_BODY_BYTES,
   SourceIndexOperationError,
   SourceEmbeddingRepresentationSchema, type SourceEmbeddingRepresentation,
+  SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION,
   SourceIndexWindowingSchema, type SourceIndexWindowing,
   type SourceIndexBackfillBudget,
   type SourceIndexBackfillResult,
@@ -242,6 +243,9 @@ export class SourceIndexProducer {
       seen.add(workspace);
       // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
       this.afterWorkspace = workspace;
+      // Lexical text is model-independent: it is prepared whether or not an embedding binding exists.
+      await this.reconcileLexical(workspace, pass);
+      if (pass.signal.aborted) return;
       if (tracked.status !== "ready") {
         this.lifecycle.unbind(workspace);
         this.targetCursors.delete(workspace);
@@ -251,6 +255,25 @@ export class SourceIndexProducer {
         if (outcome !== null && pass.outcome.status === "settled") pass.outcome = outcome;
         if (!this.hasBudget(pass)) return;
       }
+    }
+  }
+
+  /** Takes at most half of what the pass has left so vector preparation after it is never starved. */
+  private async reconcileLexical(workspaceId: string, pass: Pass): Promise<void> {
+    const left = remainingBudget(pass.limits, pass.spent);
+    const roots = Math.ceil((pass.limits.maxRootsPerPass - pass.visitedRoots) / 2);
+    if (left.work < 2 || left.native_bytes < 16 || roots < 1) return;
+    // An explicit selection (e.g. a raw rollback) is honored; the default applies only to unselected workspaces.
+    const representation = this.repository.lexical.lexicalState(workspaceId)?.selection.representation
+      ?? SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION;
+    const result = await this.lifecycle.prepareLexical(workspaceId, representation, {
+      work: Math.ceil(left.work / 2), native_bytes: Math.ceil(left.native_bytes / 2), capture_page: pass.limits.capturePage,
+      max_capture_pages: Math.max(1, Math.ceil((pass.limits.maxCapturePages - pass.capturePages) / 2)),
+      max_roots: roots, max_body_bytes: pass.limits.maxBodyBytes }, pass.signal, pass.deadline);
+    pass.spent.work += result.resources.work;
+    pass.spent.native_bytes += result.resources.native_bytes;
+    if (result.status === "unavailable" && result.reason !== "segmenter_unavailable" && !pass.signal.aborted) {
+      this.input.warn("source index lexical preparation unavailable", { workspace_id: workspaceId, reason: boundedProducerFailureReason(result.reason ?? "") });
     }
   }
 

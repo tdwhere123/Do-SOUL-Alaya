@@ -11,6 +11,8 @@ import {
 
 import { readSourceIndexLexicalAnalysisStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 
+const LEXICAL_REUSE_BATCH_ROWS = 64, LEXICAL_REUSE_BATCHES_PER_PAGE = 16;
+
 /** Owns Source projection build intent. No inference, provider, worker, or query side effects. */
 export class SourceIndexLifecycle {
   public constructor(private readonly repository: SourceIndexRepository, private readonly sha256: FieldContractSha256) {}
@@ -123,12 +125,21 @@ export class SourceIndexLifecycle {
       }
       generation = store.beginLexical(selection);
       checkpoint();
+      // A published generation for this epoch is final; later passes only observe it.
+      if (generation.status === "ready" || generation.status === "valid_empty") return result("ready", null);
       for (let page = 0; page < limits.max_capture_pages && !generation.enumeration_complete; page++) {
         const captured = store.captureLexicalPage(workspaceId, generation.generation_id, limits.capture_page, left());
         debit(captured.resources); generation = captured.generation;
         checkpoint();
         await yieldToEventLoop(); checkpoint();
         if (captured.resources.work === 0) break;
+      }
+      // Unchanged roots copy the active generation's projections; only new or changed roots are analyzed.
+      for (let batch = 0; batch < limits.max_capture_pages * LEXICAL_REUSE_BATCHES_PER_PAGE; batch++) {
+        const reuse = store.reuseLexicalProjections(workspaceId, generation.generation_id, LEXICAL_REUSE_BATCH_ROWS, left());
+        debit(reuse.resources); checkpoint();
+        if (reuse.reused === 0 || reuse.complete) break;
+        await yieldToEventLoop(); checkpoint();
       }
       for (let root = 0; root < limits.max_roots; root++) {
         const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());

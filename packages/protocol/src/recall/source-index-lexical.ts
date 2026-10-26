@@ -8,6 +8,8 @@ import type { SourceIndexBudget, SourceIndexGeneration, SourceIndexGuardedWriteR
 /** Absence of explicit selection retains the historical raw/default SourceIndex reader. */
 export const SourceIndexLexicalRepresentationSchema = z.enum(["raw-unicode61.v1", "segmented-unicode61.v1"]);
 export type SourceIndexLexicalRepresentation = z.infer<typeof SourceIndexLexicalRepresentationSchema>;
+/** Representation the background producer prepares for a workspace that has no explicit selection. */
+export const SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION: SourceIndexLexicalRepresentation = "segmented-unicode61.v1";
 export const SourceIndexLexicalSelectionSchema = z.object({ workspace_id: BoundedIdSchema,
   selection_revision: NonNegativeIntSchema, representation: SourceIndexLexicalRepresentationSchema }).strict().readonly();
 export type SourceIndexLexicalSelection = z.infer<typeof SourceIndexLexicalSelectionSchema>;
@@ -22,6 +24,8 @@ export type SourceIndexLexicalState = Readonly<{ selection: SourceIndexLexicalSe
   active_generation_id: string | null }> | null;
 export type SourceIndexLexicalCaptureResult = Readonly<{ generation: SourceIndexLexicalGeneration;
   added: number; resources: SourceIndexResources }>;
+export type SourceIndexLexicalReuseResult = Readonly<{ reused: number; resources: SourceIndexResources;
+  complete: boolean }>;
 /** Work additionally charges one analysis unit per UTF-16 input code unit actually analyzed.
  * This is neither measured CPU nor model work. Native bytes retain their existing read meaning. */
 export type SourceIndexLexicalPreparationResult = Readonly<{ status: "ready" | "partial" | "unavailable" | "stale" | "superseded" | "unbound";
@@ -37,6 +41,8 @@ export type SourceIndexLexicalPassResult = SourceIndexLexicalPreparationResult &
 
 /** Independent lexical selection and generation, under the existing SourceIndex owner and source epoch. */
 export interface SourceIndexLexicalRepository {
+  /** Active generation's reusable projections: copies projection and FTS rows for roots whose digest is unchanged. */
+  reuseLexicalProjections(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReuseResult;
   selectLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection;
   lexicalState(workspaceId: string): SourceIndexLexicalState;
   beginLexical(selection: SourceIndexLexicalSelection): SourceIndexLexicalGeneration;

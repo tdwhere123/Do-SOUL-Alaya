@@ -336,11 +336,23 @@ The explicit `SourceIndexLifecycle.prepareLexical` entry and the idle daemon's
 records and standalone capsules with no embedding binding or dispatch. They share
 the bounded native census, source guards and dependency closure with vector
 preparation, but have independent selection, generation, pending roots and activation.
-No selector is installed by startup. The absent-selector raw/default reader remains
-the named consumer of historical exact-text rows. Explicit `raw-unicode61.v1` and
+The background producer prepares `SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`
+(`segmented-unicode61.v1`, Protocol 26.0.0, invariant §25 major) for every workspace it
+visits that has no explicit selection, whether or not an embedding binding exists; an
+explicit selection (for example a raw rollback) is prepared as selected. Lexical takes at
+most half of each pass's remaining work, native bytes and roots, then vector work uses the
+rest. Until the first generation of the selected representation publishes, the reader
+serves the raw `source_index_fts` exactly as for an absent selector, so preparation never
+causes a lexical outage. The raw reader remains the named consumer of historical
+exact-text rows. Explicit `raw-unicode61.v1` and
 `segmented-unicode61.v1` selections activate only after matching coverage publishes.
-Changing the selection withdraws prior lexical eligibility immediately; incomplete
-preparation is unavailable, not a silent mixture. Model changes/unbind do not affect
+Changing the selection withdraws prior lexical eligibility immediately; until the new
+generation publishes the raw reader serves, never a mixture of the two projections.
+A new source epoch's generation reuses the projection and FTS rows of every root whose
+`root_key`, content digest and body bytes match the active generation (charged as copy
+reads and writes, no analysis units) and analyzes only new or changed roots. A segmented
+selection whose segmenter is cold, loading or failed reads the raw index with raw query
+tokens; it never mixes the two tokenizations. Model changes/unbind do not affect
 lexical selection, and lexical selection does not retire vector generations.
 
 The segmented variant requires the pinned Node Jieba analyzer to be ready; cold,

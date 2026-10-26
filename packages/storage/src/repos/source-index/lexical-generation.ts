@@ -4,7 +4,7 @@ import {
   canonicalJson, prepareSourceIndexLexical, sourceIndexLexicalGenerationId,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexLexicalRepository,
   type SourceIndexLexicalRepresentation, type SourceIndexLexicalSelection, type SourceIndexLexicalGeneration,
-  type SourceIndexLexicalState, type SourceIndexLexicalCaptureResult, type SourceIndexReadResult,
+  type SourceIndexLexicalState, type SourceIndexLexicalCaptureResult, type SourceIndexLexicalReuseResult, type SourceIndexReadResult,
   type SourceIndexLexicalBinding, type SourceIndexResources,
   type SourceIndexGuardedWriteResult, type SourceIndexTarget, type SourceIndexWriteResult
 } from "@do-soul/alaya-protocol";
@@ -21,6 +21,46 @@ import { assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSo
 /** Independent lexical persistence behind SourceIndexLifecycle; no vector configuration or writes. */
 export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalRepository {
   constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256) {}
+
+  /** Roots unchanged since the active generation (same root_key, digest, body bytes) copy its projection; no analysis.
+   * The trigger-maintained FTS rows follow the insert. Reads and writes of each projection are charged as native bytes. */
+  reuseLexicalProjections(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReuseResult {
+    assertIndexBudget(budget); assertIndexPageLimit(limit);
+    const resources = { work: 0, native_bytes: 0 };
+    try { return this.atomic(() => {
+      const generation = this.requireGeneration(workspaceId, generationId);
+      const state = this.lexicalState(workspaceId), from = state?.active_generation_id ?? null;
+      if (this.guard(generation) !== null || from === null || from === generationId ||
+          this.requireGeneration(workspaceId, from).selection.representation !== generation.selection.representation) {
+        return { reused: 0, resources, complete: true };
+      }
+      const match = `FROM source_index_lexical_targets t JOIN source_index_roots r ON r.workspace_id=t.workspace_id AND r.root_key=t.root_key
+        JOIN source_index_lexical_projections p ON p.workspace_id=t.workspace_id AND p.root_key=t.root_key AND p.generation_id=?
+          AND p.content_digest=json_extract(r.target_json,'$.target.content_digest') AND p.body_bytes=json_extract(r.target_json,'$.body_bytes')
+        WHERE t.workspace_id=? AND t.generation_id=? AND t.complete=0 AND NOT EXISTS (SELECT 1 FROM source_index_lexical_projections n
+          WHERE n.workspace_id=t.workspace_id AND n.generation_id=t.generation_id AND n.root_key=t.root_key)`;
+      const candidates = this.database.connection.prepare(`SELECT t.root_key AS root_key,octet_length(p.projection) AS bytes ${match}
+        ORDER BY t.root_key LIMIT ?`).all(from, workspaceId, generationId, limit + 1);
+      resources.work++;
+      const insert = this.database.connection.prepare(`INSERT INTO source_index_lexical_projections
+        (workspace_id,generation_id,root_key,content_digest,body_bytes,projection)
+        SELECT p.workspace_id,?,p.root_key,p.content_digest,p.body_bytes,p.projection FROM source_index_lexical_projections p
+        WHERE p.workspace_id=? AND p.generation_id=? AND p.root_key=?`);
+      const complete = this.database.connection.prepare(`UPDATE source_index_lexical_targets SET complete=1
+        WHERE workspace_id=? AND generation_id=? AND root_key=?`);
+      let reused = 0;
+      for (const raw of candidates.slice(0, limit)) {
+        const row = readRecord(raw, "reusable lexical projection"), bytes = readIntegerField(row, "bytes");
+        if (budget.work - resources.work < 2 || budget.native_bytes - resources.native_bytes < 2 * bytes) {
+          return { reused, resources, complete: false };
+        }
+        const rootKey = readStringField(row, "root_key");
+        insert.run(generationId, workspaceId, from, rootKey); complete.run(workspaceId, generationId, rootKey);
+        resources.work += 2; resources.native_bytes += 2 * bytes; reused++;
+      }
+      return { reused, resources, complete: candidates.length <= limit };
+    }); } catch (error) { throw new SourceIndexOperationError(error, resources); }
+  }
 
   selectLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection {
     BoundedIdSchema.parse(workspaceId); SourceIndexLexicalRepresentationSchema.parse(representation);
@@ -233,7 +273,8 @@ export function readSourceIndexLexicalBinding(database: StorageDatabase, workspa
   const row = readRecord(cachedReadStatement(database, `SELECT s.selection_revision,s.representation,s.active_generation_id,
     g.selection_revision AS generation_revision,g.representation AS generation_representation,g.source_epoch,g.status ${from}`)
     .get(workspaceId), "lexical binding");
-  if (row.active_generation_id === null) return unavailable("lexical_generation_unpublished");
+  // Until the selected representation first publishes, readers keep the raw index rather than losing lexical recall.
+  if (row.active_generation_id === null) return { state: { status: "legacy" }, resources };
   if (row.selection_revision !== row.generation_revision || row.representation !== row.generation_representation) return unavailable("lexical_selection_mismatch");
   const status = row.status;
   if (status !== "ready" && status !== "valid_empty" && status !== "partial") return unavailable("lexical_generation_unavailable");

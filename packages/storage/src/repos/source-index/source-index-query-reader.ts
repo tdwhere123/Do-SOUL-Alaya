@@ -177,11 +177,14 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
       if (selected.state.reason === "read_budget") resourceRefusal = { stage: "lexical", phase: "source lexical binding read" };
       return result(selected.state.reason === "read_budget" ? "partial" : "unavailable", selected.state.reason);
     }
-    const binding = "binding" in selected.state ? selected.state.binding : undefined;
-    partialGeneration = selected.state.status === "partial";
+    const selectedBinding = "binding" in selected.state ? selected.state.binding : undefined;
+    // A cold or failed segmenter reads the raw index with raw query tokens, which stay mutually consistent.
+    const segmenterReady = selectedBinding?.representation !== "segmented-unicode61.v1"
+      || readSourceIndexLexicalAnalysisStatus() === "ready";
+    const binding = segmenterReady ? selectedBinding : undefined;
+    partialGeneration = segmenterReady && selected.state.status === "partial";
     const segmented = binding?.representation === "segmented-unicode61.v1";
     const cjkState = segmented ? readSourceIndexLexicalAnalysisStatus() : readCjkSegmentationStatus();
-    if (segmented && cjkState !== "ready") return result("unavailable", `segmenter_${cjkState}`);
     const tokens = segmented ? analyzeSourceIndexLexical(navigationText, "query")
       : tokenizeFtsQuery(navigationText, { initializeCjk: false });
     const split = splitFtsLanes(tokens);
