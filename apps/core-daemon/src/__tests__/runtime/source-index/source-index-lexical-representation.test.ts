@@ -167,6 +167,23 @@ it("distinguishes bounded-out from valid-empty and scrubs capsule and canonical 
   } finally { database.close({ optimize: false }); }
 });
 
+it("advances a root whose analysis exceeds one pass allowance and reports the advanced generation", async () => {
+  const environment = fixture(), { database, index } = environment;
+  try {
+    const long = "自动部署流水线 ".repeat(400);
+    admit(database, long, "long");
+    const small = { ...limits, work: 1_000 };
+    expect(long.length).toBeGreaterThan(small.work);
+    const lifecycle = new SourceIndexLifecycle(index, fieldSha256);
+    let pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", small);
+    for (let attempt = 0; attempt < 8 && pass.status !== "ready"; attempt++) {
+      pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", small);
+    }
+    expect(pass).toMatchObject({ status: "ready", generation: { target_count: 1, completed_count: 1 } });
+    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget).candidates).toHaveLength(1);
+  } finally { database.close({ optimize: false }); }
+});
+
 it("resumes a bounded generation, fences stale writers, repairs lost payloads, and leaves vector identities alone", async () => {
   const directory = mkdtempSync(join(tmpdir(), "lexical-resume-")), filename = join(directory, "source.sqlite");
   const environment = fixture(filename);

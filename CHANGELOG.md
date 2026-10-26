@@ -33,6 +33,11 @@ page, so their read bytes no longer carry into the retained field. Long roots no
 exhaust the default request memory on later pages, which failed the page commit with
 an internal error. Result identifiers and delivered intervals are unchanged.
 
+Lexical preparation always advances: a pass funds its first pending root's analysis
+within `max_body_bytes`, so a root larger than one pass allowance no longer stalls the
+generation (`lexical_no_progress`). Budget-limited passes report the generation they
+actually advanced.
+
 Protocol 24.0.0 funds ordinary native acquisition from its declared attempts, roots
 and active-generation window allowance, independently of the field page budget
 (invariant §25 major: ordinary membership and ranking can change). Acquisition runs

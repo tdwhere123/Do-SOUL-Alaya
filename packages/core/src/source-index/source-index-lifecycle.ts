@@ -109,6 +109,11 @@ export class SourceIndexLifecycle {
     const result = (status: SourceIndexLexicalPassResult["status"], reason: string | null,
       accounting: "complete" | "lower_bound" = "complete"): SourceIndexLexicalPassResult =>
       ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0 });
+    // A budget-limited stop is not an interruption: report the generation it actually advanced.
+    const settled = (status: SourceIndexLexicalPassResult["status"], reason: string | null) => {
+      if (generation !== null) generation = store.lexicalGeneration(workspaceId, generation.generation_id) ?? generation;
+      return result(status, reason);
+    };
     try {
       checkpoint();
       const warmed = representation !== "segmented-unicode61.v1" || await warmCjkSegmentation();
@@ -129,18 +134,22 @@ export class SourceIndexLifecycle {
         const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());
         debit(pending.resources); checkpoint();
         if (pending.source === null) {
-          if (!pending.complete) return result("partial", "read_budget");
+          if (!pending.complete) return settled("partial", "read_budget");
           break;
         }
         const read = store.readLexicalDocument(workspaceId, generation.generation_id, pending.source.root_key, limits.max_body_bytes, left());
         debit(read.resources); checkpoint();
-        if (read.status !== "ready") return result(read.status, read.reason);
-        const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body, left());
+        if (read.status !== "ready") return settled(read.status, read.reason);
+        // The pass's first root funds its own analysis (bounded by max_body_bytes), so a root
+        // larger than the pass allowance still advances instead of stalling every pass.
+        const allowance = left();
+        const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body,
+          root === 0 ? { ...allowance, work: allowance.work + read.body.length } : allowance);
         debit(write.resources); analysis += write.analysis_units;
         checkpoint();
         if (write.status !== "accepted") {
           const rejected = preparationRejection(write.reason, resources);
-          return result(rejected.status, rejected.reason);
+          return settled(rejected.status, rejected.reason);
         }
         await yieldToEventLoop(); checkpoint();
       }
