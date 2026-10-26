@@ -99,8 +99,9 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly insertEvidenceBindingStatement;
   private readonly listEvidenceBindingsStatement;
 
-  public readDeliveryBoundaries(workspaceId: string, recordId: string, workLimit: number, byteLimit: number) {
-    return readSourceDeliveryBoundaries(this.database, this.sha256, workspaceId, recordId, workLimit, byteLimit);
+  public readDeliveryBoundaries(workspaceId: string, recordId: string, window: Readonly<{ start: number; end: number }>,
+    workLimit: number, byteLimit: number) {
+    return readSourceDeliveryBoundaries(this.database, this.sha256, workspaceId, recordId, window, workLimit, byteLimit);
   }
 
   public constructor(

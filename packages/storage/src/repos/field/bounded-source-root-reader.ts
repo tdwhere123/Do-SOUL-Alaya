@@ -178,6 +178,7 @@ export class SqliteSourceRootRecallReader {
     if (!deliveryBoundaries || page.row === null || page.unavailable) return page;
     const read = target.root_kind === "source_record"
       ? this.records.readDeliveryBoundaries(workspaceId, target.root_id,
+        { start: page.row.content_start, end: page.row.content_end },
         Math.max(0, workLimit - (page.nativeWork ?? page.rowsRead)),
         Math.max(0, nativeByteLimit - page.bytesRead - (page.metadataBytes ?? 0)))
       : { boundaries: { status: "available" as const, spans: [] }, nativeWork: 0, metadataBytes: 0, rowsRead: 0 };

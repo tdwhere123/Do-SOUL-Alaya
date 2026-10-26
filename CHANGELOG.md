@@ -33,6 +33,14 @@ page, so their read bytes no longer carry into the retained field. Long roots no
 exhaust the default request memory on later pages, which failed the page commit with
 an internal error. Result identifiers and delivered intervals are unchanged.
 
+Source delivery boundaries are read for the delivered window only: one unit (message
+when the root records any, else line) and only its ends inside the hydrated span,
+through a new `(workspace_id, record_id, purpose, end_offset)` index (migration 026).
+Previously every span of the root was read on each hydration, so one long round could
+spend ~190 KB of request memory for a 4 KB preview and stall a query for dozens of
+empty interrupted pages. Retention checks before commit also count the page's
+releasable hydration bytes. Delivered text and intervals are unchanged.
+
 Lexical preparation always advances: a pass funds its first pending root's analysis
 within `max_body_bytes`, so a root larger than one pass allowance no longer stalls the
 generation (`lexical_no_progress`). Budget-limited passes report the generation they

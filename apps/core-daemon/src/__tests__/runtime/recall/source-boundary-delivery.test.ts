@@ -270,9 +270,8 @@ it("charges native boundary lookup and distinguishes known absence, unreadable a
       new SqliteEvidenceCapsuleRepo(fixture.database));
     const baseline = reader.hydrate(WS, target, 1500, 0, 100_000, 1000);
     const aligned = reader.hydrate(WS, target, 1500, 0, 100_000, 1000, true);
-    expect(aligned.row?.delivery_boundaries).toEqual({ status: "available", spans: expect.arrayContaining([
-      { purpose: "line", end_offset: lineEnd }, { purpose: "line", end_offset: Buffer.byteLength(text) }
-    ]) });
+    // The second line ends past the hydrated window; delivery never uses it.
+    expect(aligned.row?.delivery_boundaries).toEqual({ status: "available", spans: [{ purpose: "line", end_offset: lineEnd }] });
     expect(aligned.nativeWork).toBeGreaterThan(baseline.nativeWork!);
     expect(aligned.metadataBytes).toBeGreaterThan(baseline.metadataBytes!);
     const limited = reader.hydrate(WS, target, 1500, 0, 100_000, baseline.nativeWork!, true);

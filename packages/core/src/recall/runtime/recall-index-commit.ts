@@ -191,7 +191,8 @@ export function prepareIndexCommit(input: Readonly<{
     input.first_retention,
     invalidated ? input.projectionProgress.delivered_products : products
   );
-  assertDeliveryRetention(delivery.bytes, input.payload.remainingMemoryBytes);
+  // Commit releases this page's source hydration before it retains the ledger.
+  assertDeliveryRetention(delivery.bytes, input.payload.remainingMemoryBytes + input.payload.releasableSourceBytes);
   let retained = { ...input.state, projection_progress: delivery.progress };
   if (index.continuation === null && !invalidated && index.entries.some((entry) => entry.target.kind === "source_evidence")) {
     const view = input.state.interpretation.view;

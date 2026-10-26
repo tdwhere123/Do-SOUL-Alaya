@@ -184,6 +184,9 @@ export class BoundedIndexPayload {
     this.sourcePreviewKeys.add(cacheKey);
   }
 
+  /** Bytes commit will return; retention checks before commit may count them. */
+  public get releasableSourceBytes(): number { return this.sourceBytes; }
+
   /** After the page is fitted: return source hydration bytes and drop those previews before the field is retained. */
   public releaseSourceHydration(): number {
     const released = this.sourceBytes;

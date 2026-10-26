@@ -323,7 +323,8 @@ function commitInterruptedMembership(context: ProjectionContext,
         ...(candidate.index.entries.length === 0 && (candidate.index.product_updates?.length ?? 0) === 0
           ? { offset: candidate.projectionProgress.offset, facet_offset: candidate.projectionProgress.facet_offset } : {}) },
       first_retention: candidate.first_retention,
-      generation: paid.control_generation!, available_bytes: candidate.payload.remainingMemoryBytes,
+      generation: paid.control_generation!,
+      available_bytes: candidate.payload.remainingMemoryBytes + candidate.payload.releasableSourceBytes,
       queryKey: context.queryKey, requestDigest: context.requestDigest, request: context.input.continuation });
     const committed = commitPreparedIndex({ prepared, index: paid.control, previews: new Map(),
       payload: candidate.payload, cost: context.cost });
