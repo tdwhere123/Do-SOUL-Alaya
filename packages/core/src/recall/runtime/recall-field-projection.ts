@@ -150,7 +150,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
     if (context.progress_delivery?.control !== undefined) {
       const control = context.progress_delivery.control;
       attachIndexSurfaces(control, new Map(), {});
-      retain?.({ ...state, remaining_memory_bytes: fitted.remaining_memory_bytes,
+      retain?.({ ...state, remaining_memory_bytes: fitted.remaining_memory_bytes + payload.releaseSourceHydration(),
         memory_exhausted: fitted.interruption === "memory", ...remainingWorkFields(state, fitted.remaining_work) });
       return control;
     }
@@ -169,6 +169,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
     if (!control.fits) throw pageResourceRefusal({ message: "Recall interruption cannot fit its public envelope",
       fit: control.observation });
     payload.remainingMemoryBytes = controlMeter.bytes;
+    payload.releaseSourceHydration();
     attachIndexSurfaces(interrupted, new Map(), {});
     // An interrupted expansion delivers no membership, so it is not staged as an
     // issued page: replaying it would turn a resource interruption into a cached
@@ -181,6 +182,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
   const expanded = fitted.index;
   attachIndexSurfaces(expanded, expanded === assembled ? payload.previews : fitted.previews, payload.sourceMetadata);
   stageIssuedDelivery(expanded, { query_key: queryKey, request_digest: requestDigest, request: input.continuation });
+  payload.releaseSourceHydration();
   retain?.({ ...state, remaining_memory_bytes: payload.remainingMemoryBytes,
     ...remainingWorkFields(state, fitted.remaining_work) });
   return expanded;

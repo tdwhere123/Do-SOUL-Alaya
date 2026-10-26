@@ -29,6 +29,9 @@ export class BoundedIndexPayload {
   private nativeBytes = 0;
   private admittedBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
+  // Source previews are re-read on every page, so their bytes are page-local, not field retention.
+  private sourceBytes = 0;
+  private readonly sourcePreviewKeys = new Set<string>();
 
   public constructor(private readonly input: Readonly<{
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
@@ -129,7 +132,7 @@ export class BoundedIndexPayload {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) continue;
-        remaining -= 1; this.consumeMemory(bytes);
+        remaining -= 1; this.consumeSourceMemory(bytes, cacheKey);
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
@@ -172,6 +175,23 @@ export class BoundedIndexPayload {
   private consumeMemory(bytes: number): void {
     this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - bytes);
     this.admittedBytes += bytes;
+  }
+
+  private consumeSourceMemory(bytes: number, cacheKey: string): void {
+    const debited = Math.min(bytes, this.remainingMemoryBytes);
+    this.consumeMemory(bytes);
+    this.sourceBytes += debited;
+    this.sourcePreviewKeys.add(cacheKey);
+  }
+
+  /** After the page is fitted: return source hydration bytes and drop those previews before the field is retained. */
+  public releaseSourceHydration(): number {
+    const released = this.sourceBytes;
+    this.remainingMemoryBytes += released;
+    this.sourceBytes = 0;
+    for (const key of this.sourcePreviewKeys) this.previews.delete(key);
+    this.sourcePreviewKeys.clear();
+    return released;
   }
 
   public applyDeliveredSpans(index: InformationIndex): InformationIndex {
@@ -221,7 +241,7 @@ export class BoundedIndexPayload {
     this.nativeVisits += Math.max(1, page.nativeWork ?? page.rowsRead);
     this.nativeRows += page.rowsRead;
     this.nativeBytes += page.bytesRead + (page.metadataBytes ?? 0);
-    this.consumeMemory(page.bytesRead + (page.metadataBytes ?? 0));
+    this.consumeSourceMemory(page.bytesRead + (page.metadataBytes ?? 0), cacheKey);
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
@@ -233,7 +253,7 @@ export class BoundedIndexPayload {
       forgetPreview(this.previews, cacheKey, undefined);
       return { ok: false, remaining: nextRemaining, retryable: true };
     }
-    this.consumeMemory(requiredBytes);
+    this.consumeSourceMemory(requiredBytes, cacheKey);
     this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
     {
       rememberPreview(

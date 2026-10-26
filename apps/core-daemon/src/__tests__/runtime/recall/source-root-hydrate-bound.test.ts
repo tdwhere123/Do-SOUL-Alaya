@@ -79,6 +79,28 @@ describe("worker source-root hydrate", () => {
     expect(page.bytesRead).toBeLessThan(Buffer.byteLength(body, "utf8"));
   });
 
+  it("returns page-local source hydration bytes and drops the source preview before field retention", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const row = new SqliteFieldSourceRecordRepo(database, fieldSha256)
+      .insert(hashedRecord("workspace-1", "round body ".repeat(2_000), "src-long"));
+    const entry = sourceIndexEntry({ workspace_id: "workspace-1", root_kind: "source_record",
+      root_id: row.record_id, source_version: row.source_version, content_digest: row.content_digest,
+      evidence_object_id: null, hypothesis_id: "h0", output_binding: "source-evidence", role: "requested",
+      association_milligrades: 1000, claim: "unknown", explanation_ids: [] });
+    const payload = new BoundedIndexPayload({ readers: createConditionalFieldObserverReaders(database),
+      workspaceId: "workspace-1", remainingMemoryBytes: 100_000, manifestationFor: () => "excerpt" });
+    payload.finalize([entry], 500);
+    const spent = 100_000 - payload.remainingMemoryBytes;
+    expect(spent).toBeGreaterThan(0);
+    expect(payload.previews.size).toBe(1);
+    expect(payload.takeWork().charged_retained_bytes).toBe(spent);
+    expect(payload.releaseSourceHydration()).toBe(spent);
+    expect(payload.remainingMemoryBytes).toBe(100_000);
+    expect(payload.previews.size).toBe(0);
+    expect(payload.releaseSourceHydration()).toBe(0);
+  });
+
   it("maps persisted scope_class so project authorization includes only that native root", () => {
     const database = openFieldDatabase();
     tracked.add(database);

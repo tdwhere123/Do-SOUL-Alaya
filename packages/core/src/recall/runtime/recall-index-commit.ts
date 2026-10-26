@@ -258,6 +258,7 @@ export function commitPreparedIndex(input: Readonly<{
   readonly cost: RequestCostLedger;
 }>): Readonly<{ readonly index: InformationIndex; readonly retained: FieldEngineState }> {
   const { prepared } = input;
+  input.payload.releaseSourceHydration();
   assertDeliveryRetention(prepared.retention_bytes, input.payload.remainingMemoryBytes);
   if (prepared.revisions !== undefined && prepared.products !== undefined) {
     bindCommittedDelivery(input.index, prepared.revisions, prepared.products);

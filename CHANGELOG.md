@@ -28,6 +28,11 @@ profiles retain their identity; preparation selects a distinct generation before
 serving the new default. Explicit `utf8-byte-windows.v1` remains a supported control
 and rollback selection; retired generations are never revived by relabeling them.
 
+Ordinary source hydration bytes are page-local: source previews are re-read on every
+page, so their read bytes no longer carry into the retained field. Long roots no longer
+exhaust the default request memory on later pages, which failed the page commit with
+an internal error. Result identifiers and delivered intervals are unchanged.
+
 Protocol 24.0.0 funds ordinary native acquisition from its declared attempts, roots
 and active-generation window allowance, independently of the field page budget
 (invariant §25 major: ordinary membership and ranking can change). Acquisition runs

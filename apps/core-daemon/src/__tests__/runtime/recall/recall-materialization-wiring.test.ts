@@ -59,7 +59,8 @@ it("prepares only eligible active generations and preserves original/hint failur
       signal: new AbortController().signal, remainingMs: () => 1000 });
     expect(bindSourceEmbedding).toHaveBeenCalledExactlyOnceWith({
       window_bytes: h.selection.configuration.profile.window_bytes,
-      max_input_tokens: h.selection.configuration.profile.max_input_tokens
+      max_input_tokens: h.selection.configuration.profile.max_input_tokens,
+      windowing: h.selection.configuration.profile.windowing
     });
     expect(embedInputs.mock.calls[0]![0]).toEqual([{ input_id: digest(ORIGINAL), text: ORIGINAL, role: "query" }]);
     expect(prepared).toMatchObject({ receipt: { status: "ready", submitted_inputs: 1, token_count: 2,

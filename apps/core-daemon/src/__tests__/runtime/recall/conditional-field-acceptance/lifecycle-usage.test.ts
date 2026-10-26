@@ -313,10 +313,13 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       // Native operation/row counters are not SQLite VM steps or acquisition work.
       expect(visits).toBe(0);
       expect(visits + snapshotPin.mock.calls.length * SNAPSHOT_PIN_NATIVE_WORK).toBeLessThanOrEqual(work_units);
+      // Ordinary acquisition is funded by its own allowance; only retained nominations reach field memory.
       for (const [index, nomination] of nominateSources.mock.results.entries()) {
         expect(nomination.type).toBe("return");
         expect(nomination.value.result?.resources.sql_internal_work).toBe("unknown");
-        expect(nomination.value.result?.resources.work).toBeLessThanOrEqual(nominateSources.mock.calls[index]![0].budget.work_units);
+        expect(nomination.value.charged_by_caller).toBe(true);
+        expect(nomination.value.acquisition_resources).toBeDefined();
+        expect(nomination.value.retained_bytes ?? 0).toBeLessThanOrEqual(nominateSources.mock.calls[index]![0].budget.memory_bytes);
       }
     }
   });
