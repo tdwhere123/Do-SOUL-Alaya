@@ -20,7 +20,9 @@ import {
   type AnswerTurnSpan,
   type SnapshotSourceRecordRow
 } from "../../../runs/longmemeval-semantic/answer-spans.js";
-import { scoreRecallHarnessRow } from "../../../../scripts/recall-harness-score.mjs";
+const { scoreRecallHarnessRow } = await import(
+  new URL("../../../../scripts/recall-harness-score.mjs", import.meta.url).href
+);
 import type { SourceGoldUnit } from "../../../runs/measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
