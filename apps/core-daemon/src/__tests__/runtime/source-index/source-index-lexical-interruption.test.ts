@@ -37,7 +37,7 @@ it("refuses publication after a raw native write crosses the deadline before any
     const result = await producer.runLexicalPass(WORKSPACE, "raw-unicode61.v1");
     expect(callbackRan).toBe(false);
     expect(result).toMatchObject({ status: "partial", reason: "deadline_exceeded", accounting: "complete",
-      analysis_units: 0, model_inputs: 0 });
+      analysis_units: 0, model_inputs: 0, visited_roots: 1, capture_pages: 1 });
     expect(result.resources.work).toBeGreaterThan(0);
     expect(result.resources.native_bytes).toBeGreaterThan(0);
     expect(write).toHaveBeenCalledTimes(1); expect(activate).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ it("admits queued stop between segmented roots, retains occupancy and durable wo
     const interrupted = await pass;
     expect(settledWhenStopStarted).toBe(false); expect(settledInsideStopCallback).toBe(false);
     expect(interrupted).toMatchObject({ status: "partial", reason: "cancelled", accounting: "complete",
-      analysis_units: body.length, model_inputs: 0 });
+      analysis_units: body.length, model_inputs: 0, visited_roots: 1, capture_pages: 1 });
     expect(interrupted.resources.work).toBeGreaterThan(body.length);
     expect(interrupted.resources.native_bytes).toBeGreaterThan(0);
     expect(write).toHaveBeenCalledTimes(1); expect(activate).not.toHaveBeenCalled();

@@ -37,6 +37,10 @@ export type SourceIndexLexicalPassBudget = SourceIndexBudget & Readonly<{
 export type SourceIndexLexicalPassResult = SourceIndexLexicalPreparationResult & Readonly<{
   selection: SourceIndexLexicalSelection; generation: SourceIndexLexicalGeneration | null;
   accounting: "complete" | "lower_bound"; model_inputs: 0;
+  /** Root visits include attempted projection copies and document reads, even when refused or rolled back. */
+  visited_roots: number;
+  /** Census calls attempted, including empty, refused and failed pages. */
+  capture_pages: number;
 }>;
 
 /** Independent lexical selection and generation, under the existing SourceIndex owner and source epoch. */

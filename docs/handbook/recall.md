@@ -386,8 +386,12 @@ generation. Valid-empty is only published after complete enumeration. Preparatio
 work includes instrumented native reads and one analysis unit per UTF-16 source code
 unit analyzed; native bytes exclude search-output allocation. Neither is measured CPU,
 SQLite-internal work, process memory or model cost. Failed operations report lower-bound
-accounting. Bounded selection/generation bookkeeping is administrative work, outside
-these native-source read counters. Worker warmup uses a separate indexed administrative selector probe, not
+accounting. Lexical root visits include attempted projection copies and document reads,
+including refusals and rolled-back copies. Capture-page visits include empty, refused and
+failed census calls. These visits and actual resource costs debit the producer's shared
+pass allowance before vector work; pass receipts report the effective restricted limits.
+Bounded selection/generation bookkeeping is
+administrative work, outside these native-source read counters. Worker warmup uses a separate indexed administrative selector probe, not
 source enumeration; native analyzer load cost is not measured by the query ledger.
 Lexical preparation checks the producer's absolute wall-clock deadline around bounded
 operations and before publication, and yields between census/root batches so queued

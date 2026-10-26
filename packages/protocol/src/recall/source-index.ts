@@ -127,13 +127,16 @@ export type SourceIndexBackfillResult = Readonly<{
  */
 export class SourceIndexOperationError extends AlayaError {
   public readonly resources: SourceIndexResources;
-  public constructor(cause: unknown, completed: SourceIndexResources) {
+  /** Visits owned inside the failed operation, including rolled-back copies; caller-owned visits are separate. */
+  public readonly visited_roots: number;
+  public constructor(cause: unknown, completed: SourceIndexResources, visitedRoots = 0) {
     super(cause instanceof AlayaError ? cause.code : "SOURCE_INDEX_FAILED",
       cause instanceof Error ? cause.message : "Source index operation failed",
       { cause, statusCode: cause instanceof AlayaError ? cause.statusCode : undefined });
     this.name = "SourceIndexOperationError";
     const nested = cause instanceof SourceIndexOperationError ? cause.resources : { work: 0, native_bytes: 0 };
     this.resources = Object.freeze({ work: completed.work + nested.work, native_bytes: completed.native_bytes + nested.native_bytes });
+    this.visited_roots = visitedRoots + (cause instanceof SourceIndexOperationError ? cause.visited_roots : 0);
   }
 }
 

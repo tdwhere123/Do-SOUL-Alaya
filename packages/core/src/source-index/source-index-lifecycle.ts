@@ -105,12 +105,14 @@ export class SourceIndexLifecycle {
     if (store === undefined) throw new AlayaError("UNAVAILABLE", "source lexical preparation is not wired");
     const selection = store.selectLexical(workspaceId, representation);
     const resources = { work: 0, native_bytes: 0 };
-    let analysis = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
-    const left = () => ({ work: limits.work - resources.work, native_bytes: limits.native_bytes - resources.native_bytes });
+    let analysis = 0, visitedRoots = 0, capturePages = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
+    const left = () => ({ work: Math.max(0, limits.work - resources.work),
+      native_bytes: Math.max(0, limits.native_bytes - resources.native_bytes) });
     const debit = (cost: SourceIndexResources) => { resources.work += cost.work; resources.native_bytes += cost.native_bytes; };
     const result = (status: SourceIndexLexicalPassResult["status"], reason: string | null,
       accounting: "complete" | "lower_bound" = "complete"): SourceIndexLexicalPassResult =>
-      ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0 });
+      ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0,
+        visited_roots: visitedRoots, capture_pages: capturePages });
     // A budget-limited stop is not an interruption: report the generation it actually advanced.
     const settled = (status: SourceIndexLexicalPassResult["status"], reason: string | null) => {
       if (generation !== null) generation = store.lexicalGeneration(workspaceId, generation.generation_id) ?? generation;
@@ -128,6 +130,7 @@ export class SourceIndexLifecycle {
       // A published generation for this epoch is final; later passes only observe it.
       if (generation.status === "ready" || generation.status === "valid_empty") return result("ready", null);
       for (let page = 0; page < limits.max_capture_pages && !generation.enumeration_complete; page++) {
+        capturePages++;
         const captured = store.captureLexicalPage(workspaceId, generation.generation_id, limits.capture_page, left());
         debit(captured.resources); generation = captured.generation;
         checkpoint();
@@ -135,15 +138,18 @@ export class SourceIndexLifecycle {
         if (captured.resources.work === 0) break;
       }
       // Unchanged roots copy the active generation's projections; only new or changed roots are analyzed.
-      for (let batch = 0; batch < limits.max_capture_pages * LEXICAL_REUSE_BATCHES_PER_PAGE; batch++) {
-        const reuse = store.reuseLexicalProjections(workspaceId, generation.generation_id, LEXICAL_REUSE_BATCH_ROWS, left());
-        debit(reuse.resources); checkpoint();
+      for (let batch = 0; batch < limits.max_capture_pages * LEXICAL_REUSE_BATCHES_PER_PAGE && visitedRoots < limits.max_roots; batch++) {
+        const reuse = store.reuseLexicalProjections(workspaceId, generation.generation_id,
+          Math.min(LEXICAL_REUSE_BATCH_ROWS, limits.max_roots - visitedRoots), left());
+        debit(reuse.resources); visitedRoots += reuse.reused; checkpoint();
         if (reuse.reused === 0 || reuse.complete) break;
         await yieldToEventLoop(); checkpoint();
       }
-      for (let root = 0; root < limits.max_roots; root++) {
+      for (let root = 0; visitedRoots < limits.max_roots; root++) {
         const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());
-        debit(pending.resources); checkpoint();
+        debit(pending.resources);
+        if (pending.source !== null) visitedRoots++;
+        checkpoint();
         if (pending.source === null) {
           if (!pending.complete) return settled("partial", "read_budget");
           break;
@@ -176,7 +182,9 @@ export class SourceIndexLifecycle {
     } catch (error) {
       if (error === cancelled) return result("partial", cancelled.message);
       if (error === expired) return result("partial", expired.message);
-      if (error instanceof SourceIndexOperationError) debit(error.resources);
+      if (error instanceof SourceIndexOperationError) {
+        debit(error.resources); visitedRoots += error.visited_roots;
+      }
       return result("unavailable", error instanceof Error ? error.message : "lexical_preparation_failed", "lower_bound");
     }
   }

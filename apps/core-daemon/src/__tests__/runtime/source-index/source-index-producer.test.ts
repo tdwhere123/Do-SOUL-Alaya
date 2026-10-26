@@ -493,22 +493,27 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
     const capture = vi.spyOn(SqliteSourceIndexRepository.prototype, "capturePage");
     const producer = producerFor(environment, bind, { capturePage: 1, maxCapturePages: 2, modelInputs: 1 });
-    await producer.runPass();
-    expect(capture).toHaveBeenCalledTimes(2);
-    expect(capture.mock.calls[1]![3].work).toBeLessThan(capture.mock.calls[0]![3].work);
-    expect(capture.mock.calls[1]![3].native_bytes).toBeLessThan(capture.mock.calls[0]![3].native_bytes);
+    expect(await producer.runPass()).toMatchObject({ capture_pages: 2 });
+    // One lexical census and one vector census share the two-page cap.
+    expect(capture).toHaveBeenCalledTimes(1);
     expect(embedInputs).toHaveBeenCalledTimes(1);
     expect(environment.index.state("workspace-2")).toEqual({ status: "unknown" });
-    await producer.runPass();
-    // A record-only exhausted cursor no longer closes the capsule family for free.
+    expect(await producer.runPass()).toMatchObject({ capture_pages: 2 });
+    // Each lane needs a separate record-exhaustion and capsule-empty call at page size one:
+    // (two sources + two empty probes) + (one source + two empty probes), twice = fourteen pages.
     expect(environment.index.state("workspace-2").status).toBe("partial");
     expect(embedInputs).toHaveBeenCalledTimes(2);
-    for (let pass = 0; pass < 2; pass++) {
+    let pages = 4;
+    for (let pass = 0; pass < 5; pass++) {
       const before = capture.mock.calls.length;
       const receipt = await producer.runPass();
-      expect(capture.mock.calls.length - before).toBeLessThanOrEqual(2);
+      expect(capture.mock.calls.length - before).toBeLessThanOrEqual(receipt.capture_pages);
+      expect(receipt.capture_pages).toBeLessThanOrEqual(2);
+      pages += receipt.capture_pages;
       expect(receipt.resources.model_inputs).toBeLessThanOrEqual(1);
     }
+    expect(pages).toBe(14);
+    expect(environment.index.state(WORKSPACE).status).toBe("ready");
     expect(environment.index.state("workspace-2").status).toBe("ready");
     expect(embedInputs).toHaveBeenCalledTimes(3);
   });
@@ -525,15 +530,22 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       vi.spyOn(SqliteSourceIndexRepository.prototype, "writeDocument"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "writeVector")
     ];
+    const lexical = vi.spyOn(SourceIndexLifecycle.prototype, "prepareLexical");
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
-    await producerFor(environment, bind, { capturePage: 1, work: 1000, nativeBytes: 1024 * 1024,
+    const receipt = await producerFor(environment, bind, { capturePage: 1, work: 1000, nativeBytes: 1024 * 1024,
       modelInputs: 3, inputBytes: 64 }).runPass();
     let work = 0, bytes = 0;
+    for (const result of lexical.mock.results) {
+      if (result.type !== "return") throw new Error("expected lexical preparation receipt");
+      const prepared = await result.value;
+      work += prepared.resources.work; bytes += prepared.resources.native_bytes;
+    }
     for (const operation of operations) for (const result of operation.mock.results) {
       if (result.type !== "return" || !("resources" in result.value)) throw new Error("expected guarded native result");
       work += result.value.resources.work;
       bytes += result.value.resources.native_bytes;
     }
+    expect(receipt.resources).toMatchObject({ work, native_bytes: bytes });
     expect(work).toBeGreaterThan(0);
     expect(bytes).toBeGreaterThan(0);
     expect(work).toBeLessThanOrEqual(1000);
@@ -549,9 +561,10 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const { bind } = labeledBind({ max_input_tokens: 32 });
     const list = vi.spyOn(SqliteSourceIndexRepository.prototype, "listTargets");
     const producer = producerFor(environment, bind, { maxRootsPerPass: 2 });
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 5; pass++) {
       const calls = list.mock.calls.length;
-      await producer.runPass();
+      const receipt = await producer.runPass();
+      expect(receipt.visited_roots).toBeLessThanOrEqual(2);
       expect(list.mock.calls.length - calls).toBeLessThanOrEqual(3); // two targets plus an empty workspace probe
     }
     expect(environment.index.state(WORKSPACE).status).toBe("ready");
@@ -590,8 +603,8 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     publishSource(environment, "first source body", "source-a");
     publishSource(environment, "second source body", "source-b");
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
-    const producer = producerFor(environment, bind, { maxRootsPerPass: 1 });
-    expect(await producer.runPass()).toMatchObject({ status: "partial", reason: "pending_targets" });
+    const producer = producerFor(environment, bind, { maxRootsPerPass: 2 });
+    expect(await producer.runPass()).toMatchObject({ status: "partial", reason: "pending_targets", visited_roots: 2 });
     const incomplete = environment.index.state(WORKSPACE);
     expect(incomplete.status).not.toBe("ready");
     if (incomplete.status !== "unknown") expect(incomplete.active_generation_id).toBeNull();
@@ -645,7 +658,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const producer = producerFor(environment, bind);
     expect(await producer.runPass({ modelInputs: 1 })).toMatchObject({
       status: "partial", reason: "pending_targets", resources: { model_inputs: 1 },
-      limits: { modelInputs: 8 }
+      limits: { modelInputs: 1 }
     });
     expect(embedInputs).toHaveBeenCalledTimes(1);
     expect(embedInputs.mock.calls[0]![0]).toHaveLength(1);
@@ -677,7 +690,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(embedInputs.mock.calls.length).toBe(9);
   });
 
-  it("walks sixteen already-complete roots with flat counts then embeds only the pending tail", async () => {
+  it("walks completed vector roots across shared lexical passes then embeds only the pending tail", async () => {
     const environment = fileEnvironment();
     for (let index = 0; index < 18; index++) {
       publishSource(environment, "Alpha uses tools.", `source-${index}`);
@@ -715,11 +728,15 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(environment.index.generation(WORKSPACE, generation.generation_id)).toMatchObject({
       completed_count: 17, target_count: 18, status: "building"
     });
-    expect(first.status).toBe("partial");
+    expect(first).toMatchObject({ status: "partial", visited_roots: 16 });
     const second = await producer.runPass();
+    expect(second).toMatchObject({ status: "partial", visited_roots: 16 });
+    expect(embedInputs.mock.calls.length).toBe(constructed);
+    const third = await producer.runPass();
+    expect(third.visited_roots).toBeLessThanOrEqual(16);
     expect(embedInputs.mock.calls.length).toBe(constructed + 1);
     expect(embedInputs.mock.calls.at(-1)?.[0]).toHaveLength(1);
-    expect(second).toMatchObject({ status: "settled" });
+    expect(third).toMatchObject({ status: "settled" });
     expect(environment.index.state(WORKSPACE)).toMatchObject({ status: "ready" });
   });
 });

@@ -27,7 +27,9 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
   reuseLexicalProjections(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReuseResult {
     assertIndexBudget(budget); assertIndexPageLimit(limit);
     const resources = { work: 0, native_bytes: 0 };
+    let visitedRoots = 0;
     try { return this.atomic(() => {
+      if (budget.work < 1) return { reused: 0, resources, complete: false };
       const generation = this.requireGeneration(workspaceId, generationId);
       const state = this.lexicalState(workspaceId), from = state?.active_generation_id ?? null;
       if (this.guard(generation) !== null || from === null || from === generationId ||
@@ -55,11 +57,12 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
           return { reused, resources, complete: false };
         }
         const rootKey = readStringField(row, "root_key");
+        visitedRoots++;
         insert.run(generationId, workspaceId, from, rootKey); complete.run(workspaceId, generationId, rootKey);
         resources.work += 2; resources.native_bytes += 2 * bytes; reused++;
       }
       return { reused, resources, complete: candidates.length <= limit };
-    }); } catch (error) { throw new SourceIndexOperationError(error, resources); }
+    }); } catch (error) { throw new SourceIndexOperationError(error, resources, visitedRoots); }
   }
 
   selectLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection {
