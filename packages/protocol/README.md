@@ -25,14 +25,15 @@ generations, retaining historical IDs while requiring a fresh bounded capture.
 Record-only semantic consumers explicitly reject capsule nominations. This is
 an invariant §25 major, not query-time indexing or automatic model preparation.
 
-## Opt-in SourceIndex message windows
+## SourceIndex message windows
 
-Protocol 23.1.0 adds `recorded-message-windows.v1` as a new profile identity
+Protocol 23.1.0 introduced `recorded-message-windows.v1` as a new profile identity
 (invariant §25 minor). It preserves bounded complete recorded messages, splits
 oversized messages at UTF-8 boundaries, and balances the last two windows where
 legal without overlap or increasing the byte cap. The embedding runtime still
-counts prepared tokens and refuses over-limit inputs. Raw profiles/defaults and
-old manifests retain their meaning. See the [window policy](../../docs/handbook/recall.md#source-index-window-representations).
+counts prepared tokens and refuses over-limit inputs. Protocol 25.0.0 makes it the
+default for new bindings; explicit raw profiles and old manifests retain their
+meaning. See the [window policy](../../docs/handbook/recall.md#source-index-window-representations).
 
 ## Opt-in SourceIndex lexical representation
 
@@ -49,8 +50,8 @@ and library field protocol 12 (invariant §25 major). Vector locations remain
 navigation evidence; ordinary payloads begin at the root start while explicit
 proof ranges and payload continuations keep their own coordinates. New embedding
 bindings default to recorded-message windows; explicit raw profiles remain supported.
-Old live continuations are
-incompatible; upgrade clients and daemon together and start fresh requests. Frozen
+Old live continuations are incompatible; upgrade clients and daemon together and
+start fresh requests. Frozen
 ordinary captures remain historical evidence, never a second execution policy.
 No source or index rewrite is required. Rollback uses the retained previous binary
 with fresh handles, not a relabeled current page.
