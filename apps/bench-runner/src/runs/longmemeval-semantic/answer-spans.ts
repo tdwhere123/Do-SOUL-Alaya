@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { buildLongMemEvalRoundMessages, pairSessionIntoRounds,
   type LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
@@ -17,6 +18,73 @@ export type AnswerTurnGold = Readonly<{
   spans: readonly AnswerTurnSpan[];
   complete: boolean;
 }>;
+
+export interface SnapshotSourceRecordRow {
+  readonly record_id: string;
+  readonly source_id: string;
+  readonly source_version: string;
+  readonly content_digest: string;
+  readonly source_body: string;
+  readonly recorded_at?: string;
+}
+
+/** Evaluator-only: reconstructs published census and publication structures directly from
+ * snapshot source_records and joins with question answer turns using official API corpus rules. */
+export function joinSnapshotAnswerSpans(
+  question: LongMemEvalQuestion,
+  workspaceId: string,
+  rows: readonly SnapshotSourceRecordRow[]
+): AnswerTurnGold {
+  const records: LongMemEvalSourceCensusRecord[] = [];
+  const publicationSources: z.infer<typeof QuestionPublicationSchema>["sources"] = [];
+  for (const row of rows) {
+    const match = row.source_id.match(/-s(\d+)-r(\d+)$/u);
+    if (!match) continue;
+    const sessionIndex = parseInt(match[1]!, 10);
+    const roundIndex = parseInt(match[2]!, 10);
+    const sessionId = question.haystack_session_ids[sessionIndex];
+    if (sessionId === undefined) continue;
+    const corpusDigest = createHash("sha256").update(row.source_body, "utf8").digest("hex");
+    records.push({
+      population: "longmemeval_s",
+      question_id: question.question_id,
+      session_id: sessionId,
+      session_index: sessionIndex,
+      round_index: roundIndex,
+      source_id: row.source_id,
+      source_version: row.source_version,
+      content_bytes: row.source_body,
+      content_digest: row.content_digest,
+      corpus_digest: corpusDigest,
+      source_observed_at: row.recorded_at ?? "1970-01-01T00:00:00.000Z",
+      roles: [],
+      units: [],
+      repeated_assertion_text: false
+    });
+    publicationSources.push({
+      question_id: question.question_id,
+      session_id: sessionId,
+      source_id: row.source_id,
+      source_version: row.source_version,
+      content_digest: row.content_digest,
+      corpus_digest: corpusDigest,
+      admission: "admitted",
+      record_id: row.record_id
+    });
+  }
+  const publication = {
+    workspace_id: workspaceId,
+    run_id: "snapshot",
+    recorded_at: "snapshot",
+    snapshot_path: "snapshot",
+    db_sha256: "snapshot",
+    census_count: rows.length,
+    admitted_count: rows.length,
+    published_count: 0,
+    sources: publicationSources
+  };
+  return joinLongMemEvalAnswerSpans(question, publication, records);
+}
 
 /** Evaluator-only: the dataset SHA freezes has_answer, not an answer substring or a full support set.
  * Reuse the census round identity and SOUL's actual canonical corpus (trim/newline normalization).
