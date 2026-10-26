@@ -440,7 +440,8 @@ describe("LocalOnnxEmbeddingClient Source capability (mock loaded runtime)", () 
     options.max_input_tokens = 64;
     finishLoad(fixture.extractor);
     const binding = await pending;
-    expect(fixture.bind).toHaveBeenCalledWith({ window_bytes: 1024, max_input_tokens: 32 });
+    expect(fixture.bind).toHaveBeenCalledWith({ window_bytes: 1024, max_input_tokens: 32,
+      windowing: "recorded-message-windows.v1" });
     expect(binding.status).toBe("ready");
     if (binding.status !== "ready") throw new Error("mock capability must bind");
     const inputs = [{ input_id: "raw", text: "  原文🙂\r\n " }];

@@ -24,7 +24,10 @@ it("adds lexical tables without selecting, rewriting raw text, or retiring an el
     const environment = { database, index: new SqliteSourceIndexRepository(database, fieldSha256),
       records: new SqliteFieldSourceRecordRepo(database, fieldSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldSha256) };
     publishSource(environment, "Alpha-BETA 自动部署流水线");
+    // Current capture reads migration 027's role; build with its historical default, then restore the v24 shape.
+    database.connection.exec("ALTER TABLE evidence_capsules ADD COLUMN source_provenance INTEGER NOT NULL DEFAULT 0");
     const built = buildReady(environment);
+    database.connection.exec("ALTER TABLE evidence_capsules DROP COLUMN source_provenance");
     const before = database.connection.prepare("SELECT * FROM source_index_vectors ORDER BY window_id").all();
     const text = database.connection.prepare("SELECT * FROM source_index_text").all();
     database.close({ optimize: false }); database = initDatabase({ filename });

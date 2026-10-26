@@ -106,9 +106,14 @@ describe("audited predecessor-bound source replacement", () => {
     const f = fixture();
     const first = await f.admission.admit(request(), context);
     const { runAtomicWithOutcome: _phasePort, ...legacy } = f.stores;
+    // Admission nests its own atomic section; only the outermost commit loses its evidence.
+    let depth = 0;
     const writer = createAuditedSourceReplacement({ ...f.input, stores: { ...legacy, runAtomic(work) {
-      legacy.runAtomic(work);
-      throw new Error("lost completion evidence");
+      depth += 1;
+      let result;
+      try { result = legacy.runAtomic(work); } finally { depth -= 1; }
+      if (depth === 0) throw new Error("lost completion evidence");
+      return result;
     } } });
     const result = await writer.replaceCurrent({ expected_current: first.record, replacement: replacementRequest() }, context);
     expect(result.status).toBe("unknown");
