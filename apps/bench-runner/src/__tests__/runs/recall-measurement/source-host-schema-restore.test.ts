@@ -7,15 +7,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import BetterSqlite3 from "better-sqlite3";
-import { canonicalJson, hashSourceRecordId, sourceIndexProfileId, SoulInterpretationResponseSchema, sourceSemanticAccessPhases,
+import { sourceIndexProfileId, SoulInterpretationResponseSchema, sourceSemanticAccessPhases,
   SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
-import { StorageDatabase, openReadOnlyDatabase, prepareIndexedRecallProjection, SqliteFieldSourceRecordRepo, SqliteFieldEraseBarrierRepo,
+import { StorageDatabase, openReadOnlyDatabase, SqliteFieldSourceRecordRepo, SqliteFieldEraseBarrierRepo,
   SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../../../../../packages/storage/src/sqlite/temporal-cutover-gate.js";
 import { migrateVerifiedProjectionBindKey } from "../../../../../../packages/storage/src/sqlite/temporal-verified-bind-key.js";
-import { writeRetainedSourceChunks } from "../../../../../../packages/storage/src/repos/field/retained-source-chunks.js";
-import { applyBaselineSql } from "../../../../../../packages/storage/src/__tests__/migrations/apply-baseline.js";
+import { applyBaselineSql, currentSchemaVersion } from "../../../../../../packages/storage/src/__tests__/migrations/apply-baseline.js";
+import { insertPreHostSourceRecord } from "./historical-source.test-support.js";
 import { seedWorkspaces, hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { buildReady, configuration, CLOCK, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { snapshotSourceIndex } from "../../longmemeval/recall-eval/workspace-slice-source-index-fixture.js";
@@ -45,23 +45,15 @@ function preparedLegacySource(filename: string) {
     database.connection.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
     for (let version = 1; version <= 23; version++) database.connection.prepare("INSERT INTO schema_version VALUES(?,?)").run(version, CLOCK);
     seedWorkspaces(database);
-    prepareIndexedRecallProjection(database);
-    const draft = { ...hashedOriginalRecord(WORKSPACE, "Blue stone retained source.", "legacy-source"), scope_class: "project" as const };
-    const record = { ...draft, record_id: hashSourceRecordId(draft, fieldContractSha256) };
-    // Author an actual old-schema row: the current writer correctly refuses schema 23.
-    database.connection.prepare(`INSERT INTO source_records (workspace_id, record_id, source_id, source_version,
-      content_digest, evidence_object_id, recorded_at, event_time, valid_from, valid_to, operator_id, speaker,
-      scope_class, attribution_context_json, source_representation_json, source_body, retained_content_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(record.workspace_id, record.record_id, record.source_id, record.source_version, record.content_digest,
-        record.evidence_object_id, record.recorded_at, record.event_time, record.valid_from, record.valid_to,
-        record.operator_id, record.speaker, record.scope_class, canonicalJson(record.attribution_context),
-        canonicalJson(record.source_representation), record.source_body, Buffer.byteLength(record.source_body!));
-    writeRetainedSourceChunks(database, { workspaceId: WORKSPACE, kind: "source_record", rootId: record.record_id,
-      revision: record.source_version, digest: record.content_digest }, record.source_body!);
+    const record = insertPreHostSourceRecord(database, {
+      ...hashedOriginalRecord(WORKSPACE, "Blue stone retained source.", "legacy-source"), scope_class: "project" });
+    // Current capture reads migration 027's role. Build with its historical zero, then retain the actual v23 shape.
+    database.connection.exec("ALTER TABLE evidence_capsules ADD COLUMN source_provenance INTEGER NOT NULL DEFAULT 0");
     const index = new SqliteSourceIndexRepository(database, fieldContractSha256);
     const prepared = buildReady({ database, index, records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
       erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) },
     configuration({ provider_kind: "local_onnx", model_id: "authored-no-model", window_bytes: 504, max_input_tokens: 512 }));
+    database.connection.exec("ALTER TABLE evidence_capsules DROP COLUMN source_provenance");
     return { record, generation: prepared.generation, indexRows: snapshotSourceIndex(database, WORKSPACE) };
   } finally { database.close({ optimize: false }); }
 }
@@ -93,7 +85,7 @@ it("restores schema-23 source/index bytes into the current daemon without enrich
     expect(inspectSemanticChainSourceIndex(restored, WORKSPACE, budget)).toEqual(before);
     const database = openReadOnlyDatabase(restored);
     try {
-      expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 24 });
+      expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: currentSchemaVersion() });
       expect(snapshotSourceIndex(database, WORKSPACE)).toEqual(prepared.indexRows);
       const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
       expect(records.findById(WORKSPACE, prepared.record.record_id)).toEqual(prepared.record);

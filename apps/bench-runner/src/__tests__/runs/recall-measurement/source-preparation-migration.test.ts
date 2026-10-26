@@ -16,9 +16,10 @@ import childProcess from "node:child_process";
 import BetterSqlite3 from "better-sqlite3";
 import { canonicalJson, sourceIndexConfigurationId, sourceIndexProfileId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
-import { StorageDatabase, initDatabase, SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo,
-  SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { StorageDatabase, initDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { insertPreHostSourceRecord } from "./historical-source.test-support.js";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../../../../../packages/storage/src/sqlite/temporal-cutover-gate.js";
+import { migrateRetainedSourceChunks } from "../../../../../../packages/storage/src/sqlite/retained-source-migration.js";
 import { applyBaselineSql } from "../../../../../../packages/storage/src/__tests__/migrations/apply-baseline.js";
 import { seedWorkspaces, hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { configuration, CLOCK, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
@@ -47,15 +48,22 @@ async function historicalFixture() {
   database.connection.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   for (let version = 1; version <= 22; version++) database.connection.prepare("INSERT INTO schema_version VALUES(?,?)").run(version, CLOCK);
   seedWorkspaces(database);
-  const record = new SqliteFieldSourceRecordRepo(database, fieldContractSha256)
-    .insert(hashedOriginalRecord(WORKSPACE, "Blue stone retained record.", "record-source"));
-  const capsule = await new SqliteEvidenceCapsuleRepo(database).create({
+  const record = insertPreHostSourceRecord(database,
+    hashedOriginalRecord(WORKSPACE, "Blue stone retained record.", "record-source"));
+  const capsule = {
     object_id: "cccccccc-cccc-4ccc-8ccc-000000000202", object_kind: "evidence_capsule", schema_version: 1,
     lifecycle_state: "active", created_at: CLOCK, updated_at: CLOCK, created_by: "user_action",
     evidence_kind: "conversation_excerpt", semantic_anchor: { topic: "stone", keywords: ["stone"], summary: "stone" },
     event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "short gist",
     excerpt: "Blue stone standalone capsule.", source_hash: null, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
-  });
+  };
+  // Preserve the schema-22 capsule shape rather than invoking the current provenance-aware writer.
+  database.connection.prepare(`INSERT INTO evidence_capsules (object_id, created_at, updated_at, created_by,
+    evidence_kind, semantic_anchor, evidence_health_state, gist, excerpt, run_id, workspace_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(capsule.object_id, capsule.created_at, capsule.updated_at, capsule.created_by,
+      capsule.evidence_kind, canonicalJson(capsule.semantic_anchor), capsule.evidence_health_state,
+      capsule.gist, capsule.excerpt, capsule.run_id, capsule.workspace_id);
+  migrateRetainedSourceChunks(database.connection);
   const indexConfig = configuration({ provider_kind: "local_onnx", model_id: "fixture-local-model", window_bytes: 504, max_input_tokens: 512 });
   const configId = sourceIndexConfigurationId(indexConfig, fieldContractSha256);
   const profileId = sourceIndexProfileId(indexConfig.profile, fieldContractSha256);
@@ -121,7 +129,7 @@ it("migrates only a private copy, retires historical selection, and prepares new
   });
   const prepared = await prepareSemanticChainSourceIndex(config, execution, join(root, "current"), undefined,
     { maxPasses: 2, modelInputs: 4, work: 100000, nativeBytes: 16777216, inputBytes: 1048576, softElapsedMs: 60000 });
-  expect(prepared.config).not.toBeNull();
+  expect(prepared.config, JSON.stringify(prepared.report)).not.toBeNull();
   if (prepared.config === null) throw new Error(JSON.stringify(prepared.report));
   expect(prepared.report).toMatchObject({ admission: "prepared_complete", input_snapshot_sha256: config.snapshot_sha256,
     index: { target_count: 2, completed_count: 2, status: "ready" } });

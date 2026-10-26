@@ -11,7 +11,8 @@ import { dirname, join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { prepareSourceIndexDocument } from "@do-soul/alaya-protocol";
-import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
+import { SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
+import { insertPreHostSourceRecord } from "./historical-source.test-support.js";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -159,7 +160,7 @@ it("qualifies a genuine pre-index schema only after canonical restore/start and 
       const mark = legacy.connection.prepare("INSERT INTO schema_version VALUES (?, ?)");
       for (let version = 1; version <= 20; version++) mark.run(version, CLOCK);
       seedWorkspaces(legacy, [WS]);
-      new SqliteFieldSourceRecordRepo(legacy, fieldContractSha256).insert({
+      insertPreHostSourceRecord(legacy, {
         ...hashedOriginalRecord(WS, "Harbor was delayed.", "harbor"), speaker: "user", scope_class: "project" });
       expect(legacy.connection.prepare("SELECT name FROM sqlite_master WHERE name='source_index_epochs'").get()).toBeUndefined();
     } finally { legacy.close({ optimize: false }); }
