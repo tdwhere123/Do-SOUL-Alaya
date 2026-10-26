@@ -8,6 +8,5 @@ export {
   parseEnvOptionalBoolean,
   parseEnvOptionalNonNegativeSafeInt,
   parseEnvOptionalNumber,
-  parseEnvPositiveInt,
-  parseSourceRefRobust
+  parseEnvPositiveInt
 } from "@do-soul/alaya-protocol";

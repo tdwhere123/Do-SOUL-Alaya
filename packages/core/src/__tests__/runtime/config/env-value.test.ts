@@ -6,7 +6,6 @@ import {
   parseEnvOptionalNumber,
   parseEnvPositiveInt,
   parseRecallRuntimeConfigFromEnv,
-  parseSourceRefRobust,
   readRecallUnitFloat,
   resetCoreConfigForTests
 } from "../../../runtime/config/index.js";
@@ -14,27 +13,6 @@ import {
   isEnvFlagDisabled as isStorageEnvFlagDisabled,
   parseEnvPositiveInt as parseGatewayPositiveInt
 } from "@do-soul/alaya-protocol";
-
-describe("parseSourceRefRobust", () => {
-  it.each([
-    [undefined, false],
-    ["", false],
-    ["   ", false],
-    ["true", true],
-    ["TRUE", true],
-    ["1", true],
-    ["false", false],
-    ["0", false]
-  ] as const)("parses %j as %s", (raw, expected) => {
-    expect(parseSourceRefRobust(raw)).toBe(expected);
-  });
-
-  it("throws on a written invalid value", () => {
-    expect(() => parseSourceRefRobust("maybe")).toThrow(
-      /ALAYA_RECALL_SOURCE_REF_ROBUST must be true, false, 1, 0, on, off, yes, no, enabled, or disabled/
-    );
-  });
-});
 
 describe("parseEnvOptionalNumber", () => {
   it("throws when a written number is not finite", () => {

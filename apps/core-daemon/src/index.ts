@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCoreConfig, installCoreConfigFromProcessEnv, parseSourceRefRobust } from "@do-soul/alaya-core";
+import { getCoreConfig, installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
 import {
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
@@ -19,7 +19,6 @@ import {
   createRequestProtection,
   listServerHardConstraints,
   loadConfigEnv,
-  readConfigEnvValue,
   recordStartupStep,
   resolveDatabasePath
 } from "./runtime/daemon/lifecycle/daemon-runtime-support.js";
@@ -29,7 +28,6 @@ import { finalizeDaemonRuntimeFromWiring } from "./runtime/daemon/lifecycle/fina
 import { createAnswersWithCrystallizer } from "./runtime/garden-wiring/garden-answers-with-crystallizer.js";
 import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
 import {
-  DAEMON_ONLY_CONFIG_ENV_KEYS,
   mergeDaemonEnvLookup,
   warnUnregisteredPrefixedDaemonEnvKeys
 } from "./runtime/config/daemon-config-environment.js";
@@ -148,10 +146,7 @@ async function createRuntimeBootstrapContext() {
   // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
   warnLogger.info("effective recall runtime", {
-    projections_enabled: getCoreConfig().recall.projectionsEnabled,
-    source_ref_robust: parseSourceRefRobust(
-      readConfigEnvValue(configEnvResult, DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
-    )
+    projections_enabled: getCoreConfig().recall.projectionsEnabled
   });
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();

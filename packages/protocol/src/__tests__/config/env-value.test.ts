@@ -8,8 +8,7 @@ import {
   parseEnvBoolean,
   parseEnvOptionalBoolean,
   parseEnvOptionalNumber,
-  parseEnvPositiveInt,
-  parseSourceRefRobust
+  parseEnvPositiveInt
 } from "../../config/env-value.js";
 
 describe("protocol env-value parsers", () => {
@@ -34,7 +33,6 @@ describe("protocol env-value parsers", () => {
     expect(() => parseDefaultOnFlag("2", "FLAG")).toThrow(error);
     expect(() => parseEnvOptionalBoolean("2", "FLAG")).toThrow(error);
     expect(() => isEnvFlagDisabled("2", "FLAG")).toThrow(error);
-    expect(() => parseSourceRefRobust("2")).toThrow(/ALAYA_RECALL_SOURCE_REF_ROBUST/);
   });
 
   it("accepts on/yes on every public boolean parser", () => {
@@ -50,10 +48,6 @@ describe("protocol env-value parsers", () => {
       expect(parseEnvOptionalBoolean(token, "FLAG")).toBe(false);
       expect(isEnvFlagDisabled(token, "FLAG")).toBe(true);
     }
-  });
-
-  it("parseSourceRefRobust rejects garbage", () => {
-    expect(() => parseSourceRefRobust("maybe")).toThrow(/ALAYA_RECALL_SOURCE_REF_ROBUST/);
   });
 
   it("parseDefaultOnFlag defaults on when unset", () => {

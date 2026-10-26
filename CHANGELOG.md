@@ -17,6 +17,8 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
+Protocol 26.0.0 removes `parseSourceRefRobust`; `ALAYA_RECALL_SOURCE_REF_ROBUST` never gated behavior and is now a retired daemon env key (ignored with the retired-key warning).
+
 Protocol 26.0.0 makes segmented lexical text (`segmented-unicode61.v1`, exported as
 `SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`) the default lexical representation
 (invariant §25 major: ordinary lexical candidates and their ranking change). The idle

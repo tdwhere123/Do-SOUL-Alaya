@@ -76,10 +76,6 @@ export function parseEnvOptionalNonNegativeSafeInt(
   return value;
 }
 
-export function parseSourceRefRobust(raw: string | undefined): boolean {
-  return parseEnvBoolean(raw, "ALAYA_RECALL_SOURCE_REF_ROBUST");
-}
-
 export function parseDefaultOnFlag(raw: string | undefined, key: string): boolean {
   return parseEnvBoolean(raw, key, true);
 }

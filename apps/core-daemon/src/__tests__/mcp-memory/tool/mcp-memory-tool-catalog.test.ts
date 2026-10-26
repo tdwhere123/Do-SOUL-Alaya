@@ -58,7 +58,8 @@ describe("mcp memory tool catalog", () => {
     const description = listAlayaMemoryTools().find((tool) => tool.name === "soul.recall")?.description ?? "";
 
     expect(description).toContain("`cap_contracts`");
-    expect(description).toMatch(/associative enumeration requires declared `cap_contracts`/i);
+    expect(description).toMatch(/`associative` also requires declared `cap_contracts`/i);
+    expect(description).toMatch(/`native_query` default/);
     expect(description).toMatch(/absence is incompatible/i);
   });
 

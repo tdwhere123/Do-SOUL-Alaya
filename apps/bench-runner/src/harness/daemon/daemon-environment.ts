@@ -8,7 +8,7 @@ import {
   warnUnregisteredPrefixedDaemonEnvKeys,
   type ResolveSecretError
 } from "@do-soul/alaya";
-import { parseSourceRefRobust, resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
+import { resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import type {
   BenchDaemonOptions,
@@ -215,11 +215,7 @@ function buildBenchDaemonEnvironment(input: {
   setEnvironmentValue(environment, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", undefined);
   setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR", undefined);
   setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_MODEL", undefined);
-  setEnvironmentValue(
-    environment,
-    "ALAYA_RECALL_SOURCE_REF_ROBUST",
-    resolveSourceRefRobust(input.ambientEnv.ALAYA_RECALL_SOURCE_REF_ROBUST) ? "true" : "false"
-  );
+  setEnvironmentValue(environment, "ALAYA_RECALL_SOURCE_REF_ROBUST", undefined);
   return Object.freeze(environment);
 }
 
@@ -311,10 +307,6 @@ function resolveLocalModelCacheRoot(
   const cacheHome = env.XDG_CACHE_HOME?.trim();
   const home = env.HOME?.trim() || homedir();
   return resolve(cacheHome || join(home, ".cache"), "do-soul-alaya", "models");
-}
-
-export function resolveSourceRefRobust(raw: string | undefined): boolean {
-  return parseSourceRefRobust(raw);
 }
 
 export function assertBenchEmbeddingModeMatchesEffective(

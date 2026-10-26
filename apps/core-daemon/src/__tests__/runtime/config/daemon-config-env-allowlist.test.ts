@@ -81,7 +81,8 @@ describe("daemon env registry allowlist", () => {
     const emitWarning = vi.fn();
     const configEnv = new Map([
       ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
-      ["ALAYA_LOCAL_CROSS_ENCODER_MODEL", "legacy-model"]
+      ["ALAYA_LOCAL_CROSS_ENCODER_MODEL", "legacy-model"],
+      ["ALAYA_RECALL_SOURCE_REF_ROBUST", "1"]
     ]);
     const unknown = warnUnregisteredPrefixedDaemonEnvKeys(
       mergeDaemonEnvLookup({}, configEnv),
@@ -89,10 +90,12 @@ describe("daemon env registry allowlist", () => {
     );
     expect(unknown).toEqual([
       "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
-      "ALAYA_LOCAL_CROSS_ENCODER_MODEL"
+      "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
+      "ALAYA_RECALL_SOURCE_REF_ROBUST"
     ]);
     expect(listRegisteredDaemonEnvKeys()).not.toContain("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
     expect(RETIRED_DAEMON_ENV_KEYS).toContain("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
+    expect(RETIRED_DAEMON_ENV_KEYS).toContain("ALAYA_RECALL_SOURCE_REF_ROBUST");
     expect(emitWarning).toHaveBeenCalledWith(
       expect.stringContaining("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK (retired)"),
       expect.objectContaining({ code: "ALAYA_UNREGISTERED_ENV_KEYS" })

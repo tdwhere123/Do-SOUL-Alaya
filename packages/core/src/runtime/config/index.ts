@@ -21,8 +21,7 @@ export {
   parseEnvOptionalBoolean,
   parseEnvOptionalNonNegativeSafeInt,
   parseEnvOptionalNumber,
-  parseEnvPositiveInt,
-  parseSourceRefRobust
+  parseEnvPositiveInt
 } from "./env-value.js";
 export {
   getCoreConfig,

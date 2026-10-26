@@ -43,8 +43,7 @@ export {
   parseEnvOptionalBoolean,
   parseEnvOptionalNonNegativeSafeInt,
   parseEnvOptionalNumber,
-  parseEnvPositiveInt,
-  parseSourceRefRobust
+  parseEnvPositiveInt
 } from "./config/env-value.js";
 export type { DiagnosticLogger, LoggerCorrelationIds, LoggerPort } from "./runtime/logger-port.js";
 export {

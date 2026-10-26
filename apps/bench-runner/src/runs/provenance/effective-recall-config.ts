@@ -12,7 +12,6 @@ import {
   applyBenchRecallWeightOverrides,
   type BenchRecallWeightOverrides
 } from "../../harness/recall/recall-weight-overrides.js";
-import { resolveSourceRefRobust } from "../../harness/daemon/daemon-environment.js";
 
 export const EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION = 2 as const;
 
@@ -74,12 +73,7 @@ export function buildEffectiveRecallConfigIdentity(
       conflict_awareness: options.conflictAwareness
     },
     runtime: normalizedCoreRuntime(env),
-    recall_policy: normalizedRecallPolicy(options, recallWeightOverrides),
-    daemon_adapter: {
-      source_ref_robust: resolveSourceRefRobust(
-        env.ALAYA_RECALL_SOURCE_REF_ROBUST
-      )
-    }
+    recall_policy: normalizedRecallPolicy(options, recallWeightOverrides)
   };
   return Object.freeze({
     schema_version: EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION,

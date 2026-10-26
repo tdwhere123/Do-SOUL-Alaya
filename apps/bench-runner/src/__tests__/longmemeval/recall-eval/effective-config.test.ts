@@ -39,21 +39,13 @@ describe("effective recall config identity", () => {
       ...options,
       maxResults: 20
     });
-    const equivalentAdapter = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
-    }, options);
-    const adapterDrift = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "true"
-    }, options);
     const h1Drift = buildEffectiveRecallConfigIdentity({
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
     }, options);
 
     expect(equivalent.effective_config_sha256).toBe(base.effective_config_sha256);
-    expect(equivalentAdapter.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(runtimeDrift.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(requestDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
-    expect(adapterDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(h1Drift.effective_config_sha256).toBe(base.effective_config_sha256);
   });
 
@@ -218,8 +210,7 @@ describe("effective recall config identity", () => {
   it.each([
     { ALAYA_RECALL_EVAL_MAX_RESULTS: "20" },
     { ALAYA_EMBEDDING_RECALL_TIERS: "cold" },
-    { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "2" },
-    { ALAYA_RECALL_SOURCE_REF_ROBUST: "true" }
+    { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "2" }
   ])("rejects effective product recall drift before reading inputs", async (drift) => {
     await expect(prepareRecallEvalRunContext({
       snapshotDbPath: "/missing/snapshot.db",

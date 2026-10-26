@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveEffectiveEmbeddingPosture } from "@do-soul/alaya";
 import {
-  assertBenchEmbeddingModeMatchesEffective,
-  resolveSourceRefRobust
+  assertBenchEmbeddingModeMatchesEffective
 } from "../../../harness/daemon/daemon-environment.js";
 
 describe("bench embeddingMode vs effective supplement", () => {
@@ -30,13 +29,5 @@ describe("bench embeddingMode vs effective supplement", () => {
       ALAYA_EMBEDDING_PROVIDER: "openai",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true"
     })).toThrow(/embeddingMode=disabled but effective embedding supplement is on/);
-  });
-});
-
-describe("resolveSourceRefRobust", () => {
-  it("treats unset as false", () => {
-    expect(resolveSourceRefRobust(undefined)).toBe(false);
-    expect(resolveSourceRefRobust("true")).toBe(true);
-    expect(() => resolveSourceRefRobust("maybe")).toThrow(/ALAYA_RECALL_SOURCE_REF_ROBUST/);
   });
 });

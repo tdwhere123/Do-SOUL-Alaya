@@ -136,7 +136,6 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ),
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "false",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true",
       ALAYA_EMBEDDING_PROVIDER: "local_onnx"
     });
@@ -150,13 +149,11 @@ describe("effective bench daemon environment", () => {
       HOME: process.env.HOME,
       XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR,
-      ALAYA_RECALL_SOURCE_REF_ROBUST: process.env.ALAYA_RECALL_SOURCE_REF_ROBUST,
       ALAYA_CONFIG_DIR: process.env.ALAYA_CONFIG_DIR
     };
     process.env.HOME = operatorHome;
     delete process.env.XDG_CACHE_HOME;
     delete process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR;
-    delete process.env.ALAYA_RECALL_SOURCE_REF_ROBUST;
 
     try {
       daemon = await startBenchDaemon({
@@ -170,12 +167,10 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ));
-      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBe("false");
       await daemon.shutdown();
       daemon = undefined;
       expect(process.env.HOME).toBe(operatorHome);
       expect(process.env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR).toBeUndefined();
-      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBeUndefined();
       expect(process.env.ALAYA_CONFIG_DIR).toBe(saved.ALAYA_CONFIG_DIR);
     } finally {
       for (const [key, value] of Object.entries(saved)) {

@@ -2,9 +2,6 @@ import { resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
 import type { EnvLookup } from "@do-soul/alaya-protocol";
 
 export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
-  recall: Object.freeze({
-    sourceRefRobust: "ALAYA_RECALL_SOURCE_REF_ROBUST"
-  }),
   embedding: Object.freeze({
     provider: "ALAYA_EMBEDDING_PROVIDER",
     supplement: "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
@@ -78,7 +75,8 @@ const DAEMON_ONLY_KEY_LIST: readonly string[] = Object.freeze(
 export const RETIRED_DAEMON_ENV_KEYS = Object.freeze([
   "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
   "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
-  "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR"
+  "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
+  "ALAYA_RECALL_SOURCE_REF_ROBUST"
 ] as const);
 
 const RETIRED_DAEMON_ENV_KEY_SET: ReadonlySet<string> = new Set(RETIRED_DAEMON_ENV_KEYS);
