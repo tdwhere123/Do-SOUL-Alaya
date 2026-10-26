@@ -100,7 +100,7 @@ it("prepares fresh admitted bytes without binding a model, matches embedded word
   } finally { await producer?.stop(); database.close({ optimize: false }); rmSync(directory, { recursive: true, force: true }); }
 });
 
-it("does not serve or publish a cold, loading, unavailable or failing strict analyzer", async () => {
+it("reads the raw index under a cold or loading analyzer and never publishes a cold, unavailable or failing one", async () => {
   const { database, index } = fixture();
   try {
     admit(database);
@@ -108,12 +108,17 @@ it("does not serve or publish a cold, loading, unavailable or failing strict ana
     const prepared = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", limits);
     expect(prepared.status).toBe("ready");
     __resetCjkSegmentationStateForTests();
-    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "unavailable", reason: "segmenter_uninitialized" });
+    const cold = index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget);
+    expect(cold.reason).not.toMatch(/^segmenter_/u);
+    expect(cold.tokenization).toMatchObject({ cjk_state: "uninitialized" });
+    expect(cold.tokenization).not.toHaveProperty("lexical_binding");
     expect(index.lexical.activateLexical(WORKSPACE, prepared.generation!.generation_id)).toEqual({ status: "rejected", reason: "incomplete" });
     let resolve!: (value: null) => void;
     __setCjkSegmentationLoaderForTests(() => new Promise(done => { resolve = done; }));
     const warming = warmCjkSegmentation();
-    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "unavailable", reason: "segmenter_loading" });
+    const loading = index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget);
+    expect(loading.reason).not.toMatch(/^segmenter_/u);
+    expect(loading.tokenization).not.toHaveProperty("lexical_binding");
     resolve(null); await warming;
     expect(await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", limits)).toMatchObject({ status: "unavailable", reason: "segmenter_unavailable" });
     __setCjkSegmentationLoaderForTests(async () => ({ cut: () => { throw new Error("authored analyzer failure"); } }));

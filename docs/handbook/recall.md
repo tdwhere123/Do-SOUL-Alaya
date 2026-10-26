@@ -351,7 +351,8 @@ generation publishes the raw reader serves, never a mixture of the two projectio
 A new source epoch's generation reuses the projection and FTS rows of every root whose
 `root_key`, content digest and body bytes match the active generation (charged as copy
 reads and writes, no analysis units) and analyzes only new or changed roots. A segmented
-selection with a cold, loading or failed segmenter remains unavailable at the reader. Model changes/unbind do not affect
+selection whose segmenter is cold, loading or failed reads the raw index with raw query
+tokens; it never mixes the two tokenizations. Model changes/unbind do not affect
 lexical selection, and lexical selection does not retire vector generations.
 
 The segmented variant requires the pinned Node Jieba analyzer to be ready; cold,

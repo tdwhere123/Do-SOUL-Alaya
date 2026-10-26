@@ -26,9 +26,8 @@ more than half first). Until a workspace's first segmented generation publishes,
 keeps reading the raw index; it no longer reports `lexical_generation_unpublished`. A
 new source epoch's generation copies the projections of roots whose key and content
 digest are unchanged and analyzes only new or changed roots. An explicit selection, such
-as a `raw-unicode61.v1` rollback, is honored and never overridden. A cold or failed
-segmenter still reports the lexical lane unavailable rather than silently mixing
-tokenization. Upgrade the daemon and clients together; no source or index rewrite is
+as a `raw-unicode61.v1` rollback, is honored and never overridden. Until the segmenter is
+ready, readers use the raw index with raw query tokens; the two never mix. Upgrade the daemon and clients together; no source or index rewrite is
 required, and old binaries need a retained pre-migration database copy only if the
 schema fence applies.
 
