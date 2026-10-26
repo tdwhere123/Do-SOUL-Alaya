@@ -76,7 +76,8 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>
+      .EvidenceOsfSemanticCompletenessReceipt>,
+    sourceProvenance?: boolean
   ): Promise<Readonly<EvidenceCapsule>>;
   createInCurrentTransaction?(
     capsule: EvidenceCapsule,
@@ -84,7 +85,8 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>
+      .EvidenceOsfSemanticCompletenessReceipt>,
+    sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;

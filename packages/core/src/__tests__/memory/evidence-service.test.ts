@@ -81,7 +81,8 @@ describe("EvidenceService", () => {
       expect.objectContaining({
         status: "not_applicable",
         reason_code: "upstream_not_formed"
-      })
+      }),
+      false
     );
     expect(appendedEvents[1]).toMatchObject({
       event_type: "soul.field.source_record.admitted",

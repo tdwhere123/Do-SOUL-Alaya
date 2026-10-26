@@ -102,23 +102,59 @@ describe("native retained capsule SourceIndex roots", () => {
     expect(env.index.writeLexical(source, documents[0]!.body, BUDGET).status).toBe("rejected");
   });
 
-  it("does not index a provenance capsule whose source_hash is an admitted source body", async () => {
+  it("indexes an independent capsule that cites an admitted source digest", async () => {
     const env = setup();
     const record = publishSource(env, "Harbor opening was put off.");
-    await new SqliteEvidenceCapsuleRepo(env.database).create({
+    const root = await new SqliteEvidenceCapsuleRepo(env.database).create({
       object_id: randomUUID(), object_kind: "evidence_capsule", schema_version: 1, lifecycle_state: "active",
       created_at: CLOCK, updated_at: CLOCK, created_by: "user_action", evidence_kind: "conversation_excerpt",
-      semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
-      event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "provenance gist",
+      semantic_anchor: { topic: "source", keywords: ["source"], summary: "retained source" },
+      event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "independent gist",
       excerpt: "Harbor opening was put off.", source_hash: record.content_digest, run_id: "run-1",
       workspace_id: WORKSPACE, surface_id: null
     });
     const { generation, documents } = buildReady(env);
-    expect(generation).toMatchObject({ enumeration_complete: true, target_count: 1 });
-    expect(documents).toHaveLength(1);
-    expect(documents[0]!.source).toMatchObject({ source_id: record.source_id, target: { root_kind: "source_record",
-      root_id: record.record_id } });
+    expect(generation).toMatchObject({ enumeration_complete: true, target_count: 2 });
+    expect(documents.map(row => row.source.target.root_kind).sort()).toEqual(["evidence_capsule", "source_record"]);
+    expect(documents.some(row => row.source.source_id === record.source_id)).toBe(true);
+    expect(documents.some(row => row.source.target.root_id === root.object_id)).toBe(true);
   });
+
+  it.each(["source-first", "capsule-first"] as const)(
+    "does not index a persisted provenance capsule (%s)", async order => {
+      const env = setup();
+      const body = "Harbor opening was put off.";
+      const plantProvenance = (sourceHash: string | null = null) => new SqliteEvidenceCapsuleRepo(env.database).create({
+        object_id: randomUUID(), object_kind: "evidence_capsule", schema_version: 1, lifecycle_state: "active",
+        created_at: CLOCK, updated_at: CLOCK, created_by: "user_action", evidence_kind: "conversation_excerpt",
+        semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
+        event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "provenance gist",
+        excerpt: body, source_hash: sourceHash, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
+      }, [], undefined, undefined, undefined, true);
+      if (order === "source-first") {
+        const record = publishSource(env, body);
+        const first = buildReady(env);
+        expect(first.documents).toHaveLength(1);
+        await plantProvenance(record.content_digest);
+        expect(env.index.generation(WORKSPACE, first.generation.generation_id)?.status).toBe("partial");
+        const { generation, documents } = buildReady(env);
+        expect(generation).toMatchObject({ enumeration_complete: true, target_count: 1 });
+        expect(documents).toHaveLength(1);
+        expect(documents[0]!.source).toMatchObject({ source_id: record.source_id, target: { root_kind: "source_record",
+          root_id: record.record_id } });
+        return;
+      }
+      await plantProvenance();
+      const empty = env.index.begin(env.index.select(WORKSPACE, configuration()));
+      expect(env.index.capturePage(WORKSPACE, empty.generation_id, 8, BUDGET).generation)
+        .toMatchObject({ enumeration_complete: true, target_count: 0 });
+      const record = publishSource(env, body);
+      const { generation, documents } = buildReady(env);
+      expect(generation).toMatchObject({ enumeration_complete: true, target_count: 1 });
+      expect(documents).toHaveLength(1);
+      expect(documents[0]!.source).toMatchObject({ source_id: record.source_id, target: { root_kind: "source_record",
+        root_id: record.record_id } });
+    });
 
   it("retains paid reads on native admission failure and rolls capture progress back", async () => {
     const env = setup(); await capsule(env); const { documents } = buildReady(env);

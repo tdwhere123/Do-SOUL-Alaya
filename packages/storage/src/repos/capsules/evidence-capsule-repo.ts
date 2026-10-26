@@ -157,14 +157,16 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>
+      .EvidenceOsfSemanticCompletenessReceipt>,
+    sourceProvenance = false
   ): Promise<Readonly<EvidenceCapsule>> {
     const run = () => this.createInCurrentTransaction(
       capsule,
       searchProjections,
       factFrameFormation,
       semanticFactorFormation,
-      semanticCompleteness
+      semanticCompleteness,
+      sourceProvenance
     );
     if (this.db.connection.inTransaction) {
       return run();
@@ -178,7 +180,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>
+      .EvidenceOsfSemanticCompletenessReceipt>,
+    sourceProvenance = false
   ): Readonly<EvidenceCapsule> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
     const formationInsert = prepareFactFrameFormationInsert(
@@ -197,7 +200,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         parsedCapsule,
         searchProjections,
         formationInsert,
-        semanticFormationInsert
+        semanticFormationInsert,
+        sourceProvenance
       );
     } catch (error) {
       throw new StorageError(
@@ -213,7 +217,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     parsedCapsule: EvidenceCapsule,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[],
     formationInsert: ReturnType<typeof prepareFactFrameFormationInsert>,
-    semanticFormationInsert: ReturnType<typeof prepareSemanticFactorFormationInsert>
+    semanticFormationInsert: ReturnType<typeof prepareSemanticFactorFormationInsert>,
+    sourceProvenance: boolean
   ): void {
     this.statements.createStatement.run(
       parsedCapsule.object_id,
@@ -238,6 +243,12 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       Buffer.byteLength(parsedCapsule.excerpt ?? parsedCapsule.gist, "utf8"),
       parsedCapsule.event_anchor?.occurred_at ?? null
     );
+    if (sourceProvenance) {
+      // Shared INSERT omits this later column so create still works before migration 027.
+      this.db.connection.prepare(
+        "UPDATE evidence_capsules SET source_provenance = 1 WHERE object_id = ?"
+      ).run(parsedCapsule.object_id);
+    }
     const retained = parsedCapsule.excerpt ?? parsedCapsule.gist;
     writeRetainedSourceChunks(this.db, { workspaceId: parsedCapsule.workspace_id, kind: "evidence_capsule",
       rootId: parsedCapsule.object_id, revision: parsedCapsule.updated_at,

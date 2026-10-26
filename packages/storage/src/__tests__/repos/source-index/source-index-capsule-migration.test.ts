@@ -3,13 +3,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, expect, it } from "vitest";
-import { canonicalJson, sourceIndexConfigurationId, sourceIndexProfileId } from "@do-soul/alaya-protocol";
+import { canonicalJson, hashSourceRecordId, sourceIndexConfigurationId, sourceIndexProfileId } from "@do-soul/alaya-protocol";
 import { StorageDatabase, initDatabase } from "../../../sqlite/db.js";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../../sqlite/temporal-cutover-gate.js";
 import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-capsule-repo.js";
+import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
 import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-index-repo.js";
 import { applyBaselineSql } from "../../migrations/apply-baseline.js";
-import { seedWorkspaces } from "../field/field-contract-fixture.js";
+import { hashedOriginalRecord, seedWorkspaces } from "../field/field-contract-fixture.js";
 import { BUDGET, CLOCK, WORKSPACE, configuration, fieldSha256 } from "./source-index-fixture.js";
 const opened: StorageDatabase[] = [], directories: string[] = [];
 afterEach(() => { for (const db of opened.splice(0)) db.close(); for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -44,4 +45,33 @@ it("forward migration retires record-only valid-empty generations and recaptures
   expect(index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET).generation).toMatchObject({ target_count: 1, enumeration_complete: true });
   expect(index.listTargets(WORKSPACE, generation.generation_id, null, 8)[0]).toMatchObject({ source_id: null,
     target: { root_kind: "evidence_capsule", root_id: root.object_id } });
+});
+
+it("does not infer historical provenance membership from a matching source digest", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "capsule-source-provenance-migration-")); directories.push(directory);
+  const filename = join(directory, "old.sqlite"), old = new StorageDatabase(filename, new BetterSqlite3(filename)); opened.push(old);
+  applyBaselineSql(old.connection, 22);
+  migrateLegacyPathRelationsToTemporalCandidate(old.connection, { selectionRequired: false });
+  old.connection.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+  for (let version = 1; version <= 22; version++) old.connection.prepare("INSERT INTO schema_version VALUES(?,?)").run(version, CLOCK);
+  seedWorkspaces(old);
+  const root = await new SqliteEvidenceCapsuleRepo(old).create({ object_id: "cccccccc-cccc-4ccc-8ccc-000000000202",
+    object_kind: "evidence_capsule", schema_version: 1, lifecycle_state: "active", created_at: CLOCK, updated_at: CLOCK,
+    created_by: "user_action", evidence_kind: "conversation_excerpt", semantic_anchor: { topic: "source", keywords: ["source"], summary: "source" },
+    event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "gist", excerpt: "Harbor opening was put off.",
+    source_hash: "sha256:not-identity", run_id: "run-1", workspace_id: WORKSPACE, surface_id: null });
+  old.close({ optimize: false });
+  const migrated = initDatabase({ filename }); opened.push(migrated);
+  expect(migrated.connection.prepare("SELECT source_provenance FROM evidence_capsules WHERE object_id=?").get(root.object_id))
+    .toEqual({ source_provenance: 0 });
+  const records = new SqliteFieldSourceRecordRepo(migrated, fieldSha256);
+  const row = hashedOriginalRecord(WORKSPACE, "Harbor opening was put off.", "source-a");
+  const record = records.insert({ ...row, record_id: hashSourceRecordId(row, fieldSha256) });
+  migrated.connection.prepare("UPDATE evidence_capsules SET source_hash=? WHERE object_id=?").run(record.content_digest, root.object_id);
+  const index = new SqliteSourceIndexRepository(migrated, fieldSha256);
+  const generation = index.begin(index.select(WORKSPACE, configuration()));
+  expect(index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET).generation)
+    .toMatchObject({ target_count: 2, enumeration_complete: true });
+  const kinds = index.listTargets(WORKSPACE, generation.generation_id, null, 8).map(target => target.target.root_kind).sort();
+  expect(kinds).toEqual(["evidence_capsule", "source_record"]);
 });

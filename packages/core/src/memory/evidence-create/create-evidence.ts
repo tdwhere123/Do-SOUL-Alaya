@@ -56,14 +56,16 @@ export async function createEvidenceCapsule(input: Readonly<{
       searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
       factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
       semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
-      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
+      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
+      sourceProvenance?: boolean
     ): Promise<Readonly<EvidenceCapsule>>;
     createInCurrentTransaction?(
       capsule: EvidenceCapsule,
       searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
       factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
       semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
-      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
+      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
+      sourceProvenance?: boolean
     ): Readonly<EvidenceCapsule>;
   };
   readonly eventLogRepo: {
@@ -213,13 +215,15 @@ async function admitOptionalFieldFormation(
 function persistCreatedEvidence(
   input: Readonly<{
     readonly assertSourceCurrent?: () => void;
+    readonly sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE;
     readonly evidenceCapsuleRepo: {
       createInCurrentTransaction?(
         capsule: EvidenceCapsule,
         searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
         factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
         semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"],
-        semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
+        semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
+        sourceProvenance?: boolean
       ): Readonly<EvidenceCapsule>;
     };
     readonly eventLogRepo: {
@@ -253,7 +257,8 @@ function persistCreatedEvidence(
         formation.searchProjections,
         formation.factFrameCapture,
         formation.semanticFormation,
-        formation.semanticCompleteness
+        formation.semanticCompleteness,
+        input.sourceFieldFormation === SOURCE_PROVENANCE_CAPSULE
       );
       if (enqueueEnrichment !== undefined && input.gardenIntentPort !== undefined) {
         admitSourceEnrichmentIntent(input.gardenIntentPort, {

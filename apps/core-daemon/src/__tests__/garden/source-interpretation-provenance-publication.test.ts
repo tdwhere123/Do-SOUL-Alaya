@@ -142,6 +142,9 @@ it.each(["semantic", "packet"] as const)("persists %s provenance without admitti
   expect(fixture.notifications.map(row => row.event_type)).toEqual([
     "soul.field.source_record.admitted", "soul.evidence.created"
   ]);
+  expect(fixture.database.connection.prepare(
+    "SELECT source_provenance FROM evidence_capsules WHERE object_id = ?")
+    .get(publication.evidence.object_id)).toEqual({ source_provenance: 1 });
   for (const table of ["evidence_fact_frame_formations", "evidence_semantic_factor_formations"]) {
     expect(fixture.database.connection.prepare(`SELECT evidence_object_id FROM ${table} WHERE evidence_object_id = ?`)
       .get(publication.evidence.object_id)).toEqual({ evidence_object_id: publication.evidence.object_id });
@@ -167,6 +170,9 @@ it.each(["semantic", "packet"] as const)("persists %s provenance without admitti
   expect(reopened.stores.listStoredRecords(WORKSPACE_ID)).toHaveLength(2);
   const ordinaryRecord = reopened.stores.getCurrentRecord(WORKSPACE_ID, "ordinary-source");
   expect(ordinaryRecord?.evidence_object_id).toBe(ordinary.object_id);
+  expect(reopened.database.connection.prepare(
+    "SELECT source_provenance FROM evidence_capsules WHERE object_id = ?")
+    .get(ordinary.object_id)).toEqual({ source_provenance: 0 });
   expect(reopened.stores.getStoredRecord(WORKSPACE_ID, ordinaryRecord!.identity)?.content_bytes)
     .toBe("Ordinary evidence body.");
   expect(reopened.stores.getCurrentRecord(WORKSPACE_ID, "artifact-1")).toEqual(original.record);

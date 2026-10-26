@@ -359,7 +359,7 @@ describe("EvidenceService source formation", () => {
 
     expect(await service.findById(created.object_id)).not.toBeNull();
     expect(create).toHaveBeenCalledWith(
-      created, [], expect.anything(), expect.anything(), expect.anything()
+      created, [], expect.anything(), expect.anything(), expect.anything(), false
     );
   });
 });

@@ -69,7 +69,8 @@ describe("EvidenceService creation", () => {
       }),
       expect.objectContaining({ status: "certified", upstream_semantic_formation: expect.objectContaining({
         producer_operator_id: "structured_open_semantic_factor_v1", status: "formed"
-      }) })
+      }) }),
+      selection === SOURCE_PROVENANCE_CAPSULE
     );
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
     expect(stores.listRecords("workspace-1")).toHaveLength(sourceRecords);
@@ -180,7 +181,8 @@ describe("EvidenceService creation", () => {
       [],
       expect.anything(),
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      false
     );
     expect(warn).toHaveBeenCalledWith(
       "optional evidence formation failed",

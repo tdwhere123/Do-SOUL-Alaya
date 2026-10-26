@@ -27,14 +27,17 @@ export interface EvidenceCapsuleRepo {
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>
+    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
+    // Create-time role: derived provenance excerpts are not new source bodies.
+    sourceProvenance?: boolean
   ): Promise<Readonly<EvidenceCapsule>>;
   createInCurrentTransaction(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>
+    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
+    sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;

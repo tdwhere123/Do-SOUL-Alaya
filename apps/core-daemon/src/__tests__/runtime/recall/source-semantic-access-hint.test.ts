@@ -106,16 +106,14 @@ it("admits one current source tuple shared by canonical, native index and repeat
         const targets = repository.listTargets(WS, generation.generation_id, null, 16);
         target = targets.find(row => row.source_id === "overlap");
         if (target === undefined) throw new Error("native source index target expected");
-        // Publish requires every captured root. The admitted source record is the shared tuple.
-        for (const captured of targets) {
-          const prepared = lifecycle.prepare(WS, generation.generation_id, captured.root_key, INDEX_BUDGET);
-          if (prepared.status !== "ready") throw new Error("native source document expected");
-          // Independently authored vector control: no inference, provider or retained archive is used.
-          for (const window of prepared.document.windows) expect(lifecycle.acceptVector(WS, generation.generation_id, {
-            window_id: window.window_id, input_digest: window.content_digest,
-            embedding: new Float32Array([1, 0, 0]), token_count: 2, truncated: false
-          }, INDEX_BUDGET).status).toBe("accepted");
-        }
+        expect(targets).toHaveLength(1);
+        const prepared = lifecycle.prepare(WS, generation.generation_id, target.root_key, INDEX_BUDGET);
+        if (prepared.status !== "ready") throw new Error("native source document expected");
+        // Independently authored vector control: no inference, provider or retained archive is used.
+        for (const window of prepared.document.windows) expect(lifecycle.acceptVector(WS, generation.generation_id, {
+          window_id: window.window_id, input_digest: window.content_digest,
+          embedding: new Float32Array([1, 0, 0]), token_count: 2, truncated: false
+        }, INDEX_BUDGET).status).toBe("accepted");
         expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
       } finally { database.close(); closeCachedDatabase(filename); }
       const prepared = await accessCall(execute, { ...prepare, access_hint: "Harbor" });
