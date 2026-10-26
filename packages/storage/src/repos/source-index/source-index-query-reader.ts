@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { analyzeSourceIndexLexical, isCjkSegmentationCandidate, readCjkSegmentationStatus, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js";
@@ -36,8 +37,8 @@ export class SourceIndexTargetCapture {
     // The epoch point-read pins the SQLite snapshot before comparing connection
     // revision, including the first read of a newly opened deferred transaction.
     const sourceEpoch = sourceIndexEpoch(database, workspace);
-    const revision = `${database.getConnectionVersion()}:${sourceEpoch}:${String(database.connection.pragma("data_version", { simple: true }))}:${String(
-      readRecord(database.connection.prepare("SELECT total_changes() AS n").get(), "source capture revision").n)}`;
+    const revision = `${database.getConnectionVersion()}:${sourceEpoch}:${String(cachedReadStatement(database, "PRAGMA data_version").pluck().get())}:${String(
+      readRecord(cachedReadStatement(database, "SELECT total_changes() AS n").get(), "source capture revision").n)}`;
     if (this.rows === undefined) {
       meter.ledger.charge(1, 64, "source target capture map"); this.rows = new Map();
     } else if (this.epoch !== revision) {
@@ -46,6 +47,7 @@ export class SourceIndexTargetCapture {
     this.epoch = revision;
     return true;
   }
+  owns(key: string): boolean { return this.rows?.has(key) === true; }
   get(key: string, meter: QueryReadMeter): SourceIndexTarget | undefined {
     meter.ledger.charge(1, 0, "source target capture lookup");
     return this.rows?.get(key);
@@ -68,6 +70,21 @@ class QueryReadMeter {
   read(work: number, bytes: number): void {
     this.ledger.charge(work, bytes, "source index query read"); this.nativeBytes += bytes;
   }
+  /** Rows of one batch are already read from SQLite: pay each in order. Once the ledger refuses, the unpaid
+   * remainder is charged as far as the budget reaches and always counts as native bytes, so no read goes unaccounted. */
+  readRows(rowBytes: readonly number[]): SourceSemanticResourceExhausted | null {
+    for (let paid = 0; paid < rowBytes.length; paid++) {
+      try { this.read(1, rowBytes[paid]!); } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        for (let unpaid = paid; unpaid < rowBytes.length; unpaid++) {
+          this.ledger.charge(Math.min(1, this.ledger.work), Math.min(rowBytes[unpaid]!, this.ledger.bytes), "source index query read");
+          this.nativeBytes += rowBytes[unpaid]!;
+        }
+        return error;
+      }
+    }
+    return null;
+  }
   absorb(resources: SourceIndexResources): void { this.read(resources.work, resources.native_bytes); }
   remaining() { return { work: this.ledger.work, native_bytes: this.ledger.bytes }; }
   resources(): SourceIndexQueryResources {
@@ -75,6 +92,9 @@ class QueryReadMeter {
       memory_bytes: this.ledger.spentBytes, sql_internal_work: "unknown" };
   }
 }
+// Decoding a target charges its JSON bytes as work, and a valid target is larger than this: rows past what
+// the remaining work could decode are not worth reading.
+const LEXICAL_ROW_WORK_ESTIMATE = 512;
 const LEXICAL_LIMITATIONS = Object.freeze([
   "database_wide_bm25_statistics", "short_or_unadmitted_tokens_are_not_absence", "lexical_corpus_coverage_untracked"
 ]);
@@ -124,53 +144,27 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
     shortCjk = split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
       Array.from(token).length < TRIGRAM_MIN_CODEPOINTS && (!segmented || !isCjkSegmentationCandidate(token)));
     const lanes = [
-      { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts",
-        tokens: split.porterTokens, offset: 0, done: false },
-      { lane: "trigram" as const, table: "source_index_fts_trigram", tokens: split.trigramTokens, offset: 0, done: false }
-    ].filter(lane => lane.tokens.length > 0).map(lane => ({ ...lane, match: buildFtsMatchExpression(lane.tokens) }));
+      { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts", tokens: split.porterTokens },
+      { lane: "trigram" as const, table: "source_index_fts_trigram", tokens: split.trigramTokens }
+    ].filter(lane => lane.tokens.length > 0).map(lane => new LexicalLane(database, lane.lane, lane.table,
+      buildFtsMatchExpression(lane.tokens), binding?.generation_id));
     meter.ledger.retain(lanes.map(lane => lane.match));
     if (lanes.length === 0) return result("partial", "no_admitted_tokens");
     while (candidates.length < limit && lanes.some(lane => !lane.done)) {
       for (const lane of lanes) {
         if (lane.done || candidates.length >= limit) continue;
-        meter.ledger.reserve(1, 24); meter.read(1, 0);
-        const projected = lane.table === "source_index_lexical_fts";
-        const projectionJoin = projected
-          ? `JOIN source_index_lexical_projections p ON p.id=${lane.table}.rowid AND p.workspace_id=?
-             JOIN source_index_text x ON x.workspace_id=p.workspace_id AND x.root_key=p.root_key`
-          : `JOIN source_index_text x ON x.id=${lane.table}.rowid AND x.workspace_id=?`;
-        const generationJoin = binding === undefined ? "" : `${projected ? "" : `JOIN source_index_lexical_projections p
-          ON p.workspace_id=x.workspace_id AND p.root_key=x.root_key`}
-          JOIN source_index_lexical_targets t ON t.workspace_id=p.workspace_id AND t.generation_id=p.generation_id
-            AND t.root_key=p.root_key AND t.complete=1`;
-        const raw = database.connection.prepare(`SELECT x.id,bm25(${lane.table}) AS score,r.root_key,
-          octet_length(r.target_json) AS metadata_bytes FROM ${lane.table} ${projectionJoin} ${generationJoin}
-          JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
-          WHERE ${lane.table} MATCH ? AND ${SOURCE_INDEX_LEXICAL_CURRENT}
-          ${binding === undefined ? "" : "AND p.generation_id=? AND p.content_digest=x.content_digest AND p.body_bytes=x.body_bytes"}
-          ORDER BY score ASC,x.root_key ASC LIMIT 1 OFFSET ?`).get(workspaceId, lane.match,
-            ...(binding === undefined ? [] : [binding.generation_id]), lane.offset);
-        if (raw === undefined) { lane.done = true; continue; }
-        const row = readRecord(raw, "source lexical candidate"), bytes = readIntegerField(row, "metadata_bytes");
-        const rootKey = readStringField(row, "root_key");
-        meter.read(0, 24 + Buffer.byteLength(rootKey));
-        const owned = captured ? capture!.get(rootKey, meter) : undefined;
-        // Reserve actual target decoding only when no paid snapshot-owned target exists.
-        meter.ledger.reserve(129 + (owned === undefined ? bytes : 0), 4096 + 5 * bytes); meter.read(1, 0);
-        const target = database.connection.prepare(`SELECT r.target_json FROM source_index_text x
-          JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
-          WHERE x.workspace_id=? AND x.id=?`).get(workspaceId, readIntegerField(row, "id"));
-        meter.read(0, bytes);
-        if (owned === undefined) meter.ledger.charge(bytes, 0, "source target decode");
-        const source = owned ?? parseTarget(target, workspaceId, meter);
-        lane.offset++;
-        const lexical = { rank: candidates.length + 1, lane: lane.lane, lane_rank: lane.offset,
-          bm25: readFiniteNumberField(row, "score") };
-        if (!Number.isFinite(lexical.bm25)) return result("unavailable", "invalid_bm25");
-        const candidate = { source, lexical };
-        meter.ledger.retain(candidate);
-        if (captured) capture!.remember(source, meter);
-        candidates.push(candidate);
+        if (!lane.buffered()) {
+          // Alternation hands this lane every other remaining slot while the other lanes still yield rows.
+          const live = lanes.filter(other => !other.done && (other.buffered() || !other.exhausted)).length;
+          lane.fill(workspaceId, Math.min(Math.ceil((limit - candidates.length) / live),
+            Math.max(1, Math.floor(meter.ledger.work / LEXICAL_ROW_WORK_ESTIMATE))), meter);
+        }
+        const row = lane.take();
+        if (row === undefined) {
+          if (lane.refusal !== null) throw lane.refusal;
+          lane.done = true; continue;
+        }
+        candidates.push(lexicalCandidate(lane, row, candidates.length + 1, workspaceId, meter, captured ? capture : undefined));
       }
     }
     return lanes.every(lane => lane.done)
@@ -184,7 +178,97 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
   }
 }
 
-/** Rowid is only a point-read address; the continuation and deterministic order use the window key. */
+type LexicalRow = Readonly<{ raw: Record<string, unknown>; rootKey: string; bytes: number }>;
+
+/** One FTS lane: a single ordered statement read in bounded batches, never one statement per candidate. */
+class LexicalLane {
+  done = false;
+  exhausted = false;
+  refusal: SourceSemanticResourceExhausted | null = null;
+  consumed = 0;
+  private rows: readonly LexicalRow[] = [];
+  private next = 0;
+  private fetched = 0;
+  private readonly statement;
+  constructor(database: StorageDatabase, readonly lane: "unicode61" | "trigram", readonly table: string,
+    readonly match: string, private readonly generationId: string | undefined) {
+    const projected = table === "source_index_lexical_fts";
+    const projectionJoin = projected
+      ? `JOIN source_index_lexical_projections p ON p.id=${table}.rowid AND p.workspace_id=?
+         JOIN source_index_text x ON x.workspace_id=p.workspace_id AND x.root_key=p.root_key`
+      : `JOIN source_index_text x ON x.id=${table}.rowid AND x.workspace_id=?`;
+    const generationJoin = generationId === undefined ? "" : `${projected ? "" : `JOIN source_index_lexical_projections p
+      ON p.workspace_id=x.workspace_id AND p.root_key=x.root_key`}
+      JOIN source_index_lexical_targets t ON t.workspace_id=p.workspace_id AND t.generation_id=p.generation_id
+        AND t.root_key=p.root_key AND t.complete=1`;
+    this.statement = cachedReadStatement(database, `SELECT bm25(${table}) AS score,r.root_key,r.target_json,
+      octet_length(r.target_json) AS metadata_bytes FROM ${table} ${projectionJoin} ${generationJoin}
+      JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
+      WHERE ${table} MATCH ? AND ${SOURCE_INDEX_LEXICAL_CURRENT}
+      ${generationId === undefined ? "" : "AND p.generation_id=? AND p.content_digest=x.content_digest AND p.body_bytes=x.body_bytes"}
+      ORDER BY score ASC,x.root_key ASC LIMIT ? OFFSET ?`);
+  }
+  buffered(): boolean { return this.next < this.rows.length; }
+  take(): LexicalRow | undefined {
+    const row = this.rows[this.next];
+    if (row !== undefined) { this.next++; this.consumed++; }
+    return row;
+  }
+  /** Reads the next `size` rows in `score ASC, root_key ASC` order and pays for every one of them. */
+  fill(workspaceId: string, size: number, meter: QueryReadMeter): void {
+    if (this.exhausted) return;
+    meter.ledger.reserve(1, 24); meter.read(1, 0);
+    const raw = this.statement.all(workspaceId, this.match, ...(this.generationId === undefined ? [] : [this.generationId]),
+      size, this.fetched);
+    const rows = raw.map(item => {
+      const row = readRecord(item, "source lexical candidate"), rootKey = readStringField(row, "root_key");
+      return { raw: row, rootKey, bytes: readIntegerField(row, "metadata_bytes") };
+    });
+    this.fetched += rows.length; this.exhausted = rows.length < size;
+    this.refusal = meter.readRows(rows.map(row => 24 + Buffer.byteLength(row.rootKey) + row.bytes));
+    this.rows = this.refusal === null ? rows : []; this.next = 0;
+  }
+}
+
+function lexicalCandidate(lane: LexicalLane, row: LexicalRow, rank: number, workspaceId: string, meter: QueryReadMeter,
+  capture: SourceIndexTargetCapture | undefined): SourceIndexLexicalCandidate {
+  const owned = capture?.get(row.rootKey, meter);
+  // Reserve actual target decoding only when no paid snapshot-owned target exists.
+  meter.ledger.reserve(129 + (owned === undefined ? row.bytes : 0), 4096 + 5 * row.bytes);
+  if (owned === undefined) meter.ledger.charge(row.bytes, 0, "source target decode");
+  const source = owned ?? parseTarget(row.raw, workspaceId, meter);
+  const candidate = { source, lexical: { rank, lane: lane.lane, lane_rank: lane.consumed, bm25: readFiniteNumberField(row.raw, "score") } };
+  meter.ledger.retain(candidate);
+  capture?.remember(source, meter);
+  return candidate;
+}
+
+const VECTOR_PAGE_SQL = `SELECT v.window_id,v.dimensions,v.embedding_blob,w.start_byte,w.end_byte,w.content_digest,r.root_key,
+  octet_length(r.target_json) AS target_bytes,
+  octet_length(v.window_id)+octet_length(w.content_digest)+24 AS window_bytes
+  FROM source_index_vectors v
+  JOIN source_index_windows w ON w.workspace_id=v.workspace_id AND w.generation_id=v.generation_id
+    AND w.root_key=v.root_key AND w.window_id=v.window_id
+  JOIN source_index_targets t ON t.workspace_id=v.workspace_id AND t.generation_id=v.generation_id AND t.root_key=v.root_key
+  JOIN source_index_roots r ON r.workspace_id=v.workspace_id AND r.root_key=v.root_key
+  WHERE v.workspace_id=? AND v.generation_id=? AND v.window_id>?
+  ORDER BY v.window_id ASC LIMIT ?`;
+const VECTOR_TARGETS_SQL = `SELECT root_key,target_json FROM source_index_roots
+  WHERE workspace_id=? AND root_key IN (SELECT value FROM json_each(?))`;
+
+/** Rows a ledger can still pay for: each needs `headroom` free before it starts and charges at least `charge`.
+ * One more is counted for the row whose refusal ends the page. */
+function consumableRows(free: number, headroom: number, charge: number): number {
+  return free < headroom ? 1 : Math.floor((free - headroom) / charge) + 1;
+}
+
+type VectorWindowRow = Readonly<{ raw: Record<string, unknown>; rootKey: string; blob: Buffer; windowBytes: number; targetBytes: number }>;
+function readVectorWindowRow(raw: Record<string, unknown>): VectorWindowRow {
+  return { raw, rootKey: readStringField(raw, "root_key"), blob: readBufferField(raw, "embedding_blob"),
+    windowBytes: readIntegerField(raw, "window_bytes"), targetBytes: readIntegerField(raw, "target_bytes") };
+}
+
+/** Windows are read in pages of one statement; the window key is the continuation and the deterministic order. */
 export function readSourceIndexVectorCandidates(database: StorageDatabase, workspaceId: string,
   cursor: SourceIndexVectorCursor | null, limit: number, budget: SourceSemanticResourceBudget,
   capture?: SourceIndexTargetCapture): SourceIndexVectorRead {
@@ -211,63 +295,60 @@ export function readSourceIndexVectorCandidates(database: StorageDatabase, works
       meter.ledger.retain(cursor);
       if (canonicalJson(cursor.binding) !== canonicalJson(state.binding)) return result("unavailable", "active_generation_changed");
     }
-    const binding = state.binding;
+    const binding = state.binding, dims = binding.dimensions;
+    const page = cachedReadStatement(database, VECTOR_PAGE_SQL), targetsStatement = cachedReadStatement(database, VECTOR_TARGETS_SQL);
+    const parsedTargets = new Map<string, SourceIndexTarget>();
     while (inspected < limit) {
       meter.ledger.reserve(1, 32); meter.read(1, 0);
-      const raw = database.connection.prepare(`SELECT v.rowid AS vector_rowid,v.dimensions,r.root_key,
-        octet_length(r.target_json) AS target_bytes,
-        octet_length(r.target_json)+octet_length(v.window_id)+octet_length(w.content_digest)+24 AS metadata_bytes,
-        length(v.embedding_blob) AS blob_bytes
-        FROM source_index_vectors v
-        JOIN source_index_windows w ON w.workspace_id=v.workspace_id AND w.generation_id=v.generation_id
-          AND w.root_key=v.root_key AND w.window_id=v.window_id
-        JOIN source_index_targets t ON t.workspace_id=v.workspace_id AND t.generation_id=v.generation_id AND t.root_key=v.root_key
-        JOIN source_index_roots r ON r.workspace_id=v.workspace_id AND r.root_key=v.root_key
-        WHERE v.workspace_id=? AND v.generation_id=? AND v.window_id>?
-        ORDER BY v.window_id ASC LIMIT 1`).get(workspaceId, binding.generation_id, next?.after_window_id ?? "");
-      if (raw === undefined) return result(invalid > 0 ? "partial" : "complete", invalid > 0 ? "invalid_vectors" : null);
-      const pointer = readRecord(raw, "source vector pointer"), rootKey = readStringField(pointer, "root_key");
-      meter.read(0, 40 + Buffer.byteLength(rootKey));
-      const metadataBytes = readIntegerField(pointer, "metadata_bytes"), blobBytes = readIntegerField(pointer, "blob_bytes");
-      const owned = captured ? capture!.get(rootKey, meter) : undefined;
-      const payloadBytes = metadataBytes - (owned === undefined ? 0 : readIntegerField(pointer, "target_bytes"));
-      // A snapshot-owned target needs neither another native JSON transfer nor
-      // JSON decoding. The cached branch reads five typed window/vector fields;
-      // native window bytes and the embedding BLOB remain fully charged.
-      const decodeWork = owned === undefined ? metadataBytes : 5;
-      meter.ledger.reserve(129 + decodeWork + binding.dimensions,
-        4160 + 5 * payloadBytes + blobBytes + binding.dimensions * 4);
-      meter.read(1, 0);
-      const targetColumn = owned === undefined ? "r.target_json," : "";
-      const targetJoin = owned === undefined
-        ? "JOIN source_index_roots r ON r.workspace_id=v.workspace_id AND r.root_key=v.root_key" : "";
-      const row = readRecord(database.connection.prepare(`SELECT ${targetColumn}v.window_id,w.start_byte,w.end_byte,
-        w.content_digest,v.dimensions,v.embedding_blob FROM source_index_vectors v
-        ${targetJoin}
-        JOIN source_index_windows w ON w.workspace_id=v.workspace_id AND w.generation_id=v.generation_id
-          AND w.root_key=v.root_key AND w.window_id=v.window_id
-        WHERE v.workspace_id=? AND v.generation_id=? AND v.rowid=?`).get(workspaceId, binding.generation_id,
-        readIntegerField(pointer, "vector_rowid")), "source vector candidate");
-      meter.read(0, payloadBytes + blobBytes);
-      meter.ledger.charge(decodeWork, 0, owned === undefined ? "source target decode" : "source vector window fields");
-      const window = { window_id: readStringField(row, "window_id"), start_byte: readIntegerField(row, "start_byte"),
-        end_byte: readIntegerField(row, "end_byte"), content_digest: readStringField(row, "content_digest") };
-      next = { binding, after_window_id: window.window_id }; inspected++;
-      meter.ledger.charge(binding.dimensions, binding.dimensions * 4, "source vector decode");
-      const embedding = readIntegerField(row, "dimensions") === binding.dimensions
-        ? decodeValidEmbeddingBlob(readBufferField(row, "embedding_blob"), binding.dimensions) : null;
-      const source = owned ?? parseTarget(row, workspaceId, meter);
-      if (embedding === null || !sourceIndexWindowWithinSource(window, source)) {
-        invalid++; continue;
+      const size = Math.min(limit - inspected, consumableRows(meter.ledger.work, 134 + dims, 6 + dims),
+        consumableRows(meter.ledger.bytes, 4160 + 8 * dims, 40 + 8 * dims));
+      const rows = page.all(workspaceId, binding.generation_id, next?.after_window_id ?? "", size)
+        .map(item => readVectorWindowRow(readRecord(item, "source vector candidate")));
+      // Only the first window of a root not yet owned carries its target; owned roots never re-read it.
+      const pending = new Set<string>();
+      const costs = rows.map(row => {
+        const carries = !pending.has(row.rootKey) && !parsedTargets.has(row.rootKey) && !(captured && capture!.owns(row.rootKey));
+        if (carries) pending.add(row.rootKey);
+        return 40 + Buffer.byteLength(row.rootKey) + row.windowBytes + row.blob.length + (carries ? row.targetBytes : 0);
+      });
+      const targets = new Map<string, Record<string, unknown>>();
+      if (pending.size > 0) {
+        for (const item of targetsStatement.all(workspaceId, JSON.stringify([...pending]))) {
+          const target = readRecord(item, "source vector target");
+          targets.set(readStringField(target, "root_key"), target);
+        }
       }
-      if (owned === undefined) meter.ledger.retain({ source, window });
-      else {
-        meter.ledger.retain(window);
-        meter.ledger.charge(1, 8, "source vector captured target reference");
+      const refusal = meter.readRows(costs);
+      if (refusal !== null) throw refusal;
+      for (const row of rows) {
+        const owned = captured ? capture!.get(row.rootKey, meter) : undefined;
+        const known = owned ?? parsedTargets.get(row.rootKey);
+        const payloadBytes = row.windowBytes + (known === undefined ? row.targetBytes : 0);
+        // A known target needs neither another native JSON transfer nor JSON decoding. The cached branch reads five
+        // typed window/vector fields; native window bytes and the embedding BLOB remain fully charged.
+        const decodeWork = known === undefined ? payloadBytes : 5;
+        meter.ledger.reserve(129 + decodeWork + dims, 4160 + 5 * payloadBytes + row.blob.length + dims * 4);
+        meter.ledger.charge(decodeWork, 0, known === undefined ? "source target decode" : "source vector window fields");
+        const window = { window_id: readStringField(row.raw, "window_id"), start_byte: readIntegerField(row.raw, "start_byte"),
+          end_byte: readIntegerField(row.raw, "end_byte"), content_digest: readStringField(row.raw, "content_digest") };
+        next = { binding, after_window_id: window.window_id }; inspected++;
+        meter.ledger.charge(dims, dims * 4, "source vector decode");
+        const embedding = readIntegerField(row.raw, "dimensions") === dims ? decodeValidEmbeddingBlob(row.blob, dims) : null;
+        const source = known ?? parseTarget(targets.get(row.rootKey), workspaceId, meter);
+        parsedTargets.set(row.rootKey, source);
+        if (embedding === null || !sourceIndexWindowWithinSource(window, source)) {
+          invalid++; continue;
+        }
+        if (known === undefined) meter.ledger.retain({ source, window });
+        else {
+          meter.ledger.retain(window);
+          meter.ledger.charge(1, 8, "source vector captured target reference");
+        }
+        meter.ledger.charge(1, 64, "source vector candidate retention");
+        if (captured) capture!.remember(source, meter);
+        candidates.push({ source, window, embedding });
       }
-      meter.ledger.charge(1, 64, "source vector candidate retention");
-      if (captured) capture!.remember(source, meter);
-      candidates.push({ source, window, embedding });
+      if (rows.length < size) return result(invalid > 0 ? "partial" : "complete", invalid > 0 ? "invalid_vectors" : null);
     }
     return result("partial", "window_page_limit");
   } catch (error) {

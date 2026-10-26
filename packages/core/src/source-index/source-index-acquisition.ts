@@ -319,6 +319,8 @@ class AcquisitionQuery {
   private lexicalCandidates: readonly SourceIndexLexicalCandidate[] = [];
   private vectorCandidates: readonly ScoredRoot[] = [];
   private readonly nominations = new Map<string, RetainedNomination>();
+  private readonly unboundAdmissions = new Map<string, SourceIndexQueryAdmission>();
+  private readonly boundAdmissions = new Map<string, SourceIndexQueryAdmission>();
   private readonly counts = { attempted: 0, admitted: 0, duplicate: 0, rejected: 0,
     scope_denied: 0, native_unknown: 0, resource_refused: 0, stale: 0, nomination_limit: 0 } satisfies SourceIndexNominationAccounting;
   private readonly resourceRefusals: QueryResourceRefusal[] = [];
@@ -577,7 +579,7 @@ class AcquisitionQuery {
       if (this.candidate !== undefined) this.candidate.progress[channel]++;
       this.stage = "admission";
       try {
-        const admission = this.repository.admitQueryCandidate(source, vector === null ? null : this.vectorBinding, this.meter.remaining());
+        const admission = this.admit(source, vector === null ? null : this.vectorBinding);
         this.absorb(admission.resources);
         if (admission.status !== "ready") {
           this.counts.rejected++;
@@ -626,6 +628,22 @@ class AcquisitionQuery {
       }
     }
     if (lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length) this.limited = true;
+  }
+
+  /** One snapshot decides a root once per binding mode; a resource-limited result is never reused. */
+  private admit(source: SourceIndexTarget, binding: SourceIndexVectorBinding | null): SourceIndexQueryAdmission {
+    const decided = binding === null ? this.unboundAdmissions : this.boundAdmissions;
+    const previous = decided.get(source.root_key);
+    if (previous !== undefined) {
+      this.meter.charge(1, 0, "source admission reuse");
+      return { ...previous, resources: { work: 0, native_bytes: 0, memory_bytes: 0, sql_internal_work: "unknown" } };
+    }
+    const admission = this.repository.admitQueryCandidate(source, binding, this.meter.remaining());
+    if (admission.status !== "resource_limited") {
+      this.meter.charge(0, 64, "source admission reuse retention");
+      decided.set(source.root_key, admission);
+    }
+    return admission;
   }
 
   private retainNomination(channel: "lexical" | "vector", source: SourceIndexTarget,

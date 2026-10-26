@@ -1,5 +1,14 @@
+const LITTLE_ENDIAN_HOST = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
 export function isFiniteNonzeroEmbedding(embedding: Float32Array): boolean {
-  return hasFiniteNonzeroMagnitude(embedding.length, (index) => embedding[index]!);
+  if (embedding.length <= 0) return false;
+  let squaredMagnitude = 0;
+  // Squares are non-negative, so one non-finite element keeps the sum non-finite.
+  for (let index = 0; index < embedding.length; index += 1) {
+    const value = embedding[index]!;
+    squaredMagnitude += value * value;
+  }
+  return Number.isFinite(squaredMagnitude) && squaredMagnitude > 0;
 }
 
 export function decodeValidEmbeddingBlob(
@@ -8,7 +17,10 @@ export function decodeValidEmbeddingBlob(
 ): Float32Array | null {
   if (!hasExpectedEmbeddingByteLength(blob, dimensions)) return null;
   const embedding = new Float32Array(dimensions);
-  return inspectEmbeddingBlob(blob, dimensions, embedding) ? embedding : null;
+  if (!LITTLE_ENDIAN_HOST) return inspectEmbeddingBlob(blob, dimensions, embedding) ? embedding : null;
+  // Stored floats are little-endian: a byte copy yields the same bit patterns as per-element reads.
+  new Uint8Array(embedding.buffer).set(blob);
+  return isFiniteNonzeroEmbedding(embedding) ? embedding : null;
 }
 
 export function isValidEmbeddingBlob(blob: Uint8Array, dimensions: number): boolean {

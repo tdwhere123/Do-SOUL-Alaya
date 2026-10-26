@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { analyzeSourceIndexLexical, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
@@ -222,14 +223,14 @@ export function readSourceIndexLexicalBinding(database: StorageDatabase, workspa
   const from = `FROM source_index_lexical_selections s LEFT JOIN source_index_lexical_generations g
     ON g.workspace_id=s.workspace_id AND g.generation_id=s.active_generation_id WHERE s.workspace_id=?`;
   resources.work++;
-  const size = database.connection.prepare(`SELECT 24+octet_length(s.representation)+COALESCE(octet_length(g.representation),0)+
+  const size = cachedReadStatement(database, `SELECT 24+octet_length(s.representation)+COALESCE(octet_length(g.representation),0)+
     COALESCE(octet_length(s.active_generation_id),0)+COALESCE(octet_length(g.status),0) AS bytes ${from}`).get(workspaceId);
   if (size === undefined) return { state: { status: "legacy" }, resources };
   resources.native_bytes += 8;
   const bytes = readIntegerField(readRecord(size, "lexical binding size"), "bytes");
   if (budget.work < 3 || budget.native_bytes < bytes + 16) return unavailable("read_budget");
   resources.work++; resources.native_bytes += bytes;
-  const row = readRecord(database.connection.prepare(`SELECT s.selection_revision,s.representation,s.active_generation_id,
+  const row = readRecord(cachedReadStatement(database, `SELECT s.selection_revision,s.representation,s.active_generation_id,
     g.selection_revision AS generation_revision,g.representation AS generation_representation,g.source_epoch,g.status ${from}`)
     .get(workspaceId), "lexical binding");
   if (row.active_generation_id === null) return unavailable("lexical_generation_unpublished");

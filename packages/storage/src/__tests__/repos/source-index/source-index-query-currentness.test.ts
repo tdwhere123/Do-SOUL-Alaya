@@ -33,29 +33,31 @@ describe("source index query currentness after native mutation", () => {
       const lexical = captured.readLexicalCandidates(WORKSPACE, "needle", 8, QUERY_BUDGET);
       const source = lexical.candidates[0]!.source;
       const statement = environment.database.connection.prepare("SELECT 1");
-      const get = vi.spyOn(Object.getPrototypeOf(statement) as typeof statement, "get");
+      const all = vi.spyOn(Object.getPrototypeOf(statement) as typeof statement, "all");
+      const rowsRead = () => all.mock.results.flatMap(result => result.type === "return" && Array.isArray(result.value)
+        ? result.value as Record<string, unknown>[] : []);
       const reused = captured.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET);
-      const reusedRows = get.mock.results.flatMap(result => result.type === "return" && result.value !== null
-        && typeof result.value === "object" && "embedding_blob" in result.value ? [result.value] : []);
-      get.mockClear();
+      const reusedRows = rowsRead();
+      all.mockClear();
       const cold = environment.index.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET);
-      const coldRows = get.mock.results.flatMap(result => result.type === "return" && result.value !== null
-        && typeof result.value === "object" && "embedding_blob" in result.value ? [result.value] : []);
-      get.mockRestore();
+      const coldRows = rowsRead();
+      all.mockRestore();
       expect(reused.completion).toBe("complete");
       expect(reused.candidates.length).toBeGreaterThan(1);
       expect(reused.candidates.every(row => row.source === source)).toBe(true);
       expect(reused.candidates).toEqual(cold.candidates);
       expect(reused.resources.work).toBeLessThan(cold.resources.work);
-      expect(reusedRows).toHaveLength(reused.candidates.length);
-      expect(coldRows).toHaveLength(cold.candidates.length);
-      expect(reusedRows.every(row => !Object.hasOwn(row, "target_json"))).toBe(true);
-      expect(coldRows.every(row => Object.hasOwn(row, "target_json"))).toBe(true);
-      expect(reusedRows.every(row => Buffer.isBuffer(row.embedding_blob) && row.embedding_blob.length > 0)).toBe(true);
+      const windowRows = (rows: Record<string, unknown>[]) => rows.filter(row => "embedding_blob" in row);
+      const targetRows = (rows: Record<string, unknown>[]) => rows.filter(row => "target_json" in row);
+      expect(windowRows(reusedRows)).toHaveLength(reused.candidates.length);
+      expect(windowRows(coldRows)).toHaveLength(cold.candidates.length);
+      expect(targetRows(reusedRows)).toHaveLength(0);
+      expect(targetRows(coldRows)).toHaveLength(1);
+      expect(windowRows(reusedRows).every(row => Buffer.isBuffer(row.embedding_blob) && row.embedding_blob.length > 0)).toBe(true);
       // Only omitted JSON transfer is saved; the capture pays its three native
       // revision reads (24 bytes) and still transfers every embedding BLOB.
       expect(cold.resources.native_bytes - reused.resources.native_bytes)
-        .toBe(reused.candidates.length * Buffer.byteLength(canonicalJson(source)) - 24);
+        .toBe(Buffer.byteLength(canonicalJson(source)) - 24);
       environment.database.connection.prepare("UPDATE source_index_roots SET target_json=json_set(target_json,'$.root_key','forged') WHERE workspace_id=?")
         .run(WORKSPACE);
       expect(captured.readVectorCandidates(WORKSPACE, null, 128, QUERY_BUDGET))

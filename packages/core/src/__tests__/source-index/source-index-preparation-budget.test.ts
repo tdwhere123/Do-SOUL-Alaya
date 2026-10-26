@@ -42,11 +42,14 @@ function instrument(environment: Environment) {
   // These spies observe real native calls; none replaces their implementation.
   const current = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findCurrentBounded");
   const chunks = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
-  const statements = vi.spyOn(environment.database.connection, "prepare");
+  // Hot read statements are compiled once, so count executions rather than compilations.
+  const executions = vi.spyOn(Object.getPrototypeOf(environment.database.connection.prepare("SELECT 1")) as { get(): unknown }, "get");
   const lexical = vi.spyOn(environment.index, "writeLexical");
   const document = vi.spyOn(environment.index, "writeDocument");
-  const barrierChecks = () => statements.mock.calls.filter(([sql]) =>
-    sql.includes("SELECT 1 FROM projection_erase_barriers") && sql.includes("subject_kind = 'source_record'")).length;
+  const barrierChecks = () => executions.mock.contexts.filter(statement => {
+    const sql = (statement as { source: string }).source;
+    return sql.includes("SELECT 1 FROM projection_erase_barriers") && sql.includes("subject_kind = 'source_record'");
+  }).length;
   return { current, chunks, lexical, document, barrierChecks };
 }
 function expectNativeCalls(spies: ReturnType<typeof instrument>, current: number, chunks: number, barriers: number) {

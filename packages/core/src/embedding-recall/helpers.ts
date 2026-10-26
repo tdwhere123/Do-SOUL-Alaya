@@ -180,7 +180,8 @@ function finiteNonzeroMagnitudeSquared(vector: Float32Array): number | null {
     return null;
   }
   let squared = 0;
-  for (const value of vector) {
+  for (let index = 0; index < vector.length; index += 1) {
+    const value = vector[index]!;
     squared += value * value;
   }
   return squared === 0 || !Number.isFinite(squared) ? null : squared;

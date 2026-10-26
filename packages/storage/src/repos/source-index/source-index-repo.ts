@@ -400,6 +400,8 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
       this.records = new SqliteFieldSourceRecordRepo(this.database, this.sha256);
       this.connectionVersion = this.database.getConnectionVersion();
     }
+    // A read inside the caller's snapshot needs no nested savepoint: it writes nothing to undo.
+    if (mode === "read" && this.database.connection.inTransaction) return operation();
     const transaction = this.database.connection.transaction(operation);
     return mode === "read" ? transaction() : transaction.immediate();
   }

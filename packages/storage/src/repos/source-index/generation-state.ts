@@ -3,12 +3,13 @@ import {
   type SourceIndexBudget, type SourceIndexResources, type SourceIndexVectorQueryState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import { readIntegerField, readJsonColumn, readNonEmptyStringField, readNullableStringField,
   readRecord, readSqliteBooleanIntField } from "../shared/parse-row.js";
 
 export function sourceIndexEpoch(database: StorageDatabase, workspaceId: string): number {
-  const raw = database.connection.prepare("SELECT epoch FROM source_index_epochs WHERE workspace_id = ?").get(workspaceId);
+  const raw = cachedReadStatement(database, "SELECT epoch FROM source_index_epochs WHERE workspace_id = ?").get(workspaceId);
   return raw === undefined ? 0 : readIntegerField(readRecord(raw, "source epoch"), "epoch");
 }
 function selectionFromRow(value: unknown): SourceIndexSelection {
@@ -83,14 +84,14 @@ export function readSourceIndexQueryState(database: StorageDatabase, workspaceId
       LEFT JOIN source_index_epochs e ON e.workspace_id=s.workspace_id WHERE s.workspace_id=?`;
     const fields = ["s.config_id", "s.profile_id", "s.active_generation_id", "g.config_id", "g.profile_id", "g.status"];
     resources.work++;
-    const size = database.connection.prepare(`SELECT ${fields.map(field => `COALESCE(octet_length(${field}),0)`).join("+")}
+    const size = cachedReadStatement(database, `SELECT ${fields.map(field => `COALESCE(octet_length(${field}),0)`).join("+")}
       + 48 AS bytes ${from}`).get(workspaceId);
     resources.native_bytes += size === undefined ? 0 : 8;
     if (size === undefined) return { state: { status: "unknown", reason: "missing_selection" }, resources };
     const bytes = readIntegerField(readRecord(size, "source query state size"), "bytes");
     if (budget.work - resources.work < 1 || budget.native_bytes - resources.native_bytes < bytes) return unavailable("read_budget");
     resources.work++;
-    const raw = database.connection.prepare(`SELECT s.selection_revision,s.config_id,s.profile_id,s.active_generation_id,
+    const raw = cachedReadStatement(database, `SELECT s.selection_revision,s.config_id,s.profile_id,s.active_generation_id,
       g.selection_revision AS generation_revision,g.config_id AS generation_config,g.profile_id AS generation_profile,
       g.status,g.source_epoch,g.preparation_revision,COALESCE(e.epoch,0) AS current_epoch,
       json_extract(g.configuration_json,'$.profile.dimensions') AS dimensions ${from}`).get(workspaceId);

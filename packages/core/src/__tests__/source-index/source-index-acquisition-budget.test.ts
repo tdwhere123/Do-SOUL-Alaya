@@ -67,7 +67,7 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
     publishIndex(environment);
     const observed = observeRepository(environment);
     const statement = environment.database.connection.prepare("SELECT 1");
-    const get = vi.spyOn(Object.getPrototypeOf(statement) as typeof statement, "get");
+    const all = vi.spyOn(Object.getPrototypeOf(statement) as typeof statement, "all");
     const charges = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge");
     const input = queryInput();
     const result = query(environment, input, admitScope);
@@ -80,22 +80,18 @@ describe("one acquisition ledger across real SQLite reads, scoring and admission
     expect(result.resources.native_bytes).toBe(observed.calls.reduce((sum, call) => sum + call.resources.native_bytes, 0));
     expect(result.resources.memory_bytes).toBeGreaterThan(result.resources.native_bytes);
     expect(result.resources.work).toBeGreaterThan(observed.calls.reduce((sum, call) => sum + call.resources.work, 0));
-    const sql = get.mock.contexts.map((context, index) => ({ sql: (context as typeof statement).source,
-      result: get.mock.results[index]!.type === "return" ? get.mock.results[index]!.value : undefined }));
-    const pointers = sql.filter(call => call.sql.includes("length(v.embedding_blob) AS blob_bytes") && call.result !== undefined);
-    expect(pointers).toHaveLength(7);
-    const payloads = sql.filter(call => call.sql.includes("w.content_digest,v.dimensions,v.embedding_blob"));
-    expect(payloads).toHaveLength(7);
-    for (const call of pointers) expect(call.result).toMatchObject({ dimensions: 3, blob_bytes: 12 });
-    for (const call of payloads) {
-      const row = call.result as { embedding_blob: Buffer };
+    const pages = all.mock.contexts.flatMap((context, index) => (context as typeof statement).source.includes("ORDER BY v.window_id ASC LIMIT")
+      && all.mock.results[index]!.type === "return" ? [all.mock.results[index]!.value as Record<string, unknown>[]] : []);
+    // One statement reads the whole window page: window fields and BLOB together, no pointer or per-window row read.
+    expect(pages).toHaveLength(1);
+    const windows = pages[0]!;
+    expect(windows).toHaveLength(7);
+    for (const row of windows) {
+      expect(row).toMatchObject({ dimensions: 3 });
       expect(Buffer.isBuffer(row.embedding_blob)).toBe(true);
-      expect(row.embedding_blob.length).toBe(12);
+      expect((row.embedding_blob as Buffer).length).toBe(12);
     }
-    const returnedWindowBytes = pointers.reduce((sum, call) => {
-      const row = call.result as { metadata_bytes: number; blob_bytes: number };
-      return sum + 32 + row.metadata_bytes + row.blob_bytes;
-    }, 0);
+    const returnedWindowBytes = windows.reduce((sum, row) => sum + 40 + (row.window_bytes as number) + (row.embedding_blob as Buffer).length, 0);
     // Selection size/payload reads add native bytes beyond window metadata and BLOBs.
     expect(vector.resources.native_bytes).toBeGreaterThan(returnedWindowBytes);
     expect(vector.resources.memory_bytes).toBeGreaterThanOrEqual(vector.resources.native_bytes + 7 * 3 * 4);

@@ -4,6 +4,7 @@ import {
   type SourceIndexMessageStructure
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import { SqliteFieldSourceRecordRepo, type BoundedSourceRecordRead } from "../field/source-repo.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "../field/retained-source-chunks.js";
@@ -64,7 +65,7 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
     for (const id of ids) {
       if (resources.work >= budget.work) return { status: "partial" as const, reason: "read_budget" as const, resources };
       resources.work++;
-      if (database.connection.prepare(`SELECT 1 FROM projection_erase_barriers
+      if (cachedReadStatement(database, `SELECT 1 FROM projection_erase_barriers
         WHERE workspace_id = ? AND subject_kind = 'source_record' AND subject_id = ? LIMIT 1`)
         .get(source.target.workspace_id, id) !== undefined) return { status: "stale" as const, reason: "source_erased", resources };
     }
