@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
+import BetterSqlite3 from "better-sqlite3";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
@@ -100,7 +101,8 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
       windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing) => {
       producerPassRemaining.push(remaining);
       return producer.runPass(remaining, representation, windowing);
-    } },
+    }, runSourceIndexLexicalPass: (workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
+      remaining?: SourceIndexProducerPassRemaining) => producer.runLexicalPass(workspaceId, representation, remaining) },
       checkpointFieldProjection: checkpoint,
       shutdown };
     nativeShutdown.set(handle, shutdown);
@@ -119,6 +121,22 @@ it("explicitly prepares and seals a new message-window profile without promoting
   expect(result.report.execution).toMatchObject({ windowing: "recorded-message-windows.v1" });
   expect(result.report.setup.status).toBe("settled");
   expect(config).not.toHaveProperty("source_index");
+});
+
+it("prepares and seals an opt-in segmented lexical generation", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, { ...execution, lexical: "segmented-unicode61.v1" }, join(root, "segmented"));
+  expect(result.report.execution).toMatchObject({ lexical: "segmented-unicode61.v1" });
+  expect(result.config?.source_index).toMatchObject({ lexical: "segmented-unicode61.v1" });
+  const sealed = new BetterSqlite3(result.config!.snapshot_path, { readonly: true });
+  try {
+    expect(sealed.prepare("SELECT representation,status FROM source_index_lexical_generations WHERE status != 'retired'").all())
+      .toEqual([{ representation: "segmented-unicode61.v1", status: "ready" }]);
+  } finally { sealed.close(); }
+  expect(() => assertChainSnapshot(result.config!)).not.toThrow();
+  const plain = await prepareSemanticChainSourceIndex(config, execution, join(root, "plain"));
+  expect(plain.config?.source_index).not.toHaveProperty("lexical");
 });
 
 it("keeps standalone freeze closure and explicitly preserves the live SQLite owner when sealing", () => {

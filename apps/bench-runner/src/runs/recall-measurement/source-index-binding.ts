@@ -81,7 +81,8 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
       retained.workspace_id !== config.workspace_id || canonicalJson(retained.execution) !== canonicalJson({
         cache_root: binding.cache_root, model_id: binding.model_id,
         ...(binding.representation === undefined ? {} : { representation: binding.representation }),
-        ...(binding.windowing === undefined ? {} : { windowing: binding.windowing }) }) ||
+        ...(binding.windowing === undefined ? {} : { windowing: binding.windowing }),
+        ...(binding.lexical === undefined ? {} : { lexical: binding.lexical }) }) ||
       (binding.windowing ?? "utf8-byte-windows.v1") !== binding.index.configuration.profile.windowing ||
       canonicalJson(binding.representation ?? null) !== canonicalJson(binding.index.configuration.profile.representation ?? null) ||
       canonicalJson(retained.index) !== canonicalJson(binding.index) || !observed.complete ||
@@ -239,6 +240,11 @@ async function prepareLiveSourceIndex(input: {
   if (expired()) return failure("setup_soft_deadline");
   if (setup.status !== "settled" || binding.status !== "ready") return failure(setup.reason);
   if (run.stop_reason !== "settled") return failure(run.stop_reason);
+  if (execution.lexical !== undefined) {
+    const lexicalFailure = await runLexicalPreparation(live, config.workspace_id, execution.lexical, allowance.maxPasses, expired);
+    refuseBenchWorkAfterCancel();
+    if (lexicalFailure !== null) return failure(lexicalFailure);
+  }
   const usable = (observed: ReturnType<typeof inspectSemanticChainSourceIndex>) =>
     observed.complete && observed.index !== null && binding.profile_id === observed.index.profile_id &&
     binding.profile.provider_kind === "local_onnx" && binding.profile.model_id === execution.model_id &&
@@ -274,6 +280,29 @@ async function prepareLiveSourceIndex(input: {
     refuseBenchWorkAfterCancel();
   }
   return { config: bindPreparation(config, execution, report, join(root, "preparation.json")), report };
+}
+
+/** Model-free lexical generation; runs after vector setup so it binds the final source epoch. Null = active and ready. */
+async function runLexicalPreparation(live: BenchDaemonHandle, workspace: string,
+  representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation, maxPasses: number,
+  expired: () => boolean): Promise<string | null> {
+  const run = live.runtime.runSourceIndexLexicalPass;
+  if (run === undefined) throw new AlayaError("UNAVAILABLE", "Source lexical preparation is unwired");
+  let last: string | undefined;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (expired()) return "setup_soft_deadline";
+    const result = await run(workspace, representation);
+    refuseBenchWorkAfterCancel();
+    if (result.status === "ready") return null;
+    // Pass bounds (roots/pages/work/deadline) leave a durable partial generation that the next pass resumes.
+    const continuable = result.status === "partial" && result.generation !== null &&
+      (result.reason === "incomplete" || result.reason === "read_budget" || result.reason === "deadline_exceeded");
+    if (!continuable) return `lexical_${result.status}:${result.reason ?? "none"}`;
+    const g = result.generation!, progress = `${g.completed_count}/${g.target_count}/${g.enumeration_complete}`;
+    if (progress === last) return "lexical_no_progress";
+    last = progress;
+  }
+  return "setup_pass_exhausted";
 }
 
 function bindPreparation(config: SemanticChainConfig, execution: z.infer<typeof CachedLocalSourceExecutionSchema>,

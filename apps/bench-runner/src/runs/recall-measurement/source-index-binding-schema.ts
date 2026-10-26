@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { SourceIndexConfigurationSchema, SourceEmbeddingRepresentationSchema, SourceIndexWindowingSchema } from "@do-soul/alaya-protocol";
+import { SourceIndexConfigurationSchema, SourceEmbeddingRepresentationSchema, SourceIndexLexicalRepresentationSchema,
+  SourceIndexWindowingSchema } from "@do-soul/alaya-protocol";
 
 /** Binding and cached-local execution schema authority. This module is a dependency
  * leaf so compiled contract and execution modules can initialize in either import order. */
@@ -9,7 +10,8 @@ export const CachedLocalSourceExecutionSchema = z.object({
   cache_root: z.string().min(1).refine(isAbsolute, "explicit absolute model cache required"),
   model_id: z.string().min(1),
   representation: SourceEmbeddingRepresentationSchema.optional(),
-  windowing: SourceIndexWindowingSchema.optional()
+  windowing: SourceIndexWindowingSchema.optional(),
+  lexical: SourceIndexLexicalRepresentationSchema.optional()
 }).strict();
 export const IndexBindingSchema = z.object({
   configuration: SourceIndexConfigurationSchema, config_id: z.string(), profile_id: z.string(),

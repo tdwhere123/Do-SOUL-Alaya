@@ -6,7 +6,7 @@
 //   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b]
 //
 // ARMS.json: [{ "name": "line", "host": false }, { "name": "message", "host": true,
-//              "windowing": "recorded-message-windows.v1" }, ...]
+//              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1" }, ...]
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -82,7 +82,7 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? "utf8-byte-windows.v1"])).slice(0, 16);
+  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? "utf8-byte-windows.v1", arm.lexical ?? null])).slice(0, 16);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
@@ -106,7 +106,8 @@ async function prepared(question, index, arm) {
   const caches = { query: join(dir, "empty-query-cache"), correspondence: join(dir, "empty-correspondence-cache") };
   mkdirSync(caches.query); mkdirSync(caches.correspondence);
   const config = baseConfig({ question, snapshot, snapshotSha: publication.db_sha256, workspace, caches });
-  const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}) };
+  const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}),
+    ...(arm.lexical ? { lexical: arm.lexical } : {}) };
   const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined, { maxPasses: 10_000 });
   if (result.config === null) throw new Error(`preparation failed: ${result.report.reason}`);
   return result.config;
