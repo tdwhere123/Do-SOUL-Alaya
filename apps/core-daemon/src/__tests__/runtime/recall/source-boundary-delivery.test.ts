@@ -27,6 +27,48 @@ const sources = ["first", "second"].map(id => ({ id, text, vector: [1, 0, 0], sp
   { start_offset: lineEnd, end_offset: Buffer.byteLength(text), purpose: "line" as const }
 ] }));
 
+it("defers a partial recorded line to the next membership page without skipping it or changing replay", async () => {
+  const message = `needle ${"é".repeat(600)}\n`;
+  const body = `${message}${"tail ".repeat(600)}`;
+  const roots = ["first-line", "next-line"].map(id => ({ id, text: body, vector: [1, 0, 0], spans: [
+    { start_offset: 0, end_offset: Buffer.byteLength(message), purpose: "line" as const },
+    { start_offset: Buffer.byteLength(message), end_offset: Buffer.byteLength(body), purpose: "line" as const }
+  ] }));
+  await withIndexedSources(roots, async fixture => {
+    const client = await fixture.openClient();
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
+      readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
+      activeConstraintsPort: client.activeConstraintsPort });
+    const calls = vi.spyOn(service, "recall");
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
+    const request = { ...capableRecallConsumerDeclaration(), query: "needle", max_results: 2,
+      scope_class: "project", dimension: null, domain_tags: null, result_kind_view: "source_only" };
+    const call = async (args: object) => {
+      const response = await handler.call({ toolName: "soul.recall", arguments: args,
+        context: { workspaceId: WS, runId: "run", sessionId: "complete-line", agentTarget: "codex" } });
+      if (!response.ok) throw new Error(JSON.stringify(response.error));
+      return SoulMemorySearchResponseSchema.parse(response.output);
+    };
+    const first = await call(request);
+    expect(first.index?.entries).toHaveLength(1);
+    expect(first.results).toHaveLength(1);
+    expect(first.results[0]!.content_preview).toBe(message);
+    expect(first.index?.continuation).toBeTruthy();
+    const continued = { ...request, continuation: first.index!.continuation };
+    const next = await call(continued), replay = await call(continued);
+    expect(next.index?.entries).toHaveLength(1);
+    expect(next.results[0]!.content_preview).toBe(message);
+    expect(next.results[0]!.target).not.toEqual(first.results[0]!.target);
+    expect(next.results[0]!.target).toMatchObject({ span: { content_start: 0,
+      content_end: Buffer.byteLength(message), content_complete: false } });
+    expect(replay.results).toEqual(next.results);
+    expect(replay.index).toEqual({ ...next.index, page_purpose: "retry" });
+    const executed = await calls.mock.results[0]!.value;
+    expect(executed.execution_receipt?.actual?.phases.index.budget_work).toBeGreaterThan(0);
+    expect(executed.execution_receipt?.actual?.phases.payload.native_bytes).toBeGreaterThan(0);
+  });
+});
+
 it("delivers a later vector hit from the root start through the built worker and MCP, preserving navigation and explicit continuation", async () => {
   const prefix = `${"é".repeat(127)}\n\n`, body = `${prefix}HIT ${"tail ".repeat(600)}`;
   expect(Buffer.byteLength(prefix)).toBe(256);
@@ -49,7 +91,7 @@ it("delivers a later vector hit from the root start through the built worker and
       return SoulMemorySearchResponseSchema.parse(response.output);
     };
     const first = await call(request);
-    expect(first.index?.result_version).toBe("ordinary-native-field.v3");
+    expect(first.index?.result_version).toBe("ordinary-native-field.v4");
     expect(first.index?.entries[0]?.navigation).toMatchObject({ operator: "source_vector",
       location: { start_byte: 256, end_byte: 384 } });
     expect(first.results[0]?.content_preview).toBe(prefix);
@@ -68,7 +110,7 @@ it("delivers a later vector hit from the root start through the built worker and
     expect(expanded.results[0]?.target).toMatchObject({ span: { content_start: 256, content_end: 320, content_complete: false } });
     expect(repeated.results).toEqual(expanded.results);
     const obsolete = await call({ ...continuation,
-      continuation: { ...first.index!.continuation, result_version: "ordinary-native-field.v2" } });
+      continuation: { ...first.index!.continuation, result_version: "ordinary-native-field.v3" } });
     expect(obsolete).toMatchObject({ results: [], index: { continuation: null,
       completeness: { logical_index: "invalidated" } } });
     // The same native hit in the library uses the new identity; explicit semantic
@@ -90,7 +132,7 @@ it("delivers recorded lines through SQLite, built worker and MCP and replays the
     if (first.operation !== "recall" || first.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
       throw new Error("current field delivery required");
     }
-    expect(first.index.result_version).toBe("ordinary-native-field.v3");
+    expect(first.index.result_version).toBe("ordinary-native-field.v4");
     expect(first.results).toHaveLength(1);
     expect(first.results[0]?.content_preview).toBe(firstLine);
     expect(first.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: lineEnd, content_complete: false } });

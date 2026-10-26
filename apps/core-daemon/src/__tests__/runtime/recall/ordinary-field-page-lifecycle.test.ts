@@ -37,7 +37,7 @@ it("delivers a generation-pinned membership page and replays its issued retry id
   ], async fixture => {
     const { request, prepared } = await fieldRequest(fixture, { page_budget: 2 });
     const first = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
-    expect(first.index.result_version).toBe("ordinary-native-field.v3");
+    expect(first.index.result_version).toBe("ordinary-native-field.v4");
     expect(first.index.entries.some(entry => entry.target.kind === "source_evidence")).toBe(true);
     expect(first.index.entries.filter(entry => entry.target.kind === "source_evidence")
       .every(entry => entry.navigation?.contract === "native-query-navigation.v1")).toBe(true);

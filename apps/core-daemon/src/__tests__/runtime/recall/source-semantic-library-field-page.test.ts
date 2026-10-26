@@ -119,7 +119,7 @@ it("delivers the tagged native field page with visible Q/H/C support and no priv
   await withAccessLibrary(sources, async ({ ids, port, filename }) => {
     const recalled = await publicProofPage(port, ids);
     expect(recalled.protocol_version).toBe(SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION);
-    expect(recalled.index.result_version).toBe("ordinary-native-field.v3");
+    expect(recalled.index.result_version).toBe("ordinary-native-field.v4");
     expect(recalled.results).toHaveLength(recalled.index.entries.length);
     expect(recalled.total_count).toBe(recalled.index.entries.length);
     // Proofs are side evidence: the shared field delivers tagged source slots only.
@@ -378,7 +378,7 @@ it("executes a peer recall payload that predates the optional surface delivery f
           interpretation_clock: CLOCK, as_of: CLOCK, expires_at: "2026-09-18T00:10:00.000Z",
           authorized_scopes: SCOPES, ...capableRecallConsumerDeclaration() } });
       // The optional surface fields stay optional on the wire; the field keeps its own default.
-      expect(result).toMatchObject({ index: { result_version: "ordinary-native-field.v3" } });
+      expect(result).toMatchObject({ index: { result_version: "ordinary-native-field.v4" } });
     } finally { database.close(); }
   });
 }, 60_000);

@@ -91,7 +91,13 @@ SourceIndex is the native ordinary discovery owner. It includes current
 `SourceRecord` bodies **and** standalone retained `evidence_capsule` text
 (`excerpt ?? gist`); a capsule has its own root kind, revision and digest, and
 `source_id: null`. It is not a SourceRecord mirror or a gist-first bypass of
-SourceRecord. Scoped records require governed authorization; a capsule with no
+SourceRecord. Interpretation provenance capsules carry a storage-only create-time
+`source_provenance` role and are excluded from standalone native membership. An
+independent capsule citing the same source hash remains eligible: hash equality is
+not role identity. SQLite migration 027 adds the role with default zero; it does not
+infer or backfill historical roles from text or hashes. Core's provenance creation
+owner persists it in the same transaction as the capsule and EventLog entry.
+Scoped records require governed authorization; a capsule with no
 scope is eligible only to the unrestricted principal. Lexical and inspected
 vector windows nominate candidates; their ordinal navigation witnesses are
 not association grades, assertion support or proof. Optional inference is
@@ -170,18 +176,23 @@ explicit principal and lifetime admission, not a reusable ordinary worker key.
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v3`, Protocol
-25.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v4`, Protocol
+27.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
 The navigation witness retains the actual matched window, but does not cap or
 anchor ordinary payload bytes. Explicit semantic proof-support ranges and payload
 continuation offsets remain authoritative for their respective reads. Source
-previews keep the same order, shares, slots and budgets. Within the fitted allowance, they end at the
-largest recorded boundary of the coarsest available unit: an admitted `message`
-span where recorded, otherwise a `line` span. No positive fitting end means the
-existing UTF-8 prefix, not an empty result. Role markers and inferred messages
+previews keep the same root order and declared budgets. Within the fitted allowance,
+they end at the largest recorded boundary of the coarsest available unit: an admitted
+`message` span where recorded, otherwise a `line` span. When a later member would
+expose only a fragment but a complete unit fits a fresh page, the codec refuses that
+wider membership fit. The projection owner pays for the attempt, refits a shorter
+prefix and leaves the deferred member pending. This may increase page count and
+framing work; it is not free payload expansion or a ranking change. A first unit
+that cannot fit even a fresh page still uses a nonempty UTF-8 prefix, as do sources
+with unavailable or empty boundaries. No source is deferred indefinitely. Role markers and inferred messages
 are not boundaries. Verified retained-source reads precede the bounded structural
 lookup; native lookup work and metadata share the payload request ledger.
 Unavailable, unreadable and bounded-out lookup states remain distinct from a

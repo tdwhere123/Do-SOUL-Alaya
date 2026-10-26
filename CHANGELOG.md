@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 26.0.0, engine gateway 2.0.0
+## Unreleased — protocol 27.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,23 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 27.0.0 identifies complete-unit page deferral as `ordinary-native-field.v4`
+(invariant §25 major). A source that would receive only a page-tail fragment remains
+pending when its recorded message or line fits a fresh page. The projection owner
+pays for the refused wider fit and commits a shorter membership prefix. Root order,
+declared budgets and explicit payload offsets are unchanged; additional pages and
+framing are not free. Oversized first units and sources without recorded boundaries
+retain UTF-8 progress. Upgrade clients and daemon together and start fresh queries;
+v3 continuations are incompatible. Frozen captures stay unchanged, and rollback
+uses the prior binary with fresh handles. This delivery change needs no source or
+index migration. Development measurements are not a production quality guarantee.
+
+Native SourceIndex excludes newly created interpretation-provenance capsules by
+persisted create-time role (SQLite 027), not by matching source hashes. Independent
+capsules remain distinct roots even when they cite an admitted body's digest.
+Historical capsules default to independent; no heuristic backfill or retroactive
+role inference is performed.
 
 Protocol 26.0.0 removes `parseSourceRefRobust`; `ALAYA_RECALL_SOURCE_REF_ROBUST` never gated behavior and is now a retired daemon env key (ignored with the retired-key warning).
 

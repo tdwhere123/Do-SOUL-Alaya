@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
 
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v3" as const;
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v4" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({

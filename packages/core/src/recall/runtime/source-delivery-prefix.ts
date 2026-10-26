@@ -27,12 +27,18 @@ export function sourceDeliveryPrefix(text: string, fits: (prefix: string) => boo
   if (low > 0 && low < text.length && /[\uD800-\uDBFF]/u.test(text[low - 1]!)
     && /[\uDC00-\uDFFF]/u.test(text[low]!)) low -= 1;
   const prefix = text.slice(0, low);
-  if (recordedEnds === undefined || recordedEnds.length === 0) return prefix;
-  const bytes = Buffer.from(prefix);
+  const alignedEnd = completeSourceDeliveryEnd(prefix, recordedEnds);
+  return alignedEnd === undefined ? prefix : Buffer.from(prefix).subarray(0, alignedEnd).toString("utf8");
+}
+
+/** A complete recorded unit is different from a nonempty UTF-8 fragment. */
+export function completeSourceDeliveryEnd(text: string, recordedEnds?: readonly number[]): number | undefined {
+  if (recordedEnds === undefined || recordedEnds.length === 0) return undefined;
+  const bytes = Buffer.from(text);
   let alignedEnd = 0;
   for (const end of recordedEnds) {
     if (Number.isSafeInteger(end) && end > alignedEnd && end <= bytes.length
       && (end === bytes.length || (bytes[end]! & 0xc0) !== 0x80)) alignedEnd = end;
   }
-  return alignedEnd === 0 ? prefix : bytes.subarray(0, alignedEnd).toString("utf8");
+  return alignedEnd === 0 ? undefined : alignedEnd;
 }

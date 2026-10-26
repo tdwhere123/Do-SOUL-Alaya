@@ -48,6 +48,14 @@ lexical candidates change once it publishes; until then the raw reader serves). 
 
 ## Ordinary field delivery compatibility
 
+Protocol 27.0.0 versions complete-unit page deferral as `ordinary-native-field.v4`
+(invariant §25 major). A trailing source fragment is deferred only when a complete
+recorded unit fits a fresh page; oversized units retain UTF-8 progress. Root order
+and budgets are unchanged, but page boundaries and framing costs can change.
+Upgrade clients and daemon together and start fresh queries; v3 continuations
+cannot execute v4. Frozen captures are unchanged. No source/index migration is
+needed for this delivery change; rollback uses the prior binary with fresh handles.
+
 Protocol 25.0.0 versions root-start delivery as `ordinary-native-field.v3`
 and library field protocol 12 (invariant §25 major). Vector locations remain
 navigation evidence; ordinary payloads begin at the root start while explicit
@@ -61,7 +69,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `26.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `27.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

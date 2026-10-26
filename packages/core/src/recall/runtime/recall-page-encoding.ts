@@ -1,7 +1,7 @@
 import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulMemorySearchResponseSchema, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
   type InformationIndex, type MemorySearchResult, type RecallCandidate, type StagedWarningArray } from "@do-soul/alaya-protocol";
 import { projectSourceDisclosure } from "./source-disclosure.js";
-import { sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
+import { completeSourceDeliveryEnd, sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
 import { displayRecallPreview, projectPayloadCompleteness } from "./recall-result-encoding.js";
 
 /** The same complete envelope is sized by the field and returned by MCP. */
@@ -88,6 +88,14 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       break;
     }
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens, boundaryEnds);
+    if (encoded.length > 0 && boundaryEnds !== undefined
+      && completeSourceDeliveryEnd(fitted?.preview ?? "", boundaryEnds) === undefined) {
+      const fresh = fitEncodedPreview(preview, metadataBytes, maxTotalTokens, boundaryEnds);
+      // Refuse this wider membership fit before issuance; the projector retries
+      // a shorter prefix without advancing the deferred source. Oversized first
+      // units still make UTF-8 progress instead of indefinitely deferring.
+      if (fresh !== null && completeSourceDeliveryEnd(fresh.preview, boundaryEnds) !== undefined) break;
+    }
     const content = fitted?.preview ?? "[payload omitted]", tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
     usedTokens += tokenEstimate;
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
