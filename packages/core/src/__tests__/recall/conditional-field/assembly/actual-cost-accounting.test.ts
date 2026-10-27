@@ -220,6 +220,7 @@ describe("conditional-field actual request cost", () => {
     const first = runConditionalFieldRecallWithReceipt({
       workspace_id: WS,
       query_text: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
       budget,
       result_kind_view: "memory_only",
       snapshot_id: SNAPSHOT_ID,
@@ -229,7 +230,8 @@ describe("conditional-field actual request cost", () => {
       readers: readersFor(slice),
       authorized_scopes: null
     });
-    const pages = collect(readersFor(slice), budget, 20, first.index, "yesterday failed deployment", INTERPRETATION_CLOCK);
+    const pages = collect(readersFor(slice), budget, 20, first.index, "yesterday failed deployment", INTERPRETATION_CLOCK,
+      deploymentProposal("yesterday failed deployment"));
     const hits = pages.flatMap((page) => page.entries.filter((entry) => entry.object_id === MEM.c));
     expect(new Set(hits.map((entry) => entry.object_id)).size).toBe(1);
     expect(hits[0]?.association_milligrades).toBe(1000);
@@ -444,6 +446,8 @@ describe("conditional-field actual request cost", () => {
   });
 });
 
+import { deploymentProposal } from "../reference/deployment-proposal.fixture.js";
+
 function recall(readers: ObserverReaders, budget: RequestBudget, continuation: Continuation | null = null,
   captureBudgetWork?: (work: number | undefined) => void) {
   return runConditionalFieldRecallWithReceipt({
@@ -467,7 +471,8 @@ function collect(
   maximum: number,
   first: InformationIndex,
   query = QUERY,
-  clock = CLOCK
+  clock = CLOCK,
+  proposal?: ReturnType<typeof deploymentProposal>
 ): InformationIndex[] {
   const pages = [first];
   let continuation = first.continuation;
@@ -475,6 +480,7 @@ function collect(
     const next = runConditionalFieldRecallWithReceipt({
       workspace_id: WS,
       query_text: query,
+      ...(proposal === undefined ? {} : { interpretation_proposal: proposal }),
       budget,
       result_kind_view: "memory_only",
       snapshot_id: SNAPSHOT_ID,

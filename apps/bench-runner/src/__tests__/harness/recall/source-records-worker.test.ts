@@ -7,6 +7,7 @@ import { SoulMemorySearchRequestSchema, type SoulMemorySearchResponse } from "@d
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { HARD_IDENTITY_CAP_CONTRACT } from "../../../../../../packages/core/src/recall/conditional-field/cap-contract.js";
+import { deploymentProposal } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
 
 import { prepareSourceRecordLexicalIndex, recallSourcePages } from "./source-records-worker-fixture.js";
 
@@ -74,6 +75,9 @@ describe("workspace-bound source admission through the native Recall worker", ()
         speaker: "user" as const, scope_class: "project" as const, source_representation: { kind: "original_body" as const },
         spans: deriveAddressableSpanViews(content) });
       const request = SoulMemorySearchRequestSchema.parse({ query: "yesterday failed deployment", max_results: 50,
+        interpretation_proposal: deploymentProposal("yesterday failed deployment", {
+          start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z"
+        }),
         scope_class: null, dimension: null, domain_tags: null, source_observed_at: NOW,
         protocol_version: 1, supports_source_evidence: true, supported_result_kinds: ["source_evidence"],
         supports_product_updates: true, result_kind_view: "source_only" });
@@ -100,7 +104,7 @@ describe("workspace-bound source admission through the native Recall worker", ()
       expect(ids).not.toContain(unknown.record.identity);
       // The unknown-time record remains independently accessible, not known false
       // or absent. Neither failure text nor admission time may invent its event time.
-      const raw = await recallSourcePages(daemon, { ...request, query: "deployment" });
+      const raw = await recallSourcePages(daemon, { ...request, query: "deployment", interpretation_proposal: undefined });
       expect(new Set(raw.results.flatMap(row => row.target.kind === "source_evidence" ? [row.target.root_id] : [])))
         .toEqual(new Set([negative.record.identity, unknown.record.identity, positive.record.identity]));
       const foreign = await daemon.attachWorkspace({ workspaceId: "foreign-workspace", runId: "foreign-run" });

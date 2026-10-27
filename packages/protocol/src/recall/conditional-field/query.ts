@@ -346,6 +346,8 @@ export const QueryProposalInputLimitsSchema = z
   .strict()
   .readonly();
 
+import { QuestionTimePreferenceSchema } from "./question-time.js";
+
 export const QueryInterpretationProposalBodySchema = z
   .object({
     schema_version: SchemaVersionSchema,
@@ -353,6 +355,7 @@ export const QueryInterpretationProposalBodySchema = z
     producer_id: ConditionalFieldIdSchema,
     producer_version: ConditionalFieldIdSchema.optional(),
     stored_cosine_admission: StoredCosineAdmissionSchema.optional(),
+    question_time: QuestionTimePreferenceSchema.optional(),
     conditions: z.array(ProposedGuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     input_limits: QueryProposalInputLimitsSchema.optional(),
     program: ProposedQueryProgramSchema.optional(),

@@ -1,3 +1,5 @@
+import childProcess from "node:child_process";
+import workerThreads from "node:worker_threads";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -10,7 +12,7 @@ type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
  * inside fresh directories created by that test process; existing temp paths,
  * substituted directories, external symlinks and shared credential inodes are
  * not fixture ownership. Native CLI fixtures retain their named config owner. */
-export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFixtures?: boolean }> = {}) {
+export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFixtures?: boolean; descendantPreload?: string }> = {}) {
   const restores: (() => void)[] = [], violations: string[] = [];
   const fixtures = new Map<string, FixtureDirectory>();
   const deny = (kind: string): never => {
@@ -30,6 +32,30 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     .filter(key => !/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key))
     .map(key => [key, environment[key]]));
   restores.push(() => { process.env = environment; });
+  if (options.descendantPreload !== undefined) {
+    const preload = `--import=${options.descendantPreload}`;
+    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${preload}`.trim();
+    const argv = (supplied?: readonly string[]) => [...new Set([...(supplied ?? process.execArgv), preload])];
+    // ONNX deliberately clears inherited loader flags; recall workers supply
+    // explicit argv. Apply the fixture guard at those actual creation boundaries.
+    const fork = childProcess.fork;
+    childProcess.fork = ((modulePath, argsOrOptions, suppliedOptions) => {
+      const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
+      const selected = Array.isArray(argsOrOptions) ? suppliedOptions : argsOrOptions;
+      const settings = selected as import("node:child_process").ForkOptions | undefined;
+      return fork(modulePath, args, { ...settings, execArgv: argv(settings?.execArgv) });
+    }) as typeof childProcess.fork;
+    restores.push(() => { childProcess.fork = fork; });
+    const Worker = workerThreads.Worker;
+    workerThreads.Worker = new Proxy(Worker, { construct(target, [filename, settings = {}]) {
+      // Node does not run --import preloads for CommonJS eval workers (the
+      // native SQLite lease uses one). Install synchronously before their body.
+      const guarded = settings.eval === true
+        ? `require(${JSON.stringify(fileURLToPath(options.descendantPreload!))});\n${filename}` : filename;
+      return new target(guarded, { ...settings, execArgv: argv(settings.execArgv) });
+    } });
+    restores.push(() => { workerThreads.Worker = Worker; });
+  }
 
   const remember = (value: unknown) => {
     const path = fs.realpathSync(String(value)), stat = fs.lstatSync(path);

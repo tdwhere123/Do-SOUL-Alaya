@@ -11,8 +11,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import { failedDeploymentVerdict } from "./source-event.js";
 
-export const SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID = "failed-deployment";
-
 export type OpenRelationCapture = Readonly<{
   readonly relation_kind: string;
   readonly source_variable: string;
@@ -22,47 +20,12 @@ export type OpenRelationCapture = Readonly<{
   readonly threshold_milligrades?: number;
 }>;
 
-export type OrdinaryRequestClass =
-  | { readonly kind: "supported" }
-  | { readonly kind: "partial"; readonly missing: "time" }
-  | { readonly kind: "hypotheses" }
-  | { readonly kind: "lexical" }
-  | { readonly kind: "unsupported" }
-  | { readonly kind: "malformed" };
-
-const YESTERDAY_PATTERN = /\b(?:yesterday|previous day|last day)\b/u;
-const FAILED_PATTERN = /\b(?:failed|failure|unsuccessful)\b/u;
-const DEPLOY_PATTERN = /\bdeploy(?:ed|ment|s)?\b/u;
-
 export function normalizeOrdinaryText(text: string): string {
   return text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
-export function calendarYesterdayWindow(clockIso: string): QueryTimeWindow | undefined {
-  const clock = new Date(clockIso);
-  if (Number.isNaN(clock.getTime())) return undefined;
-  const endMs = Date.UTC(clock.getUTCFullYear(), clock.getUTCMonth(), clock.getUTCDate());
-  return {
-    start: new Date(endMs - 86_400_000).toISOString(),
-    end: new Date(endMs).toISOString()
-  };
-}
-
-export function classifyOrdinaryRequest(text: string): OrdinaryRequestClass {
-  const normalized = normalizeOrdinaryText(text);
-  if (normalized.length === 0) return { kind: "malformed" };
-  const hasYesterday = YESTERDAY_PATTERN.test(normalized);
-  const hasFailed = FAILED_PATTERN.test(normalized);
-  const hasDeploy = DEPLOY_PATTERN.test(normalized);
-  if (hasFailed && hasDeploy) {
-    return hasYesterday ? { kind: "supported" } : { kind: "partial", missing: "time" };
-  }
-  if (hasYesterday && hasFailed) return { kind: "hypotheses" };
-  return { kind: "lexical" };
-}
-
-// Yesterday is an event-variable interval. Applying it to associated items drops last-week config.
-export function yesterdayAnchorGuard(window: QueryTimeWindow, variable = ANCHOR_EVENT_VARIABLE): Guard {
+// An explicit event-variable interval is distinct from a global source filter.
+export function anchorTimeGuard(window: QueryTimeWindow, variable = ANCHOR_EVENT_VARIABLE): Guard {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "interval_relation",
@@ -74,16 +37,6 @@ export function yesterdayAnchorGuard(window: QueryTimeWindow, variable = ANCHOR_
       end: window.end,
       time_domain: "calendar_day"
     }
-  };
-}
-
-export function openAnchorTimeGuard(variable = ANCHOR_EVENT_VARIABLE): Guard {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    kind: "interval_relation",
-    verdict: "unresolved",
-    variable,
-    time_scope: "anchor"
   };
 }
 
@@ -270,41 +223,6 @@ export function sourceBoundEntityGuard(variable: string, entityId?: string): Gua
     time_scope: "none",
     ...(entityId === undefined ? {} : { entity_id: entityId })
   };
-}
-
-export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgram {
-  anchorGuard = { ...anchorGuard, predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) };
-  // History hangs off the service variable so a shared-provider object cannot unify another service.
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    kind: "alternative",
-    options: [
-      { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" },
-      relationProgram("config_direct", ANCHOR_EVENT_VARIABLE, "c", anchorGuard),
-      {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        kind: "sequence",
-        steps: [
-          relationProgram("observed_log", ANCHOR_EVENT_VARIABLE, "l", anchorGuard),
-          relationProgram("config_via_log", "l", "c", associatedItemGuard("c"))
-        ]
-      },
-      {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        kind: "sequence",
-        steps: [
-          relationProgram(USES_SERVICE_RELATION, ANCHOR_EVENT_VARIABLE, SERVICE_VARIABLE, anchorGuard),
-          relationProgram("associated_history", SERVICE_VARIABLE, "h", associatedItemGuard("h"))
-        ]
-      }
-    ]
-  };
-}
-
-export function ordinaryRemainder(text: string): string {
-  return normalizeOrdinaryText(text).replace(YESTERDAY_PATTERN, "").replace(FAILED_PATTERN, "")
-    .replace(DEPLOY_PATTERN, "").replace(/\b(?:s|the|find|show|me|please|tell|about)\b/gu, "")
-    .replace(/\s+/gu, " ").trim();
 }
 
 export function proposeOrdinaryRelations(text: string): readonly OpenRelationCapture[] {

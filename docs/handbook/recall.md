@@ -173,11 +173,39 @@ missing ordinary worker authorization key fails closed. Do not substitute a
 workspace default. Source-semantic attached-agent handles have their own
 explicit principal and lifetime admission, not a reusable ordinary worker key.
 
+## Question-time preference
+
+Protocol 28.0.0 admits `interpretation_proposal.question_time` from the narrow
+`alaya.query.question-time.v1` producer. The proposal binds the original-query digest
+and interpretation clock, and contains up to 32 closed UTC calendar-day intervals on
+source `event_time`. Formation reads only the question and clock; Recall performs
+no provider call or language-specific time inference. The retired ordinary English
+failed-deployment demo no longer creates a program, hypotheses or claim demands;
+semantic programs must be explicit inputs from declared producers.
+
+The time coordinate is a soft preference, not a source guard. Native acquisition
+orders in-window roots from the original bounded prefix first, then time-restricted
+lexical candidates with the original query and existing lexical statistics, then the
+remaining original prefix. One shared 128-attempt and 16-retained-root allowance still
+applies; a preferred candidate can displace a fallback root, never make it ineligible.
+There is no per-question FTS corpus or unbounded union. Unknown source time is not
+inferred from ingestion time. Empty and outside-corpus windows preserve nomination
+order. Unavailable time reads remain explicit partial outcomes, not successful absence.
+Public `since`/`until` retain their hard-filter semantics independently of preference.
+
+Native navigation consumes the bounded source permutation separately from capture
+ranks. Restricted lexical occurrences and rank summaries carry `domain: "question_time"`; their ranks
+remain local to that capture and are validated independently of unrestricted ranks.
+This capture is not an additional round-robin opportunity or allowance. Preference
+permutes source positions in the mixed access schedule, preserving memory positions
+and native order within each source tier. Continuations retain that frozen order;
+public navigation exposes factual capture provenance and the separate access ordinal.
+
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v4`, Protocol
-27.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v5`, Protocol
+28.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -501,10 +529,11 @@ lives in the
 Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
-14.1.0–20.0.0 listed in its schema, plus a separately qualified 27.0.0 branch.
+14.1.0–20.0.0 listed in its schema, plus separately qualified 27.0.0 and 28.0.0 branches.
 Historical captures retain `conditional-field-source-only-v1` and their canonical
-request policy; 27.0.0 requires `ordinary-native-field.v4`, `native_query`, current
-compact disclosures and the matching result/continuation version. This is offline
+request policy; 27.0.0 requires `ordinary-native-field.v4` and 28.0.0 requires
+`ordinary-native-field.v5`, both with `native_query`, current compact disclosures
+and the matching result/continuation version. This is offline
 source-record delivery validation, not support for intervening majors, capsule
 captures or historical execution. Installed reader provenance is recorded separately
 from the untouched producer version. Authored historical-format tests demonstrate

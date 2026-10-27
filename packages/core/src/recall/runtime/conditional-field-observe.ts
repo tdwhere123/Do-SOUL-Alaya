@@ -91,7 +91,7 @@ export function observeField(
     && interpretation.view.result_kind_view !== "memory_only" && input.authorized_scopes !== undefined
     && input.readers.nominateSources !== undefined) {
     if (initial.native_sources === undefined) {
-      initial = acquireNativeSources(initial, input);
+      initial = acquireNativeSources(initial, input, interpretation);
     }
     // An exhausted retained observation has no source-reader call left to make.
     // Rebuilding its frozen frontier would repay acquisition frames merely to
@@ -132,11 +132,14 @@ export function observeField(
     ? completed : stampRetainedFieldLevel(completed, input.budget.memory_bytes);
 }
 
-function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInput): FieldEngineState {
+function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInput,
+  interpretation: QueryInterpretation): FieldEngineState {
   const acquire = () => input.readers.nominateSources?.({ workspaceId: input.workspace_id,
     query: input.query_text, authorizedScopes: nominationScopes(input.authorized_scopes),
     ...(input.source_id === undefined ? {} : { sourceId: input.source_id }),
     ...(input.access_hint === undefined ? {} : { hint: input.access_hint }),
+    ...(interpretation.interpretation_proposal?.question_time === undefined ? {}
+      : { questionTime: interpretation.interpretation_proposal.question_time }),
     budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
   const captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
   const resources = captured?.result?.resources;

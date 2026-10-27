@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
+import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
 
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v4" as const;
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v5" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({
@@ -12,6 +13,8 @@ export const RecallNavigationWitnessSchema = z.object({
   ordinal: z.number().int().nonnegative(),
   access_ordinal: z.number().int().nonnegative().optional(),
   native_rank: z.number().int().positive().optional(),
+  /** Restricted lexical capture; does not change the factual native rank. */
+  domain: QuestionTimeCaptureDomainSchema.optional(),
   reference: ConditionalFieldIdSchema,
   location: z.object({
     start_byte: z.number().int().nonnegative(),

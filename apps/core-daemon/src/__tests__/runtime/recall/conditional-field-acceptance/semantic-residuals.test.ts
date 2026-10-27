@@ -9,6 +9,8 @@ import { MEM, WS } from "../../../../../../../packages/core/src/__tests__/recall
 import { defaultBudget, INTERPRETATION_CLOCK, YESTERDAY_INSTANT, SNAPSHOT_ID } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { compileConditionalFieldQuery } from "../../../../../../../packages/core/src/recall/conditional-field/query/compile-query.js";
 
+import { deploymentProposal, deploymentClaimDemands } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
+
 const databases = new Set<StorageDatabase>();
 const COMPLETE_FINALIZATION_RESERVE = 512;
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
@@ -36,6 +38,7 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
     warn: () => undefined, generateId: () => "00000000-0000-4000-8000-000000000001" });
   return async (width = 800, continuation?: InformationIndex["continuation"]) => {
     const result = await handler({ query: "yesterday failed deployment", scope_class: null, dimension: null,
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"), claim_demands: deploymentClaimDemands,
       domain_tags: null, max_results: width,
       protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
       supported_result_kinds: ["memory_entry", "source_evidence"],
@@ -70,7 +73,14 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("separates ambiguous ordinary identities and rejects a cross-query continuation", async () => {
     const slice = await planted();
     const queries = ["yesterday failure of checkout", "yesterday failure of payments"];
-    const compiled = queries.map((text) => compileConditionalFieldQuery({ source: "ordinary", text,
+    const proposals = queries.map(text => ({ ...deploymentProposal(text), hypotheses: [
+      { schema_version: 1 as const, hypothesis_id: "authored-failure", bindings: [
+        { schema_version: 1 as const, variable: "event", value: "failed_deployment" }] },
+      { schema_version: 1 as const, hypothesis_id: "authored-unresolved-event", bindings: [
+        { schema_version: 1 as const, variable: "event", value: "unresolved" }] }
+    ] }));
+    const compiled = queries.map((text, index) => compileConditionalFieldQuery({ source: "ordinary", text,
+      interpretation_proposal: proposals[index],
       interpretation_clock: INTERPRETATION_CLOCK, snapshot_id: SNAPSHOT_ID, budget: defaultBudget() }));
     expect(compiled.map((item) => item.status)).toEqual(["hypotheses", "hypotheses"]);
     expect(compiled[0]!.query_id).not.toBe(compiled[1]!.query_id);
@@ -79,9 +89,9 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       await slice.writeMemory(id, "yesterday failure of checkout; yesterday failure of payments; failed deployment", MemoryDimension.EPISODE);
       stamp(slice, id, YESTERDAY_INSTANT);
     }
-    const first = runRecall(slice, { query_text: queries[0], budget: defaultBudget({ page_budget: 1, finalization_reserve: 1000 }) });
+    const first = runRecall(slice, { query_text: queries[0], interpretation_proposal: proposals[0], budget: defaultBudget({ page_budget: 1, finalization_reserve: 1000 }) });
     expect(first.continuation).not.toBeNull();
-    const wrong = runRecall(slice, { query_text: queries[1], continuation: first.continuation,
+    const wrong = runRecall(slice, { query_text: queries[1], interpretation_proposal: proposals[1], continuation: first.continuation,
       budget: defaultBudget({ page_budget: 1, finalization_reserve: 1000 }) });
     expect(wrong.completeness.logical_index).toBe("invalidated");
     expect(wrong.entries).toEqual([]);
@@ -96,6 +106,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     const requests = relation.mock.calls.map(([input]) => JSON.stringify(input));
     expect(new Set(requests).size).toBe(requests.length);
     const query = compileConditionalFieldQuery({ source: "ordinary", text: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
       interpretation_clock: INTERPRETATION_CLOCK, snapshot_id: SNAPSHOT_ID, budget: defaultBudget() });
     const observed = observeProgram(slice, query.program, { query_text: "yesterday failed deployment" });
     expect(observed.field.observations.find((row) => row.object_id === MEM.l)?.applicability.verdict).toBe("unresolved");

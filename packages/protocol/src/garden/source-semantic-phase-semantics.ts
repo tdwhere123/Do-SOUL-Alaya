@@ -3,6 +3,7 @@ import { SourceIndexLexicalBindingSchema } from "../recall/source-index-lexical.
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
+import { QuestionTimeCaptureDomainSchema } from "../recall/conditional-field/question-time.js";
 
 const Completion = z.enum(["complete", "partial", "unavailable", "not_run"]);
 const SourceSemanticPhaseResourcesSchema = z.object({ work: NonNegativeIntSchema, memory_bytes: NonNegativeIntSchema,
@@ -29,7 +30,7 @@ const VectorState = z.union([
   z.object({ status: z.enum(["unknown", "unbound", "unavailable"]), reason: z.string() }).strict().readonly()
 ]);
 const LexicalRank = z.object({ rank: NonNegativeIntSchema, lane: z.enum(["unicode61", "trigram"]),
-  lane_rank: NonNegativeIntSchema, bm25: z.number().finite() }).strict().readonly();
+  lane_rank: NonNegativeIntSchema, bm25: z.number().finite(), domain: QuestionTimeCaptureDomainSchema.optional() }).strict().readonly();
 export const SourceSemanticQueryWindowSchema = z.object({ window_id: Sha256DigestSchema, start_byte: NonNegativeIntSchema,
   end_byte: NonNegativeIntSchema, content_digest: Sha256DigestSchema }).strict().readonly();
 const Tokenization = z.object({ policy: z.literal("source-index-fts.v1"), binding_digest: Sha256DigestSchema,

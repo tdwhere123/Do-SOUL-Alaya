@@ -182,7 +182,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(parseBindingContext(encoded, owner).get("gamma")).toBe("c".repeat(90));
   });
 
-  it("compiles yesterday failed deployment as the supported program", () => {
+  it("does not compile retired demo phrasing as a semantic program", () => {
     const compiled = compileConditionalFieldQuery({
       source: "ordinary",
       text: "Tell me about yesterday failed deployment",
@@ -190,8 +190,8 @@ describe("admission, binding, measurement, and evidence identities", () => {
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget()
     });
-    expect(compiled.status).toBe("resolved");
-    expect(compiled.program.kind).toBe("alternative");
+    expect(compiled.status).toBe("partial");
+    expect(compiled.program.kind).toBe("epsilon");
   });
 
   it("admits a typed immutable relation by identity while keeping absent measurements and reachable zero distinct", () => {

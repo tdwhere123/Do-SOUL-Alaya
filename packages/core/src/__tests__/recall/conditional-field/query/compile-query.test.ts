@@ -18,7 +18,6 @@ import {
   digestOriginalQuery,
   FROZEN_SOURCE_PREDICATE_NAMES,
   interpretationIdentity,
-  SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   UNSUPPORTED_POLICY_QUERY_ID,
   type QueryMemoryPort
 } from "../../../../recall/conditional-field/query/compile-query.js";
@@ -43,7 +42,9 @@ import {
   yesterdayAnchorGuard
 } from "../reference/deployment.fixture.js";
 
-const SUPPORTED_PARAPHRASES = [
+import { deploymentProposal, deploymentClaimDemands } from "../reference/deployment-proposal.fixture.js";
+
+const RETIRED_DEMO_PHRASES = [
   "yesterday's failed deployment",
   "failed deployment yesterday",
   "yesterday failed deploy",
@@ -71,10 +72,12 @@ describe("conditional-field query compiler", () => {
     expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind)).toEqual(["depends_on_build_agent"]);
     expect(collectRelations(interpretation.program)[0]?.source_variable).toBe("deployment");
   });
-  it("assesses ordinary common_cause without hiding unknown associated history", () => {
+  it("retains explicitly requested common_cause without hiding unknown associated history", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+      view: { ...defaultView(), claim_demands: deploymentClaimDemands },
       interpretation_clock: INTERPRETATION_CLOCK,
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget()
@@ -88,11 +91,12 @@ describe("conditional-field query compiler", () => {
   });
 
   it("keeps yesterday on the anchor and admits last-week associated config", () => {
-    const interpretation = compileOrdinary("yesterday's failed deployment");
-    expect(interpretation.status).toBe("resolved");
+    const interpretation = compileConditionalFieldQuery({ source: "ordinary", text: "yesterday's failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday's failed deployment"),
+      interpretation_clock: INTERPRETATION_CLOCK, snapshot_id: SNAPSHOT_ID, budget: defaultBudget() });
+    expect(interpretation.status).toBe("partial");
     expect(interpretation.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(interpretation.query_id).not.toBe(SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID);
-    expect(interpretation.time_window).toEqual({ start: YESTERDAY_START, end: YESTERDAY_END });
+    expect(interpretation.time_window).toBeUndefined();
     const relations = collectRelations(interpretation.program);
     const anchor = relations.find((relation) => relation.relation_kind === "observed_log");
     const config = relations.find((relation) => relation.relation_kind === "config_via_log");
@@ -131,14 +135,13 @@ describe("conditional-field query compiler", () => {
     expect(moved.program).not.toEqual(interpretation.program);
   });
 
-  it.each(SUPPORTED_PARAPHRASES)("close paraphrase compiles the supported program: %s", (text) => {
+  it.each(RETIRED_DEMO_PHRASES)("does not infer a program, time or hypotheses from retired demo text: %s", (text) => {
     const interpretation = compileOrdinary(text);
-    expect(interpretation.status).toBe(/complete information|of checkout|last week|prior same/u.test(text) ? "partial" : "resolved");
-    const relations = collectRelations(interpretation.program);
-    expect(relations.find((relation) => relation.guard.time_scope === "anchor")?.guard.variable)
-      .toBe("r");
-    expect(relations.find((relation) => relation.relation_kind === "config_via_log")?.guard.time_scope)
-      .toBe("none");
+    expect(interpretation.status).toBe("partial");
+    expect(interpretation.program.kind).toBe("epsilon");
+    expect(interpretation.time_window).toBeUndefined();
+    expect(interpretation.hypotheses).toEqual([]);
+    expect(interpretation.view.claim_demands).toBeUndefined();
   });
 
   it("does not compile owner or channel phrasing as a relation catalog", () => {
@@ -148,8 +151,7 @@ describe("conditional-field query compiler", () => {
     expect(collectRelations(owns.program)).toEqual([]);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
     expect(wrapped.status).toBe("partial");
-    expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
-      .toEqual(["associated_history", "config_direct", "config_via_log", "observed_log", "uses_service"]);
+    expect(collectRelations(wrapped.program)).toEqual([]);
   });
 
   it("keeps unseen ordinary language partial instead of false-resolved epsilon", () => {
@@ -182,7 +184,8 @@ describe("conditional-field query compiler", () => {
     expect(evening.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(morning.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(evening.query_id).not.toBe(morning.query_id);
-    expect(evening.time_window).not.toEqual(morning.time_window);
+    expect(evening.time_window).toBeUndefined();
+    expect(morning.time_window).toBeUndefined();
     const explicit = compileConditionalFieldQuery({
       source: "ordinary",
       snapshot_id: SNAPSHOT_ID,
@@ -267,11 +270,8 @@ describe("conditional-field query compiler", () => {
     expect(interpretation.hypotheses[1]?.bindings).toEqual(second.bindings);
     expect(interpretation.hypotheses).toHaveLength(2);
     const ambiguous = compileOrdinary("yesterday's failure");
-    expect(ambiguous.status).toBe("hypotheses");
-    expect(ambiguous.hypotheses.map((row) => row.hypothesis_id).sort())
-      .toEqual(["h-failed-deployment", "h-unresolved-event"]);
-    expect(new Set(ambiguous.hypotheses.flatMap((row) => row.bindings.map((binding) => binding.value))).size)
-      .toBeGreaterThan(1);
+    expect(ambiguous.status).toBe("partial");
+    expect(ambiguous.hypotheses).toEqual([]);
   });
 
   it("defaults same_path and does not rewrite it to independent", () => {
@@ -337,7 +337,7 @@ describe("conditional-field query compiler", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       memory
     });
-    expect(ordinary.status).toBe("resolved");
+    expect(ordinary.status).toBe("partial");
     expect(reads).toEqual([SNAPSHOT_ID]);
   });
 
@@ -352,6 +352,7 @@ describe("conditional-field query compiler", () => {
       budget: defaultBudget(),
       text: "yesterday's failed deployment",
       interpretation_clock: INTERPRETATION_CLOCK,
+      since: YESTERDAY_START, until: YESTERDAY_END,
       relations: [{
         relation_kind: "custom.unseen.relation.v1",
         source_variable: "anchor",
@@ -376,9 +377,9 @@ describe("conditional-field query compiler", () => {
     expect(partial.status).toBe("partial");
     expect(partial.holes).toContainEqual({
       schema_version: 1,
-      hole_id: "hole.anchor.time",
-      variable: "r",
-      status: "open"
+      hole_id: "hole.query.uninterpreted",
+      variable: "q",
+      status: "unresolved"
     });
     const hinted = compileConditionalFieldQuery({
       source: "ordinary",
@@ -390,9 +391,8 @@ describe("conditional-field query compiler", () => {
       until: YESTERDAY_END
     });
     expect(hinted.status).toBe("partial");
-    expect(collectRelations(hinted.program)[0]?.guard.time_scope).toBe("anchor");
-    expect(collectRelations(hinted.program).find((relation) => relation.relation_kind === "config_via_log")
-      ?.guard.time_scope).toBe("none");
+    expect(collectRelations(hinted.program)).toEqual([]);
+    expect(decodeSourceFilters(hinted.source_guard?.predicate_name)).toEqual({ since: YESTERDAY_START, until: YESTERDAY_END });
     for (const status of ["malformed", "unsupported", "partial", "resource_rejected"] as const) {
       expect(interpretationMayEmitCompleteEmpty(status)).toBe(false);
     }

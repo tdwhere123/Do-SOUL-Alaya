@@ -27,6 +27,8 @@ import {
 } from "../reference/deployment.fixture.js";
 import { INAPPLICABLE_KIND, MEM, WS, openSourceSlice } from "../vertical/source-slice.js";
 
+import { deploymentProposal, deploymentClaimDemands } from "../reference/deployment-proposal.fixture.js";
+
 const databases = new Set<StorageDatabase>();
 const COMPLETE_FINALIZATION_RESERVE = 512;
 
@@ -42,6 +44,8 @@ describe("conditional-field executeRecall assembly", () => {
     const compiled = compileConditionalFieldQuery({
       source: "ordinary",
       text: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+      view: { ...defaultView(), claim_demands: deploymentClaimDemands },
       interpretation_clock: INTERPRETATION_CLOCK,
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget()
@@ -275,7 +279,10 @@ describe("conditional-field executeRecall assembly", () => {
       taskSurface: surface,
       workspaceId: WS,
       strategy: "chat" as const,
+      interpretationClock: INTERPRETATION_CLOCK,
       queryText: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+      claim_demands: deploymentClaimDemands,
       ...capableRecallConsumerDeclaration()
     };
     const full = await service.recall({ ...pageRequest, pageBudget: 800,
@@ -309,6 +316,7 @@ describe("conditional-field executeRecall assembly", () => {
     const drifted = await service.recall({
       ...pageRequest,
       pageBudget: 1,
+      interpretationClock: "2026-09-06T00:00:05.000Z",
       continuation: withoutClock
     });
     expect(drifted.index.completeness.observed_coverage).toBe("invalidated");
@@ -338,6 +346,8 @@ describe("conditional-field executeRecall assembly", () => {
       workspaceId: WS,
       strategy: "chat",
       queryText: "yesterday failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+      claim_demands: deploymentClaimDemands,
       pageBudget: 800,
       interpretationClock: INTERPRETATION_CLOCK,
       snapshotDigest: SNAPSHOT_ID,
@@ -431,6 +441,8 @@ function runRecall(
   return runConditionalFieldRecall({
     workspace_id: WS,
     query_text: input.query_text ?? "yesterday failed deployment",
+    ...(input.query_text === undefined ? { interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+      claim_demands: deploymentClaimDemands } : {}),
     budget: defaultBudget({ page_budget: input.page_budget, finalization_reserve: COMPLETE_FINALIZATION_RESERVE }),
     snapshot_id: SNAPSHOT_ID,
     interpretation_clock: INTERPRETATION_CLOCK,

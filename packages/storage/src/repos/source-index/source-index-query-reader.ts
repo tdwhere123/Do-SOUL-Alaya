@@ -2,7 +2,7 @@ import {
   CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema, SOURCE_INDEX_MAX_WINDOWS,
   SourceIndexOperationError, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
   sourceGoldRootIdentity, splitFtsLanes,
-  type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
+  type QuestionTimePreference, type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
   type SourceIndexQueryResources, type SourceIndexResources, type SourceIndexTarget,
   type SourceIndexNominationAllowance, type SourceIndexQueryCapacity,
   type SourceIndexVectorBinding, type SourceIndexVectorCandidate, type SourceIndexVectorCursor,
@@ -18,6 +18,7 @@ import { buildFtsMatchExpression, tokenizeFtsQuery } from "../shared/fts-lane-ro
 import { readBufferField, readIntegerField, readJsonColumn, readFiniteNumberField, readRecord, readStringField } from "../shared/parse-row.js";
 import { readSourceIndexQueryState, sourceIndexEpoch, SOURCE_INDEX_LEXICAL_CURRENT } from "./generation-state.js";
 import { assertIndexPageLimit, guardSourceIndexTarget, SOURCE_INDEX_STANDALONE_BUDGET } from "./native-source.js";
+import { questionTimeSql } from "./question-time-domain.js";
 import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
@@ -156,7 +157,8 @@ function vectorDecodeReservation(bytes: number, dimensions: number): SourceSeman
  */
 export function readSourceIndexLexicalCandidates(database: StorageDatabase, workspaceId: string,
   navigationText: string, limit: number, budget: SourceSemanticResourceBudget,
-  sha256: FieldContractSha256, capture?: SourceIndexTargetCapture): SourceIndexLexicalRead {
+  sha256: FieldContractSha256, capture?: SourceIndexTargetCapture,
+  questionTime?: QuestionTimePreference): SourceIndexLexicalRead {
   assertIndexPageLimit(limit);
   const meter = new QueryReadMeter(budget), candidates: SourceIndexLexicalCandidate[] = [];
   let tokenization: SourceIndexLexicalRead["tokenization"] = null, shortCjk = false;
@@ -169,6 +171,7 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
   });
   try {
     const captured = capture?.begin(database, workspaceId, meter) === true;
+    if (questionTime !== undefined) meter.ledger.retain(questionTime, "question time lexical domain");
     meter.ledger.retain(navigationText); meter.ledger.charge(navigationText.length, 0, "source query tokenization");
     // The synchronous capture cannot transition loading -> ready. Reads never initiate native loading.
     const selected = readSourceIndexLexicalBinding(database, workspaceId, meter.remaining());
@@ -202,7 +205,7 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
       { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts", tokens: split.porterTokens },
       { lane: "trigram" as const, table: "source_index_fts_trigram", tokens: split.trigramTokens }
     ].filter(lane => lane.tokens.length > 0).map(lane => new LexicalLane(database, lane.lane, lane.table,
-      buildFtsMatchExpression(lane.tokens), binding?.generation_id));
+      buildFtsMatchExpression(lane.tokens), binding?.generation_id, questionTime));
     meter.ledger.retain(lanes.map(lane => lane.match));
     if (lanes.length === 0) return result("partial", "no_admitted_tokens");
     while (candidates.length < limit && lanes.some(lane => !lane.done)) {
@@ -245,8 +248,11 @@ class LexicalLane {
   private next = 0;
   private fetched = 0;
   private readonly statement;
+  private readonly timeParameters: readonly string[];
   constructor(database: StorageDatabase, readonly lane: "unicode61" | "trigram", readonly table: string,
-    readonly match: string, private readonly generationId: string | undefined) {
+    readonly match: string, private readonly generationId: string | undefined, questionTime?: QuestionTimePreference) {
+    const time = questionTime === undefined ? undefined : questionTimeSql(questionTime);
+    this.timeParameters = time?.parameters ?? [];
     const projected = table === "source_index_lexical_fts";
     const projectionJoin = projected
       ? `JOIN source_index_lexical_projections p ON p.id=${table}.rowid AND p.workspace_id=?
@@ -261,6 +267,7 @@ class LexicalLane {
       JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
       WHERE ${table} MATCH ? AND ${SOURCE_INDEX_LEXICAL_CURRENT}
       ${generationId === undefined ? "" : "AND p.generation_id=? AND p.content_digest=x.content_digest AND p.body_bytes=x.body_bytes"}
+      ${time === undefined ? "" : `AND ${time.sql}`}
       ORDER BY score ASC,x.root_key ASC LIMIT ? OFFSET ?`);
   }
   buffered(): boolean { return this.next < this.rows.length; }
@@ -274,7 +281,7 @@ class LexicalLane {
     if (this.exhausted) return;
     meter.ledger.reserve(1, 24); meter.read(1, 0);
     const raw = this.statement.all(workspaceId, this.match, ...(this.generationId === undefined ? [] : [this.generationId]),
-      size, this.fetched);
+      ...this.timeParameters, size, this.fetched);
     const rows = raw.map(item => {
       const row = readRecord(item, "source lexical candidate"), rootKey = readStringField(row, "root_key");
       return { raw: row, rootKey, bytes: readIntegerField(row, "metadata_bytes") };

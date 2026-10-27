@@ -20,7 +20,8 @@ type NativeLaneCapture = (
 );
 export type NativeRouteLane = Readonly<{ lane: LaneId; scope: string } & NativeLaneCapture>;
 export type NativeMemoryLane = Readonly<{ lane: "memory-lexical"; scope: string } & NativeLaneCapture>;
-type AnyNativeLane = NativeRouteLane | NativeMemoryLane;
+type NativeTimeCapture = Readonly<{ lane: "question-time-lexical"; scope: string } & NativeLaneCapture>;
+type AnyNativeLane = NativeRouteLane | NativeMemoryLane | NativeTimeCapture;
 export type NativeRoutePending = Readonly<{
   ordinal: number; lane: LaneId; scope: string; occurrence: NativeRouteOccurrence;
 }>;
@@ -234,23 +235,48 @@ export function orderNativeRouteAccess(input: AccessInput<NativeRouteLane>) {
  * captured-opportunity walk. This is navigation, not a cross-kind relevance score.
  * An unavailable lane is skipped, never filled from an unrelated catalog.
  */
-export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & { memory: NativeMemoryLane }) {
-  return orderCapturedAccess<AnyNativeLane>({ ...input, lanes: [...input.lanes, input.memory] },
-    [...OPPORTUNITY_CYCLE, "memory-lexical"]);
+export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
+  memory: NativeMemoryLane;
+  question_time?: Readonly<{ capture: NativeTimeCapture; root_order: readonly string[] }>;
+}) {
+  const result = orderCapturedAccess<AnyNativeLane>({ ...input, lanes: [...input.lanes, input.memory] },
+    [...OPPORTUNITY_CYCLE, "memory-lexical"], input.question_time?.capture);
+  if (input.question_time === undefined) return result;
+  // Preference permutes source slots only. Memory keeps its observed opportunity
+  // positions; restricted lexical capture is not another round-robin allowance.
+  const rootOrder = [...input.question_time.root_order];
+  const byRoot = new Map(result.trace.filter(row => row.lane !== "memory-lexical")
+    .map(row => [row.occurrence.root_key, row.record_id]));
+  requireFact(new Set(rootOrder).size === rootOrder.length && rootOrder.every(key => byRoot.has(key)),
+    "question-time order requires distinct captured source roots");
+  const memoryIds = new Set(result.trace.filter(row => row.lane === "memory-lexical").map(row => row.record_id));
+  const ordered = result.status === "ordered" ? result.record_ids
+    : result.trace.filter(row => row.decision === "placed").map(row => row.record_id);
+  const preferred = rootOrder.map(key => byRoot.get(key)!);
+  const preferredIds = new Set(preferred);
+  const sources = [...preferred, ...ordered.filter(id => !memoryIds.has(id) && !preferredIds.has(id))];
+  let cursor = 0;
+  const recordIds = ordered.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
+  return { ...result, preferred_record_ids: recordIds,
+    ...(result.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function orderCapturedAccess<L extends AnyNativeLane>(input: AccessInput<L>, cycle: readonly string[]) {
-  const captured = structuredClone(input);
-  validateLanes(captured.lanes, cycle);
+function orderCapturedAccess<L extends AnyNativeLane>(input: AccessInput<L>, cycle: readonly string[], additional?: L) {
+  const captured = structuredClone(input), extra = additional === undefined ? undefined : structuredClone(additional);
+  const allLanes = extra === undefined ? captured.lanes : [...captured.lanes, extra];
+  validateLanes(allLanes, extra === undefined ? cycle : [...cycle, extra.lane]);
   requireFact(typeof captured.unvisited_sources === "boolean", "missing global source residual state");
-  const associations = validateAccessMembership(captured, captured.lanes), walk = capturedWalk(captured.lanes);
+  const associations = validateAccessMembership(captured, allLanes), walk = capturedWalk(captured.lanes);
   const recordIds: string[] = [], placed = new Set<string>(), trace: AccessTrace<L>[] = [];
-  for (let next = walk.peek(); next !== null; next = walk.peek()) {
+  const place = (next: { lane: L["lane"]; scope: string; occurrence: NativeRouteOccurrence }) => {
     const recordId = associations.get(next.occurrence.reference)!.record_id;
     const decision = placed.has(recordId) ? "duplicate" : "placed";
     trace.push({ ...next, record_id: recordId, decision });
     if (decision === "placed") { placed.add(recordId); recordIds.push(recordId); }
-    walk.advance(next.lane);
+  };
+  for (let next = walk.peek(); next !== null; next = walk.peek()) { place(next); walk.advance(next.lane); }
+  if (extra?.state === "exact-captured") for (const occurrence of extra.occurrences) {
+    place({ lane: extra.lane, scope: extra.scope, occurrence });
   }
   const tail = captured.pool.filter(member => !placed.has(member.record_id));
   const missing = tail.filter(member => member.catalog_position === null).map(member => member.record_id);

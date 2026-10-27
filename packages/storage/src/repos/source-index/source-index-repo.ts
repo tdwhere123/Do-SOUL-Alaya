@@ -6,7 +6,7 @@ import {
   type SourceIndexReadResult, type SourceIndexQueryRepository, type SourceIndexVectorBinding,
   type SourceIndexVectorCursor, type SourceSemanticResourceBudget, type SourceIndexNominationAllowance,
   type SourceIndexRepository, type SourceIndexSelection, type SourceIndexState, type SourceIndexTarget,
-  type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult
+  type QuestionTimePreference, type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
@@ -21,6 +21,7 @@ import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndex
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
   readSourceIndexVectorCandidates, quoteSourceIndexQueryCapacity } from "./source-index-query-reader.js";
+import { readQuestionTimeDomain } from "./question-time-domain.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
@@ -48,10 +49,17 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     return this.atomic(() => quoteSourceIndexQueryCapacity(this.database, workspaceId, allowance), "read");
   }
 
-  public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget) {
+  public readQuestionTimeDomain(workspaceId: string, preference: QuestionTimePreference,
+    rootKeys: readonly string[], budget: SourceSemanticResourceBudget) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.atomic(() => readQuestionTimeDomain(this.database, workspaceId, preference, rootKeys, budget), "read");
+  }
+
+  public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget,
+    questionTime?: QuestionTimePreference) {
     BoundedIdSchema.parse(workspaceId);
     const capture = this.database.connection.inTransaction ? this.targetCapture : undefined;
-    return this.atomic(() => readSourceIndexLexicalCandidates(this.database, workspaceId, navigationText, limit, budget, this.sha256, capture), "read");
+    return this.atomic(() => readSourceIndexLexicalCandidates(this.database, workspaceId, navigationText, limit, budget, this.sha256, capture, questionTime), "read");
   }
 
   public readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,

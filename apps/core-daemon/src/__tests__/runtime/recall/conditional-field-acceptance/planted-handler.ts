@@ -29,6 +29,11 @@ export type { SourceSlice } from "../../../../../../../packages/core/src/__tests
 export { MEM, WS } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 export { INTERPRETATION_CLOCK, defaultBudget, SNAPSHOT_ID } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/finite-worlds.js";
 
+import { deploymentProposal, deploymentClaimDemands } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
+
+// A finite authored fixture, never inference from an arbitrary caller's prose.
+const authoredProposals = new Map([["yesterday failed deployment", deploymentProposal("yesterday failed deployment")]]);
+
 export function recallReadWorkerUrl(): URL {
   return new URL("../../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url);
 }
@@ -107,7 +112,9 @@ export async function recallThroughHandler(
     warn: () => undefined,
     generateId: () => "00000000-0000-4000-8000-000000000001"
   });
+  const proposal = request.interpretation_proposal ?? authoredProposals.get(request.query);
   const response = await handler({
+    claim_demands: deploymentClaimDemands,
     ...capableRecallConsumerDeclaration(),
     query: request.query,
     scope_class: null,
@@ -119,9 +126,7 @@ export async function recallThroughHandler(
       : { continuation: request.continuation }),
     ...(request.enumeration_policy === undefined ? {} : { enumeration_policy: request.enumeration_policy }),
     ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
-    ...(request.interpretation_proposal === undefined
-      ? {}
-      : { interpretation_proposal: request.interpretation_proposal })
+    ...(proposal === undefined ? {} : { interpretation_proposal: proposal })
   }, {
     workspaceId: WS,
     runId: null,

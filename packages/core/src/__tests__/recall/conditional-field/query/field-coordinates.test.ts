@@ -25,15 +25,15 @@ import {
   defaultBudget
 } from "../reference/deployment.fixture.js";
 
+import { deploymentProposal } from "../reference/deployment-proposal.fixture.js";
+
 function bindingContext(program: QueryProgram): string {
   return encodeBindingContext(new Map(collectRecoverableBindings(program).map(({ variable, value }) => [variable, value])));
 }
 
 describe("conditional-field query field coordinates", () => {
   it("keeps same-service history as association without a causal predicate", () => {
-    const interpretation = compileOrdinary(
-      "prior same-service failure around yesterday's failed deployment"
-    );
+    const interpretation = compileDeployment("prior same-service failure around yesterday's failed deployment");
     const relations = collectRelations(interpretation.program);
     expect(relations.some((relation) => (
       relation.relation_kind === USES_SERVICE_RELATION
@@ -67,7 +67,7 @@ describe("conditional-field query field coordinates", () => {
     const plantedBridge = collectRecoverableBindings(provider.program)[0]?.value;
     expect(plantedBridge).toBe("shared-provider");
     expect(collectRecoverableBindings(serviceA.program)[0]?.value).not.toBe(plantedBridge);
-    const ordinary = compileOrdinary("yesterday's failed deployment");
+    const ordinary = compileDeployment("yesterday's failed deployment");
     expect(collectRelations(ordinary.program).some((relation) => (
       relation.relation_kind === USES_SERVICE_RELATION
       && relation.target_variable === SERVICE_VARIABLE
@@ -111,12 +111,13 @@ describe("conditional-field query field coordinates", () => {
     const plantedCertainty = interpretationCoverageFor("resolved");
     expect(plantedCertainty).not.toBe(interpretationCoverageFor(compiled.status, compiled));
     const ambiguous = compileOrdinary("yesterday's failure");
-    expect(ambiguous.status).toBe("hypotheses");
+    expect(ambiguous.status).toBe("partial");
+    expect(ambiguous.hypotheses).toEqual([]);
     expect(interpretationCoverageFor(ambiguous.status, ambiguous)).toBe("open");
   });
 
   it("keeps association finite and explicit rather than an unbounded spread", () => {
-    const supported = compileOrdinary("yesterday's failed deployment");
+    const supported = compileDeployment("yesterday's failed deployment");
     expect(collectRelations(supported.program)).toHaveLength(5);
     const repeat = compileTyped({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -178,7 +179,7 @@ describe("conditional-field query field coordinates", () => {
   it("keeps unresolved holes open when an optional source is absent", () => {
     const partial = compileOrdinary("failed deployment of checkout");
     expect(partial.status).toBe("partial");
-    expect(partial.holes.some((hole) => hole.status === "open")).toBe(true);
+    expect(partial.holes.some((hole) => hole.status === "unresolved")).toBe(true);
     expect(interpretationCoverageFor(partial.status, partial)).toBe("open");
     expect(interpretationCoverageFor(partial.status, partial)).not.toBe("complete");
     const reads: string[] = [];
@@ -206,6 +207,11 @@ function compileOrdinary(text: string) {
     text,
     interpretation_clock: INTERPRETATION_CLOCK
   });
+}
+
+function compileDeployment(text: string) {
+  return compileConditionalFieldQuery({ source: "ordinary", text, snapshot_id: SNAPSHOT_ID, budget: defaultBudget(),
+    interpretation_clock: INTERPRETATION_CLOCK, interpretation_proposal: deploymentProposal(text) });
 }
 
 function compileTyped(program: QueryProgram) {

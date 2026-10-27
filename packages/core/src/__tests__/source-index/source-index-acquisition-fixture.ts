@@ -17,6 +17,7 @@ export const digest = (text: string) => `sha256:${createHash("sha256").update(te
 export type RootSpec = Readonly<{
   id: string; body: string; vectors: readonly (readonly number[])[];
   scope?: "project" | "global_domain" | "global_core";
+  eventTime?: string | null;
 }>;
 
 // All values are independently authored controls, not output from an embedding model.
@@ -30,7 +31,8 @@ export const AXIS_ROOTS: readonly RootSpec[] = [
 
 export function publishIndex(environment: Fixture, specs: readonly RootSpec[] = AXIS_ROOTS,
   config: SourceIndexConfiguration = configuration()) {
-  const records = specs.map(spec => publishSource(environment, spec.body, spec.id, { scope_class: spec.scope ?? "project" }));
+  const records = specs.map(spec => publishSource(environment, spec.body, spec.id, { scope_class: spec.scope ?? "project",
+    ...(spec.eventTime === undefined ? {} : { event_time: spec.eventTime }) }));
   const generation = environment.index.begin(environment.index.select(WORKSPACE, config));
   const documents = captureDocuments(environment, generation);
   for (const document of documents) {

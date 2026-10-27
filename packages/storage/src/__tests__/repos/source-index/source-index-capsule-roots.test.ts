@@ -9,16 +9,37 @@ import { QUERY_BUDGET } from "./source-index-query-fixture.js";
 const opened: Fixture[] = [];
 afterEach(() => { for (const env of opened.splice(0)) env.database.close(); });
 function setup() { const env = fixture(); opened.push(env); return env; }
-async function capsule(env: Fixture, excerpt: string | null = "needle 😀 original", lifecycle_state: "active" | "archived" = "active") {
+async function capsule(env: Fixture, excerpt: string | null = "needle 😀 original", lifecycle_state: "active" | "archived" = "active",
+  eventTime?: string) {
   return new SqliteEvidenceCapsuleRepo(env.database).create({ object_id: randomUUID(), object_kind: "evidence_capsule", schema_version: 1,
     lifecycle_state, created_at: CLOCK, updated_at: CLOCK, created_by: "user_action", evidence_kind: "conversation_excerpt",
     semantic_anchor: { topic: "source", keywords: ["source"], summary: "retained source" },
-    event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: excerpt === null ? "needle 😀 fallback" : "gist",
+    event_anchor: eventTime === undefined ? null : { event_type: "engine.response.received", event_id: "observed-event", occurred_at: eventTime },
+    physical_anchor: null, evidence_health_state: "verified", gist: excerpt === null ? "needle 😀 fallback" : "gist",
     excerpt, source_hash: "not-the-retained-digest", run_id: "run-1", workspace_id: WORKSPACE, surface_id: null });
 }
 function lexical(env: Fixture) { return env.index.readLexicalCandidates(WORKSPACE, "needle", 16, QUERY_BUDGET); }
 
 describe("native retained capsule SourceIndex roots", () => {
+  it("uses retained source event time for calendar preference, never capsule creation time", async () => {
+    const env = setup();
+    const dated = await capsule(env, "needle dated", "active", "2020-01-02T23:59:59.999Z");
+    await capsule(env, "needle unknown");
+    const { documents } = buildReady(env);
+    const preference = { interpretation_clock: CLOCK, intervals: [{ start: "2020-01-02", end: "2020-01-02" }] };
+    const result = env.index.readLexicalCandidates(WORKSPACE, "needle", 16, QUERY_BUDGET, preference);
+    expect(result.candidates.map(row => row.source.target.root_id)).toEqual([dated.object_id]);
+    const keys = documents.map(document => document.source.root_key);
+    const matched = documents.find(document => document.source.target.root_id === dated.object_id)!.source.root_key;
+    expect(env.index.readQuestionTimeDomain(WORKSPACE, preference, keys, QUERY_BUDGET))
+      .toMatchObject({ status: "ready", exists: true, matched_root_keys: [matched] });
+    expect(env.index.readQuestionTimeDomain("foreign", preference, keys, QUERY_BUDGET))
+      .toMatchObject({ status: "ready", exists: false, matched_root_keys: [] });
+    expect(env.index.readQuestionTimeDomain(WORKSPACE,
+      { ...preference, intervals: [{ start: CLOCK.slice(0, 10), end: CLOCK.slice(0, 10) }] }, keys, QUERY_BUDGET))
+      .toMatchObject({ status: "ready", exists: false, matched_root_keys: [] });
+  });
+
   it.each(["needle 😀 original", null])("indexes retained text without a mirror and resumes exact windows: %s", async excerpt => {
     const env = setup(); const root = await capsule(env, excerpt);
     expect(lexical(env).candidates).toEqual([]);

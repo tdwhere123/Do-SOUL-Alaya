@@ -9,12 +9,25 @@
 //              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1",
 //              "representation": { "kind": "paired-prefix.v1", "query_prefix": "query: ", "passage_prefix": "passage: " } }, ...]
 // Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
+// --coordinates FILE loads frozen question-only coordinates; only arms with "question_time": true send time proposals.
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
+
+// Install before runtime imports: only local inference and loopback transport are authorized.
+const providerFree = installProviderFreeBoundary({
+  descendantPreload: new URL("../src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+});
+process.on("exit", () => {
+  if (providerFree.violations.length > 0) {
+    process.stderr.write(`Provider-free boundary violations: ${providerFree.violations.join(", ")}\n`);
+    process.exitCode = 1;
+  }
+});
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "../dist");
@@ -22,15 +35,20 @@ const repo = resolve(here, "../../..");
 const { publishSourceSemanticSnapshot } = await import(join(dist, "runs/snapshot/source-records/publish.js"));
 const { prepareSemanticChainSourceIndex } = await import(join(dist, "runs/recall-measurement/source-index-binding.js"));
 const { executeOrdinaryRecallEntry } = await import(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js"));
+const { questionTimeProposalFromCoordinates } = await import(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js"));
 const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs/extraction/authority/inspection.js"));
 
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
-  cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" }
+  coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" }
 } });
 if (!values.out || !values.arms) throw new Error("--out and --arms are required");
 const out = resolve(values.out);
 const arms = JSON.parse(readFileSync(values.arms, "utf8"));
+if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new Error("question_time requires --coordinates");
+const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
+const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
+if (coordinates.size !== coordinateRows.length) throw new Error("duplicate frozen question coordinates");
 const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data/longmemeval/longmemeval_s.json"));
 const pinnedMeta = join(repo, "docs/bench-history/datasets");
 const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
@@ -129,6 +147,10 @@ for (const id of ids) {
     const started = performance.now();
     const row = { question_id: id, question_type: question.question_type, arm: arm.name };
     try {
+      const frozen = coordinates.get(id);
+      if (arm.question_time === true && frozen === undefined) throw new Error(`missing frozen coordinates for ${id}`);
+      const proposal = arm.question_time === true
+        ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
       const config = await prepared(question, index, arm);
       const root = join(out, "runs", id, arm.name);
       rmSync(root, { recursive: true, force: true });
@@ -137,7 +159,8 @@ for (const id of ids) {
       let result;
       try {
         result = await executeOrdinaryRecallEntry({ config, root,
-          queries: [{ query_key: sha256(question.question), original_query: question.question }] });
+          queries: [{ query_key: sha256(question.question), original_query: question.question,
+            ...(proposal === undefined ? {} : { interpretation_proposal: proposal }) }] });
       } finally {
         for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       }

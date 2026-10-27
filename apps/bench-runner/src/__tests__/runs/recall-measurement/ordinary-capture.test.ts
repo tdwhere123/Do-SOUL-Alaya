@@ -51,9 +51,9 @@ function rewriteCapturedEnvelope(root: string, ordinal: number,
 it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ordered %s public envelopes without consumer execution", mode => {
   const capture = captures[mode], observation = admitOrdinaryRecallObservation(capture.root);
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
-  expect(installedRecallProtocolVersion()).toBe("27.0.0");
-  expect(observation.binding).toMatchObject({ protocol_package_version: "27.0.0", reader_protocol_package_version: "27.0.0",
-    public_semantics: "ordinary-native-field.v4", producer_revision: capture.config.implementation_revision });
+  expect(installedRecallProtocolVersion()).toBe("28.0.0");
+  expect(observation.binding).toMatchObject({ protocol_package_version: "28.0.0", reader_protocol_package_version: "28.0.0",
+    public_semantics: "ordinary-native-field.v5", producer_revision: capture.config.implementation_revision });
   expect(capture.config.first_request.enumeration_policy).toBe("native_query");
   expect(observation.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
     (_, index) => readJson(join(capture.execution, `${String(index + 1).padStart(2, "0")}-public-envelope.json`))));
@@ -67,7 +67,7 @@ it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "
   const original = readFileSync(join(root, "config.json"), "utf8");
   const originalEnvelope = readFileSync(join(root, "execution/01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "27.0.0",
+  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "28.0.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision });
   expect(observation.state).toBe("partial");
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);

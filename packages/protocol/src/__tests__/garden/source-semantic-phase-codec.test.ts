@@ -109,6 +109,20 @@ it.each(["input profile", "input digest", "binding", "target", "window"])(
   }
 );
 
+it("roundtrips restricted lexical provenance without changing factual ranks or unrestricted wire bytes", () => {
+  const phase = activeAcquisition();
+  const rank = phase.result.nominations[0]!.lexical[0]!;
+  const preferred = { ...phase, result: { ...phase.result, nominations: [{ ...phase.result.nominations[0]!,
+    lexical: [rank, { ...rank, domain: "question_time" as const }] }] } };
+  const packed = codec.packSourceSemanticAcquisition(preferred);
+  expect(SourceSemanticCompactAcquisitionSchema.safeParse(packed).success).toBe(true);
+  const decoded = SourceSemanticAcquisitionPhaseSchema.parse(codec.sourceSemanticExecutionPhases(
+    codec.sourceSemanticExecution(undefined, JSON.parse(JSON.stringify(packed)))).acquisition);
+  expect(decoded).toEqual(preferred);
+  expect(decoded.result?.nominations[0]!.lexical).toEqual([rank, { ...rank, domain: "question_time" }]);
+  expect(JSON.stringify(codec.packSourceSemanticAcquisition(phase))).not.toContain("question_time");
+});
+
 function notRunAcquisition(reason = "operation_does_not_acquire") {
   return sourceSemanticAcquisitionNotRun(reason);
 }

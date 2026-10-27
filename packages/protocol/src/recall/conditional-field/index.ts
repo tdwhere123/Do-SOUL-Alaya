@@ -1,3 +1,5 @@
+export { QUESTION_TIME_PROPOSAL_PRODUCER_ID, QuestionTimePreferenceSchema,
+  type QuestionTimePreference } from "./question-time.js";
 export { ORDINARY_NATIVE_FIELD_RESULT_VERSION, RecallNavigationWitnessSchema, type RecallNavigationWitness } from "./navigation.js";
 export {
   ASSOCIATION_DOMAIN_ID,

@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 27.0.0, engine gateway 2.0.0
+## Unreleased — protocol 28.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,19 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 28.0.0 adds typed question-time preference and retires the ordinary English
+failed-deployment demo compiler (invariant §25 major). `ordinary-native-field.v5`
+orders original in-window roots, then time-restricted lexical candidates using the
+existing lexical statistics, then native fallback. All routes share the existing
+16-root/128-attempt allowance; preference can displace roots, never make them
+ineligible. Public `since`/`until` remain hard filters. The narrow declared producer
+binds closed UTC calendar-day alternatives to the original question and interpretation
+clock; no language heuristic or provider call forms them during recall. Tests needing
+semantic programs now supply declared proposals. Upgrade clients and daemon together
+and restart queries; old continuations cannot execute v5. Frozen captures remain
+unchanged. No data migration is required; rollback uses the prior binary with fresh
+handles. Mechanism checks do not establish a natural-data quality gain.
 
 Protocol 27.0.0 identifies complete-unit page deferral as `ordinary-native-field.v4`
 (invariant §25 major). A source that would receive only a page-tail fragment remains

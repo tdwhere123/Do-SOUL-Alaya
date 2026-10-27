@@ -175,6 +175,8 @@ export type EmbeddingObserverPage = Readonly<{
 export type NativeSourceNomination = Readonly<{
   result: SourceIndexAcquisitionResult | null;
   witness: readonly SourceSemanticNominationOccurrence[];
+  /** Bounded source permutation, separate from factual capture ranks. */
+  question_time_order?: readonly string[];
   /** An explicitly bound source pool can include scoped or proved catalog roots. */
   admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
   catalog_positions?: Readonly<Record<string, number>>;
@@ -194,6 +196,7 @@ export type ObserverReaders = Readonly<{
     sourceId?: string;
     /** Prepared access hint; a discovery proposal, never proof of relevance. */
     hint?: string;
+    questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
   }>) => NativeSourceNomination;
   /** An admitted Q/H/C package may require a different visible source interval
    * from the native navigation window; this never changes membership or rank. */

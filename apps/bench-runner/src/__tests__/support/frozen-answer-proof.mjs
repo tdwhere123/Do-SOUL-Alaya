@@ -176,8 +176,14 @@ try {
   const cancellation = await consume(cancelled, 'execute', controller.signal);
   assert.equal(cancellation.ledger.attempts, 1); assert.equal(cancellation.ledger.successfulShards, 0);
   assert.equal(cancellation.rows[1].status, 'unattempted'); onRequest = () => {};
-  const deadline = await consume(make('deadline', { wallMs: 100 }));
-  assert.equal(deadline.ledger.attempts, 1); assert.equal(deadline.rows[1].status, 'unattempted');
+  // Revision and root validation are inside the phase budget. Use the fixture's
+  // normal allowance so this probes an in-flight deadline, not Git/setup speed.
+  const beforeDeadline = received.length;
+  const deadline = await consume(make('deadline'));
+  assert.equal(received.length - beforeDeadline, 1);
+  assert.equal(deadline.ledger.attempts, 1); assert.equal(deadline.ledger.successfulShards, 0);
+  assert.equal(deadline.ledger.telemetry.usageUnknownAttempts, 1);
+  assert.equal(deadline.rows[1].status, 'unattempted');
   checks.push('caller cancellation and phase deadline cover in-flight native HTTP; reservations/cost unknown survive');
 
   response = 'success';

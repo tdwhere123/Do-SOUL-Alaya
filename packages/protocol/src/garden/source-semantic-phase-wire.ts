@@ -3,6 +3,7 @@ import { SourceIndexLexicalBindingSchema } from "../recall/source-index-lexical.
 import { NonNegativeIntSchema as N } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
+import { QuestionTimeCaptureDomainSchema } from "../recall/conditional-field/question-time.js";
 import { SourceSemanticQueryWindowSchema, SourceSemanticVectorBindingSchema } from "./source-semantic-phase-semantics.js";
 import { SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema,
   SourceSemanticAcquisitionAllowanceSchema, SourceSemanticProfiledAcquisitionResultSchema,
@@ -50,7 +51,7 @@ const VectorInput = z.union([
   z.tuple([z.literal(0), Ref, Ref]).readonly(), z.tuple([z.literal(1), Ref]).readonly()
 ]);
 const Nomination = z.tuple([SourceIndexTargetSchema,
-  z.array(z.tuple([N, C2, N, z.number().finite()]).readonly()).readonly(),
+  z.array(z.tuple([N, C2, N, z.number().finite(), QuestionTimeCaptureDomainSchema.optional()]).readonly()).readonly(),
   z.tuple([N, z.number().finite(), SourceSemanticQueryWindowSchema]).readonly().nullable()
 ]).readonly();
 const ResultShape = z.tuple([

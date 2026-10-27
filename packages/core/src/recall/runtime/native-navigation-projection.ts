@@ -26,14 +26,13 @@ export type NativeFieldNavigation =
     witnessFor: (target: RecallTargetRef) => RecallNavigationWitness | undefined;
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>;
 
-export function nativeNavigationProjection(state: FieldEngineState, values: readonly FieldValue[],
-  meter: SourceSemanticResourceLedger): NativeFieldNavigation {
-  const witnesses = new Map<string, RecallNavigationWitness>();
-  try {
+function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
     const digest = hashContentDigest(state.observation_query_text ?? "", fieldContractSha256);
     const lanes = new Map<NativeRouteLane["lane"], NativeRouteOccurrence[]>([
       ["original-lexical", []], ["original-vector", []], ["hint-lexical", []], ["hint-vector", []]
     ]);
+    const timeOccurrences: NativeRouteOccurrence[] = [];
+    const sourceKeys = new Map<string, string>();
     const pool = new Map<string, { record_id: string; catalog_position: number | null }>();
     const associations: { occurrence_reference: string; root_key: string; record_id: string }[] = [];
     const navigation = new Map<string, RecallNavigationWitness>();
@@ -56,7 +55,12 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       meter.charge(1, 0, "native occurrence scope association");
       const route = occurrence.route, key = sourceFactKey(occurrence.source.target);
       if (state.native_sources?.admitted_roots !== undefined && !pool.has(key)) continue;
-      const lane = lanes.get(`${occurrence.view}-${occurrence.route.kind}`)!;
+      sourceKeys.set(occurrence.source.root_key, key);
+      if (occurrence.domain !== undefined && (occurrence.view !== "original" || route.kind !== "lexical")) {
+        throw new CoreError("OBLIGATION_VIOLATION", "Question-time capture requires original-query lexical provenance");
+      }
+      const lane = occurrence.domain === "question_time" ? timeOccurrences
+        : lanes.get(`${occurrence.view}-${occurrence.route.kind}`)!;
       const queryDigest = state.native_sources?.navigation_digests?.[occurrence.view]
         ?? (occurrence.view === "original" ? state.native_sources?.result?.navigation_digest ?? undefined : undefined);
       if (queryDigest === undefined) throw new CoreError("OBLIGATION_VIOLATION", "Hint occurrence lacks its query identity");
@@ -64,6 +68,7 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       const witness: RecallNavigationWitness = { contract: "native-query-navigation.v1", query_digest: queryDigest,
         view: occurrence.view, operator: route.kind === "lexical" ? "source_lexical" : "source_vector",
         ordinal: lane.length, native_rank: route.native_rank, reference: occurrence.reference,
+        ...(occurrence.domain === undefined ? {} : { domain: occurrence.domain }),
         ...(window === undefined ? {} : { location: { start_byte: window.start_byte, end_byte: window.end_byte } }) };
       const row = { reference: occurrence.reference, root_key: key, native_rank: route.native_rank };
       append(key, row, witness); lane.push(row);
@@ -88,15 +93,33 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
         ...(memory.length === 0 ? { state: "measured-empty" as const }
           : { state: "exact-captured" as const, occurrences: memory }) },
       pool: [...pool.values()], acquired_root_keys: [...new Set(associations.map(row => row.root_key))], associations,
-      unvisited_sources: state.native_sources?.result?.completion !== "complete" };
+      unvisited_sources: state.native_sources?.result?.completion !== "complete",
+      ...(state.native_sources?.question_time_order === undefined ? {} : { question_time: {
+        root_order: state.native_sources.question_time_order.map(key => sourceKeys.get(key) ?? key),
+        capture: { lane: "question-time-lexical" as const, scope: digest,
+          ...(timeOccurrences.length === 0 ? { state: "measured-empty" as const }
+            : { state: "exact-captured" as const, occurrences: timeOccurrences }) }
+      } }) };
+    if (timeOccurrences.length > 0 && input.question_time === undefined) {
+      throw new CoreError("OBLIGATION_VIOLATION", "Question-time capture lacks its bounded preference order");
+    }
     // The ordering owner receives field-owned references and returns a bounded
     // trace. Charge that trace's containers, not a deep copy of the same values.
     meter.charge(4 + associations.length + pool.size, 128 * (associations.length + pool.size + 5), "field navigation frames");
+    return { input, navigation, catalog };
+}
+
+export function nativeNavigationProjection(state: FieldEngineState, values: readonly FieldValue[],
+  meter: SourceSemanticResourceLedger): NativeFieldNavigation {
+  const witnesses = new Map<string, RecallNavigationWitness>();
+  try {
+    const { input, navigation, catalog } = captureNativeNavigation(state, meter);
     const ordered = orderNativeFieldAccess(input);
     // A bound source without a captured catalog position may still be returned,
     // but cannot manufacture a total navigation order or a native hit witness.
-    const recordIds = ordered.status === "ordered" ? ordered.record_ids
-      : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
+    const recordIds = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
+      : ordered.status === "ordered" ? ordered.record_ids
+        : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
     const positions = new Map(recordIds.map((key, index) => [key, index]));
     for (const row of ordered.trace) if (row.decision === "placed") {
       const witness = { ...navigation.get(row.occurrence.reference)!, access_ordinal: positions.get(row.record_id)! };

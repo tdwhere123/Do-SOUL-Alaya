@@ -53,7 +53,7 @@ async function recallPrepared({ execute, observe }: Pick<AccessLibrary, "execute
   expect(recalled.discovery.visited_source_interpretation_pages).toBe(0);
   expect(recalled.discovery.visited_source_interpretation_descriptors).toBe(0);
   expect(recalled.order.enumeration_policy).toBe("native_query");
-  expect(recalled.index.result_version).toBe("ordinary-native-field.v4");
+  expect(recalled.index.result_version).toBe("ordinary-native-field.v5");
   expect(recalled.request_budget).toEqual(request.budget);
   expect(recalled.work.logical_work).toBeLessThanOrEqual(request.budget.work_units);
   expect(recalled.work.logical_memory_bytes).toBeLessThanOrEqual(request.budget.memory_bytes);

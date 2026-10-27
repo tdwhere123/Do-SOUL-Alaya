@@ -157,14 +157,16 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     catch { return "denied" as const; }
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
-    allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE };
+    allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE,
+    ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }) };
   const capacity = funding === "allowance" ? repository.quoteQueryCapacity(input.workspaceId, fields.allowance) : undefined;
   const budget = capacity === undefined ? input.budget
     : SourceIndexAcquisition.quoteAllowanceBudget({ ...fields, navigation_text: input.query }, capacity);
   const meter = new SourceSemanticResourceLedger(budget);
   if (capacity !== undefined) meter.charge(capacity.resources.work, capacity.resources.memory_bytes, "source acquisition capacity reads");
   const run = (navigation_text: string, allowance: SourceIndexNominationAllowance, invocation: "original" | "hint") => {
-    const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining() }, admit, invocation,
+    const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
+      ...(invocation === "hint" ? { question_time: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
         observer.sourceIndexAcquisition(invocation, "field", capture, kind));
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
@@ -248,6 +250,8 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
       resource_refusals: results.flatMap(row => row.resource_refusals),
       limitations: [...new Set(results.flatMap(row => row.limitations))] },
     witness: membership.witness,
+    ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
+      captures[0].question_time_order.filter(key => membership.nominations.some(row => row.source.root_key === key)) }),
     ...(digests.original === null ? {} : { navigation_digests: { original: digests.original,
       ...(digests.hint === undefined ? {} : { hint: digests.hint }) } }),
     ...(options?.catalog_positions === undefined ? {} : { catalog_positions: options.catalog_positions }),

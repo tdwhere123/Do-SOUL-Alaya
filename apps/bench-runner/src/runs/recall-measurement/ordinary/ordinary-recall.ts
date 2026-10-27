@@ -12,7 +12,7 @@ import { FirstExposurePageSchema, type FirstExposurePage } from "../../measureme
 import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch } from "../../measurement/conditional-field-request-binding.js";
 import {
   OrdinaryRecallArchiveConfigSchema, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT,
-  ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
+  nativeRecallArchiveSemantics, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
   OrdinaryRecallObservationSchema, OrdinaryRecallPreparationSchema, OrdinaryRecallProcessResultSchema,
   OrdinaryRecallRequestRecordSchema, OrdinaryRecallReservationSchema, OrdinaryRecallShutdownSchema,
   OrdinaryRecallWireRecordSchema, OrdinaryRecallMultiSourceObservationSchema, installedRecallProtocolVersion, type OrdinaryRecallArchiveConfig, type OrdinaryRecallContext,
@@ -243,9 +243,10 @@ function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError:
   }
   const output = SoulMemorySearchResponseSchema.parse(current);
   same(output, current, "public output cannot be normalized during archive admission");
-  if (protocolVersion === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION) {
+  const nativeSemantics = nativeRecallArchiveSemantics(protocolVersion);
+  if (nativeSemantics !== undefined) {
     const index = output.index, continuation = index?.continuation;
-    if (output.protocol_version !== 1 || index?.result_version !== ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS ||
+    if (output.protocol_version !== 1 || index?.result_version !== nativeSemantics ||
         continuation != null && (continuation.result_version !== index.result_version ||
           continuation.enumeration_policy !== "native_query" || continuation.result_kind_view !== "source_only")) {
       conflict("native producer output does not match its supported public contract");

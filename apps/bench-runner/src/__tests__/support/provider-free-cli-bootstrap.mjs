@@ -1,7 +1,7 @@
 /** Install the shared isolation owner before Node imports the bench CLI. */
 import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
 
-const isolation = installProviderFreeBoundary();
+const isolation = installProviderFreeBoundary({ descendantPreload: import.meta.url });
 // A caught refusal must still fail the child, not masquerade as a successful replay.
 process.on("exit", () => {
   if (isolation.violations.length > 0) process.exitCode = 1;

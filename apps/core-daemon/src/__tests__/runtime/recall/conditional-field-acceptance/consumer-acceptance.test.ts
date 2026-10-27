@@ -45,6 +45,10 @@ import {
   entryIdentity
 } from "./consumer-contract.js";
 
+import { deploymentProposal, deploymentClaimDemands } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
+
+// Only this explicitly authored fixture request carries the planted graph program.
+const authoredProposals = new Map([["yesterday failed deployment", deploymentProposal("yesterday failed deployment")]]);
 const databases = new Set<StorageDatabase>();
 const COMPLETE_FINALIZATION_RESERVE = 512;
 
@@ -294,6 +298,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
         supports_source_evidence: true,
         supports_product_updates: true,
         query: "yesterday failed deployment",
+        interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+        claim_demands: deploymentClaimDemands,
         scope_class: null,
         dimension: null,
         domain_tags: null,
@@ -374,7 +380,9 @@ async function invokeRecallHandler(
     readonly continuation?: InformationIndex["continuation"];
   }
 ) {
+  const proposal = request.interpretation_proposal ?? authoredProposals.get(request.query);
   const response = await handler({
+    claim_demands: deploymentClaimDemands,
     protocol_version: 1,
     supported_result_kinds: ["memory_entry", "source_evidence"],
     supports_source_evidence: true,
@@ -389,9 +397,7 @@ async function invokeRecallHandler(
       : { continuation: request.continuation }),
     ...(request.enumeration_policy === undefined ? {} : { enumeration_policy: request.enumeration_policy }),
     ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
-    ...(request.interpretation_proposal === undefined
-      ? {}
-      : { interpretation_proposal: request.interpretation_proposal }),
+    ...(proposal === undefined ? {} : { interpretation_proposal: proposal }),
     ...(request.cap_contracts === undefined ? {} : { cap_contracts: request.cap_contracts })
   }, {
     workspaceId: WS,
@@ -414,6 +420,8 @@ function runProducer(
   return runConditionalFieldRecall({
     workspace_id: WS,
     query_text: "yesterday failed deployment",
+    interpretation_proposal: deploymentProposal("yesterday failed deployment"),
+    claim_demands: deploymentClaimDemands,
     budget: defaultBudget({ page_budget: input.page_budget, finalization_reserve: COMPLETE_FINALIZATION_RESERVE }),
     snapshot_id: snapshotFor(slice),
     interpretation_clock: INTERPRETATION_CLOCK,

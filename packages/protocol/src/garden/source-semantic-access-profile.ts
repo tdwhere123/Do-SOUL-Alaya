@@ -4,6 +4,7 @@ import type { SourceSemanticResourceLedger } from "./source-semantic-resources.j
 import { BoundedIdSchema, NonNegativeIntSchema as N } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexTargetSchema } from "../recall/source-index.js";
+import { QuestionTimeCaptureDomainSchema } from "../recall/conditional-field/question-time.js";
 import { sourceGoldRootIdentity } from "../recall/conditional-field/product-identity.js";
 import { SourceSemanticAcquisitionSchema, SourceSemanticQueryPreparationSchema,
   SourceSemanticQueryWindowSchema } from "./source-semantic-phase-semantics.js";
@@ -53,6 +54,8 @@ const Window = z.union([Unavailable, z.object({ status: z.literal("available"), 
 export const SourceSemanticNominationOccurrenceSchema = z.object({
   reference: BoundedIdSchema, attempt: AttemptCount.min(1), source: SourceIndexTargetSchema,
   view: View,
+  /** Absent means the unrestricted native capture; ranks are local to this domain. */
+  domain: QuestionTimeCaptureDomainSchema.optional(),
   route: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("lexical"), native_rank: Rank, lane: z.enum(["unicode61", "trigram"]),
       lane_rank: Rank, bm25: z.number().finite(), hit: Hit.optional() }).strict().readonly(),

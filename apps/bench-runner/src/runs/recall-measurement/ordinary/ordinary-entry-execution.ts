@@ -138,10 +138,11 @@ async function runMappedOrdinaryRecall(
 async function executeOrdinaryQuery(
   daemon: BenchDaemonHandle, config: SemanticChainConfig,
   mapping: Extract<OrdinaryRecallMapping, { status: "mapped" }>,
-  query: { query_key: string; original_query: string }
+  query: { query_key: string; original_query: string; interpretation_proposal?: OrdinaryRecallPublicRequest["interpretation_proposal"] }
 ): Promise<OrdinaryRecallQueryRow> {
   const firstRequest = buildOrdinaryRecallRequest({
-    query: query.original_query, scope_class: mapping.scope_class, source_observed_at: config.interpretation_clock
+    query: query.original_query, scope_class: mapping.scope_class, source_observed_at: config.interpretation_clock,
+    ...(query.interpretation_proposal === undefined ? {} : { interpretation_proposal: query.interpretation_proposal })
   });
   // Session refuses a replacement initial; replayed cursors/positions fail closed below.
   const session = new FirstExposureSession();

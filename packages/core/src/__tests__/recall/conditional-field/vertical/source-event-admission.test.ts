@@ -6,6 +6,10 @@ import { LAST_WEEK_INSTANT, YESTERDAY_INSTANT } from "../reference/deployment.fi
 import { fieldSha256, hashedOriginalRecord } from "../../../../../../storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 
+import { deploymentProposal } from "../reference/deployment-proposal.fixture.js";
+
+const request = { query_text: "yesterday failed deployment", result_kind_view: "source_only" as const,
+  interpretation_proposal: deploymentProposal("yesterday failed deployment") };
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const db of databases) db.close(); databases.clear(); });
 
@@ -24,14 +28,16 @@ it.each([
   const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert({
     ...hashedOriginalRecord(WS, body), event_time: YESTERDAY_INSTANT
   });
-  const index = runRecall(slice, { query_text: "yesterday failed deployment", result_kind_view: "source_only" });
+  const index = runRecall(slice, request);
   const entries = index.entries.filter((entry) => entry.target.kind === "source_evidence" && entry.target.root_id === record.record_id);
   expect(entries).toEqual([]);
   expect(sourceFactsSatisfyFilters({ event_kind: "failed_deployment" }, { content: body })).toBe(verdict);
   if (verdict === "unresolved") {
     expect(index.completeness.logical_index).not.toBe("complete");
   } else {
-    expect(index.completeness.logical_index).toBe("complete");
+    // The explicit guard disproves this event, not complete interpretation of the prose query.
+    expect(index.completeness.logical_index).toBe("open");
+    expect(index.completeness.interpretation_coverage).toBe("open");
   }
 });
 
@@ -41,7 +47,7 @@ it.each(["Deployment failed yesterday.", "yesterday failed deployment of checkou
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert({
       ...hashedOriginalRecord(WS, body), event_time: YESTERDAY_INSTANT
     });
-    const index = runRecall(slice, { query_text: "yesterday failed deployment", result_kind_view: "source_only" });
+    const index = runRecall(slice, request);
     expect(index.entries.some((entry) => entry.target.kind === "source_evidence" &&
       entry.target.root_id === record.record_id && entry.guaranteed_milligrades === 1000)).toBe(true);
     expect(encodedRecall(index)).toMatchObject({ provider_calls: 0, garden_enqueue: 0 });
@@ -60,7 +66,7 @@ it("excludes an out-of-window unresolved event without holding an independent in
   const repo = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
   const outside = repo.insert({ ...hashedOriginalRecord(WS, "If deployment failed, roll back"), event_time: LAST_WEEK_INSTANT });
   const inside = repo.insert({ ...hashedOriginalRecord(WS, "deployment failed"), event_time: YESTERDAY_INSTANT });
-  const index = runRecall(slice, { query_text: "yesterday failed deployment", result_kind_view: "source_only" });
+  const index = runRecall(slice, request);
   expect(index.entries.some((entry) => entry.target.kind === "source_evidence" && entry.target.root_id === outside.record_id)).toBe(false);
   expect(index.entries.some((entry) => entry.target.kind === "source_evidence" && entry.target.root_id === inside.record_id)).toBe(true);
   expect(index.completeness.logical_index).toBe("complete");

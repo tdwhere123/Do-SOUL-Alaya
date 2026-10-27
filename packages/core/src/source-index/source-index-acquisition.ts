@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
-  BoundedIdSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  BoundedIdSchema, QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceIndexProfileId,
   unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
@@ -14,6 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
+import { preferQuestionTime } from "./question-time-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -35,11 +36,8 @@ type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceS
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
-// The capacity quotation and executed debits share these logical vector prices.
-const VECTOR_COST = Object.freeze({ validation_per_dimension: 2, lookup_work: 1,
-  replacement_work: 1, replacement_bytes: 128, key_bytes_per_character: 4,
-  ordering_work: 1, ordering_bytes: 64, ordering_reference_bytes: 8,
-  comparison_work: 1, rank_work: 1, rank_bytes: 128 });
+import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
+  acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionQueryVectorCaptureCost } from "./acquisition-prices.js";
 
 type NativeAdmissionFact =
   | Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>, "status" | "reason">
@@ -317,7 +315,9 @@ export class SourceIndexAcquisition {
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
       observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 } });
-    return { result: query.run(), witness: retained };
+    const result = query.run();
+    return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
+      : { question_time_order: query.questionTimeOrder }) };
   }
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -356,6 +356,8 @@ class AcquisitionQuery {
   };
   private vector: SourceIndexAcquisitionResult["vector"];
   private limited = false;
+  private timeRoute = false;
+  public questionTimeOrder?: readonly string[];
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
     private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission,
@@ -363,6 +365,8 @@ class AcquisitionQuery {
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
       progress: { lexical: number; vector: number } }) {
+    this.input = { ...input, ...(input.question_time === undefined ? {}
+      : { question_time: QuestionTimePreferenceSchema.parse(input.question_time) }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
@@ -401,7 +405,36 @@ class AcquisitionQuery {
       }
       this.stage = "vector";
       if (this.control !== "lexical") this.scanVectors();
-      this.stage = "nomination"; if (!captureOnly) this.nominatePrefix();
+      this.stage = "nomination";
+      if (!captureOnly) {
+        const preference = this.input.question_time;
+        const cursor = { lexicalIndex: 0, vectorIndex: 0, takeLexical: true };
+        // Secure the original prefix before optional time reads can exhaust resources.
+        const nativePending = this.nominatePrefix(Boolean(preference?.intervals.length), cursor);
+        const domain = preference?.intervals.length ? this.repository.readQuestionTimeDomain?.(
+          this.input.workspace_id, preference, [], this.meter.remaining()) : undefined;
+        if (domain !== undefined) this.absorb(domain.resources);
+        const active = domain?.status === "ready" && domain.exists;
+        if (preference?.intervals.length && (domain === undefined || domain.status === "unavailable")) {
+          this.limited = true;
+          this.resourceRefusals.push({ stage: "nomination", phase: domain?.reason ?? "question_time_reader_unavailable" });
+        }
+        if (!active && preference?.intervals.length) this.nominatePrefix(false, cursor);
+        if (active) {
+          this.limited ||= nativePending;
+          const partial = preferQuestionTime({ repository: this.repository, workspace: this.input.workspace_id,
+            navigation: this.input.navigation_text, preference: preference!, nominations: this.nominations, counts: this.counts,
+            maxRoots: this.input.allowance.max_roots, maxAttempts: this.input.allowance.max_attempts, meter: this.meter,
+            absorb: resources => this.absorb(resources), refusals: this.resourceRefusals,
+            ordered: keys => { this.questionTimeOrder = keys; },
+            ...(this.candidate === undefined ? {} : { occurrences: this.candidate.retained }),
+            nominate: candidates => {
+              this.timeRoute = true; this.lexicalCandidates = candidates; this.vectorCandidates = [];
+              const pending = this.nominatePrefix(true); this.limited ||= pending;
+            } });
+          this.limited ||= partial;
+        }
+      }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
       // Work inside the failed operation remains unknown; it is not successful absence.
@@ -425,7 +458,7 @@ class AcquisitionQuery {
       lexical: this.lexical, vector: this.vector, resource_refusals: this.resourceRefusals,
       limitations: ["nominations_are_not_source_absence", "sqlite_internal_work_unknown",
         "native_deadline_and_interruption_require_daemon_integration", "caller_owned_read_snapshot_required",
-        "lexical_corpus_coverage_untracked"]
+        "lexical_corpus_coverage_untracked", ...(this.timeRoute ? ["question_time_bounded_preference"] : [])]
     };
     this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
       lexical_completion: this.lexical.completion, vector_completion: this.vector.completion }));
@@ -590,9 +623,11 @@ class AcquisitionQuery {
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
   }
 
-  private nominatePrefix(): void {
-    let lexicalIndex = 0, vectorIndex = 0, takeLexical = true;
-    while (this.counts.attempted < this.input.allowance.max_attempts &&
+  private nominatePrefix(stopAtRootLimit = false,
+    cursor = { lexicalIndex: 0, vectorIndex: 0, takeLexical: true }): boolean {
+    let { lexicalIndex, vectorIndex, takeLexical } = cursor;
+    while ((!stopAtRootLimit || this.nominations.size < this.input.allowance.max_roots)
+      && this.counts.attempted < this.input.allowance.max_attempts &&
         (lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length)) {
       const lexicalTurn: boolean = lexicalIndex < this.lexicalCandidates.length &&
         (takeLexical || vectorIndex >= this.vectorCandidates.length);
@@ -655,7 +690,10 @@ class AcquisitionQuery {
         this.limited = true; break;
       }
     }
-    if (lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length) this.limited = true;
+    Object.assign(cursor, { lexicalIndex, vectorIndex, takeLexical });
+    const pending = lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length;
+    if (!stopAtRootLimit) this.limited ||= pending;
+    return pending;
   }
 
   /** One snapshot decides a root once per binding mode; a resource-limited result is never reused. */
@@ -678,6 +716,10 @@ class AcquisitionQuery {
     lexical: SourceIndexLexicalRank | null, vector: SourceIndexRootNomination["vector"]): void {
     // Admission owns canonical target validation. Reuse that admitted identity;
     // reconstructing it here copies and scans a key already retained by the reader.
+    if (this.timeRoute && lexical !== null) {
+      lexical = { ...lexical, domain: "question_time" };
+      this.meter.retain(lexical, "restricted lexical rank provenance");
+    }
     const key = source.root_key, previous = this.nominations.get(key);
     if (previous !== undefined) {
       this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
@@ -706,7 +748,9 @@ class AcquisitionQuery {
       ? { kind: "lexical", native_rank: lexical.rank, lane: lexical.lane, lane_rank: lexical.lane_rank, bm25: lexical.bm25 }
       : { kind: "vector", native_rank: vector!.rank, cosine: vector!.cosine,
         window: { status: "available", window: vector!.window } };
-    const metadata = { reference: `${view}:${route.kind}:${route.native_rank}`, attempt: this.counts.attempted, view, route };
+    const metadata = { reference: `${view}:${this.timeRoute ? "question-time:" : ""}${route.kind}:${route.native_rank}`,
+      attempt: this.counts.attempted, view, route,
+      ...(lexical?.domain === undefined ? {} : { domain: lexical.domain }) };
     this.meter.retain(metadata, "source retained nomination occurrence");
     // The native reader already owns and charges the immutable source graph.
     // Attach its reference after measuring the newly allocated metadata, rather
@@ -721,27 +765,10 @@ class AcquisitionQuery {
   }
 }
 
-function acquisitionResultEnvelopeCost(maxRoots: number): SourceSemanticResourceBudget {
-  return { work_units: 1, memory_bytes: 2048 + 8 * maxRoots };
-}
-function acquisitionNavigationDigestCost(navigation: string): SourceSemanticResourceBudget {
-  return { work_units: navigation.length, memory_bytes: 0 };
-}
-function acquisitionQueryBindingCost(): SourceSemanticResourceBudget {
-  return { work_units: 1, memory_bytes: 256 };
-}
-function acquisitionQueryVectorNormCost(dimensions: number): SourceSemanticResourceBudget {
-  return { work_units: 3 * dimensions, memory_bytes: 4 * dimensions };
-}
-function acquisitionQueryVectorCaptureCost(vector: SourceIndexQueryVector): SourceSemanticResourceBudget {
-  if (vector.status !== "available") return { work_units: 0, memory_bytes: 0 };
-  const binding = acquisitionQueryBindingCost();
-  const norm = acquisitionQueryVectorNormCost(vector.profile.dimensions);
-  return { work_units: binding.work_units + norm.work_units, memory_bytes: binding.memory_bytes + norm.memory_bytes };
-}
 
 function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission, rootCeiling = 16): void {
   BoundedIdSchema.parse(input.workspace_id);
+  if (input.question_time !== undefined) QuestionTimePreferenceSchema.parse(input.question_time);
   if (typeof admitScope !== "function" || typeof input.navigation_text !== "string") {
     throw new CoreError("VALIDATION", "source index query requires captured text and scope admission");
   }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  ScopeClassSchema, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
+  ScopeClassSchema, QueryInterpretationProposalSchema, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
   SourceDeliveredSpanSchema, RecallTargetRefSchema, type AuthorizedScopesAdmission, type ScopeClass
 } from "@do-soul/alaya-protocol";
 import { FirstExposurePageSchema } from "../../measurement/first-exposure-session.js";
@@ -34,7 +34,8 @@ export const ORDINARY_RECALL_UNMAPPED_DIMENSIONS = Object.freeze([
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const OrdinaryRecallEntryQuerySchema = z.object({
-  query_key: Digest, original_query: z.string().min(1)
+  query_key: Digest, original_query: z.string().min(1),
+  interpretation_proposal: QueryInterpretationProposalSchema.optional()
 }).strict();
 export const OrdinaryRecallEntryInputSchema = z.object({
   config: z.unknown(), root: z.string().min(1),
@@ -157,12 +158,14 @@ export function mapOrdinaryRecallScope(admission: AuthorizedScopesAdmission): Or
 export type OrdinaryRecallPublicRequest = z.output<typeof SoulMemorySearchRequestSchema>;
 export function buildOrdinaryRecallRequest(input: Readonly<{
   query: string; scope_class: ScopeClass | null; source_observed_at: string;
+  interpretation_proposal?: OrdinaryRecallPublicRequest["interpretation_proposal"];
 }>): OrdinaryRecallPublicRequest {
   return SoulMemorySearchRequestSchema.parse({
     query: input.query, scope_class: input.scope_class, dimension: null, domain_tags: null,
     max_results: ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, source_observed_at: input.source_observed_at,
     enumeration_policy: "native_query", result_kind_view: "source_only", protocol_version: 1,
-    supports_source_evidence: true
+    supports_source_evidence: true,
+    ...(input.interpretation_proposal === undefined ? {} : { interpretation_proposal: input.interpretation_proposal })
   });
 }
 

@@ -75,6 +75,7 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
           registry_policy_version: parts.proposal_registry_policy_version
             ?? QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION,
           stored_cosine_admission: parts.interpretation_proposal.stored_cosine_admission ?? null,
+          question_time: parts.interpretation_proposal.question_time ?? null,
           conditions: parts.interpretation_proposal.conditions ?? null,
           input_limits: parts.proposal_effective_limits ?? parts.interpretation_proposal.input_limits ?? null,
           program: parts.interpretation_proposal.program ?? null,

@@ -40,12 +40,14 @@ import {
   openSourceSlice
 } from "../conditional-field/vertical/source-slice.js";
 import { productStateId, type EnumeratedField } from "./enumerate-simple-paths.js";
+import { deploymentProposal, deploymentClaimDemands } from "../conditional-field/reference/deployment-proposal.fixture.js";
 import {
   INTERPRETATION_CLOCK,
   LAST_WEEK_INSTANT,
   SNAPSHOT_ID,
   YESTERDAY_INSTANT,
-  defaultBudget
+  defaultBudget,
+  defaultView
 } from "./finite-worlds.js";
 
 export type SourceSlice = Awaited<ReturnType<typeof openSourceSlice>>;
@@ -214,6 +216,7 @@ export function produceField(
   slice: SourceSlice,
   input: Readonly<{
     readonly query_text?: string;
+    readonly interpretation_proposal?: ReturnType<typeof deploymentProposal>;
     readonly budget?: RequestBudget;
     readonly readers?: ObserverReaders;
     readonly authorized_scopes?: readonly string[] | null;
@@ -224,6 +227,9 @@ export function produceField(
   const interpretation = compileConditionalFieldQuery({
     source: "ordinary",
     text: input.query_text ?? "yesterday failed deployment",
+    interpretation_proposal: input.interpretation_proposal ?? (input.query_text === undefined
+      ? deploymentProposal("yesterday failed deployment") : undefined),
+    view: { ...defaultView(), claim_demands: deploymentClaimDemands },
     snapshot_id: SNAPSHOT_ID,
     budget,
     interpretation_clock: INTERPRETATION_CLOCK
@@ -249,6 +255,7 @@ export function runRecall(
   slice: SourceSlice,
   input: Readonly<{
     readonly query_text?: string;
+    readonly interpretation_proposal?: ReturnType<typeof deploymentProposal>;
     readonly budget?: RequestBudget;
     readonly continuation?: InformationIndex["continuation"];
     readonly cancelled?: boolean;
@@ -264,6 +271,9 @@ export function runRecall(
   return runConditionalFieldRecall({
     workspace_id: WS,
     query_text: input.query_text ?? "yesterday failed deployment",
+    interpretation_proposal: input.interpretation_proposal ?? (input.query_text === undefined
+      ? deploymentProposal("yesterday failed deployment") : undefined),
+    claim_demands: deploymentClaimDemands,
     budget: input.budget ?? defaultBudget(),
     snapshot_id: input.snapshot_id ?? SNAPSHOT_ID,
     interpretation_clock: clock,

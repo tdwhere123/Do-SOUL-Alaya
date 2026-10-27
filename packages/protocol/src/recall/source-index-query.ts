@@ -1,4 +1,5 @@
 import type { SourceSemanticResourceBudget } from "../garden/source-semantic-resources.js";
+import type { QuestionTimePreference } from "./conditional-field/question-time.js";
 import type { SourceIndexProfile, SourceIndexTarget } from "./source-index.js";
 import { SourceSemanticAcquisitionSchema, type SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
 
@@ -68,10 +69,17 @@ export type SourceIndexQueryAdmission = Readonly<{ resources: SourceIndexQueryRe
  */
 export type SourceIndexScopeAdmission = (scopeClass: string | null, source: SourceIndexTarget) => "admitted" | "denied";
 
+export type SourceIndexQuestionTimeDomain = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; exists: boolean; matched_root_keys: readonly string[] }> |
+  Readonly<{ status: "unavailable"; reason: "question_time_read_budget" | "question_time_read_failed" }>
+);
+
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
-    budget: SourceSemanticResourceBudget): SourceIndexLexicalRead;
+    budget: SourceSemanticResourceBudget, questionTime?: QuestionTimePreference): SourceIndexLexicalRead;
+  readQuestionTimeDomain?(workspaceId: string, preference: QuestionTimePreference, rootKeys: readonly string[],
+    budget: SourceSemanticResourceBudget): SourceIndexQuestionTimeDomain;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */
@@ -83,6 +91,7 @@ export type SourceIndexNominationAccounting = SourceSemanticAcquisition["account
 export type SourceIndexAcquisitionInput = Readonly<{
   workspace_id: string; navigation_text: string; vector: SourceIndexQueryVector;
   allowance: SourceIndexNominationAllowance; budget: SourceSemanticResourceBudget;
+  question_time?: QuestionTimePreference;
 }>;
 /** Bounded schedule completion, never a source-absence certificate. Leaf-safe semantic authority only. */
 export type SourceIndexAcquisitionResult = SourceSemanticAcquisition;

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
+import { deploymentProposal, deploymentClaimDemands } from "./conditional-field/reference/deployment-proposal.fixture.js";
 
 const databases = new Set<StorageDatabase>();
 const SEED = "aaaaaaaa-aaaa-4aaa-8aaa-000000000801";
@@ -11,7 +12,8 @@ const HISTORY = "aaaaaaaa-aaaa-4aaa-8aaa-000000000804";
 const QUERY = "yesterday failed deployment";
 const OPEN: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const request = { workspaceId: "workspace-1", strategy: "analyze" as const,
-  taskSurface: { ...createTaskSurface(), display_name: QUERY }, queryText: QUERY, pageBudget: 100 };
+  taskSurface: { ...createTaskSurface(), display_name: QUERY }, queryText: QUERY, pageBudget: 100,
+  interpretation_proposal: deploymentProposal(QUERY), claim_demands: deploymentClaimDemands };
 
 afterEach(() => {
   for (const database of databases) database.close();

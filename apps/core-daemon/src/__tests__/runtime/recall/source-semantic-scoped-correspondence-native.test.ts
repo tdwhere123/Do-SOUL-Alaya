@@ -413,7 +413,7 @@ it("delivers an intact scoped proof when independent same-source proofs exceed o
     // The other independent proof may remain on a frozen field page; this page still
     // carries exactly one intact proof and never splits its own support window.
     expect(both.index?.continuation === null
-      || both.index?.continuation.result_version === "ordinary-native-field.v4").toBe(true);
+      || both.index?.continuation.result_version === "ordinary-native-field.v5").toBe(true);
     const proof = both.proofs![0]!;
     const input = ids.indexOf(proof.semantic_correspondence_id!);
     expect(input).toBeGreaterThanOrEqual(0);

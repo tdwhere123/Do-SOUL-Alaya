@@ -2,6 +2,8 @@ import {
   QUERY_PROPOSAL_GUARD_KINDS,
   QUERY_PROPOSAL_PROGRAM_KINDS,
   QueryInterpretationProposalSchema,
+  QuestionTimePreferenceSchema,
+  compareUtcInstants,
   inspectQueryProposalStructure,
   type Guard,
   type ProposedGuard,
@@ -49,10 +51,14 @@ export type QueryProposalAdmission =
 export function admitQueryProposal(
   proposal: QueryInterpretationProposal | undefined,
   originalQuery: string,
-  registry: QueryProposalProducerRegistry = defaultQueryProposalProducerRegistry
+  registry: QueryProposalProducerRegistry = defaultQueryProposalProducerRegistry,
+  interpretationClock?: string
 ): QueryProposalAdmission {
   if (proposal === undefined) return { kind: "absent" };
   if (!proposalBindsOriginalQuery(proposal, originalQuery)) return { kind: "invalid" };
+  if (proposal.question_time !== undefined && (!QuestionTimePreferenceSchema.safeParse(proposal.question_time).success
+    || interpretationClock === undefined
+    || compareUtcInstants(proposal.question_time.interpretation_clock, interpretationClock) !== 0)) return { kind: "invalid" };
   const producer = registry.lookup(proposal.producer_id, producerVersionOf(proposal));
   const effectiveLimits = effectiveQueryProposalLimits(producer, proposal.input_limits);
   const structure = inspectQueryProposalStructure(proposal, effectiveLimits);
@@ -166,6 +172,7 @@ function producerMatchesProposal(
   if (!capabilityAllows(producer, "stored_cosine_admission", proposal.stored_cosine_admission !== undefined)) {
     return false;
   }
+  if (!capabilityAllows(producer, "question_time", proposal.question_time !== undefined)) return false;
   if (proposal.program === undefined) return true;
   const allowed = new Set<string>(producer.allowed_grammar);
   const stack: unknown[] = [proposal.program];

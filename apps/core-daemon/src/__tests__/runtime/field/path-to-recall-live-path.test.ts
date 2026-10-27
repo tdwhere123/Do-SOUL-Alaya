@@ -4,6 +4,8 @@ import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createSourceBoundRecallFixture, createTaskSurface } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { conditionalRecallPayload, createQueryOnlyRuntime, dispatchQueryOnly } from "./query-only-hydration-fixture.js";
 
+import { deploymentProposal } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
+
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
 
@@ -28,10 +30,11 @@ describe("admitted relation to worker Recall", () => {
     expect(native.observations, JSON.stringify(native)).toHaveLength(1);
     const local = await fixture.service.recall({ workspaceId: "workspace-1", strategy: "analyze",
       taskSurface: { ...createTaskSurface(), display_name: "yesterday failed deployment" },
-      queryText: "yesterday failed deployment", pageBudget: 100 });
+      queryText: "yesterday failed deployment", interpretation_proposal: deploymentProposal("yesterday failed deployment"), pageBudget: 100 });
     expect(local.index.entries.map((row) => row.object_id), JSON.stringify(local.index)).toContain(linked);
     const result = await dispatchQueryOnly(createQueryOnlyRuntime(fixture.database), "conditionalField.recall", {
       ...conditionalRecallPayload("yesterday failed deployment"),
+      interpretation_proposal: deploymentProposal("yesterday failed deployment"),
       interpretation_clock: "2026-09-06T12:00:00.000Z", as_of: "2026-09-06T12:00:00.000Z",
       lifetime_now: "2026-09-06T12:00:00.000Z"
     }) as ConditionalFieldRecallPortResult;

@@ -166,7 +166,9 @@ function packResult(value: SourceSemanticAcquisition, strings: LocalStrings): Co
     : [strings.code(C.vector, state.status) as 3 | 4 | 5, strings.ref(state.reason)];
   return [strings.nullable(value.navigation_digest), strings.code(C.completion, value.completion) as 0 | 1 | 2 | 3,
     value.nominations.map(row => [row.source,
-      row.lexical.map(rank => [rank.rank, strings.code(C.lane, rank.lane) as 0 | 1, rank.lane_rank, rank.bm25]),
+      row.lexical.map(rank => rank.domain === undefined
+        ? [rank.rank, strings.code(C.lane, rank.lane) as 0 | 1, rank.lane_rank, rank.bm25]
+        : [rank.rank, strings.code(C.lane, rank.lane) as 0 | 1, rank.lane_rank, rank.bm25, rank.domain]),
       row.vector === null ? null : [row.vector.rank, row.vector.cosine,
         row.vector.window]]),
     tuple.every(count => count === 0) ? 0 : tuple,
@@ -250,7 +252,7 @@ function expandResult(value: CompactAcquisitionResult, strings: LocalReader): So
       : { status: C.vector[state[0]] as "ready" | "partial" | "valid_empty", binding: state[1] };
   return { policy: POLICY, navigation_digest: strings.nullable(value[0]), completion: C.completion[value[1]],
     nominations: value[2].map(row => ({ source: row[0], lexical: row[1].map(rank => ({ rank: rank[0], lane: C.lane[rank[1]],
-      lane_rank: rank[2], bm25: rank[3] })), vector: row[2] === null ? null : { rank: row[2][0], cosine: row[2][1], window: row[2][2] } })),
+      lane_rank: rank[2], bm25: rank[3], ...(rank[4] === undefined ? {} : { domain: rank[4] }) })), vector: row[2] === null ? null : { rank: row[2][0], cosine: row[2][1], window: row[2][2] } })),
     accounting: { attempted: counts === 0 ? 0 : counts[0], admitted: counts === 0 ? 0 : counts[1], duplicate: counts === 0 ? 0 : counts[2],
       rejected: counts === 0 ? 0 : counts[3], scope_denied: counts === 0 ? 0 : counts[4], native_unknown: counts === 0 ? 0 : counts[5],
       resource_refused: counts === 0 ? 0 : counts[6], stale: counts === 0 ? 0 : counts[7], nomination_limit: counts === 0 ? 0 : counts[8] },

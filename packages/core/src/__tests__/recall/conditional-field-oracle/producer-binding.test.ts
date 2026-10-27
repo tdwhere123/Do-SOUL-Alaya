@@ -21,6 +21,7 @@ import {
   defaultView
 } from "./finite-worlds.js";
 import { productIdentity } from "./oracle-index.js";
+import { deploymentProposal } from "../conditional-field/reference/deployment-proposal.fixture.js";
 
 describe("conditional-field compiler and projection contracts", () => {
   it("does not claim real-producer while IndexEntry drops program/time", () => {
@@ -47,6 +48,7 @@ describe("conditional-field compiler and projection contracts", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "prior same-service failure around yesterday's failed deployment",
+      interpretation_proposal: deploymentProposal("prior same-service failure around yesterday's failed deployment"),
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget(),
       interpretation_clock: INTERPRETATION_CLOCK
@@ -71,6 +73,7 @@ describe("conditional-field compiler and projection contracts", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "yesterday's failed deployment",
+      interpretation_proposal: deploymentProposal("yesterday's failed deployment"),
       snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget(),
       interpretation_clock: INTERPRETATION_CLOCK
@@ -95,7 +98,9 @@ describe("conditional-field compiler and projection contracts", () => {
 
   it("projects the actual compiler hypothesis coverage", () => {
     const ambiguous = compileConditionalFieldQuery({
-      source: "ordinary", text: "yesterday's failure", snapshot_id: SNAPSHOT_ID,
+      source: "typed", program: { schema_version: 1, kind: "epsilon" }, snapshot_id: SNAPSHOT_ID,
+      hypotheses: ["deployment", "unresolved"].map(value => ({ schema_version: 1 as const, hypothesis_id: value,
+        bindings: [{ schema_version: 1 as const, variable: "event", value }] })),
       budget: defaultBudget(), interpretation_clock: INTERPRETATION_CLOCK
     });
     const index = projectAcceptingIndex({
