@@ -230,6 +230,21 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     expect((await repo.findById(dormant.object_id))?.lifecycle_state).toBe("dormant");
   });
 
+  it("skips low-activity demotion after the selected memory is reinforced", async () => {
+    const { repo, database } = await createRepo();
+    const active = createMemoryEntry({ object_id: "ffffffff-0000-4000-8000-000000000009",
+      lifecycle_state: "active", activation_score: 0.01, last_hit_at: "2026-01-01T00:00:00.000Z" });
+    await repo.create(active);
+    database.connection.prepare("UPDATE memory_entries SET activation_score = ?, last_hit_at = ? WHERE object_id = ?")
+      .run(0.9, "2026-03-21T23:59:00.000Z", active.object_id);
+    const audit = vi.fn();
+    await expect(repo.transitionToDormantIfActive(active.object_id, "2026-03-22T00:00:00.000Z", audit,
+      { workspaceId: active.workspace_id, maxActivation: 0.1, idleBefore: "2026-02-01T00:00:00.000Z" }))
+      .resolves.toBeNull();
+    expect(audit).not.toHaveBeenCalled();
+    expect((await repo.findById(active.object_id))?.lifecycle_state).toBe("active");
+  });
+
   it("transitionToDormantIfActive rolls the demotion back when onTransition throws (one transaction)", async () => {
     const { repo } = await createRepo();
     const active = createMemoryEntry({

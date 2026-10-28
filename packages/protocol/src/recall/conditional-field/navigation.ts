@@ -3,7 +3,7 @@ import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
 import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
 
 /** Generation-local lexical statistics with question-time preference; old identities cannot execute this ranking. */
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v6" as const;
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v7" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({

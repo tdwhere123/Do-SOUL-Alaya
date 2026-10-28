@@ -113,6 +113,8 @@ export class SourceIndexProducer {
   // A caller timeout is not native settlement. Only the shared provider lifecycle can kill it.
   private readonly nativeWork = new Set<Promise<unknown>>();
   private afterWorkspace = "";
+  // A single discrete slot cannot be split; alternate priority on each workspace-ring wrap.
+  private vectorFirstOnSingleSlot = false;
   // Transient scheduling hints only; every pass rechecks the durable generation/pending windows.
   private readonly targetCursors = new Map<string, { generation: string; after: string | null }>();
 
@@ -244,22 +246,29 @@ export class SourceIndexProducer {
       let workspace = this.nextWorkspace();
       if (workspace === null && !wrapped) {
         wrapped = true;
+        this.vectorFirstOnSingleSlot = !this.vectorFirstOnSingleSlot;
         workspace = this.nextWorkspace();
       }
       if (workspace === null || seen.has(workspace)) return;
       seen.add(workspace);
       // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
       this.afterWorkspace = workspace;
-      // Lexical text is model-independent: it is prepared whether or not an embedding binding exists.
-      await this.reconcileLexical(workspace, pass);
-      if (pass.signal.aborted) return;
       if (tracked.status !== "ready") {
+        // Lexical text is model-independent, including when no embedding binding exists.
+        await this.reconcileLexical(workspace, pass);
+        if (pass.signal.aborted) return;
         this.lifecycle.unbind(workspace);
         this.targetCursors.delete(workspace);
       } else {
+        const singleSlot = pass.limits.maxRootsPerPass - pass.visitedRoots === 1
+          || pass.limits.maxCapturePages - pass.capturePages === 1;
+        const vectorFirst = singleSlot && this.vectorFirstOnSingleSlot;
+        if (!vectorFirst) await this.reconcileLexical(workspace, pass);
+        if (pass.signal.aborted) return;
         const outcome = await this.reconcileWorkspace(workspace, tracked, pass);
         // Keep normal workspace rotation, but never let a later success erase a terminal refusal.
         if (outcome !== null && pass.outcome.status === "settled") pass.outcome = outcome;
+        if (vectorFirst && !pass.signal.aborted && this.hasBudget(pass)) await this.reconcileLexical(workspace, pass);
         if (!this.hasBudget(pass)) return;
       }
     }
@@ -271,12 +280,11 @@ export class SourceIndexProducer {
     const roots = Math.ceil((pass.limits.maxRootsPerPass - pass.visitedRoots) / 2);
     if (left.work < 2 || left.native_bytes < 16 || roots < 1) return;
     // An explicit selection (e.g. a raw rollback) is honored; the default applies only to unselected workspaces.
-    const representation = this.repository.lexical.lexicalState(workspaceId)?.selection.representation
-      ?? SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION;
-    const result = await this.lifecycle.prepareLexical(workspaceId, representation, {
-      work: Math.ceil(left.work / 2), native_bytes: Math.ceil(left.native_bytes / 2), capture_page: pass.limits.capturePage,
+    const selection = this.repository.lexical.ensureLexicalSelection(workspaceId, SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION);
+    const result = await this.lifecycle.prepareLexical(workspaceId, selection.representation, {
+      work: Math.floor(left.work / 2), native_bytes: Math.floor(left.native_bytes / 2), capture_page: pass.limits.capturePage,
       max_capture_pages: Math.ceil((pass.limits.maxCapturePages - pass.capturePages) / 2),
-      max_roots: roots, max_body_bytes: pass.limits.maxBodyBytes }, pass.signal, pass.deadline);
+      max_roots: roots, max_body_bytes: pass.limits.maxBodyBytes }, pass.signal, pass.deadline, selection);
     pass.spent.work += result.resources.work;
     pass.spent.native_bytes += result.resources.native_bytes;
     pass.visitedRoots += result.visited_roots;

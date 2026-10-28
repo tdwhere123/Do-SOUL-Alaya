@@ -17,6 +17,7 @@ import {
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
 import { requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
+import { sourceIdentityObservationWork } from "../conditional-field/observers/observe-ports.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { bindEngineState } from "../conditional-field/engine/field-update.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
@@ -37,6 +38,9 @@ import { ObservedSourceFacts } from "./observed-source-facts.js";
 import { indexedIdentityWork } from "../conditional-field/engine/state-endpoint-index.js";
 import {
   openResiduals,
+  interruptAtomicWork,
+  reportAtomicWorkBlock,
+  interruptObservedField,
   type SourceDomainCoverage
 } from "./observe-field-residuals.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
@@ -44,7 +48,6 @@ import { restoredFieldFootprint, restoredFieldRemainingMemory, stampRetainedFiel
 import { CoreError } from "../../shared/errors.js";
 import {
   RELATION_ROUTING,
-  interruptObservedField,
   loadStoredRelationKinds,
   reopenAdjacency,
   runObservationRounds
@@ -68,6 +71,14 @@ export type ObserveFieldInput = Readonly<{
   readonly expected_model_id?: string;
   readonly cost?: RequestCostLedger;
   readonly on_reused_cost_owner?: (reused: FieldEngineState | undefined) => void;
+  readonly on_retained_progress?: () => void;
+  readonly on_atomic_work_block?: (block: Readonly<{
+    phase: "seed" | "adjacency" | "source_fact" | "program_compile" | "snapshot_pin" | "native_source_setup" | "path_prepare" | "measurement";
+    required_exploration_work: number;
+    available_exploration_work: number;
+  }>) => void;
+  /** Work that every retry must pay again before its next retained operation. */
+  readonly repeated_setup_work?: number;
 }>;
 
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
@@ -92,6 +103,7 @@ export function observeField(
     && input.readers.nominateSources !== undefined) {
     if (initial.native_sources === undefined) {
       initial = acquireNativeSources(initial, input, interpretation);
+      if (initial.native_sources !== undefined) input.on_retained_progress?.();
     }
     // An exhausted retained observation has no source-reader call left to make.
     // Rebuilding its frozen frontier would repay acquisition frames merely to
@@ -103,14 +115,19 @@ export function observeField(
         input = { ...input, readers: nativeSourceReaders(input.readers, initial.native_sources ?? null, bridge) };
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        if (error.constraints?.work !== undefined) {
+          interruptAtomicWork({ state: initial, input }, "native_source_setup", bridge.spentWork + error.constraints.work.required);
+        }
         input = { ...input, readers: { ...input.readers, sourceRoots: undefined, sourceTextHints: undefined,
           boundInterpretations: undefined } };
-        initial = { ...initial, last_observer_status: "interrupted" };
+        initial = { ...initial, last_observer_status: "interrupted",
+          memory_exhausted: initial.memory_exhausted || error.constraints?.memory !== undefined };
       } finally {
         input.cost?.add("observe", { budget_work: bridge.spentWork });
         initial = { ...initial, remaining_exploration: Math.max(0, initial.remaining_exploration - bridge.spentWork),
           remaining_memory_bytes: bridge.bytes,
           admitted_allocation_bytes: initial.admitted_allocation_bytes + bridge.spentBytes };
+        input = { ...input, repeated_setup_work: (input.repeated_setup_work ?? 0) + bridge.spentWork };
       }
     }
   }
@@ -181,43 +198,11 @@ function observeWithinMemory(
   // unfinished facet/grounding scan. Native cursors remain retained and resume
   // after the acknowledged projection frontier catches up.
   if (retainedProjectionHasPriority(state, input)) return state;
-  const runtime = runtimeProgram(interpretation.program);
-  if (runtime !== "empty" && runtime !== "epsilon" && state.compiled_automaton === undefined) {
-    let compilation;
-    try { compilation = programAutomatonCost(runtime); }
-    catch (error) {
-      if (!(error instanceof ProgramAutomatonResourceError)) throw error;
-      return { ...interruptObservedField(state), memory_exhausted: true };
-    }
-    if (compilation.work_units > state.remaining_exploration
-      || compilation.retained_bytes > state.remaining_memory_bytes) {
-      return { ...interruptObservedField(state),
-        memory_exhausted: compilation.retained_bytes > state.remaining_memory_bytes };
-    }
-    state = { ...state, compiled_automaton: compileProgramAutomaton(runtime),
-      compiled_automaton_bytes: compilation.retained_bytes,
-      admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + compilation.retained_bytes,
-      remaining_exploration: state.remaining_exploration - compilation.work_units,
-      remaining_memory_bytes: state.remaining_memory_bytes - compilation.retained_bytes };
-    input.cost?.add("observe", { joins: compilation.work_units });
-  }
-  const seedUnitCost = 4 + seedProgramStates(interpretation.program, state.compiled_automaton).length
-    * Math.max(1, interpretation.hypotheses.length) * indexedIdentityWork(state);
-  let expectedRevision = input.expected_source_revision;
-  if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
-    if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) return interruptObservedField(state);
-    expectedRevision = input.readers.snapshotPin(input.workspace_id).source_revision;
-    input.cost?.add("observe", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
-    state = { ...state, remaining_exploration: state.remaining_exploration - SNAPSHOT_PIN_NATIVE_WORK };
-  }
+  const prepared = admitObservationSetup(interpretation, input, state);
+  if (prepared.status === "blocked") return prepared.state;
+  ({ state, input } = prepared);
+  const { seedUnitCost, expectedRevision } = prepared;
   const lease = activeLease(interpretation);
-  if (state.pending_path_effects !== undefined) {
-    const beforePathWork = state.remaining_exploration;
-    state = resumePathEffects(state);
-    input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - state.remaining_exploration) });
-    if (state.pending_path_effects !== undefined || state.memory_exhausted) return state;
-    if (state.last_observer_status === "interrupted") state = { ...state, last_observer_status: "open" };
-  }
   const cursors = new Map<string, ObserverCursor>();
   const pairProgress = new ObservationPairs(state.pair_progress, state.pair_completed_count, state.pair_revision,
     state.pair_demands, state.pair_progress_bytes);
@@ -247,10 +232,10 @@ function observeWithinMemory(
   const sourceFacts = new ObservedSourceFacts(state.source_facts, state.source_fact_bytes);
   const memoryBox = { remaining: state.remaining_memory_bytes, cachedBytes: 0 };
   const sourceCache = new Map<string, SourceObserverPage>();
-  const observedInput: ObserveFieldInput = {
+  let observedInput: ObserveFieldInput = {
     ...input,
     ...(expectedRevision === undefined ? {} : { expected_source_revision: expectedRevision }),
-    readers: meterReaders(input.readers, memoryBox, sourceCache)
+    readers: meterReaders(input.readers, memoryBox, sourceCache, work => input.cost?.add("observe", work))
   };
   let unresolvedGuard = state.observation_gaps?.guards ?? false;
   let missingMeasurement = state.observation_gaps?.measurements ?? false;
@@ -266,6 +251,8 @@ function observeWithinMemory(
       ...state,
       remaining_exploration: Math.max(0, state.remaining_exploration - storedKinds.charged)
     });
+    observedInput = { ...observedInput,
+      repeated_setup_work: (observedInput.repeated_setup_work ?? 0) + storedKinds.charged };
   }
   const programKinds = adjacencyKindsFor(interpretation.program, storedKinds.kinds);
   const predicates = [...new Set([
@@ -278,9 +265,55 @@ function observeWithinMemory(
   ])];
   if (pairProgress.hasOpenDemand()) state = reopenAdjacency(state);
   return runObservationRounds({ state, interpretation, input: observedInput, lease, cursors, pairProgress,
-    subjects, relationRows, observedAt, sourceFacts, memoryBox, predicates, seedUnitCost,
+    subjects, relationRows, observedAt, sourceFacts, sourceCache, memoryBox, predicates, seedUnitCost,
     storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement,
     sourceFamilyUnavailable: false });
+}
+
+function admitObservationSetup(interpretation: QueryInterpretation, input: ObserveFieldInput, state: FieldEngineState):
+  | Readonly<{ status: "blocked"; state: FieldEngineState }>
+  | Readonly<{ status: "ready"; state: FieldEngineState; input: ObserveFieldInput; seedUnitCost: number; expectedRevision?: string }> {
+  const runtime = runtimeProgram(interpretation.program);
+  if (runtime !== "empty" && runtime !== "epsilon" && state.compiled_automaton === undefined) {
+    let compilation;
+    try { compilation = programAutomatonCost(runtime); }
+    catch (error) {
+      if (!(error instanceof ProgramAutomatonResourceError)) throw error;
+      return { status: "blocked", state: { ...interruptObservedField(state), memory_exhausted: true } };
+    }
+    if (compilation.work_units > state.remaining_exploration || compilation.retained_bytes > state.remaining_memory_bytes) {
+      const interrupted = compilation.work_units > state.remaining_exploration
+        ? interruptAtomicWork({ state, input }, "program_compile", compilation.work_units) : interruptObservedField(state);
+      return { status: "blocked", state: { ...interrupted, memory_exhausted: compilation.retained_bytes > state.remaining_memory_bytes } };
+    }
+    state = { ...state, compiled_automaton: compileProgramAutomaton(runtime), compiled_automaton_bytes: compilation.retained_bytes,
+      admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + compilation.retained_bytes,
+      remaining_exploration: state.remaining_exploration - compilation.work_units,
+      remaining_memory_bytes: state.remaining_memory_bytes - compilation.retained_bytes };
+    input.cost?.add("observe", { joins: compilation.work_units });
+    input.on_retained_progress?.();
+  }
+  const seedUnitCost = sourceIdentityObservationWork(input.readers) + seedProgramStates(interpretation.program, state.compiled_automaton).length
+    * Math.max(1, interpretation.hypotheses.length) * indexedIdentityWork(state);
+  let expectedRevision = input.expected_source_revision;
+  if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
+    if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) {
+      return { status: "blocked", state: interruptAtomicWork({ state, input }, "snapshot_pin", SNAPSHOT_PIN_NATIVE_WORK) };
+    }
+    expectedRevision = input.readers.snapshotPin(input.workspace_id).source_revision;
+    input.cost?.add("observe", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
+    state = { ...state, remaining_exploration: state.remaining_exploration - SNAPSHOT_PIN_NATIVE_WORK };
+    input = { ...input, repeated_setup_work: (input.repeated_setup_work ?? 0) + SNAPSHOT_PIN_NATIVE_WORK };
+  }
+  if (state.pending_path_effects !== undefined) {
+    const beforePathWork = state.remaining_exploration;
+    state = resumePathEffects(state, input.on_retained_progress,
+      (required, available) => reportAtomicWorkBlock(input, "path_prepare", required, available));
+    input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - state.remaining_exploration) });
+    if (state.pending_path_effects !== undefined || state.memory_exhausted) return { status: "blocked", state };
+    if (state.last_observer_status === "interrupted") state = { ...state, last_observer_status: "open" };
+  }
+  return { status: "ready", state, input, seedUnitCost, ...(expectedRevision === undefined ? {} : { expectedRevision }) };
 }
 
 function startObservedField(

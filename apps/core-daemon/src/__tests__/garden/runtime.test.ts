@@ -182,6 +182,16 @@ describe("garden runtime path plasticity queue", () => {
     hoisted.schedulers.splice(0, hoisted.schedulers.length);
   });
 
+  it("does not enqueue retired proposal tasks during the Librarian pass", async () => {
+    const runtime = createGardenRuntime(createRuntimeInput());
+    const scheduler = currentScheduler();
+    await getService(runtime, "Librarian").task();
+    expect(scheduler.queue.some(task => task.task_kind === GardenTaskKind.MERGE_PROPOSAL)).toBe(false);
+    expect(scheduler.queue.some(task => task.task_kind === GardenTaskKind.TEMPLATE_CANDIDATE)).toBe(false);
+    expect(scheduler.queue.some(task => task.task_kind === GardenTaskKind.PATH_COMPRESSION)).toBe(false);
+    expect(scheduler.queue.some(task => task.task_kind === GardenTaskKind.PATH_GRAPH_SNAPSHOT)).toBe(true);
+  });
+
   it("records embedding backfill failures without aborting the scheduler pass", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => {

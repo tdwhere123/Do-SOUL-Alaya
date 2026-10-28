@@ -69,8 +69,8 @@ describe("retrofitMemoryObjectKeys", () => {
     const report = retrofitMemoryObjectKeys({
       owners: scan.owners,
       evidence: scan.evidence,
-      replaceOwnerKeys: (workspaceId, ownerId, minted) =>
-        keys.replaceOwnerKeys(workspaceId, ownerId, minted)
+      replaceOwnerKeys: (workspaceId, ownerId, minted, owner) =>
+        keys.replaceOwnerKeys(workspaceId, ownerId, minted, owner)
     });
 
     expect(report.owner_count).toBe(1);
@@ -84,12 +84,21 @@ describe("retrofitMemoryObjectKeys", () => {
     const again = retrofitMemoryObjectKeys({
       owners: scan.owners,
       evidence: scan.evidence,
-      replaceOwnerKeys: (workspaceId, ownerId, minted) =>
-        keys.replaceOwnerKeys(workspaceId, ownerId, minted)
+      replaceOwnerKeys: (workspaceId, ownerId, minted, owner) =>
+        keys.replaceOwnerKeys(workspaceId, ownerId, minted, owner)
     });
     expect(again.key_count).toBe(report.key_count);
     expect(keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID).map((key) => key.surface))
       .toEqual(persisted.map((key) => key.surface));
+
+    database.connection.prepare("DELETE FROM memory_object_keys WHERE workspace_id = ? AND owner_id = ?")
+      .run(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID);
+    database.connection.prepare("UPDATE memory_entries SET content = ? WHERE workspace_id = ? AND object_id = ?")
+      .run("A later reviewed version.", REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID);
+    const stale = retrofitMemoryObjectKeys({ ...scan,
+      replaceOwnerKeys: (workspaceId, ownerId, minted, owner) => keys.replaceOwnerKeys(workspaceId, ownerId, minted, owner) });
+    expect(stale).toMatchObject({ objects_with_keys: 0, key_count: 0 });
+    expect(keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID)).toEqual([]);
   });
 });
 

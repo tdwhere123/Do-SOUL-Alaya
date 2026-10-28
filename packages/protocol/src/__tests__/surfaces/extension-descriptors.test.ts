@@ -105,7 +105,7 @@ describe("extension descriptor schemas", () => {
         integration_id: "integration.github",
         name: "GitHub MCP",
         integration_type: "mcp_server",
-        endpoint: "http://127.0.0.1:3040/mcp",
+        endpoint: "http://127.0.0.2:3040/mcp",
         status: "active",
         registered_at: validTimestamp
       })
@@ -113,7 +113,7 @@ describe("extension descriptor schemas", () => {
       integration_id: "integration.github",
       name: "GitHub MCP",
       integration_type: "mcp_server",
-      endpoint: "http://127.0.0.1:3040/mcp",
+      endpoint: "http://127.0.0.2:3040/mcp",
       status: "active",
       registered_at: validTimestamp
     });

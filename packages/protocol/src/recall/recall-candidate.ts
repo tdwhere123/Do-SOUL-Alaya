@@ -106,6 +106,8 @@ export const RecallCandidateSchema = z
     activation_score: z.number().min(0).max(1),
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
+    // Historical candidates omit this field; current producers retain hydration state.
+    payload_available: z.boolean().optional(),
     source_disclosure: SourceDisclosureSchema.optional(),
     token_estimate: NonNegativeIntSchema,
     manifestation: ManifestationStateSchema,

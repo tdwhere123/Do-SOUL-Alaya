@@ -1,6 +1,7 @@
 import type { CandidateMemorySignal, GardenCompleteTaskRequest } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { finalizePostTurnEvidence } from "../../garden/post-turn-extract/evidence-finalizer.js";
+import { signalMaterializationFailed } from "../../garden/post-turn-extract/signal-receiver.js";
 import {
   buildPostTurnContent,
   buildPostTurnConversationMessages,
@@ -27,7 +28,8 @@ export async function emitTaskCandidateSignals(
   row: GardenTaskRow,
   postTurnPayload: PostTurnExtractTaskPayload | null,
   candidateSignals: readonly CandidateMemorySignal[],
-  completionClaimedBy: string
+  completionClaimedBy: string,
+  failedSignalIds: Set<string>
 ): Promise<readonly string[]> {
   if (postTurnPayload !== null) {
     return await finalizeExternalPostTurnEvidence(
@@ -35,13 +37,15 @@ export async function emitTaskCandidateSignals(
       row,
       postTurnPayload,
       request.status === "completed" ? candidateSignals : [],
-      completionClaimedBy
+      completionClaimedBy,
+      failedSignalIds
     );
   }
   const emittedSignalIds: string[] = [];
   for (const signal of candidateSignals) {
     const received = await params.deps.signalService.receiveSignal(signal);
     emittedSignalIds.push(received.signal.signal_id);
+    if (signalMaterializationFailed(received)) failedSignalIds.add(received.signal.signal_id);
   }
   return emittedSignalIds;
 }
@@ -65,7 +69,8 @@ async function finalizeExternalPostTurnEvidence(
   row: GardenTaskRow,
   payload: PostTurnExtractTaskPayload,
   candidates: readonly CandidateMemorySignal[],
-  completionClaimedBy: string
+  completionClaimedBy: string,
+  failedSignalIds: Set<string>
 ): Promise<readonly string[]> {
   const receiver = params.deps.postTurnSignalReceiver;
   if (receiver === undefined) {
@@ -80,9 +85,10 @@ async function finalizeExternalPostTurnEvidence(
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
     turnMessages: buildPostTurnConversationMessages(payload),
-    sourceObservation: payload.source_observation,
+    sourceObservation: null,
     candidates,
     signalReceiver: receiver,
+    failedSignalIds,
     ...(payload.admitted_source_root_id === undefined
       ? {}
       : { admittedSourceRootId: payload.admitted_source_root_id }),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, type ApiError } from "../api";
 import { parseSearchQuery } from "./graph-spotlight-search-query";
+import type { SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 
 export interface GraphSearchTimeHits {
   readonly ids: ReadonlySet<string>;
@@ -9,10 +10,7 @@ export interface GraphSearchTimeHits {
 
 interface GraphSearchEnvelope {
   readonly success: boolean;
-  readonly data: {
-    readonly results: ReadonlyArray<{ readonly object_id: string }>;
-    readonly total_count?: number;
-  };
+  readonly data: SoulMemorySearchResponse;
 }
 
 interface GraphTimeSearchState {
@@ -86,7 +84,8 @@ async function runGraphTimeSearch(
     searchError: null,
     searchKeywordFallback: parsed.text,
     searchTimeHits: {
-      ids: new Set(envelope.data.results.map((result) => result.object_id)),
+      ids: new Set(envelope.data.results.flatMap((result) =>
+        result.target.kind === "memory_entry" ? [result.target.object_id] : [])),
       windowLabel: parsed.windowLabel ?? trimmed
     }
   };

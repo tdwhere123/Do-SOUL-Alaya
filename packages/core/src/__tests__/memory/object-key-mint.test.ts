@@ -14,8 +14,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{ object_id: EVIDENCE, gist: text, fact_key_contents: [], osf_graph: null }] });
     expect(surfacesOf(keys, "temporal_alias")).toEqual([]);
     expect(complementaryTemporalAliasSurfaces(text)).toEqual([]);
-    expect(complementaryTemporalAliasSurfaces("2/8/2026")).toContain("2026-02-08");
-    expect(complementaryTemporalAliasSurfaces("2/8")).toContain("February 8");
   });
 
   it.each(["一百", "一百二十", "两千", "十万", "一〇〇"])("does not mint a partial small-number alias from %s", (text) => {
@@ -23,6 +21,10 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{ object_id: EVIDENCE, gist: text, fact_key_contents: [], osf_graph: null }] });
     expect(surfacesOf(keys, "numeric_alias")).toEqual([]);
     expect(complementaryNumericAliasSurfaces(text)).toEqual([]);
+  });
+  it("retains supported temporal and numeric aliases", () => {
+    expect(complementaryTemporalAliasSurfaces("2/8/2026")).toContain("2026-02-08");
+    expect(complementaryTemporalAliasSurfaces("2/8")).toContain("February 8");
     expect(complementaryNumericAliasSurfaces("二十本书")).toContain("20");
   });
   it("mints gist-remainder keys that are not already in distilled content", () => {

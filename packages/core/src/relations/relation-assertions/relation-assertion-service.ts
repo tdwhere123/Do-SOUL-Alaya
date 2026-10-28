@@ -3,10 +3,12 @@ import {
   RelationAssertionAdmittedPayloadSchema,
   RelationAssertionResolvedPayloadSchema,
   RuntimeGovernanceEventType,
+  compareUtcInstants,
   type RelationAssertion,
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
+import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherDecision } from "../../runtime/event-publisher.js";
 import { buildRelationProjection } from "./relation-projection-builder.js";
 import {
@@ -123,7 +125,7 @@ export class RelationAssertionService {
           assertion: { ...admission, admission_event_id: entry.event_id },
           identityKey
         });
-        const projection = this.buildProjectionInCurrentTransaction(admission.admitted_at, true);
+        const projection = this.buildProjectionInCurrentTransaction(this.now(), true);
         this.activateProjection(projection);
         return projectionAdmissionResult("admitted", assertion, projection);
       }
@@ -180,11 +182,14 @@ export class RelationAssertionService {
     resolvedAt: string
   ): EventPublisherDecision<RelationAssertionResolutionResult> {
     const assertion = this.requireResolutionAssertion(request);
-    const existing = this.dependencies.repo.getCurrentResolutionInCurrentTransaction(
-      request.assertionId
-    );
-    if (existing !== null) {
+    const history = this.dependencies.repo.listResolutionHistoryInCurrentTransaction();
+    const existing = history.find(resolution => resolution.resolution_id === resolutionId);
+    if (existing !== undefined) {
       return this.decideExistingResolution(existing, request, resolutionId);
+    }
+    const latest = this.dependencies.repo.getCurrentResolutionInCurrentTransaction(request.assertionId);
+    if (compareUtcInstants(resolvedAt, latest?.resolved_at ?? assertion.admitted_at) === -1) {
+      throw new CoreError("CONFLICT", "A later relation resolution cannot precede its accepted history.");
     }
     const payload = prepareResolution(request, assertion, resolutionId, resolvedAt);
     return this.decideNewResolution(request, payload);
@@ -196,7 +201,7 @@ export class RelationAssertionService {
     resolutionId: string
   ): EventPublisherDecision<RelationAssertionResolutionResult> {
     assertSameResolution(existing, request, resolutionId);
-    const projection = this.buildProjectionInCurrentTransaction(existing.resolved_at, true);
+    const projection = this.buildProjectionInCurrentTransaction(this.now(), true);
     return {
       eventInputs: [],
       apply: () => {
@@ -219,7 +224,7 @@ export class RelationAssertionService {
           ...payload,
           event_id: entry.event_id
         });
-        const projection = this.buildProjectionInCurrentTransaction(payload.resolved_at, true);
+        const projection = this.buildProjectionInCurrentTransaction(this.now(), true);
         this.activateProjection(projection);
         return projectionResolutionResult("resolved", resolution, projection);
       }
@@ -248,12 +253,12 @@ export class RelationAssertionService {
 
   public async verifyAndRebuild(asOf?: string): Promise<RelationAssertionReplayResult> {
     const projectionAsOf = asOf ?? this.now();
-    const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
-    const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
-    await this.verifyEventHistory(assertions, resolutions);
-    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
-      this.refreshProjectionDecision(projectionAsOf, asOf === undefined)
-    );
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() => {
+      const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
+      const resolutions = this.dependencies.repo.listResolutionHistoryInCurrentTransaction();
+      this.verifyEventHistory(assertions, resolutions);
+      return this.refreshProjectionDecision(projectionAsOf, asOf === undefined);
+    });
   }
 
   public readActiveProjectionGeneration(): string | null | undefined {
@@ -296,7 +301,7 @@ export class RelationAssertionService {
     activate: boolean
   ): RelationAssertionProjectionResult {
     const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
-    const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
+    const resolutions = this.dependencies.repo.listResolutionHistoryInCurrentTransaction();
     return buildRelationProjection(
       assertions,
       resolutions,
@@ -310,23 +315,25 @@ export class RelationAssertionService {
     );
   }
 
-  private async verifyEventHistory(
+  private verifyEventHistory(
     assertions: readonly Readonly<RelationAssertion>[],
     resolutions: readonly Readonly<RelationAssertionResolution>[]
-  ): Promise<void> {
-    const resolutionByAssertion = new Map(resolutions.map((resolution) => [
-      resolution.assertion_id,
-      resolution
-    ]));
+  ): void {
     for (const assertion of assertions) {
       this.assertFormationInputs(assertion);
-      const events = await this.dependencies.eventHistory.queryByEntity(
+      const events = this.dependencies.eventHistory.queryByEntityInCurrentTransaction(
         RELATION_ASSERTION_ENTITY_TYPE,
         assertion.assertion_id
       );
       verifyAdmissionEvent(events, assertion);
-      const resolution = resolutionByAssertion.get(assertion.assertion_id);
-      if (resolution !== undefined) verifyResolutionEvent(events, resolution);
+      const history = resolutions.filter(resolution => resolution.assertion_id === assertion.assertion_id);
+      const ids = new Set(history.map(resolution => resolution.resolution_id));
+      if (ids.size !== history.length) throw new CoreError("CONFLICT", "Relation resolution history repeats an immutable identity.");
+      for (const resolution of history) verifyResolutionEvent(events, resolution);
+      const current = this.dependencies.repo.getCurrentResolutionInCurrentTransaction(assertion.assertion_id);
+      if (stableStringify(current) !== stableStringify(history.at(-1) ?? null)) {
+        throw new CoreError("CONFLICT", "Current relation resolution does not match accepted EventLog history.");
+      }
     }
   }
 }
@@ -335,7 +342,9 @@ export class RelationAssertionService {
 function assertSharedStorageBoundary(dependencies: RelationAssertionServiceDependencies): void {
   const publisherIdentity = dependencies.eventPublisher.getStorageConnectionIdentity?.();
   const repoIdentity = dependencies.repo.getStorageConnectionIdentity?.();
-  if (publisherIdentity !== undefined && repoIdentity !== undefined && publisherIdentity !== repoIdentity) {
+  const historyIdentity = dependencies.eventHistory.getStorageConnectionIdentity?.();
+  if (publisherIdentity !== undefined && [repoIdentity, historyIdentity].some(identity =>
+    identity !== undefined && publisherIdentity !== identity)) {
     throw new Error(
       "Relation assertion EventLog and projection repositories must share one SQLite transaction boundary."
     );
@@ -388,8 +397,10 @@ function assertSameResolution(
 ): void {
   if (
     existing.resolution_id !== resolutionId ||
+    existing.assertion_id !== request.assertionId ||
     existing.resolution_kind !== request.resolutionKind ||
-    existing.reason !== request.reason
+    existing.reason !== request.reason ||
+    (request.resolvedAt !== undefined && compareUtcInstants(existing.resolved_at, request.resolvedAt) !== 0)
   ) {
     throw new Error(`Relation assertion ${existing.assertion_id} already has a different immutable resolution.`);
   }
@@ -422,7 +433,8 @@ function verifyAdmissionEvent(
     event.entity_type !== RELATION_ASSERTION_ENTITY_TYPE ||
     event.entity_id !== assertion.assertion_id ||
     event.workspace_id !== assertion.workspace_id ||
-    stableStringify(payload) !== stableStringify(expected)
+    stableStringify({ ...payload, evidence_receipts: sortEvidenceReceipts(payload.evidence_receipts) }) !==
+      stableStringify({ ...expected, evidence_receipts: sortEvidenceReceipts(expected.evidence_receipts) })
   ) {
     throw new Error(`Relation assertion ${assertion.assertion_id} admission EventLog payload is not canonical.`);
   }
@@ -433,7 +445,7 @@ function verifyResolutionEvent(
   resolution: Readonly<RelationAssertionResolution>
 ): void {
   const matching = events.filter((event) =>
-    event.event_type === RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED
+    event.event_type === RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED && event.event_id === resolution.event_id
   );
   if (matching.length !== 1) {
     throw new Error(`Relation assertion ${resolution.assertion_id} has no unique resolution EventLog entry.`);

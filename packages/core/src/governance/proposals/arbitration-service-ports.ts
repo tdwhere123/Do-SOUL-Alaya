@@ -16,10 +16,13 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import type { ClaimService } from "../claims/claim-service.js";
+import type { ElectionTransactionGuard } from "../claims/claim-service-types.js";
+import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 import { CoreError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 
 export interface ArbitrationServiceSlotRepoPort {
+  getStorageConnectionIdentity?(): object;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   updateWinner(
     objectId: string,
@@ -31,11 +34,13 @@ export interface ArbitrationServiceSlotRepoPort {
 }
 
 export interface ArbitrationServiceClaimRepoPort {
+  getStorageConnectionIdentity?(): object;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
 }
 
 export interface ArbitrationServiceConflictMatrixRepoPort {
+  getStorageConnectionIdentity?(): object;
   create(edge: Readonly<ConflictMatrixEdge>): Readonly<ConflictMatrixEdge>;
   findById(objectId: string): Promise<Readonly<ConflictMatrixEdge> | null>;
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
@@ -47,6 +52,7 @@ export interface ArbitrationServiceConflictMatrixRepoPort {
 }
 
 export interface ArbitrationServiceClaimServicePort {
+  getStorageConnectionIdentity?(): object | undefined;
   prepareLifecycleTransition: ClaimService["prepareLifecycleTransition"];
   transitionLifecycle(
     objectId: string,
@@ -55,6 +61,8 @@ export interface ArbitrationServiceClaimServicePort {
     causedBy: TransitionCausedBy,
     options?: {
       readonly skipSlotElection?: boolean;
+      readonly additionalEventInputs?: readonly EventPublisherInput[];
+      readonly transactionGuard?: ElectionTransactionGuard;
     }
   ): Promise<Readonly<ClaimForm>>;
 }
@@ -112,6 +120,7 @@ export interface WinnerChangeOptions {
   readonly causedBy: TransitionCausedBy;
   readonly lifecycleReasonPrefix: string;
   readonly eventReasonCode: string;
+  readonly transactionGuard?: ElectionTransactionGuard;
 }
 
 const decisiveEdgeTypes = new Set<ConflictEdgeTypeType>([

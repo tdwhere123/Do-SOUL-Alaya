@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { expectFrozenPropertyWriteThrows } from "../support/frozen-mutation.js";
 import {
   EvidenceHealthState,
+  CommittedObjectError,
   TransitionCausedBy,
   type EvidenceCapsule,
   type EventLogEntry
@@ -17,6 +18,7 @@ describe("EvidenceService", () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
+    const notify = vi.fn(async () => { order.push("notify"); });
     const create = vi.fn<NonNullable<EvidenceServiceEvidenceCapsuleRepoPort["createInCurrentTransaction"]>>((capsule) => {
       order.push("repo_create");
       store.set(capsule.object_id, Object.freeze({ ...capsule }));
@@ -57,9 +59,7 @@ describe("EvidenceService", () => {
         })
       },
       runtimeNotifier: {
-        notifyEntry: vi.fn(async () => {
-          order.push("notify");
-        })
+        notifyEntry: notify
       }
     });
 
@@ -101,6 +101,14 @@ describe("EvidenceService", () => {
         run_id: "run-1"
       }
     });
+
+    notify.mockRejectedValue(new Error("broadcast unavailable"));
+    const failure = await service.create(createEvidenceInput()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(CommittedObjectError);
+    expect(failure).toMatchObject({ object: {
+      object_kind: "evidence_capsule", object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"
+    } });
+    expect(store.has("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9")).toBe(true);
   });
 
   it("rolls back the EventLog row when evidence create throws", async () => {

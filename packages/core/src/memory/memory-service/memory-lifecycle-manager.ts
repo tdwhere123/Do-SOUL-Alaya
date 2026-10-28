@@ -1,5 +1,6 @@
 import {
   MemoryGovernanceEventType,
+  DYNAMICS_CONSTANTS,
   SoulMemoryArchivedPayloadSchema,
   SoulMemoryStateChangedPayloadSchema,
   type EventLogEntry,
@@ -7,7 +8,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, type EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
   MemoryEntryLifecyclePort,
@@ -119,7 +120,8 @@ export class MemoryLifecycleManager {
     objectId: string,
     nextState: MemoryEntry["lifecycle_state"],
     reason: string,
-    causedBy: TransitionCausedBy
+    causedBy: TransitionCausedBy,
+    options: { readonly additionalEventInputs?: readonly EventPublisherInput[]; readonly additionalEventsSink?: EventLogEntry[] } = {}
   ): Promise<Readonly<MemoryEntry>> {
     const parsedObjectId = parseObjectId(objectId);
     const parsedNextState = parseLifecycleState(nextState);
@@ -134,6 +136,7 @@ export class MemoryLifecycleManager {
     ensureAllowedLifecycleTransition(existing.lifecycle_state, parsedNextState);
 
     if (parsedNextState === "archived") {
+      if ((options.additionalEventInputs?.length ?? 0) > 0) throw new CoreError("CONFLICT", "Additional audit events are unavailable for archive.");
       return await this.archive(parsedObjectId, parsedReason, parsedCausedBy);
     }
 
@@ -167,13 +170,16 @@ export class MemoryLifecycleManager {
     } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
     let event: EventLogEntry | undefined;
-    const updated = await transitionLifecycle(parsedObjectId, parsedNextState, occurredAt, () => {
+    const additional: EventLogEntry[] = [];
+    const updated = await transitionLifecycle.call(this.memoryEntryRepo, parsedObjectId, parsedNextState, occurredAt, () => {
       event = appendAuditEventSynchronously(this.eventLogRepo, eventInput);
-    });
+      for (const extra of options.additionalEventInputs ?? []) additional.push(appendAuditEventSynchronously(this.eventLogRepo, extra));
+    }, existing.lifecycle_state);
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Memory lifecycle transition transaction did not append its audit event.");
     }
-    await this.propagateCommitted([event]);
+    options.additionalEventsSink?.push(...additional);
+    await this.propagateCommitted([event, ...additional]);
     return updated;
   }
 
@@ -184,7 +190,8 @@ export class MemoryLifecycleManager {
   public async demoteActiveToDormantIfActive(
     objectId: string,
     reason: string,
-    causedBy: TransitionCausedBy
+    causedBy: TransitionCausedBy,
+    options?: { readonly requireLowActivity: boolean }
   ): Promise<{ readonly status: "demoted"; readonly entry: Readonly<MemoryEntry> } | { readonly status: "skipped" }> {
     const parsedObjectId = parseObjectId(objectId);
     const parsedReason = parseReason(reason);
@@ -230,9 +237,14 @@ export class MemoryLifecycleManager {
     // invariant: onTransition is the audit append, so 0-row guarded UPDATEs
     // write no spurious audit and successful demotions are atomic.
     let event: EventLogEntry | undefined;
-    const demoted = await transitionToDormantIfActive(parsedObjectId, occurredAt, () => {
+    const eligibility = options?.requireLowActivity === true ? {
+      workspaceId: existing.workspace_id,
+      maxActivation: DYNAMICS_CONSTANTS.manifestation_thresholds.hint_max,
+      idleBefore: new Date(Date.parse(occurredAt) - DYNAMICS_CONSTANTS.path_plasticity.retirement_inactivity_ms).toISOString()
+    } : undefined;
+    const demoted = await transitionToDormantIfActive.call(this.memoryEntryRepo, parsedObjectId, occurredAt, () => {
       event = appendAuditEventSynchronously(this.eventLogRepo, eventInput);
-    });
+    }, eligibility);
     if (demoted === null) {
       return { status: "skipped" };
     }
@@ -291,7 +303,7 @@ export class MemoryLifecycleManager {
     } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
     let event: EventLogEntry | undefined;
-    await hardDeleteTombstoned(parsedObjectId, () => {
+    await hardDeleteTombstoned.call(this.memoryEntryRepo, parsedObjectId, () => {
       event = appendAuditEventSynchronously(this.eventLogRepo, eventInput);
     });
     if (event === undefined) {

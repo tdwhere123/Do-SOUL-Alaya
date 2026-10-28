@@ -206,8 +206,10 @@ async function executeRecall(
     const response = buildRecallResponse(delivery.deliveryId, encoded.results,
       { ...recallResult, index: encoded.index }, encoded.explainabilityPartial);
     throwIfAborted(context.abortSignal);
-    await recallResult.acknowledge_delivery?.(encoded.index, new Map(encoded.index.entries.map((entry, offset) =>
-      [indexEntryCacheKey(entry), encoded.results[offset]?.content_preview ?? "[payload omitted]"])));
+    await recallResult.acknowledge_delivery?.(encoded.index, new Map(encoded.index.entries.flatMap((entry, offset) => {
+      const result = encoded.results[offset];
+      return result?.payload_available !== true ? [] : [[indexEntryCacheKey(entry), result.content_preview] as const];
+    })));
     const replayed = recallResult.issued_delivery_id === undefined ? null
       : await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId);
     if (replayed === null) {
@@ -259,12 +261,13 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
 function encodeRecallHandlerResults(recallResult: RecallServiceResult, policy: RecallPolicy) {
   const index = recallResult.index;
   if (index === undefined) throw new Error("conditional-field Recall requires an authoritative index");
-  const previews = new Map(
-    index.entries.map((entry, offset) => [
-      indexEntryCacheKey(entry),
-      recallResult.candidates[offset]?.content_preview ?? "[payload omitted]"
-    ] as const)
-  );
+  const previews = new Map(index.entries.flatMap((entry, offset) => {
+    const candidate = recallResult.candidates[offset];
+    // Older in-process producers lack availability metadata; retain their text
+    // contract. Current producers distinguish unavailable payload explicitly.
+    return candidate === undefined || candidate.payload_available === false ? []
+      : [[indexEntryCacheKey(entry), candidate.content_preview] as const];
+  }));
   const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
   const metadata = sourceMetadataForRecallResult(recallResult);
   const results = encodeIndexResults(index, previews, maxTotalTokens, metadata);

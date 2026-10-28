@@ -22,6 +22,7 @@ import {
 } from "../../lifecycle/execution-stance.js";
 import { OutputShapingResultSchema } from "../../recall/output-shaping.js";
 import { SecurityPostureSchema } from "../../governance/security-status.js";
+import { SourceEraseRedactionSchema } from "../privacy-redaction.js";
 
 import {
   ManifestationBudgetEvaluatedPayloadSchema,
@@ -185,27 +186,35 @@ export const RuntimeGovernanceEventType = {
 
 export const RuntimeGovernanceEventTypeSchema = z.enum(runtimeGovernanceEventTypeValues);
 
-export const CanonicalizationAppliedPayloadSchema = z
-  .object({
+export const CanonicalizationAppliedPayloadSchema = z.union([
+  z.object({
     input: NonEmptyStringSchema,
     canonical: NonEmptyStringSchema,
     domain: NonEmptyStringSchema,
     was_alias_resolved: z.boolean(),
     applied_at: IsoDatetimeStringSchema
-  })
-  .strict()
-  .readonly();
+  }).strict(),
+  z.object({
+    input: z.null(), canonical: z.null(), domain: z.null(),
+    was_alias_resolved: z.boolean(), applied_at: IsoDatetimeStringSchema,
+    redaction: SourceEraseRedactionSchema
+  }).strict()
+]).readonly();
 
-export const CanonicalizationAliasResolvedPayloadSchema = z
-  .object({
+export const CanonicalizationAliasResolvedPayloadSchema = z.union([
+  z.object({
     alias: NonEmptyStringSchema,
     canonical: NonEmptyStringSchema,
     domain: NonEmptyStringSchema,
     language: NonEmptyStringSchema,
     resolved_at: IsoDatetimeStringSchema
-  })
-  .strict()
-  .readonly();
+  }).strict(),
+  z.object({
+    alias: z.null(), canonical: z.null(), domain: z.null(),
+    language: NonEmptyStringSchema, resolved_at: IsoDatetimeStringSchema,
+    redaction: SourceEraseRedactionSchema
+  }).strict()
+]).readonly();
 
 export const StancePolicyEvaluatedPayloadSchema = z
   .object({

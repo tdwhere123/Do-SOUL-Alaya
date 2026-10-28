@@ -36,26 +36,22 @@ export async function recordCausalUsedReceipts(
     readonly causedBy?: string | null;
   }>
 ): Promise<readonly CausalUsageReceipt[]> {
-  const receipts: CausalUsageReceipt[] = [];
-  for (const objectId of input.usedObjectIds) {
-    const candidate = buildCausalUsageReceipt({
+  if (input.usedObjectIds.length === 0) return Object.freeze([]);
+  const candidates = input.usedObjectIds.map((objectId) => buildCausalUsageReceipt({
       workspaceId: input.workspaceId,
       causalKey: input.causalKey,
       downstreamRef: objectId,
       occurredAt: input.occurredAt,
       scope: input.scope,
       usageKind: "causal"
-    });
-    const persisted = await input.eventPublisher.mutateThenAppendMany(() => {
-      const result = port.recordUsage(candidate);
-      return {
-        events: result.inserted
-          ? [buildCausalUsageRecordedEvent(result.receipt, input)]
-          : [],
-        result: result.receipt
-      };
-    });
-    receipts.push(persisted.result);
-  }
-  return Object.freeze(receipts);
+    }));
+  const persisted = await input.eventPublisher.mutateThenAppendMany(() => {
+    const results = candidates.map((candidate) => port.recordUsage(candidate));
+    return {
+      events: results.filter((result) => result.inserted)
+        .map((result) => buildCausalUsageRecordedEvent(result.receipt, input)),
+      result: results.map((result) => result.receipt)
+    };
+  });
+  return Object.freeze(persisted.result);
 }

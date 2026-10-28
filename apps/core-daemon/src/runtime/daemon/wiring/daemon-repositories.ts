@@ -56,6 +56,7 @@ import {
 } from "../lifecycle/daemon-runtime-support.js";
 import type { WarnLogger } from "../lifecycle/daemon-runtime-helpers.js";
 import { SqliteWorkspaceEngineConfigRepo } from "../../../services/config/workspace-engine-config-repo.js";
+import { createDaemonMemoryObjectKeyWriter } from "./memory-object-key-writer.js";
 
 export function createDaemonRepositories(input: {
   readonly database: StorageDatabase;
@@ -85,6 +86,7 @@ export function createDaemonRepositories(input: {
 }
 
 function createCoreDaemonRepos(database: StorageDatabase) {
+  const objectKeyWriter = createDaemonMemoryObjectKeyWriter(database);
   return {
     workspaceRepo: new SqliteWorkspaceRepo(database),
     runRepo: new SqliteRunRepo(database),
@@ -104,7 +106,8 @@ function createCoreDaemonRepos(database: StorageDatabase) {
     claimFormRepo: new SqliteClaimFormRepo(database),
     conflictMatrixRepo: new SqliteConflictMatrixRepo(database),
     slotRepo: new SqliteSlotRepo(database),
-    proposalRepo: new SqliteProposalRepo(database),
+    proposalRepo: new SqliteProposalRepo(database, (memory) =>
+      objectKeyWriter.materializeForMemory(memory)),
     greenStatusRepo: new SqliteGreenStatusRepo(database),
     healthJournalRepo: new SqliteHealthJournalRepo(database),
     fileRepo: new SqliteFileRepo(database),

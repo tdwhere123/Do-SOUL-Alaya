@@ -1,6 +1,5 @@
 import {
   MemoryGovernanceEventType,
-  SoulProposalCreatedPayloadSchema,
   SoulProposalResolvedPayloadSchema,
   SoulReviewCompletedPayloadSchema,
   SoulReviewCreatedPayloadSchema,
@@ -9,6 +8,7 @@ import {
   type Proposal,
   type SoulReviewMemoryProposalRequest
 } from "@do-soul/alaya-protocol";
+import { buildProposalCreatedEvent } from "@do-soul/alaya-core";
 import type { McpMemoryToolCallContext } from "../../tool/tool-handler-types.js";
 import type {
   ProposalCreationEventInput,
@@ -26,21 +26,8 @@ export function buildProposalCreationEvents(
   context: McpMemoryToolCallContext,
   sourceDeliveryIds: readonly string[] | null
 ): readonly ProposalCreationEventInput[] {
-  return [{
-    event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-    entity_type: "proposal",
-    entity_id: proposal.proposal_id,
-    workspace_id: context.workspaceId,
-    run_id: context.runId,
-    caused_by: context.agentTarget,
-    payload_json: SoulProposalCreatedPayloadSchema.parse({
-      object_id: proposal.runtime_id,
-      object_kind: proposal.object_kind,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      ...(sourceDeliveryIds === null ? {} : { source_delivery_ids: sourceDeliveryIds })
-    })
-  }];
+  return [buildProposalCreatedEvent(proposal, { workspaceId: context.workspaceId, runId: context.runId,
+    causedBy: context.agentTarget, sourceDeliveryIds })];
 }
 
 export function buildProposalResolutionEvents(input: Readonly<{

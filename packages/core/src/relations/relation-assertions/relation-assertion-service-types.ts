@@ -47,6 +47,7 @@ export interface RelationAssertionAtomicRepoPort {
   ): Readonly<RelationAssertionResolution>;
   listAssertionsInCurrentTransaction(): readonly Readonly<RelationAssertion>[];
   listCurrentResolutionsInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[];
+  listResolutionHistoryInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[];
   writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGenerationInput,
     options: { readonly activate: boolean }
@@ -54,7 +55,8 @@ export interface RelationAssertionAtomicRepoPort {
 }
 
 export interface RelationAssertionHistoryPort {
-  queryByEntity(entityType: string, entityId: string): Promise<readonly RelationAssertionEventEntry[]>;
+  getStorageConnectionIdentity?(): object;
+  queryByEntityInCurrentTransaction(entityType: string, entityId: string): readonly RelationAssertionEventEntry[];
 }
 
 export type RelationAssertionEventEntry = Readonly<{

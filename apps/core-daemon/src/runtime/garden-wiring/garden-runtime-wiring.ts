@@ -1,15 +1,19 @@
 import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
+  createGardenProposalWriter,
   type AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
   DEFAULT_ANSWER_OVERLAP_BAR,
   GardenBacklogTelemetryService,
+  RelationAssertionService,
   rebuildCountersFromEventLog,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
 import {
   SqliteGardenTaskRepo,
   createGardenBackgroundDataPorts,
+  isTemporalProjectionSelected,
+  SqliteTemporalPathProjectionReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
@@ -35,6 +39,7 @@ import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime
 import type { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
 import { loadBackfillFormationObjects } from "../daemon/support/path-formation-order.js";
+import { createRecallTemporalProjectionEnsurer } from "../recall/recall-path-readers.js";
 
 type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
 type DaemonServiceFoundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -60,6 +65,8 @@ type GardenRuntimeWiringInput = Readonly<{
     | "orphanRadarRepo"
     | "pathGraphSnapshotRepo"
     | "pathRelationRepo"
+    | "relationAssertionRepo"
+    | "proposalRepo"
     | "pathPlasticityWatermarkRepo"
     | "workspaceRepo"
     | "enrichPendingRepo"
@@ -164,7 +171,9 @@ function createForgetTombstoneAuthority(input: GardenRuntimeWiringInput) {
 }
 
 function createGardenDataPorts(input: GardenRuntimeWiringInput) {
-  const gardenBackgroundDataPorts = createGardenBackgroundDataPorts(input.database);
+  const gardenBackgroundDataPorts = createGardenBackgroundDataPorts(input.database, {
+    proposalWriter: createGardenProposalWriter({ proposalRepo: input.proposalRepo, eventPublisher: input.eventPublisher })
+  });
   return {
     ...gardenBackgroundDataPorts,
     dormantDemotionPort: {
@@ -174,7 +183,8 @@ function createGardenDataPorts(input: GardenRuntimeWiringInput) {
         const outcome = await input.memoryService.demoteActiveToDormantIfActive(
           memoryId,
           `autonomous_dormant_demotion: ${taskId}`,
-          "deterministic_rule"
+          "deterministic_rule",
+          { requireLowActivity: true }
         );
         return outcome.status;
       }
@@ -217,6 +227,7 @@ function createGardenSchedulerRuntime(
     healthIssueGroupRepo: input.healthIssueGroupRepo,
     pathGraphSnapshotRepo: input.pathGraphSnapshotRepo,
     pathRelationRepo: input.pathRelationRepo,
+    ...(isTemporalProjectionSelected(input.database) ? { maintenancePathReader: createTemporalMaintenancePathReader(input) } : {}),
     legacyTopologyMutationsEnabled: false,
     pathPlasticityWatermarkRepo: input.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: input.embeddingBackfillHandler,
@@ -237,6 +248,23 @@ function createGardenSchedulerRuntime(
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     warn: input.warnLogger.warn
   });
+}
+
+function createTemporalMaintenancePathReader(input: GardenRuntimeWiringInput) {
+  const service = new RelationAssertionService({ repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher, eventHistory: input.eventLogRepo });
+  const ensure = createRecallTemporalProjectionEnsurer(service);
+  const reader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
+  return {
+    findByAnchors: async (workspaceId: string, anchors: Parameters<SqliteTemporalPathProjectionReader["findByAnchors"]>[1]) => {
+      await ensure();
+      return await reader.findByAnchors(workspaceId, anchors);
+    },
+    findActiveAll: async (workspaceId: string) => {
+      await ensure();
+      return await reader.findByWorkspace(workspaceId);
+    }
+  };
 }
 
 function createGardenEnrichmentPorts(

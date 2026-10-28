@@ -9,7 +9,7 @@ const vector = Float32Array.from({ length: 384 }, (_, index) => (index + 1) / 38
 const content = "Alex works from Lisbon weekdays.";
 const profile = { providerKind: provider.providerKind, modelId: provider.modelId, schemaVersion: provider.schemaVersion,
   maxRows: 3, maxMetadataUtf8Bytes: 1024 };
-const options = { ...profile, expectedDimensions: 384, maxVectorBytes: 1536, maxObjectIds: 3 };
+const options = { ...profile, maxRows: 6, expectedDimensions: 384, maxVectorBytes: 1536, maxObjectIds: 3 };
 
 afterEach(() => { vi.restoreAllMocks(); for (const db of databases) db.close(); databases.clear(); });
 
@@ -43,7 +43,7 @@ describe("bounded exact-profile embedding storage reads", () => {
     const result = await repo.listBoundedByObjectIds("workspace-1", ids, options);
     expect(result.records.map((row) => row.object_id)).toEqual([ids[2]]);
     expect(result.records[0]!.embedding).toEqual(vector);
-    expect(result.rowVisits).toBe(3);
+    expect(result.rowVisits).toBe(6);
     expect(result.vectorBytes).toBe(1536);
     expect(result.filteredRows).toBe(2);
     expect(result.truncated).toBe(true);
@@ -54,14 +54,19 @@ describe("bounded exact-profile embedding storage reads", () => {
     slice.database.connection.prepare("UPDATE memory_embeddings SET dimensions = 384 WHERE object_id = ?").run(ids[0]);
     expect(await repo.listBoundedByObjectIds("workspace-1", [ids[0]!], options)).toMatchObject({ records: [], vectorBytes: 0, filteredRows: 1, truncated: true });
     expect(materialized.at(-1)!.embedding_blob).toBeNull();
-    const capped = await repo.listBoundedByObjectIds("workspace-1", [...ids].reverse(), { ...options, maxRows: 1 });
-    expect(capped).toMatchObject({ records: [], rowVisits: 1, vectorBytes: 0, truncated: true });
+    const capped = await repo.listBoundedByObjectIds("workspace-1", [...ids].reverse(), { ...options, maxRows: 2 });
+    expect(capped).toMatchObject({ records: [], rowVisits: 2, vectorBytes: 0, truncated: true });
     const recalled = await slice.runRecall({ text: "Who works remotely?",
       familyCaps: { lexical: "unavailable", typed_relation: "unavailable", embedding: "ready" } });
     expect(recalled.membership).toEqual([]);
     expect(recalled.counters.query_embed_count).toBe(0);
     expect(recalled.counters.embedding_vector_payload_bytes).toBe(0);
     expect(recalled.index.completeness.observed_coverage).toBe("unavailable");
+    slice.database.connection.prepare(`INSERT INTO privacy_dependency_quarantine (workspace_id, object_kind, object_id)
+      VALUES ('workspace-1', 'memory_entry', ?)`).run(ids[2]);
+    const unavailable = await repo.listBoundedByObjectIds("workspace-1", [ids[2]!], options);
+    expect(unavailable).toMatchObject({ records: [], rowVisits: 2, vectorBytes: 0, filteredRows: 1, truncated: true });
+    await expect(repo.findByObjectId(ids[2]!)).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("caps native indexed identity visits before inactive source filtering with no refill", async () => {

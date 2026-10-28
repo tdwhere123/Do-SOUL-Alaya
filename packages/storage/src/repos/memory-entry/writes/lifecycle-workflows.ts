@@ -247,7 +247,8 @@ export async function transitionMemoryEntryLifecycle(
   objectId: string,
   lifecycleState: MemoryEntry["lifecycle_state"],
   updatedAt: string,
-  onTransition?: () => void
+  onTransition?: () => void,
+  expectedFromState?: MemoryEntry["lifecycle_state"]
 ): Promise<Readonly<MemoryEntry>> {
   const parsedLifecycleState = parseLifecycleState(lifecycleState);
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
@@ -261,10 +262,10 @@ export async function transitionMemoryEntryLifecycle(
         parsedLifecycleState === "tombstone"
           ? this.transitionLifecycleStatement
           : this.transitionLifecycleClearForgetStatement;
-      const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
+      const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId, expectedFromState ?? null, expectedFromState ?? null);
 
       if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+        throw new StorageError(expectedFromState === undefined ? "NOT_FOUND" : "CONFLICT", `Memory entry ${objectId} lifecycle changed or was not found.`);
       }
 
       const updated = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
@@ -354,7 +355,7 @@ export function transitionMemoryEntryLifecycleSync(
       parsedLifecycleState === "tombstone"
         ? this.transitionLifecycleStatement
         : this.transitionLifecycleClearForgetStatement;
-    const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
+    const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId, null, null);
     if (result.changes === 0) {
       throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
     }
@@ -375,12 +376,15 @@ export async function transitionMemoryEntryToDormantIfActive(
   this: MemoryEntryLifecycleWorkflowHost,
   objectId: string,
   updatedAt: string,
-  onTransition?: () => void
+  onTransition?: () => void,
+  eligibility?: { readonly workspaceId: string; readonly maxActivation: number; readonly idleBefore: string }
 ): Promise<Readonly<MemoryEntry> | null> {
   const parsedUpdatedAt = parseUpdatedAt(updatedAt);
   try {
     const demoted = this.transaction(() => {
-      const result = this.demoteActiveToDormantStatement.run(parsedUpdatedAt, objectId);
+      const result = this.demoteActiveToDormantStatement.run(parsedUpdatedAt, objectId,
+        eligibility?.workspaceId ?? null, eligibility?.workspaceId ?? null,
+        eligibility?.maxActivation ?? null, eligibility?.idleBefore ?? null);
       if (result.changes === 0) {
         return false;
       }

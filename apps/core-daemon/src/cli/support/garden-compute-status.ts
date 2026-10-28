@@ -103,7 +103,7 @@ function deriveGardenRoutingDecision(
     return config.provider_kind;
   }
 
-  if (resolved === null) {
+  if (!config.enabled || resolved === null) {
     return "local_heuristics";
   }
 

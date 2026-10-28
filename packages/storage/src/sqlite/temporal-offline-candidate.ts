@@ -15,6 +15,8 @@ import {
   type LegacyPathRelationQuarantineSummary
 } from "./temporal-cutover-gate.js";
 import { StorageError } from "../shared/errors.js";
+import { acquireTemporalMaintenanceLease, type TemporalMaintenanceLease } from "./temporal-maintenance-lease.js";
+import { publishNewTemporalFile, syncTemporalDirectory, TemporalFilePublicationError } from "./temporal-file-publication.js";
 
 export interface TemporalCandidateFileDigest {
   readonly role: "database" | "journal" | "wal";
@@ -58,6 +60,18 @@ export async function prepareTemporalCandidate(input: {
   readonly receiptFilename: string;
 }): Promise<TemporalCandidatePreparation> {
   const paths = normalizePaths(input);
+  const leases: TemporalMaintenanceLease[] = [];
+  try {
+    for (const filename of [paths.candidateFilename, paths.receiptFilename].sort()) {
+      leases.push(acquireTemporalMaintenanceLease(`${filename}.temporal-preparation.lock.sqlite`));
+    }
+    return await prepareCandidateWithinLease(paths);
+  } finally {
+    for (const lease of leases.reverse()) lease.release();
+  }
+}
+
+async function prepareCandidateWithinLease(paths: NormalizedPaths): Promise<TemporalCandidatePreparation> {
   assertCandidateOutputsAreNew(paths);
 
   const sourceBefore = readFileSet(paths.sourceFilename);
@@ -85,7 +99,7 @@ export async function prepareTemporalCandidate(input: {
     assertQuarantineReconciliation(sourceQuarantines, sourceSummary, candidateQuarantines);
     assertUnchangedSource(paths.sourceFilename, sourceBefore);
 
-    fs.renameSync(sealedStagingFilename, paths.candidateFilename);
+    publishNewTemporalFile(sealedStagingFilename, paths.candidateFilename);
     candidatePublished = true;
     assertTemporalCandidateDatabaseReady(paths.candidateFilename, knownMaxVersion);
 
@@ -111,7 +125,20 @@ export async function prepareTemporalCandidate(input: {
     writeReceiptAtomically(paths.receiptFilename, preparedReceipt(result));
     return result;
   } catch (error) {
-    if (candidatePublished) removeDatabaseFileSet(paths.candidateFilename);
+    if (error instanceof TemporalFilePublicationError && error.publishedFilename === paths.receiptFilename) {
+      try {
+        // Retire the visible success witness durably before its database. If
+        // retirement is uncertain, keep the complete candidate for recovery.
+        fs.unlinkSync(paths.receiptFilename);
+        syncTemporalDirectory(path.dirname(paths.receiptFilename));
+      } catch (compensationError) {
+        throw new StorageError("CONFLICT", "Temporal receipt publication failed; candidate retained for recovery.",
+          new AggregateError([error, compensationError]));
+      }
+    }
+    if (candidatePublished || error instanceof TemporalFilePublicationError && error.publishedFilename === paths.candidateFilename) {
+      removeDatabaseFileSet(paths.candidateFilename);
+    }
     writeFailureReceiptIfPossible(paths.receiptFilename, failureReceipt({
       sourceFilename: paths.sourceFilename,
       sourceSchemaVersions,
@@ -383,8 +410,8 @@ function writeFailureReceiptIfPossible(filename: string, receipt: Record<string,
 function writeReceiptAtomically(filename: string, receipt: Record<string, unknown>): void {
   const temporaryFilename = `${filename}.tmp-${randomUUID()}`;
   try {
-    fs.writeFileSync(temporaryFilename, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-    fs.renameSync(temporaryFilename, filename);
+    fs.writeFileSync(temporaryFilename, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    publishNewTemporalFile(temporaryFilename, filename);
   } finally {
     fs.rmSync(temporaryFilename, { force: true });
   }

@@ -1,6 +1,7 @@
 import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import {
+  capableRecallConsumerDeclaration,
   CoreError,
   type RecallService,
   type RunService,
@@ -49,7 +50,8 @@ export function registerRecallRoutes(app: Hono, services: RecallRouteServices): 
       taskSurface,
       workspaceId: run.workspace_id,
       runId: run.run_id,
-      strategy
+      strategy,
+      ...capableRecallConsumerDeclaration()
     });
     return context.json({ success: true, data: result }, 200);
   });

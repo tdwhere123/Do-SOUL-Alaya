@@ -78,6 +78,7 @@ export const zh = {
   "overview:bench.loading": "加载 benchmark 摘要中…",
   "overview:bench.error": "Benchmark 不可用：{message}",
   "recall:stale": "刷新失败，当前显示此前加载的数据。",
+  "recall:pending": "正在加载所选时间范围，当前显示此前加载的数据。",
   "overview:bench.delta": "Δ vs 上一版 {delta}",
   "overview:bench.firstBaseline": "首份 baseline",
   "overview:bench.history": "共 {count} 份历史记录",
@@ -138,8 +139,6 @@ export const zh = {
   "memoryBrowser:error.unknown": "未知错误",
   "memoryBrowser:toast.memoryListFetchFailed": "记忆列表加载失败：{message}",
   "memoryBrowser:toast.evidenceOpenFailed": "打开证据失败：{message}",
-  "memoryBrowser:toast.proposalCreated": "提议已创建：{id}（path_relation → strictly_governed）",
-  "memoryBrowser:toast.promoteFailed": "提升失败：{message}",
 
   // ── graph ───────────────────────────────────────────────────────────
   "graph:loading": "正在加载图谱界面…",
@@ -240,6 +239,7 @@ export const zh = {
   "proposals:reviewer.required": "必须先填审核人身份才能接受/拒绝。",
   "proposals:loading": "加载提议中…",
   "proposals:empty": "暂无待审提议。",
+  "proposals:queueCount": "显示 {shown} / {total} 条待审提议。审阅这些条目后可加载队列中的其余提议。",
   "proposals:errorPrefix": "错误：{message}",
   "proposals:loadFailedNoWorkspace": "URL 缺少 workspaceId。请用 alaya inspect --workspace 重新启动。",
   "proposals:row.proposedChanges": "提议改动",
@@ -277,6 +277,7 @@ export const zh = {
   "config:diagnostic.heading": "诊断信息",
   "config:loadingSection": "{section} 加载中…",
   "config:error.load": "加载 {section} 失败：{message}",
+  "config:embedding.statusUnavailable": "Embedding 状态不可用：{message}",
   "config:toast.patchedRestart": "{section} 已更新 · 等待重启守护进程",
   "config:toast.saved": "{section} 已保存",
   "config:error.save": "保存 {section} 失败：{message}",
@@ -379,14 +380,13 @@ export const zh = {
   "healthInbox:cause.green_revoked": "Green 撤销",
   "healthInbox:cause.evidence_failure": "证据失败",
   "healthInbox:cause.path_relation_failure": "路径关系失败",
+  "healthInbox:cause.recall_auxiliary_failure": "召回辅助查询失败",
   "healthInbox:row.count": "次数",
   "healthInbox:row.confidence": "置信度",
   "healthInbox:row.firstSeen": "首次出现",
   "healthInbox:row.lastSeen": "最近 {ts}",
   "healthInbox:row.resolutionState": "处理状态",
   "healthInbox:row.suggestedActions": "建议动作",
-  "healthInbox:row.promoteStrictlyGoverned": "提升为 strictly_governed",
-  "healthInbox:row.promoteStrictlyGovernedAria": "为记忆 {id} 提交 strictly_governed 提议",
 
   // ── session ────────────────────────────────────────────────────────
   "session:expired.title": "会话已过期",

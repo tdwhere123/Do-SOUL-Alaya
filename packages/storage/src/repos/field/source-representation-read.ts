@@ -13,7 +13,7 @@ export type SourceRecordReadAllowance = Readonly<{ workLimit?: number; nativeByt
 export const SOURCE_DEPENDENCY_METADATA_RESERVATION = 1024;
 
 /** SQLite supplies bounded facts; the shared source contract owns dependency eligibility. */
-export function readSourceProjectionDependencies(database: StorageDatabase, source: Pick<SourceRecordIdentity,
+export function readSourceProjectionDependencies(database: Pick<StorageDatabase, "connection">, source: Pick<SourceRecordIdentity,
   "workspace_id" | "scope_class" | "source_representation">, currentOrder: string,
 allowance: SourceRecordReadAllowance = {}) {
   const representation = source.source_representation;

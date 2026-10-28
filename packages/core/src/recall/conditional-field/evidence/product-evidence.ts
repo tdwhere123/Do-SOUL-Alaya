@@ -21,6 +21,7 @@ export type ProductEvidenceCursor = Readonly<{
 export function prepareProductEvidence(input: Readonly<{
   state: FieldEngineState; value: FieldValue; claimKind?: string; causeSource?: string;
   progress?: ProductEvidenceCursor; workLimit: number; memoryLimit: number;
+  onAtomicWorkBlock?: (required: number, available: number) => void;
 }>): Readonly<{ progress: ProductEvidenceCursor; rows: readonly RelationObserverRow[]; work: number; retained_bytes: number; complete: boolean }> {
   let cursor: ProductEvidenceCursor = input.progress ?? { phase: input.value.state.target.kind === "memory_entry" ? "transitions" : "complete",
     transition_offset: 0, roots: new PersistentStringMap(), leaf_offset: 0, leaf_id_offset: 0,
@@ -31,6 +32,7 @@ export function prepareProductEvidence(input: Readonly<{
   let retained = 0;
   let assessmentReserve = 2;
   const withdrawn = new Set(input.state.withdrawn_leaves ?? []);
+  if (input.workLimit < 1 && cursor.phase !== "complete") input.onAtomicWorkBlock?.(1, input.workLimit);
   while (work < input.workLimit) {
     if (cursor.phase === "complete") break;
     if (cursor.phase === "transitions") {
@@ -77,7 +79,10 @@ export function prepareProductEvidence(input: Readonly<{
       work += 1;
       continue;
     }
-    if (work + assessmentReserve + 9 > input.workLimit) break;
+    if (work + assessmentReserve + 9 > input.workLimit) {
+      input.onAtomicWorkBlock?.(assessmentReserve + 9, input.workLimit - work);
+      break;
+    }
     cursor = { ...cursor, receipt_offset: cursor.receipt_offset + 1 };
     work += 1;
     if (withdrawn.has(receipt.evidenceId) || withdrawn.has(receipt.eventId)) continue;

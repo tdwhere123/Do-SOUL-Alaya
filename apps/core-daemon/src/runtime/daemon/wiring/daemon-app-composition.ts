@@ -84,7 +84,6 @@ type CreateCoreDaemonAppInput = Readonly<{
   runHotStateService: RouteField<"runs", "runHotStateService">;
   eventLogRepo: RouteField<"runs", "eventLogRepo"> &
     RouteField<"files", "eventLogRepo"> &
-    RouteField<"proposals", "eventLogRepo"> &
     RouteField<"recallUtilization", "eventLogRepo"> &
     E2eEventLogInputPort;
   governanceLeaseService: RouteField<"runs", "governanceLeaseService"> &
@@ -94,7 +93,6 @@ type CreateCoreDaemonAppInput = Readonly<{
     RouteField<"governance", "sessionOverrideService">;
   budgetBankruptcyService: RouteField<"runs", "budgetBankruptcyService"> &
     RouteField<"budget", "budgetBankruptcyService">;
-  contextLensAssembler: RouteField<"runs", "contextLensAssembler">;
   signalService: RouteField<"signals", "signalService">;
   evidenceService: RouteField<"evidence", "evidenceService">;
   gardenBacklogTelemetryService: RouteService<"gardenBacklog">["gardenBacklogTelemetryService"];
@@ -116,15 +114,13 @@ type CreateCoreDaemonAppInput = Readonly<{
   synthesisService: RouteField<"syntheses", "synthesisService">;
   claimService: RouteField<"claims", "claimService">;
   proposalService: RouteField<"proposals", "proposalService">;
-  proposalRepo: RouteField<"proposals", "proposalRepo">;
   healthIssueGroupRepo: RouteField<"healthInbox", "healthIssueGroupRepo">;
   // Inspector loopback HTTP routes call the same MCP handler that
   // attached agents use.
   mcpMemoryToolHandler: RouteField<"proposals", "mcpMemoryToolHandler"> &
     RouteField<"soulSearch", "mcpMemoryToolHandler">;
   fileRepo: RouteField<"files", "fileRepo">;
-  runtimeNotifier: RouteField<"proposals", "runtimeNotifier"> &
-    RouteField<"files", "runtimeNotifier"> &
+  runtimeNotifier: RouteField<"files", "runtimeNotifier"> &
     RouteField<"e2eEventTriggers", "runtimeNotifier">;
   topologyAuditService?: TopologyAuditInputPort;
   graphExploreService: RouteField<"soul", "graphExploreService">;
@@ -213,7 +209,6 @@ function createRunLifecycleRoutes(input: CreateCoreDaemonAppInput) {
       governanceLeaseService: input.governanceLeaseService,
       sessionOverrideService: input.sessionOverrideService,
       budgetBankruptcyService: input.budgetBankruptcyService,
-      contextLensAssembler: input.contextLensAssembler,
       warn: input.warn
     },
     signals: {
@@ -307,9 +302,6 @@ function createGovernanceRouteServices(input: CreateCoreDaemonAppInput) {
       workspaceService: input.workspaceService,
       memoryService: input.memoryService,
       proposalService: input.proposalService,
-      proposalRepo: input.proposalRepo,
-      eventLogRepo: input.eventLogRepo,
-      runtimeNotifier: input.runtimeNotifier,
       mcpMemoryToolHandler: input.mcpMemoryToolHandler
     },
     healthInbox: {

@@ -12,6 +12,7 @@ import type { GardenSchedulerRuntimeSupport } from "../scheduler/scheduler-runti
 import type { RuntimeGardenScheduler } from "./runtime-types.js";
 
 export const BULK_ENRICH_DRAIN_CAP_PER_PASS = 32;
+const JANITOR_DRAIN_CAP_PER_PASS = 16;
 
 const JANITOR_RUNTIME_TASK_KINDS = [
   GardenTaskKind.TTL_CLEANUP,
@@ -95,6 +96,7 @@ function createJanitorBackgroundService(input: Readonly<{
     intervalMs: 300_000,
     task: async () => {
       await input.enqueueForAllWorkspaces(GardenTaskKind.TTL_CLEANUP, GardenTier.TIER_0);
+      await input.enqueueForAllWorkspaces(GardenTaskKind.HOT_INDEX_DEMOTION, GardenTier.TIER_0);
       await input.enqueueForAllWorkspaces(GardenTaskKind.DORMANT_DEMOTION, GardenTier.TIER_0);
       await input.enqueueForAllWorkspaces(GardenTaskKind.TOMBSTONE_GC, GardenTier.TIER_0);
       input.markBackgroundPassCompleted();
@@ -116,6 +118,7 @@ function createAuditorBackgroundService(input: Readonly<{
     intervalMs: 1_800_000,
     task: async () => {
       await input.enqueueForAllWorkspaces(GardenTaskKind.EVIDENCE_STALENESS_CHECK, GardenTier.TIER_1);
+      await input.enqueueForAllWorkspaces(GardenTaskKind.GREEN_MAINTENANCE, GardenTier.TIER_1);
       if (input.orphanDetectionEnabled) {
         await input.enqueueForAllWorkspaces(GardenTaskKind.ORPHAN_DETECTION, GardenTier.TIER_1);
         await input.enqueueForAllWorkspaces(GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, GardenTier.TIER_1);
@@ -140,7 +143,6 @@ function createLibrarianBackgroundService(input: Readonly<{
     name: "Librarian",
     intervalMs: 900_000,
     task: async () => {
-      await input.enqueueForAllWorkspaces(GardenTaskKind.MERGE_PROPOSAL, GardenTier.TIER_2);
       if (input.embeddingBackfillEnabled) {
         await input.gardenSchedulerRuntime.enqueueEmbeddingBackfillForAllWorkspaces();
       }
@@ -263,12 +265,11 @@ async function dispatchRuntimeRoleTasks(input: Readonly<{
   readonly requestBacklogTelemetryCapture: (reason: string) => void;
 }>): Promise<void> {
   for (const [role, handler, runtimeTaskKinds] of runtimeRoleDispatchEntries(input)) {
-    const task = await input.runtimeGardenScheduler.dispatchNextMatchingTaskKind(
-      role,
-      runtimeTaskKinds
-    );
-    input.requestBacklogTelemetryCapture(`dispatch:${role}`);
-    if (task !== null) {
+    const cap = role === GardenRole.JANITOR ? JANITOR_DRAIN_CAP_PER_PASS : 1;
+    for (let dispatched = 0; dispatched < cap; dispatched += 1) {
+      const task = await input.runtimeGardenScheduler.dispatchNextMatchingTaskKind(role, runtimeTaskKinds);
+      input.requestBacklogTelemetryCapture(`dispatch:${role}`);
+      if (task === null) break;
       await dispatchRuntimeRoleTask(input, handler, task);
     }
   }

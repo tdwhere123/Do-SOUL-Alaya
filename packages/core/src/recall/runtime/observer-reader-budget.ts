@@ -1,9 +1,11 @@
 import type { ObserverReaders, SourceObserverPage } from "../conditional-field/observers/observe.js";
+import { validateSourceObserverPage } from "../conditional-field/observers/observe-ports.js";
 
 export function meterReaders(
   readers: ObserverReaders,
   memory: { remaining: number; cachedBytes: number },
-  cache: Map<string, SourceObserverPage>
+  cache: Map<string, SourceObserverPage>,
+  onInvalidSourcePage?: (work: Readonly<{ native_visits?: number; native_bytes?: number }>) => void
 ): ObserverReaders {
   const source = readers.source;
   return {
@@ -43,12 +45,19 @@ export function meterReaders(
         return page;
       }
     }),
+    ...(readers.measureStoredPairs === undefined ? {} : {
+      measureStoredPairs: (args: Parameters<NonNullable<ObserverReaders["measureStoredPairs"]>>[0]) => {
+        const page = readers.measureStoredPairs!({ ...args, byteLimit: Math.min(args.byteLimit ?? 137472, memory.remaining) });
+        memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
+        return page;
+      }
+    }),
     ...(source === undefined ? {} : { source: (args: Parameters<NonNullable<ObserverReaders["source"]>>[0]) => {
       const hit = cache.get(args.objectId);
       if (hit !== undefined) return { ...hit, rowsRead: 0, bytesRead: 0 };
       const byteLimit = Math.min(args.byteLimit ?? 65536, 65536, memory.remaining);
       if (byteLimit < 1) return { row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
-      const page = source({ ...args, byteLimit });
+      const page = validateSourceObserverPage(source({ ...args, byteLimit }), onInvalidSourcePage);
       memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
       memory.cachedBytes += page.bytesRead;
       if (page.resourceLimited !== true) cache.set(args.objectId, page);

@@ -295,9 +295,8 @@ function reportStructuredInstallUsage(ctx: AlayaCliContext): AlayaCliResult {
       "Run:  alaya install --non-interactive '<answers-json>'\n" +
       "      alaya install --keychain                 # guided secret prompt\n" +
       "Example answers JSON:\n" +
-      '  {"db_path":"~/.local/share/alaya/alaya.db","model_id":"gpt-4.1-mini",' +
-      '"api_key_source":"file","key_file_path":"~/.config/alaya/secrets/openai",' +
-      '"default_workspace":"default","garden_provider_kind":"official_api"}\n' +
+      '  {"embedding_provider":"local_onnx","default_workspace":"default"}\n' +
+      "Custom db_path and key_file_path values must use absolute paths; ~ is not expanded.\n" +
       "Fields are documented in README.md §Quickstart.\n"
   );
   return { exitCode: ALAYA_SYSEXITS.USAGE };

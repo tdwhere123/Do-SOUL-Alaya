@@ -12,9 +12,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { requirePrivacyObjectAvailable } from "./privacy-availability.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { CountRowParser, parseOptionalRow } from "../shared/parse-row.js";
 import { verifyPersistedEffect, verifyPersistedUsage } from "./identity.js";
+import { CURRENT_SOURCE_RECORD_ORDER } from "./source-representation-read.js";
 import {
   fieldCausalUsageParser,
   fieldProofEffectParser,
@@ -281,6 +283,7 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
     const row = this.database.connection.prepare(`${CLAIM_FACT_SELECT}
       WHERE workspace_id = ? AND object_id = ? LIMIT 1
     `).get(workspaceId, objectId) as ClaimFactRow | undefined;
+    if (row !== undefined) requirePrivacyObjectAvailable(this.database, workspaceId, "claim_form", objectId);
     return row ?? null;
   }
 
@@ -290,15 +293,18 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
       FROM memory_entries WHERE workspace_id = ? AND object_id = ? LIMIT 1
     `).get(workspaceId, objectId) as MemoryFactRow | undefined;
     if (row === undefined) throw new StorageError("VALIDATION_FAILED", "effect target is stale");
+    requirePrivacyObjectAvailable(this.database, workspaceId, "memory_entry", objectId);
     return row;
   }
 
   private readCompetingClaimRows(workspaceId: string, canonicalKey: string): readonly ClaimFactRow[] {
-    return this.database.connection.prepare(`${CLAIM_FACT_SELECT}
+    const rows = this.database.connection.prepare(`${CLAIM_FACT_SELECT}
       WHERE workspace_id = ?
         AND json_extract(governance_subject, '$.canonical_key') = ?
         AND claim_status NOT IN ('archived', 'rejected', 'superseded')
     `).all(workspaceId, canonicalKey) as readonly ClaimFactRow[];
+    for (const row of rows) requirePrivacyObjectAvailable(this.database, workspaceId, "claim_form", row.object_id);
+    return rows;
   }
 
   private readGroundedEvidenceIds(workspaceId: string): ReadonlySet<string> {
@@ -307,7 +313,11 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
       FROM source_record_evidence_refs AS ref
       JOIN source_records AS source
         ON source.workspace_id = ref.workspace_id AND source.record_id = ref.record_id
-      WHERE ref.workspace_id = ? AND NOT EXISTS (
+      WHERE ref.workspace_id = ? AND source.record_id = (
+        SELECT source_records.record_id FROM source_records INDEXED BY idx_source_records_current
+        WHERE source_records.workspace_id = source.workspace_id AND source_records.source_id = source.source_id
+        ORDER BY ${CURRENT_SOURCE_RECORD_ORDER} LIMIT 1
+      ) AND NOT EXISTS (
         SELECT 1 FROM projection_erase_barriers AS barrier
         WHERE barrier.workspace_id = source.workspace_id
           AND barrier.subject_kind = 'source_record'
@@ -402,6 +412,11 @@ function prepareEffectStatements(database: StorageDatabase) {
         ON source.workspace_id = ?
        AND source.record_id = requested.source_record_id
        AND source.content_digest = requested.source_content_digest
+       AND source.record_id = (
+         SELECT source_records.record_id FROM source_records INDEXED BY idx_source_records_current
+         WHERE source_records.workspace_id = source.workspace_id AND source_records.source_id = source.source_id
+         ORDER BY ${CURRENT_SOURCE_RECORD_ORDER} LIMIT 1
+       )
        AND NOT EXISTS (
          SELECT 1 FROM projection_erase_barriers AS barrier
          WHERE barrier.workspace_id = source.workspace_id

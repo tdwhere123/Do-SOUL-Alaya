@@ -81,14 +81,14 @@ describe("per-lane evaluated universe witness", () => {
 
   it("encodes each lane's effective objectIds+tier scope, not a shared request stamp", async () => {
     const { repo, database } = await seedPopulation();
-    await repo.create(createMemoryEntry({
+    const warmKeyOwner = await repo.create(createMemoryEntry({
       object_id: KEY_WARM,
       content: "Stable warm key owner.",
       storage_tier: StorageTier.WARM
     }));
     new SqliteMemoryObjectKeyRepo(database).replaceOwnerKeys("workspace-1", KEY_WARM, [
       objectKey(KEY_WARM)
-    ]);
+    ], warmKeyOwner);
     const objectIds = [HIT, WARM, KEY_OWNER, KEY_WARM];
     const field = await repo.searchByKeywordField!(
       "workspace-1",
@@ -233,13 +233,13 @@ async function seedPopulation() {
     run_id: "run-3",
     content: "Stable row in another workspace."
   }));
-  await repo.create(createMemoryEntry({
+  const keyOwner = await repo.create(createMemoryEntry({
     object_id: KEY_OWNER,
     content: "Key owner content without the query token either."
   }));
   new SqliteMemoryObjectKeyRepo(database).replaceOwnerKeys("workspace-1", KEY_OWNER, [
     objectKey(KEY_OWNER)
-  ]);
+  ], keyOwner);
   return { repo, database };
 }
 

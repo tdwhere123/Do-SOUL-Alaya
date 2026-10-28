@@ -1,6 +1,7 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import { parseJsonColumn } from "../../shared/parse-json-column.js";
+import { requirePrivacyRowsAvailable } from "../../field/privacy-availability.js";
 import {
   readObjectKeyEvidenceSources,
   type StoredObjectKeyEvidenceSource
@@ -21,10 +22,12 @@ export interface ObjectKeyRetrofitScan {
 const IN_CHUNK = 400;
 
 export function scanObjectKeyRetrofitSources(db: StorageDatabase): Readonly<ObjectKeyRetrofitScan> {
-  const refsByMemory = loadEvidenceRefs(db);
-  const owners = loadOwners(db, refsByMemory);
-  const evidence = loadEvidence(db, owners);
-  return Object.freeze({ owners, evidence });
+  return db.connection.transaction(() => {
+    const refsByMemory = loadEvidenceRefs(db);
+    const owners = loadOwners(db, refsByMemory);
+    const evidence = loadEvidence(db, owners);
+    return Object.freeze({ owners, evidence });
+  })();
 }
 
 function loadOwners(
@@ -43,6 +46,7 @@ function loadOwners(
     readonly content: string;
     readonly evidence_refs: string;
   }>;
+  requirePrivacyRowsAvailable(db, "memory_entry", rows);
   return Object.freeze(rows.map((row) => Object.freeze({
     object_id: row.object_id,
     workspace_id: row.workspace_id,

@@ -10,6 +10,7 @@ import {
   resolveDeliveredTargetSources
 } from "./resolution-delivery-scope.js";
 import { McpToolError } from "./mcp-tool-error.js";
+import { resolveReviewerIdentity, type ReviewerIdentityBinding } from "../proposal/reviewer-gating.js";
 
 // invariant: trusted MCP call context fields the handler binds onto
 // the protocol-stripped agent-facing request before calling
@@ -27,6 +28,7 @@ export interface SoulResolveCallContext {
 
 export interface SoulResolveHandlerDependencies {
   readonly resolutionService: Pick<ResolutionService, "resolve">;
+  readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   // invariant: delivered object identities gate which objects the agent may
   // resolve against this delivery. Bare object_id is insufficient now that
   // memory_entry and synthesis_capsule can share an id in recall competition.
@@ -86,6 +88,13 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
       context: SoulResolveCallContext
     ): Promise<SoulResolveResponse> {
       const request = SoulResolveRequestSchema.parse(rawArguments);
+      if (deps.reviewerIdentityBinding !== undefined && request.reviewer_identity === undefined) {
+        throw new SoulResolveScopeError("VALIDATION", "Reviewer identity is required when reviewer binding is configured.");
+      }
+      const reviewerIdentity = resolveReviewerIdentity({
+        reviewer_identity: request.reviewer_identity ?? context.agentTarget,
+        ...(request.reviewer_token === undefined ? {} : { reviewer_token: request.reviewer_token })
+      }, deps.reviewerIdentityBinding);
       const usedObjectIds = await resolveCausalUsageSourcesInScope(
         deps.trustStateRecorder,
         deps.claimSourceReader,
@@ -100,6 +109,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
         workspaceId: context.workspaceId,
         runId: context.runId,
         agentTarget: context.agentTarget,
+        reviewerIdentity,
         deliveryId: request.delivery_id,
         ...(request.policy === undefined ? {} : { policy: request.policy }),
         ...(request.correction === undefined ? {} : { correction: request.correction }),
@@ -109,16 +119,17 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
           ? {}
           : { policyClassification: request.policy_classification })
       });
-      if (isPositiveGovernedAdoption(outcome)) {
-        throwIfAborted(context.abortSignal);
-        await recordResolvedCausalUsage(deps, context, outcome.auditEventId, usedObjectIds);
-      }
+      const usageRecordingStatus = isPositiveGovernedAdoption(outcome)
+        ? await recordResolvedCausalUsage(deps, context, outcome.auditEventId, usedObjectIds)
+        : undefined;
       return SoulResolveResponseSchema.parse({
         target_object_id: request.target_object_id,
         resolution: outcome.resolution,
         status: outcome.status,
         audit_event_type: outcome.auditEventType,
         audit_event_id: outcome.auditEventId,
+        ...(usageRecordingStatus === undefined ? {} : { usage_recording_status: usageRecordingStatus }),
+        ...(outcome.electionStatus === undefined ? {} : { election_status: outcome.electionStatus }),
         ...(outcome.obligationId === undefined ? {} : { obligation_id: outcome.obligationId }),
         ...(outcome.activatedClaimId === undefined
           ? {}
@@ -196,9 +207,11 @@ async function recordResolvedCausalUsage(
   context: SoulResolveCallContext,
   causalKey: string,
   usedObjectIds: readonly string[]
-): Promise<void> {
-  if (deps.causalUsageRecorder === undefined || usedObjectIds.length === 0) return;
-  await deps.causalUsageRecorder.record({
+): Promise<"recorded" | "failed" | "unavailable" | "not_applicable"> {
+  if (usedObjectIds.length === 0) return "not_applicable";
+  if (deps.causalUsageRecorder === undefined) return "unavailable";
+  try {
+    await deps.causalUsageRecorder.record({
     workspaceId: context.workspaceId,
     causalKey,
     usedObjectIds,
@@ -206,5 +219,9 @@ async function recordResolvedCausalUsage(
     scope: context.workspaceId,
     runId: context.runId,
     causedBy: context.agentTarget
-  });
+    });
+    return "recorded";
+  } catch {
+    return "failed";
+  }
 }

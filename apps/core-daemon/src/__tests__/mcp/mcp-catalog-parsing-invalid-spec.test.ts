@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { McpToolDiscoveryService } from "@do-soul/alaya-core";
 import {
   parseDaemonMcpServerRuntimeConfigs,
   readDaemonMcpCatalogEnvironment
@@ -10,6 +11,24 @@ import {
 // see also: apps/core-daemon/src/mcp/mcp-catalog-parsing.ts (parseMcpToolSpec)
 
 describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
+  it.each(["127.0.0.1", "127.0.0.2", "127.255.255.254", "localhost", "[::1]"])(
+    "keeps accepted local endpoint %s valid through inactive Protocol discovery", async hostname => {
+      const configs = parseDaemonMcpServerRuntimeConfigs(JSON.stringify({ local: {
+        transport_type: "http", endpoint: `http://${hostname}:3765/mcp`
+      } }), vi.fn());
+      const config = configs.local;
+      expect(config?.transportType).toBe("http");
+      if (config?.transportType !== "http") throw new Error("Expected local HTTP config");
+      const listServerTools = vi.fn(async () => []);
+      const discovery = new McpToolDiscoveryService({
+        extensionRegistry: { listProviders: async () => [], registerProvider: async provider => provider },
+        mcpToolCatalog: { listServerTools }, eventLogWriter: { append: vi.fn(), queryByEntityAll: async () => [] }
+      });
+      await expect(discovery.discoverAndRegister([{ server_name: "local", transport_type: "http",
+        endpoint: config.endpoint, status: "inactive", registered_at: "2026-10-28T00:00:00.000Z" }])).resolves.toEqual([]);
+      expect(listServerTools).not.toHaveBeenCalled();
+    }
+  );
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -10,7 +10,7 @@ import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js
 import { SqliteFieldEraseBarrierRepo } from "../../../repos/field/erase-repo.js";
 import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-index-repo.js";
 import { lexicalDomainTables } from "../../../repos/source-index/lexical-domain.js";
-import { applyBaselineSql } from "../../migrations/apply-baseline.js";
+import { applyBaselineSql, currentSchemaVersion } from "../../migrations/apply-baseline.js";
 import { seedWorkspaces } from "../field/field-contract-fixture.js";
 import { WORKSPACE, CLOCK, fieldSha256, publishSource, buildReady } from "./source-index-fixture.js";
 
@@ -102,7 +102,8 @@ it("rolls back shared-FTS removal and partial domain creation when migration enc
     } finally { retained.close(); }
     const migrated = initDatabase({ filename });
     try {
-      expect(migrated.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 28 });
+      expect(migrated.connection.prepare("SELECT max(version) AS version FROM schema_version").get())
+        .toEqual({ version: currentSchemaVersion() });
       expect(migrated.connection.prepare("SELECT name FROM sqlite_master WHERE name=?").get(lexicalDomainTables(valid).unicode61)).toBeDefined();
     } finally { migrated.close({ optimize: false }); }
   } finally { if (legacy.open) legacy.close(); rmSync(directory, { recursive: true, force: true }); }

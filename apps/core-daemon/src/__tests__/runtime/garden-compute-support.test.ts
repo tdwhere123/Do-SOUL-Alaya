@@ -16,12 +16,39 @@ import {
   createConflictDetectionLlmPort
 } from "../../runtime/garden-wiring/garden-compute-support.js";
 import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
+import { mergeDaemonEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 const environment = process.env;
 beforeEach(() => { process.env = {}; });
 afterEach(() => { process.env = environment; vi.restoreAllMocks(); });
 
 describe("createConflictDetectionLlmPort", () => {
+  it.each([false, true])("uses file conflict settings with process precedence (process override=%s)", async override => {
+    const configEnv = new Map([
+      ["ALAYA_CONFLICT_LLM_PROVIDER_URL", "https://conflict.example.test/v1"],
+      ["ALAYA_CONFLICT_LLM_MODEL", "file-conflict-model"],
+      ["ALAYA_CONFLICT_LLM_API_KEY", "fixture-only"],
+      ["ALAYA_CONFLICT_LLM_TIMEOUT_MS", "60"]
+    ]);
+    if (override) process.env.ALAYA_CONFLICT_LLM_MODEL = "process-conflict-model";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "none" } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const port = createConflictDetectionLlmPort(mergeDaemonEnvLookup(process.env, configEnv));
+    await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.model).toBe(override ? "process-conflict-model" : "file-conflict-model");
+  });
+
+  it("does not use a config-file value as an env secret-ref target", () => {
+    const configEnv = new Map([
+      ["ALAYA_CONFLICT_LLM_PROVIDER_URL", "https://conflict.example.test/v1"],
+      ["ALAYA_CONFLICT_LLM_MODEL", "file-conflict-model"],
+      ["ALAYA_CONFLICT_LLM_SECRET_REF", "env:CONFLICT_FILE_VALUE"],
+      ["CONFLICT_FILE_VALUE", "fixture-only"]
+    ]);
+    expect(createConflictDetectionLlmPort(mergeDaemonEnvLookup(process.env, configEnv))).toBeNull();
+  });
   it("unrefs the conflict request timeout so classification does not pin shutdown", async () => {
     configureConflictLlmEnv();
     const unref = vi.fn();

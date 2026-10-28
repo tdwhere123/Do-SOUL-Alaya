@@ -11,7 +11,12 @@ import { claimDemandForState } from "../conditional-field/index/claim-obligation
 import type { RelationObserverRow } from "../conditional-field/observers/observe.js";
 import { restoredFieldFootprint, stampRetainedFieldLevel } from "./request-cost-engine-snapshot.js";
 
-export function assessUnknownCause(state: FieldEngineState, input: { readonly as_of: string }): FieldEngineState {
+export type SupportWorkBlock = Readonly<{ phase: "support";
+  required_exploration_work: number; available_exploration_work: number }>;
+
+export function assessUnknownCause(state: FieldEngineState,
+  input: { readonly as_of: string; readonly on_retained_progress?: () => void;
+    readonly on_atomic_work_block?: (block: SupportWorkBlock) => void }): FieldEngineState {
   if ((state.observed_relations?.length ?? 0) === 0 && (state.interpretation.view.claim_demands?.length ?? 0) === 0) {
     return applyEvidenceEffect(state, { support: [], work_status: "complete" });
   }
@@ -40,18 +45,25 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   let offset = same ? state.support_scan_offset ?? 0 : 0;
   const fallback = state.binding.kind === "bound" && state.ordered_identities === undefined ? state.binding.snapshot.values : [];
   const values = orderedProjectionValues(state) ?? { size: fallback.length, at: (index: number) => fallback[index] };
+  if (offset < values.size && remaining < 1) input.on_atomic_work_block?.({ phase: "support",
+    required_exploration_work: 1, available_exploration_work: remaining });
   while (offset < values.size && remaining > 0) {
     remaining -= 1;
     const value = values.at(offset)!;
-    if (!value.accepting || value.activation?.kind === "unreachable" || value.milligrades === undefined) { offset += 1; continue; }
+    if (!value.accepting || value.activation?.kind === "unreachable" || value.milligrades === undefined) {
+      offset += 1; input.on_retained_progress?.(); continue;
+    }
     const key = productStateNodeId(value.state);
-    if (progress[key]?.complete) { offset += 1; continue; }
+    if (progress[key]?.complete) { offset += 1; input.on_retained_progress?.(); continue; }
     const claim = claimForProduct(state, value);
     const prepared = prepareProductEvidence({ state, value, claimKind: claim.causeDemand ? claim.claimKind : undefined,
       causeSource: claim.causeDemand ? claim.arguments_[0] : undefined, progress: progress[key]?.cursor,
-      workLimit: remaining, memoryLimit: memory });
+      workLimit: remaining, memoryLimit: memory,
+      onAtomicWorkBlock: (required, available) => input.on_atomic_work_block?.({ phase: "support",
+        required_exploration_work: 1 + required, available_exploration_work: available }) });
     remaining -= prepared.work;
     if (prepared.rows.length === 0 && !prepared.complete) {
+      if (prepared.progress !== progress[key]?.cursor) input.on_retained_progress?.();
       progress[key] = { cursor: prepared.progress, complete: false };
       memory -= prepared.retained_bytes; retainedBytes += prepared.retained_bytes;
       admittedBytes += prepared.retained_bytes;
@@ -59,7 +71,11 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     }
     const demand = evidenceDemandForProduct(state, value, input.as_of, prepared.rows, prepared.progress.assertion_ids);
     const { id, context, observations, demands, required, dependencyIds } = demand;
-    if (required > remaining) break;
+    if (required > remaining) {
+      input.on_atomic_work_block?.({ phase: "support", required_exploration_work: 1 + prepared.work + required,
+        available_exploration_work: remaining });
+      break;
+    }
     const assessed = assessEvidence({ ...context, observations, propositions: demands, work_limit: required });
     remaining -= required;
     const records = assessed.records.map((record) => mergeSupportRecord(support.get(record.proposition_id), record));
@@ -78,6 +94,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     claims.set(key, support.get(id)?.claim ?? "unknown");
     dependencies[key] = [...new Set([...(dependencies[key] ?? []), ...dependencyIds])];
     progress[key] = { cursor: prepared.progress, complete: prepared.complete };
+    input.on_retained_progress?.();
     if (prepared.complete) offset += 1;
   }
   // An unfinished solve can still activate identities already skipped by this scan.

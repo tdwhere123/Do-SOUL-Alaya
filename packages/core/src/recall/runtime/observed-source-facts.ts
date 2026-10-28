@@ -1,5 +1,5 @@
 import { SourceLookupReasonsSchema, sameSourceEvidenceRoot, type TypedObservation } from "@do-soul/alaya-protocol";
-import type { ObserverReaders, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
+import type { ObserverReaders, SourceObserverPage, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
 import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
@@ -46,7 +46,7 @@ export class ObservedSourceFacts {
 
 type ObservedFactInput = Readonly<{
   readonly workspace_id: string;
-  readonly readers: ObserverReaders;
+  readonly sourceCache: ReadonlyMap<string, SourceObserverPage>;
   readonly authorized_scopes?: readonly string[] | null;
   readonly as_of?: string;
 }>;
@@ -57,13 +57,14 @@ export function recordObservedAt(
   observedAt: Record<string, string>,
   sourceFacts: FactWriter
 ): void {
-  const source = input.readers.source;
-  if (source === undefined) return;
+  // These facts were funded by the observer. Missing dependencies are read by
+  // the bounded source-fact demand owner, never through an implicit extra lookup.
   for (const objectId of objectIds) {
     if (sourceFacts.has(objectId)) continue;
-    const page = source({ workspaceId: input.workspace_id, objectId });
-    const row = page.row;
-    if (row === null || !sourceFactEligible(row, input.authorized_scopes, input.as_of)) continue;
+    const page = input.sourceCache.get(objectId);
+    const row = page?.row;
+    if (row == null || page?.unavailable || page?.resourceLimited
+      || !sourceFactEligible(row, input.authorized_scopes, input.as_of)) continue;
     retainSourceFact(sourceFacts, objectId, row, input.workspace_id, observedAt);
   }
 }

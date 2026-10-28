@@ -25,7 +25,7 @@ export function readRequiredFlagValue(
   errorMessage: string
 ): string {
   const raw = readFlagValue(args, index, token, flag);
-  if (raw === undefined) throw new Error(errorMessage);
+  if (raw === undefined || raw.trim().length === 0 || raw.startsWith("--")) throw new Error(errorMessage);
   return raw;
 }
 

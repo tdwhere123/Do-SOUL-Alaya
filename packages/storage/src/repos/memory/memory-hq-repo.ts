@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { requirePrivacyObjectAvailable } from "../field/privacy-availability.js";
 import { parseRows } from "../shared/parse-row.js";
 
 export interface MemoryHqRecord {
@@ -65,9 +66,14 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
   public async upsert(record: MemoryHqRecord): Promise<Readonly<MemoryHqObservationRecord>> {
     const observation = buildObservation(record);
     try {
-      this.assertEvidenceReceipt(record.workspace_id, record.evidence_receipt);
       this.db.connection.transaction(() => {
+        requirePrivacyObjectAvailable(this.db, record.workspace_id, "memory_entry", record.object_id);
+        this.assertEvidenceReceipt(record.workspace_id, record.evidence_receipt);
+        requirePrivacyObjectAvailable(this.db, record.workspace_id, "memory_hq_observation", observation.observation_id);
         this.insertOrVerifyObservation(observation);
+        this.db.connection.prepare(`DELETE FROM privacy_dependency_quarantine
+          WHERE workspace_id = ? AND object_kind = 'memory_hq_projection' AND object_id = ?`)
+          .run(record.workspace_id, record.object_id);
         this.db.connection.prepare(UPSERT_MEMORY_HQ_SQL).run(
           record.object_id,
           record.workspace_id,
@@ -119,9 +125,19 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
         const chunk = unique.slice(offset, offset + HQ_LOOKUP_CHUNK);
         if (chunk.length === 0) continue;
         const placeholders = chunk.map(() => "?").join(", ");
+        const projections = this.db.connection.prepare(`SELECT workspace_id, object_id FROM memory_hq
+          WHERE object_id IN (${placeholders})`).all(...chunk) as { workspace_id: string; object_id: string }[];
+        for (const row of projections) {
+          requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_entry", row.object_id);
+          requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_hq_projection", row.object_id);
+        }
         const rows = parseRows(this.db.connection.prepare(`${OBSERVATION_SELECT_SQL}
           WHERE current.object_id IN (${placeholders})`).all(...chunk), { parse: (value: unknown) => value as ObservationRow }, "observation row");
-        for (const row of rows) result.set(row.object_id, parseObservationRow(row));
+        for (const row of rows) {
+          requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_entry", row.object_id);
+          requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_hq_observation", row.observation_id);
+          result.set(row.object_id, parseObservationRow(row));
+        }
       }
       return result;
     } catch (error) {
@@ -137,7 +153,7 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
     const row = this.db.connection.prepare(`
       SELECT workspace_id, event_anchor
       FROM evidence_capsules
-      WHERE object_id = ?
+      WHERE object_id = ? AND lifecycle_state != 'tombstone'
       LIMIT 1
     `).get(evidenceId) as {
       readonly workspace_id: string;
@@ -175,7 +191,7 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
         ON source.event_id = ?
        AND source.event_type = ?
        AND source.workspace_id = ?
-      WHERE evidence.object_id = ?
+      WHERE evidence.object_id = ? AND evidence.lifecycle_state != 'tombstone'
     `).get(
       expected.event_id,
       expected.event_type,
@@ -241,6 +257,10 @@ export class SqliteMemoryHqRepo implements MemoryHqRepo {
   private findObservationById(observationId: string): Readonly<MemoryHqObservationRecord> | null {
     const row = this.db.connection.prepare(`${OBSERVATION_SELECT_SQL}
       WHERE observation.observation_id = ?`).get(observationId) as ObservationRow | undefined;
+    if (row !== undefined) {
+      requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_entry", row.object_id);
+      requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_hq_observation", row.observation_id);
+    }
     return row === undefined ? null : parseObservationRow(row);
   }
 }

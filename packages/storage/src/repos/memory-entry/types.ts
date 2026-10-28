@@ -188,6 +188,10 @@ export interface MemoryEntryRepo {
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number>;
+  findByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryDimension, page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassAndDimension(workspaceId: string, scopeClass: ScopeClass, dimension: MemoryDimension): Promise<number>;
   findByWorkspaceIdWithConflict(
     workspaceId: string,
     page?: MemoryEntryListPageOptions
@@ -298,7 +302,8 @@ export interface MemoryEntryRepo {
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    expectedFromState?: MemoryEntry["lifecycle_state"]
   ): Promise<Readonly<MemoryEntry>>;
   // invariant (§7): synchronous lifecycle transition (revival fallback) for the
   // single-transaction karma path.
@@ -316,7 +321,8 @@ export interface MemoryEntryRepo {
   transitionToDormantIfActive(
     objectId: string,
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    eligibility?: { readonly workspaceId: string; readonly maxActivation: number; readonly idleBefore: string }
   ): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string, onArchived?: () => void): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void>;

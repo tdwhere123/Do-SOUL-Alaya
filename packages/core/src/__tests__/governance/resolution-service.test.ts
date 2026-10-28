@@ -27,6 +27,7 @@ import type { DeferredObligationService } from "../../governance/policy/deferred
 import { buildEffectDecisionReceipt } from "../../governance/effects/proof-effect-policy.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { firstDefined } from "../helpers/defined.js";
+import { createResolutionElectionLease } from "../shared/resolution-election-lease.test-support.js";
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 type EffectAuthorityInput = Readonly<{
   workspaceId: string;
@@ -91,7 +92,9 @@ interface Harness {
 function createHarness(): Harness {
   const published: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
   let counter = 0;
+  const eventLogIdentity = {};
   const eventPublisher = {
+    getStorageConnectionIdentity: () => eventLogIdentity,
     publish: vi.fn(async (input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       counter += 1;
       published.push(input);
@@ -101,11 +104,24 @@ function createHarness(): Harness {
         created_at: FIXED_NOW,
         revision: 0
       } satisfies EventLogEntry;
+    }),
+    mutateThenAppendMany: vi.fn(async (mutate: () => { readonly events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]; readonly result: unknown }) => {
+      const decision = mutate();
+      const entries = decision.events.map(input => {
+        counter += 1;
+        published.push(input);
+        return { ...input, event_id: `evt-${counter}`, created_at: FIXED_NOW, revision: 0 } satisfies EventLogEntry;
+      });
+      return { result: decision.result, entries };
     })
   } as unknown as EventPublisher;
-  const claimRepo = { findById: vi.fn(async (_id: string) => null as ClaimForm | null) };
+  const claimRepo = { findById: vi.fn(async (_id: string) => null as ClaimForm | null),
+    findByIdSync: () => buildClaim({ claim_status: "active" }), getStorageConnectionIdentity: () => eventLogIdentity };
   const memoryRepo = { findById: vi.fn(async (_id: string) => null as MemoryEntry | null) };
   const claimService = {
+    getStorageConnectionIdentity: () => eventLogIdentity,
+    getEventPublisherConnectionIdentity: () => eventLogIdentity,
+    resumeActivationElection: vi.fn(async (objectId: string) => buildClaim({ object_id: objectId, claim_status: "active" })),
     // The mock honors the atomic-audit-composition contract: additional
     // event inputs are persisted (in the same logical transaction as the
     // claim mutation) and the persisted rows are pushed into the sink in
@@ -149,9 +165,17 @@ function createHarness(): Harness {
       objectId: string,
       nextState: MemoryEntry["lifecycle_state"],
       _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap"
-    ): Promise<Readonly<MemoryEntry>> =>
-      buildMemory({ object_id: objectId, lifecycle_state: nextState }))
+      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap",
+      options?: { readonly additionalEventInputs?: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
+        readonly additionalEventsSink?: EventLogEntry[] }
+    ): Promise<Readonly<MemoryEntry>> => {
+      for (const input of options?.additionalEventInputs ?? []) {
+        counter += 1;
+        published.push(input);
+        options?.additionalEventsSink?.push({ ...input, event_id: `evt-${counter}`, created_at: FIXED_NOW, revision: 0 });
+      }
+      return buildMemory({ object_id: objectId, lifecycle_state: nextState });
+    })
   };
   const deferredObligationService = {
     create: vi.fn(async (
@@ -197,6 +221,9 @@ function createHarness(): Harness {
   const now = vi.fn(() => FIXED_NOW);
   const service = new ResolutionService({
     eventPublisher,
+    electionLease: createResolutionElectionLease(eventLogIdentity),
+    resolutionAuditRepo: { queryByEntityAll: vi.fn(async () => []), queryByEntityInCurrentTransaction: () => [],
+      getStorageConnectionIdentity: () => eventLogIdentity },
     claimRepo,
     memoryRepo,
     claimService,
@@ -357,7 +384,7 @@ describe("ResolutionService dispatch", () => {
         effectDecisionReceipt: expect.objectContaining({ decision: "allow" })
       })
     );
-    expect(harness.published).toHaveLength(2);
+    expect(harness.published).toHaveLength(3);
     expect(firstDefined(harness.published).event_type).toBe(
       GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED
     );
@@ -554,7 +581,8 @@ describe("ResolutionService dispatch", () => {
       "mem-1",
       ObjectLifecycleState.DORMANT,
       expect.any(String),
-      "user"
+      "user",
+      expect.objectContaining({ additionalEventInputs: expect.any(Array), additionalEventsSink: expect.any(Array) })
     );
   });
 

@@ -41,6 +41,7 @@ export function encodeRecallResult(
       activation_score: score,
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
+      payload_available: excerpts[offset] !== undefined,
       ...(entry.target.kind !== "source_evidence" ? {} : { source_disclosure: kind === "semantic_proof"
         ? qualifySourceDisclosure(metadata?.source_disclosure ?? projectSourceDisclosure({
           material_kind: entry.target.root_kind === "source_record" ? "original_body"

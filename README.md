@@ -86,23 +86,17 @@ macOS, and Windows on x64 or arm64. Its install path has no automatic
 source-build fallback, so other operating-system or architecture combinations
 are not supported by the default Alaya install.
 
-## Optional local ONNX embeddings
+## Local ONNX embeddings
 
-Default `pnpm install` intentionally does not install
-`@huggingface/transformers` or
-ONNX Runtime (~640MiB, including a web `-dev` runtime the Node embedding
-path does not use). The extra is not a package.json peer: this workspace
-auto-installs peers, which would pull the runtimes on every default
-install. Local `local_onnx` recall is an explicit add:
+`pnpm install` installs the required, version-pinned
+`@huggingface/transformers@4.3.1` runtime. Provision the model artifacts before
+using `local_onnx`; runtime startup never downloads models implicitly:
 
 ```bash
-pnpm add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core
 node scripts/fetch-local-embedding-model.mjs
 ```
 
-`pnpm add` rewrites the workspace lockfile. After the add, `pnpm install
---frozen-lockfile` succeeds. Release installs print the same command with
-`--dir "$ALAYA_HOME"` so the filter resolves against the installed workspace.
+Release installs print the same provisioning command using the installed path.
 `pnpm-workspace.yaml` overrides `onnxruntime-web` away; the Node embedding path
 does not use it.
 

@@ -302,7 +302,7 @@ function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorRep
     );
   }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
-  stream.write(`garden status: ${report.garden.status}\n`);
+  stream.write(`garden scheduler activity: ${report.garden.status} (recent enqueue/dispatch; task success is separate)\n`);
   stream.write(`garden schema_ok: ${report.garden.schema_ok ? "yes" : "no"}\n`);
   if (report.garden_compute.degraded_reason) {
     stream.write(`garden compute degraded_reason: ${report.garden_compute.degraded_reason}\n`);

@@ -15,12 +15,14 @@ export async function claimGardenTaskWithEvents(
   claimedBy: string,
   claimedAt: string,
   dispatchedEvents: readonly GardenTaskEventInput[],
-  workspaceId?: string
+  workspaceId?: string,
+  eligible: () => boolean = () => true
 ): Promise<GardenTaskClaimResult> {
   const request = parseClaimRequest(taskId, claimedBy, claimedAt, workspaceId);
   try {
-    if (dispatchedEvents.length === 0) return runClaim(statement, request);
+    if (dispatchedEvents.length === 0) return eligible() ? runClaim(statement, request) : "already-claimed";
     return await eventPublisher.appendManyWithMutation(dispatchedEvents, () => {
+      if (!eligible()) throw new GardenTaskClaimCasMiss();
       const result = runClaim(statement, request);
       if (result !== "claimed") throw new GardenTaskClaimCasMiss();
       return result;

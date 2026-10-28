@@ -1,5 +1,6 @@
 import type { EventPublisher } from "@do-soul/alaya-core";
 import {
+  AlayaError,
   CandidateMemorySignalSchema,
   GardenEventType,
   GardenRole,
@@ -32,6 +33,7 @@ import {
   parsePostTurnExtractTaskPayload,
   type PostTurnExtractTaskPayload
 } from "../post-turn-extract/task-payload.js";
+import { quarantineUnavailablePostTurnTasks } from "../post-turn-extract/source-provenance.js";
 
 const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
 const HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS = 15 * 60 * 1000;
@@ -98,6 +100,7 @@ async function claimPostTurnExtractTask(
     readonly configService: NonNullable<PostTurnExtractRuntimeInput["configService"]>;
   }
 ): Promise<PostTurnExtractTaskRow | null> {
+  await quarantineUnavailablePostTurnTasks(input.gardenTaskRepo, input.now);
   const row = findPendingPostTurnExtractTask(input.gardenTaskRepo);
   if (row === undefined) {
     return null;
@@ -140,8 +143,9 @@ async function processClaimedPostTurnExtractTask(
   }
   try {
     const dispatch = await publishPostTurnExtractDispatch(task, payload, input.eventPublisher);
+    await quarantineUnavailablePostTurnTasks(input.gardenTaskRepo, input.now, task.row.workspace_id, task.row.id);
     const sourceObservation = resolvePostTurnCompileSourceObservation(payload, dispatch);
-    const { emittedSignalIds, incomplete } = await emitPostTurnExtractSignals(
+    const { emittedSignalIds, failedSignalCount, incomplete } = await emitPostTurnExtractSignals(
       task.row,
       payload,
       task.provider,
@@ -150,17 +154,22 @@ async function processClaimedPostTurnExtractTask(
     );
     if (incomplete !== null) {
       await failPostTurnExtractTask(task.row, payload.run_id, incomplete,
-        input.gardenTaskRepo, input.now, emittedSignalIds);
+        input.gardenTaskRepo, input.now, emittedSignalIds, failedSignalCount);
       return;
     }
     await completePostTurnExtractTask(
       task.row,
       payload.run_id,
       emittedSignalIds,
+      failedSignalCount,
       input.gardenTaskRepo,
       input.now
     );
   } catch (error) {
+    await quarantineUnavailablePostTurnTasks(input.gardenTaskRepo, input.now, task.row.workspace_id, task.row.id);
+    if (input.gardenTaskRepo.findByIdInWorkspace(task.row.id, task.row.workspace_id)?.status !== "claimed") {
+      return;
+    }
     await failPostTurnExtractTask(
       task.row,
       payload.run_id,
@@ -228,9 +237,7 @@ function resolvePostTurnCompileSourceObservation(
   payload: PostTurnExtractTaskPayload,
   dispatch: EventLogEntry
 ): NonNullable<CandidateMemorySignal["source_observation"]> | null {
-  if (payload.source_observation !== null) {
-    return payload.source_observation;
-  }
+  // Delivery time describes exposure to context, not when reported messages occurred.
   if (payload.source_observed_at === undefined) {
     return null;
   }
@@ -250,7 +257,8 @@ async function emitPostTurnExtractSignals(
     readonly gardenTaskRepo: SqliteGardenTaskRepo;
     readonly signalReceiver: NonNullable<PostTurnExtractRuntimeInput["signalReceiver"]>;
   }
-): Promise<{ readonly emittedSignalIds: readonly string[]; readonly incomplete: OfficialApiGardenCompileIncompleteError | null }> {
+): Promise<{ readonly emittedSignalIds: readonly string[]; readonly failedSignalCount: number; readonly incomplete: OfficialApiGardenCompileIncompleteError | null }> {
+  const failedSignalIds = new Set<string>();
   const retainInput = {
     taskId: row.id,
     workspaceId: payload.workspace_id,
@@ -260,6 +268,7 @@ async function emitPostTurnExtractSignals(
     turnMessages: buildPostTurnConversationMessages(payload),
     sourceObservation,
     signalReceiver: input.signalReceiver,
+    failedSignalIds,
     ...(payload.admitted_source_root_id === undefined
       ? {}
       : { admittedSourceRootId: payload.admitted_source_root_id }),
@@ -274,6 +283,9 @@ async function emitPostTurnExtractSignals(
     ...retainInput,
     candidates: []
   });
+  if (!input.gardenTaskRepo.refreshClaim(row.id, IN_PROCESS_POST_TURN_CLAIMANT, input.now())) {
+    throw new AlayaError("CONFLICT", `Garden task ${row.id} claim changed before compilation.`);
+  }
   const compilation = await compilePostTurnExtractTask(
     provider,
     payload,
@@ -290,7 +302,8 @@ async function emitPostTurnExtractSignals(
       })
     )
   });
-  return { emittedSignalIds: extraIds.length > 0 ? extraIds : retainedIds, incomplete: compilation.incomplete };
+  return { emittedSignalIds: extraIds.length > 0 ? extraIds : retainedIds,
+    failedSignalCount: failedSignalIds.size, incomplete: compilation.incomplete };
 }
 
 async function refreshPostTurnExtractClaim(
@@ -314,6 +327,7 @@ async function completePostTurnExtractTask(
   row: GardenTaskRow,
   runId: string,
   emittedSignalIds: readonly string[],
+  failedSignalCount: number,
   gardenTaskRepo: SqliteGardenTaskRepo,
   now: () => string
 ): Promise<void> {
@@ -332,7 +346,7 @@ async function completePostTurnExtractTask(
         workspace_id: row.workspace_id,
         run_id: runId,
         caused_by: "garden-runtime",
-        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, true, emittedSignalIds)
+        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, true, emittedSignalIds, failedSignalCount)
       }
     ],
     IN_PROCESS_POST_TURN_CLAIMANT,
@@ -346,7 +360,8 @@ async function failPostTurnExtractTask(
   error: unknown,
   gardenTaskRepo: SqliteGardenTaskRepo,
   now: () => string,
-  emittedSignalIds: readonly string[] = []
+  emittedSignalIds: readonly string[] = [],
+  failedSignalCount = 0
 ): Promise<void> {
   const completedAt = now();
   await gardenTaskRepo.completeWithEvents(
@@ -364,7 +379,7 @@ async function failPostTurnExtractTask(
         workspace_id: row.workspace_id,
         run_id: runId,
         caused_by: "garden-runtime",
-        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, false, emittedSignalIds)
+        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, false, emittedSignalIds, failedSignalCount)
       }
     ],
     IN_PROCESS_POST_TURN_CLAIMANT,
@@ -377,7 +392,8 @@ function buildPostTurnExtractCompletionPayload(
   runId: string,
   occurredAt: string,
   success: boolean,
-  objectsAffected: readonly string[]
+  objectsAffected: readonly string[],
+  failedSignalCount: number
 ): ReturnType<typeof parseGardenEventPayload> {
   return parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
     task_id: row.id,
@@ -387,6 +403,7 @@ function buildPostTurnExtractCompletionPayload(
     success,
     objects_affected: [...objectsAffected],
     candidate_signals_count: objectsAffected.length,
+    ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
     workspace_id: row.workspace_id,
     occurred_at: occurredAt
   });

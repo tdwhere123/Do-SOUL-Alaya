@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   InformationIndexSchema,
   MemoryDimension,
   sourceIndexEntry,
-  type Continuation,
   type InformationIndex
 } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
@@ -16,14 +15,15 @@ import {
   issuedDeliveryIdOf,
   runConditionalFieldRecallWithReceipt
 } from "../../../recall/recall-service.js";
-import {
-  commitIssuedDelivery,
-  pendingIssuedDeliveryOf
-} from "../../../recall/runtime/recall-index-commit.js";
+import { pendingIssuedDeliveryOf } from "../../../recall/runtime/recall-index-commit.js";
+import * as resultEncoding from "../../../recall/runtime/recall-result-encoding.js";
 import {
   productIdOfEntry,
-  replayIssuedDelivery
+  replayIssuedDelivery,
+  restoreField
 } from "../../../recall/runtime/index-continuation.js";
+import { groundedOutputDerivations } from "../../../recall/conditional-field/engine/output-derivations.js";
+import { ExplanationDelivery } from "../../../recall/conditional-field/index/explanation-delivery.js";
 import { readersFor } from "../conditional-field-oracle/bound-producer.js";
 import {
   FAR_FUTURE_EXPIRY,
@@ -79,18 +79,49 @@ describe("issued delivery commit", () => {
       .toEqual(last.index.entries.map((entry) => entry.object_id));
   });
 
-  it("does not remember an issued digest when encode throws before commitIssuedDelivery", () => {
-    const continuation = issuedContinuation("encode-after-commit-page");
-    const index = memoryIndex();
-    expect(replayIssuedDelivery(continuation.continuation_id)).toBeUndefined();
-    expect(() => encodeThenIssue(index, continuation, () => {
-      throw new Error("encoder rejection");
-    })).toThrow("encoder rejection");
-    expect(replayIssuedDelivery(continuation.continuation_id)).toBeUndefined();
-    const issued = encodeThenIssue(index, continuation, () => encodeRecallResult(index));
-    expect(replayIssuedDelivery(continuation.continuation_id)?.delivery_id).toBe(issued);
-    expect(encodeRecallResult(index).index.entries.map(productIdOfEntry))
-      .toEqual(index.entries.map(productIdOfEntry));
+  it("does not issue a continuation when the production service encoder rejects, and safely retries", async () => {
+    const slice = await openSourceSlice(database => databases.add(database));
+    for (const [index, id] of [MEM.r, MEM.c, MEM.h].entries()) {
+      await slice.writeMemory(id, `needle ${index}`, MemoryDimension.FACT);
+    }
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => NOW, observerReaders: readersFor(slice) });
+    const request = { taskSurface: { ...createTaskSurface(), display_name: "needle" }, workspaceId: WS,
+      strategy: "chat" as const, queryText: "needle", pageBudget: 1,
+      budget: defaultBudget({ work_units: 2_000, page_budget: 1, finalization_reserve: 20, min_envelope: 1 }),
+      ...capableRecallConsumerDeclaration() };
+    const first = await service.recall(request);
+    const continuation = first.index.continuation!;
+    expect(continuation).not.toBeNull();
+    const digest = continuation.continuation_id;
+    const state = restoreField(continuation)!;
+    expect(state).toBeDefined();
+    const grounding = groundedOutputDerivations({ seeds: state.seeds, transitions: state.transitions,
+      derivations: state.derivations, transition_derivations: state.transition_derivations,
+      allowance: 100_000, memory_bytes: 10_000_000 }).progress;
+    const selected = first.index.entries.length > 0 ? first.index.entries : mixedIndex().entries;
+    const proof = new ExplanationDelivery(selected, grounding.forest, state.support, request.pageBudget, 224);
+    // Keep the issued field's identity: the runtime binds its source pin to that object.
+    Object.assign(state, { grounding_progress: grounding,
+      grounding_input_references: [state.seeds, state.transitions, state.derivations, state.transition_derivations],
+      explanation_progress: proof, remaining_memory_bytes: state.remaining_memory_bytes - proof.retainedBytes });
+    const advance = vi.spyOn(ExplanationDelivery.prototype, "advance");
+    const matches = vi.spyOn(ExplanationDelivery.prototype, "matchesSource");
+    const encoder = vi.spyOn(resultEncoding, "encodeRecallResult").mockImplementationOnce(() => { throw new Error("encoder rejection"); });
+    try {
+      await expect(service.recall({ ...request, continuation })).rejects.toThrow("encoder rejection");
+      expect(replayIssuedDelivery(digest)).toBeUndefined();
+      expect((advance.mock.contexts as ExplanationDelivery[]).some(owner => owner.page === selected && owner.completedWork > 0),
+        `matches=${JSON.stringify(matches.mock.results)} advances=${advance.mock.calls.length}`).toBe(true);
+      expect(proof.completedWork).toBe(0);
+      expect(restoreField(continuation)?.explanation_progress).toBe(proof);
+      encoder.mockRestore();
+      const retry = await service.recall({ ...request, continuation });
+      expect(retry.issued_delivery_id).toBeDefined();
+      expect(replayIssuedDelivery(digest)?.delivery_id).toBe(retry.issued_delivery_id);
+      expect(replayIssuedDelivery(digest)?.member_ids).toEqual(retry.index.entries.map(productIdOfEntry));
+      expect(retry.execution_receipt?.actual?.phases.index.budget_work).toBeGreaterThan(0);
+      expect(proof.completedWork).toBe(0);
+    } finally { encoder.mockRestore(); advance.mockRestore(); matches.mockRestore(); }
   });
 
   it("issues the encoded continuation page through RecallService.recall", async () => {
@@ -204,36 +235,6 @@ function collectIssuedPages(
     if (continuation === null) break;
   }
   return pages;
-}
-
-function encodeThenIssue(
-  index: InformationIndex,
-  request: Continuation,
-  encode: () => ReturnType<typeof encodeRecallResult>
-): string {
-  const encoded = encode();
-  return commitIssuedDelivery({
-    query_key: `${index.query_id}\0${index.snapshot_id}`,
-    request_digest: request.continuation_id,
-    index: encoded.index,
-    request
-  });
-}
-
-function issuedContinuation(continuation_id: string): Continuation {
-  return {
-    schema_version: 1,
-    continuation_id,
-    query_id: "issued-commit",
-    snapshot_id: SNAPSHOT,
-    result_version: "v1",
-    expires_at: FAR_FUTURE_EXPIRY,
-    cursor: "offset-1"
-  };
-}
-
-function memoryIndex(): InformationIndex {
-  return mixedIndex([memoryEntry()]);
 }
 
 function mixedIndex(entries: InformationIndex["entries"] = [memoryEntry(), sourceEntry()]): InformationIndex {

@@ -91,7 +91,7 @@ it("delivers a later vector hit from the root start through the built worker and
       return SoulMemorySearchResponseSchema.parse(response.output);
     };
     const first = await call(request);
-    expect(first.index?.result_version).toBe("ordinary-native-field.v6");
+    expect(first.index?.result_version).toBe("ordinary-native-field.v7");
     expect(first.index?.entries[0]?.navigation).toMatchObject({ operator: "source_vector",
       location: { start_byte: 256, end_byte: 384 } });
     expect(first.results[0]?.content_preview).toBe(prefix);
@@ -132,7 +132,7 @@ it("delivers recorded lines through SQLite, built worker and MCP and replays the
     if (first.operation !== "recall" || first.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
       throw new Error("current field delivery required");
     }
-    expect(first.index.result_version).toBe("ordinary-native-field.v6");
+    expect(first.index.result_version).toBe("ordinary-native-field.v7");
     expect(first.results).toHaveLength(1);
     expect(first.results[0]?.content_preview).toBe(firstLine);
     expect(first.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: lineEnd, content_complete: false } });

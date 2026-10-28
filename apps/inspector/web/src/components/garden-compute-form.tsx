@@ -17,6 +17,7 @@ export default function GardenComputeForm({ workspaceId }: Props) {
   if (state.loading) {
     return <LoadingConfig label={t("config:loading.gardenCompute")} />;
   }
+  if (state.error !== null) return <p role="alert">{t("config:error.load", { section: "Garden compute config", message: state.error })}</p>;
   if (state.config === null) return null;
   return (
     <div className="space-y-5">

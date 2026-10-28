@@ -3,6 +3,7 @@ import { BOUNDED_EMBEDDING_INDEX_SQL, readBoundedEmbeddingIds, readBoundedEmbedd
   readUniqueEmbeddingProfile,
   type BoundedEmbeddingProfile, type BoundedEmbeddingReadOptions } from "./reads/memory-embedding-bounded-read.js";
 import { StorageError } from "../../shared/errors.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable } from "../field/privacy-availability.js";
 import { parseOptionalRow, parseRows, readRecord } from "../shared/parse-row.js";
 import {
   MemoryEmbeddingMetadataRowParser,
@@ -154,6 +155,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     parsedRecord: Readonly<MemoryEmbeddingRecord>
   ) => Readonly<MemoryEmbeddingRecord> | null {
     return this.db.connection.transaction((parsedRecord: Readonly<MemoryEmbeddingRecord>) => {
+      requirePrivacyObjectAvailable(this.db, parsedRecord.workspace_id, "memory_entry", parsedRecord.object_id);
       const currentMemory = parseMemoryContentProbe(
         this.findCurrentMemoryContentStatement.get(parsedRecord.object_id, parsedRecord.workspace_id)
       );
@@ -186,8 +188,12 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     const parsedRecord = parseMemoryEmbeddingRecord(record);
 
     try {
-      this.runUpsert(parsedRecord);
+      this.db.connection.transaction(() => {
+        requirePrivacyObjectAvailable(this.db, parsedRecord.workspace_id, "memory_entry", parsedRecord.object_id);
+        this.runUpsert(parsedRecord);
+      })();
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to persist memory embedding for ${parsedRecord.object_id}.`,
@@ -239,6 +245,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         MemoryEmbeddingRowParser,
         "memory embedding row"
       );
+      if (row !== null) requirePrivacyObjectAvailable(this.db, row.workspace_id, "memory_entry", row.object_id);
       return row === null ? null : parseMemoryEmbeddingRow(row);
     } catch (error) {
       if (error instanceof StorageError) {
@@ -274,6 +281,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
           ...parseRows(statement.all(...chunk), MemoryEmbeddingMetadataRowParser, "memory embedding metadata row")
         );
       }
+      requirePrivacyRowsAvailable(this.db, "memory_entry", rows);
       return Object.freeze(
         rows
           .map((row) => parseMemoryEmbeddingMetadataRow(row))
@@ -305,6 +313,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         MemoryEmbeddingRowParser,
         "memory embedding row"
       );
+      requirePrivacyRowsAvailable(this.db, "memory_entry", rows);
       return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -331,6 +340,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       const rows = this.db.connection.prepare(query.sql).all(...query.args) as ReadonlyArray<{
         readonly object_id: unknown;
       }>;
+      for (const row of rows) requirePrivacyObjectAvailable(this.db, parsedWorkspaceId, "memory_entry", String(row.object_id));
       return Object.freeze(rows.map((row) => parseObjectId(String(row.object_id))));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -361,6 +371,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         MemoryEmbeddingRowParser,
         "memory embedding row"
       );
+      requirePrivacyRowsAvailable(this.db, "memory_entry", rows);
       return Object.freeze(
         rows
           .map((row) => parseMemoryEmbeddingRow(row))
@@ -391,6 +402,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
 
     try {
+      for (const objectId of parsedObjectIds) requirePrivacyObjectAvailable(this.db, parsedWorkspaceId, "memory_entry", objectId);
       const row = this.existsAnyByObjectIdFilterStatement.get(
         JSON.stringify(parsedObjectIds),
         parsedWorkspaceId

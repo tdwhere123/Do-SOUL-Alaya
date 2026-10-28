@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GardenEventType, GardenRole, GardenTaskKind, GardenTier, parseGardenEventPayload } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteGardenTaskRepo } from "../../../repos/garden/garden-task-repo.js";
+import { gardenTurnSourceId, retainGardenTurnSources } from "./garden-task-source-fixture.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -14,6 +15,7 @@ describe("garden task kind counts", () => {
   it("counts failed POST_TURN_EXTRACT rows separately from pending and stale", async () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);
+    retainGardenTurnSources(database);
     const repo = new SqliteGardenTaskRepo(database.connection, {
       appendManyWithMutation: async (events, mutate) =>
         mutate(events.map((event, index) => ({
@@ -28,6 +30,7 @@ describe("garden task kind counts", () => {
       task_kind: GardenTaskKind.POST_TURN_EXTRACT,
       required_tier: GardenTier.TIER_2,
       workspace_id: "workspace-1",
+      admitted_source_root_id: gardenTurnSourceId("workspace-1"),
       run_id: "run-1",
       target_object_refs: [],
       priority: 20,
@@ -178,6 +181,7 @@ describe("garden task kind counts", () => {
 
 function extractPayload(taskId: string, workspaceId: string) {
   return {
+    admitted_source_root_id: gardenTurnSourceId(workspaceId),
     task_id: taskId,
     task_kind: GardenTaskKind.POST_TURN_EXTRACT,
     required_tier: GardenTier.TIER_2,
@@ -197,6 +201,7 @@ async function createCountedExtractRepo(): Promise<{
 }> {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
+  retainGardenTurnSources(database);
   const repo = new SqliteGardenTaskRepo(database.connection, {
     appendManyWithMutation: async (events, mutate) =>
       mutate(events.map((event, index) => ({

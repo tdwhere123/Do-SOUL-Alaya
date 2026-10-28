@@ -52,6 +52,8 @@ export const SoulResolveRequestSchema = z
     target_object_id: BoundedIdSchema,
     resolution: SoulResolutionKindSchema,
     delivery_id: BoundedIdSchema,
+    reviewer_identity: BoundedIdSchema.optional(),
+    reviewer_token: BoundedIdSchema.optional(),
     policy: BoundedLabelSchema.optional(),
     policy_classification: GovernanceResolutionPolicyClassificationSchema.optional(),
     correction: BoundedReasonSchema.optional(),
@@ -89,6 +91,8 @@ export const SoulResolveResponseSchema = z
     status: z.enum(["applied", "deferred", "noop"]),
     audit_event_type: NonEmptyStringSchema,
     audit_event_id: NonEmptyStringSchema,
+    usage_recording_status: z.enum(["recorded", "failed", "unavailable", "not_applicable"]).optional(),
+    election_status: z.enum(["completed", "failed", "pending"]).optional(),
     obligation_id: NonEmptyStringSchema.optional(),
     activated_claim_id: NonEmptyStringSchema.optional()
   })

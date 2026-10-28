@@ -247,7 +247,7 @@ export function produceField(
     || interpretation.status === "unsupported") {
     return { interpretation, field: observeField(interpretation, observeInput), observeInput };
   }
-  const field = assessUnknownCause(observeField(interpretation, observeInput), observeInput);
+  const field = assessUnknownCause(observeField(interpretation, observeInput), { as_of: observeInput.as_of });
   return { interpretation, field, observeInput };
 }
 
@@ -310,7 +310,7 @@ export function observeProgram(
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled })
   };
   const field = observeField(interpretation, observeInput);
-  const assessed = assessUnknownCause(field, observeInput);
+  const assessed = assessUnknownCause(field, { as_of: observeInput.as_of });
   return { interpretation, field: assessed, observeInput };
 }
 

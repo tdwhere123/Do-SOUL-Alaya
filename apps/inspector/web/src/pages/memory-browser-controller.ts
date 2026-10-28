@@ -21,7 +21,6 @@ import {
   type EvidenceEnvelope,
   type MemoryEntryRow,
   type MemoryPageData,
-  type PromoteEnvelope,
   type ScopeFilter
 } from "./memory-browser-support";
 
@@ -43,7 +42,6 @@ export interface MemoryBrowserController {
   readonly paginationStatus: string;
   readonly pointer: EvidenceCapsuleShape | null;
   readonly pointerLoading: boolean;
-  readonly promoteBusyIds: ReadonlySet<string>;
   readonly refreshing: boolean;
   readonly rows: readonly MemoryEntryRow[];
   readonly scopeFilter: ScopeFilter;
@@ -52,7 +50,6 @@ export interface MemoryBrowserController {
   readonly handleRefresh: () => Promise<void>;
   readonly loadMore: () => Promise<void>;
   readonly openEvidence: (evidenceId: string) => Promise<void>;
-  readonly promoteToStrictlyGoverned: (memoryId: string) => Promise<void>;
   readonly selectRow: (row: MemoryEntryRow) => void;
   readonly setConflictFilter: (value: ConflictFilter) => void;
   readonly setDimensionFilter: (value: DimensionFilter) => void;
@@ -69,7 +66,6 @@ export function useMemoryBrowserController({
   const pointer = useEvidencePointer({ workspaceId, showToast, isMountedRef, t });
   const rows = useMemoryRows({ workspaceId, showToast, filters, isMountedRef, t });
   const selection = useMemorySelection(rows.rows, pointer.invalidatePointerState);
-  const promotion = useStrictGovernancePromotion({ workspaceId, showToast, isMountedRef, t });
   const handleRefresh = useCallback(async () => {
     pointer.invalidatePointerState();
     await rows.handleRefresh();
@@ -82,9 +78,7 @@ export function useMemoryBrowserController({
     handleRefresh,
     pointer: pointer.pointer,
     pointerLoading: pointer.pointerLoading,
-    openEvidence: pointer.openEvidence,
-    promoteBusyIds: promotion.promoteBusyIds,
-    promoteToStrictlyGoverned: promotion.promoteToStrictlyGoverned
+    openEvidence: pointer.openEvidence
   };
 }
 
@@ -348,46 +342,6 @@ function useOpenEvidence(props: {
       }
     }
   }, [props]);
-}
-
-function useStrictGovernancePromotion(props: {
-  readonly workspaceId: string | null;
-  readonly showToast: ShowToast;
-  readonly isMountedRef: MutableRefObject<boolean>;
-  readonly t: Translate;
-}) {
-  const [promoteBusyIds, setPromoteBusyIds] = useState<ReadonlySet<string>>(() => new Set());
-  const promoteToStrictlyGoverned = useCallback(async (memoryId: string) => {
-    if (props.workspaceId === null) return;
-    setPromoteBusyIds((previous) => new Set(previous).add(memoryId));
-    try {
-      const envelope = await apiFetch<PromoteEnvelope>(
-        `/workspaces/${props.workspaceId}/soul/memory/${encodeURIComponent(memoryId)}/proposals/promote-strictly-governed`,
-        { method: "POST", body: {} }
-      );
-      props.showToast({
-        type: "success",
-        message: props.t("memoryBrowser:toast.proposalCreated", { id: envelope.data.proposal_id })
-      });
-    } catch (err) {
-      if ((err as ApiError).status !== 401) {
-        const message = err instanceof Error ? err.message : props.t("memoryBrowser:error.unknown");
-        props.showToast({
-          message: props.t("memoryBrowser:toast.promoteFailed", { message }),
-          type: "error"
-        });
-      }
-    } finally {
-      if (props.isMountedRef.current) {
-        setPromoteBusyIds((previous) => {
-          const next = new Set(previous);
-          next.delete(memoryId);
-          return next;
-        });
-      }
-    }
-  }, [props]);
-  return { promoteBusyIds, promoteToStrictlyGoverned };
 }
 
 function emptyRowState(): MemoryPageData {

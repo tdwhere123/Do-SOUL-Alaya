@@ -135,7 +135,7 @@ function resolveOpenAiEmbeddingApiKey(
 function formatEmbeddingSecretResolutionError(error: ResolveSecretError): string {
   switch (error.kind) {
     case "malformed":
-      return `ALAYA_OPENAI_SECRET_REF: ${error.ref} -> ${error.reason}`;
+      return `ALAYA_OPENAI_SECRET_REF is malformed: ${error.reason}`;
     case "empty":
       return `ALAYA_OPENAI_SECRET_REF: ${error.ref} -> ${error.origin} secret is empty`;
     default:

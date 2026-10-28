@@ -10,6 +10,38 @@ const context = {
 } as const;
 
 describe("soul.resolve causal usage", () => {
+  it("requires the configured reviewer identity and token before resolution", async () => {
+    const resolve = vi.fn(async () => ({
+      resolution: SoulResolutionKind.CONFIRM,
+      status: "applied" as const,
+      auditEventType: "soul.governance.resolution.confirmed",
+      auditEventId: "resolution-event-1",
+      activatedClaimId: "claim-1",
+      effectDecision: "allow" as const
+    }));
+    const handler = createSoulResolveHandler({
+      resolutionService: { resolve },
+      trustStateRecorder: { findDeliveryById: async () => delivery() },
+      claimSourceReader: { findSourceObjectRefs: async () => ["memory-1"] },
+      reviewerIdentityBinding: { identity: "reviewer-1", token: "review-token" }
+    });
+
+    for (const credentials of [
+      {},
+      { reviewer_identity: "reviewer-1" },
+      { reviewer_identity: "reviewer-1", reviewer_token: "wrong" },
+      { reviewer_identity: "other", reviewer_token: "review-token" }
+    ]) {
+      await expect(handler.resolve({ ...request(), ...credentials }, context)).rejects.toThrow();
+    }
+    expect(resolve).not.toHaveBeenCalled();
+    await handler.resolve({ ...request(), reviewer_identity: "reviewer-1", reviewer_token: "review-token" }, context);
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      agentTarget: "agent-1",
+      reviewerIdentity: "reviewer-1"
+    }));
+  });
+
   it("records delivered source usage only after a successful trusted resolution", async () => {
     const record = vi.fn(async () => undefined);
     const resolve = vi.fn(async () => ({
@@ -28,7 +60,7 @@ describe("soul.resolve causal usage", () => {
       now: () => "2026-08-17T00:00:00.000Z"
     });
 
-    await handler.resolve(request(), context);
+    await expect(handler.resolve(request(), context)).resolves.toMatchObject({ usage_recording_status: "recorded" });
 
     expect(record).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
@@ -38,6 +70,23 @@ describe("soul.resolve causal usage", () => {
       scope: "workspace-1",
       runId: "run-1",
       causedBy: "agent-1"
+    });
+  });
+
+  it("reports committed confirmation even if cancellation and usage failure follow", async () => {
+    const abort = new AbortController();
+    const handler = createSoulResolveHandler({
+      resolutionService: { resolve: async () => {
+        abort.abort();
+        return { resolution: SoulResolutionKind.CONFIRM, status: "applied", auditEventType: "confirmed",
+          auditEventId: "resolution-event-1", activatedClaimId: "claim-1", effectDecision: "allow", electionStatus: "failed" };
+      } },
+      trustStateRecorder: { findDeliveryById: async () => delivery() },
+      claimSourceReader: { findSourceObjectRefs: async () => ["memory-1"] },
+      causalUsageRecorder: { record: async () => { throw new Error("usage unavailable"); } }
+    });
+    await expect(handler.resolve(request(), { ...context, abortSignal: abort.signal })).resolves.toMatchObject({
+      status: "applied", audit_event_id: "resolution-event-1", usage_recording_status: "failed", election_status: "failed"
     });
   });
 

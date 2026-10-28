@@ -147,9 +147,15 @@ export function startObserverCursor(input: Readonly<{
 export function observeConditionalField(input: ObserveConditionalFieldInput): ObserverActionResult {
   const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
   if (input.action.work_limit < pinWork) return interruptedAction(input);
-  const bounded = { ...input, action: { ...input.action, work_limit: input.action.work_limit - pinWork } };
+  const bounded = { ...input, action: { ...input.action, work_limit: input.action.work_limit - pinWork },
+    on_atomic_work_block: (required: number) => input.on_atomic_work_block?.(required + pinWork) };
   const invalid = invalidSnapshotPage(bounded);
-  const result = invalid ?? (bounded.action.work_limit === 0 ? interruptedAction(bounded) : observeAction(bounded));
+  let result: ObserverActionResult;
+  try { result = invalid ?? (bounded.action.work_limit === 0 ? interruptedAction(bounded) : observeAction(bounded)); }
+  catch (error) {
+    input.on_failure_work?.({ native_visits: pinWork, native_bytes: 0 });
+    throw error;
+  }
   return { ...result, work: { ...result.work,
     work_units: result.work.work_units + pinWork,
     native_visits: result.work.native_visits + pinWork

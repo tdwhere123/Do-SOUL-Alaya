@@ -1,5 +1,6 @@
 import { MaxMinWorkQueue, PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { productEndpointId, type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../../shared/errors.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { incomingRules, type SharedRule } from "./dependency-equations.js";
 import { joinDerivation, leafDerivation, seedDerivationIdentity } from "./path-derivation.js";
@@ -21,6 +22,8 @@ export type GroundingProgress = Readonly<{
   input_digest: string;
   input_references: InputReferences;
   completed_work: number;
+  /** Successful retained transitions; failed resource attempts do not advance this cursor. */
+  completed_steps: number;
   retained_bytes: number;
   forest: PersistentStringMap<Derivation>;
   incoming: RuleIndex;
@@ -78,8 +81,9 @@ export function groundedOutputDerivations(input: GroundingInput): {
   const prior = same ? input.progress : undefined;
   const inputDigest = input.input_revision ?? prior?.input_digest ?? "grounding-local-v2:" + (++localGeneration);
   const machine = new GroundingMachine(input, prior);
-  while (machine.work < input.allowance && machine.step()) {}
-  const progress = machine.progress(inputDigest, references);
+  let completedSteps = prior?.completed_steps ?? 0;
+  while (machine.work < input.allowance && machine.step()) completedSteps++;
+  const progress = machine.progress(inputDigest, references, completedSteps);
   return {
     get derivations() { return [...progress.forest.values()]; },
     get roots() { return Object.fromEntries(progress.root_map); },
@@ -295,7 +299,7 @@ class GroundingMachine {
     const memoBytes = frame.cycle || this.proofMemo.has(frame.id) ? 0 : 64 + Buffer.byteLength(frame.id, "utf8");
     if (frame.parent !== undefined) {
       const rule = this.incoming.get(frame.parent.id)?.entryAt(frame.parent.offset)?.[1];
-      if (rule === undefined) throw new Error("missing retained proof rule");
+      if (rule === undefined) throw new CoreError("OBLIGATION_VIOLATION", "missing retained proof rule");
       const edge = this.forest.get(rule.derivation_id);
       const serial = frame.root !== undefined && edge !== undefined ? joinDerivation("serial", [frame.root, edge]) : undefined;
       const alternative = serial === undefined ? undefined : frame.parent.root === undefined
@@ -336,8 +340,9 @@ class GroundingMachine {
     return true;
   }
 
-  public progress(inputDigest: string, references: InputReferences): GroundingProgress {
-    return { input_digest: inputDigest, input_references: references, completed_work: (this.prior?.completed_work ?? 0) + this.work,
+  public progress(inputDigest: string, references: InputReferences, completedSteps: number): GroundingProgress {
+    return { input_digest: inputDigest, input_references: references, completed_steps: completedSteps,
+      completed_work: (this.prior?.completed_work ?? 0) + this.work,
       retained_bytes: (this.prior?.retained_bytes ?? 0) + this.retainedBytes, forest: this.forest, incoming: this.incoming,
       outgoing: this.outgoing, root_map: this.roots, assembled: this.assembled, grades: this.grades, settled: this.settled,
       queue: this.queue, current: this.current, proof_needed: this.proofNeeded,

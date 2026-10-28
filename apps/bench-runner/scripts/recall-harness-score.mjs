@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createRequire } from "node:module";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answer-spans.js";
 import {
   scoreContiguousReadVisibility,
@@ -39,7 +40,7 @@ export function loadSnapshotSources(snapshot, workspace) {
 export function scoreRecallHarnessRow(row, dataset) {
   const question = dataset.get(row.question_id);
   if (!question) {
-    throw new Error(`Question ${row.question_id} not found in dataset`);
+    throw new AlayaError("VALIDATION", `Question ${row.question_id} not found in dataset`);
   }
   const gold = question.haystack_sessions.flat().filter(turn => turn.has_answer).map(turn => norm(turn.content)).filter(Boolean);
   const baseData = { question_id: row.question_id, question_type: row.question_type, arm: row.arm, status: row.status };
@@ -55,7 +56,7 @@ export function scoreRecallHarnessRow(row, dataset) {
   }
 
   if (!Array.isArray(row.intervals)) {
-    throw new Error(`Row ${row.question_id} (${row.arm}) status "${row.status}" requires intervals array`);
+    throw new AlayaError("VALIDATION", `Row ${row.question_id} (${row.arm}) status "${row.status}" requires intervals array`);
   }
 
   const { bodyMap, sourceRows } = loadSnapshotSources(row.snapshot, row.workspace);

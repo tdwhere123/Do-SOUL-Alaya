@@ -6,7 +6,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
-import { parseMemoryDimension, MemoryEntryRowParser, parseScopeClass, parseStorageTier } from "../mappers/row-mapper.js";
+import { parseMemoryDimension, parseScopeClass, parseStorageTier } from "../mappers/row-mapper.js";
+import { createPrivacyMemoryRowParser } from "./privacy-memory-row-parser.js";
+import { requirePrivacyRowsAvailable, requirePrivacyRunMemoriesAvailable, requirePrivacyWorkspaceAvailable } from "../../field/privacy-availability.js";
 import type { RefreshableStatementHolder } from "../../../sqlite/refreshable-statement-holder.js";
 import { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prepared-statement-cache.js";
 import type { MemoryEntryStatements } from "../statements/sqlite-memory-entry-statements.js";
@@ -26,15 +28,17 @@ import { CountRowParser, parseOptionalRow, parseRows } from "../../shared/parse-
 export class MemoryEntryReadQueries {
   private readonly conflictQueries: MemoryEntryConflictReadQueries;
   private readonly dynamicQueries: MemoryEntryDynamicReadQueries;
+  private readonly memoryRowParser: ReturnType<typeof createPrivacyMemoryRowParser>;
 
   public constructor(
-    db: StorageDatabase,
+    private readonly privacyDatabase: StorageDatabase,
     private readonly diagnostics: MemoryEntryRepoDiagnosticSink,
     private readonly statementHolder: RefreshableStatementHolder<MemoryEntryStatements>
   ) {
-    this.conflictQueries = new MemoryEntryConflictReadQueries(() => this.statements);
-    const dynamicStatementCache = new DynamicPreparedStatementCache(db, () => this.ensureActiveConnection());
-    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, this.diagnostics);
+    this.memoryRowParser = createPrivacyMemoryRowParser(privacyDatabase);
+    this.conflictQueries = new MemoryEntryConflictReadQueries(() => this.statements, this.memoryRowParser);
+    const dynamicStatementCache = new DynamicPreparedStatementCache(privacyDatabase, () => this.ensureActiveConnection());
+    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, this.diagnostics, this.memoryRowParser, privacyDatabase);
   }
 
   private get statements(): MemoryEntryStatements {
@@ -55,7 +59,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseOptionalRow(
         this.statements.findByIdStatement.get(objectId),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -82,7 +86,7 @@ export class MemoryEntryReadQueries {
       return parsedTier === undefined || parsedTier === StorageTier.HOT
         ? parseRows(
             this.statements.findByWorkspaceHotPagedStatement.all(workspaceId, parsedPage.limit, parsedPage.offset),
-            MemoryEntryRowParser,
+            this.memoryRowParser,
             "memory entry row"
           )
         : parseRows(
@@ -92,7 +96,7 @@ export class MemoryEntryReadQueries {
               parsedPage.limit,
               parsedPage.offset
             ),
-            MemoryEntryRowParser,
+            this.memoryRowParser,
             "memory entry row"
           );
     } catch (error) {
@@ -103,13 +107,17 @@ export class MemoryEntryReadQueries {
   public async findRecallTierWindow(
     query: RecallTierWindowQuery
   ): Promise<Readonly<RecallTierWindowResult>> {
-    return findRecallTierWindow(this.statements, query);
+    const result = findRecallTierWindow(this.statements, query);
+    requirePrivacyRowsAvailable(this.privacyDatabase, "memory_entry", result.memories);
+    return result;
   }
 
   public async findByEventTimeWindow(
     query: RecallEventTimeWindowQuery
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    return findByEventTimeWindow(this.statements, query);
+    const result = findByEventTimeWindow(this.statements, query);
+    requirePrivacyRowsAvailable(this.privacyDatabase, "memory_entry", result);
+    return result;
   }
 
   public async findByWorkspaceIdAll(
@@ -121,12 +129,12 @@ export class MemoryEntryReadQueries {
       return parsedTier === undefined || parsedTier === StorageTier.HOT
         ? parseRows(
             this.statements.findByWorkspaceHotStatement.all(workspaceId),
-            MemoryEntryRowParser,
+            this.memoryRowParser,
             "memory entry row"
           )
         : parseRows(
             this.statements.findByWorkspaceTierStatement.all(workspaceId, parsedTier),
-            MemoryEntryRowParser,
+            this.memoryRowParser,
             "memory entry row"
           );
     } catch (error) {
@@ -138,6 +146,7 @@ export class MemoryEntryReadQueries {
   }
 
   public async countByWorkspaceId(workspaceId: string, tier?: StorageTier): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     try {
       const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
       const row =
@@ -171,7 +180,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findByRunIdPagedStatement.all(runId, parsedPage.limit, parsedPage.offset),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -181,13 +190,14 @@ export class MemoryEntryReadQueries {
 
   public async findByRunIdAll(runId: string): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      return parseRows(this.statements.findByRunIdStatement.all(runId), MemoryEntryRowParser, "memory entry row");
+      return parseRows(this.statements.findByRunIdStatement.all(runId), this.memoryRowParser, "memory entry row");
     } catch (error) {
       throw wrapMemoryEntryQueryError(`Failed to list all memory entries for run ${runId}.`, error);
     }
   }
 
   public async countByRunId(runId: string): Promise<number> {
+    requirePrivacyRunMemoriesAvailable(this.privacyDatabase, runId);
     try {
       return parseOptionalRow(
         this.statements.countByRunIdStatement.get(runId),
@@ -215,7 +225,7 @@ export class MemoryEntryReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -235,7 +245,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findByDimensionHotStatement.all(workspaceId, parsedDimension),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -247,6 +257,7 @@ export class MemoryEntryReadQueries {
   }
 
   public async countByDimension(workspaceId: string, dimension: MemoryDimension): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     const parsedDimension = parseMemoryDimension(dimension);
 
     try {
@@ -260,6 +271,36 @@ export class MemoryEntryReadQueries {
         `Failed to count memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
         error
       );
+    }
+  }
+
+  public async findByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryDimension, page?: MemoryEntryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
+    const scope = parseScopeClass(scopeClass);
+    const parsedDimension = parseMemoryDimension(dimension);
+    try {
+      return parseRows(this.statements.findByScopeClassAndDimensionHotPagedStatement.all(
+        workspaceId, scope, parsedDimension, parsedPage.limit, parsedPage.offset
+      ), this.memoryRowParser, "memory entry row");
+    } catch (error) {
+      throw wrapMemoryEntryQueryError("Failed to list memory entries by scope and dimension.", error);
+    }
+  }
+
+  public async countByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryDimension
+  ): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
+    const scope = parseScopeClass(scopeClass);
+    const parsedDimension = parseMemoryDimension(dimension);
+    try {
+      return parseOptionalRow(this.statements.countByScopeClassAndDimensionHotStatement.get(
+        workspaceId, scope, parsedDimension
+      ), CountRowParser, "memory entry count row")?.total ?? 0;
+    } catch (error) {
+      throw wrapMemoryEntryQueryError("Failed to count memory entries by scope and dimension.", error);
     }
   }
 
@@ -279,7 +320,7 @@ export class MemoryEntryReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -299,7 +340,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findByScopeClassHotStatement.all(workspaceId, parsedScopeClass),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -311,6 +352,7 @@ export class MemoryEntryReadQueries {
   }
 
   public async countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     const parsedScopeClass = parseScopeClass(scopeClass);
 
     try {
@@ -335,6 +377,7 @@ export class MemoryEntryReadQueries {
   }
 
   public async countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     return await this.conflictQueries.countByWorkspaceIdWithConflict(workspaceId);
   }
 
@@ -350,6 +393,7 @@ export class MemoryEntryReadQueries {
     workspaceId: string,
     dimension: MemoryDimension
   ): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     return await this.conflictQueries.countByDimensionWithConflict(workspaceId, dimension);
   }
 
@@ -365,6 +409,7 @@ export class MemoryEntryReadQueries {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     return await this.conflictQueries.countByScopeClassWithConflict(workspaceId, scopeClass);
   }
 
@@ -387,6 +432,7 @@ export class MemoryEntryReadQueries {
     scopeClass: ScopeClass,
     dimension: MemoryDimension
   ): Promise<number> {
+    requirePrivacyWorkspaceAvailable(this.privacyDatabase, workspaceId, ["memory_entry"]);
     return await this.conflictQueries.countByScopeClassAndDimensionWithConflict(
       workspaceId,
       scopeClass,
@@ -421,7 +467,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findLowActivityActiveMemoriesStatement.all(workspaceId),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -438,7 +484,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findTombstonedMemoriesStatement.all(workspaceId),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -455,7 +501,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findDormantMemoriesStatement.all(workspaceId),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
@@ -472,7 +518,7 @@ export class MemoryEntryReadQueries {
     try {
       return parseRows(
         this.statements.findTombstonedWithDispositionStatement.all(workspaceId),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {

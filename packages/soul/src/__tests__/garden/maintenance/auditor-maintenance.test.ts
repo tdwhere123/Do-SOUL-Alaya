@@ -113,96 +113,17 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
   });
 
 
-  it("creates synthesis candidates inside the EventLog mutate callback", async () => {
-    const order: string[] = [];
-    const eventLogRepo = createPassthroughEventLogPort();
-    const originalAppend = eventLogRepo.appendManyWithMutation;
-    eventLogRepo.appendManyWithMutation = vi.fn(
-      async <T>(
-        entries: readonly object[],
-        mutate: (rows: readonly object[]) => T
-      ): Promise<T> => {
-        order.push("append");
-        return await originalAppend(entries as never, (rows) => {
-          order.push("mutate-enter");
-          const value = mutate(rows);
-          order.push("mutate-exit");
-          return value;
-        });
-      }
-    ) as typeof originalAppend;
-    const { auditor, bootstrappingPort, scheduler } = createAuditor({
-      patterns: [
-        { pattern_key: "pattern-a", frequency: 4 },
-        { pattern_key: "pattern-b", frequency: 6 }
-      ],
-      eventLogRepo
-    });
-    bootstrappingPort.createSynthesisCandidate = vi.fn((_workspaceId: string, patternKey: string) => {
-      order.push(`create:${patternKey}`);
-      return { candidate_id: `candidate:${patternKey}` };
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(order).toEqual([
-      "append",
-      "mutate-enter",
-      "create:pattern-a",
-      "mutate-exit",
-      "append",
-      "mutate-enter",
-      "create:pattern-b",
-      "mutate-exit"
-    ]);
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenNthCalledWith(
-      1,
-      "workspace-1",
-      "pattern-a"
-    );
-    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenNthCalledWith(
-      2,
-      "workspace-1",
-      "pattern-b"
-    );
-    expect(result).toMatchObject({
-      success: true,
-      objects_affected: ["candidate:pattern-a", "candidate:pattern-b"]
-    });
-    expect(result.audit_entries).toEqual([
-      "crystallization_scan: 2 synthesis candidates created from 2 high-frequency patterns"
-    ]);
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
-  });
-
-  it("fails closed on crystallization mutation when eventLogRepo is missing", async () => {
+  it("reports a failed crystallization when the candidate owner refuses creation", async () => {
     const { auditor, bootstrappingPort } = createAuditor({
-      omitEventLogRepo: true,
-      patterns: [{ pattern_key: "pattern-a", frequency: 4 }]
+      patterns: [{ pattern_key: "pattern-b", frequency: 5 }]
     });
+    bootstrappingPort.createSynthesisCandidate = vi.fn(async () => { throw new Error("creation unavailable"); });
 
     const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
 
     expect(result.success).toBe(false);
-    expect(result.error_message).toMatch(/eventLogRepo/);
-    expect(bootstrappingPort.createSynthesisCandidate).not.toHaveBeenCalled();
-  });
-
-  it("does not create a crystallization candidate when EventLog append fails", async () => {
-    const { auditor, bootstrappingPort } = createAuditor({
-      patterns: [{ pattern_key: "pattern-b", frequency: 5 }],
-      eventLogRepo: {
-        append: vi.fn(),
-        appendManyWithMutation: vi.fn(async () => {
-          throw new Error("event log crashed");
-        }) as NonNullable<AuditorDependencies["eventLogRepo"]>["appendManyWithMutation"]
-      }
-    });
-
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
-
-    expect(result.success).toBe(false);
-    expect(bootstrappingPort.createSynthesisCandidate).not.toHaveBeenCalled();
+    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledOnce();
+    expect(result.error_message).toContain("creation unavailable");
   });
 
 
@@ -302,6 +223,17 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
     expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledTimes(AUDITOR_CONSTANTS.BATCH_SIZE);
     expect(result.objects_affected).toHaveLength(AUDITOR_CONSTANTS.BATCH_SIZE);
   });
+
+  it("continues past pending patterns until it creates the available batch", async () => {
+    const patterns = Array.from({ length: AUDITOR_CONSTANTS.BATCH_SIZE + 1 }, (_, index) => ({
+      pattern_key: `pattern-${index}`, frequency: AUDITOR_CONSTANTS.CRYSTALLIZATION_THRESHOLD
+    }));
+    const { auditor, bootstrappingPort } = createAuditor({ patterns,
+      pendingPatternKeys: patterns.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE).map(pattern => pattern.pattern_key) });
+    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.CRYSTALLIZATION_SCAN }));
+    expect(bootstrappingPort.createSynthesisCandidate).toHaveBeenCalledOnce();
+    expect(result.objects_affected).toEqual([`candidate:pattern-${AUDITOR_CONSTANTS.BATCH_SIZE}`]);
+  });
 });
 
 function createPassthroughEventLogPort(): NonNullable<AuditorDependencies["eventLogRepo"]> {
@@ -363,8 +295,8 @@ function createAuditor(options: {
     ),
     generateDraftCandidates: vi.fn(async () => options.draftCandidates ?? []),
     findHighFrequencyPatterns: vi.fn(async () => options.patterns ?? []),
-    createSynthesisCandidate: vi.fn( (_workspaceId: string, patternKey: string) => ({
-      candidate_id: `candidate:${patternKey}`
+    createSynthesisCandidate: vi.fn( async (_workspaceId: string, patternKey: string) => ({
+      candidate_id: `candidate:${patternKey}`, created: true
     })),
     hasPendingSynthesisCandidate: vi.fn(async (_workspaceId: string, patternKey: string) =>
       (options.pendingPatternKeys ?? []).includes(patternKey)

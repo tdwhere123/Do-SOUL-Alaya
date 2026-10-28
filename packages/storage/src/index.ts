@@ -4,6 +4,7 @@ export { isLexicalDomainTable, isLexicalDomainTrigger, rebuildSourceIndexLexical
 export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./shared/index.js";
 export {
   initDatabase,
+  resolveTemporalResourcePath,
   closeCachedDatabase,
   StorageDatabase,
   getCurrentSchemaSummary,
@@ -34,6 +35,7 @@ export {
   isTemporalProjectionSelected,
   selectTemporalProjection,
   rollbackTemporalProjection,
+  verifyTemporalProjectionRollbackSource,
   type InitDatabaseOptions,
   type EmbeddingOverlayBindDocument,
   type SqliteWriteJob,
@@ -159,6 +161,8 @@ export {
 } from "./repos/governance/index.js";
 export {
   SqliteProposalRepo,
+  isRetiredProposalDossier,
+  isSynthesisCreateProposalDossier,
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
   type CreateProposalWithEventsIfAbsentResult,
@@ -346,6 +350,7 @@ export {
 
 export {
   SqliteReconciliationLeaseRepo,
+  SqliteClaimElectionLeaseRepo,
   type ReconciliationLease,
   type ReconciliationLeaseRepo
 } from "./repos/lease/index.js";

@@ -4,6 +4,16 @@ import { resolveDefaultBenchHistoryRoot } from "@do-soul/alaya-eval";
 import { parseFlags } from "../../cli/cli-options.js";
 
 describe("parseFlags", () => {
+  it("honors inline cohort and boolean flag values without silently broadening the run", () => {
+    expect(parseFlags(["--variant=s", "--limit=100", "--offset=25", "--force=true", "--qa=off"]))
+      .toMatchObject({ variant: "longmemeval_s", limit: 100, offset: 25, force: true, qa: false });
+  });
+
+  it.each([["--limti=100"], ["--variant", "unknown"], ["--variant=unknown"], ["--qa=maybe"], ["--limit"], ["--variant"]])(
+    "refuses unknown, malformed, or missing benchmark intent: %j", (...args) => {
+      expect(() => parseFlags(args)).toThrow();
+    }
+  );
   it("uses local ignored history and retains explicit history and static input paths", () => {
     expect(parseFlags([]).historyRoot).toBe(path.resolve(process.cwd(), ".bench-artifacts/history"));
     expect(parseFlags([]).historyRoot).toBe(resolveDefaultBenchHistoryRoot());

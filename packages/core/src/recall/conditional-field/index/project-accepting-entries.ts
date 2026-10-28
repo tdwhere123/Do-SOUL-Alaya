@@ -104,6 +104,7 @@ export function acceptingEntries(
   truncated = prepared.truncated;
   const indexed = { ...input, projection_facet_index: prepared.facet.index };
   if (prepared.truncated && allowance <= 0) {
+    input.on_atomic_work_block?.({ phase: "facet_index", required_work: 1, available_work: allowance });
     return {
       entries, members, updates, retracted, unemitted: values.size,
       has_incomparable_activations: input.snapshot.has_incomparable_activations,
@@ -181,7 +182,10 @@ function scanAcceptingValues(scan: {
           next += 1;
           continue;
         }
-        if (allowance < 1 || updates.length >= input.budget.page_budget) { truncated = true; break; }
+        if (allowance < 1 || updates.length >= input.budget.page_budget) {
+          if (allowance < 1) input.on_atomic_work_block?.({ phase: "refinement", required_work: 1, available_work: allowance });
+          truncated = true; break;
+        }
         allowance -= 1;
         updates.push(entry);
         next += 1;
@@ -211,6 +215,9 @@ function scanAcceptingValues(scan: {
     const payloadReserve = input.finalize_payload === undefined ? 0
       : (input.payload_work_per_entry ?? 1) * (collected + (value.accepting && grounded ? 1 : 0));
     if (allowance < 1 + payloadReserve) {
+      input.on_atomic_work_block?.({ phase: "membership", required_work: 1 +
+        (input.finalize_payload === undefined || !value.accepting || !grounded ? 0 : input.payload_work_per_entry ?? 1),
+        available_work: allowance });
       truncated = true;
       facet = { ...facet, scan_offset: Math.max(facet.scan_offset, 1) };
       break;
@@ -241,6 +248,15 @@ function scanAcceptingValues(scan: {
 
 function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {
   const key = productStateNodeId(value.state);
+  if (input.derivation_forest !== undefined) {
+    const roots = input.output_derivation_roots?.get(key) ?? [];
+    return roots.some(id => {
+      const root = input.derivation_forest!.get(id);
+      return root?.kind === "leaf" && root.observation_ids.includes(productSubjectId(value.state))
+        && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0);
+    }) && input.snapshot.seeds.some(seed => productStateNodeId(seed.state) === key
+      && seed.milligrades >= (value.milligrades ?? 0));
+  }
   const roots = new Set(input.output_derivations?.[key] ?? []);
   return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
       && root.observation_ids.includes(productSubjectId(value.state))

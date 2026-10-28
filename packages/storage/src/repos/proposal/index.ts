@@ -1,4 +1,5 @@
 export { SqliteProposalRepo } from "./sqlite-proposal-repo.js";
+export { isRetiredProposalDossier, isSynthesisCreateProposalDossier } from "./types.js";
 export type {
   AcceptedMemoryUpdateInput,
   AcceptedPathRelationGovernanceInput,

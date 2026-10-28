@@ -110,6 +110,7 @@ export const EvidenceReceiptVerificationRowParser: RowParser<EvidenceReceiptVeri
 
 export interface HqFormationSourceRow {
   readonly observation_id: string;
+  readonly object_id: string;
   readonly workspace_id: string;
   readonly evidence_id: string;
   readonly source_event_type: string;
@@ -123,6 +124,7 @@ export const HqFormationSourceRowParser: RowParser<HqFormationSourceRow> = {
     const record = readRecord(value, "hq formation source row");
     return {
       observation_id: readNonEmptyStringField(record, "observation_id"),
+      object_id: readNonEmptyStringField(record, "object_id"),
       workspace_id: readNonEmptyStringField(record, "workspace_id"),
       evidence_id: readNonEmptyStringField(record, "evidence_id"),
       source_event_type: readNonEmptyStringField(record, "source_event_type"),

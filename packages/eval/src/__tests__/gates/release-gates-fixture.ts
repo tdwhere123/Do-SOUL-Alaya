@@ -1,6 +1,7 @@
 import {
   KpiPayloadSchema,
-  type KpiPayload
+  type KpiPayload,
+  type MeasuredQualityMetrics
 } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
   "../../contracts/longmemeval-selection-contract.js";
@@ -139,7 +140,7 @@ export function legacyAbstention(): NonNullable<
 
 export function passingQualityMetrics(
   denominator: number
-): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+): MeasuredQualityMetrics {
   const evidenceCount = Math.floor(denominator * 0.2);
   const pathCount = Math.floor(denominator * 0.12);
   const rate = (count: number): number => denominator === 0 ? 0 : count / denominator;

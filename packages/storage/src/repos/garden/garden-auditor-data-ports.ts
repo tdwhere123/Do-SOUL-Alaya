@@ -9,6 +9,7 @@ import type {
   BrokenPointerRecord,
   ExpiringGreenStatus
 } from "@do-soul/alaya-protocol";
+import { requirePrivacyWorkspaceAvailable } from "../field/privacy-availability.js";
 import type {
   GardenAuditorBootstrappingPort,
   GardenAuditorEvidenceCheckPort,
@@ -49,6 +50,9 @@ export function createEvidenceCheckPort(
      AND e.workspace_id = m.workspace_id
     WHERE m.workspace_id = ?
       AND m.lifecycle_state = '${ACTIVE_STATE}'
+      AND EXISTS (SELECT 1 FROM green_statuses g
+        WHERE g.workspace_id = m.workspace_id AND g.target_object_id = m.object_id
+          AND g.green_state IN ('eligible', 'grace'))
       AND (e.object_id IS NULL OR e.evidence_health_state <> 'verified')
     GROUP BY m.object_id, m.updated_at
     ORDER BY m.updated_at ASC, m.object_id ASC
@@ -221,11 +225,18 @@ export function createBootstrappingPort(
   const statements = prepareBootstrappingStatements(context.database);
 
   return {
-    assessColdStart: async (workspaceId) => assessColdStart(statements, workspaceId),
-    generateDraftCandidates: async (workspaceId) =>
-      generateDraftCandidates(statements, workspaceId),
+    assessColdStart: async (workspaceId) => {
+      requirePrivacyWorkspaceAvailable(context.database, workspaceId, ["memory_entry", "claim_form"]);
+      return assessColdStart(statements, workspaceId);
+    },
+    generateDraftCandidates: async (workspaceId) => {
+      requirePrivacyWorkspaceAvailable(context.database, workspaceId, ["memory_entry", "claim_form"]);
+      return generateDraftCandidates(statements, workspaceId);
+    },
     findHighFrequencyPatterns: async (workspaceId, minFrequency) => {
+      requirePrivacyWorkspaceAvailable(context.database, workspaceId, ["memory_entry", "claim_form"]);
       const rows = statements.patternStatement.all(
+        workspaceId,
         workspaceId,
         workspaceId,
         Math.max(1, minFrequency)
@@ -235,13 +246,13 @@ export function createBootstrappingPort(
         frequency: row.frequency
       }));
     },
-    createSynthesisCandidate: (workspaceId, patternKey) => {
-      const candidateId = createPendingCandidateProposal(context, {
+    createSynthesisCandidate: async (workspaceId, patternKey) => {
+      return await createPendingCandidateProposal(context, {
         workspaceId,
         derivedFrom: buildDerivedKey("bootstrapping", patternKey),
-        dossierRef: "bootstrapping.synthesis_candidate"
+        dossierRef: "bootstrapping.synthesis_candidate",
+        causedBy: "auditor"
       });
-      return { candidate_id: candidateId };
     },
     hasPendingSynthesisCandidate: async (workspaceId, patternKey) => {
       const row = statements.hasPendingStatement.get(

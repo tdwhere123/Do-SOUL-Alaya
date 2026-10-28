@@ -111,7 +111,9 @@ export function nextContinuation(
     )
     : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`
       + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`)
-      + ((input.projection_facet_offset ?? 0) > 0 ? `e${input.projection_facet_offset}` : "");
+      + ((input.projection_facet_offset ?? 0) > 0 ? `e${input.projection_facet_offset}` : "")
+      + (input.explanation_progress === undefined ? "" : `x${input.explanation_progress.completedWork}`)
+      + `d${emittedKeys.length}`;
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

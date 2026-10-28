@@ -28,6 +28,8 @@ interface WorkerSession {
   readonly pending: Map<number, PendingWaiter>;
   readonly ready: Promise<void>;
   closed: boolean;
+  terminalError: Error | null;
+  closing: Promise<void> | null;
   nextRequestId: number;
   failAllPending(error: Error): void;
 }
@@ -73,6 +75,8 @@ function createWorkerSession(workerUrl: URL, observation: QueueLifecycleObservat
     pending,
     ready,
     closed: false,
+    terminalError: null,
+    closing: null,
     nextRequestId: 1,
     failAllPending(error) {
       for (const waiter of pending.values()) {
@@ -110,6 +114,7 @@ function createWorkerSession(workerUrl: URL, observation: QueueLifecycleObservat
 
   session.worker.on("error", (error) => {
     const normalized = error instanceof Error ? error : new Error(String(error));
+    session.terminalError = normalized;
     failReady(normalized);
     if (observation && observation.state.readiness === "pending") {
       observation.state.readiness = "failed"; observation.publish();
@@ -121,6 +126,7 @@ function createWorkerSession(workerUrl: URL, observation: QueueLifecycleObservat
     if (observation) { observation.state.terminal = { code }; observation.publish(); }
     if (session.closed) return;
     const error = new Error(`sqlite write queue worker exited unexpectedly (code=${code})`);
+    session.terminalError = error;
     failReady(error);
     if (observation && observation.state.readiness === "pending") {
       observation.state.readiness = "failed"; observation.publish();
@@ -136,6 +142,7 @@ async function postRequest(
   request: SqliteWriteQueueWorkerRequest
 ): Promise<void> {
   await session.ready;
+  if (session.terminalError !== null) throw session.terminalError;
   if (session.closed) {
     throw new Error("sqlite write queue worker is closed");
   }
@@ -145,7 +152,12 @@ async function postRequest(
       session.observation.state.pendingRequests = session.pending.size;
       session.observation.publish();
     }
-    session.worker.postMessage(request);
+    try {
+      session.worker.postMessage(request);
+    } catch (error) {
+      session.pending.delete(request.requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
@@ -176,7 +188,12 @@ async function runPayloadJob(session: WorkerSession, job: SqliteWriteJob): Promi
   });
 }
 
-async function closeWorker(session: WorkerSession): Promise<void> {
+function closeWorker(session: WorkerSession): Promise<void> {
+  session.closing ??= closeWorkerSession(session);
+  return session.closing;
+}
+
+async function closeWorkerSession(session: WorkerSession): Promise<void> {
   if (session.closed) {
     return;
   }

@@ -39,6 +39,7 @@ import type {
   PostTurnSignalReceiveResult,
   PostTurnSignalReceiver
 } from "../../../garden/post-turn-extract/signal-receiver.js";
+import { bindPostTurnTaskSource } from "./post-turn-source-fixture.js";
 
 const harnesses = new Set<GardenMcpHarness>();
 
@@ -158,6 +159,8 @@ export async function createGardenMcpHarness(
     enqueue: gardenTaskRepo.enqueue.bind(gardenTaskRepo),
     findByIdInWorkspace: gardenTaskRepo.findByIdInWorkspace.bind(gardenTaskRepo),
     peekPending: gardenTaskRepo.peekPending.bind(gardenTaskRepo),
+    hasAvailableSource: gardenTaskRepo.hasAvailableSource.bind(gardenTaskRepo),
+    quarantineUnavailablePostTurnTasks: gardenTaskRepo.quarantineUnavailablePostTurnTasks.bind(gardenTaskRepo),
     claimAtomic: gardenTaskRepo.claimAtomic.bind(gardenTaskRepo),
     completeWithEvents: async (taskId, result, events, claimedBy, workspaceId) => {
       if (options.completeWithEvents !== undefined) {
@@ -290,18 +293,16 @@ export async function createGardenMcpHarness(
       const workspaceId = overrides.workspace_id ?? "workspace-a";
       const role = overrides.role ?? GardenRole.JANITOR;
       const kind = overrides.kind ?? GardenTaskKind.TTL_CLEANUP;
+      const payload = overrides.payload ?? createTaskDescriptor({
+        task_id: taskId, task_kind: kind, workspace_id: workspaceId
+      });
       gardenTaskRepo.enqueue({
         id: taskId,
         workspace_id: workspaceId,
         role,
         kind,
-        payload:
-          overrides.payload ??
-          createTaskDescriptor({
-            task_id: taskId,
-            task_kind: kind,
-            workspace_id: workspaceId
-          }),
+        payload: kind === GardenTaskKind.POST_TURN_EXTRACT
+          ? bindPostTurnTaskSource(database, payload, `post-turn:${taskId}`) : payload,
         created_at: overrides.created_at ?? "2026-05-07T00:00:00.000Z"
       });
     },

@@ -76,6 +76,13 @@ export interface GardenTaskRepoPort {
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
   findById(taskId: string): GardenTaskRow | null;
   findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
+  hasAvailableSource(taskId: string, workspaceId?: string): boolean;
+  quarantineUnavailablePostTurnTasks(
+    completedAt: string,
+    eventForTask: (task: GardenTaskRow, reason: string) => GardenTaskEventInput,
+    workspaceId?: string,
+    taskId?: string
+  ): Promise<number>;
   peekPending(
     role: GardenRoleValue,
     workspace_id?: string,

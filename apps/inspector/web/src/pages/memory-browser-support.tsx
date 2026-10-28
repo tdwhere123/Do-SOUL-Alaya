@@ -1,4 +1,4 @@
-import type { EvidenceTextDisclosures } from "@do-soul/alaya-protocol";
+import { MemoryDimensionSchema, type EvidenceTextDisclosures } from "@do-soul/alaya-protocol";
 
 export interface MemoryEntryRow {
   readonly object_id: string;
@@ -33,17 +33,6 @@ export interface EvidenceEnvelope {
   readonly data: EvidenceCapsuleShape;
 }
 
-export interface PromoteEnvelope {
-  readonly success: boolean;
-  readonly data: {
-    readonly proposal_id: string;
-    readonly status: "created";
-    readonly target_object_id: string;
-    readonly target_object_kind: "path_relation";
-    readonly requested_governance_class: "strictly_governed";
-  };
-}
-
 export interface MemoryPageData {
   readonly rows: readonly MemoryEntryRow[];
   readonly totalRows: number | null;
@@ -55,14 +44,7 @@ export type DimensionFilter = "all" | string;
 export type ScopeFilter = "all" | string;
 export type ConflictFilter = "any" | "has_conflict";
 
-export const DIMENSION_OPTIONS: readonly string[] = [
-  "preference",
-  "procedure",
-  "constraint",
-  "hazard",
-  "concept",
-  "outcome"
-];
+export const DIMENSION_OPTIONS = MemoryDimensionSchema.options;
 
 export const SCOPE_OPTIONS: readonly string[] = ["project", "global_domain", "global_core"];
 

@@ -147,6 +147,31 @@ the first convenient alignment is not a complete comparison. Proof dependencies
 and alternative roots survive identical scores. See [observation](../../packages/core/src/recall/runtime/conditional-field-observe.ts)
 and [accepting projection](../../packages/core/src/recall/conditional-field/index/project-accepting-index.ts).
 
+Supplied proof forests and support may use an owner-issued immutable
+`explanation_source_revision` across continuations. It covers the entire forest and
+support, stays stable for equivalent copies, and changes whenever either changes.
+Core retains the original captured inputs for that revision. Without a revision,
+changed forest or support references conservatively restart proof preparation, so
+callers reconstructing those arrays on every page cannot rely on eventual progress.
+Missing or cyclic derivations invalidate the projection; a proof exceeding the
+protocol's output-array capacity receives a resource rejection. Emitting a complete
+proof also requires enough current-request finalization work to assemble its nodes,
+roots and selected-page views. Preparation that advances retained cursors can defer
+this copy to a later page. If an attempt cannot fund the copy and makes no retained
+preparation progress, membership and available claims remain usable and the payload
+reports `resource_rejected`; the discarded proof cursor does not advertise endless
+progress. Membership continuation ends on
+that refusal; source entries can retain a capability solely for explicit body
+expansion. That capability cannot restart membership or proof traversal, and reading
+the body preserves the proof's payload rejection. If other membership was still
+pending, transport is also resource-rejected.
+A pending logical index is likewise resource-rejected rather than complete.
+A new request with sufficient finalization allowance can obtain the complete proof.
+Proof cursors that survive delivery must also fit alongside its mandatory retention
+ledger. A cursor that cannot coexist with that ledger is discarded with an explicit
+payload resource rejection; fitted membership remains usable. Completed cursors that
+are released before commit do not share that retention lifetime.
+
 The index distinguishes interpretation, observation, logical-index, transport
 and payload completeness. `exhausted` describes a reader, not necessarily
 query-relative closure or absence of a counterfactual influencer. A partial
@@ -377,16 +402,35 @@ The explicit `SourceIndexLifecycle.prepareLexical` entry and the idle daemon's
 records and standalone capsules with no embedding binding or dispatch. They share
 the bounded native census, source guards and dependency closure with vector
 preparation, but have independent selection, generation, pending roots and activation.
+
+Operators can replace an existing lexical selection through the idle runtime:
+
+```bash
+alaya source-index-lexical select --workspace <workspace-id> --representation segmented-unicode61.v2 --json
+```
+
+The same command accepts `raw-unicode61.v1` and `segmented-unicode61.v1`. It runs
+one bounded lexical pass without embedding inference. The JSON receipt retains
+selection revision, generation, preparation status and resource accounting.
+Only `status: ready` exits zero; partial, unavailable or superseded preparation
+returns temporary-failure status75. A persisted partial selection resumes on the
+next scheduled pass or repeated command. Stop the existing daemon before using
+this standalone CLI so its runtime storage lease is available.
+
 The background producer prepares `SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`
-(`segmented-unicode61.v1`, Protocol 26.0.0, invariant §25 major) for every workspace it
+(`segmented-unicode61.v2`, Protocol 30.0.0, invariant §25 major) for every workspace it
 visits that has no explicit selection, whether or not an embedding binding exists; an
 explicit selection (for example a raw rollback) is prepared as selected. Lexical takes at
-most half of each pass's remaining work, native bytes and roots, then vector work uses the
-rest. Until the first generation of the selected representation publishes, the reader
+most half of each pass's remaining work and native bytes, and half of discrete roots and
+capture pages rounded up. When only one discrete slot remains, ready vector and lexical
+work alternate priority on each workspace-ring traversal. Until the first generation of the selected representation publishes, the reader
 serves the raw `source_index_fts` exactly as for an absent selector, so preparation never
 causes a lexical outage. The raw reader remains the named consumer of historical
-exact-text rows. Explicit `raw-unicode61.v1` and
-`segmented-unicode61.v1` selections activate only after matching coverage publishes.
+exact-text rows. Explicit `raw-unicode61.v1`, `segmented-unicode61.v1` and
+`segmented-unicode61.v2` selections activate only after matching coverage publishes.
+Background selection initializes only absent workspaces atomically. If an operator
+changes the selection after a scheduled pass captures it, that stale pass is superseded
+instead of restoring the old representation.
 Changing the selection withdraws prior lexical eligibility immediately; until the new
 generation publishes the raw reader serves, never a mixture of the two projections.
 A new source epoch's generation reuses the projection and FTS rows of every root whose
@@ -406,6 +450,22 @@ The separately stored word projection appends supported CJK pieces without chang
 `source_index_text.body`, digest, spans, evidence bytes or embedding inputs. Jieba's
 Han/Hiragana/Katakana path is not Hangul segmentation or uniform multilingual quality.
 There is no English natural-efficacy claim, stemming, synonyms or stop-word policy.
+
+The v2 representation advances and persists guarded source units of at most 64 UTF-8
+bytes, charging each read, scan and expanded UTF-16 code unit to the pass that performs
+it. Surface-token units carry across native reads, so source and query expansion use the
+same token-relative boundaries. Committed units resume after interruption or restart; invalidation and erasure scrub
+them. A new unit starts only with at least 646 work units and 12,288 native bytes
+remaining after its source guard and staged-prefix lookup; census, target lookup and
+source-specific dependencies require additional allowance. Smaller passes stay partial
+until the allowance is increased. Publication waits for the complete root and source-generation guards. The v2
+Unicode61 projection contains the unmodified full source followed by each unit's
+segmented expansion; raw trigram still uses the original source. Query expansion uses
+the same bounded segmenter. Unit boundaries can change segmentation and ranking relative
+to the whole-token v1 representation; v2 does not claim v1 parity. SQLite-internal
+aggregation and FTS indexing are not measured physical work. An explicitly selected v1
+root whose indivisible analysis does not fit the allowance remains partial until a
+sufficiently large explicit pass or a selection change; it never borrows vector work.
 
 Protocol 29.0.0 scopes both Unicode61 and raw-trigram BM25 statistics to the selected
 active lexical generation (invariant §25 major). Each generation owns two contentless
@@ -497,6 +557,14 @@ rather than silently granting it. The
 [write and review owners](architecture.md#runtime-write-model) keep proposal,
 resolution, EventLog and source-replacement effects outside
 Recall ranking.
+
+The Inspector blanket `strictly_governed` promotion action is retired. Historical
+proposals remain readable and rejectable, but cannot be accepted or synthesized
+into new relations. Historical `strictly_governed` paths still contribute active
+constraint disclosure and remain protected from automatic consolidation; these
+read and protection consumers preserve existing user decisions. They do not
+authorize a new path or replace evidence-grounded, temporally valid assertion
+admission.
 
 The request ledger distinguishes charged work, newly allocated logical memory,
 retained footprint, native bytes and limits. Work/memory charges do not measure

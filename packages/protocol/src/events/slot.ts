@@ -10,6 +10,7 @@ import { ConflictEdgeTypeSchema } from "../governance/conflict-matrix.js";
 import { GovernanceSubjectSchema } from "../governance/governance-subject.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { TransitionCausedBySchema } from "./memory-governance.js";
+import { SourceEraseRedactionSchema } from "./privacy-redaction.js";
 
 const slotEventTypeValues = [
   "soul.slot.created",
@@ -34,12 +35,19 @@ const SlotObjectPayloadObjectSchema = z.object({
   run_id: BoundedIdSchema.nullable()
 }).strict();
 
-export const SoulSlotCreatedPayloadSchema = SlotObjectPayloadObjectSchema.extend({
-  governance_subject: GovernanceSubjectSchema,
+const SlotCreatedCommonSchema = SlotObjectPayloadObjectSchema.extend({
   claim_kind: ClaimKindSchema,
   scope_class: ScopeClassSchema,
   winner_claim_id: BoundedIdSchema.nullable()
-}).readonly();
+});
+
+export const SoulSlotCreatedPayloadSchema = z.union([
+  SlotCreatedCommonSchema.extend({ governance_subject: GovernanceSubjectSchema }),
+  SlotCreatedCommonSchema.extend({
+    governance_subject: z.null(),
+    redaction: SourceEraseRedactionSchema
+  })
+]).readonly();
 
 export const SoulSlotWinnerChangedPayloadSchema = SlotObjectPayloadObjectSchema.extend({
   from_claim_id: BoundedIdSchema.nullable(),

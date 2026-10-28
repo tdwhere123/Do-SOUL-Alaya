@@ -3,20 +3,17 @@ import {
   SoulActiveConstraintSchema
 } from "@do-soul/alaya-protocol";
 import {
-  ContextLensAssembler,
   RecallService,
   type RecallReadSnapshotPort
 } from "@do-soul/alaya-core";
 import { findActiveConstraints } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../recall-read-worker/observer-operations.js";
 import { createBoundedActiveConstraintsReader } from "../recall-read-worker/active-constraints.js";
-import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import {
   annotateRecallEmbeddingWarmupHold,
   type EmbeddingWarmupHoldReason
 } from "../../ai/embedding-warmup-hold.js";
-import { createManifestationContextLensAssembler } from "../../manifestation/context-lens-assembler.js";
 import {
   buildSingleUsedAnchorPayload,
   type SingleUsedAnchorTelemetryEmitter
@@ -167,7 +164,6 @@ function toActiveConstraintRecord(record: Awaited<ReturnType<typeof findActiveCo
     }
   });
 }
-
 export function createRecallServiceRuntime(input: {
   readonly input: CreateRecallMaterializationWiringInput;
   readonly embeddingRuntime: ReturnType<typeof createDaemonEmbeddingRuntime>;
@@ -175,14 +171,7 @@ export function createRecallServiceRuntime(input: {
   readonly readSnapshot: RecallReadSnapshotPort;
 }) {
   const recallService = createRecallService(input);
-  const contextLensAssembler = createRecallContextLensAssembler(input.input, recallService);
-  return {
-    recallService,
-    contextLensAssembler,
-    conversationContextLensAssembler: createManifestationContextLensAssembler({
-      delegate: contextLensAssembler
-    })
-  };
+  return { recallService };
 }
 
 function createRecallService(input: {
@@ -219,24 +208,5 @@ function withEmbeddingWarmupHoldAnnotation(
       }
       return Reflect.get(target, prop, receiver);
     }
-  });
-}
-
-function createRecallContextLensAssembler(
-  input: CreateRecallMaterializationWiringInput,
-  recallService: RecallService
-) {
-  return new ContextLensAssembler({
-    recallService,
-    taskSurfaceBuilder: input.taskSurfaceBuilder,
-    slotRepo: input.slotRepo,
-    claimRepo: input.claimFormRepo,
-    memoryRepo: input.memoryEntryRepo,
-    eventLogRepo: input.eventLogRepo,
-    runtimeNotifier: input.runtimeNotifier,
-    overrideService: input.sessionOverrideService,
-    degradationPipeline: new DegradationPipeline(),
-    bankruptcyService: input.budgetBankruptcyService,
-    warn: input.warn
   });
 }

@@ -16,9 +16,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
+import { SOURCE_IDENTITY_HYDRATE_RESERVE, sourceNativeReadCounts, validateSourceObserverPage } from "../conditional-field/observers/observe-ports.js";
 import { createContentPreview } from "./recall-service-helpers.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+
+export const MEMORY_PAYLOAD_READ_RESERVE = 2 + SOURCE_IDENTITY_HYDRATE_RESERVE;
 
 export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
@@ -44,6 +47,7 @@ export class BoundedIndexPayload {
     readonly contentByteBudget?: number;
     readonly manifestationFor: (objectId: string) => ManifestationState;
     readonly payloadContinuation?: PayloadContinuationRequest;
+    readonly onSourceReadFailure?: (work: Readonly<{ native_visits?: number; native_bytes?: number }>) => void;
   }>) {
     this.previews = new Map(Object.entries(input.previewCache ?? {}));
     this.remainingMemoryBytes = input.remainingMemoryBytes;
@@ -136,15 +140,17 @@ export class BoundedIndexPayload {
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
-      if (objectId === undefined || this.input.readers.source === undefined || remaining < 5 || this.remainingMemoryBytes < 1) { complete = false; continue; }
-      const page = this.input.readers.source({ workspaceId: this.input.workspaceId, objectId,
-        byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes)) });
+      if (objectId === undefined || this.input.readers.source === undefined
+        || remaining < MEMORY_PAYLOAD_READ_RESERVE || this.remainingMemoryBytes < 1) { complete = false; continue; }
+      const page = validateSourceObserverPage(this.input.readers.source({ workspaceId: this.input.workspaceId, objectId,
+        byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes)) }), this.input.onSourceReadFailure);
       remaining -= Math.max(1, page.rowsRead) + 2;
-      this.nativeVisits += Math.max(1, page.rowsRead);
-      this.nativeRows += page.rowsRead;
-      this.nativeBytes += page.bytesRead;
+      const native = sourceNativeReadCounts(page);
+      this.nativeVisits += native.native_visits;
+      this.nativeRows += native.native_rows;
+      this.nativeBytes += native.native_bytes;
       this.consumeMemory(page.bytesRead);
-      if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
+      if (page.row?.content === undefined || page.unavailable || page.resourceLimited === true) { complete = false; continue; }
       // Object-id source lookup is current state, not the pinned product.
       if (!observedMemoryRevisionMatches(entry, page.row.sourceRevision)) {
         complete = false;

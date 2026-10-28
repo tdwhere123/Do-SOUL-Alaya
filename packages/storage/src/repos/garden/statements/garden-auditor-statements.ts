@@ -241,10 +241,15 @@ const BOOTSTRAP_PATTERNS_SQL = `
         AND m.lifecycle_state = '${ACTIVE_STATE}'
     )
     SELECT pattern_key, COUNT(*) AS frequency
-    FROM raw_patterns
+    FROM raw_patterns AS pattern
     WHERE pattern_key IS NOT NULL
       AND pattern_key <> 'claim:'
       AND pattern_key <> 'memory:'
+      AND NOT EXISTS (
+        SELECT 1 FROM proposals p
+        WHERE p.workspace_id = ? AND p.resolution_state = 'pending'
+          AND p.derived_from = 'bootstrapping:' || pattern.pattern_key
+      )
     GROUP BY pattern_key
     HAVING COUNT(*) >= ?
     ORDER BY frequency DESC, pattern_key ASC

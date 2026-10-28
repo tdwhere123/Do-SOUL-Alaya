@@ -46,8 +46,8 @@ export function projectSourceSemanticState(input: Readonly<{
     remaining_reserve: beforeProjection, on_remaining_reserve: (value) => { afterProjection = value; },
     resource_work: state.memory_exhausted || state.remaining_work.length > 0 ? "open" : "complete",
     transition_derivations: state.transition_derivations, grounding_progress: state.grounding_progress,
-    grounding_transitions: [...state.transitions], grounding_seeds: [...state.seeds], grounding_derivations: [...state.derivations],
-    derivations: [...state.derivations], projection_facets: [...state.facets], remaining_memory_bytes: projectionBudget.memory_bytes }),
+    grounding_transitions: state.transitions, grounding_seeds: state.seeds, grounding_derivations: state.derivations,
+    remaining_memory_bytes: projectionBudget.memory_bytes }),
     as_of: query.interpretation_clock };
   meter.charge(Math.max(0, beforeProjection - afterProjection), 0, "index projection");
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {

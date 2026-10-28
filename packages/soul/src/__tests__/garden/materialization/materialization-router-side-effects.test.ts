@@ -8,6 +8,12 @@ import {
 } from "./materialization-router-fixture.js";
 
 describe("MaterializationRouter side effects and projections", () => {
+  it("does not mark caller-provided evidence labels as verified", async () => {
+    const deps = createDeps();
+    await new MaterializationRouter(deps).materializeSignal(createSignal({ evidence_refs: ["caller-label"] }));
+    expect(deps.evidenceService.create.mock.calls[0]?.[0])
+      .toMatchObject({ evidence_health_state: "questionable" });
+  });
   it("materializes memory_and_claim by creating evidence, memory, and claim objects", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
@@ -55,6 +61,9 @@ describe("MaterializationRouter side effects and projections", () => {
 
     const result = await router.materializeSignal(createSignal());
 
+    if (result.success) throw new Error("expected materialization failure");
+    const error: string = result.error;
+    expect(error).toBe("memory create failed");
     expect(result).toMatchObject({
       signal_id: "signal-1",
       target_kind: "memory_and_claim",

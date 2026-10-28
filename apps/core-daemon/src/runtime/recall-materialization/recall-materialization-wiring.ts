@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-core";
 import {
   SqliteSourceIndexRepository,
+  SqliteClaimElectionLeaseRepo,
   SqliteFieldCausalUsageRepo,
   SqliteTemporalPathProjectionReader
 } from "@do-soul/alaya-storage";
@@ -239,6 +240,8 @@ function createResolutionService(input: CreateRecallMaterializationWiringInput) 
   });
   return new ResolutionService({
     eventPublisher: input.eventPublisher,
+    resolutionAuditRepo: input.eventLogRepo,
+    electionLease: new SqliteClaimElectionLeaseRepo(input.database),
     claimRepo: input.claimFormRepo,
     memoryRepo: input.memoryEntryRepo,
     claimService: input.claimService,
@@ -271,9 +274,6 @@ function buildRecallMaterializationWiringResult(
     singleUsedAnchorEmitter: recallReadRuntime.recallUtilizationRuntime.singleUsedAnchorEmitter,
     deliveryAnchorReader: recallReadRuntime.recallUtilizationRuntime.deliveryAnchorReader,
     recallService: recallReadRuntime.recallServiceRuntime.recallService,
-    contextLensAssembler: recallReadRuntime.recallServiceRuntime.contextLensAssembler,
-    conversationContextLensAssembler:
-      recallReadRuntime.recallServiceRuntime.conversationContextLensAssembler,
     graphEdgePort: materializationRuntime.graphEdgePort,
     edgeAutoProducerService: materializationRuntime.edgeRuntime.edgeAutoProducerService,
     conflictDetectionService: materializationRuntime.edgeRuntime.conflictDetectionService,

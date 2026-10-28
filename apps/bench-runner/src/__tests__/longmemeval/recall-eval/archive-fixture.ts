@@ -1,11 +1,11 @@
-import type { KpiPayload } from "@do-soul/alaya-eval";
+import type { KpiPayload, MeasuredQualityMetrics } from "@do-soul/alaya-eval";
 import { RECALL_EVAL_ARCHIVE_MARKER } from "../../../runs/lifecycle/recall-eval/recall-eval-archive-impl.js";
 import { snapshotQuestionIdDigest } from "../../../runs/snapshot/materialize.js";
 import { withEligibleMeasurementContract } from "../runner/longmemeval-runner-fixture.js";
 import { VERIFIED_TEST_DATASET_SHA256 } from
   "../../../../../../packages/eval/src/__tests__/gates/verified-dataset-fixture.js";
 
-function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+function passingQualityMetrics(): MeasuredQualityMetrics {
   return {
     schema_version: "bench-quality-metrics.v1",
     non_monotonic_rate: 0,

@@ -3,6 +3,8 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ALAYA_SYSEXITS, createAlayaCliBridge } from "../../cli/bridge.js";
+import { runAlayaCli } from "../../cli/support/module-loader.js";
+import { registerAlayaOfflineCliCommands } from "../../cli/register.js";
 import {
   createTemporalCutoverCommandSpec,
   type TemporalCutoverCommandDependencies
@@ -45,6 +47,34 @@ function createHarness(options: {
 }
 
 describe("temporal cutover CLI", () => {
+  it("dispatches offline maintenance without attempting the normal database bootstrap", async () => {
+    const createAlayaDaemonRuntime = vi.fn(async () => { throw new Error("legacy runtime startup must stay gated"); });
+    const stdout = createTextSink();
+    const stderr = createTextSink();
+    const exitCode = await runAlayaCli(["temporal-cutover", "recover", "missing-journal.json"], {
+      cwd: CLI_CONFIG_DIR, env: { ALAYA_CONFIG_DIR: CLI_CONFIG_DIR }, stdout: stdout.stream, stderr: stderr.stream,
+      stdin: new PassThrough(), isTTY: false,
+      loadModules: async () => ({ createAlayaCliBridge, createAlayaDaemonRuntime,
+        registerAlayaCliCommands: vi.fn(), registerAlayaOfflineCliCommands, softwareExit: ALAYA_SYSEXITS.SOFTWARE })
+    });
+    expect(exitCode).toBe(ALAYA_SYSEXITS.USAGE);
+    expect(stderr.readText()).toContain("requires --yes");
+    expect(createAlayaDaemonRuntime).not.toHaveBeenCalled();
+  });
+
+  it("reports unavailable offline registration without opening the runtime", async () => {
+    const createAlayaDaemonRuntime = vi.fn(async () => { throw new Error("runtime must stay closed"); });
+    const stderr = createTextSink();
+    const exitCode = await runAlayaCli(["temporal-cutover", "recover", "missing-journal.json"], {
+      stdout: createTextSink().stream, stderr: stderr.stream, stdin: new PassThrough(), isTTY: false,
+      loadModules: async () => ({ createAlayaCliBridge, createAlayaDaemonRuntime,
+        registerAlayaCliCommands: vi.fn(), softwareExit: ALAYA_SYSEXITS.SOFTWARE })
+    });
+    expect(exitCode).toBe(ALAYA_SYSEXITS.SOFTWARE);
+    expect(stderr.readText()).toContain("Offline maintenance CLI registration is unavailable");
+    expect(createAlayaDaemonRuntime).not.toHaveBeenCalled();
+  });
+
   it("requires explicit confirmation before it stops the runtime", async () => {
     const shutdown = vi.fn(async () => undefined);
     const { bridge, stderr } = createHarness({ shutdown });

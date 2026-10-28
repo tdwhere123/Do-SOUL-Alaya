@@ -97,6 +97,7 @@ export {
 } from "./mcp-memory-search-types.js";
 
 export {
+  GARDEN_TASK_PAYLOAD_MAX_CHARS,
   GardenMcpWorkerRoleSchema,
   GardenListPendingTasksRequestSchema,
   GardenPendingTaskSnapshotSchema,

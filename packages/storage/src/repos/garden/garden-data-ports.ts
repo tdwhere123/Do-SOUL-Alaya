@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import {
   createBootstrappingPort,
@@ -13,8 +12,6 @@ import type {
 import { type GardenDataPortFactoryContext } from "./garden-data-port-shared.js";
 import { createDormantDemotionPort, createTieringPort } from "./garden-janitor-data-ports.js";
 import {
-  createCompressionPort,
-  createMergePort,
   createNeighborPort,
   createSynthesisPort
 } from "./garden-librarian-data-ports.js";
@@ -25,22 +22,17 @@ export type {
   GardenAuditorGreenMaintenancePort,
   GardenAuditorPointerHealthPort,
   GardenBackgroundDataPorts,
-  GardenCompressionCandidate,
   GardenDataPortFactoryOptions,
   GardenDormantDemotionOutcome,
   GardenHotDemotionCandidate,
   GardenJanitorDormantDemotionPort,
   GardenJanitorHotDemotionCriteria,
   GardenJanitorMemoryTieringPort,
-  GardenLibrarianMergeDetectionPort,
   GardenLibrarianNeighborDetectionPort,
-  GardenLibrarianPathCompressionPort,
   GardenLibrarianSynthesisThrottlePort,
   GardenLowActivityMemoryRecord,
-  GardenMergeCandidate,
   GardenNeighborGroup,
-  GardenSynthesisCandidateCluster,
-  GardenTemplateCluster
+  GardenSynthesisCandidateCluster
 } from "./garden-background-port-types.js";
 
 export function createGardenBackgroundDataPorts(
@@ -50,7 +42,7 @@ export function createGardenBackgroundDataPorts(
   const context: GardenDataPortFactoryContext = {
     database,
     now: options.now ?? (() => new Date().toISOString()),
-    generateId: options.generateId ?? (() => randomUUID())
+    ...(options.proposalWriter === undefined ? {} : { proposalWriter: options.proposalWriter })
   };
 
   return {
@@ -60,9 +52,7 @@ export function createGardenBackgroundDataPorts(
     pointerHealthPort: createPointerHealthPort(context),
     greenMaintenancePort: createGreenMaintenancePort(context),
     bootstrappingPort: createBootstrappingPort(context),
-    mergePort: createMergePort(context),
     neighborPort: createNeighborPort(context),
-    compressionPort: createCompressionPort(context),
     synthesisPort: createSynthesisPort(context)
   };
 }

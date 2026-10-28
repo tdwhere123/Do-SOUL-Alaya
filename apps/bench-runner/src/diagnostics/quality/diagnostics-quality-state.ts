@@ -1,4 +1,4 @@
-import type { QualityMetrics } from "@do-soul/alaya-eval";
+import type { MeasuredQualityMetrics as QualityMetrics } from "@do-soul/alaya-eval";
 import { COHORT_PLANE, isDeliveryBudgetLoss } from "../schema/diagnostics-private.js";
 import { readQuestionMissTaxonomy } from "../miss/diagnostics-miss-taxonomy.js";
 import type {

@@ -10,6 +10,7 @@ import { initializeSemanticArtifactCandidateSchema } from "../../../repos/garden
 import { SqliteIndexedRecallProjection } from "../../../repos/garden/indexed-recall-projection.js";
 import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-index-repo.js";
 import { lexicalDomainTables } from "../../../repos/source-index/lexical-domain.js";
+import { readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "../../../repos/source-index/source-index-qualification.js";
 import { BUDGET, WORKSPACE, buildReady, eraseSource, fieldSha256, fixture, publishSource, type Fixture } from "./source-index-fixture.js";
 
 const databases: StorageDatabase[] = [], directories: string[] = [];
@@ -50,6 +51,30 @@ function read(index: SqliteSourceIndexRepository, text = "alpha beta", preferenc
   expect(result.completion).toBe("complete");
   return result;
 }
+
+it("qualifies only roots in the active lexical generation and binds activation identity", () => {
+  const environment = setup(), store = environment.index.lexical;
+  publishSource(environment, "alpha", "a");
+  buildReady(environment);
+  const active = prepare(environment);
+  publishSource(environment, "beta", "b");
+  buildReady(environment);
+  const pending = prepare(environment, "raw-unicode61.v1", WORKSPACE, false);
+  const readFact = () => environment.database.connection.transaction(() => ({
+    snapshot: readSourceIndexSnapshotFact(environment.database, WORKSPACE),
+    root: readSourceIndexRootQualification(environment.database, fieldSha256, WORKSPACE, "b")
+  }))();
+  const before = readFact();
+  expect(before.snapshot.lexical).toMatchObject({ serving: "generation", selected: { binding: { generation_id: active } } });
+  expect(before.root.lexical.status).toBe("not_indexed");
+  expect(environment.index.readLexicalCandidates(WORKSPACE, "beta", 8, queryBudget).candidates).toEqual([]);
+  expect(store.activateLexical(WORKSPACE, pending)).toEqual({ status: "accepted" });
+  const after = readFact();
+  expect(after.snapshot.lexical.selected).toMatchObject({ binding: { generation_id: pending } });
+  expect(after.snapshot.lexical).not.toEqual(before.snapshot.lexical);
+  expect(after.root.lexical).toMatchObject({ status: "ready", start_byte: 0, end_byte: 4 });
+  expect(environment.index.readLexicalCandidates(WORKSPACE, "beta", 8, queryBudget).candidates).toHaveLength(1);
+});
 function pin(environment: Fixture) {
   const database = new StorageDatabase(environment.database.filename,
     new BetterSqlite3(environment.database.filename, { readonly: true }));

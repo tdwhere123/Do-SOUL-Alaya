@@ -297,7 +297,7 @@ const FullGoldCoverageSchema = FullGoldCoverageSliceSchema
   .strict();
 export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;
 
-export type { QualityMetrics } from "./kpi-quality-schema.js";
+export type { QualityMetrics, MeasuredQualityMetrics } from "./kpi-quality-schema.js";
 
 export type {
   EdgeProposalAutoAccept,
@@ -457,6 +457,8 @@ export const KpiPayloadSchema = z
     // New producers populate the answerable/scorable metric denominator.
     // Optional preserves reads of historical artifacts.
     answerable_evaluated_count: z.number().int().nonnegative().optional(),
+    // Historical merge reporting only; never establishes answerable-cohort authority.
+    reporting_recall_denominator: z.number().int().nonnegative().optional(),
     harness_mode: HarnessMode,
     kpi: KpiCoreSchema,
     diff_vs_previous: DiffVsPreviousSchema.nullable().optional()
@@ -474,5 +476,9 @@ export const KpiPayloadSchema = z
     }
   )
   .superRefine(validateMeasurementDenominatorContract)
+  .refine((payload) => payload.reporting_recall_denominator === undefined ||
+    payload.reporting_recall_denominator <= payload.evaluated_count &&
+    (payload.answerable_evaluated_count === undefined || payload.reporting_recall_denominator === payload.answerable_evaluated_count),
+  { message: "reporting recall denominator must fit the evaluated cohort and agree with explicit authority", path: ["reporting_recall_denominator"] })
   .superRefine(validateLongMemEvalSelectionContract);
 export type KpiPayload = z.infer<typeof KpiPayloadSchema>;

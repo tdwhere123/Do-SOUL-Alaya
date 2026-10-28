@@ -280,7 +280,8 @@ describe("routes-config port batch", () => {
     });
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toMatchObject({
       config_version: 1,
-      secret_ref: "env:OPENAI_API_KEY"
+      // A legacy saved row is version metadata, not the process/file runtime authority.
+      secret_ref: null
     });
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
       config_version: 1,

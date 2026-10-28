@@ -6,7 +6,7 @@ import { SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo, SqliteSourceRoo
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { admitEmittedSourcePreview } from "../library-admission.js";
-import { admittedSourcePreviewInterval } from "../../measurement/source-delivery-visibility.js";
+import { admittedSourcePreviewInterval, isSourcePayloadOmitted } from "../../measurement/source-delivery-visibility.js";
 import { sourceGoldUnitFromPublishedRoot } from "../../measurement/source-gold-join.js";
 import type { OrdinarySourcePreview } from "./ordinary-preview-stream.js";
 
@@ -80,7 +80,7 @@ function admitCapsule(database: StorageDatabase, workspace: string, scopes: read
     || span.content_end > row.content_end || row.content === undefined) {
     throw new AlayaError("CONFLICT", "ordinary retained capsule span changed or exceeds admitted native read");
   }
-  if (result.content_preview === "[payload omitted]" && !result.budget_state.within_budget) return;
+  if (isSourcePayloadOmitted(result)) return;
   const text = result.content_preview === "[empty source]" && span.content_start === span.content_end ? "" : result.content_preview;
   const bytes = Buffer.byteLength(text, "utf8");
   const chunk = hydrateUtf8Chunk(row.content, { offset: 0, byteLimit: bytes });

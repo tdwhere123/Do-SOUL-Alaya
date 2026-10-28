@@ -1,6 +1,4 @@
 import {
-  DYNAMICS_CONSTANTS,
-  ManifestationBudgetConfigSchema,
   ManifestationLevel,
   listPathAnchorRefContextRefs,
   type ActivationCandidate,
@@ -156,31 +154,6 @@ export function compareCandidatesForDeterministicEvaluation(
   }
 
   return left.candidate_id.localeCompare(right.candidate_id);
-}
-
-export function createDefaultManifestationBudgetConfig(
-  workspaceId: string,
-  nowIso: string
-): Readonly<ManifestationBudgetConfig> {
-  return ManifestationBudgetConfigSchema.parse({
-    workspace_id: workspaceId,
-    stance_bias_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_stance_bias_cap,
-    dialogue_nudge_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_dialogue_nudge_cap,
-    lens_entry_cap: DYNAMICS_CONSTANTS.manifestation_budget.default_lens_entry_cap,
-    escalation_policy: {
-      nudge_min_pressure:
-        DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_pressure,
-      nudge_min_confidence:
-        DYNAMICS_CONSTANTS.manifestation_budget.default_nudge_min_confidence,
-      lens_min_pressure:
-        DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_pressure,
-      lens_min_confidence:
-        DYNAMICS_CONSTANTS.manifestation_budget.default_lens_min_confidence,
-      lens_requires_task_coupling: true,
-      lens_requires_governance_ceiling: true
-    },
-    updated_at: nowIso
-  });
 }
 
 export function anchorMemoryObjectId(

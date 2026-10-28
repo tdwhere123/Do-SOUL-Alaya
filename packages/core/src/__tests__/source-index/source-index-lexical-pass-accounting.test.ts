@@ -18,9 +18,9 @@ function setup() {
 }
 
 it("retains nested operation costs and separately owned root visits", () => {
-  const inner = new SourceIndexOperationError(new Error("copy failed"), { work: 3, native_bytes: 8 }, 2);
-  const outer = new SourceIndexOperationError(inner, { work: 1, native_bytes: 4 }, 1);
-  expect(outer).toMatchObject({ cause: inner, resources: { work: 4, native_bytes: 12 }, visited_roots: 3 });
+  const inner = new SourceIndexOperationError(new Error("copy failed"), { work: 3, native_bytes: 8 }, 2, 2);
+  const outer = new SourceIndexOperationError(inner, { work: 1, native_bytes: 4 }, 1, 1);
+  expect(outer).toMatchObject({ cause: inner, resources: { work: 4, native_bytes: 12 }, visited_roots: 3, analysis_units: 3 });
   expect(new SourceIndexOperationError(inner, { work: 0, native_bytes: 0 }).visited_roots).toBe(2);
 });
 

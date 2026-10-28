@@ -10,6 +10,7 @@ import { OrdinaryRecallMultiSourceObservationSchema, OrdinaryRecallSourceStateSc
   type OrdinaryRecallMultiSourceConfig } from "./ordinary-recall-contract.js";
 import { capturedSourceDisclosure, resolveCapturedSource, terminal, verifyCapturedSourceResult, verifyExposure } from "./ordinary-recall-delivery.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
+import { hasDeliveredSourcePayload } from "../../measurement/source-delivery-visibility.js";
 
 type Observation = z.infer<typeof OrdinaryRecallMultiSourceObservationSchema>;
 type SourceState = z.infer<typeof OrdinaryRecallSourceStateSchema>;
@@ -136,7 +137,7 @@ class MultiSourceDelivery {
     if (row !== undefined) verifyCapturedSourceResult(this.config, target, row, source.content_bytes, capturedSourceDisclosure(this.config, source.record));
     this.issuedTargets.add(canonicalJson(target));
     const span = row === undefined ? undefined : target.span;
-    const usable = !terminal(index) && span !== undefined && row !== undefined && row.content_preview !== "[payload omitted]";
+    const usable = !terminal(index) && span !== undefined && row !== undefined && hasDeliveredSourcePayload(row);
     const accepted = usable && (span.content_end > state.contiguous_delivered_bytes || size === 0 && !state.source_complete);
     const requested = call.request.arguments.payload_continuation;
     if (usable && requested?.target.kind === "source_evidence" && requested.target.root_id === target.root_id &&

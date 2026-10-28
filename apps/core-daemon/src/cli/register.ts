@@ -44,6 +44,7 @@ import { createReviewCommand } from "./review/review.js";
 import { createStatusCommand } from "./status.js";
 import { createSourceGroundingDefersCommand } from "./source-grounding-defers/command.js";
 import { createTemporalCutoverCommandSpec } from "./temporal-cutover.js";
+import { createSourceIndexLexicalCommand } from "./source-index-lexical.js";
 import { createToolsCommand } from "./tools.js";
 import {
   ensureImplicitLocalWorkspace,
@@ -61,7 +62,13 @@ export function registerAlayaCliCommands(
   registerMemoryCommands(bridge, runtime);
   bridge.registerSubcommand(createMcpCommand(runtime));
   bridge.registerSubcommand(createTemporalCutoverCommandSpec(runtime));
+  bridge.registerSubcommand(createSourceIndexLexicalCommand(runtime));
   registerOperationCommands(bridge);
+}
+
+/** Maintenance must remain reachable while normal startup rejects the active storage. */
+export function registerAlayaOfflineCliCommands(bridge: AlayaCliBridge): void {
+  bridge.registerSubcommand(createTemporalCutoverCommandSpec({ shutdown: async () => undefined }));
 }
 
 interface AttachArgs {

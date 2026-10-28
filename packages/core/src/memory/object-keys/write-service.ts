@@ -16,7 +16,8 @@ export interface MemoryObjectKeyWritePorts {
   readonly replaceOwnerKeys: (
     workspaceId: string,
     ownerId: string,
-    keys: readonly Readonly<MemoryObjectKey>[]
+    keys: readonly Readonly<MemoryObjectKey>[],
+    expectedOwner: Pick<MemoryEntry, "content" | "evidence_refs">
   ) => void;
 }
 
@@ -31,7 +32,7 @@ export function createMemoryObjectKeyWriter(
         memory_content: memory.content,
         evidence: ports.readEvidenceSources(memory.workspace_id, memory.evidence_refs)
       });
-      ports.replaceOwnerKeys(memory.workspace_id, memory.object_id, keys);
+      ports.replaceOwnerKeys(memory.workspace_id, memory.object_id, keys, memory);
     }
   };
 }

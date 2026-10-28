@@ -444,10 +444,16 @@ export function withdrawDerivationLeaves(
   const sequenceOwner = forkSequenceReachOwner(state.sequence_reach_owner ?? state.compiled_automaton);
   dropSequenceReachAssertion(sequenceOwner, withdrawnLeafId);
   const sequenceCharge = transferSequenceReachCharge(state, sequenceOwner);
+  const proofBytes = (state.grounding_progress?.retained_bytes ?? 0) + (state.explanation_progress?.retainedBytes ?? 0);
+  const sequenceBalance = sequenceReachBalance(state, sequenceCharge);
   const withdrawn = bindEngineState({
     ...rest,
     sequence_reach_owner: sequenceOwner,
-    ...sequenceReachBalance(state, sequenceCharge),
+    ...sequenceBalance,
+    remaining_memory_bytes: (sequenceBalance.remaining_memory_bytes ?? state.remaining_memory_bytes) + proofBytes,
+    ...(state.accounted_retained_bytes === undefined ? {} : {
+      accounted_retained_bytes: Math.max(0, state.accounted_retained_bytes + sequenceCharge.delta - proofBytes)
+    }),
     retained_index: undefined,
     claims,
     claim_propositions: propositions,
@@ -549,8 +555,13 @@ export function applyEvidenceEffect(
   state: FieldEngineState,
   effect: EvidenceEffect
 ): FieldEngineState {
-  const supportById = new Map(state.support.map((record) => [record.proposition_id, record]));
-  for (const record of effect.support) supportById.set(record.proposition_id, record);
+  const supportById = effect.support.length === 0 ? undefined
+    : new Map(state.support.map((record) => [record.proposition_id, record]));
+  let supportChanged = false;
+  for (const record of effect.support) {
+    if (supportById!.get(record.proposition_id) !== record) supportChanged = true;
+    supportById!.set(record.proposition_id, record);
+  }
   let claims = state.claims;
   if (effect.claims !== undefined) {
     for (const [objectId, claim] of effect.claims) if (claims.get(objectId) !== claim) {
@@ -560,7 +571,7 @@ export function applyEvidenceEffect(
   }
   const next = {
     ...state,
-    support: Object.freeze([...supportById.values()]),
+    support: supportChanged ? Object.freeze([...supportById!.values()]) : state.support,
     claims,
     ...(effect.work_status === undefined ? {} : { support_work_status: effect.work_status })
   };

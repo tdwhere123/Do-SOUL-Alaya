@@ -1,10 +1,11 @@
 import { expect, it } from "vitest";
-import { MemoryDimension, QueryViewSchema, sourceGoldRootIdentity, sourceRecallTarget } from "@do-soul/alaya-protocol";
+import { MemoryDimension, QueryViewSchema, SourceSemanticResourceLedger, sourceGoldRootIdentity, sourceRecallTarget } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
 import type { FieldEngineState } from "../../../recall/conditional-field/engine/field-engine.js";
 import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
 import { projectFromField } from "../../../recall/runtime/recall-field-projection.js";
+import { nativeNavigationProjection } from "../../../recall/runtime/native-navigation-projection.js";
 import { startRequestCost } from "../../../recall/runtime/request-cost-ledger.js";
 import type { ConditionalFieldRecallRequest } from "../../../recall/runtime/recall-service-runner-types.js";
 import { defaultBudget, FAR_FUTURE_EXPIRY } from "../conditional-field/reference/deployment.fixture.js";
@@ -33,8 +34,17 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     const initial = observeField(interpretation, { workspace_id: WS, query_text: "needle", budget,
       as_of: NOW, readers: request.readers, authorized_scopes: null });
     let retained: FieldEngineState | undefined;
-    const first = projectFromField({ ...initial, native_sources: { result: null, witness: [], admitted_roots: [target],
-      catalog_positions: { [sourceGoldRootIdentity(target)]: 0 } } }, request, interpretation,
+    const captured = { ...initial, native_sources: { result: null, witness: [], admitted_roots: [target],
+      catalog_positions: { [sourceGoldRootIdentity(target)]: 0 } } };
+    const workRefused = nativeNavigationProjection(captured, [],
+      new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 100_000 }));
+    expect(workRefused).toMatchObject({ status: "resource_refused", constraints: { work: { required: 2, available: 1 } } });
+    const memoryRefused = nativeNavigationProjection(captured, [],
+      new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 0 }));
+    expect(memoryRefused).toMatchObject({ status: "resource_refused", constraints: { memory: { available: 0 } } });
+    if (memoryRefused.status !== "resource_refused") throw new Error("Expected bounded navigation refusal");
+    expect(memoryRefused.constraints?.work).toBeUndefined();
+    const first = projectFromField(captured, request, interpretation,
     state => { retained = state; }, startRequestCost());
     expect(first.entries.map(entry => entry.object_id)).toContain(MEM.r);
     if (retained?.binding.kind !== "bound") throw new Error("bound fixture expected");

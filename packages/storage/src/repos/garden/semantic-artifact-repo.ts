@@ -10,6 +10,8 @@ import {
   semanticExtractionProfilePreimage,
   semanticExtractionProfilesEqual,
   type AdmittedSemanticArtifact,
+  type SemanticArtifactAccess,
+  type SemanticArtifactCodec,
   type SemanticArtifactRepositoryPort,
   type SemanticArtifactWork,
   type SemanticEnrichmentTask,
@@ -20,6 +22,8 @@ import {
 import { buildWorkspaceFtsScopeMatch, buildFtsMatchExpression } from "../shared/fts-lane-routing.js";
 import { assertSemanticArtifactCandidateSchema } from "./semantic-artifact-schema.js";
 import type { SqliteConnection } from "../../sqlite/db.js";
+import { hasQuarantinedSemanticArtifact, requireNoQuarantineRecord } from "../field/privacy-availability.js";
+import { StorageError } from "../../shared/errors.js";
 import type { SqliteGardenTaskRepo } from "./garden-task-repo.js";
 import { parseRows } from "../shared/parse-row.js";
 import { prepareGardenTaskClaimStatements, prepareGardenTaskMaintenanceStatements } from
@@ -27,6 +31,13 @@ import { prepareGardenTaskClaimStatements, prepareGardenTaskMaintenanceStatement
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function sameSourceSnapshot(left: SemanticSourceSnapshot, right: SemanticSourceSnapshot): boolean {
+  return left.workspaceId === right.workspaceId && left.objectId === right.objectId &&
+    left.revision === right.revision && left.sourceEventRevision === right.sourceEventRevision &&
+    left.content === right.content && left.runId === right.runId && left.createdAt === right.createdAt &&
+    left.trustedRole === right.trustedRole;
 }
 
 const sourceEventRevisionSql = (alias: string) => `(SELECT revision FROM event_log
@@ -55,7 +66,8 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     private readonly db: SqliteConnection,
     private readonly garden: SqliteGardenTaskRepo,
     private readonly defaultProfile: SemanticExtractionProfile | null = null,
-    private readonly enrichmentContract = SOURCE_ENRICHMENT_CONTRACT
+    private readonly enrichmentContract = SOURCE_ENRICHMENT_CONTRACT,
+    private readonly formationCodec: SemanticArtifactCodec | null = null
   ) {
     assertSemanticArtifactCandidateSchema(db);
     db.function(this.visitFunction, (id: string, callId: number) => {
@@ -69,6 +81,10 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   }
 
   public source(workspaceId: string, objectId: string): SemanticSourceSnapshot | null {
+    return this.db.transaction(() => this.readSource(workspaceId, objectId))();
+  }
+
+  private readSource(workspaceId: string, objectId: string): SemanticSourceSnapshot | null {
     const row = this.db.prepare(`SELECT object_id, content, run_id, created_at, source_kind,
       evidence_refs, updated_at, ${sourceEventRevisionSql('m')} AS sourceEventRevision FROM memory_entries m
       WHERE workspace_id = ? AND object_id = ? AND ${sourceEligibleSql('m')}`)
@@ -76,6 +92,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
         created_at: string; source_kind: string; evidence_refs: string; updated_at: string;
         sourceEventRevision: number | null } | undefined;
     if (!row || row.source_kind !== 'user' || row.sourceEventRevision === null) return null;
+    requireNoQuarantineRecord(this.db, workspaceId, "memory_entry", objectId);
     return { workspaceId, objectId, content: row.content, runId: row.run_id,
       createdAt: row.created_at, trustedRole: 'user', sourceEventRevision: row.sourceEventRevision,
       revision: memorySourceRevision(row.sourceEventRevision, row.content, row.evidence_refs, row.updated_at) };
@@ -159,7 +176,29 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       task.id, task.claim, task.claimedAt).changes === 1;
   }
 
-  public artifact(workspaceId: string, key: string): AdmittedSemanticArtifact | null {
+  public artifact(workspaceId: string, key: string, access?: SemanticArtifactAccess): AdmittedSemanticArtifact | null {
+    return this.db.transaction(() => {
+      const artifact = this.readArtifact(workspaceId, key);
+      if (artifact === null || !hasQuarantinedSemanticArtifact(this.db, workspaceId, key)) return artifact;
+      if (access === undefined || access.work.key !== key || artifact.requestJson !== access.work.requestJson) {
+        throw new StorageError("CONFLICT", "Semantic artifact source provenance is unavailable.");
+      }
+      const task = this.task(workspaceId, access.task.id);
+      if (task === null || task.status !== "claimed" || task.claim !== access.task.claim ||
+          task.objectId !== access.task.objectId || task.revision !== access.task.revision ||
+          !semanticExtractionProfilesEqual(task.profile, access.task.profile) || !this.isCurrent(task)) {
+        throw new StorageError("CONFLICT", "Semantic artifact source binding is stale.");
+      }
+      const source = this.source(workspaceId, task.objectId);
+      if (source === null || source.revision !== task.revision) {
+        throw new StorageError("CONFLICT", "Semantic artifact source binding is stale.");
+      }
+      this.requireCurrentFormation(task, source, access.work, artifact, false);
+      return artifact;
+    })();
+  }
+
+  private readArtifact(workspaceId: string, key: string): AdmittedSemanticArtifact | null {
     const row = this.db.prepare(`SELECT artifact_key AS key, raw_json AS rawJson,
       payload_json AS payloadJson, search_text AS searchText, request_json AS requestJson, integrity FROM garden_semantic_artifacts
       WHERE workspace_id = ? AND artifact_key = ?`).get(workspaceId, key);
@@ -187,7 +226,29 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       ...(stored.requestJson === null ? {} : { requestJson: stored.requestJson }) });
   }
 
+  private requireCurrentFormation(task: SemanticEnrichmentTask, source: SemanticSourceSnapshot,
+    work: SemanticArtifactWork, artifact: AdmittedSemanticArtifact, bound: boolean): void {
+    if (this.formationCodec === null) throw new StorageError("CONFLICT", "Semantic artifact formation authority is unavailable.");
+    try {
+      const planned = this.formationCodec.plan(source, task.profile).find(unit => unit.key === work.key &&
+        unit.semanticKey === work.semanticKey && unit.requestJson === work.requestJson &&
+        unit.admissionJson === work.admissionJson);
+      if (planned === undefined || artifact.requestJson !== planned.requestJson) {
+        throw new StorageError("CONFLICT", "semantic artifact request is not current");
+      }
+      const verified = this.formationCodec.bind(source, planned, artifact);
+      if (work.bindingJson !== (bound ? verified.bindingJson : planned.bindingJson)) {
+        throw new StorageError("CONFLICT", "semantic artifact binding is not current");
+      }
+    } catch (error) {
+      throw new StorageError("CONFLICT", "Semantic artifact formation is unavailable.", error);
+    }
+  }
+
   public attempt(taskId: string, key: string): SemanticTransportAttempt | null {
+    const task = this.garden.findById(taskId);
+    const objectId = readNonEmptyString(asRecord(task?.payload)?.source_object_id);
+    if (task !== null && objectId !== null) requireNoQuarantineRecord(this.db, task.workspace_id, "memory_entry", objectId);
     const row = this.db.prepare(`SELECT id, task_id AS taskId, artifact_key AS key,
       state, raw_json AS rawJson, ordinal, reconciliations FROM garden_semantic_attempts
       WHERE workspace_id=(SELECT workspace_id FROM garden_tasks WHERE id=?)
@@ -275,21 +336,25 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   public publish(task: SemanticEnrichmentTask, source: SemanticSourceSnapshot,
     work: readonly SemanticArtifactWork[], now: string): number {
     this.assertClaim(task);
-    if (!this.isCurrent(task) || source.revision !== task.revision ||
-      this.source(task.workspaceId, task.objectId)?.revision !== task.revision) {
+    const currentSource = this.source(task.workspaceId, task.objectId);
+    if (!this.isCurrent(task) || currentSource === null || currentSource.revision !== task.revision ||
+      !sameSourceSnapshot(source, currentSource)) {
       throw new Error("superseded source result");
     }
     const old = this.db.prepare(`SELECT publication_key FROM garden_semantic_projections
       WHERE workspace_id=? AND object_id=?`).get(task.workspaceId, task.objectId) as
       { publication_key: string } | undefined;
-    const publicationKey = digest(JSON.stringify([source.revision, work.map((unit) => [unit.key, unit.bindingJson])]));
+    const publicationKey = digest(JSON.stringify([currentSource.revision, work.map((unit) => [unit.key, unit.bindingJson])]));
     if (old?.publication_key === publicationKey) return 0;
     const texts: string[] = [];
     for (const unit of work) {
-      const artifact = this.artifact(task.workspaceId, unit.key);
+      const artifact = this.readArtifact(task.workspaceId, unit.key);
       if (!artifact) throw new Error("artifact missing before publication");
+      if (hasQuarantinedSemanticArtifact(this.db, task.workspaceId, unit.key)) {
+        this.requireCurrentFormation(task, currentSource, unit, artifact, true);
+      }
       this.db.prepare(`INSERT OR IGNORE INTO garden_semantic_bindings VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(task.workspaceId, task.objectId, source.revision, digest(JSON.stringify([unit.bindingJson, unit.key])), unit.key, unit.bindingJson);
+        .run(task.workspaceId, task.objectId, currentSource.revision, digest(JSON.stringify([unit.bindingJson, unit.key])), unit.key, unit.bindingJson);
       texts.push(artifact.searchText);
     }
     const text = texts.join("\n");
@@ -299,7 +364,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       ON CONFLICT(workspace_id,object_id) DO UPDATE SET source_revision=excluded.source_revision,
       publication_key=excluded.publication_key, task_id=excluded.task_id, source_content=excluded.source_content,
       source_evidence_refs=excluded.source_evidence_refs, source_updated_at=excluded.source_updated_at, source_event_revision=excluded.source_event_revision, search_text=excluded.search_text, published_at=excluded.published_at`)
-      .run(task.workspaceId, task.objectId, source.revision, publicationKey, task.id, source.content, text, now, source.sourceEventRevision, task.workspaceId, task.objectId);
+      .run(task.workspaceId, task.objectId, currentSource.revision, publicationKey, task.id, currentSource.content, text, now, currentSource.sourceEventRevision, task.workspaceId, task.objectId);
     if (this.source(task.workspaceId, task.objectId)?.revision !== task.revision) {
       throw new Error("superseded source result");
     }
@@ -321,11 +386,15 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   }
 
   public searchReadyObserved(workspaceId: string, query: string, limit: number) {
+    return this.db.transaction(() => this.readReadyObserved(workspaceId, query, limit))();
+  }
+
+  private readReadyObserved(workspaceId: string, query: string, limit: number) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 512) throw new Error("invalid projection read limit");
     const terms = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
     const observation = { rowsRead: 0, candidateRowsRead: 0, candidateRowsReturned: 0,
       nativeVisits: 0, nativeBytes: 0, sourceRevisionRowsRead: 0, projectionRowsRead: 0,
-      sourceRowsRead: 0, intentRowsRead: 0, bytesRead: 0, truncated: false,
+      sourceRowsRead: 0, intentRowsRead: 0, privacyRowsRead: 0, bytesRead: 0, truncated: false,
       byteAccounting: "utf8_candidate_and_validation_columns" as const };
     if (terms.length === 0) return { ...observation, rows: [] };
     const match = `${buildWorkspaceFtsScopeMatch(workspaceId)} AND search_text:(${buildFtsMatchExpression(terms.slice(0, 32))})`;
@@ -347,6 +416,8 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     observation.nativeBytes = state.bytes;
     observation.candidateRowsReturned = read.length;
     for (const row of read) {
+      requireNoQuarantineRecord(this.db, row.workspace_id, "memory_entry", row.object_id);
+      observation.privacyRowsRead += 1;
       observation.projectionRowsRead += Number(row.projectionId !== null);
       observation.sourceRowsRead += Number(row.sourceId !== null);
       observation.intentRowsRead += Number(row.intentId !== null);
@@ -358,7 +429,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
         sourceRevision: row.sourceRevision!, projectionText: row.projectionText! });
     }
     observation.rowsRead = observation.candidateRowsRead + observation.projectionRowsRead +
-      observation.sourceRowsRead + observation.intentRowsRead + observation.sourceRevisionRowsRead;
+      observation.sourceRowsRead + observation.intentRowsRead + observation.sourceRevisionRowsRead + observation.privacyRowsRead;
     return { ...observation, rows };
   }
 
@@ -409,7 +480,9 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   private assertClaim(task: SemanticEnrichmentTask): void {
     this.requireTransaction();
     const live = this.task(task.workspaceId, task.id);
-    if (!live || live.status !== 'claimed' || live.claim !== task.claim || live.attempts !== task.attempts) {
+    if (!live || live.status !== 'claimed' || live.claim !== task.claim || live.attempts !== task.attempts ||
+      live.objectId !== task.objectId ||
+      !semanticExtractionProfilesEqual(live.profile, task.profile)) {
       throw new Error("stale worker claim");
     }
     if (this.isCurrent(task)) {
@@ -436,8 +509,9 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     const profile = this.readProfile(payload);
     if (profile === null) return null;
     const source = this.source(row.workspace_id, objectId);
-    const revision = source?.revision ?? readNonEmptyString(payload.source_revision) ??
-      (payload.source_revision === undefined ? null : String(payload.source_revision));
+    const revision = readNonEmptyString(payload.enrichment_contract) === this.enrichmentContract
+      ? source?.revision ?? (payload.source_revision === undefined ? null : String(payload.source_revision))
+      : readNonEmptyString(payload.source_revision);
     if (revision === null) return null;
     return { id: row.id, workspaceId: row.workspace_id, objectId, revision, profile,
       status: row.status, claim: row.claimed_by, claimedAt: row.claimed_at, attempts: row.attempt_count };
@@ -471,13 +545,14 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   private sourceMatchesTask(task: SemanticEnrichmentTask): boolean {
     const source = this.source(task.workspaceId, task.objectId);
     const row = this.garden.findById(task.id);
-    if (source === null || row === null) return false;
+    if (source === null || row === null || row.workspace_id !== task.workspaceId) return false;
     const payload = asRecord(row.payload);
-    if (payload === null) return false;
+    if (payload === null || readNonEmptyString(payload.source_object_id) !== task.objectId) return false;
     if (readNonEmptyString(payload.enrichment_contract) === this.enrichmentContract) {
       return Number(payload.source_revision) === source.sourceEventRevision;
     }
-    return source.revision === task.revision;
+    const persistedRevision = readNonEmptyString(payload.source_revision);
+    return persistedRevision !== null && persistedRevision === source.revision && persistedRevision === task.revision;
   }
 
   private findSourceEnrichmentTaskId(workspaceId: string, objectId: string, sourceEventRevision: number): string | null {

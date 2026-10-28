@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DYNAMICS_CONSTANTS } from "../lifecycle/dynamics-constants.js";
 import {
   BoundedJsonObjectSchema,
   BoundedIdSchema,
@@ -80,3 +81,23 @@ export type ManifestationEscalationPolicy = z.infer<typeof ManifestationEscalati
 export type ManifestationBudgetRemaining = z.infer<typeof ManifestationBudgetRemainingSchema>;
 export type ManifestationBudgetConfig = z.infer<typeof ManifestationBudgetConfigSchema>;
 export type ManifestationDecision = z.infer<typeof ManifestationDecisionSchema>;
+
+/** Canonical default policy for persisted configuration and standalone resolution. */
+export function createDefaultManifestationBudgetConfig(workspaceId: string, nowIso: string): ManifestationBudgetConfig {
+  const defaults = DYNAMICS_CONSTANTS.manifestation_budget;
+  return ManifestationBudgetConfigSchema.parse({
+    workspace_id: workspaceId,
+    stance_bias_cap: defaults.default_stance_bias_cap,
+    dialogue_nudge_cap: defaults.default_dialogue_nudge_cap,
+    lens_entry_cap: defaults.default_lens_entry_cap,
+    escalation_policy: {
+      nudge_min_pressure: defaults.default_nudge_min_pressure,
+      nudge_min_confidence: defaults.default_nudge_min_confidence,
+      lens_min_pressure: defaults.default_lens_min_pressure,
+      lens_min_confidence: defaults.default_lens_min_confidence,
+      lens_requires_task_coupling: true,
+      lens_requires_governance_ceiling: true
+    },
+    updated_at: nowIso
+  });
+}

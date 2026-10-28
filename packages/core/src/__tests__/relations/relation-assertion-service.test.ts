@@ -71,7 +71,6 @@ describe("RelationAssertionService", () => {
       ...request,
       assertionId: "assertion-multi-source",
       evidenceReceipts: [
-        ...request.evidenceReceipts,
         {
           evidence_id: secondEvidenceId,
           source_event_anchor: {
@@ -79,13 +78,16 @@ describe("RelationAssertionService", () => {
             event_id: secondEvent.event_id,
             occurred_at: secondObservedAt
           }
-        }
+        },
+        ...request.evidenceReceipts
       ],
       formationReceipt: formationReceipt([firstEvent, secondEvent]),
       validity: { kind: "open", valid_from: secondObservedAt }
     });
 
     expect(admitted.assertion.evidence_receipts).toHaveLength(2);
+    await expect(harness.service.verifyAndRebuild("2026-07-17T01:02:05Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 1 });
     expect((await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))[0])
       .toMatchObject({ legitimacy: { evidence_basis: [
         "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
@@ -173,12 +175,13 @@ describe("RelationAssertionService", () => {
     });
 
     expect(resolved.status).toBe("resolved");
-    expect(resolved.activeProjectionCount).toBe(0);
-    expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).toEqual([]);
+    // A future effective resolution cannot retire the current-time projection yet.
+    expect(resolved.activeProjectionCount).toBe(1);
+    expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).toHaveLength(1);
 
     await expect(harness.service.verifyAndRebuild("2026-07-17T12:00:00.000Z"))
       .resolves.toMatchObject({ activeProjectionCount: 1 });
-    expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).toEqual([]);
+    expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).toHaveLength(1);
     expect(await harness.relationRepo.findProjectionByWorkspaceAtAsOf(
       "workspace-1",
       "2026-07-17T12:00:00.000Z"
@@ -212,6 +215,54 @@ describe("RelationAssertionService", () => {
     await expect(harness.service.verifyAndRebuild()).rejects.toThrow(/resolution EventLog payload is not canonical/);
   });
 
+  it("appends successive resolutions and replays older identities without losing historical or current state", async () => {
+    const harness = await createHarness({ now: () => "2026-07-20T00:00:00.000Z" });
+    const sourceEvent = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    const admitted = await harness.service.admit(admissionRequest(sourceEvent));
+    const first = {
+      assertionId: admitted.assertion.assertion_id, workspaceId: "workspace-1", runId: "run-1",
+      causedBy: "garden", resolutionKind: "contradicted" as const, reason: "new contrary evidence",
+      resolvedAt: "2026-07-18T00:00:00.000Z"
+    };
+    const second = { ...first, resolutionKind: "retracted" as const, reason: "withdrawn",
+      resolvedAt: "2026-07-19T00:00:00.000Z" };
+    const [a, b] = await Promise.all([harness.service.resolve(first), harness.service.resolve(second)]);
+    expect([a.status, b.status]).toEqual(["resolved", "resolved"]);
+    expect(harness.relationRepo.listResolutionHistoryInCurrentTransaction().map(row => row.resolution_kind))
+      .toEqual(["contradicted", "retracted"]);
+    await expect(harness.service.resolve(first)).resolves.toMatchObject({ status: "already_resolved", activeProjectionCount: 0 });
+    expect(harness.relationRepo.getCurrentResolutionInCurrentTransaction(first.assertionId)?.resolution_id)
+      .toBe(b.resolution.resolution_id);
+    await expect(harness.service.verifyAndRebuild("2026-07-17T12:00:00.000Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 1 });
+    await expect(harness.service.verifyAndRebuild("2026-07-18T12:00:00.000Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 0 });
+    await expect(harness.service.resolve({ ...first, reason: "changed", resolutionId: a.resolution.resolution_id }))
+      .rejects.toThrow(/different immutable resolution/);
+    expect((await harness.eventLogRepo.queryByEntity("relation_assertion", first.assertionId))
+      .filter(event => event.event_type === "relation.assertion_resolved")).toHaveLength(2);
+    await expect(harness.service.verifyAndRebuild()).resolves.toMatchObject({ activeProjectionCount: 0 });
+  });
+
+  it.each([false, true])("activates admission at the current clock without reviving expired peers (replay=%s)", async replay => {
+    let now = "2026-07-17T01:02:04Z";
+    const harness = await createHarness({ now: () => now });
+    const event = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, event.event_id);
+    const request = admissionRequest(event);
+    if (replay) await harness.service.admit(request);
+    await harness.service.admit({ ...request, assertionId: "assertion-expiring",
+      anchors: { ...request.anchors, target_anchor: { kind: "object", object_id: "memory-3" } },
+      validity: { kind: "bounded", valid_from: "2026-07-17T01:02:03Z", valid_to: "2026-07-17T01:02:08Z" } });
+    now = "2026-07-17T01:02:10Z";
+    await expect(harness.service.admit(request)).resolves.toMatchObject({
+      status: replay ? "already_admitted" : "admitted", activeProjectionCount: 1
+    });
+    expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))
+      .toEqual([expect.objectContaining({ path_id: "assertion-1" })]);
+  });
+
   it("reports the next validity boundary that can change the current projection", async () => {
     const harness = await createHarness();
     const sourceEvent = await appendSourceSignalEvent(harness);
@@ -235,6 +286,67 @@ describe("RelationAssertionService", () => {
         activeProjectionCount: 0,
         nextProjectionRefreshAt: null
       });
+  });
+
+  it("respects admission time and preserves a submillisecond refresh boundary", async () => {
+    const harness = await createHarness();
+    const event = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, event.event_id);
+    await harness.service.admit({
+      ...admissionRequest(event),
+      admittedAt: "2026-07-17T01:02:03.000Z",
+      validity: { kind: "bounded", valid_from: "2026-07-17T01:02:03.000Z",
+        valid_to: "2026-07-17T01:02:03.0001Z" }
+    });
+    await expect(harness.service.verifyAndRebuild("2026-07-17T01:02:02Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 0,
+        nextProjectionRefreshAt: "2026-07-17T01:02:03.000Z" });
+    await expect(harness.service.verifyAndRebuild("2026-07-17T01:02:03.000Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 1,
+        nextProjectionRefreshAt: "2026-07-17T01:02:03.0001Z" });
+    await expect(harness.service.verifyAndRebuild("2026-07-17T01:02:03.0001Z"))
+      .resolves.toMatchObject({ activeProjectionCount: 0 });
+  });
+
+  it.each([false, true])("resolves at the current clock without reactivating expired assertions (replay=%s)", async replay => {
+    let now = "2026-07-17T01:02:04Z";
+    const harness = await createHarness({ now: () => now });
+    const event = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, event.event_id);
+    const request = admissionRequest(event);
+    await harness.service.admit(request);
+    await harness.service.admit({ ...request, assertionId: "assertion-expiring",
+      anchors: { ...request.anchors, target_anchor: { kind: "object", object_id: "memory-3" } },
+      validity: { kind: "bounded", valid_from: "2026-07-17T01:02:03Z", valid_to: "2026-07-17T01:02:08Z" } });
+    const resolution = { assertionId: "assertion-1", workspaceId: "workspace-1", runId: "run-1",
+      causedBy: "garden", resolutionKind: "retracted" as const, reason: "withdrawn",
+      resolvedAt: "2026-07-17T01:02:05Z" };
+    if (replay) await harness.service.resolve(resolution);
+    now = "2026-07-17T01:02:10Z";
+    await expect(harness.service.resolve(resolution)).resolves.toMatchObject({
+      status: replay ? "already_resolved" : "resolved", activeProjectionCount: 0
+    });
+    await expect(harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).resolves.toEqual([]);
+  });
+
+  it("verifies history and rebuilds in the same SQLite transaction across concurrent resolution", async () => {
+    const harness = await createHarness({ now: () => "2026-07-20T00:00:00Z" });
+    const sourceEvent = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    const admitted = await harness.service.admit(admissionRequest(sourceEvent));
+    const read = harness.eventLogRepo.queryByEntityInCurrentTransaction.bind(harness.eventLogRepo);
+    vi.spyOn(harness.eventLogRepo, "queryByEntityInCurrentTransaction").mockImplementation((kind, id) => {
+      expect(harness.database.connection.inTransaction).toBe(true);
+      return read(kind, id);
+    });
+    await expect(Promise.all([
+      harness.service.verifyAndRebuild(),
+      harness.service.resolve({ assertionId: admitted.assertion.assertion_id, workspaceId: "workspace-1",
+        runId: "run-1", causedBy: "garden", resolutionKind: "retracted", reason: "withdrawn",
+        resolvedAt: "2026-07-18T00:00:00Z" }),
+      harness.service.verifyAndRebuild()
+    ])).resolves.toHaveLength(3);
+    await expect(harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).resolves.toEqual([]);
   });
 
   it("writes an empty as-of generation witness without activating historical rebuild", async () => {

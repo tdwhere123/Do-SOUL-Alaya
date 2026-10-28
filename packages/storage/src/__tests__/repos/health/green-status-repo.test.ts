@@ -91,7 +91,8 @@ describe("SqliteGreenStatusRepo", () => {
       })
     );
 
-    await expect(repo.findEligible("workspace-1")).resolves.toHaveLength(1);
+    await expect(repo.findEligible("workspace-1", "2026-03-20T00:00:00.000Z")).resolves.toHaveLength(1);
+    await expect(repo.findEligible("workspace-1", "2026-04-23T00:00:00.000Z")).resolves.toEqual([]);
     await expect(repo.findGrace("workspace-1")).resolves.toHaveLength(1);
     await expect(repo.findByWorkspaceId("workspace-1")).resolves.toHaveLength(3);
   });

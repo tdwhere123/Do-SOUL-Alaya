@@ -15,6 +15,7 @@ export {
   type InitDatabaseOptions
 } from "./db.js";
 export { openReadOnlyDatabase } from "./open-readonly.js";
+export { resolveTemporalResourcePath } from "./temporal-resource-path.js";
 export {
   EMBEDDING_OVERLAY_ALIAS,
   EMBEDDING_OVERLAY_BIND_FILENAME,
@@ -60,6 +61,7 @@ export {
   isTemporalProjectionSelected,
   selectTemporalProjection,
   rollbackTemporalProjection,
+  verifyTemporalProjectionRollbackSource,
   type RollbackTemporalProjectionInput,
   type SelectTemporalProjectionInput,
   type TemporalProjectionSelectionAuditEntry,

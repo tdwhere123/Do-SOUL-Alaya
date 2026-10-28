@@ -2,6 +2,19 @@ import type { InformationIndex, MemorySearchResult, SourceEvidenceTarget } from 
 
 const CLOSED_INDEX = new Set(["complete", "exhausted_empty"]);
 
+/** Historical captures lack availability metadata. Retain their display-marker
+ * convention only until those archive contracts are retired. Current responses
+ * always carry explicit availability, including literal marker source text. */
+export function hasDeliveredSourcePayload(result: MemorySearchResult): boolean {
+  return result.payload_available ?? result.content_preview !== "[payload omitted]";
+}
+
+/** Historical admission allowed omission only with the codec's refusal flag. */
+export function isSourcePayloadOmitted(result: MemorySearchResult): boolean {
+  return result.payload_available === false || (result.payload_available === undefined &&
+    result.content_preview === "[payload omitted]" && !result.budget_state.within_budget);
+}
+
 /** Occupancy-tail fact from an admitted native index, independent of evaluator labels. */
 export function admittedSourceDeliveryTail(index: Pick<InformationIndex, "continuation" | "completeness">):
   Readonly<{ status: "exhausted" | "open" | "unknown"; reason: string }> {
@@ -22,7 +35,7 @@ export function admittedSourcePreviewInterval(target: SourceEvidenceTarget,
   result: MemorySearchResult): Readonly<{ start: number; end: number }> | null {
   const span = target.span;
   if (span?.retained_extent !== "body") return null;
-  const omitted = result.content_preview === "[payload omitted]" && !result.budget_state.within_budget;
+  const omitted = isSourcePayloadOmitted(result);
   const empty = result.content_preview === "[empty source]" && span.content_start === span.content_end;
   const bytes = omitted || empty ? 0 : Buffer.byteLength(result.content_preview, "utf8");
   if (bytes > span.content_end - span.content_start) return null;

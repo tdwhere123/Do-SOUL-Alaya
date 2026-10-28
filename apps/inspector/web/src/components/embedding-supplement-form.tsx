@@ -18,10 +18,12 @@ export default function EmbeddingSupplementForm({ workspaceId }: Props) {
   if (state.loading) {
     return <LoadingConfig label={t("config:loading.embeddingSupplement")} />;
   }
+  if (state.configError !== null) return <p role="alert">{t("config:error.load", { section: "embedding config", message: state.configError })}</p>;
   if (state.config === null) return null;
   return (
     <div className="space-y-5">
       <EmbeddingStatusAlert status={state.embeddingStatus} />
+      {state.statusError !== null ? <p role="alert">{t("config:embedding.statusUnavailable", { message: state.statusError })}</p> : null}
       <RuntimeConfigReadOnlyNotice />
       <ReadOnlyFieldRow label={t("config:field.providerUrl")} value={state.config.provider_url} />
       <ReadOnlyFieldRow label={t("config:field.modelId")} value={state.config.model_id} />

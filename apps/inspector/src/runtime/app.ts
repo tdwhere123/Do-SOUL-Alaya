@@ -54,7 +54,6 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "POST /api/proposals/:workspaceId/memory/:memoryId/rewrite",
   "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
   "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
-  "POST /api/workspaces/:workspaceId/soul/memory/:memoryId/proposals/promote-strictly-governed",
   "POST /api/soul/search/:workspaceId",
   "POST /api/launch-session"
 ] as const);

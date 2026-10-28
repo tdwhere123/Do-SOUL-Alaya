@@ -70,6 +70,9 @@ it("captures indexed, not-indexed, missing-vector and unbound facts from the liv
         const pages: FrozenSourceIndexQualificationPage[] = [];
         const capture = () => captureFrozenSourceIndexQualifications({ daemon, onPage: page => { pages.push(page); } });
         const frozen = capture();
+        expect(frozenIndexMetadataMatchesNativeBinding(frozen, frozen.index)).toBe(true);
+        expect(frozenIndexMetadataMatchesNativeBinding(frozen, { ...frozen.index,
+          lexical: { ...frozen.index.lexical, serving: frozen.index.lexical.serving === "raw" ? "generation" : "raw" } })).toBe(false);
         const dataDir = daemon.dataDir;
         try {
           Reflect.set(daemon, "dataDir", config.snapshot_path);

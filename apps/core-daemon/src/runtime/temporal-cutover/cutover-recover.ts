@@ -1,4 +1,5 @@
 import path from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
   inspectTemporalProjectionSelection
@@ -130,8 +131,35 @@ async function recoverWithinLease(
     return Object.freeze({ status: "rolled_back", journalFilename: resolvedJournalFilename });
   }
 
+  // Selection is the durable commit point. A restarted runtime may already have
+  // accepted writes, so an exact owned selection must only recover forward.
+  if (await readPointerState(journal) === "candidate" && candidateSelectionMatches(journal)) {
+    verifyOrdinaryRuntimeBootstrap(journal);
+    if (journal.status === "prepared") {
+      journal = await advanceJournal(lease, journal, journalFilename, "pointer_switched", now);
+    }
+    if (journal.status === "pointer_switched") {
+      journal = await advanceJournal(lease, journal, journalFilename, "selected", now);
+    }
+    await advanceJournal(lease, journal, journalFilename, "committed", now);
+    return Object.freeze({ status: "committed", journalFilename: resolvedJournalFilename });
+  }
+
   await compensateIncompleteCutover(lease, journal, journalFilename, now, reason);
   return Object.freeze({ status: "compensated", journalFilename: resolvedJournalFilename });
+}
+
+function candidateSelectionMatches(journal: TemporalCutoverJournal): boolean {
+  const database = initDatabase({ filename: journal.candidatePointer, temporalMode: "candidate" });
+  try {
+    const state = inspectTemporalProjectionSelection(database);
+    if (state.selected && state.selectionId !== journal.selectionId) {
+      throw new AlayaError("CONFLICT", "Temporal candidate selection belongs to a different cutover journal.");
+    }
+    return state.selected;
+  } finally {
+    database.close();
+  }
 }
 
 function assertRollbackEligible(journal: TemporalCutoverJournal): void {

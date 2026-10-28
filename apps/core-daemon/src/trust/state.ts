@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   ContextDeliveryRecordSchema,
+  canonicalJson,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   TrustStateEventType,
@@ -219,7 +220,10 @@ export class TrustStateRecorder {
       audit_event_id: PLACEHOLDER_AUDIT_EVENT_ID
     });
     validateUsageProofAgainstDelivery(draftRecord, linkedDelivery);
-    return await this.eventPublisher.appendManyWithMutation(
+    const existing = (await this.repo.listUsageByDeliveryIds([draftRecord.delivery_id]))[0];
+    if (existing !== undefined) return requireMatchingUsageReplay(existing, draftRecord);
+    try {
+      return await this.eventPublisher.appendManyWithMutation(
       [
         {
           event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
@@ -260,7 +264,13 @@ export class TrustStateRecorder {
         });
         return this.repo.createUsage(finalRecord);
       }
-    );
+      );
+    } catch (error) {
+      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "CONFLICT") throw error;
+      const raced = (await this.repo.listUsageByDeliveryIds([draftRecord.delivery_id]))[0];
+      if (raced === undefined) throw error;
+      return requireMatchingUsageReplay(raced, draftRecord);
+    }
   }
 
   // Resolve the delivery this usage report attaches to and enforce the
@@ -416,6 +426,25 @@ export class TrustStateRecorder {
       }
     );
   }
+}
+
+function requireMatchingUsageReplay(existing: Readonly<UsageProofRecord>, incoming: Readonly<UsageProofRecord>): UsageProofRecord {
+  const relevant = (record: Readonly<UsageProofRecord>) => ({
+    delivery_id: record.delivery_id,
+    usage_state: record.usage_state,
+    used_object_ids: record.used_object_ids,
+    used_objects: record.used_objects ?? null,
+    witness_reports: record.witness_reports ?? null,
+    per_anchor_usage: record.per_anchor_usage?.length ? record.per_anchor_usage : null,
+    trust_mode: record.trust_mode ?? null,
+    reason: record.reason
+  });
+  if (canonicalJson(relevant(existing)) !== canonicalJson(relevant(incoming))) {
+    const error = new Error(`Usage report for delivery ${incoming.delivery_id} conflicts with the existing report.`);
+    Object.assign(error, { code: "CONFLICT" });
+    throw error;
+  }
+  return existing;
 }
 
 export function createTrustStateRecorder(deps: TrustStateRecorderDependencies): TrustStateRecorder {

@@ -1,4 +1,4 @@
-import type { QualityMetrics } from "@do-soul/alaya-eval";
+import type { MeasuredQualityMetrics as QualityMetrics } from "@do-soul/alaya-eval";
 import type { MergeQualityMetricsState } from "./merge-quality-state.js";
 
 export function accumulateCoreCounters(

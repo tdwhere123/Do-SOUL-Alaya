@@ -509,12 +509,16 @@ function collectObserverSubjects(program: QueryProgram, role: ObserverRole, into
 
 function andObserverDecisions(decisions: readonly (Guard | undefined)[]): Guard | undefined {
   let unresolved: Guard | undefined;
+  let accepted: Guard | undefined;
   for (const decision of decisions) {
     if (decision === undefined) continue;
     if (decision.verdict === "false") return decision;
     if (decision.verdict === "unresolved") unresolved = decision;
+    else accepted = decision;
   }
-  return unresolved;
+  // Preserve a successful constrained conjunction for an enclosing alternative.
+  // No applicable decision still represents an unconstrained epsilon branch.
+  return unresolved ?? accepted;
 }
 
 function orObserverDecisions(decisions: readonly (Guard | undefined)[]): Guard | undefined {

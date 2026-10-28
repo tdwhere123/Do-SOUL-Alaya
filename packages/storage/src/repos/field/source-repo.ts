@@ -231,6 +231,21 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     return row?.canonical_inventory ?? null;
   }
 
+  public hasHostCaptureResourceLimit(workspaceId: string, recordId: string): boolean {
+    return this.database.connection.prepare(`SELECT 1 FROM source_host_capture_limitations
+      WHERE workspace_id = ? AND record_id = ?`).get(workspaceId, recordId) !== undefined;
+  }
+
+  public putHostCaptureResourceLimit(workspaceId: string, recordId: string): void {
+    const inserted = this.database.connection.prepare(`INSERT OR IGNORE INTO source_host_capture_limitations
+      (workspace_id, record_id, reason) SELECT workspace_id, record_id, 'resource_limit' FROM source_records
+      WHERE workspace_id = ? AND record_id = ? AND source_body IS NOT NULL AND host_structure_json IS NULL`)
+      .run(workspaceId, recordId);
+    if (inserted.changes === 0 && !this.hasHostCaptureResourceLimit(workspaceId, recordId)) {
+      throw new StorageError("VALIDATION_FAILED", "capture limitation requires a retained uncaptured source");
+    }
+  }
+
   public putHostInventory(workspaceId: string, recordId: string, canonicalInventory: string): void {
     const record = this.findById(workspaceId, recordId);
     if (record?.source_body == null || record.host_structure === undefined) {

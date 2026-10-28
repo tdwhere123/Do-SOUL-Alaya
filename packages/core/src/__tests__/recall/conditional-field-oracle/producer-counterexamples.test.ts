@@ -202,7 +202,22 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(concatenated).toEqual(fullIds);
     expect(planted.length).toBe(40);
     expect(full.completeness.logical_index).toBe("complete");
+    expect(full.completeness.payload).toBe("resource_rejected");
     expect(fullIds).toHaveLength(40);
+  });
+
+  it("delivers complete proofs for forty matches when their preparation peak fits memory", async () => {
+    const slice = await openBoundSlice(database => databases.add(database));
+    const planted = await plantNeedles(slice, 40, 501);
+    const inner = readersFor(slice);
+    const full = runRecall(slice, { query_text: "needle", readers: {
+      ...inner, lexical: input => inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
+    }, budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: 1_050_000 }) });
+    expect(full.entries.map(entry => entry.object_id)).toEqual(planted);
+    expect(full.completeness.logical_index).toBe("complete");
+    expect(full.completeness.payload).toBe("complete");
+    expect(full.entries.every(entry => entry.explanation_ids.length > 0)).toBe(true);
+    expect(full.explanations!.length).toBeGreaterThan(0);
   });
 
   it("native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {

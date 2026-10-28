@@ -29,111 +29,6 @@ export const NodeTemplateContractSchema = z
   .strict()
   .readonly();
 
-const AnalyzeNodeTemplateContractSchema = z
-  .object({
-    node_template: z.literal("analyze"),
-    input: z.tuple([z.literal("prompt"), z.literal("evidence")]).readonly(),
-    output: z.tuple([z.literal("analysis_note")]).readonly(),
-    tools: z.tuple([z.literal("read"), z.literal("validation"), z.literal("evidence")]).readonly(),
-    approval: z
-      .object({
-        checkpoint_required: z.literal(false),
-        user_confirmation_required: z.literal(false)
-      })
-      .strict()
-      .readonly(),
-    budget: z
-      .object({
-        max_worker_delegations: z.literal(0),
-        max_tool_calls: z.literal(3)
-      })
-      .strict()
-      .readonly()
-  })
-  .strict()
-  .readonly();
-
-const PlanNodeTemplateContractSchema = z
-  .object({
-    node_template: z.literal("plan"),
-    input: z.tuple([z.literal("goal")]).readonly(),
-    output: z.tuple([z.literal("plan")]).readonly(),
-    tools: z.tuple([z.literal("read"), z.literal("validation"), z.literal("governance")]).readonly(),
-    approval: z
-      .object({
-        checkpoint_required: z.literal(true),
-        user_confirmation_required: z.literal(false)
-      })
-      .strict()
-      .readonly(),
-    budget: z
-      .object({
-        max_worker_delegations: z.literal(1),
-        max_tool_calls: z.literal(4)
-      })
-      .strict()
-      .readonly()
-  })
-  .strict()
-  .readonly();
-
-const BuildNodeTemplateContractSchema = z
-  .object({
-    node_template: z.literal("build"),
-    input: z.tuple([z.literal("spec")]).readonly(),
-    output: z.tuple([z.literal("patch")]).readonly(),
-    tools: z.tuple([z.literal("read"), z.literal("write"), z.literal("exec"), z.literal("validation")]).readonly(),
-    approval: z
-      .object({
-        checkpoint_required: z.literal(true),
-        user_confirmation_required: z.literal(true)
-      })
-      .strict()
-      .readonly(),
-    budget: z
-      .object({
-        max_worker_delegations: z.literal(2),
-        max_tool_calls: z.literal(8)
-      })
-      .strict()
-      .readonly()
-  })
-  .strict()
-  .readonly();
-
-const ReviewNodeTemplateContractSchema = z
-  .object({
-    node_template: z.literal("review"),
-    input: z.tuple([z.literal("diff")]).readonly(),
-    output: z.tuple([z.literal("review_summary")]).readonly(),
-    tools: z.tuple([z.literal("read"), z.literal("validation"), z.literal("evidence")]).readonly(),
-    approval: z
-      .object({
-        checkpoint_required: z.literal(false),
-        user_confirmation_required: z.literal(true)
-      })
-      .strict()
-      .readonly(),
-    budget: z
-      .object({
-        max_worker_delegations: z.literal(0),
-        max_tool_calls: z.literal(2)
-      })
-      .strict()
-      .readonly()
-  })
-  .strict()
-  .readonly();
-
-export const FrozenNodeTemplateContractsSchema = z
-  .tuple([
-    AnalyzeNodeTemplateContractSchema,
-    PlanNodeTemplateContractSchema,
-    BuildNodeTemplateContractSchema,
-    ReviewNodeTemplateContractSchema
-  ])
-  .readonly();
-
 const frozenNodeTemplateContractValues = [
   {
     node_template: "analyze",
@@ -192,6 +87,35 @@ const frozenNodeTemplateContractValues = [
     }
   }
 ] as const;
+
+function literalSequence<const T extends readonly [string, ...string[]]>(values: T) {
+  const items = values.map(value => z.literal(value)) as { -readonly [K in keyof T]: z.ZodLiteral<T[K]> };
+  return z.tuple(items).readonly();
+}
+
+function frozenContractSchema<const T extends typeof frozenNodeTemplateContractValues[number]>(contract: T) {
+  return z.object({
+    node_template: z.literal<T["node_template"]>(contract.node_template),
+    input: literalSequence<T["input"]>(contract.input),
+    output: literalSequence<T["output"]>(contract.output),
+    tools: literalSequence<T["tools"]>(contract.tools),
+    approval: z.object({
+      checkpoint_required: z.literal<T["approval"]["checkpoint_required"]>(contract.approval.checkpoint_required),
+      user_confirmation_required: z.literal<T["approval"]["user_confirmation_required"]>(contract.approval.user_confirmation_required)
+    }).strict().readonly(),
+    budget: z.object({
+      max_worker_delegations: z.literal<T["budget"]["max_worker_delegations"]>(contract.budget.max_worker_delegations),
+      max_tool_calls: z.literal<T["budget"]["max_tool_calls"]>(contract.budget.max_tool_calls)
+    }).strict().readonly()
+  }).strict().readonly();
+}
+
+export const FrozenNodeTemplateContractsSchema = z.tuple([
+  frozenContractSchema(frozenNodeTemplateContractValues[0]),
+  frozenContractSchema(frozenNodeTemplateContractValues[1]),
+  frozenContractSchema(frozenNodeTemplateContractValues[2]),
+  frozenContractSchema(frozenNodeTemplateContractValues[3])
+]).readonly();
 
 export function assertFrozenNodeTemplateContracts(
   value: unknown = FROZEN_NODE_TEMPLATE_CONTRACTS

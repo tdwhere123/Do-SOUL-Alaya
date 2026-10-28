@@ -1467,10 +1467,6 @@
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/core-daemon/bin/alaya.mjs": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/core-daemon/src/ai/daemon-embedding-provider-readiness.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -2296,10 +2292,6 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/storage/src/repos/field/usage-effect-repo.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/storage/src/repos/garden/garden-librarian-data-ports.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },

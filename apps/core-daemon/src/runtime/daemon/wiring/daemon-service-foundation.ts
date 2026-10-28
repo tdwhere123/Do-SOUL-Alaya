@@ -236,6 +236,7 @@ function createSlotClaimRuntime(
     claimRepo: input.claimFormRepo,
     conflictMatrixRepo: input.conflictMatrixRepo,
     claimService: {
+      getStorageConnectionIdentity: () => claimServiceRef.current?.getStorageConnectionIdentity(),
       prepareLifecycleTransition: async (...args) => {
         const claimService = claimServiceRef.current;
         if (claimService === null) {

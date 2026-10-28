@@ -217,7 +217,7 @@ describe("daemon tool runtime bootstrap", () => {
   );
 
   it(
-    "boots ConversationService with the compute-routing resolver and no legacy stance resolver",
+    "keeps historical ConversationService reads without unused turn-orchestration wiring",
     async () => {
     // No garden secret in this boot -> the product default is host_worker, so
     // the compute-routing fallback provider is local_heuristics (the zero-cloud
@@ -228,11 +228,9 @@ describe("daemon tool runtime bootstrap", () => {
 
     await bootDaemonRuntime();
 
-    expect(hoisted.conversationServiceDeps).toMatchObject({
-      gardenCompileQueue: expect.objectContaining({
-        enqueue: expect.any(Function)
-      })
-    });
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("gardenCompileQueue");
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("contextLensAssembler");
+    expect(hoisted.conversationServiceDeps).not.toHaveProperty("governanceLeaseService");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("gardenComputeProvider");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("resolveGardenComputeProvider");
     expect(hoisted.conversationServiceDeps).not.toHaveProperty("engine");

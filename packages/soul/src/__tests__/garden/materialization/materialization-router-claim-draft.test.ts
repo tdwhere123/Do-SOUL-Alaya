@@ -13,7 +13,7 @@ type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 // invariant: routes-by-object_kind suite. Asserts MaterializationRouter
 // diversifies the producer-side so the live ontology no longer collapses
 // every potential_claim / potential_preference into memory_and_claim,
-// locks claim_status=draft at the wire boundary, and routes
+// omits claim_status at the wire boundary, and routes
 // potential_conflict to ConflictDetectionPort.evaluate.
 // see also: packages/soul/src/garden/materialization/materialization-router/router.ts route()
 // see also: packages/core/src/governance/claim-service.ts create() (DRAFT default)
@@ -67,7 +67,7 @@ describe("MaterializationRouter claim_status draft lock", () => {
     expect("claim_status" in claimInput).toBe(false);
   });
 
-  it("memory_and_claim_draft path produces a claim object whose status is draft at the wire boundary", async () => {
+  it("memory_and_claim_draft produces a claim object", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);
 
@@ -83,8 +83,6 @@ describe("MaterializationRouter claim_status draft lock", () => {
     expect(result.success).toBe(true);
     expect(result.route_target).toBe("memory_and_claim_draft");
     expect(result.created_objects.some((obj) => obj.object_kind === "claim_form")).toBe(true);
-    // see also: packages/core/src/governance/claim-service.ts create() — ClaimLifecycleState.DRAFT default
-    expect(deps.claimServiceLastStatus()).toBe("draft");
   });
 
   for (const claimCase of [
@@ -166,12 +164,10 @@ interface TestDeps {
   readonly synthesisService: { create: Mock<SynthesisCreate> };
   readonly claimService: { create: Mock<ClaimCreate> };
   readonly handoffGapHandler: InMemoryHandoffGapHandler;
-  claimServiceLastStatus(): string | undefined;
 }
 
 function createDeps(): TestDeps {
   let evidenceCounter = 0;
-  let lastClaimStatus: string | undefined;
 
   const evidenceService = {
     create: vi.fn<EvidenceCreate>(async () => {
@@ -200,13 +196,9 @@ function createDeps(): TestDeps {
   };
   const claimService = {
     create: vi.fn<ClaimCreate>(async () => {
-      // mirror ClaimService.create real default; see
-      // packages/core/src/governance/claim-service.ts ClaimLifecycleState.DRAFT default.
-      lastClaimStatus = "draft";
       return {
         object_kind: "claim_form",
-        object_id: "claim-1",
-        claim_status: "draft"
+        object_id: "claim-1"
       } as never;
     })
   };
@@ -215,7 +207,6 @@ function createDeps(): TestDeps {
     memoryService,
     synthesisService,
     claimService,
-    handoffGapHandler: new InMemoryHandoffGapHandler(),
-    claimServiceLastStatus: () => lastClaimStatus
+    handoffGapHandler: new InMemoryHandoffGapHandler()
   };
 }

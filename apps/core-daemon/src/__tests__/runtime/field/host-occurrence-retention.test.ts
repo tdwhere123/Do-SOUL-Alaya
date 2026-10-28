@@ -46,6 +46,23 @@ function read(f: ReturnType<typeof open>, record: { identity: string; source_ver
     sourceVersion: record.source_version, contentDigest: record.content_digest, authorizedScopes: ["project"], ...limits });
 }
 
+it("reports invalid inventory allowances as validation failures without changing bounded-read outcomes", async () => {
+  const f = fixture();
+  const record = (await f.admission.admit(request(), context)).record;
+  for (const limits of [
+    { nativeByteLimit: -1, workLimit: 262144, memoryLimit: 262144 },
+    { nativeByteLimit: 131072, workLimit: 1.5, memoryLimit: 262144 },
+    { nativeByteLimit: 131072, workLimit: 262144, memoryLimit: Number.NaN }
+  ]) {
+    expect(() => read(f, record, limits)).toThrow(expect.objectContaining({
+      name: "StorageError", code: "VALIDATION_FAILED", message: "invalid host inventory allowance"
+    }));
+  }
+  expect(read(f, record, { nativeByteLimit: 0, workLimit: 0, memoryLimit: 0 }).status)
+    .toBe("resource_limited");
+  expect(read(f, record).status).toBe("captured");
+});
+
 it("commits source/inventory/message spans atomically, replays after audit failure, replaces and invalidates the affected index", async () => {
   const f = fixture();
   const failing = createAuditedSourceAdmission({ ...f.input, eventLogRepo: { append: () => { throw new Error("audit unavailable"); } } });

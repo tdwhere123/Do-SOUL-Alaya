@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   GardenRole,
   GardenTaskKind,
   GardenTier,
@@ -30,35 +31,8 @@ import {
 } from "../scheduling/garden-task-runner.js";
 
 export const LIBRARIAN_CONSTANTS = {
-  MERGE_THRESHOLD: 0.85,
-  TEMPLATE_MIN_CLUSTER_SIZE: 3,
   BATCH_SIZE: 10
 } as const;
-
-export interface MergeCandidate {
-  readonly primary_id: string;
-  readonly duplicate_ids: readonly string[];
-  readonly object_kind: string;
-  readonly similarity_score: number;
-}
-
-interface TemplateCluster {
-  readonly representative_id: string;
-  readonly member_ids: readonly string[];
-  readonly pattern_description: string;
-}
-
-export interface LibrarianMergeDetectionPort {
-  findMergeCandidates(workspaceId: string): Promise<readonly MergeCandidate[]>;
-  hasPendingMergeProposal(primaryId: string): Promise<boolean>;
-  createMergeProposal(workspaceId: string, candidate: MergeCandidate): Promise<{ readonly proposal_id: string }>;
-  findTemplateClusters(workspaceId: string, minClusterSize: number): Promise<readonly TemplateCluster[]>;
-  hasPendingTemplateProposal(representativeId: string): Promise<boolean>;
-  createTemplateCandidate(
-    workspaceId: string,
-    cluster: TemplateCluster
-  ): Promise<{ readonly candidate_id: string }>;
-}
 
 export interface NeighborGroup {
   readonly subject: string;
@@ -68,20 +42,6 @@ export interface NeighborGroup {
 
 export interface LibrarianNeighborDetectionPort {
   findSubjectNeighbors(workspaceId: string): Promise<readonly NeighborGroup[]>;
-}
-
-export interface CompressionCandidate {
-  readonly chain_start: string;
-  readonly chain_end: string;
-  readonly intermediate_ids: readonly string[];
-}
-
-export interface LibrarianPathCompressionPort {
-  findCompressiblePaths(workspaceId: string): Promise<readonly CompressionCandidate[]>;
-  createCompressionCandidate(
-    workspaceId: string,
-    candidate: CompressionCandidate
-  ): Promise<{ readonly candidate_id: string }>;
 }
 
 interface SynthesisCandidateCluster {
@@ -96,7 +56,7 @@ export interface LibrarianSynthesisThrottlePort {
     workspaceId: string,
     subject: string,
     evidenceIds: readonly string[]
-  ): Promise<{ readonly candidate_id: string }>;
+  ): Promise<{ readonly candidate_id: string; readonly created: boolean }>;
 }
 
 export interface LibrarianSchedulerPort {
@@ -104,9 +64,7 @@ export interface LibrarianSchedulerPort {
 }
 
 export interface LibrarianDependencies {
-  readonly mergePort: LibrarianMergeDetectionPort;
   readonly neighborPort: LibrarianNeighborDetectionPort;
-  readonly compressionPort: LibrarianPathCompressionPort;
   readonly synthesisPort: LibrarianSynthesisThrottlePort;
   readonly scheduler: LibrarianSchedulerPort;
   readonly healthJournal?: HealthJournalRecordPort;
@@ -121,9 +79,7 @@ export class Librarian {
   public readonly role: GardenRoleValue = GardenRole.LIBRARIAN;
   public readonly tier: GardenTierValue = GardenTier.TIER_2;
 
-  private readonly mergePort: LibrarianMergeDetectionPort;
   private readonly neighborPort: LibrarianNeighborDetectionPort;
-  private readonly compressionPort: LibrarianPathCompressionPort;
   private readonly synthesisPort: LibrarianSynthesisThrottlePort;
   private readonly scheduler: LibrarianSchedulerPort;
   private readonly healthJournal: HealthJournalRecordPort | null;
@@ -135,9 +91,7 @@ export class Librarian {
   private readonly taskHandlers: ReadonlyMap<GardenTaskKindValue, GardenTaskHandler>;
 
   public constructor(deps: LibrarianDependencies) {
-    this.mergePort = deps.mergePort;
     this.neighborPort = deps.neighborPort;
-    this.compressionPort = deps.compressionPort;
     this.synthesisPort = deps.synthesisPort;
     this.scheduler = deps.scheduler;
     this.healthJournal = deps.healthJournal ?? null;
@@ -148,10 +102,10 @@ export class Librarian {
       deps.pathPlasticityBudgetMs ?? PATH_PLASTICITY_TASK_DEFAULTS.MAX_EXECUTION_MS;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.taskHandlers = new Map<GardenTaskKindValue, GardenTaskHandler>([
-      [GardenTaskKind.MERGE_PROPOSAL, this.executeMergeProposal.bind(this)],
+      [GardenTaskKind.MERGE_PROPOSAL, async () => { throw new AlayaError("VALIDATION", "Librarian merge proposals are retired"); }],
       [GardenTaskKind.SUBJECT_NEIGHBOR_DETECT, this.executeSubjectNeighborDetect.bind(this)],
-      [GardenTaskKind.PATH_COMPRESSION, this.executePathCompression.bind(this)],
-      [GardenTaskKind.TEMPLATE_CANDIDATE, this.executeTemplateCandidate.bind(this)],
+      [GardenTaskKind.PATH_COMPRESSION, async () => { throw new AlayaError("VALIDATION", "Librarian compression proposals are retired"); }],
+      [GardenTaskKind.TEMPLATE_CANDIDATE, async () => { throw new AlayaError("VALIDATION", "Librarian template proposals are retired"); }],
       [GardenTaskKind.SYNTHESIS_REVIEW, this.executeSynthesisReview.bind(this)],
       [GardenTaskKind.PATH_PLASTICITY_UPDATE, this.executePathPlasticityUpdate.bind(this)]
     ]);
@@ -166,30 +120,6 @@ export class Librarian {
       createFailureResult: this.createFailureResult.bind(this),
       reportCompletion: (result) => this.scheduler.reportCompletion(result)
     });
-  }
-
-  private async executeMergeProposal(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
-    const candidates = await this.mergePort.findMergeCandidates(task.workspace_id);
-    const eligibleCandidates = candidates
-      .filter((candidate) => candidate.similarity_score >= LIBRARIAN_CONSTANTS.MERGE_THRESHOLD)
-      .slice(0, LIBRARIAN_CONSTANTS.BATCH_SIZE);
-    let createdProposalIds: readonly string[] = [];
-
-    for (const candidate of eligibleCandidates) {
-      const hasPending = await this.mergePort.hasPendingMergeProposal(candidate.primary_id);
-      if (hasPending) {
-        continue;
-      }
-
-      const proposal = await this.mergePort.createMergeProposal(task.workspace_id, candidate);
-      createdProposalIds = [...createdProposalIds, proposal.proposal_id];
-    }
-
-    const result = this.createSuccessResult(task, completedAt, createdProposalIds, [
-      `merge_proposal: created ${createdProposalIds.length} merge proposals`
-    ]);
-    await this.scheduler.reportCompletion(result);
-    return result;
   }
 
   private async executeSubjectNeighborDetect(
@@ -259,52 +189,6 @@ export class Librarian {
     return result;
   }
 
-  private async executePathCompression(
-    task: GardenTaskDescriptor,
-    completedAt: string
-  ): Promise<GardenTaskResult> {
-    const candidates = await this.compressionPort.findCompressiblePaths(task.workspace_id);
-    let createdCandidateIds: readonly string[] = [];
-
-    for (const candidate of candidates.slice(0, LIBRARIAN_CONSTANTS.BATCH_SIZE)) {
-      const created = await this.compressionPort.createCompressionCandidate(task.workspace_id, candidate);
-      createdCandidateIds = [...createdCandidateIds, created.candidate_id];
-    }
-
-    const result = this.createSuccessResult(task, completedAt, createdCandidateIds, [
-      `path_compression: created ${createdCandidateIds.length} compression candidates`
-    ]);
-    await this.scheduler.reportCompletion(result);
-    return result;
-  }
-
-  private async executeTemplateCandidate(
-    task: GardenTaskDescriptor,
-    completedAt: string
-  ): Promise<GardenTaskResult> {
-    const clusters = await this.mergePort.findTemplateClusters(
-      task.workspace_id,
-      LIBRARIAN_CONSTANTS.TEMPLATE_MIN_CLUSTER_SIZE
-    );
-    let createdCandidateIds: readonly string[] = [];
-
-    for (const cluster of clusters.slice(0, LIBRARIAN_CONSTANTS.BATCH_SIZE)) {
-      const hasPending = await this.mergePort.hasPendingTemplateProposal(cluster.representative_id);
-      if (hasPending) {
-        continue;
-      }
-
-      const created = await this.mergePort.createTemplateCandidate(task.workspace_id, cluster);
-      createdCandidateIds = [...createdCandidateIds, created.candidate_id];
-    }
-
-    const result = this.createSuccessResult(task, completedAt, createdCandidateIds, [
-      `template_candidate: created ${createdCandidateIds.length} template candidates`
-    ]);
-    await this.scheduler.reportCompletion(result);
-    return result;
-  }
-
   private async executeSynthesisReview(
     task: GardenTaskDescriptor,
     completedAt: string
@@ -312,7 +196,8 @@ export class Librarian {
     const clusters = await this.synthesisPort.findSynthesisCandidateClusters(task.workspace_id);
     let createdCandidateIds: readonly string[] = [];
 
-    for (const cluster of clusters.slice(0, LIBRARIAN_CONSTANTS.BATCH_SIZE)) {
+    for (const cluster of clusters) {
+      if (createdCandidateIds.length >= LIBRARIAN_CONSTANTS.BATCH_SIZE) break;
       const hasPending = await this.synthesisPort.hasPendingSynthesisForSubject(
         task.workspace_id,
         cluster.subject
@@ -326,7 +211,7 @@ export class Librarian {
         cluster.subject,
         cluster.evidence_ids
       );
-      createdCandidateIds = [...createdCandidateIds, created.candidate_id];
+      if (created.created) createdCandidateIds = [...createdCandidateIds, created.candidate_id];
     }
 
     const result = this.createSuccessResult(task, completedAt, createdCandidateIds, [

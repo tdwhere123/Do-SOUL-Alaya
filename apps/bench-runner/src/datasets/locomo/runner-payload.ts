@@ -133,11 +133,11 @@ function writeLocomoQaSummary(
   );
   if (allQaVerdicts.length === 0) return;
   process.stdout.write(
-    `LoCoMo QA accuracy=${((qaMetrics?.qa_accuracy ?? 0) * 100).toFixed(1)}% ` +
+    `LoCoMo QA accuracy=${qaMetrics?.qa_accuracy == null ? "unavailable" : `${(qaMetrics.qa_accuracy * 100).toFixed(1)}%`} ` +
       `(${qaMetrics?.qa_correct ?? 0}/${qaMetrics?.qa_total ?? 0})\n`
   );
   for (const [type, tally] of Object.entries(qaMetrics?.qa_by_type ?? {})) {
-    process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}\n`);
+    process.stdout.write(`  ${type}: ${tally.correct}/${tally.total}${tally.invalid_judge_count ? ` (invalid judge ${tally.invalid_judge_count}; accuracy unavailable)` : ""}\n`);
   }
   writeLocomoQaCategorySummary(aggregate);
 }
@@ -150,19 +150,20 @@ function writeLocomoQaCategorySummary(
     const tally = byCat.get(cat)!;
     process.stdout.write(
       `  category ${cat}: ${tally.correct}/${tally.total} = ` +
-        `${((100 * tally.correct) / tally.total).toFixed(1)}%\n`
+        `${tally.invalid > 0 ? "unavailable" : `${((100 * tally.correct) / tally.total).toFixed(1)}%`}\n`
     );
   }
 }
 
 function buildLocomoQaCategorySummary(
   aggregate: LocomoConversationAggregate
-): Map<number, { correct: number; total: number }> {
-  const byCat = new Map<number, { correct: number; total: number }>();
+): Map<number, { correct: number; total: number; invalid: number }> {
+  const byCat = new Map<number, { correct: number; total: number; invalid: number }>();
   for (const row of aggregate.conversationResults.flatMap((r) => r.qaCategoryRows)) {
-    const tally = byCat.get(row.category) ?? { correct: 0, total: 0 };
+    const tally = byCat.get(row.category) ?? { correct: 0, total: 0, invalid: 0 };
     tally.total += 1;
     if (row.correct) tally.correct += 1;
+    if (row.correct === null) tally.invalid += 1;
     byCat.set(row.category, tally);
   }
   return byCat;

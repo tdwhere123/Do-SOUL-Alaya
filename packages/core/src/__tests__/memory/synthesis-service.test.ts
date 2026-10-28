@@ -104,10 +104,10 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
       )
     },
     evidenceService: {
-      findById: evidenceFindByIdSpy
+      findByIdScoped: evidenceFindByIdSpy
     },
     memoryService: {
-      findById: memoryFindByIdSpy
+      findByIdScoped: memoryFindByIdSpy
     },
     eventLogRepo: {
       append: appendSpy,
@@ -228,7 +228,7 @@ describe("SynthesisService", () => {
   it("rejects create when evidence reference is missing before EventLog writes", async () => {
     const { dependencies, appendSpy, queryByEntitySpy } = createDependencies({
       evidenceService: {
-        findById: vi.fn(async () => null)
+        findByIdScoped: vi.fn(async () => null)
       }
     });
 
@@ -247,7 +247,7 @@ describe("SynthesisService", () => {
   it("rejects create when source memory reference is missing before EventLog writes", async () => {
     const { dependencies, appendSpy, queryByEntitySpy } = createDependencies({
       memoryService: {
-        findById: vi.fn(async () => null)
+        findByIdScoped: vi.fn(async () => null)
       }
     });
 
@@ -262,6 +262,24 @@ describe("SynthesisService", () => {
     expect(queryByEntitySpy).not.toHaveBeenCalled();
     expect(appendSpy).not.toHaveBeenCalled();
   });
+
+  it.each(["memory", "evidence"] as const)(
+    "rejects a %s reference from another workspace before persisting",
+    async (kind) => {
+      const foreignWorkspace = "workspace-foreign";
+      const lookup = vi.fn(async (_id: string, workspaceId: string) =>
+        workspaceId === foreignWorkspace ? { workspace_id: foreignWorkspace } : null
+      );
+      const { dependencies, appendSpy } = createDependencies(kind === "memory"
+        ? { memoryService: { findByIdScoped: lookup } }
+        : { evidenceService: { findByIdScoped: lookup } });
+
+      await expect(new SynthesisService(dependencies).create(createSynthesisInput()))
+        .rejects.toMatchObject({ code: "VALIDATION" });
+      expect(lookup).toHaveBeenCalledWith(`${kind}-1`, "workspace-1");
+      expect(appendSpy).not.toHaveBeenCalled();
+    }
+  );
 
   it("transitions status in one direction only", async () => {
     const order: string[] = [];

@@ -220,8 +220,10 @@ class ResolutionEffectAuthority implements
   private collectEvidenceState(workspaceId: string, eligibleEvidence: ReadonlySet<string>) {
     const erased = this.listErasedSubjectKeys(workspaceId);
     const bindings = this.deps.fieldComposition.fieldRepos.records.listEvidenceBindings(workspaceId);
-    const sourceRecords = this.deps.fieldComposition.fieldRepos.records.listByWorkspace(workspaceId)
-      .filter((record) => !erased.has(`source_record:${record.record_id}`));
+    const records = this.deps.fieldComposition.fieldRepos.records;
+    const sourceRecords = records.listByWorkspace(workspaceId)
+      .filter((record) => !erased.has(`source_record:${record.record_id}`) &&
+        records.findCurrent(workspaceId, record.source_id)?.record_id === record.record_id);
     const groundedEvidenceIds = new Set(bindings
       .filter((binding) => sourceRecords.some((record) => record.record_id === binding.record_id))
       .map((binding) => binding.evidence_object_id));
@@ -354,8 +356,8 @@ class ResolutionEffectAuthority implements
       target,
       scope: input.scope,
       recorded_at: record.recorded_at,
-      event_time: record.event_time ?? record.recorded_at,
-      valid_from: record.valid_from ?? record.event_time ?? record.recorded_at,
+      event_time: record.event_time,
+      valid_from: record.valid_from ?? record.event_time,
       valid_to: record.valid_to
     });
   }

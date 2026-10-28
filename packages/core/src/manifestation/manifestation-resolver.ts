@@ -1,6 +1,7 @@
 import {
     ManifestationBudgetConfigSchema,
     ManifestationDecisionSchema,
+    createDefaultManifestationBudgetConfig,
     type ActivationCandidate,
     type ManifestationBudgetConfig,
     type ManifestationDecision,
@@ -15,7 +16,6 @@ import {
   anchorMemoryObjectId,
   buildDecisionReason,
   compareCandidatesForDeterministicEvaluation,
-  createDefaultManifestationBudgetConfig,
   determineDesiredLevel
 } from "./manifestation-resolver-helpers.js";
 import type {

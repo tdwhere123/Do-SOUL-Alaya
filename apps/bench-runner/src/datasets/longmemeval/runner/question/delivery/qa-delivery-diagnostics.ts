@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import type { LongMemEvalQuestion } from "../../../ingestion/dataset.js";
 import type { QaDeliveredCandidate, QaQuestionVerdict } from "../../../../../runs/qa/qa-harness.js";
 import { normalizeQaDeliveryContent } from "./qa-delivery-content.js";
@@ -31,8 +32,11 @@ function buildQaDeliveryDiagnosticRecord(input: QaDeliveryDiagnosticInput) {
     modelAnswer: input.qaVerdict.modelAnswer,
     judgeVerdict: input.qaVerdict.judgeVerdict,
     correct: input.qaVerdict.correct,
+    evaluatorValidity: input.qaVerdict.evaluatorValidity,
+    contextClipped: input.qaVerdict.contextClipped,
+    contextExposure: input.qaVerdict.contextExposure,
     ...diagnostic,
-    deliveredGoldOnly: process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
+    deliveredGoldOnly: parseEnvBoolean(process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY, "ALAYA_BENCH_DELIVER_GOLD_ONLY"),
     delivered: input.delivered.map((candidate) => ({
       objectId: candidate.objectId,
       objectKind: candidate.objectKind ?? "memory_entry",
@@ -55,14 +59,23 @@ function inspectQaDeliveryFailure(input: QaDeliveryDiagnosticInput) {
   const goldInWidePool = widePoolGoldRanks.length > 0;
   const goldInDelivered = input.delivered.some((candidate) =>
     goldIdentities.has(candidateIdentity(candidate)));
-  const failureClass = input.qaVerdict.correct
+  const goldInAnswerContext = input.qaVerdict.contextExposure.some((exposure) =>
+    goldIdentities.has(`${exposure.objectKind}:${exposure.objectId}`) &&
+    exposure.contentChars > 0 && exposure.includedContentChars === exposure.contentChars);
+  const goldContextClipped = input.qaVerdict.contextExposure.some((exposure) =>
+    goldIdentities.has(`${exposure.objectKind}:${exposure.objectId}`) && exposure.includedContentChars < exposure.contentChars);
+  const failureClass = input.qaVerdict.evaluatorValidity !== "valid"
+    ? "evaluator_invalid"
+    : input.qaVerdict.correct
     ? null
     : !goldInWidePool
       ? "recall_miss"
       : !goldInDelivered
         ? "support_selector_miss"
-        : "reader_miss";
-  return { goldInWidePool, goldInDelivered, failureClass, widePoolGoldRanks };
+        : goldContextClipped || !goldInAnswerContext
+          ? "context_clipped"
+          : "reader_miss";
+  return { goldInWidePool, goldInDelivered, goldInAnswerContext, goldContextClipped, failureClass, widePoolGoldRanks };
 }
 
 function identityKey(identity: LongMemEvalGoldObjectIdentity): string {

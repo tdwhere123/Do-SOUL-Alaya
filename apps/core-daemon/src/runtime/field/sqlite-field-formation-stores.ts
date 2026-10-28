@@ -48,6 +48,8 @@ export function createSqliteFieldFormationStores(input: Readonly<{
       sourceRecordFromRow(repos.records.insert(recordToRow(record, contentBytes))),
     getHostInventory: (workspaceId, recordId) => repos.records.getHostInventory(workspaceId, recordId),
     putHostInventory: (workspaceId, recordId, inventory) => repos.records.putHostInventory(workspaceId, recordId, inventory),
+    hasHostCaptureResourceLimit: (workspaceId, recordId) => repos.records.hasHostCaptureResourceLimit(workspaceId, recordId),
+    putHostCaptureResourceLimit: (workspaceId, recordId) => repos.records.putHostCaptureResourceLimit(workspaceId, recordId),
     getSpan: (workspaceId, spanId) => {
       const row = repos.spans.findById(workspaceId, spanId);
       return row === null ? null : sourceSpanFromRow(row);

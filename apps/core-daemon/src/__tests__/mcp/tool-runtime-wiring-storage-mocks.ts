@@ -18,9 +18,7 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
     pointerHealthPort: {},
     greenMaintenancePort: {},
     bootstrappingPort: {},
-    mergePort: {},
     neighborPort: {},
-    compressionPort: {},
     synthesisPort: {}
   };
 

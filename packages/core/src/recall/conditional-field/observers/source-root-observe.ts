@@ -23,6 +23,13 @@ export function sourceFamilySettled(committed: string | null | undefined): boole
   return parseSeedCursor(committed ?? null).sourcesDone;
 }
 
+export function sourceSeedCursorAdvanced(before: string | null, after: string | null): boolean {
+  const prior = parseSeedCursor(before), next = parseSeedCursor(after);
+  return prior.source !== next.source || prior.memory !== next.memory || prior.hint !== next.hint
+    || prior.sourcesDone !== next.sourcesDone || prior.hintsDone !== next.hintsDone
+    || (prior.hintsUnavailable === true) !== (next.hintsUnavailable === true);
+}
+
 export function observeSourceAwareSeed(
   input: ObserveConditionalFieldInput,
   wantMemory: boolean
@@ -103,7 +110,7 @@ export function observeSourceAwareSeed(
   let pagedMemory = false;
   // Source hydration failure is not a lexical skip: mixed seed would fail-close FTS memory.
   if (wantMemory && share.memoryWork > 0) {
-    const taken = takeLexicalPage(input, share, memoryCommitted);
+    const taken = takeLexicalPage(input, share, memoryCommitted, { workUnits, bytes });
     pagedMemory = taken !== null;
     if (taken === null) {
       memoryIdle = true;
@@ -143,7 +150,7 @@ export function observeSourceAwareSeed(
   if (wantMemory && !pagedMemory && input.readers.lexical !== undefined && input.seed_query !== undefined
     && sourceRows.length === 0 && workUnits < input.action.work_limit) {
     const taken = takeLexicalPage(input, {
-      memoryWork: input.action.work_limit - workUnits, memoryLimit: pageLimit(input) }, memoryCommitted);
+      memoryWork: input.action.work_limit - workUnits, memoryLimit: pageLimit(input) }, memoryCommitted, { workUnits, bytes });
     if (taken !== null) {
       pagedMemory = true;
       observations.push(...taken.observations);
@@ -298,7 +305,8 @@ function takeSourcePage(
 function takeLexicalPage(
   input: ObserveConditionalFieldInput,
   share: Readonly<{ readonly memoryLimit: number; readonly memoryWork: number }>,
-  memoryCommitted: string | null
+  memoryCommitted: string | null,
+  prior: Readonly<{ workUnits: number; bytes: number }>
 ): Readonly<{
   readonly observations: readonly TypedObservation[];
   readonly workUnits: number;
@@ -314,34 +322,39 @@ function takeLexicalPage(
   if (queryText === undefined || lexical === undefined) return null;
   const hydrateReserve = input.readers.source === undefined ? 0 : SOURCE_IDENTITY_HYDRATE_RESERVE;
   const nativeLimit = Math.max(1, share.memoryWork - hydrateReserve);
-  const page = lexical({
-    workspaceId: input.workspace_id,
-    query: queryText,
-    limit: Math.max(1, Math.min(share.memoryLimit, nativeLimit)),
-    nativeLimit,
-    afterObjectId: memoryCommitted
-  });
-  const collected = collectObserved({
-    ...input,
-    action: { ...input.action, work_limit: share.memoryWork }
-  }, {
-    identities: page.ids,
-    truncated: page.truncated,
-    nativeVisits: page.nativeVisits,
-    bytesRead: page.bytesRead,
-    identityKind: "object",
-    commitThrough: page.committedThrough ?? page.ids.at(-1) ?? memoryCommitted
-  });
-  return {
-    observations: collected.page.observations,
-    workUnits: collected.work.work_units,
-    bytes: collected.work.bytes_read,
-    truncated: page.truncated || collected.page.outcome.status === "interrupted",
-    memoryCommitted: collected.page.cursor.committed_through,
-    ids: page.ids.length,
-    hydrationUnavailable: collected.page.outcome.status === "unavailable",
-    resourceLimited: collected.page.outcome.status === "interrupted"
-  };
+  try {
+    const page = lexical({
+      workspaceId: input.workspace_id,
+      query: queryText,
+      limit: Math.max(1, Math.min(share.memoryLimit, nativeLimit)),
+      nativeLimit,
+      afterObjectId: memoryCommitted
+    });
+    const collected = collectObserved({
+      ...input,
+      action: { ...input.action, work_limit: share.memoryWork }
+    }, {
+      identities: page.ids,
+      truncated: page.truncated,
+      nativeVisits: page.nativeVisits,
+      bytesRead: page.bytesRead,
+      identityKind: "object",
+      commitThrough: page.committedThrough ?? page.ids.at(-1) ?? memoryCommitted
+    });
+    return {
+      observations: collected.page.observations,
+      workUnits: collected.work.work_units,
+      bytes: collected.work.bytes_read,
+      truncated: page.truncated || collected.page.outcome.status === "interrupted",
+      memoryCommitted: collected.page.cursor.committed_through,
+      ids: page.ids.length,
+      hydrationUnavailable: collected.page.outcome.status === "unavailable",
+      resourceLimited: collected.page.outcome.status === "interrupted"
+    };
+  } catch (error) {
+    input.on_failure_work?.({ native_visits: prior.workUnits, native_bytes: prior.bytes });
+    throw error;
+  }
 }
 
 function parseSeedCursor(committed: string | null): Readonly<{

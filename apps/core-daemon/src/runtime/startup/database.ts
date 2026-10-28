@@ -15,11 +15,21 @@ export async function openDaemonDatabase(filename: string) {
   // Close any prior install first — the port is process-global and workers outlive DB handles.
   await closeDaemonSqliteWriteQueue();
   installedWriteQueue = await installDefaultSqliteWriteQueue(processEnvLookup());
-  const database = initDatabase({ filename });
-  assertTemporalProjectionReady(database);
-  // Without stats, SQLite can pick a low-selectivity index on a growing alaya.db.
-  database.optimize();
-  return database;
+  let database: ReturnType<typeof initDatabase> | undefined;
+  try {
+    database = initDatabase({ filename });
+    assertTemporalProjectionReady(database);
+    // Without stats, SQLite can pick a low-selectivity index on a growing alaya.db.
+    database.optimize();
+    return database;
+  } catch (error) {
+    try {
+      database?.close();
+    } finally {
+      await closeDaemonSqliteWriteQueue();
+    }
+    throw error;
+  }
 }
 
 export function assertTemporalProjectionReady(

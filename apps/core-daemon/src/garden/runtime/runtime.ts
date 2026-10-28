@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   diagnosticWarn,
+  GardenTaskKind,
   type GardenTaskDescriptor,
   type GardenTaskKindValue,
   type GardenTierValue
@@ -132,6 +133,7 @@ function createGardenSchedulerRuntime(
     legacyTopologyMutationsEnabled: input.legacyTopologyMutationsEnabled === true,
     pathGraphSnapshotRepo: input.pathGraphSnapshotRepo,
     pathRelationRepo: input.pathRelationRepo,
+    ...(input.maintenancePathReader === undefined ? {} : { maintenancePathReader: input.maintenancePathReader }),
     pathPlasticityWatermarkRepo: input.pathPlasticityWatermarkRepo,
     requestBacklogTelemetryCapture: telemetry.requestBacklogTelemetryCapture,
     runtimeGardenScheduler: core.runtimeGardenScheduler,
@@ -206,6 +208,7 @@ function createRuntimeSupportContext(
       readonly target_object_refs: readonly string[];
       readonly priority: number;
       readonly created_at: string;
+      readonly periodic?: boolean;
     }): void;
   },
   requestBacklogTelemetryCapture: (reason: string) => void
@@ -253,6 +256,7 @@ async function enqueueGardenTaskForAllWorkspaces(
       readonly target_object_refs: readonly string[];
       readonly priority: number;
       readonly created_at: string;
+      readonly periodic?: boolean;
     }): void;
   },
   requestBacklogTelemetryCapture: (reason: string) => void,
@@ -271,7 +275,10 @@ async function enqueueGardenTaskForAllWorkspaces(
       run_id: null,
       target_object_refs: resolveTargetObjectRefs(workspace.workspace_id, nowIso),
       priority: 10,
-      created_at: nowIso
+      created_at: nowIso,
+      ...([GardenTaskKind.TTL_CLEANUP, GardenTaskKind.HOT_INDEX_DEMOTION,
+        GardenTaskKind.DORMANT_DEMOTION, GardenTaskKind.TOMBSTONE_GC].some(kind => kind === taskKind)
+        ? { periodic: true } : {})
     });
   }
   if (workspaces.length > 0) {

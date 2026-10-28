@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,
+  analyzeSourceIndexLexical,
+  advanceSourceIndexLexicalV2,
   readCjkSegmentationStatus,
   segmentCjkRun,
   warmCjkSegmentation
@@ -13,9 +15,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("keeps bounded surface-token segmentation identical across source read boundaries", async () => {
+  __setCjkSegmentationLoaderForTests(async () => ({ cut: token => {
+    const chars = Array.from(token), pieces: string[] = [];
+    for (let i = 0; i < chars.length; i += 2) pieces.push(chars.slice(i, i + 2).join(""));
+    return pieces;
+  } }));
+  await expect(warmCjkSegmentation()).resolves.toBe(true);
+  const text = `prefix ${"甲乙".repeat(9)}天地${"甲乙".repeat(30)} 🙂 suffix`;
+  const whole = advanceSourceIndexLexicalV2(text, "", true);
+  let pending = "", projection = "";
+  const characters = Array.from(text);
+  for (let offset = 0; offset < characters.length; offset += 7) {
+    const result = advanceSourceIndexLexicalV2(characters.slice(offset, offset + 7).join(""), pending,
+      offset + 7 >= characters.length);
+    pending = result.pending;
+    projection += `${result.projection} `;
+  }
+  expect(pending).toBe("");
+  expect(projection.trim().split(/\s+/u)).toEqual(whole.projection.trim().split(/\s+/u));
+  expect(analyzeSourceIndexLexical("天地", "query", "v2")).toEqual(["天地"]);
+  expect(whole.projection.trim().split(/\s+/u)).toContain("天地");
+});
+
 describe("CJK segmentation fallback", () => {
   it("splits interrogative atoms when jieba is unavailable", async () => {
     __setCjkSegmentationLoaderForTests(async () => null);
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+    expect(readCjkSegmentationStatus()).toBe("unavailable");
     expect(segmentCjkRun("多久部署")).toEqual(["多久", "部署"]);
     expect(segmentCjkRun("我爱北京")).toEqual(["我爱北京"]);
   });

@@ -1,10 +1,14 @@
 import { z } from "zod";
 import { CandidateMemorySignalContentSchema } from "../signals/candidate-memory-signal.js";
-import { BoundedIdSchema, BoundedJsonObjectSchema, BoundedLabelSchema, BoundedReasonSchema, IsoDatetimeStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import { BoundedIdSchema, BoundedJsonObjectSchema, BoundedLabelSchema, BoundedReasonSchema, IsoDatetimeStringSchema, NonNegativeIntSchema, boundedJsonObjectSchema } from "../shared/schema-primitives.js";
 import { EdgeClassifyVerdictSchema } from "../garden/garden-tier.js";
 
 const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
 const GARDEN_COMPLETE_EXTRACTED_PROPOSAL_MAX = 32;
+// A valid turn digest can contain 50 excerpts plus up to 1000 delivered IDs;
+// JSON escaping can expand each UTF-16 code unit to six characters.
+export const GARDEN_TASK_PAYLOAD_MAX_CHARS = 7_000_000;
+const GardenTaskPayloadSchema = boundedJsonObjectSchema(GARDEN_TASK_PAYLOAD_MAX_CHARS);
 
 export const GardenMcpWorkerRoleSchema = z.enum([
   "janitor",
@@ -27,7 +31,7 @@ export const GardenPendingTaskSnapshotSchema = z
     role: BoundedLabelSchema,
     kind: BoundedLabelSchema,
     created_at: IsoDatetimeStringSchema,
-    payload: BoundedJsonObjectSchema
+    payload: GardenTaskPayloadSchema
   })
   .strict()
   .readonly();
@@ -52,7 +56,7 @@ export const GardenClaimTaskResponseSchema = z
     task_id: BoundedIdSchema,
     role: BoundedLabelSchema,
     kind: BoundedLabelSchema,
-    payload: BoundedJsonObjectSchema
+    payload: GardenTaskPayloadSchema
   })
   .strict()
   .readonly();
@@ -103,7 +107,8 @@ export const GardenCompleteTaskResponseSchema = z
   .object({
     task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
-    events_appended: NonNegativeIntSchema
+    events_appended: NonNegativeIntSchema,
+    failed_candidate_signals_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

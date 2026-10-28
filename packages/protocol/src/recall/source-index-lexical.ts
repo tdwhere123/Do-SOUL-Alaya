@@ -6,10 +6,10 @@ import type { SourceIndexBudget, SourceIndexGeneration, SourceIndexGuardedWriteR
   SourceIndexResources, SourceIndexTarget, SourceIndexWriteResult } from "./source-index.js";
 
 /** Absence of explicit selection retains the historical raw/default SourceIndex reader. */
-export const SourceIndexLexicalRepresentationSchema = z.enum(["raw-unicode61.v1", "segmented-unicode61.v1"]);
+export const SourceIndexLexicalRepresentationSchema = z.enum(["raw-unicode61.v1", "segmented-unicode61.v1", "segmented-unicode61.v2"]);
 export type SourceIndexLexicalRepresentation = z.infer<typeof SourceIndexLexicalRepresentationSchema>;
 /** Representation the background producer prepares for a workspace that has no explicit selection. */
-export const SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION: SourceIndexLexicalRepresentation = "segmented-unicode61.v1";
+export const SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION: SourceIndexLexicalRepresentation = "segmented-unicode61.v2";
 export const SourceIndexLexicalSelectionSchema = z.object({ workspace_id: BoundedIdSchema,
   selection_revision: NonNegativeIntSchema, representation: SourceIndexLexicalRepresentationSchema }).strict().readonly();
 export type SourceIndexLexicalSelection = z.infer<typeof SourceIndexLexicalSelectionSchema>;
@@ -55,6 +55,8 @@ export interface SourceIndexLexicalRepository {
   /** Active generation's reusable projections: copies projection and FTS rows for roots whose digest is unchanged. */
   reuseLexicalProjections(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReuseResult;
   selectLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection;
+  /** Select the default only if no operator selection exists; never replace a concurrent selection. */
+  ensureLexicalSelection(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection;
   lexicalState(workspaceId: string): SourceIndexLexicalState;
   beginLexical(selection: SourceIndexLexicalSelection): SourceIndexLexicalGeneration;
   lexicalGeneration(workspaceId: string, generationId: string): SourceIndexLexicalGeneration | null;
@@ -66,6 +68,9 @@ export interface SourceIndexLexicalRepository {
   /** Storage analyzes exact bytes itself under the declared representation; callers cannot supply projections. */
   writeLexicalDocument(workspaceId: string, generationId: string, source: SourceIndexTarget, body: string,
     budget: SourceIndexBudget): SourceIndexGuardedWriteResult & Readonly<{ analysis_units: number }>;
+  /** Advances a v2 document by bounded source reads and analyzer units; committed progress survives restart. */
+  advanceLexicalDocument(workspaceId: string, generationId: string, rootKey: string, maxBytes: number,
+    budget: SourceIndexBudget): SourceIndexGuardedWriteResult & Readonly<{ analysis_units: number; complete: boolean }>;
   activateLexical(workspaceId: string, generationId: string): SourceIndexWriteResult;
 }
 export function sourceIndexLexicalGenerationId(selection: SourceIndexLexicalSelection, sourceEpoch: number,

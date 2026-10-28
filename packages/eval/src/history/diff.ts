@@ -119,7 +119,7 @@ function pushCiAwareRatioDelta(
 }
 
 function recallDenominator(payload: KpiPayload): number {
-  return payload.answerable_evaluated_count ?? payload.evaluated_count;
+  return payload.answerable_evaluated_count ?? payload.reporting_recall_denominator ?? payload.evaluated_count;
 }
 
 function pushTokenEconomyDelta(

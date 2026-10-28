@@ -290,68 +290,13 @@ describe("daemon tool runtime bootstrap", () => {
     );
   });
 
-  it("delegates ContextLens assembly directly on the live conversation seam until manifestation candidates exist", async () => {
+  it("does not construct a conversation lens or manifestation resolver for historical message reads", async () => {
     await bootDaemonRuntime();
 
     const core = (await import("@do-soul/alaya-core")) as Record<string, any>;
-    const conversationServiceDeps = core.ConversationService.mock.calls[0]?.[0] as
-      | {
-          readonly contextLensAssembler?: {
-            assemble(params: {
-              readonly run: {
-                readonly run_id: string;
-                readonly workspace_id: string;
-                readonly run_mode: string;
-                readonly title: string;
-              };
-              readonly surfaceId: string | null;
-              readonly displayName?: string;
-              readonly runtimeMode: string;
-            }): Promise< unknown>;
-          };
-        }
-      | undefined;
-    const wrappedAssembler = conversationServiceDeps?.contextLensAssembler;
-
     expect(core.ManifestationResolver).not.toHaveBeenCalled();
-    expect(wrappedAssembler).toBeDefined();
-
-    const order: string[] = [];
-    (hoisted.contextLensAssemble as ReturnType<typeof vi.fn>).mockImplementationOnce(async (params: unknown) => {
-      order.push("assemble");
-      expect(params).toEqual({
-        run: {
-          run_id: "run-1",
-          workspace_id: "workspace-1",
-          run_mode: "chat",
-          title: "manifestation test"
-        },
-        surfaceId: "surface://chat/main",
-        displayName: "Manifestation pass",
-        runtimeMode: "full"
-      });
-      return {
-        contextLens: null,
-        workingProjection: {
-          entries: [],
-          total_token_estimate: 0
-        }
-      };
-    });
-
-    await wrappedAssembler?.assemble({
-      run: {
-        run_id: "run-1",
-        workspace_id: "workspace-1",
-        run_mode: "chat",
-        title: "manifestation test"
-      },
-      surfaceId: "surface://chat/main",
-      displayName: "Manifestation pass",
-      runtimeMode: "full"
-    });
-
-    expect(order).toEqual(["assemble"]);
+    expect(core.ContextLensAssembler).not.toHaveBeenCalled();
+    expect(core.ConversationService.mock.calls[0]?.[0]).not.toHaveProperty("contextLensAssembler");
   });
 
   it("registers missing conversation tool specs when ToolSpecService.findById reports NOT_FOUND", async () => {

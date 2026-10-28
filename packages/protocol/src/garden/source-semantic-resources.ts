@@ -3,7 +3,10 @@ import { canonicalJsonLength } from "../recall/selection/capture/canonical-json.
 export type SourceSemanticResourceBudget = Readonly<{ work_units: number; memory_bytes: number }>;
 
 export class SourceSemanticResourceExhausted extends Error {
-  constructor(readonly phase: string) { super(`source semantic ${phase} budget exhausted`); }
+  constructor(readonly phase: string, readonly constraints?: Readonly<{
+    work?: Readonly<{ required: number; available: number }>;
+    memory?: Readonly<{ required: number; available: number }>;
+  }>) { super(`source semantic ${phase} budget exhausted`); }
 }
 
 type RetainedKind = "scalar" | "array" | "object";
@@ -59,8 +62,13 @@ export class SourceSemanticResourceLedger {
   public spentBytes = 0;
   constructor(budget: SourceSemanticResourceBudget) { this.work = budget.work_units; this.bytes = budget.memory_bytes; }
   reserve(work: number, bytes: number, phase = "preparation"): void {
-    if (!Number.isSafeInteger(work) || !Number.isSafeInteger(bytes) || work < 0 || bytes < 0
-      || work > this.work || bytes > this.bytes) throw new SourceSemanticResourceExhausted(phase);
+    if (!Number.isSafeInteger(work) || !Number.isSafeInteger(bytes) || work < 0 || bytes < 0) {
+      throw new SourceSemanticResourceExhausted(phase);
+    }
+    if (work > this.work || bytes > this.bytes) throw new SourceSemanticResourceExhausted(phase, {
+      ...(work > this.work ? { work: { required: work, available: this.work } } : {}),
+      ...(bytes > this.bytes ? { memory: { required: bytes, available: this.bytes } } : {})
+    });
   }
   charge(work: number, bytes: number, phase = "preparation"): void {
     this.reserve(work, bytes, phase);

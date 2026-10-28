@@ -11,6 +11,7 @@ import { exposureSlots, firstExposureMismatch, type FirstExposurePage } from "..
 import { OrdinaryRecallObservationSchema, RepresentationAwareRecallProtocolVersionSchema,
   type OrdinaryRecallArchiveConfig, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
+import { hasDeliveredSourcePayload } from "../../measurement/source-delivery-visibility.js";
 
 type Observation = z.infer<typeof OrdinaryRecallObservationSchema>;
 type ResponseIndex = NonNullable<SoulMemorySearchResponse["index"]>;
@@ -88,7 +89,7 @@ function verifySequence(config: OrdinaryRecallCaptureConfig, calls: readonly Cap
       firstExposure ??= call.firstExposure;
       verifySourcePage(config, output, source, disclosure);
       const row = output.results[0], span = row?.target.kind === "source_evidence" ? row.target.span : undefined;
-      const usable = !terminal(index) && span !== undefined && row?.content_preview !== "[payload omitted]";
+      const usable = !terminal(index) && span !== undefined && row !== undefined && hasDeliveredSourcePayload(row);
       const accepted = usable && span.content_end > end;
       pages.push({ ordinal: call.request.ordinal, phase: call.request.phase, delivery_id: output.delivery_id,
         completeness: index.completeness, continuation: index.continuation, span: span ?? null,
@@ -175,8 +176,9 @@ function verifySourcePage(config: OrdinaryRecallCaptureConfig, output: SoulMemor
 export function verifyCapturedSourceResult(config: OrdinaryRecallArchiveConfig, target: SourceEvidenceTarget,
   row: SoulMemorySearchResponse["results"][number], source: string, disclosure: ReturnType<typeof projectSourceDisclosure>): void {
   admitEmittedSourcePreview(target.span, row, undefined, target, source, false);
-  if (target.span !== undefined && row.content_preview !== "[payload omitted]") {
-    const deliveredBytes = row.content_preview === "[empty source]" ? 0 : Buffer.byteLength(row.content_preview);
+  if (target.span !== undefined && hasDeliveredSourcePayload(row)) {
+    const deliveredBytes = row.content_preview === "[empty source]" && target.span.content_start === target.span.content_end
+      ? 0 : Buffer.byteLength(row.content_preview);
     if (target.span.content_end - target.span.content_start !== deliveredBytes ||
         target.span.content_complete && target.span.content_end !== Buffer.byteLength(source)) {
       conflict("public source extent overstates delivered bytes or completeness");

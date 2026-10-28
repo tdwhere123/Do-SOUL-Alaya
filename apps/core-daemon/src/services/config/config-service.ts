@@ -8,6 +8,7 @@ import {
   DEFAULT_STRATEGY_CONFIG,
   EnvironmentConfigSchema,
   GardenEventType,
+  createDefaultManifestationBudgetConfig,
   HealthEventKind,
   ManifestationBudgetConfigSchema,
   SoulConfigSchema,
@@ -34,10 +35,7 @@ import {
   type RuntimeGardenComputeConfigView
 } from "./config-service-runtime.js";
 export type { RuntimeGardenComputeConfigView } from "./config-service-runtime.js";
-import {
-  buildManifestationBudgetChangeSummary,
-  defaultManifestationBudgetConfig
-} from "./config-service-manifestation-support.js";
+import { buildManifestationBudgetChangeSummary } from "./config-service-manifestation-support.js";
 
 export interface AppConfigService {
   getSoulConfig(workspaceId: string): Promise<SoulConfig>;
@@ -244,7 +242,7 @@ async function getManifestationBudgetConfig(
   );
   return {
     config: ManifestationBudgetConfigSchema.parse(
-      stored ?? defaultManifestationBudgetConfig(workspaceId, clock)
+      stored ?? createDefaultManifestationBudgetConfig(workspaceId, clock())
     ),
     source: stored === null ? "default" : "stored"
   };
@@ -340,10 +338,13 @@ function createRuntimeConfigReadMethods(input: {
   "getRuntimeEmbeddingConfig" | "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig"
 > {
   return {
-    getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(input.configRepo),
+    getRuntimeEmbeddingConfig: async () => await getRuntimeEmbeddingConfig(
+      input.configRepo, input.configPathsProvider(), input.envProvider()
+    ),
     getGardenCredentialProvenance: async () =>
       await getGardenCredentialProvenance({
         paths: input.configPathsProvider(),
+        repo: input.configRepo,
         env: input.envProvider()
       }),
     getRuntimeGardenComputeConfig: async () =>

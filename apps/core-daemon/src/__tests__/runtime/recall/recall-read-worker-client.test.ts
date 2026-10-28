@@ -206,7 +206,7 @@ describe("RecallReadWorkerClient", () => {
     }
   }, 30_000);
 
-  it("resolves close when the worker never responds to the close request", async () => {
+  it("terminates a silent worker and settles close", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-close-timeout-test-"));
     const workerPath = join(directory, "silent-worker.mjs");
     writeFileSync(

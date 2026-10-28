@@ -10,7 +10,8 @@ import * as daemonOwner from "../../../harness/daemon.js";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
-import { assertLongMemEvalRoundSourceRevision, createLongMemEvalRoundProjection, bindPublishedLongMemEvalRoundCensus } from "../../../runs/snapshot/source-records/round-projection.js";
+import { assertLongMemEvalRoundSourceRevision, createLongMemEvalRoundProjection, bindPublishedLongMemEvalRoundCensus,
+  longMemEvalRoundSourceVersion } from "../../../runs/snapshot/source-records/round-projection.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { createTestLongMemEvalDatasetAuthority } from "./test-dataset-authority.js";
 
@@ -70,7 +71,8 @@ it("publishes fresh structured round revisions through actual Core admission and
     { ...report, sources: report.sources.map(row => ({ ...row, content_digest: "sha256:" + "0".repeat(64) })) },
     { ...report, sources: report.sources.map(row => ({ ...row, round_index: 99 })) },
     { ...report, sources: report.sources.map(row => ({ ...row, source_version: f.loaded.sha256 })) }
-  ]) expect(() => bindPublishedLongMemEvalRoundCensus(legacyCensus, changed)).toThrow();
+  ]) expect(() => bindPublishedLongMemEvalRoundCensus(legacyCensus, changed))
+    .toThrow(expect.objectContaining({ name: "AlayaError", code: "CONFLICT" }));
   const db = openReadOnlyDatabase(report.snapshot_path);
   try {
     const records = new SqliteFieldSourceRecordRepo(db, fieldContractSha256), spans = new SqliteFieldSourceSpanRepo(db, fieldContractSha256);
@@ -122,5 +124,10 @@ it("refuses source/byte overruns before daemon startup and never grants custom p
   expect(() => captured.authorize({ workspace_id: "authored-round-workspace", source_id: "longmemeval_s:authored-round-s0-r0",
     source_version: f.loaded.sha256, content_bytes: "User: café 雪\nAssistant: User: quoted Assistant: still quoted",
     host_occurrences: captured.occurrences } as Parameters<typeof captured.authorize>[0])).toThrow(/coordinates/);
-  expect(() => assertLongMemEvalRoundSourceRevision({ datasetSha256: f.loaded.sha256, sourceVersion: f.loaded.sha256, hostCaptured: true })).toThrow(/projection/);
+  expect(() => assertLongMemEvalRoundSourceRevision({ datasetSha256: f.loaded.sha256, sourceVersion: f.loaded.sha256, hostCaptured: true }))
+    .toThrow(expect.objectContaining({ name: "AlayaError", code: "CONFLICT",
+      message: "round source revision differs from its dataset-bound host projection" }));
+  expect(() => longMemEvalRoundSourceVersion("invalid-digest", false))
+    .toThrow(expect.objectContaining({ name: "AlayaError", code: "VALIDATION",
+      message: "round projection requires a dataset SHA-256" }));
 });

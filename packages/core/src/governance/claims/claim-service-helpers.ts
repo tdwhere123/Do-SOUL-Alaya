@@ -4,8 +4,10 @@ import {
   ClaimLifecycleStateSchema,
   MemoryGovernanceEventType,
   PrecedenceBasis,
+  SoulClaimContestedPayloadSchema,
   SoulClaimCreatedPayloadSchema,
   SoulClaimLifecycleChangedPayloadSchema,
+  TransitionCausedBy,
   TransitionCausedBySchema,
   canonicalGovernanceSubject,
   isValidClaimTransition,
@@ -68,6 +70,21 @@ export function createClaimCreatedEventInput(
       object_kind: claim.object_kind,
       workspace_id: claim.workspace_id,
       run_id: null
+    })
+  };
+}
+
+/** A contested fact accompanies the lifecycle transition in its transaction. */
+export function createClaimContestedEventInput(
+  claim: Readonly<ClaimForm>, contestedBy: string | null
+): EventPublisherInput {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_CLAIM_CONTESTED,
+    entity_type: "claim_form", entity_id: claim.object_id, workspace_id: claim.workspace_id,
+    run_id: null, caused_by: TransitionCausedBy.SYSTEM,
+    payload_json: SoulClaimContestedPayloadSchema.parse({
+      object_id: claim.object_id, object_kind: claim.object_kind, workspace_id: claim.workspace_id,
+      run_id: null, contested_by: contestedBy, triage_result: "deferred"
     })
   };
 }

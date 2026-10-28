@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { KpiPayload } from "@do-soul/alaya-eval";
+import type { KpiPayload, MeasuredQualityMetrics } from "@do-soul/alaya-eval";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
@@ -117,6 +117,10 @@ export function makeEligibleMeasurementAttribution(): NonNullable<
 export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload {
   const evaluated = payload.evaluated_count;
   const hitCount = Math.round(payload.kpi.r_at_5 * evaluated);
+  const quality = payload.kpi.quality_metrics ?? makeQualityMetrics();
+  if (quality.schema_version !== "bench-quality-metrics.v1") {
+    throw new Error("Eligible measurement fixture requires measured quality metrics.");
+  }
   return {
     ...payload,
     answerable_evaluated_count: evaluated,
@@ -134,7 +138,7 @@ export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload
         tier: "warm" as const
       })),
       quality_metrics: {
-        ...(payload.kpi.quality_metrics ?? makeQualityMetrics()),
+        ...quality,
         measurement_cohort_counts: {
           evaluated,
           non_abstention: evaluated,
@@ -175,7 +179,7 @@ export function makeQualityMetrics(
     readonly candidateAbsent?: number;
     readonly nonMonotonic?: number;
   } = {}
-): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+): MeasuredQualityMetrics {
   const denominator = input.denominator ?? 5;
   const budgetDropped = input.budgetDropped ?? 0;
   const candidateAbsent = input.candidateAbsent ?? 0;

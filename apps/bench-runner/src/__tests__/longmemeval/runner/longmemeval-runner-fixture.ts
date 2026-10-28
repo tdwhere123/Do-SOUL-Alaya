@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createLongMemEvalSelectionContractIdentity,
-  type KpiPayload
+  type KpiPayload,
+  type MeasuredQualityMetrics
 } from "@do-soul/alaya-eval";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
@@ -310,7 +311,7 @@ function releaseSizeKpi(
 function currentQualityMetrics(
   denominator: number,
   hitCount: number
-): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+): MeasuredQualityMetrics {
   return {
     schema_version: "bench-quality-metrics.v1",
     non_monotonic_rate: 0,

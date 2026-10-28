@@ -1,4 +1,5 @@
-import { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, sourceInterpretationDependsOnRecord } from "@do-soul/alaya-protocol";
+import { SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, SourceInterpretationInvalidatedPayloadSchema,
+  sourceInterpretationDependsOnRecord } from "@do-soul/alaya-protocol";
 import {
   ProjectionEraseSubjectKindSchema,
   hashLabeledIdentity,
@@ -26,6 +27,7 @@ import type {
   FieldEraseBarrierRow
 } from "./ports.js";
 import { scrubDerivedPrivacyClosure } from "./writes/erase/derived-closure.js";
+import type { EraseAuditRedactor } from "./writes/erase/governance-closure.js";
 
 type EraseSubject = Readonly<{
   subject_kind: ProjectionEraseSubjectKind;
@@ -60,7 +62,8 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
 
   public constructor(
     private readonly database: StorageDatabase,
-    private readonly sha256: FieldContractSha256
+    private readonly sha256: FieldContractSha256,
+    private readonly redactAudit?: EraseAuditRedactor
   ) {
     this.statements = new RefreshableStatementHolder(database, prepareEraseStatements);
   }
@@ -74,17 +77,29 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     return persistFieldTransaction(this.database, () => {
       const existing = this.findById(row.workspace_id, row.barrier_id) ??
         this.findBySubject(row.workspace_id, row.subject_kind, row.subject_id);
-      if (existing !== null) {
-        return requireCompatibleBarrier(existing, row);
+      const stored = existing === null ? row : requireCompatibleBarrier(existing, row);
+      const closure = this.discoverClosure(stored);
+      if (existing === null) {
+        this.insertBarrier(stored);
+        this.insertDescendantBarriers(stored, closure.subjects);
       }
-      const closure = this.discoverClosure(row);
-      const stored = this.insertBarrier(row);
-      this.insertDescendantBarriers(stored, closure.subjects);
-      this.scrubEvidence(stored, closure.evidenceIds);
-      this.scrubSubjects(stored, closure.subjects);
-      this.invalidateGenerations(stored.workspace_id, closure.subjects);
+      this.scrubEvidence(stored, closure.evidenceIds, closure.subjects);
+      if (existing === null) {
+        this.scrubSubjects(stored, closure.subjects);
+        this.invalidateGenerations(stored.workspace_id, closure.subjects);
+      }
       return stored;
     }, "erase barrier");
+  }
+
+  /** Reapply committed receipts before serving so older, attributable closures are repaired. */
+  public repairExistingSourceClosures(): void {
+    const rows = parseRows(this.database.connection.prepare(`
+      SELECT receipt_identity AS identity, barrier_id, workspace_id, generation_id,
+        subject_kind, subject_id, erased_at FROM projection_erase_barriers
+      WHERE subject_kind = 'source_record' ORDER BY workspace_id, barrier_id
+    `).all(), fieldEraseBarrierParser, "existing source erase barrier");
+    for (const row of rows) this.apply(row);
   }
 
   public isErased(workspaceId: string, subjectId: string): boolean {
@@ -162,7 +177,10 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       SELECT evidence_object_id AS evidence_id
       FROM source_record_evidence_refs
       WHERE workspace_id = @workspaceId AND record_id = @subjectId
-      ORDER BY evidence_object_id
+      UNION
+      SELECT evidence_object_id AS evidence_id FROM source_records
+      WHERE workspace_id = @workspaceId AND record_id = @subjectId AND evidence_object_id IS NOT NULL
+      ORDER BY evidence_id
     `).all({ workspaceId, subjectId: recordId }), evidenceIdParser, "erase evidence binding");
     const derived = this.database.connection.prepare(`SELECT object_id, gist FROM evidence_capsules
       WHERE workspace_id = ? AND CASE WHEN json_valid(gist) THEN
@@ -171,8 +189,31 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         AND json_extract(gist, '$.source_target.root_kind') = 'source_record'
         AND json_extract(gist, '$.source_target.root_id') = ? ELSE 0 END
     `).all(workspaceId, ...SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, workspaceId, recordId) as { object_id: string; gist: string }[];
-    return [...new Set([...aliases, ...derived.filter((row) =>
+    const invalidated = this.discoverInvalidatedEvidenceIds(workspaceId, recordId);
+    return [...new Set([...aliases, ...invalidated, ...derived.filter((row) =>
       sourceInterpretationDependsOnRecord(row.gist, workspaceId, recordId)).map((row) => row.object_id)])].sort();
+  }
+
+  private discoverInvalidatedEvidenceIds(workspaceId: string, recordId: string): readonly string[] {
+    const rows = this.database.connection.prepare(`
+      SELECT event.entity_id, event.payload_json FROM source_records source JOIN event_log event
+        ON event.workspace_id = source.workspace_id AND event.entity_type = 'evidence_capsule'
+        AND event.event_type = 'source.interpretation.invalidated'
+        AND CASE WHEN json_valid(event.payload_json) THEN
+          json_extract(event.payload_json, '$.source.source_id') = source.source_id
+          AND json_extract(event.payload_json, '$.source.source_version') = source.source_version
+          AND json_extract(event.payload_json, '$.source.content_digest') = source.content_digest ELSE 0 END
+      WHERE source.workspace_id = ? AND source.record_id = ? AND 1 = (
+        SELECT COUNT(*) FROM source_records other WHERE other.workspace_id = source.workspace_id
+          AND other.source_id = source.source_id AND other.source_version = source.source_version
+          AND other.content_digest = source.content_digest
+      )
+    `).all(workspaceId, recordId) as { entity_id: string; payload_json: string }[];
+    return rows.flatMap(row => {
+      const payload = SourceInterpretationInvalidatedPayloadSchema.safeParse(JSON.parse(row.payload_json));
+      return payload.success && payload.data.workspace_id === workspaceId && payload.data.evidence_object_id === row.entity_id
+        ? [row.entity_id] : [];
+    });
   }
 
   private discoverGenerations(workspaceId: string): readonly EraseSubject[] {
@@ -202,9 +243,10 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     }
   }
 
-  private scrubEvidence(root: FieldEraseBarrierRow, evidenceIds: readonly string[]): void {
+  private scrubEvidence(root: FieldEraseBarrierRow, evidenceIds: readonly string[], subjects: readonly EraseSubject[]): void {
     const connection = this.database.connection;
-    scrubDerivedPrivacyClosure(this.database, root, evidenceIds);
+    scrubDerivedPrivacyClosure(this.database, root, evidenceIds,
+      subjects.filter(subject => subject.subject_kind === "source_record").map(subject => subject.subject_id), this.redactAudit);
     const deletes = [
       "DELETE FROM evidence_search_projections WHERE workspace_id = ? AND evidence_object_id = ?",
       "DELETE FROM main.evidence_recall_embeddings WHERE workspace_id = ? AND owner_object_id = ?",
@@ -243,6 +285,18 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       UPDATE source_records SET source_body = NULL
       WHERE workspace_id = ? AND record_id = ?
     `);
+    const scrubTask = connection.prepare(`
+      UPDATE garden_tasks
+      SET payload_json = json_remove(payload_json, '$.turn_digest'),
+          completion_envelope_json = NULL,
+          status = CASE WHEN status IN ('pending', 'claimed') THEN 'failed' ELSE status END,
+          completed_at = CASE WHEN status IN ('pending', 'claimed') THEN ? ELSE completed_at END,
+          claimed_by = NULL, claimed_at = NULL,
+          last_error_text = 'Source erased'
+      WHERE workspace_id = ? AND kind = 'post_turn_extract'
+        AND json_valid(payload_json)
+        AND json_extract(payload_json, '$.admitted_source_root_id') = ?
+    `);
     for (const subject of subjects) {
       if (subject.subject_kind === "incidence") {
         deletes.incidence.run(root.workspace_id, subject.subject_id);
@@ -251,6 +305,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       } else if (subject.subject_kind === "factor") {
         clearFactor.run(root.workspace_id, subject.subject_id);
       } else if (subject.subject_kind === "source_record") {
+        scrubTask.run(root.erased_at, root.workspace_id, subject.subject_id);
         clearRecord.run(root.workspace_id, subject.subject_id);
         connection.prepare("DELETE FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?")
           .run(root.workspace_id, subject.subject_id);

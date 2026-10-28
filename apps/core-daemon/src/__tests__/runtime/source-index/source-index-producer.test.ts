@@ -41,7 +41,8 @@ import {
   type SourceIndexBackfillResult,
   type SourceIndexProfile
 } from "@do-soul/alaya-protocol";
-import { initDatabase, SqliteSourceIndexRepository, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { initDatabase, StorageDatabase, SqliteSourceIndexRepository, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { openSqliteConnection } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import {
   BUDGET,
@@ -553,6 +554,66 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(embedInputs).toHaveBeenCalledTimes(3);
     expect(environment.index.state(WORKSPACE).status).toBe("ready");
     expect(environment.index.state("workspace-2").status).toBe("ready");
+  });
+
+  it("retains the vector share while a long lexical root advances in bounded passes", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "自动部署流水线 ".repeat(400), "long");
+    const lexical = vi.spyOn(SourceIndexLifecycle.prototype, "prepareLexical");
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const receipt = await producerFor(environment, bind, { work: 2_000, nativeBytes: 4 * 1024 * 1024,
+      modelInputs: 2, inputBytes: 256 * 1024 }).runPass();
+    const pass = await lexical.mock.results[0]!.value;
+    expect(pass.status).toBe("partial");
+    expect(pass.analysis_units).toBeGreaterThan(0);
+    expect(pass.resources.work).toBeLessThanOrEqual(1_000);
+    expect(receipt.resources.work).toBeLessThanOrEqual(2_000);
+    expect(embedInputs).toHaveBeenCalled();
+  });
+
+  it("does not replace a concurrent operator lexical selection with a stale scheduled one", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "自动部署流水线", "lexical-race");
+    const original = environment.index.lexical.selectLexical(WORKSPACE, "segmented-unicode61.v1");
+    const concurrentDb = new StorageDatabase(environment.database.filename, openSqliteConnection(environment.database.filename));
+    expect(concurrentDb.connection).not.toBe(environment.database.connection);
+    const concurrent = new SqliteSourceIndexRepository(concurrentDb, fieldSha256);
+    const prototype = Object.getPrototypeOf(environment.index.lexical) as typeof environment.index.lexical;
+    const ensure = prototype.ensureLexicalSelection;
+    const lifecycle = vi.spyOn(SourceIndexLifecycle.prototype, "prepareLexical");
+    vi.spyOn(prototype, "ensureLexicalSelection").mockImplementationOnce(function (this: typeof prototype, workspaceId, representation) {
+      const selected = ensure.call(this, workspaceId, representation);
+      concurrent.lexical.selectLexical(workspaceId, "segmented-unicode61.v2");
+      return selected;
+    });
+    try {
+      const producer = producerFor(environment, async () => ({ status: "unsupported", reason: "runtime_missing" }));
+      await producer.runPass();
+      expect(await lifecycle.mock.results[0]!.value).toMatchObject({ status: "superseded", reason: "selection_changed",
+        selection: original });
+      expect(concurrent.lexical.lexicalState(WORKSPACE)?.selection.representation).toBe("segmented-unicode61.v2");
+      await producer.runPass();
+      const selected = concurrent.lexical.lexicalState(WORKSPACE);
+      expect(selected?.selection.representation).toBe("segmented-unicode61.v2");
+      expect(selected?.active_generation_id).not.toBeNull();
+    } finally { concurrentDb.close({ optimize: false }); }
+  });
+
+  it("alternates an indivisible root and capture slot so lexical and vector work both advance", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "自动部署流水线 ".repeat(400), "long");
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const producer = producerFor(environment, bind, { work: 2_000, nativeBytes: 4 * 1024 * 1024,
+      maxRootsPerPass: 1, maxCapturePages: 1, modelInputs: 2, inputBytes: 256 * 1024 });
+    for (let attempt = 0; attempt < 6 && embedInputs.mock.calls.length === 0; attempt++) {
+      const receipt = await producer.runPass();
+      expect(receipt.resources.work).toBeLessThanOrEqual(2_000);
+      expect(receipt.visited_roots).toBeLessThanOrEqual(1);
+      expect(receipt.capture_pages).toBeLessThanOrEqual(1);
+    }
+    expect((environment.database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get() as { n: number }).n)
+      .toBeGreaterThan(0);
+    expect(embedInputs).toHaveBeenCalled();
   });
 
   it("bounds completed-target visits and resumes beyond a completed prefix", async () => {

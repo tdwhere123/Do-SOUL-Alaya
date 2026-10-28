@@ -45,10 +45,10 @@ it("schedules the default lexical representation with embedding disabled and ser
     await producer.runPass();
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_vectors").get()).toEqual({ n: 0 });
     const state = index.lexical.lexicalState(WORKSPACE);
-    expect(state?.selection.representation).toBe("segmented-unicode61.v1");
+    expect(state?.selection.representation).toBe("segmented-unicode61.v2");
     expect(state?.active_generation_id).not.toBeNull();
     const after = index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget);
-    expect(after.tokenization).toMatchObject({ lexical_binding: { representation: "segmented-unicode61.v1" } });
+    expect(after.tokenization).toMatchObject({ lexical_binding: { representation: "segmented-unicode61.v2" } });
     expect(after.candidates.map(row => row.source.target.root_id)).toEqual([old.record.identity]);
   } finally { await producer.stop(); database.close({ optimize: false }); }
 });

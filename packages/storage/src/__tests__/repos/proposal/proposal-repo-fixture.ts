@@ -145,7 +145,9 @@ export function createRepo(): { readonly repo: SqliteProposalRepo; readonly data
   trackedDatabases.add(database);
 
   return {
-    repo: new SqliteProposalRepo(database),
+    // These storage workflow tests supply the projection collaborator explicitly;
+    // the daemon boundary exercises the real key writer and persisted keys.
+    repo: new SqliteProposalRepo(database, () => {}),
     database
   };
 }

@@ -37,7 +37,7 @@ export interface ConversationResult {
   readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
   readonly tokenMetrics: BenchTokenMetrics;
   readonly qaVerdicts: readonly QaQuestionVerdict[];
-  readonly qaCategoryRows: readonly { category: number; correct: boolean }[];
+  readonly qaCategoryRows: readonly { category: number; correct: boolean | null }[];
 }
 
 export async function runOneConversation(

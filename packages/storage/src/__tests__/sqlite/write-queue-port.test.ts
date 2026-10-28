@@ -62,31 +62,6 @@ describe("SqliteWriteQueuePort contract", () => {
     expect(queue.blocksEviction(filename)).toBe(false);
   });
 
-  it("supports structuredClone serialization on its payload structure", () => {
-    const job = {
-      jobId: "job-serial-1",
-      kind: "ontology_write" as const,
-      filename: "/tmp/alaya/test.db",
-      payload: {
-        statements: [
-          {
-            sql: "INSERT INTO test_table (id, val) VALUES (?, ?)",
-            params: [1, "test-value"]
-          }
-        ]
-      }
-    };
-
-    const cloned = structuredClone(job);
-    const firstStatement = cloned.payload.statements[0];
-    if (firstStatement === undefined) {
-      throw new Error("expected cloned write job to keep its first statement");
-    }
-    expect(cloned.jobId).toBe("job-serial-1");
-    expect(firstStatement.sql).toBe("INSERT INTO test_table (id, val) VALUES (?, ?)");
-    expect(firstStatement.params).toEqual([1, "test-value"]);
-  });
-
   it("rejects jobs that set both execute and payload", async () => {
     const queue = createInMemorySqliteWriteQueuePort();
     await expect(
@@ -98,20 +73,6 @@ describe("SqliteWriteQueuePort contract", () => {
         execute: async () => undefined
       })
     ).rejects.toThrow(/must not set both execute and payload/);
-  });
-
-  it("structuredClone fails when execute is attached to a worker payload job", () => {
-    const job = {
-      jobId: "job-serial-2",
-      kind: "ontology_write" as const,
-      filename: "/tmp/alaya/test.db",
-      payload: {
-        statements: [{ sql: "SELECT 1" }]
-      },
-      execute: async () => undefined
-    };
-
-    expect(() => structuredClone(job)).toThrow();
   });
 
   it("rejects a failing job to its awaiter while still running subsequent jobs", async () => {

@@ -88,10 +88,12 @@ function buildSoulResolveHandler(
     | "claimSourceReader"
     | "causalUsagePort"
     | "eventPublisher"
-  >
+  >,
+  reviewerIdentityBinding: ReviewerIdentityBinding | undefined
 ) {
   return createSoulResolveHandler({
     resolutionService: input.resolutionService,
+    ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding }),
     trustStateRecorder: {
       findDeliveryById: async (deliveryId) => {
         const delivery = await input.trustStateRecorder.findDeliveryById(deliveryId);
@@ -182,7 +184,7 @@ function buildDaemonMcpMemoryProposalWorkflow(
 export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandlerInput) {
   const reviewerIdentityBinding =
     input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(processEnvLookup());
-  const soulResolveHandler = buildSoulResolveHandler(input);
+  const soulResolveHandler = buildSoulResolveHandler(input, reviewerIdentityBinding);
   return createMcpMemoryToolHandler({
     zeroDayToolAccess: input.zeroDayToolAccess,
     recallService: input.recallService,

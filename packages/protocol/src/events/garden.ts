@@ -70,6 +70,8 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     objects_affected_total_count: NonNegativeIntSchema.optional(),
     objects_affected_sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     candidate_signals_count: NonNegativeIntSchema.optional(),
+    // Counts signals whose materialization failed; task success describes extraction/completion.
+    failed_candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })

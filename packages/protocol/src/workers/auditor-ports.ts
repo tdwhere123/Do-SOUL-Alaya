@@ -164,10 +164,8 @@ export interface AuditorBootstrappingPort {
   assessColdStart(workspaceId: string): Promise<ColdStartAssessment>;
   generateDraftCandidates(workspaceId: string): Promise<readonly DraftCandidate[]>;
   findHighFrequencyPatterns(workspaceId: string, minFrequency: number): Promise<readonly HighFrequencyPattern[]>;
-  // invariant: Synthesis candidate INSERT joins EventPublisher
-  // appendManyWithMutation's sync mutate so the proposal row and
-  // SOUL_PROPOSAL_CREATED EventLog commit together.
-  createSynthesisCandidate(workspaceId: string, patternKey: string): { readonly candidate_id: string };
+  // The producer owns the atomic proposal-and-creation-audit transaction.
+  createSynthesisCandidate(workspaceId: string, patternKey: string): Promise<{ readonly candidate_id: string; readonly created: boolean }>;
   hasPendingSynthesisCandidate(workspaceId: string, patternKey: string): Promise<boolean>;
 }
 

@@ -341,9 +341,7 @@ export function createGardenRuntimeLibrarian(input: Readonly<{
 
   return new Librarian({
     now: input.now,
-    mergePort: input.gardenDataPorts.mergePort,
     neighborPort: input.gardenDataPorts.neighborPort,
-    compressionPort: input.gardenDataPorts.compressionPort,
     synthesisPort: input.gardenDataPorts.synthesisPort,
     pathPlasticityPendingPort: input.gardenSchedulerRuntime.pathPlasticityPendingPort,
     scheduler: librarianSchedulerPort,

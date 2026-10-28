@@ -1,6 +1,7 @@
 import {
   ClaimLifecycleState,
   GovernanceResolutionPayloadSchema,
+  KeyedMutex,
   ObjectLifecycleState,
   RESOLUTION_KIND_TO_EVENT_TYPE,
   SoulResolutionKind,
@@ -10,6 +11,7 @@ import {
   type EffectDecisionReceipt,
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { findConcurrentConfirmation, recoverConfirmedElection, requireElectionLease, runConfirmedElection } from "./resolution-confirm-recovery.js";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 import { GovernedEffectAction } from "../effects/proof-effect-policy.js";
 import {
@@ -34,6 +36,7 @@ export type {
 
 export class ResolutionService {
   private readonly now: () => string;
+  private readonly confirmationMutex = new KeyedMutex();
 
   public constructor(private readonly deps: ResolutionServiceDependencies) {
     this.now = deps.now ?? (() => new Date().toISOString());
@@ -42,10 +45,12 @@ export class ResolutionService {
   public async resolve(input: ResolveInput): Promise<ResolveOutcome> {
     this.validateInput(input);
     await requireDeliveryAuthority(this.deps.deliveryAuthority, input);
+    if (input.resolution === SoulResolutionKind.CONFIRM) {
+      return await this.confirmationMutex.runExclusive(JSON.stringify([input.workspaceId, input.targetObjectId]),
+        async () => await this.applyConfirm(input, this.now()));
+    }
     const resolvedAt = this.now();
     switch (input.resolution) {
-      case SoulResolutionKind.CONFIRM:
-        return await this.applyConfirm(input, resolvedAt);
       case SoulResolutionKind.REJECT:
         return await this.applyReject(input, resolvedAt);
       case SoulResolutionKind.CORRECT:
@@ -69,7 +74,11 @@ export class ResolutionService {
   // no longer leave an ACTIVE claim with no resolution audit row.
   // see also: ClaimService.transitionLifecycle (lifecycle gate)
   private async applyConfirm(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
-    const claim = await this.requireDraftClaim(input);
+    requireElectionLease(this.deps);
+    const claim = await this.requireClaimForConfirm(input);
+    if (claim.claim_status !== ClaimLifecycleState.DRAFT) {
+      return await recoverConfirmedElection(input, claim, this.deps);
+    }
     const decision = await this.decideEffect(input, GovernedEffectAction.ACTIVATE, effectiveAsOf);
     if (decision.decision !== "allow") {
       return await this.persistNonAllowDecision(input, decision);
@@ -78,29 +87,44 @@ export class ResolutionService {
       activatedClaimId: claim.object_id
     });
     const auditEventsSink: EventLogEntry[] = [];
-    const activated = await this.deps.claimService.transitionLifecycle(
-      claim.object_id,
-      ClaimLifecycleState.ACTIVE,
-      input.reason ?? "soul_resolve_confirm",
-      TransitionCausedBy.USER,
-      {
-        additionalEventInputs: [auditEventInput, buildEffectAuditEventInput(decision)],
-        additionalEventsSink: auditEventsSink,
-        effectDecisionReceipt: decision
+    try {
+      await this.deps.claimService.transitionLifecycle(
+        claim.object_id,
+        ClaimLifecycleState.ACTIVE,
+        input.reason ?? "soul_resolve_confirm",
+        TransitionCausedBy.USER,
+        {
+          additionalEventInputs: [auditEventInput, buildEffectAuditEventInput(decision)],
+          additionalEventsSink: auditEventsSink,
+          effectDecisionReceipt: decision,
+          skipSlotElection: true
+        }
+      );
+    } catch (error) {
+      // Another process may have won the draft CAS after our effect decision.
+      // Trust only the actual committed confirmation, never the rolled-back sink.
+      const current = await this.deps.claimRepo.findById(claim.object_id);
+      if (current !== null && current.claim_status !== ClaimLifecycleState.DRAFT) {
+        const committed = await findConcurrentConfirmation(input, current, this.deps);
+        if (committed !== null) return committed;
+        throw new CoreError("CONFLICT", `Claim form ${current.object_id} is not in draft (current: ${current.claim_status})`);
       }
-    );
+      throw error;
+    }
     const entry = requireAuditEntry(auditEventsSink);
+    const electionStatus = await runConfirmedElection(input, entry, this.deps);
     return {
       resolution: input.resolution,
       status: "applied",
       auditEventType: entry.event_type,
       auditEventId: entry.event_id,
-      activatedClaimId: activated.object_id,
-      effectDecision: decision.decision
+      activatedClaimId: claim.object_id,
+      effectDecision: decision.decision,
+      electionStatus
     };
   }
 
-  private async requireDraftClaim(input: ResolveInput): Promise<Readonly<ClaimForm>> {
+  private async requireClaimForConfirm(input: ResolveInput): Promise<Readonly<ClaimForm>> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
     if (claim === null) {
       throw new CoreError(
@@ -112,12 +136,6 @@ export class ResolutionService {
       throw new CoreError(
         "VALIDATION",
         `Claim form ${input.targetObjectId} is not in workspace ${input.workspaceId}`
-      );
-    }
-    if (claim.claim_status !== ClaimLifecycleState.DRAFT) {
-      throw new CoreError(
-        "CONFLICT",
-        `Claim form ${input.targetObjectId} is not in draft (current: ${claim.claim_status})`
       );
     }
     return claim;
@@ -247,15 +265,20 @@ export class ResolutionService {
         `Memory entry ${input.targetObjectId} is not in workspace ${input.workspaceId}`
       );
     }
+    let entry: Readonly<EventLogEntry>;
     if (memory.lifecycle_state === ObjectLifecycleState.ACTIVE) {
+      const events: EventLogEntry[] = [];
       await this.deps.memoryService.transitionLifecycle(
         memory.object_id,
         ObjectLifecycleState.DORMANT,
         input.reason ?? "soul_resolve_stale",
-        TransitionCausedBy.USER
+        TransitionCausedBy.USER,
+        { additionalEventInputs: [this.buildAuditEventInput(input, resolvedAt, {})], additionalEventsSink: events }
       );
+      entry = requireAuditEntry(events);
+    } else {
+      entry = await this.emitAuditEvent(input, resolvedAt, {});
     }
-    const entry = await this.emitAuditEvent(input, resolvedAt, {});
     return {
       resolution: input.resolution,
       status: "applied",
@@ -399,7 +422,7 @@ export class ResolutionService {
       entity_id: input.targetObjectId,
       workspace_id: input.workspaceId,
       run_id: input.runId,
-      caused_by: input.agentTarget,
+      caused_by: input.reviewerIdentity ?? input.agentTarget,
       payload_json: payload
     };
   }

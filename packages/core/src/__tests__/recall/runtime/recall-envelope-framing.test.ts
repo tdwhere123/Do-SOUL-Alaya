@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { SourceSemanticResourceLedger, sourceIndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger, indexEntryCacheKey, sourceIndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { encodeRecallResult } from "../../../recall/runtime/recall-result-encoding.js";
 import { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex } from "../../../recall/runtime/recall-page-encoding.js";
 import { fitProjectedRecallPage, framingInterruption, pageResourceRefusal } from "../../../recall/runtime/recall-page-fit.js";
@@ -14,12 +14,31 @@ const request: ConditionalFieldRecallRequest = {
 };
 const index: InformationIndex = {
   schema_version: 1, query_id: `sha256:${"b".repeat(64)}`, snapshot_id: request.snapshot_id,
-  result_version: "ordinary-native-field.v6", entries: [], continuation: null,
+  result_version: ORDINARY_NATIVE_FIELD_RESULT_VERSION, entries: [], continuation: null,
   completeness: { schema_version: 1, logical_index: "open", observed_coverage: "unknown",
     transport: "complete", payload: "complete", representation: "complete" },
   representation: { schema_version: 1, policy: "construct_index_then_page_then_payload",
     page_budget: 1, identity_tie_break: "serialization" }
 };
+
+it.each(["[payload omitted]", "[payload omitted] trailing text"])(
+  "retains literal omission-marker text through fitting: %s", text => {
+    const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "literal",
+      source_version: "1", content_digest: `sha256:${"c".repeat(64)}`, evidence_object_id: null,
+      association_milligrades: 500, hypothesis_id: "source", output_binding: "source", program_state: "matched", time_state: "current" });
+    const page = { ...index, entries: [entry], as_of: request.as_of };
+    const previews = new Map([[indexEntryCacheKey(entry), text]]);
+    const encoded = encodeIndexResults(page, previews, 2_000);
+    const overhead = encoded[0]!.budget_state.token_estimate - Buffer.byteLength(text);
+    const fitted = fitProjectedRecallPage({ index: page, previews, metadata: {},
+      meter: new SourceSemanticResourceLedger({ work_units: 10_000, memory_bytes: 1_000_000 }),
+      request_digest: "literal-marker", request: { ...request,
+        delivery_budget: { max_total_tokens: overhead + Buffer.byteLength("[payload omitted]"), max_encoded_bytes: 100_000 } } });
+    expect(fitted.fits).toBe(true);
+    expect(fitted.previews.get(indexEntryCacheKey(entry))).toBe("[payload omitted]");
+    expect(fitted.index.completeness.payload).toBe("complete");
+    expect(encoded[0]?.payload_available).toBe(true);
+  });
 
 it.each(["interrupted", "unknown", "invalidated", "unavailable", "resource_rejected", "cancelled", "omitted"] as const)(
   "preserves explicit payload %s through service and public encoders", payload => {

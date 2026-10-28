@@ -29,7 +29,8 @@ const QaByTypeSchema = z.record(
   z.string(),
   z.object({
     correct: z.number().finite(),
-    total: z.number().finite()
+    total: z.number().finite(),
+    invalid_judge_count: z.number().int().nonnegative().optional()
   })
 );
 
@@ -181,13 +182,14 @@ function renderLongMemEvalQaMetrics(
   if (metrics === undefined) return "";
   return `  QA accuracy=${pct(metrics.qa_accuracy)} ` +
     `(${metrics.qa_correct}/${metrics.qa_total})` +
+    ` | invalid judge ${metrics.qa_invalid_judge_count ?? 0}` +
     ` | abstention ${metrics.qa_abstention_correct}/${metrics.qa_abstention_total}\n` +
     Object.entries(parseQaByType(metrics.qa_by_type))
-      .map(([type, row]) => `    ${type}: ${row.correct}/${row.total}\n`)
+      .map(([type, row]) => `    ${type}: ${row.correct}/${row.total}${row.invalid_judge_count ? ` (invalid judge ${row.invalid_judge_count}; accuracy unavailable)` : ""}\n`)
       .join("");
 }
 
-function parseQaByType(value: unknown): Readonly<Record<string, { readonly correct: number; readonly total: number }>> {
+function parseQaByType(value: unknown): z.infer<typeof QaByTypeSchema> {
   const parsed = QaByTypeSchema.safeParse(value);
   return parsed.success ? parsed.data : {};
 }

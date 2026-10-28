@@ -48,7 +48,7 @@ it.each<{ label: string; representation?: SourceRepresentation }>([
       content_digest: hashContentDigest(`User: ${source.text}`, fieldContractSha256),
       ...(representation === undefined ? {} : { source_representation: representation }) });
     expect(delivered.order.enumeration_policy).toBe("native_query");
-    expect(delivered.index.result_version).toBe("ordinary-native-field.v6");
+    expect(delivered.index.result_version).toBe("ordinary-native-field.v7");
     const target = delivered.index.entries.find(entry => entry.target.kind === "source_evidence" && entry.target.root_id === control.source_record.identity)?.target;
     expect(target).toMatchObject({ kind: "source_evidence", root_kind: "source_record", workspace_id: WS,
       root_id: control.source_record.identity, source_version: "1", content_digest: control.source_record.content_digest, evidence_object_id: null });

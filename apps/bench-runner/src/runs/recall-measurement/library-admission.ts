@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { isSourcePayloadOmitted } from "../measurement/source-delivery-visibility.js";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { admitSourceSemanticQuery, authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256,
   hydrateUtf8Chunk, preparedDeliveryId, proofForLibraryEntry, resolveCurrentSource, sourceSemanticQueryStatus,
@@ -142,7 +143,10 @@ export function admitEmittedSourcePreview(span: SourceEvidenceTarget["span"], re
     || qualifier.payload_support !== "available" || !result.budget_state.within_budget)) {
     throw new AlayaError("CONFLICT", "available proof support requires its complete emitted source preview");
   }
-  if (result.content_preview === "[payload omitted]" && !result.budget_state.within_budget) return;
+  if (isSourcePayloadOmitted(result)) {
+    if (requiresCompleteSupport) throw new AlayaError("CONFLICT", "available proof support requires source payload");
+    return;
+  }
   const emitted = result.content_preview === "[empty source]" && span.content_end === span.content_start
     ? "" : result.content_preview;
   const byteLength = Buffer.byteLength(emitted, "utf8");

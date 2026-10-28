@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { parseEnvBoolean } from "@do-soul/alaya-protocol";
 import type { BenchRecallTokenEconomy } from "../../harness/recall/recall-diagnostics-schema.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../../shared/monotonic.js";
 import type { BenchEmbeddingMode, BenchWorkspaceHandle } from "../../harness/daemon.js";
@@ -41,7 +42,7 @@ export interface LocomoConversationQuestionResults {
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly recallTokenEconomySamples: readonly BenchRecallTokenEconomy[];
   readonly qaVerdicts: readonly QaQuestionVerdict[];
-  readonly qaCategoryRows: readonly { category: number; correct: boolean }[];
+  readonly qaCategoryRows: readonly { category: number; correct: boolean | null }[];
 }
 
 interface MutableConversationQuestionResults {
@@ -56,7 +57,7 @@ interface MutableConversationQuestionResults {
   readonly questionDiagnostics: LongMemEvalQuestionDiagnostic[];
   readonly recallTokenEconomySamples: BenchRecallTokenEconomy[];
   readonly qaVerdicts: QaQuestionVerdict[];
-  readonly qaCategoryRows: { category: number; correct: boolean }[];
+  readonly qaCategoryRows: { category: number; correct: boolean | null }[];
 }
 
 interface QaResult {
@@ -282,7 +283,7 @@ async function selectDeliveredQaCandidates(
   qaConfig: NonNullable<LocomoRunOptions["qa"]>
 ): Promise<QaDeliveredCandidate[]> {
   let delivered = await applyQaLlmFilter(question, widePool, qaConfig);
-  if (process.env.ALAYA_BENCH_QA_SUPPORT_PACK !== undefined) {
+  if (parseEnvBoolean(process.env.ALAYA_BENCH_QA_SUPPORT_PACK, "ALAYA_BENCH_QA_SUPPORT_PACK")) {
     delivered = buildQaSupportPack({
       questionType,
       selected: delivered,
@@ -298,7 +299,7 @@ async function applyQaLlmFilter(
   widePool: readonly QaDeliveredCandidate[],
   qaConfig: NonNullable<LocomoRunOptions["qa"]>
 ): Promise<QaDeliveredCandidate[]> {
-  if (process.env.ALAYA_BENCH_QA_LLM_FILTER === undefined) return [...widePool];
+  if (!parseEnvBoolean(process.env.ALAYA_BENCH_QA_LLM_FILTER, "ALAYA_BENCH_QA_LLM_FILTER")) return [...widePool];
   const filterK = readPositiveEnv("ALAYA_BENCH_QA_LLM_FILTER_K", 30);
   const filterM = readPositiveEnv("ALAYA_BENCH_QA_LLM_FILTER_M", 8);
   const selected = await selectRelevantMemories(
@@ -344,6 +345,10 @@ function writeQaDumpIfRequested(
       goldAnswer: String(context.qa.answer),
       modelAnswer: qaVerdict.modelAnswer,
       correct: qaVerdict.correct,
+      evaluatorValidity: qaVerdict.evaluatorValidity,
+      judgeVerdict: qaVerdict.judgeVerdict,
+      contextClipped: qaVerdict.contextClipped,
+      contextExposure: qaVerdict.contextExposure,
       delivered: delivered.slice(0, 5).map((d) => ({
         objectId: d.objectId,
         content: d.content.replace(/\s+/gu, " ").slice(0, 200)

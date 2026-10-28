@@ -310,32 +310,6 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     });
   });
 
-  it("returns 404 when the target memory does not exist", async () => {
-    const app = new Hono();
-    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
-    const memoryService = { findByIdScoped: vi.fn(async () => null) };
-    const proposalService = {
-      findByWorkspaceId: vi.fn(async () => []),
-      findPending: vi.fn(async () => [])
-    };
-    const createProposalWithEvents = vi.fn();
-    registerProposalRoutes(app, proposalRouteServices({
-      workspaceService,
-      memoryService,
-      proposalService,
-      proposalRepo: { createProposalWithEventsIfAbsent: createProposalWithEvents },
-      runtimeNotifier: { notifyEntry: vi.fn() },
-      mcpMemoryToolHandler: { call: vi.fn() }
-    }));
-
-    const response = await app.request(
-      "/workspaces/ws-1/soul/memory/missing/proposals/promote-strictly-governed",
-      { method: "POST" }
-    );
-    expect(response.status).toBe(404);
-    expect(createProposalWithEvents).not.toHaveBeenCalled();
-  });
-
   it("still creates a new proposal when the existing pending proposal has different proposed_changes", async () => {
     const app = new Hono();
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };

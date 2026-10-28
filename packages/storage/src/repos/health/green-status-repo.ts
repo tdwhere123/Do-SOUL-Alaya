@@ -9,7 +9,7 @@ export interface GreenStatusRepo {
   findByObjectId(objectId: string): Promise<Readonly<GreenStatus> | null>;
   findByTargetObjectId(targetObjectId: string): Promise<Readonly<GreenStatus> | null>;
   findByTargetObjectIdSync(targetObjectId: string): Readonly<GreenStatus> | null;
-  findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
+  findEligible(workspaceId: string, asOf: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   upsert(greenStatus: Readonly<GreenStatus>): Readonly<GreenStatus>;
@@ -92,6 +92,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
       SELECT${GREEN_STATUS_SELECT_COLUMNS}
       FROM green_statuses
       WHERE workspace_id = ? AND green_state = 'eligible'
+        AND (valid_until IS NULL OR alaya_utc_compare(valid_until, ?) > 0)
       ORDER BY created_at ASC, object_id ASC
     `);
     this.findGraceStatement = db.connection.prepare(`
@@ -185,8 +186,8 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
     }
   }
 
-  public async findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
-    return this.findByState(this.findEligibleStatement, workspaceId, "eligible");
+  public async findEligible(workspaceId: string, asOf: string): Promise<readonly Readonly<GreenStatus>[]> {
+    return this.findByState(this.findEligibleStatement, workspaceId, "eligible", parseTimestamp(asOf));
   }
 
   public async findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
@@ -260,14 +261,15 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
   }
 
   private async findByState(
-    statement: { all(workspaceId: string): unknown },
+    statement: { all(...args: readonly string[]): unknown },
     workspaceId: string,
-    stateName: string
+    stateName: string,
+    asOf?: string
   ): Promise<readonly Readonly<GreenStatus>[]> {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = parseRows(statement.all(parsedWorkspaceId), { parse: (value: unknown) => value as GreenStatusRow }, "green status row");
+      const rows = parseRows(asOf === undefined ? statement.all(parsedWorkspaceId) : statement.all(parsedWorkspaceId, asOf), { parse: (value: unknown) => value as GreenStatusRow }, "green status row");
       return rows.map((row) => parseGreenStatusRow(row));
     } catch (error) {
       if (error instanceof StorageError) {

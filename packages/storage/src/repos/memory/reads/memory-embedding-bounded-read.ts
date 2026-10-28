@@ -278,18 +278,22 @@ export function readBoundedEmbeddings(db: StorageDatabase, workspaceId: string, 
   if (unique.some((id) => Buffer.byteLength(id, "utf8") > options.maxMetadataUtf8Bytes)) {
     throw new StorageError("VALIDATION_FAILED", "Bounded embedding identity exceeds byte capacity");
   }
-  const selected = unique.slice(0, Math.min(options.maxRows, options.maxObjectIds));
+  // Each admitted vector requires one embedding-row visit and one indexed
+  // quarantine probe within the same request allowance.
+  const selected = unique.slice(0, Math.min(Math.floor(options.maxRows / 2), options.maxObjectIds));
   if (!selected.length) return Object.freeze({ records: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0,
     vectorBytes: 0, filteredRows: 0, truncated: unique.length > 0 });
   const eligibleSql = `e.vector_valid = 1 AND e.provider_kind = $provider AND e.model_id = $model AND e.schema_version = $schema
     AND e.dimensions = $dimensions AND typeof(e.embedding_blob) = 'blob' AND length(e.embedding_blob) = $vectorBytes
-    AND (${META_BYTES}) <= $metadataBytes`;
+    AND (${META_BYTES}) <= $metadataBytes AND q.object_id IS NULL`;
   const projected = PAYLOAD_COLUMNS.map((column) => `CASE WHEN is_eligible THEN ${column} ELSE NULL END AS ${column}`).join(", ");
   // Lazy CASE masks payload at the single indexed owner read, without a second table hydration.
   const rows = withSqliteBusyRetry(() => parseRows(
     statementsFor(db).prepare(`WITH eligible AS (
     SELECT e.*, (${eligibleSql}) AS is_eligible
     FROM json_each($ids) ids CROSS JOIN memory_embeddings e ON e.object_id = ids.value
+    LEFT JOIN privacy_dependency_quarantine q ON q.workspace_id = e.workspace_id
+      AND q.object_kind = 'memory_entry' AND q.object_id = e.object_id
     WHERE e.workspace_id = $workspace
   ) SELECT CASE WHEN is_eligible THEN 1 ELSE 0 END AS eligible, ${projected},
     CASE WHEN is_eligible THEN (${META_BYTES_UNQUALIFIED}) ELSE 0 END AS metadata_bytes,
@@ -303,7 +307,7 @@ export function readBoundedEmbeddings(db: StorageDatabase, workspaceId: string, 
   const eligible = rows.filter((row) => row.eligible === 1);
   const records = parseRows(eligible, MemoryEmbeddingRowParser, "bounded memory embedding row").map(parseMemoryEmbeddingRow);
   const filteredRows = rows.length - records.length;
-  return Object.freeze({ records: Object.freeze(records), rowVisits: rows.length, filteredRows,
+  return Object.freeze({ records: Object.freeze(records), rowVisits: rows.length * 2, filteredRows,
     vectorBytes: rows.reduce((sum, row) => sum + row.vector_bytes, 0),
     metadataUtf8Bytes: rows.reduce((sum, row) => sum + row.metadata_bytes, 0),
     truncated: filteredRows > 0 || unique.length > selected.length });

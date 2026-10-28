@@ -23,8 +23,8 @@ export interface ProposalCreateInput {
   // no `ALTER COLUMN ... DROP DEFAULT`). Production callers pass it
   // explicitly: `'memory_entry'` for `soul.propose_memory_update`
   // (apps/core-daemon/src/mcp-memory/proposal-workflow.ts), `'path_relation'` for the
-  // strictly_governed promote endpoint
-  // (apps/core-daemon/src/routes/proposals.ts), and `'bankruptcy_dossier'`
+  // reviewed signal-path nominations (recall-materialization-path-relation.ts),
+  // and `'bankruptcy_dossier'`
   // for the budget bankruptcy path (budget-wiring.ts).
   readonly target_object_kind: string;
   readonly proposal_operation?: MemoryProposalOperation | null;
@@ -187,10 +187,20 @@ export interface AcceptedSynthesisCreateInput {
 // dossier_ref is robust: these proposals carry no target_object_kind beyond the
 // migration default, so the kind alone cannot distinguish them from a plain
 // memory_entry update.
-export const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
+const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
   "librarian.synthesis",
   "bootstrapping.synthesis_candidate"
 ]);
+
+export function isSynthesisCreateProposalDossier(dossierRef: string | null): boolean {
+  return dossierRef !== null && SYNTHESIS_CREATE_DOSSIER_REFS.has(dossierRef);
+}
+
+/** Historical control-plane proposals remain reviewable but cannot create accepted effects. */
+export function isRetiredProposalDossier(dossierRef: string | null): boolean {
+  return dossierRef === "librarian.merge" || dossierRef === "librarian.template" ||
+    dossierRef === "librarian.compression" || dossierRef === "inspector.strict_governance_promotion";
+}
 
 export interface CreateProposalWithEventsOptions {
   readonly reviewerAssignment?: ProposalReviewerAssignmentInput;

@@ -65,9 +65,18 @@ describe("EmbeddingSupplementForm", () => {
     renderForm();
 
     await waitFor(() =>
-      expect(screen.getByText(/Failed to load embedding config: network down/i)).toBeTruthy()
+      expect(screen.getByRole("alert").textContent).toMatch(/Failed to load embedding config: network down/i)
     );
     expect(screen.getByRole("status")).toBeTruthy();
+  });
+
+  it.each(["network", "malformed"])("keeps a persistent unknown-status alert after a %s status failure", async (failure) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ provider_url: null, model_id: null, secret_ref: null, embedding_enabled: false }));
+    if (failure === "network") fetchMock.mockRejectedValueOnce(new Error("status offline"));
+    else fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: {} }));
+    renderForm();
+    expect((await screen.findByRole("alert")).textContent).toContain("Embedding status unavailable");
+    expect(screen.queryByText("Embedding Degraded")).toBeNull();
   });
 
   it("surfaces a degraded embedding banner with humanised hint", async () => {

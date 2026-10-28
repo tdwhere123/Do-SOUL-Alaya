@@ -445,11 +445,11 @@ function readBudgetDroppedShare(
   metrics: QualityMetrics | undefined
 ): number | null {
   // An absent distribution is unmeasured, not a measured zero drop rate.
-  return metrics?.budget_drop_distribution.max_entries?.share ?? null;
+  return metrics?.budget_drop_distribution?.max_entries?.share ?? null;
 }
 
 function budgetDropGateLabel(metrics: QualityMetrics | undefined): string {
-  const maxEntries = metrics?.budget_drop_distribution.max_entries;
+  const maxEntries = metrics?.budget_drop_distribution?.max_entries;
   if (maxEntries === undefined) return "budget_dropped_share";
   return `budget_dropped_share (${maxEntries.count}/${maxEntries.denominator} max_entries)`;
 }

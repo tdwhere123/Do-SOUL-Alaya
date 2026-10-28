@@ -1,4 +1,4 @@
-import { isHostOccurrenceResourceLimit } from "@do-soul/alaya-protocol";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type {
   SourceAdmissionPort,
   SourceAdmissionRequest,
@@ -57,23 +57,21 @@ export function admitPostTurnSourceRoot(input: Readonly<{
     ]
   };
   const context = { workspaceId: input.workspaceId };
-  if (input.admission.findRetained === undefined) throw new Error("post-turn capture requires retained source recovery");
+  if (input.admission.findRetained === undefined) throw new AlayaError("UNAVAILABLE", "post-turn capture requires retained source recovery");
   const retained = input.admission.findRetained(request, context);
   // An automatic retry retains facts, including historical unknown; only an explicit revision can enrich them.
   if (retained !== null) {
     const record = input.admission.admit({ ...request, recorded_at: retained.recorded_at,
       attribution_context: retained.attribution_context ?? null,
-      ...(retained.host_structure === undefined ? {} : { host_structure: retained.host_structure }) }, context).record;
-    return { record, hostCapture: record.host_structure === undefined ? "unknown" : "captured" };
+      ...(retained.host_structure === undefined ? {} : input.host_occurrences === undefined
+        ? { host_structure: retained.host_structure }
+        : { host_occurrences: input.host_occurrences }) }, context).record;
+    return { record, hostCapture: record.host_structure !== undefined ? "captured" :
+      input.admission.hostCaptureResourceLimited?.(record, context) === true ? "uncaptured_resource_limit" : "unknown" };
   }
-  try {
-    const record = input.admission.admit({ ...request,
-      ...(input.host_occurrences === undefined ? {} : { host_occurrences: input.host_occurrences }) }, context).record;
-    return { record, hostCapture: record.host_structure === undefined ? "unknown" : "captured" };
-  } catch (error) {
-    // Core rolls back the refused capture. Only its canonical resource refusal is optional;
-    // invalid facts, authority failures and persistence errors must still escape.
-    if (input.host_occurrences === undefined || !isHostOccurrenceResourceLimit(error)) throw error;
-    return { record: input.admission.admit(request, context).record, hostCapture: "uncaptured_resource_limit" };
-  }
+  const admitted = input.admission.admit({ ...request,
+    ...(input.host_occurrences === undefined ? {} : { host_occurrences: input.host_occurrences }) },
+  { ...context, allowHostCaptureResourceLimit: true });
+  return { record: admitted.record, hostCapture: admitted.host_capture_limited === true
+    ? "uncaptured_resource_limit" : admitted.record.host_structure === undefined ? "unknown" : "captured" };
 }

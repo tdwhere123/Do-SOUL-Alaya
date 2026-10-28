@@ -29,6 +29,8 @@ describe("memory routes (HTTP surface narrowed)", () => {
       countByDimension: vi.fn(async () => 1),
       findByScopeClass: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
       countByScopeClass: vi.fn(async () => 0),
+      findByScopeClassAndDimension: vi.fn(async () => [{ object_id: "combined" }]),
+      countByScopeClassAndDimension: vi.fn(async () => 4),
       findByScopeClassWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => [
         { object_id: "m-project-conflict-1", dimension: "fact", scope_class: "project", contradiction_count: 2 },
         { object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }
@@ -57,6 +59,19 @@ describe("memory routes (HTTP surface narrowed)", () => {
 
     expect(response.status).toBe(404);
     expect(memoryService.findById).not.toHaveBeenCalled();
+  });
+
+  it("forwards combined scope and dimension to matching paged and count queries", async () => {
+    const { app, memoryService } = buildApp();
+    const response = await app.request("/workspaces/ws-1/memories?scope_class=project&dimension=fact&limit=1&offset=2");
+    expect(response.status).toBe(200);
+    expect(memoryService.findByScopeClassAndDimension).toHaveBeenCalledWith(
+      "ws-1", "project", "fact", { limit: 1, offset: 2 }
+    );
+    expect(memoryService.countByScopeClassAndDimension).toHaveBeenCalledWith("ws-1", "project", "fact");
+    expect(await response.json()).toMatchObject({ data: [{ object_id: "combined" }] });
+    expect(response.headers.get("x-total-count")).toBe("4");
+    expect(memoryService.findByDimension).not.toHaveBeenCalled();
   });
 
   it("retains GET /workspaces/:wsId/memories with workspace scoping", async () => {

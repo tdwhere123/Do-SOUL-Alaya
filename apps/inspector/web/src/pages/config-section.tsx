@@ -31,6 +31,7 @@ interface ConfigSectionState {
   readonly current: ConfigPayload | null;
   readonly dirty: boolean;
   readonly loading: boolean;
+  readonly error: string | null;
   readonly saving: boolean;
   readonly handleChange: (key: string, value: unknown) => void;
   readonly handleReset: () => void;
@@ -52,6 +53,7 @@ export function ConfigSection(props: ConfigSectionProps) {
   const title = props.meta.titleKey ? t(props.meta.titleKey) : props.meta.title;
   const state = useConfigSectionState(props, title, t);
   if (state.loading) return <LoadingConfigSection title={title} t={t} />;
+  if (state.error !== null) return <p role="alert" className="mb-6 text-sm text-state-error-text">{t("config:error.load", { section: title, message: state.error })}</p>;
   return <ConfigSectionView meta={props.meta} title={title} state={state} t={t} />;
 }
 
@@ -62,7 +64,7 @@ function useConfigSectionState(props: ConfigSectionProps, title: string, t: Tran
   const [saving, setSaving] = useState(false);
   const fetchConfig = useConfigFetcher(props.workspaceId, props.meta);
   const configIdentity = `${props.workspaceId}:${props.meta.key}`;
-  const { data: loadedConfig, loading } = useApiQuery(fetchConfig, [
+  const { data: loadedConfig, loading, error } = useApiQuery(fetchConfig, [
     props.workspaceId,
     props.meta.key
   ], {
@@ -77,6 +79,7 @@ function useConfigSectionState(props: ConfigSectionProps, title: string, t: Tran
     current,
     dirty,
     loading,
+    error,
     saving,
     handleChange: (key, value) => setCurrent((prev) => patchConfigField(prev, key, value)),
     handleReset: () => setCurrent(initial),

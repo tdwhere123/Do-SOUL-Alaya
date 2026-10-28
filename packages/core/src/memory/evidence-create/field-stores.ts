@@ -33,6 +33,8 @@ export interface FieldFormationStores {
   putRecord(record: SourceRecordIdentity, contentBytes: string): SourceRecordIdentity;
   getHostInventory(workspaceId: string, recordId: string): string | null;
   putHostInventory(workspaceId: string, recordId: string, canonicalInventory: string): void;
+  hasHostCaptureResourceLimit(workspaceId: string, recordId: string): boolean;
+  putHostCaptureResourceLimit(workspaceId: string, recordId: string): void;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
   putSpan(span: AddressableSourceSpan): AddressableSourceSpan;
   getDescriptor(workspaceId: string, factorId: string): FactorDescriptor | null;
@@ -75,6 +77,7 @@ export function createInMemoryFieldStores(): FieldFormationStores {
     records: new Map<string, SourceRecordIdentity>(),
     recordBodies: new Map<string, string>(),
     hostInventories: new Map<string, string>(),
+    hostCaptureLimits: new Map<string, true>(),
     spans: new Map<string, AddressableSourceSpan>(),
     factors: new Map<string, FactorDescriptor>(),
     incidences: new Map<string, FactorIncidence>(),
@@ -92,6 +95,7 @@ function bindFieldStores(maps: Readonly<{
   readonly jobs: Map<string, DerivationJobReceipt>;
   readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
   readonly hostInventories: Map<string, string>;
+  readonly hostCaptureLimits: Map<string, true>;
 }>): FieldFormationStores {
   let atomicDepth = 0;
   const runAtomic = <T>(work: () => T): T => {
@@ -120,6 +124,8 @@ function bindFieldStores(maps: Readonly<{
     putHostInventory: (workspaceId, recordId, canonicalInventory) => {
       putSame(maps.hostInventories, key(workspaceId, recordId), canonicalInventory, (a, b) => a === b, "host inventory");
     },
+    hasHostCaptureResourceLimit: (workspaceId, recordId) => maps.hostCaptureLimits.has(key(workspaceId, recordId)),
+    putHostCaptureResourceLimit: (workspaceId, recordId) => { maps.hostCaptureLimits.set(key(workspaceId, recordId), true); },
     getSpan: (workspaceId, spanId) => maps.spans.get(key(workspaceId, spanId)) ?? null,
     putSpan: (span) => putSame(
       maps.spans,

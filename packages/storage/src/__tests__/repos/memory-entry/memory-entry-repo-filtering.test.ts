@@ -21,6 +21,29 @@ afterEach(() => {
 });
 
 describe("SqliteMemoryEntryRepo filtering and updates", () => {
+  it("combines scope and dimension before pagination and counts the same eligible rows", async () => {
+    const { repo } = await createRepo();
+    const entries = [
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000001", scope_class: ScopeClass.GLOBAL_CORE }),
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000002", dimension: MemoryDimension.CONSTRAINT }),
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000003" }),
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000004" }),
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000005", storage_tier: StorageTier.COLD }),
+      createMemoryEntry({ object_id: "00000000-0000-4000-8000-000000000006", lifecycle_state: "dormant" })
+    ];
+    for (const entry of entries) await repo.create(entry);
+    const rows = await repo.findByScopeClassAndDimension(
+      "workspace-1", ScopeClass.PROJECT, MemoryDimension.PREFERENCE, { limit: 1, offset: 1 }
+    );
+    expect(rows.map((row) => row.object_id)).toEqual(["00000000-0000-4000-8000-000000000004"]);
+    await expect(repo.countByScopeClassAndDimension(
+      "workspace-1", ScopeClass.PROJECT, MemoryDimension.PREFERENCE
+    )).resolves.toBe(2);
+    await expect(repo.countByScopeClassAndDimension(
+      "workspace-other", ScopeClass.PROJECT, MemoryDimension.PREFERENCE
+    )).resolves.toBe(0);
+  });
+
   it("filters by dimension for hot-tier workspace records", async () => {
     const { repo } = await createRepo();
 

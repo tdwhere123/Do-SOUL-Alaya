@@ -60,8 +60,8 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
   const connection = input.connection as ConstructorParameters<typeof SqliteSemanticArtifactRepo>[0];
   initializeSemanticArtifactCandidateSchema(connection);
   const profile = input.profile ?? defaultSourceEnrichmentProfile();
-  const repo = new SqliteSemanticArtifactRepo(connection, input.gardenTaskRepo, profile);
   const codec = new OfficialApiSemanticArtifactCodec();
+  const repo = new SqliteSemanticArtifactRepo(connection, input.gardenTaskRepo, profile, undefined, codec);
   const transportTimeoutMs = input.transportTimeoutMs ?? 20_000;
   const maxReservedUtf8Bytes = input.maxReservedUtf8Bytes ?? 262_144;
   const maxCompletionUtf8Bytes = input.maxCompletionUtf8Bytes ?? 262_144;

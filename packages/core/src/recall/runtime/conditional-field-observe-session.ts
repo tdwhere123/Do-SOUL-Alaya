@@ -10,15 +10,17 @@ import {
   observeConditionalField,
   startObserverCursor,
   type ObserverReaders,
-  type RelationObserverRow
+  type RelationObserverRow,
+  type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
-import { sourceFamilySettled } from "../conditional-field/observers/source-root-observe.js";
-import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
+import { sourceFamilySettled, sourceSeedCursorAdvanced } from "../conditional-field/observers/source-root-observe.js";
+import { sourceIdentityObservationWork } from "../conditional-field/observers/observe-ports.js";
+import { hasMeasurementProducer, measurementCursorAdvanced, measurementWorkRequirement, requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
 import { checkRetainedRelationFacts, ObservedRelations, relationPageJoinRows, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
-import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
+import { ObservationPairs, ObservationSubjects } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
   proposeFieldWork,
@@ -30,10 +32,12 @@ import { programRelationKinds } from "../conditional-field/engine/path-compositi
 import { seedActivationsForObservation } from "../conditional-field/engine/path-composition-seed.js";
 import { overlayIsRoutingOnly, pairKey } from "../conditional-field/engine/path-routing.js";
 import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
-import { ObservedSourceFacts, recordObservedAt, recordSourceRootFacts, retainSourceFact } from "./observed-source-facts.js";
-import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
+import { ObservedSourceFacts, recordObservedAt, recordSourceRootFacts } from "./observed-source-facts.js";
 import {
   closeAdjacency,
+  interruptAtomicWork,
+  interruptObservedField,
+  reportAtomicWorkBlock,
   closeRegion,
   cursorOf,
   incompleteObserver,
@@ -43,8 +47,8 @@ import {
   type SourceDomainCoverage
 } from "./observe-field-residuals.js";
 import type { ObserveFieldInput } from "./conditional-field-observe.js";
+import { consumeBoundSourceFact } from "./observe-bound-source-fact.js";
 import type { RequestCostPhase } from "./request-cost-ledger.js";
-import { CoreError } from "../../shared/errors.js";
 
 const MAX_OBSERVE_ROUNDS = 4_096;
 const SEED_PAGE_SIZE = 32;
@@ -63,6 +67,7 @@ export type ObservationSession = {
   state: FieldEngineState; interpretation: QueryInterpretation; input: ObserveFieldInput; lease: SnapshotReadLease;
   cursors: Map<string, ObserverCursor>; pairProgress: ObservationPairs; subjects: ObservationSubjects;
   relationRows: ObservedRelations; observedAt: Record<string, string>; sourceFacts: ObservedSourceFacts;
+  sourceCache: ReadonlyMap<string, SourceObserverPage>;
   memoryBox: { remaining: number; cachedBytes: number }; predicates: readonly string[]; seedUnitCost: number;
   storedKindsOpen: boolean; pairIndex: number; unresolvedGuard: boolean; missingMeasurement: boolean;
   sourceFamilyUnavailable: boolean;
@@ -70,6 +75,7 @@ export type ObservationSession = {
 
 export function runObservationRounds(session: ObservationSession): FieldEngineState {
   const { input, interpretation, memoryBox } = session;
+  const observationWork = sourceIdentityObservationWork(input.readers);
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
     memoryBox.remaining = Math.max(0, session.state.remaining_memory_bytes - memoryBox.cachedBytes);
     const seedFirst = session.state.pending_path_effects === undefined && session.state.pair_demands.size === 0
@@ -82,16 +88,39 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
     }
     if (terminalObserver(session.state.last_observer_status)) break;
     const proposal = proposeFieldWork(session.state);
-    if (proposal.actions.length === 0) break;
+    if (proposal.actions.length === 0) {
+      const pin = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+      if (session.state.residuals.some(region => region.kind === "seed"
+        && (region.status === "open" || region.status === "interrupted"))) {
+        return interruptAtomicWork(session, "seed", pin + session.seedUnitCost + 1);
+      }
+      if (session.pairProgress.hasOpenDemand()) return interruptAtomicWork(session, "adjacency", pin + adjacencyRowWork(input.readers) + 1);
+      const binding = session.state.residuals.find(region => region.kind === "binding"
+        && (region.status === "open" || region.status === "interrupted"));
+      if (binding !== undefined && requiresStoredMeasurement(interpretation)) {
+        return interruptAtomicWork(session, "measurement", pin + measurementWorkRequirement(interpretation, input.readers,
+          session.cursors.get(binding.region_id)?.committed_through ?? session.state.resume_cursors[binding.region_id] ?? null));
+      }
+      break;
+    }
     for (const proposed of proposal.actions) {
       const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-      const capacity = Math.floor((session.state.remaining_exploration - pinWork - 1) / session.seedUnitCost);
-      const batchedRows = proposed.action === "seed" ? 4 * Math.max(0, Math.min(SEED_PAGE_SIZE, capacity))
-        : proposed.action === "adjacency" ? 4 * Math.max(0, Math.min(ADJACENCY_PAGE_SIZE, capacity))
+      const rowWork = proposed.action === "adjacency" ? adjacencyRowWork(input.readers) : session.seedUnitCost;
+      const capacity = Math.floor((session.state.remaining_exploration - pinWork - 1) / rowWork);
+      const batchedRows = proposed.action === "seed" ? observationWork * Math.max(0, Math.min(SEED_PAGE_SIZE, capacity))
+        : proposed.action === "adjacency" ? observationWork * Math.max(0, Math.min(ADJACENCY_PAGE_SIZE, capacity))
         : Math.max(4096, ...interpretation.interpretation_proposal?.stored_cosine_admission?.obligations.map((row) => row.dimensions + 10) ?? []);
       const action = { ...proposed, work_limit: Math.min(batchedRows + pinWork, session.state.remaining_exploration) };
-      const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
-      if (action.work_limit < minimum) return interruptObservedField(session.state);
+      const minimum = pinWork + (action.action === "seed" || action.action === "adjacency" ? observationWork
+        : action.action === "measurement" ? measurementWorkRequirement(interpretation, input.readers,
+          session.cursors.get(action.region_id)?.committed_through ?? session.state.resume_cursors[action.region_id] ?? null) : 1);
+      if (action.work_limit < minimum) {
+        return action.action === "measurement" ? interruptAtomicWork(session, "measurement", minimum)
+          : action.action === "seed" || action.action === "adjacency"
+          ? interruptAtomicWork(session, action.action,
+            pinWork + 1 + (action.action === "seed" ? session.seedUnitCost : adjacencyRowWork(input.readers)))
+          : interruptObservedField(session.state);
+      }
       if (action.action === "seed") {
         if (phaseTime(session, "seed", () => consumeSeedPage(session, action))) return session.state;
       } else if (action.action === "measurement") {
@@ -131,7 +160,7 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence" &&
     row.applicability.verdict !== "false").map((row) => row.object_id);
   addSubjects(subjects, seedIds);
-  recordObservedAt(input, seedIds, observedAt, sourceFacts);
+  recordObservedAt({ ...input, sourceCache: session.sourceCache }, seedIds, observedAt, sourceFacts);
   recordSourceRootFacts(observed.source_roots ?? [], observed.page.observations, sourceFacts);
   if (input.readers.sourceRoots !== undefined
     && observed.page.outcome.status === "unavailable"
@@ -150,6 +179,9 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   subjects.snapshot = session.state.resume_subjects;
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, pairProgress);
   if (session.state.memory_exhausted) return true;
+  const priorCursor = before.resume_cursors[action.region_id] ?? null;
+  if (input.readers.sourceRoots === undefined ? observed.page.cursor.committed_through !== priorCursor
+    : sourceSeedCursorAdvanced(priorCursor, observed.page.cursor.committed_through)) input.on_retained_progress?.();
   if (pairProgress.hasOpenDemand()) {
     session.state = reopenAdjacency(session.state);
   }
@@ -185,7 +217,8 @@ function refreshPathFrontier(session: ObservationSession): boolean {
     compiledAutomaton: state.compiled_automaton } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
       snapshot_id: interpretation.snapshot_id, cursor, observations: [], outcome: { schema_version: 1, status: "open" },
-      open_regions: [{ schema_version: 1, region_id: regionId, kind: "adjacency", status: "open" }] } } });
+      open_regions: [{ schema_version: 1, region_id: regionId, kind: "adjacency", status: "open" }] } } }, input.on_retained_progress,
+    (required, available) => reportAtomicWorkBlock(input, "path_prepare", required, available));
   input.cost?.add("adjacency", { joins: Math.max(0, beforeWork - session.state.remaining_exploration) });
   session.subjects.snapshot = session.state.resume_subjects;
   session.pairProgress.demanded = session.state.pair_demands;
@@ -214,8 +247,10 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
     bindingContexts, session.state.compiled_automaton); }
   catch (error) { return rejectBindingResource(session, error); }
   session.missingMeasurement ||= measurementIsMissing(effects);
+  const priorCursor = session.state.resume_cursors[action.region_id] ?? null;
   session.state = applyObserverPage(retainBindingContexts(session.state, bindingContexts), { page: observed.page, effects, work: observed.work,
     resume_cursors: resumeCursors(cursors, pairProgress) });
+  if (measurementCursorAdvanced(priorCursor, session.state.resume_cursors[action.region_id] ?? null)) input.on_retained_progress?.();
   if (session.missingMeasurement) session.state = { ...session.state,
     observation_gaps: { guards: session.unresolvedGuard, measurements: true } };
   if (observed.page.outcome.status === "interrupted") return true;
@@ -226,11 +261,12 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
 
 function consumeAdjacencyPage(session: ObservationSession, action: ObservationAction): boolean {
   const { input, interpretation, cursors, pairProgress, subjects, sourceFacts } = session;
-  const minimum = 4 + (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK);
+  const minimum = adjacencyRowWork(input.readers) + (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK);
   const scanned = pairProgress.nextDemand(session.pairIndex,
     Math.max(0, session.state.remaining_exploration - minimum));
   const separator = scanned.key?.indexOf("\0") ?? -1;
   const pair = separator < 0 ? undefined : { subject: scanned.key!.slice(0, separator), predicate: scanned.key!.slice(separator + 1) };
+  if (scanned.next !== session.pairIndex) input.on_retained_progress?.();
   session.pairIndex = scanned.next;
   if (scanned.work > 0) session.input.cost?.add("adjacency", { joins: scanned.work });
   session.state = { ...session.state, pair_scan_offset: scanned.next,
@@ -238,7 +274,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   action = { ...action, work_limit: Math.min(action.work_limit, session.state.remaining_exploration) };
   if (pair === undefined) {
     if (pairProgress.hasOpenDemand()) {
-      session.state = interruptObservedField(session.state); return true;
+      session.state = interruptAtomicWork(session, "adjacency", minimum + 1); return true;
     }
     session.state = closeAdjacency(session.state, interpretation, action, cursors, session.storedKindsOpen);
     return false;
@@ -285,6 +321,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     pairProgress.completed = completedPair.completed;
     pairProgress.revision = completedPair.revision;
     pairProgress.bytes = completedPair.bytes;
+    if (observed.page.cursor.committed_through !== (before.pair_progress.get(key) ?? null)
+      || completedPair.completed !== before.pair_completed_count) input.on_retained_progress?.();
     return observed.page.outcome.status === "interrupted";
   }
   const priorRelations = session.relationRows;
@@ -317,12 +355,14 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     resume_cursors: resumeCursors(cursors, completedPair) };
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, completedPair);
   if (session.state.memory_exhausted) return true;
+  if (observed.page.cursor.committed_through !== (before.pair_progress.get(key) ?? null)) input.on_retained_progress?.();
   pairProgress.snapshot = completedPair.snapshot;
   pairProgress.completed = completedPair.completed;
   pairProgress.revision = completedPair.revision;
   pairProgress.bytes = completedPair.bytes;
   const beforePathWork = session.state.remaining_exploration;
-  session.state = resumePathEffects(session.state);
+  session.state = resumePathEffects(session.state, input.on_retained_progress,
+    (required, available) => reportAtomicWorkBlock(input, "path_prepare", required, available));
   input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - session.state.remaining_exploration) });
   pairProgress.demanded = session.state.pair_demands;
   session.unresolvedGuard = session.state.observation_gaps?.guards === true;
@@ -342,7 +382,8 @@ function observeTrackedAdjacency(session: ObservationSession, action: Observatio
   const { input, interpretation, lease, cursors, pairProgress, observedAt, sourceFacts } = session;
   // Each row can write two facts and replace four endpoint counts (read + write).
   const pin = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-  const pageSize = Math.min(ADJACENCY_PAGE_SIZE, Math.floor((session.state.remaining_exploration - pin) / 14));
+  const pageSize = Math.min(ADJACENCY_PAGE_SIZE,
+    Math.floor((session.state.remaining_exploration - pin) / adjacencyRowWork(input.readers)));
   if (pageSize < 1) return undefined;
   const captureBytes = Math.min(4096, Math.floor(session.memoryBox.remaining / 4));
   const bounded = { ...action, work_limit: Math.min(action.work_limit, session.state.remaining_exploration - pageSize * 10) };
@@ -350,12 +391,16 @@ function observeTrackedAdjacency(session: ObservationSession, action: Observatio
   let tracked;
   try {
     tracked = sourceFacts.captureChanges(() => observeAdjacency(input, interpretation, lease, bounded, cursors,
-      pair, captured, pairProgress, observedAt, sourceFacts, pageSize), { work: pageSize * 2, bytes: captureBytes });
+      pair, captured, pairProgress, observedAt, sourceFacts, session.sourceCache, pageSize), { work: pageSize * 2, bytes: captureBytes });
   } finally { session.memoryBox.remaining += captureBytes; }
   session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - tracked.work,
     admitted_allocation_bytes: session.state.admitted_allocation_bytes + tracked.bytes };
   input.cost?.add("adjacency", { joins: tracked.work, charged_retained_bytes: tracked.bytes });
   return tracked;
+}
+
+function adjacencyRowWork(readers: ObserverReaders): number {
+  return 10 + sourceIdentityObservationWork(readers);
 }
 
 function priorRelationFactsUnchanged(session: ObservationSession, rows: ObservedRelations,
@@ -378,11 +423,6 @@ function priorRelationFactsUnchanged(session: ObservationSession, rows: Observed
   return checked.unaffected;
 }
 
-export function interruptObservedField(state: FieldEngineState): FieldEngineState {
-  return { ...state, last_observer_status: "interrupted",
-    closure: { ...state.closure, observation: "interrupted", requested_index: "open" },
-    residuals: state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
-}
 
 export function reopenAdjacency(state: FieldEngineState): FieldEngineState {
   return { ...state, last_observer_status: "open", residuals: state.residuals.map((region) =>
@@ -428,6 +468,7 @@ function observeSeed(
     workspace_id: input.workspace_id,
     readers: input.readers,
     seed_query: input.query_text,
+    on_failure_work: work => input.cost?.add("seed", work),
     page_limit: observerPageLimit(SEED_PAGE_SIZE, action.work_limit, input),
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
@@ -451,6 +492,8 @@ function observeMeasurement(
     workspace_id: input.workspace_id,
     readers: input.readers,
     seed_query: input.query_text,
+    on_failure_work: work => input.cost?.add("measurement", work),
+    on_atomic_work_block: required => reportAtomicWorkBlock(input, "measurement", required, action.work_limit),
     as_of: input.as_of,
     authorized_scopes: input.authorized_scopes,
     ...pinExpectation(input)
@@ -468,6 +511,7 @@ function observeAdjacency(
   pairProgress: ObservationPairs,
   observedAt: Record<string, string>,
   sourceFacts: ObservedSourceFacts,
+  sourceCache: ReadonlyMap<string, SourceObserverPage>,
   pageSize: number
 ) {
   const key = pairKey(pair.subject, pair.predicate);
@@ -483,6 +527,7 @@ function observeAdjacency(
     workspace_id: input.workspace_id,
     readers: capturingReaders(input.readers, captured),
     relation_subject: pair.subject,
+    on_failure_work: work => input.cost?.add("adjacency", work),
     page_limit: observerPageLimit(pageSize, action.work_limit, input),
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
@@ -495,7 +540,7 @@ function observeAdjacency(
   captured.length = 0;
   captured.push(...eligible);
   recordObservedAt(
-    input,
+    { ...input, sourceCache },
     captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]),
     observedAt,
     sourceFacts
@@ -624,7 +669,7 @@ function observerPageLimit(
   input: ObserveFieldInput
 ): number {
   const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-  return Math.min(pageSize, Math.floor((workLimit - pinWork) / 4));
+  return Math.min(pageSize, Math.floor((workLimit - pinWork) / sourceIdentityObservationWork(input.readers)));
 }
 
 function pinExpectation(input: ObserveFieldInput): Readonly<{
@@ -677,84 +722,4 @@ export function sourceDomainSettleCoverage(session: ObservationSession): SourceD
       || (seed?.status === "unavailable" && !settled),
     settled
   };
-}
-
-function consumeBoundSourceFact(session: ObservationSession): boolean {
-  const { input } = session;
-  const demands = new SourceFactDemands(session.state.source_fact_demands,
-    session.state.source_fact_pending_count, session.state.source_fact_scan_offset,
-    session.state.source_fact_demand_bytes);
-  if (!demands.hasPending()) return false;
-  const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-  // One indexed lookup and the maximum one-row source read must both fit before
-  // invoking the reader. A completed fact can use less, but never more.
-  const readReserve = 3 + pinWork;
-  if (session.state.remaining_exploration < 1 + readReserve) {
-    session.state = interruptObservedField(session.state);
-    return true;
-  }
-  const pending = demands.nextPending(session.state.remaining_exploration - readReserve);
-  input.cost?.add("observe", { joins: pending.work });
-  session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - pending.work,
-    source_fact_scan_offset: pending.index ?? pending.next };
-  if (pending.key === undefined) {
-    session.state = interruptObservedField(session.state);
-    return true;
-  }
-  const objectId = pending.key;
-  if (session.sourceFacts.has(objectId)) {
-    demands.complete(objectId);
-    input.cost?.add("observe", { joins: 1 });
-    session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - 1,
-      source_fact_demands: demands.snapshot, source_fact_pending_count: demands.pending,
-      source_fact_scan_offset: pending.next };
-    return true;
-  }
-  const pin = input.readers.snapshotPin?.(input.workspace_id);
-  if (pinWork > 0) {
-    input.cost?.add("observe", { native_visits: pinWork });
-    session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - pinWork };
-  }
-  if (pin !== undefined && input.expected_source_revision !== undefined
-    && pin.source_revision !== input.expected_source_revision) {
-    session.state = applyObserverPage(session.state, { page: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      query_id: session.interpretation.query_id, snapshot_id: session.interpretation.snapshot_id,
-      cursor: cursorOf(session.cursors, session.interpretation, "adjacency"), observations: [],
-      outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: "invalidated" },
-      open_regions: session.state.residuals.map((region) => ({ ...region, status: "invalidated" as const }))
-    }, effects: [] });
-    return true;
-  }
-  const page = input.readers.source?.({ workspaceId: input.workspace_id, objectId });
-  if (page !== undefined && (!Number.isSafeInteger(page.rowsRead) || page.rowsRead < 0 || page.rowsRead > 1)) {
-    throw new CoreError("OBLIGATION_VIOLATION", "source reader must report at most one row for one object");
-  }
-  const work = 2 + (page?.rowsRead ?? 0);
-  input.cost?.add("observe", { native_visits: (page === undefined ? 0 : 1) + (page?.rowsRead ?? 0),
-    native_rows: page?.rowsRead ?? 0, native_bytes: page?.bytesRead ?? 0 });
-  const charged = { ...session.state, remaining_exploration: session.state.remaining_exploration - work };
-  if (page?.resourceLimited === true) {
-    session.state = interruptObservedField(charged);
-    return true;
-  }
-  const sourceFacts = new ObservedSourceFacts(session.sourceFacts.snapshot, session.sourceFacts.bytes);
-  if (page?.unavailable !== true && page?.row !== null && page?.row !== undefined
-    && sourceFactEligible(page.row, input.authorized_scopes, input.as_of)) {
-    retainSourceFact(sourceFacts, objectId, page.row, input.workspace_id, session.observedAt);
-  }
-  const retainedBytes = sourceFacts.bytes - session.sourceFacts.bytes;
-  if (retainedBytes > charged.remaining_memory_bytes) {
-    session.state = { ...interruptObservedField(charged), memory_exhausted: true };
-    return true;
-  }
-  demands.complete(objectId);
-  session.sourceFacts = sourceFacts;
-  session.state = { ...charged,
-    remaining_memory_bytes: charged.remaining_memory_bytes - retainedBytes,
-    admitted_allocation_bytes: (charged.admitted_allocation_bytes ?? 0) + retainedBytes,
-    source_facts: sourceFacts.snapshot, source_fact_bytes: sourceFacts.bytes,
-    source_fact_demands: demands.snapshot, source_fact_pending_count: demands.pending,
-    source_fact_scan_offset: pending.next };
-  return true;
 }

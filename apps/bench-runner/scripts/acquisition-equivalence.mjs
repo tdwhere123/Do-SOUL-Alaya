@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "../../..");
@@ -64,11 +65,11 @@ async function queryVector(snapshot, db) {
     cacheDir: join(process.env.HOME, ".cache/do-soul-alaya/models") });
   const repository = new storage.SqliteSourceIndexRepository(db.database, fieldSha);
   const state = repository.state(db.workspace);
-  if (!("selection" in state)) throw new Error(`${name}: no selection`);
+  if (!("selection" in state)) throw new AlayaError("UNAVAILABLE", `${name}: no selection`);
   const prepared = await core.SourceIndexAcquisition.prepareQuery({ navigation: questions.get(snapshot.id),
     selection: state.selection, bind: options => client.bindSourceEmbedding(options),
     signal: new AbortController().signal, remainingMs: () => 120_000 });
-  if (prepared.vector.status !== "available") throw new Error(`${name}: ${prepared.receipt.reason}`);
+  if (prepared.vector.status !== "available") throw new AlayaError("UNAVAILABLE", `${name}: ${prepared.receipt.reason}`);
   const { status, profile, profile_id, input_digest, embedding } = prepared.vector;
   vectors[name] = { status, profile, profile_id, input_digest, embedding: [...embedding] };
   return { ...vectors[name], embedding };

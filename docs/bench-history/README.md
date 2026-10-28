@@ -60,6 +60,15 @@ The retained `longmemeval_s.stratified-100.v1.json` identifies a specific ordere
 Record `--concurrency`, `--embedding`, `--embedding-provider`, `--policy-shape`,
 `--simulate-report`, ingestion mode, model/request profile, QA/judge settings,
 and any time, token, or recall-weight overrides used by the selected workflow.
+
+QA archives retain every attempted judgment. Empty or malformed evaluator text
+has `correct: null` and an explicit validity reason; any invalid judgment leaves
+the cohort's `qa_accuracy` unavailable without retrying or reducing `qa_total`.
+Diagnostic shard merges may reconstruct cohort counts while leaving quality
+facets `bench-quality-metrics.unavailable.v1`; unavailable facets cannot satisfy
+numeric gates. Historical merge reporting denominators do not establish current
+answerable-cohort or release authority.
+
 Use the same explicit `--data-dir` for dataset warmup and scoring. Use
 `--history-root` to choose a different output root. Dataset warmup downloads
 dataset bytes; it does not authorize extraction or other model calls.

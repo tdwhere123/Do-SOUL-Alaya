@@ -27,6 +27,7 @@ import {
 import { digestOriginalQuery } from "../../../../recall/conditional-field/query/compile-query.js";
 import { measurementEffectsFor } from "../../../../recall/runtime/measurement-effects.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { meterReaders } from "../../../../recall/runtime/observer-reader-budget.js";
 import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
 
 const DIGEST = digestOriginalQuery("seed");
@@ -35,6 +36,88 @@ const MEMORY_REVISION = "memory-rev-1";
 const OBJECT_ID = "emb-1";
 
 describe("stored pair measurement producer", () => {
+  it.each([false, true])("reports the profile/source work floor before enumeration with snapshot pin %s", pinned => {
+    let enumerated = 0;
+    const source = memorySourceReader();
+    const readers: ObserverReaders = {
+      ...(pinned ? { snapshotPin: () => ({ source_revision: "rev" }) } : {}),
+      embeddingIds: () => { enumerated += 1; return { objectIds: [OBJECT_ID], rowVisits: 1,
+        metadataUtf8Bytes: 8, truncated: false, committedThrough: OBJECT_ID }; },
+      measureStoredPair: () => readyPair(vector(OBJECT_ID, new Float32Array([1, 0, 0, 0])), vector("query", new Float32Array([1, 0, 0, 0]))),
+      source: input => ({ ...source(input), rowsRead: 4 })
+    };
+    const measurement_profile = { ...cosineObligation("profile-floor", "stored-fixture"), dimensions: 4 };
+    const blocks: number[] = [];
+    const short = observeConditionalField({ ...measureInput(readers, { work_limit: pinned ? 10 : 7 }),
+      measurement_profile, on_atomic_work_block: required => blocks.push(required) });
+    expect(enumerated).toBe(0);
+    expect(blocks).toEqual([pinned ? 17 : 14]);
+    expect(short.page.outcome.status).toBe("interrupted");
+    expect(short.page.cursor.committed_through).toBeNull();
+    const completed = observeConditionalField({ ...measureInput(readers, { work_limit: 32 }), measurement_profile });
+    expect(enumerated).toBe(1);
+    expect(completed.measurements?.[0]?.raw.status).toBe("measured");
+  });
+
+  it("keeps a resource-limited source revision uncommitted for a later measurement", () => {
+    const memory = { remaining: 24, cachedBytes: 0 };
+    let sourceCalls = 0;
+    const source = memorySourceReader();
+    const readers = meterReaders({
+      embeddingIds: () => ({ objectIds: [OBJECT_ID], rowVisits: 1, metadataUtf8Bytes: 8,
+        truncated: false, committedThrough: OBJECT_ID }),
+      measureStoredPair: () => readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0]))),
+      source: input => { sourceCalls += 1; return source(input); }
+    }, memory, new Map());
+    const result = observeConditionalField(measureInput(readers));
+    expect(result.page.observations).toEqual([]);
+    expect(result.measurements).toEqual([]);
+    expect(result.page.outcome.status).toBe("interrupted");
+    expect(result.page.cursor).toMatchObject({ position: null, committed_through: null });
+    expect(result.work.native_visits).toBe(3);
+    expect(sourceCalls).toBe(0);
+    memory.remaining = 64;
+    const retried = observeConditionalField({ ...measureInput(readers), cursor: result.page.cursor });
+    expect(sourceCalls).toBe(1);
+    expect(retried.measurements?.[0]?.raw.status).toBe("measured");
+    expect(retried.page.cursor.committed_through).toBe(OBJECT_ID);
+  });
+
+  it("refuses a source revision receipt above its reserved native work", () => {
+    expect(() => observeConditionalField(measureInput({
+      embeddingIds: () => ({ objectIds: [OBJECT_ID], rowVisits: 1, metadataUtf8Bytes: 8,
+        truncated: false, committedThrough: OBJECT_ID }),
+      measureStoredPair: () => readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0]))),
+      source: () => ({ row: null, rowsRead: 5, bytesRead: 0, unavailable: true })
+    }))).toThrowError(expect.objectContaining({ code: "OBLIGATION_VIOLATION" }));
+  });
+
+  it("reserves pair and source work for a batch-only stored measurement reader", () => {
+    let pairs = 0, sources = 0;
+    const source = memorySourceReader();
+    const readers: ObserverReaders = {
+      embeddingIds: () => ({ objectIds: [OBJECT_ID], rowVisits: 1, metadataUtf8Bytes: 8,
+        truncated: false, committedThrough: OBJECT_ID }),
+      measureStoredPairs: () => { pairs += 1; return {
+        byObjectId: { [OBJECT_ID]: readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0]))) },
+        rowVisits: 2, bytesRead: 16
+      }; },
+      source: input => { sources += 1; return { ...source(input), rowsRead: 4 }; }
+    };
+    const short = observeConditionalField(measureInput(readers, { work_limit: 6 }));
+    expect(pairs).toBe(0);
+    expect(sources).toBe(0);
+    expect(short.page.outcome.status).toBe("interrupted");
+    expect(short.page.cursor.committed_through).toBeNull();
+    expect(short.work.work_units).toBeLessThanOrEqual(6);
+    const retried = observeConditionalField({ ...measureInput(readers), cursor: short.page.cursor });
+    expect(pairs).toBe(1);
+    expect(sources).toBe(1);
+    expect(retried.measurements?.[0]?.raw.status).toBe("measured");
+    expect(retried.page.cursor.committed_through).toBe(OBJECT_ID);
+    expect(retried.work.work_units).toBeLessThanOrEqual(16);
+  });
+
   it("emits a finite measured raw from stored artifacts and keeps cosine off the cap", () => {
     const object = vector(OBJECT_ID, new Float32Array([1, 0]));
     const query = vector("query", new Float32Array([1, 0]));

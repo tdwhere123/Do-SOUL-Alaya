@@ -6,12 +6,10 @@ import {
   HealthIssueSeverity,
   HealthIssueSuggestedAction,
   MemoryDimension,
-  MemoryGovernanceEventType,
   SoulAuditorPointerHealedPayloadSchema,
   SoulGreenGraceRequestedPayloadSchema,
   SoulGreenRenewedPayloadSchema,
   SoulGreenRevokedPayloadSchema,
-  SoulProposalCreatedPayloadSchema,
   type AuditorPointerHealPort,
   type GardenTaskDescriptor,
   type GardenTaskResult
@@ -261,8 +259,11 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
       AUDITOR_CONSTANTS.CRYSTALLIZATION_THRESHOLD
     );
     let created: readonly string[] = [];
+    let considered = 0;
 
-    for (const pattern of patterns.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE)) {
+    for (const pattern of patterns) {
+      if (created.length >= AUDITOR_CONSTANTS.BATCH_SIZE) break;
+      considered += 1;
       const hasPending = await this.dependencies.bootstrappingPort.hasPendingSynthesisCandidate(
         task.workspace_id,
         pattern.pattern_key
@@ -271,35 +272,14 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         continue;
       }
 
-      const candidate = await this.appendEventLogAndMutate(
-        {
-          event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-          entity_type: "proposal",
-          entity_id: pattern.pattern_key,
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          caused_by: this.role,
-          payload_json: SoulProposalCreatedPayloadSchema.parse({
-            object_id: pattern.pattern_key,
-            object_kind: "proposal",
-            workspace_id: task.workspace_id,
-            run_id: task.run_id
-          })
-        },
-        () =>
-          this.dependencies.bootstrappingPort.createSynthesisCandidate(
-            task.workspace_id,
-            pattern.pattern_key
-          )
+      const candidate = await this.dependencies.bootstrappingPort.createSynthesisCandidate(
+        task.workspace_id, pattern.pattern_key
       );
-      created = [...created, candidate.candidate_id];
+      if (candidate.created) created = [...created, candidate.candidate_id];
     }
 
     const result = this.createSuccessResult(task, completedAt, created, [
-      `crystallization_scan: ${created.length} synthesis candidates created from ${Math.min(
-        patterns.length,
-        AUDITOR_CONSTANTS.BATCH_SIZE
-      )} high-frequency patterns`
+      `crystallization_scan: ${created.length} synthesis candidates created from ${considered} high-frequency patterns`
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;

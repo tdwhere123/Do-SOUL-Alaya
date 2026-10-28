@@ -1,3 +1,8 @@
+import {
+  HealthIssueCauseKindSchema,
+  type HealthIssueGroup
+} from "@do-soul/alaya-protocol";
+
 export interface HealthIssueGroupRow {
   readonly group_id: string;
   readonly workspace_id: string;
@@ -29,13 +34,9 @@ export function healthInboxReturnedCount(data: HealthInboxEnvelope["data"]): num
   return data.returned_count ?? data.groups.length;
 }
 
-export type HealthIssueCauseKind =
-  | "orphan_radar"
-  | "green_revoked"
-  | "evidence_failure"
-  | "path_relation_failure";
-export type HealthIssueSeverity = "info" | "warn" | "blocking";
-export type HealthIssueResolutionState = "pending" | "resolved" | "suppressed";
+export type HealthIssueCauseKind = HealthIssueGroup["cause_kind"];
+export type HealthIssueSeverity = HealthIssueGroup["severity"];
+export type HealthIssueResolutionState = HealthIssueGroup["resolution_state"];
 
 export type StateFilter = "all" | HealthIssueResolutionState;
 export type CauseFilter = "all" | HealthIssueCauseKind;
@@ -49,10 +50,7 @@ export const STATE_OPTIONS: ReadonlyArray<StateFilter> = [
 
 export const CAUSE_OPTIONS: ReadonlyArray<CauseFilter> = [
   "all",
-  "orphan_radar",
-  "green_revoked",
-  "evidence_failure",
-  "path_relation_failure"
+  ...HealthIssueCauseKindSchema.options
 ];
 
 export const SEVERITY_BADGE: Readonly<Record<HealthIssueSeverity, string>> = {

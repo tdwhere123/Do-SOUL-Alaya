@@ -1,4 +1,4 @@
-import type { KpiPayload, PerScenarioRow, QualityMetrics } from "@do-soul/alaya-eval";
+import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 import { overallRecallAt5 } from "../../measurement/answerable-recall.js";
 import { mergeSeedExtractionPath } from "../../../cli/merge-shared.js";
 import { buildMergedRates } from "../../../cli/merge/merged/merged-rates.js";
@@ -52,7 +52,6 @@ export function computeScorableHits(
     hitsAt10
   };
 }
-
 export function mergeShardPayloads(
   first: KpiPayload,
   shards: readonly LoadedShardArchive[],
@@ -263,10 +262,11 @@ function sumKpi(payloads: readonly KpiPayload[], select: (payload: KpiPayload) =
   return payloads.reduce((sum, payload) => sum + select(payload), 0);
 }
 
-function cohortQualityMetrics(hits: ScorableHits): QualityMetrics {
+function cohortQualityMetrics(hits: ScorableHits): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
   const nonAbstention = hits.answerableCount + hits.unscorableAnswerableCount;
   return {
-    ...unrecomputableQualityZeros(hits.evaluatedCount),
+    schema_version: "bench-quality-metrics.unavailable.v1",
+    unavailable_reason: "not_recomputed_from_shard_archives",
     unscorable_reason_distribution: {
       ...(hits.abstentionCount === 0
         ? {}
@@ -293,42 +293,5 @@ function cohortQualityMetrics(hits: ScorableHits): QualityMetrics {
       calibration_status: "uncalibrated",
       gate_eligible: false
     }
-  };
-}
-
-function unrecomputableQualityZeros(evaluatedCount: number): Omit<
-  QualityMetrics,
-  "measurement_cohort_counts" | "unscorable_reason_distribution" | "abstention"
-> {
-  return {
-    schema_version: "bench-quality-metrics.v1",
-    non_monotonic_rate: 0,
-    non_monotonic_count: 0,
-    non_monotonic_denominator: evaluatedCount,
-    budget_drop_distribution: {},
-    high_lexical_demoted_rate: 0,
-    high_lexical_demoted_count: 0,
-    high_lexical_demoted_denominator: 0,
-    candidate_absent_count: 0,
-    candidate_absent_denominator: evaluatedCount,
-    no_gold_count: 0,
-    no_gold_denominator: evaluatedCount,
-    evidence_stream_gold_delivery_rate: 0,
-    evidence_stream_gold_delivery_count: 0,
-    evidence_stream_gold_delivery_denominator: 0,
-    path_stream_top10_rate: 0,
-    path_stream_top10_count: 0,
-    path_stream_top10_denominator: 0,
-    per_plane_recall_coverage: {},
-    miss_taxonomy_distribution: {
-      candidate_absent: 0,
-      materialization_drop: 0,
-      fine_assessment_drop: 0,
-      budget_drop: 0,
-      delivery_order_drop: 0,
-      answer_set_coverage_drop: 0,
-      evaluation_or_gold_issue: 0
-    },
-    miss_distribution: {}
   };
 }

@@ -172,7 +172,9 @@ async function sealTree(root: string): Promise<void> {
 // chmod through a symlink: a partial copy may contain one beside sealed dirs.
 export async function removePrivateTree(root: string): Promise<void> {
   async function unseal(directory: string): Promise<void> {
-    if (!(await lstat(directory)).isDirectory()) throw new Error("Local ONNX private tree root is not a directory");
+    if (!(await lstat(directory)).isDirectory()) {
+      throw new CoreError("CONFLICT", "Local ONNX private tree root is not a directory", { subCode: "CONCURRENT_MODIFICATION" });
+    }
     await chmod(directory, 0o700);
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.isDirectory()) await unseal(join(directory, entry.name));

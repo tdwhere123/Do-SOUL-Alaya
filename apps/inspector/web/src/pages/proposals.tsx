@@ -63,7 +63,7 @@ function useProposalsController() {
     [workspaceId]
   );
   const query = useApiQuery(fetchProposals, [workspaceId], { enabled: workspaceId !== null });
-  const proposals = query.data ?? [];
+  const proposals = query.data?.proposals ?? [];
 
   useEffect(() => focusHighlightedProposal(highlightedProposalId, highlightedRowRef), [
     highlightedProposalId,
@@ -80,7 +80,8 @@ function useProposalsController() {
   );
   return {
     busyProposalIds, highlightedProposalId, highlightedRowRef, loadError: workspaceId === null ? t("proposals:loadFailedNoWorkspace") : query.error,
-    loading: query.loading, proposals, reasonByProposal, reviewer, setReasonByProposal, setReviewer, submitReview, t
+    loading: query.loading, proposals, totalCount: query.data?.total_count ?? null,
+    reasonByProposal, reviewer, setReasonByProposal, setReviewer, submitReview, t
   };
 }
 
@@ -114,6 +115,11 @@ function ProposalLoadState({ controller }: { readonly controller: ReturnType<typ
       {controller.loadError !== null ? (
         <p className="font-mono text-sm text-red-700">
           {controller.t("proposals:errorPrefix", { message: controller.loadError })}
+        </p>
+      ) : null}
+      {controller.totalCount !== null ? (
+        <p className="mb-4 font-mono text-sm text-ink-700" role="status">
+          {controller.t("proposals:queueCount", { shown: controller.proposals.length, total: controller.totalCount })}
         </p>
       ) : null}
       {!controller.loading && controller.proposals.length === 0 ? (
@@ -233,9 +239,9 @@ function ProposalActions(props: {
   );
 }
 
-async function fetchPendingProposals(workspaceId: string | null, signal: AbortSignal): Promise<readonly PendingSummary[]> {
+async function fetchPendingProposals(workspaceId: string | null, signal: AbortSignal): Promise<PendingEnvelope["data"]> {
   const envelope = await apiFetch<PendingEnvelope>(`/proposals/${workspaceId}/pending`, { signal });
-  return envelope.data.proposals;
+  return envelope.data;
 }
 
 async function submitProposalReview(props: {
@@ -243,7 +249,7 @@ async function submitProposalReview(props: {
   readonly verdict: "accept" | "reject";
   readonly reviewer: string;
   readonly reasonByProposal: Record<string, string>;
-  readonly refetch: (mode?: "replace" | "background") => Promise<readonly PendingSummary[] | null>;
+  readonly refetch: (mode?: "replace" | "background") => Promise<PendingEnvelope["data"] | null>;
   readonly setBusyProposalIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
   readonly showToast: (input: Parameters<ReturnType<typeof useToasts>["showToast"]>[0]) => void;
   readonly t: ReturnType<typeof useI18n>["t"];

@@ -1,4 +1,5 @@
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
+import { isRetiredProposalDossier, isSynthesisCreateProposalDossier } from "@do-soul/alaya-storage";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler-types.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
 
@@ -19,6 +20,8 @@ export function buildProposalReviewKarmaMutation(
   verdict: "accept" | "reject",
   context: McpMemoryToolCallContext
 ): ProposalReviewKarmaMutation | undefined {
+  if (isRetiredProposalDossier(scopedProposal.proposal.dossier_ref) ||
+      isSynthesisCreateProposalDossier(scopedProposal.proposal.dossier_ref)) return undefined;
   const dynamicsService = deps.dynamicsService;
   if (dynamicsService === undefined) {
     return undefined;

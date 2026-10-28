@@ -149,7 +149,7 @@ export class SemanticEnrichmentWorker {
     const work = this.deps.codec.plan(source, task.profile);
     if (work.length === 0 || work.length > this.deps.maxUnits) return this.fail(task, 'work_unit_bound');
     for (const unit of work) {
-      if (this.deps.repo.artifact(workspaceId, unit.key)) continue;
+      if (this.deps.repo.artifact(workspaceId, unit.key, { task, work: unit })) continue;
       const lost = await this.rejectIfSourceLost(task, source);
       if (lost !== null) return lost;
       const outcome = await this.enrich(task, source, unit);
@@ -160,7 +160,7 @@ export class SemanticEnrichmentWorker {
     let boundWork: readonly SemanticArtifactWork[];
     try {
       boundWork = work.map((unit) => {
-        const artifact = this.deps.repo.artifact(workspaceId, unit.key);
+        const artifact = this.deps.repo.artifact(workspaceId, unit.key, { task, work: unit });
         if (artifact === null) throw new Error("artifact missing before binding");
         return this.deps.codec.bind(source, unit, artifact);
       });

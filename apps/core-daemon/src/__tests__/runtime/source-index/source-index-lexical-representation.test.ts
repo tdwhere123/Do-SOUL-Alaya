@@ -173,20 +173,84 @@ it("distinguishes bounded-out from valid-empty and scrubs capsule and canonical 
   } finally { database.close({ optimize: false }); }
 });
 
-it("advances a root whose analysis exceeds one pass allowance and reports the advanced generation", async () => {
-  const environment = fixture(), { database, index } = environment;
+it("resumes a long segmented root within each pass allowance across database reopen", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "source-lexical-progress-")), filename = join(directory, "source.sqlite");
+  const environment = fixture(filename);
+  let { database, index } = environment;
   try {
     const long = "自动部署流水线 ".repeat(400);
     admit(database, long, "long");
     const small = { ...limits, work: 1_000 };
     expect(long.length).toBeGreaterThan(small.work);
-    const lifecycle = new SourceIndexLifecycle(index, fieldSha256);
-    let pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", small);
-    for (let attempt = 0; attempt < 8 && pass.status !== "ready"; attempt++) {
-      pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", small);
+    let lifecycle = new SourceIndexLifecycle(index, fieldSha256);
+    const belowUnit = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", { ...limits, work: 100 });
+    expect(belowUnit).toMatchObject({ status: "partial", analysis_units: 0 });
+    expect(belowUnit.resources.work).toBeLessThanOrEqual(100);
+    expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get()).toEqual({ n: 0 });
+    let pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", small);
+    expect(pass.status).toBe("partial");
+    expect(pass.resources.work).toBeLessThanOrEqual(small.work);
+    expect((database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get() as { n: number }).n)
+      .toBeGreaterThan(0);
+    const generation = pass.generation!.generation_id;
+    database.close({ optimize: false }); database = initDatabase({ filename });
+    index = new SqliteSourceIndexRepository(database, fieldSha256);
+    lifecycle = new SourceIndexLifecycle(index, fieldSha256);
+    let analysis = pass.analysis_units;
+    for (let attempt = 0; attempt < 80 && pass.status !== "ready"; attempt++) {
+      pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", small);
+      expect(pass.resources.work).toBeLessThanOrEqual(small.work);
+      expect(pass.resources.native_bytes).toBeLessThanOrEqual(small.native_bytes);
+      analysis += pass.analysis_units;
     }
-    expect(pass).toMatchObject({ status: "ready", generation: { target_count: 1, completed_count: 1 } });
+    expect(pass).toMatchObject({ status: "ready", generation: { generation_id: generation, target_count: 1, completed_count: 1 } });
+    expect(analysis).toBe(long.length);
+    expect(database.connection.prepare("SELECT body FROM source_index_text").get()).toEqual({ body: long });
     expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget).candidates).toHaveLength(1);
+  } finally { database.close({ optimize: false }); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it("scrubs a staged segmented source when its native root is erased", async () => {
+  const environment = fixture(), { database, index } = environment;
+  try {
+    const source = admit(database, "自动部署流水线 ".repeat(400), "erased-progress");
+    const lifecycle = new SourceIndexLifecycle(index, fieldSha256);
+    const pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", { ...limits, work: 1_000 });
+    expect(pass.status).toBe("partial");
+    expect((database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get() as { n: number }).n)
+      .toBeGreaterThan(0);
+    eraseSource(environment, source.record.identity);
+    expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get()).toEqual({ n: 0 });
+    expect(index.lexical.lexicalGeneration(WORKSPACE, pass.generation!.generation_id)?.status).not.toBe("ready");
+  } finally { database.close({ optimize: false }); }
+});
+
+it("refuses an oversized v1 analysis without exceeding the caller's allowance", async () => {
+  const environment = fixture(), { database, index } = environment;
+  try {
+    admit(database, "自动部署流水线 ".repeat(400), "legacy-long");
+    const pass = await new SourceIndexLifecycle(index, fieldSha256).prepareLexical(
+      WORKSPACE, "segmented-unicode61.v1", { ...limits, work: 1_000 });
+    expect(pass).toMatchObject({ status: "partial", reason: "read_budget", analysis_units: 0 });
+    expect(pass.resources.work).toBeLessThanOrEqual(1_000);
+  } finally { database.close({ optimize: false }); }
+});
+
+it("records analyzer work that fails before a v2 unit commits and can retry", async () => {
+  const environment = fixture(), { database, index } = environment;
+  try {
+    const text = "自动部署流水线";
+    admit(database, text, "failed-analysis");
+    __setCjkSegmentationLoaderForTests(async () => ({ cut: () => { throw new Error("authored analyzer failure"); } }));
+    const lifecycle = new SourceIndexLifecycle(index, fieldSha256);
+    const failed = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", limits);
+    expect(failed).toMatchObject({ status: "unavailable", reason: "authored analyzer failure",
+      analysis_units: text.length, accounting: "lower_bound" });
+    expect(failed.resources.work).toBeGreaterThanOrEqual(text.length);
+    expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get()).toEqual({ n: 0 });
+    __setCjkSegmentationLoaderForTests(async () => ({ cut: token => [token] }));
+    const retried = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", limits);
+    expect(retried).toMatchObject({ status: "ready", generation: { completed_count: 1 } });
   } finally { database.close({ optimize: false }); }
 });
 

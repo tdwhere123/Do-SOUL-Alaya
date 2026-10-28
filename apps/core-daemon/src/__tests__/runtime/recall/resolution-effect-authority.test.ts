@@ -75,6 +75,38 @@ describe("resolution effect authority", () => {
     expect(decision.decision).toBe("deny");
   });
 
+  it("does not turn storage time into source authority time", async () => {
+    const fixture = openAuthority();
+    fixture.database.connection.prepare(`
+      UPDATE source_records SET event_time = NULL, valid_from = NULL
+      WHERE workspace_id = ? AND record_id = ?
+    `).run(WORKSPACE_ID, "source-record-1");
+
+    const decision = await fixture.authority.effectAuthority.decide(proofInput());
+    expect(decision.decision).not.toBe("allow");
+  });
+
+  it("excludes replaced source evidence and rejects replacement between decision and commit", async () => {
+    const fixture = openAuthority();
+    const decision = await fixture.authority.effectAuthority.decide(proofInput());
+    expect(decision.decision).toBe("allow");
+    fixture.database.connection.prepare(`
+      INSERT INTO source_records (
+        workspace_id, record_id, source_id, source_version, content_digest,
+        evidence_object_id, recorded_at, event_time, valid_from, valid_to, operator_id, source_body
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(WORKSPACE_ID, "source-record-2", "turn-1", "v2", "digest-2", null,
+      "2026-08-16T01:00:00.000Z", "2026-08-15T00:30:00.000Z",
+      "2026-08-15T00:30:00.000Z", null, "source.capture.v1", "replacement");
+
+    expect(() => fixture.field.fieldRepos.effects.insert(effectRow(decision)))
+      .toThrow(/source witness is stale/u);
+    const afterReplacement = await fixture.authority.effectAuthority.decide(proofInput());
+    expect(afterReplacement.decision).toBe("deny");
+    expect(afterReplacement.supporting_proof_witnesses.map((witness) => witness.kind))
+      .not.toContain("source_grounding");
+  });
+
   it("rejects a commit when competing governance facts change after decision", async () => {
     const fixture = openAuthority();
     const decision = await fixture.authority.effectAuthority.decide({

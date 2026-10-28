@@ -18,6 +18,7 @@ import {
   type TemporalProjectionSelectionState
 } from "./temporal-projection-selection-state.js";
 import { StorageError } from "../shared/errors.js";
+import { markTemporalDatabaseEstablished } from "./temporal-file-publication.js";
 
 const LEGACY_PATH_RELATION_WRITE_BLOCK_MESSAGE =
   "Legacy path relation writes are disabled after temporal projection selection.";
@@ -102,6 +103,10 @@ export function selectTemporalProjection(
     assertSourceUnchanged(receipt);
     assertCandidateQuarantineReconciles(database.connection, receipt);
 
+    // Durable before the selection commit: a lost selected file cannot become
+    // an implicit fresh database. This marker never grants runtime admission.
+    markTemporalDatabaseEstablished(candidateFilename);
+
     const selectionId = resolveSelectionId(input.selectionId);
     database.connection.prepare(`
       UPDATE temporal_schema_state
@@ -177,6 +182,13 @@ export function rollbackTemporalProjection(
   });
 
   return transaction.immediate();
+}
+
+/** Verify the retained rollback destination before its pointer is published. */
+export function verifyTemporalProjectionRollbackSource(database: StorageDatabase, receiptFilename: string): void {
+  const receipt = readPreparedTemporalCandidateReceipt(receiptFilename);
+  assertCandidateDatabase(database, receipt);
+  assertSourceUnchanged(receipt);
 }
 
 /** Database-side callers use this early guard; triggers cover direct SQL too. */

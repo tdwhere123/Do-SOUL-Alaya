@@ -62,6 +62,17 @@ fails closed. Neither migration nor rollback manufactures time, rewrites
 assertion history or activates quarantine. This is a protocol/EventLog major
 under invariant §25, not an online mixed-schema reader.
 
+The offline CLI dispatches before normal database bootstrap and holds maintenance
+leases on physical resource paths. A journal-owned durable selection is the
+recovery commit point: recovery verifies that exact selected tuple and completes
+the journal forward, preserving writes accepted after a restart. Interruptions
+before selection compensate instead. Explicit rollback verifies the retained
+source witness before publishing its pointer. Selected database filenames have
+a durable establishment marker; it never grants selection or readiness, and a
+missing established database cannot silently become a fresh initialization.
+Candidate, receipt, pointer and journal publication syncs file contents and
+their containing directory; a sync failure is an error, not durable success.
+
 ## Recall algorithm
 
 The ordinary path is the conditional field entered by `RecallService.recall`
@@ -141,6 +152,19 @@ projection-generation and causal-usage receipts instead persist first and
 append EventLog as a separate audit step; a missing append does not erase an
 already committed receipt.
 
+An authorized source erase may redact proven source-derived claim
+canonicalization and slot-creation payload fields in the same transaction as
+the erase barrier and projection cleanup. The original EventLog envelope,
+including event identity, type, revision and time, remains unchanged. Redacted
+fields are null and carry a typed source-erase marker identifying the barrier;
+they are unavailable history, not original values. Independent review and
+resolution text is retained. An independent current slot winner keeps its own
+subject and support; an erased winner is removed from the current projection.
+Startup reapplies existing source barriers to repair dependencies that remain
+attributable. Older unindexed interpretation capsules whose source link was
+destroyed by a prior erase cannot be attributed to a particular barrier from
+their tombstone alone; current consumers must fail closed on invalid dependencies.
+
 Predecessor-bound source replacement is a Core audited capability, not MCP,
 CLI or Inspector ingress. It captures request authority once and compares
 workspace, logical source, predecessor identity/version/digest inside the
@@ -199,6 +223,18 @@ role attribution, receipts and resource limits belong to their respective
 Protocol/SOUL/Core owners. Explicit revisions need fresh authority; failed or
 unknown provider attempts stay distinct from unattempted work.
 
+Queued post-turn text is eligible for listing, claiming, compilation and
+completion only while its exact admitted source and projection dependencies
+remain retained and current in the same workspace. The shared SQLite queue
+checks those facts; the daemon owns the unsuccessful completion audit and
+quarantine transition. Legacy work with unavailable provenance retains its
+private payload and failure history, but exposes no turn text and cannot call
+an extraction provider. Maintenance checks at most 100 active tasks per pass
+with a workspace-scoped cursor, so quarantine may take multiple calls or
+ticks; exact-task claim and completion checks always fail closed. Canonical
+source rendering lives in Protocol; SOUL retains its public renderer export
+for its grounding and daemon source-publication consumers.
+
 ## Low-Trust Draft and Typed-Resolution Chain
 
 Garden's `SignalService.evaluateTriage` and `MaterializationRouter` can create
@@ -210,11 +246,25 @@ this state, both audited with the configured reviewer-identity trust mode:
 1. **Inline `soul.resolve`:** `confirm`, `reject`, `correct`, `stale`,
    `defer`, `not_relevant`. The claim lifecycle decision and EventLog row share
    a storage CAS transaction; concurrent conflicting decisions cannot both
-   win. Only an applied allowed confirm can record positive causal usage.
+   win. Slot election follows the committed activation. A confirm reports
+   `election_status: failed` if that later election fails, or `pending` while
+   another process owns it or its completion audit cannot be recorded. SQLite
+   lease ownership and the claim's live state are checked inside each election
+   mutation and the completion-audit transaction; expired owners are fenced.
+   Repeating the same delivery, reviewer
+   and resolution can resume it without another activation audit; a completed
+   election audit returns the existing outcome without rerunning election.
+   `usage_recording_status` separately reports the post-commit causal
+   usage batch. Only an applied allowed confirm can record positive causal usage.
 2. **Out-of-band Proposal:** `soul.propose_memory_update` plus
    `soul.review_memory_proposal`; accepted memory updates and privacy erasure
    pass their typed governance and proof/effect barriers. Rejection is not an
    erase or a durable memory change.
+
+Garden task completion reports extraction and emission completion. When a
+candidate signal fails materialization, the completion audit and external
+completion response expose `failed_candidate_signals_count`; the signal's own
+audit retains its detailed outcome. An absent count on older records is unknown.
 
 Inspector originates a review request, never directly persists a promotion.
 A warning names its target; agents should not infer it from array position.

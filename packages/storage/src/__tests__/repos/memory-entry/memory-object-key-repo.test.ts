@@ -36,7 +36,7 @@ describe("SqliteMemoryObjectKeyRepo", () => {
       source_ref: "evidence:capsule-1:gist:0:16"
     });
 
-    keys.replaceOwnerKeys(memory.workspace_id, memory.object_id, [key]);
+    keys.replaceOwnerKeys(memory.workspace_id, memory.object_id, [key], memory);
 
     expect(keys.listByOwner(memory.workspace_id, memory.object_id)).toEqual([key]);
     expect(keys.summarize()).toEqual({ object_count: 1, key_count: 1 });
@@ -53,30 +53,30 @@ describe("SqliteMemoryObjectKeyRepo", () => {
     const { database, repo } = await createRepo();
     const objectKeys = new SqliteMemoryObjectKeyRepo(database);
 
-    await repo.create(createMemoryEntry({
+    const head = await repo.create(createMemoryEntry({
       object_id: STRADDLE_HEAD_ID,
       content: "Museum visit notes without a calendar fragment."
     }));
-    await repo.create(createMemoryEntry({
+    const tail = await repo.create(createMemoryEntry({
       object_id: STRADDLE_TAIL_ID,
       run_id: "run-1",
       content: "Second visitor log without a calendar fragment."
     }));
-    await repo.create(createMemoryEntry({
+    const fat = await repo.create(createMemoryEntry({
       object_id: FAT_OWNER_ID,
       run_id: "run-1",
       content: "Long transcript without a calendar fragment."
     }));
 
-    objectKeys.replaceOwnerKeys("workspace-1", STRADDLE_HEAD_ID, fillerKeys(STRADDLE_HEAD_ID, 180));
+    objectKeys.replaceOwnerKeys("workspace-1", STRADDLE_HEAD_ID, fillerKeys(STRADDLE_HEAD_ID, 180), head);
     objectKeys.replaceOwnerKeys("workspace-1", STRADDLE_TAIL_ID, [
       ...fillerKeys(STRADDLE_TAIL_ID, 20),
       ...cjkKeys(STRADDLE_TAIL_ID, 21, 50)
-    ]);
+    ], tail);
     objectKeys.replaceOwnerKeys("workspace-1", FAT_OWNER_ID, [
       ...fillerKeys(FAT_OWNER_ID, EXACT_KEY_SCAN_BATCH_SIZE),
       ...cjkKeys(FAT_OWNER_ID, EXACT_KEY_SCAN_BATCH_SIZE + 1, 247)
-    ]);
+    ], fat);
 
     const hits = await repo.searchByKeyword("workspace-1", CJK_SURFACE, 5);
     expect(hits.map((hit) => hit.object_id).sort()).toEqual(
@@ -88,7 +88,7 @@ describe("SqliteMemoryObjectKeyRepo", () => {
     const { database, repo } = await createRepo();
     const objectKeys = new SqliteMemoryObjectKeyRepo(database);
     const ownerId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
-    await repo.create(createMemoryEntry({
+    const owner = await repo.create(createMemoryEntry({
       object_id: ownerId,
       content: "Museum visit notes without a calendar fragment."
     }));
@@ -101,7 +101,7 @@ describe("SqliteMemoryObjectKeyRepo", () => {
         language: "zh",
         source_ref: "evidence:capsule-1:gist:cjk:0"
       })
-    ]);
+    ], owner);
 
     const hits = await repo.searchByKeyword("workspace-1", CJK_SURFACE, 5);
     expect(hits.map((hit) => hit.object_id)).toEqual([ownerId]);
@@ -111,7 +111,7 @@ describe("SqliteMemoryObjectKeyRepo", () => {
     const { database, repo } = await createRepo();
     const objectKeys = new SqliteMemoryObjectKeyRepo(database);
     const ownerId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
-    await repo.create(createMemoryEntry({
+    const owner = await repo.create(createMemoryEntry({
       object_id: ownerId,
       content: "Museum visit notes without a particle match."
     }));
@@ -123,7 +123,7 @@ describe("SqliteMemoryObjectKeyRepo", () => {
         surface: "to",
         source_ref: "evidence:capsule-1:gist:0:2"
       })
-    ]);
+    ], owner);
 
     const hits = await repo.searchByKeyword("workspace-1", "to", 5);
     expect(hits.map((hit) => hit.object_id)).not.toContain(ownerId);

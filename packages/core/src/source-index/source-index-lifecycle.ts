@@ -1,9 +1,9 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import {
   SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexCapacityExceeded, SourceIndexConfigurationSchema, SourceIndexOperationError,
-  AlayaError, BoundedIdSchema, canonicalJson, SourceIndexLexicalRepresentationSchema,
+  AlayaError, BoundedIdSchema, canonicalJson, SourceIndexLexicalRepresentationSchema, SourceIndexLexicalSelectionSchema,
   type SourceIndexLexicalRepresentation, type SourceIndexLexicalPassBudget, type SourceIndexLexicalPassResult,
-  type SourceIndexLexicalRepository,
+  type SourceIndexLexicalRepository, type SourceIndexLexicalSelection,
   prepareSourceIndexDocument,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexConfiguration, type SourceIndexDocument,
   type SourceIndexGuardedWriteResult, type SourceIndexReadResult, type SourceIndexRepository, type SourceIndexResources,
@@ -87,7 +87,8 @@ export class SourceIndexLifecycle {
    * preempt a native call; batch yields admit queued cancellation. Interruption retains the last
    * observed generation snapshot and all consumed resources, never inventing a post-stop readback. */
   public async prepareLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation,
-    budget: SourceIndexLexicalPassBudget, signal?: AbortSignal, deadlineMs?: number): Promise<SourceIndexLexicalPassResult> {
+    budget: SourceIndexLexicalPassBudget, signal?: AbortSignal, deadlineMs?: number,
+    expectedSelection?: SourceIndexLexicalSelection): Promise<SourceIndexLexicalPassResult> {
     BoundedIdSchema.parse(workspaceId); SourceIndexLexicalRepresentationSchema.parse(representation);
     const limits = structuredClone(budget);
     if ([limits.work, limits.native_bytes, limits.capture_page, limits.max_capture_pages, limits.max_roots, limits.max_body_bytes]
@@ -104,7 +105,11 @@ export class SourceIndexLifecycle {
     checkpoint();
     const store = this.repository.lexical;
     if (store === undefined) throw new AlayaError("UNAVAILABLE", "source lexical preparation is not wired");
-    const selection = store.selectLexical(workspaceId, representation);
+    const selection = expectedSelection === undefined ? store.selectLexical(workspaceId, representation)
+      : SourceIndexLexicalSelectionSchema.parse(structuredClone(expectedSelection));
+    if (selection.workspace_id !== workspaceId || selection.representation !== representation) {
+      throw new AlayaError("VALIDATION", "lexical selection does not match the requested pass");
+    }
     const resources = { work: 0, native_bytes: 0 };
     let analysis = 0, visitedRoots = 0, capturePages = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
     const reclamation = { pages: 0, projections: 0, targets: 0, generations: 0, complete: false };
@@ -123,12 +128,18 @@ export class SourceIndexLifecycle {
     try {
       checkpoint();
       await reclaimRetiredLexical(store, workspaceId, limits, left, debit, checkpoint, reclamation);
-      const warmed = representation !== "segmented-unicode61.v1" || await warmCjkSegmentation();
+      const warmed = representation === "raw-unicode61.v1" || await warmCjkSegmentation();
       checkpoint();
-      if (!warmed || representation === "segmented-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
+      if (!warmed || representation !== "raw-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
         return result("unavailable", "segmenter_unavailable");
       }
-      generation = store.beginLexical(selection);
+      try { generation = store.beginLexical(selection); }
+      catch (error) {
+        if (canonicalJson(store.lexicalState(workspaceId)?.selection ?? null) !== canonicalJson(selection)) {
+          return result("superseded", "selection_changed");
+        }
+        throw error;
+      }
       checkpoint();
       // A published generation for this epoch is final; later passes only observe it.
       if (generation.status === "ready" || generation.status === "valid_empty") return result("ready", null);
@@ -148,7 +159,7 @@ export class SourceIndexLifecycle {
         if (reuse.reused === 0 || reuse.complete) break;
         await yieldToEventLoop(); checkpoint();
       }
-      for (let root = 0; visitedRoots < limits.max_roots; root++) {
+      while (visitedRoots < limits.max_roots) {
         const pending = store.pendingLexicalTarget(workspaceId, generation.generation_id, left());
         debit(pending.resources);
         if (pending.source !== null) visitedRoots++;
@@ -157,14 +168,27 @@ export class SourceIndexLifecycle {
           if (!pending.complete) return settled("partial", "read_budget");
           break;
         }
+        if (representation === "segmented-unicode61.v2") {
+          if (pending.source.body_bytes > limits.max_body_bytes) return settled("partial", "body_capacity");
+          while (true) {
+            const step = store.advanceLexicalDocument(workspaceId, generation.generation_id, pending.source.root_key,
+              limits.max_body_bytes, left());
+            debit(step.resources); analysis += step.analysis_units;
+            checkpoint();
+            if (step.status !== "accepted") {
+              const rejected = preparationRejection(step.reason, resources);
+              return settled(rejected.status, rejected.reason);
+            }
+            if (step.complete) break;
+            await yieldToEventLoop(); checkpoint();
+          }
+          await yieldToEventLoop(); checkpoint();
+          continue;
+        }
         const read = store.readLexicalDocument(workspaceId, generation.generation_id, pending.source.root_key, limits.max_body_bytes, left());
         debit(read.resources); checkpoint();
         if (read.status !== "ready") return settled(read.status, read.reason);
-        // The pass's first root funds its own analysis (bounded by max_body_bytes), so a root
-        // larger than the pass allowance still advances instead of stalling every pass.
-        const allowance = left();
-        const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body,
-          root === 0 ? { ...allowance, work: allowance.work + read.body.length } : allowance);
+        const write = store.writeLexicalDocument(workspaceId, generation.generation_id, read.source, read.body, left());
         debit(write.resources); analysis += write.analysis_units;
         checkpoint();
         if (write.status !== "accepted") {
@@ -186,7 +210,7 @@ export class SourceIndexLifecycle {
       if (error === cancelled) return result("partial", cancelled.message);
       if (error === expired) return result("partial", expired.message);
       if (error instanceof SourceIndexOperationError) {
-        debit(error.resources); visitedRoots += error.visited_roots;
+        debit(error.resources); visitedRoots += error.visited_roots; analysis += error.analysis_units;
       }
       return result("unavailable", error instanceof Error ? error.message : "lexical_preparation_failed", "lower_bound");
     }

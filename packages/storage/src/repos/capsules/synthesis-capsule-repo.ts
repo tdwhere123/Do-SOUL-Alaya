@@ -5,6 +5,7 @@ import {
   type SynthesisStatus
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable, requirePrivacyWorkspaceAvailable } from "../field/privacy-availability.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
@@ -130,6 +131,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     if (trimmed.length === 0 || !Number.isInteger(limit) || limit <= 0) {
       return ineligibleSynthesisField();
     }
+    requirePrivacyWorkspaceAvailable(this.db, workspaceId, ["synthesis_capsule"]);
     try {
       const tokens = tokenizeFtsQuery(trimmed);
       if (tokens.length === 0) {
@@ -234,8 +236,10 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   public async findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null> {
     try {
       const row = this.statements.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
+      if (row !== undefined) requirePrivacyObjectAvailable(this.db, row.workspace_id, "synthesis_capsule", row.object_id);
       return row === undefined ? null : parseSynthesisCapsuleRow(row);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", `Failed to load synthesis capsule ${objectId}.`, error);
     }
   }
@@ -266,8 +270,10 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       rows.sort((left, right) =>
         left.created_at.localeCompare(right.created_at) || left.object_id.localeCompare(right.object_id)
       );
+      requirePrivacyRowsAvailable(this.db, "synthesis_capsule", rows);
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", "Failed to load synthesis capsules by ids.", error);
     }
   }
@@ -275,8 +281,10 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
       const rows = parseRows(this.statements.findByWorkspaceIdStatement.all(workspaceId), { parse: (value: unknown) => value as SynthesisCapsuleRow }, "synthesis capsule row");
+      requirePrivacyRowsAvailable(this.db, "synthesis_capsule", rows);
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list synthesis capsules for workspace ${workspaceId}.`,
@@ -288,8 +296,10 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   public async findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
       const rows = parseRows(this.statements.findByTopicKeyStatement.all(workspaceId, topicKey), { parse: (value: unknown) => value as SynthesisCapsuleRow }, "synthesis capsule row");
+      requirePrivacyRowsAvailable(this.db, "synthesis_capsule", rows);
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list synthesis capsules for topic ${topicKey}.`,
@@ -314,6 +324,8 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     const parsedStatus = parseSynthesisStatus(status);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
     try {
+      const current = this.statements.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
+      if (current !== undefined) requirePrivacyObjectAvailable(this.db, current.workspace_id, "synthesis_capsule", objectId);
       const result = this.statements.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);

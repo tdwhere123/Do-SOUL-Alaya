@@ -1,5 +1,6 @@
 import {
   ToolProviderToolSpecSchema,
+  isTrustedLocalHostname,
   type EnvLookup,
   type ToolProviderToolSpec,
   AlayaError
@@ -179,22 +180,7 @@ function parseDaemonMcpServerRuntimeConfig(
 }
 
 function isLoopbackMcpEndpoint(url: URL): boolean {
-  const hostname = url.hostname.toLowerCase();
-  if (hostname === "localhost" || hostname === "[::1]" || hostname === "::1") {
-    return true;
-  }
-  const parts = hostname.split(".");
-  return (
-    parts.length === 4 &&
-    parts[0] === "127" &&
-    parts.every((part) => {
-      if (!/^\d+$/.test(part)) {
-        return false;
-      }
-      const value = Number(part);
-      return value >= 0 && value <= 255;
-    })
-  );
+  return isTrustedLocalHostname(url.hostname.toLowerCase());
 }
 
 function parseMcpToolCatalogByServer(

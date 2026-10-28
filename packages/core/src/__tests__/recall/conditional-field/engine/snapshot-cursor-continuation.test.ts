@@ -117,15 +117,17 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     expect(after.source_revision).not.toBe(before.source_revision);
   });
 
-  it("does not admit an unavailable source hydration as an observation", () => {
+  it.each([[4, "interrupted", 0], [5, "unavailable", 1]] as const)(
+    "keeps a %s-unit hydration allowance distinct from source unavailability", (work, status, calls) => {
     const query = compileQuery("needle");
+    let sourceCalls = 0;
     const observed = observeConditionalField({
       lease: activeLease(query),
       action: {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         action: "seed",
         region_id: "seed",
-        work_limit: 4
+        work_limit: work
       },
       cursor: startObserverCursor({
         cursor_id: "seed",
@@ -146,11 +148,13 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
           bytesRead: 9,
           truncated: false
         }),
-        source: () => ({ row: null, rowsRead: 0, bytesRead: 0, unavailable: true })
+        source: () => { sourceCalls += 1; return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true }; }
       }
     });
     expect(observed.page.observations).toEqual([]);
-    expect(observed.page.outcome.status).toBe("unavailable");
+    expect(sourceCalls).toBe(calls);
+    expect(observed.page.outcome.status).toBe(status);
+    expect(observed.page.cursor.committed_through).toBeNull();
     expect(observed.page.outcome.status).not.toBe("exhausted");
   });
 
@@ -198,7 +202,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
           schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
           action: "adjacency",
           region_id: "adjacency",
-          work_limit: 7
+          work_limit: step < 2 ? 7 : 8
         },
         cursor,
         query,
@@ -212,6 +216,11 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
       });
       pages.push(...observed.page.observations.map((row) => row.object_id));
       expect(observed.page.cursor.committed_through).not.toBeNull();
+      if (step === 1) {
+        expect(observed.page.outcome.status).toBe("interrupted");
+        expect(observed.page.cursor.committed_through).toBe(cursor.committed_through);
+      }
+      expect(observed.work.work_units).toBeLessThanOrEqual(step < 2 ? 7 : 8);
       cursor = observed.page.cursor;
       if (observed.page.outcome.status === "exhausted") break;
     }
@@ -241,7 +250,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const planted = await plantNeedles(slice, 6, 921);
     const tight = defaultBudget({
-      work_units: 20,
+      work_units: 64,
       finalization_reserve: 5,
       min_envelope: 1,
       page_budget: 1
@@ -249,7 +258,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     const full = runRecall(slice, { page_budget: 100 });
     const pages: InformationIndex[] = [];
     let continuation: InformationIndex["continuation"] = null;
-    for (let step = 0; step < 12; step += 1) {
+    for (let step = 0; step < 32; step += 1) {
       const page = runRecall(slice, { budget: tight, continuation });
       pages.push(page);
       continuation = page.continuation;
@@ -261,7 +270,8 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     expect(new Set(concatenated).size).toBe(concatenated.length);
     expect(concatenated).toEqual(full.entries.map((entry) => entry.object_id).slice(0, concatenated.length));
     expect(concatenated).toEqual(planted.slice(0, concatenated.length));
-    expect(continuation === null, JSON.stringify(pages.map(page => ({ ids: page.entries.map(entry => entry.object_id), completeness: page.completeness, continuation: page.continuation })))).toBe(concatenated.length === planted.length);
+    expect(concatenated).toEqual(planted);
+    expect(continuation).toBeNull();
   });
 });
 

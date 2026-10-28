@@ -7,6 +7,7 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable } from "../field/privacy-availability.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseRows, readJsonColumn, readNonEmptyStringField, readPositiveIntField, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
@@ -81,13 +82,17 @@ interface ClaimFormRow {
 }
 
 export class SqliteClaimFormRepo implements ClaimFormRepo {
+  private readonly connectionIdentity: StorageDatabase;
   private readonly statementHolder: RefreshableStatementHolder<
     ReturnType<typeof prepareClaimFormStatements>
   >;
 
   public constructor(db: StorageDatabase) {
+    this.connectionIdentity = db;
     this.statementHolder = new RefreshableStatementHolder(db, prepareClaimFormStatements);
   }
+
+  public getStorageConnectionIdentity(): StorageDatabase { return this.connectionIdentity; }
 
   private get statements(): ReturnType<typeof prepareClaimFormStatements> {
     return this.statementHolder.active();
@@ -131,8 +136,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
   public findByIdSync(objectId: string): Readonly<ClaimForm> | null {
     try {
       const row = this.statements.findByIdStatement.get(objectId) as ClaimFormRow | undefined;
-      return row === undefined ? null : parseClaimFormRow(row);
+      if (row === undefined) return null;
+      requirePrivacyObjectAvailable(this.connectionIdentity, row.workspace_id, "claim_form", objectId);
+      return parseClaimFormRow(row);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", `Failed to load claim form ${objectId}.`, error);
     }
   }
@@ -151,24 +159,30 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     }
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.statements.findByIdsStatement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)),
         ClaimFormRowParser,
         "claim form row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "claim_form", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", "Failed to load claim forms by ids.", error);
     }
   }
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      return parseRows(
+      const rows = parseRows(
         this.statements.findByWorkspaceIdStatement.all(workspaceId),
         ClaimFormRowParser,
         "claim form row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "claim_form", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", `Failed to list claim forms for workspace ${workspaceId}.`, error);
     }
   }
@@ -177,12 +191,15 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const parsedStatus = parseClaimLifecycleState(status);
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.statements.findByStatusStatement.all(workspaceId, parsedStatus),
         ClaimFormRowParser,
         "claim form row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "claim_form", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list claim forms for status ${parsedStatus}.`,
@@ -193,12 +210,15 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public async findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      return parseRows(
+      const rows = parseRows(
         this.statements.findByCanonicalKeyStatement.all(workspaceId, canonicalKey),
         ClaimFormRowParser,
         "claim form row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "claim_form", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list claim forms for canonical key ${canonicalKey}.`,
@@ -227,6 +247,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
+      this.findByIdSync(objectId);
       const result = this.statements.updateStatusStatement.run(
         parsedStatus,
         parsedUpdatedAt,

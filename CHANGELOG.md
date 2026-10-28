@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 29.0.0, engine gateway 2.0.0
+## Unreleased — protocol 30.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,21 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 30.0.0 changes the ordinary Recall ranking/default behavior under invariant §25
+and adds optional reviewer identity and token fields to `soul.resolve`.
+When reviewer binding is configured, inline resolution requires matching credentials
+and records the bound identity while retaining delivery attribution to the agent.
+The reviewer fields are additive; the Recall change requires the major version.
+Applied confirms expose post-commit election and causal-usage outcomes; a
+failed election can be retried with the original delivery and reviewer.
+Garden completion separately reports failed candidate materializations while
+preserving task completion as an extraction outcome. Source-capture resource
+refusals survive enqueue recovery without changing older unknown captures.
+Authorized source erasure also redacts proven source-derived claim
+canonicalization and slot-creation payload fields using a typed barrier marker;
+event identity, revision and time survive. Historical readers must treat the
+null fields as unavailable rather than replay them as original values.
 
 Protocol 29.0.0 scopes lexical BM25 statistics to each active generation, identified by
 `ordinary-native-field.v6` (invariant §25 major), retaining the question-time preference

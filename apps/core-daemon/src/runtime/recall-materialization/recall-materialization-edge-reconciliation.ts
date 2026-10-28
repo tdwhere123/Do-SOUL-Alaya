@@ -1,4 +1,4 @@
-import { processEnvLookup } from "../config/daemon-config-environment.js";
+import { mergeDaemonEnvLookup, processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   bindEventPublisher,
   ConflictDetectionService,
@@ -31,6 +31,7 @@ type EdgeRuntimeWiring = Pick<
   | "memoryEntryRepo"
   | "pathRelationRepo"
   | "rawConfigService"
+  | "configEnv"
   | "warn"
 >;
 
@@ -41,6 +42,7 @@ type ReconciliationRuntimeWiring = Pick<
   | "memoryEntryRepo"
   | "memoryService"
   | "rawConfigService"
+  | "configEnv"
   | "reconciliationLeaseRepo"
   | "runtimeNotifier"
   | "runLookup"
@@ -124,17 +126,18 @@ function createEdgeAutoProducerLlmPortFromConfig(
 }
 
 function createConflictDetectionRuntime(
-  input: Pick<EdgeRuntimeWiring, "memoryEntryRepo" | "warn">,
+  input: Pick<EdgeRuntimeWiring, "memoryEntryRepo" | "warn" | "configEnv">,
   pathCandidatePort: PathCandidateSink
 ): ConflictDetectionService | null {
   const conflictDetectionEnabled = readEnabledEnv(
     "ALAYA_CONFLICT_DETECTION_ENABLED",
-    PRODUCT_FORMATION_DEFAULTS.conflictDetectionEnabled
+    PRODUCT_FORMATION_DEFAULTS.conflictDetectionEnabled,
+    input.configEnv
   );
   if (!conflictDetectionEnabled) {
     return null;
   }
-  const conflictDetectionLlmPort = createConflictDetectionLlmPort();
+  const conflictDetectionLlmPort = createConflictDetectionLlmPort(mergeDaemonEnvLookup(processEnvLookup(), input.configEnv));
   return new ConflictDetectionService({
     memoryRepo: {
       findByDimension: async (workspaceId, dimension) =>
@@ -146,7 +149,7 @@ function createConflictDetectionRuntime(
     },
     pathCandidatePort,
     ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
-    ruleEnabled: readEnabledEnv("ALAYA_CONFLICT_RULE_ENABLED", true),
+    ruleEnabled: readEnabledEnv("ALAYA_CONFLICT_RULE_ENABLED", true, input.configEnv),
     warn: input.warn
   });
 }
@@ -159,7 +162,8 @@ async function createReconciliationRuntime(
 }> {
   const ingestReconciliationEnabled = readEnabledEnv(
     "ALAYA_INGEST_RECONCILIATION_ENABLED",
-    PRODUCT_FORMATION_DEFAULTS.ingestReconciliationEnabled
+    PRODUCT_FORMATION_DEFAULTS.ingestReconciliationEnabled,
+    input.configEnv
   );
   if (!ingestReconciliationEnabled) {
     return { reconciliationService: null, reconciliationBasisStatus: { enabled: false } };
@@ -252,15 +256,17 @@ export const edgeReconciliationTestInternals = {
   createReconciliationLlmPortFromConfig
 };
 
-function readEnabledEnv(name: string, defaultValue: boolean): boolean {
-  return resolveProductFormationEnabled(processEnvLookup()[name], defaultValue);
+function readEnabledEnv(name: string, defaultValue: boolean, configEnv: ReadonlyMap<string, string>): boolean {
+  return resolveProductFormationEnabled(processEnvLookup()[name] ?? configEnv.get(name), defaultValue);
 }
 
 function createEdgeClassifyRuntime(
-  wiring: Pick<EdgeRuntimeWiring, "warn">,
+  wiring: Pick<EdgeRuntimeWiring, "warn" | "configEnv">,
   sharedGardenComputeConfig: Awaited<ReturnType<EdgeRuntimeWiring["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
 ) {
-  const edgeClassifyWiring = resolveEdgeClassifyWiring(processEnvLookup(), sharedGardenComputeConfig);
+  const edgeClassifyWiring = resolveEdgeClassifyWiring(
+    mergeDaemonEnvLookup(processEnvLookup(), wiring.configEnv), sharedGardenComputeConfig
+  );
   const edgeClassifyQueueRepoHolder: {
     current:
       | {

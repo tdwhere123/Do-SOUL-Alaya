@@ -15,7 +15,7 @@ import {
   joinHyperedgeOr,
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
-import { encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
+import { alignOutgoingBinding, encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
 import { joinDerivation } from "./path-derivation.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { transitionKey } from "./path-composition.js";
@@ -87,6 +87,7 @@ type HyperedgeInput = Readonly<{
   readonly overlay: NamedKindOverlay;
   readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
   readonly toProgramStates?: readonly string[];
+  readonly destinationAutomaton?: ProgramAutomaton;
   readonly observedStates?: RetainedRows<ProductStateKey>;
   readonly physicalKinds?: readonly string[];
   readonly physicalKindSet?: ReadonlySet<string>;
@@ -420,6 +421,7 @@ function* extendSequenceState(
       sourceFacts: input.sourceFacts,
       bindingContexts: input.bindingContexts,
       toProgramStates: hyperedge.to,
+      destinationAutomaton: automaton,
       observedStates: observed,
       physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
       registeredDemands: input.registeredDemands,
@@ -667,14 +669,19 @@ function* completionEffects(
   forest.set(derivation.derivation_id, derivation);
   const derivations: Derivation[] = [];
   for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; derivations.push(row); }
-  return toProgramStates.map((programState) => {
+  const effects: HyperedgeEffect[] = [];
+  for (const programState of toProgramStates) {
+    const binding = input.destinationAutomaton === undefined ? spec.binding : alignOutgoingBinding(
+      spec.binding, spec.target, input.destinationAutomaton, programState, input.bindingContexts
+    );
+    if (binding === undefined) continue;
     const to: ProductStateKey = hyperedgeTarget(from, {
       object_id: spec.target,
       program_state: programState,
-      binding_context: spec.binding,
+      binding_context: binding,
       source_revision: targetRevision
     }, input.sourceFacts);
-    return {
+    effects.push({
       observation_id: `hyperedge:${productEndpointId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
       hyperedge_premises: premises.map((premise) => ({
         hypothesis_id: premise.hypothesis_id,
@@ -695,8 +702,9 @@ function* completionEffects(
       },
       derivation,
       derivations
-    };
-  });
+    });
+  }
+  return effects;
 }
 
 function mergeAssignments(combo: readonly PremiseAssignment[], bindingContexts?: BindingContextStore): PremiseAssignment[] | undefined {

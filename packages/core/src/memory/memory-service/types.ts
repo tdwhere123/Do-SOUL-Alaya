@@ -109,6 +109,12 @@ export interface MemoryEntryReadPort {
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   countByScopeClass?(workspaceId: string, scopeClass: ScopeClass): Promise<number>;
+  findByScopeClassAndDimension?(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"], page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClassAndDimension?(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"]
+  ): Promise<number>;
   findByWorkspaceIdWithConflict?(
     workspaceId: string,
     page?: MemoryListPageOptions
@@ -177,14 +183,16 @@ export interface MemoryEntryLifecyclePort {
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    expectedFromState?: MemoryEntry["lifecycle_state"]
   ): Promise<Readonly<MemoryEntry>>;
   // invariant: guarded active -> dormant demotion commits audit + UPDATE
   // atomically and returns null on benign 0-row races.
   transitionToDormantIfActive?(
     objectId: string,
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    eligibility?: { readonly workspaceId: string; readonly maxActivation: number; readonly idleBefore: string }
   ): Promise<Readonly<MemoryEntry> | null>;
   archive(objectId: string, updatedAt: string, onArchived?: () => void): Promise<Readonly<MemoryEntry>>;
   hardDeleteTombstoned?(objectId: string, onDeleted?: () => void): Promise<void>;
@@ -215,8 +223,8 @@ export interface MemoryServiceMemoryEntryRepoPort
     MemoryEntryLifecyclePort {}
 
 export interface MemoryServiceEvidenceServicePort {
-  findById(objectId: string): Promise<Readonly<{ readonly object_id?: string; readonly workspace_id?: string }> | null>;
-  findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly { readonly object_id: string }[]>;
+  findById(objectId: string): Promise<Readonly<{ readonly object_id?: string; readonly workspace_id?: string; readonly lifecycle_state?: string }> | null>;
+  findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly { readonly object_id: string; readonly lifecycle_state?: string }[]>;
 }
 
 // invariant: compressed physical delete re-verifies live capsule preservation

@@ -2,6 +2,7 @@ import { nativeNavigationProjection, type NativeFieldNavigation } from "./native
 import { deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
   type RecallPageInterruption, type RecallPageFitObservation } from "./recall-page-fit.js";
 import type { RecallProgressDelivery } from "./recall-progress-delivery.js";
+import { payloadExpansionCompleteness } from "../conditional-field/completeness-report.js";
 import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger,
   CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema, sharedProductIdentity, indexEntryCacheKey,
   productStateKeyFromIndexEntry, sourceEvidenceRootTarget, stableCanonicalStringify,
@@ -10,12 +11,12 @@ import { interpretationIdentity } from "../conditional-field/query/compile-query
 import { interpretationCoverageFor } from "../conditional-field/reference/interpret-query.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
-import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
-import { fieldProgressFingerprint } from "../conditional-field/index/facet-visit-accounting.js";
-import { BoundedIndexPayload } from "./index-payload.js";
+import { projectAcceptingIndex, type AcceptingProjectionInput } from "../conditional-field/index/project-accepting-index.js";
+import { fieldProgressFingerprint, retainedProjectionPreparationAdvanced } from "../conditional-field/index/facet-visit-accounting.js";
+import { BoundedIndexPayload, MEMORY_PAYLOAD_READ_RESERVE } from "./index-payload.js";
 import { deliveredPayloadEntry, recallDeliveryIdentity, issuedContinuationForState, issuedDeliveryRevoked,
   invalidateFieldDelivery, replayIssuedDelivery, replayIssuedIndex, resumeIndexProjection,
-  observationSettled, facetIndexStillOpen, type ProjectionProgress } from "./index-continuation.js";
+  observationSettled, facetIndexStillOpen, quoteIndexDeliveryRetention, type ProjectionProgress } from "./index-continuation.js";
 import { attachIndexSurfaces, commitPreparedIndex, prepareIndexCommit, prepareFittedProgressCommit, replayIssuedSurfaces,
   stageIssuedDelivery } from "./recall-index-commit.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
@@ -23,9 +24,9 @@ import type { RequestCostLedger } from "./request-cost-ledger.js";
 import { rolesFrom } from "./semantic-attribution.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 import { continuationConsumerIdentity } from "./recall-consumer-compatibility.js";
+import { CoreError } from "../../shared/errors.js";
 
 const RESULT_VERSION = ORDINARY_NATIVE_FIELD_RESULT_VERSION;
-const PAYLOAD_WORK_PER_ENTRY = 5;
 type ProjectionContext = Readonly<{
   state: FieldEngineState; input: ConditionalFieldRecallRequest; interpretation: QueryInterpretation;
   snapshot: FieldSnapshot; payload: BoundedIndexPayload; projectionProgress: ProjectionProgress;
@@ -35,6 +36,8 @@ type ProjectionContext = Readonly<{
   /** Reused across shrink attempts so a failed fit does not re-order the same capture. */
   navigation?: NativeFieldNavigation;
   progress_delivery?: RecallProgressDelivery;
+  /** Stable across fit retries so only preparation retained by the final candidate counts. */
+  preparation_origin: FieldEngineState;
 }>;
 
 export function projectFromField(
@@ -104,11 +107,12 @@ export function projectFromField(
     asOf: interpretation.interpretation_clock,
     contentByteBudget: deliveryBudgetOf(input).max_encoded_bytes,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
+    onSourceReadFailure: work => cost.add("payload", work),
     ...(input.payload_continuation === undefined
       ? {}
       : { payloadContinuation: input.payload_continuation }) });
   const context = { state, input, interpretation, snapshot, payload, projectionProgress, queryKey, requestDigest, retain, cost, restored,
-    progress_delivery: progressDelivery };
+    progress_delivery: progressDelivery, preparation_origin: state };
   return input.payload_continuation === undefined ? projectMembershipPage(context) : projectPayloadPage(context);
 }
 
@@ -126,16 +130,17 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
     ? sourceEvidenceRootTarget(delivered.entry.target) : delivered.entry.target };
   const total = state.remaining_exploration + state.remaining_reserve;
   const allowance = Math.min(total, input.budget.finalization_reserve);
-  const finalized = cost.time("payload", () => payload.finalize([entry], allowance));
-  const work = payload.takeWork();
-  cost.add("payload", work);
+  const finalized = cost.time("payload", () => {
+    try { return payload.finalize([entry], allowance); }
+    finally { cost.add("payload", payload.takeWork()); }
+  });
   const assembled = payload.applyDeliveredSpans({
     ...delivered.index,
     entries: [entry],
     continuation: input.continuation ?? null,
     page_purpose: "payload",
     product_updates: [],
-    completeness: { ...delivered.index.completeness, payload: finalized.complete ? "complete" : "partial" }
+    completeness: payloadExpansionCompleteness(delivered.index.completeness, finalized.complete ? "complete" : "partial")
   });
   // Hydration and the envelope fit share one request allowance: subtract the payload
   // spend first, then fit from what is left. The two must never be treated as
@@ -193,7 +198,7 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
 function withInterruptedPayload(index: InformationIndex): InformationIndex {
   return { ...index, entries: index.entries.map(entry => entry.target.kind === "source_evidence"
     ? { ...entry, target: sourceEvidenceRootTarget(entry.target) } : entry),
-    completeness: { ...index.completeness, payload: "interrupted", transport: "interrupted" },
+    completeness: payloadExpansionCompleteness(index.completeness, "interrupted", "interrupted"),
     continuation: index.continuation ?? null };
 }
 
@@ -241,6 +246,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
   for (;;) {
     const candidate = projectMembershipCandidate({ ...current,
       input: { ...current.input, budget: { ...current.input.budget, page_budget: width } } });
+    refuseUnfundedPageWork(current, candidate);
     // Assemble the final page (continuation, sealed token, hydrated visible spans)
     // before measuring it, so the fit sees exactly what the caller would receive.
     const prepared = prepareIndexCommit({
@@ -273,7 +279,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     // A refused fit is never a committed delivery, including an empty membership.
     // Resource interruption is separate from a measured oversized envelope.
     if (fitted.interruption !== undefined) {
-      return commitInterruptedMembership(current, candidate, meter.work);
+      return commitInterruptedMembership(current, candidate, meter.work, fitted.interruption, fitted.observation);
     }
     // Dropping every member of a nonempty page is a resource refusal, not a
     // valid-empty delivery: the field still holds undelivered membership.
@@ -310,7 +316,14 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
  * still replays the exact interrupted control result, as with other prepared pages.
  */
 function commitInterruptedMembership(context: ProjectionContext,
-  candidate: ReturnType<typeof projectMembershipCandidate>, remaining: number): InformationIndex {
+  candidate: ReturnType<typeof projectMembershipCandidate>, remaining: number,
+  interruption: RecallPageInterruption, fit: RecallPageFitObservation): InformationIndex {
+  refuseUnfundedPageWork(context, candidate, true);
+  if (interruption === "work" && !retainedPageWorkAdvanced(context, candidate)
+    && !candidate.retained.memory_exhausted && !(candidate.navigation?.status === "resource_refused"
+      && (candidate.navigation.constraints === undefined || candidate.navigation.constraints.memory !== undefined))) {
+    throw framingInterruption(interruption, fit);
+  }
   const paid = context.progress_delivery;
   if (paid?.control !== undefined) {
     const prepared = prepareFittedProgressCommit({ index: paid.control,
@@ -365,6 +378,51 @@ function commitInterruptedMembership(context: ProjectionContext,
   return committed.index;
 }
 
+/** A blocked atomic operation is a refusal only after other owners had a delivery or
+ * preparation opportunity. Empty pages that advance those cursors remain usable. */
+function refuseUnfundedPageWork(context: ProjectionContext,
+  candidate: ReturnType<typeof projectMembershipCandidate>, interrupted = false): void {
+  const hasMembers = candidate.index.entries.length > 0 || (candidate.index.product_updates?.length ?? 0) > 0;
+  if ((!interrupted && hasMembers) || retainedPageWorkAdvanced(context, candidate)
+    || candidate.retained.memory_exhausted) return;
+  context.progress_delivery?.refuse_idle_observation?.();
+  const available = context.progress_delivery?.execution_work_limit;
+  const navigation = candidate.navigation;
+  if (navigation?.status === "resource_refused" && navigation.constraints?.memory === undefined
+    && navigation.constraints?.work !== undefined && available !== undefined
+    && navigation.constraints.work.required + framingReserve(0) > available) {
+    throw new CoreError("CONFLICT", "Recall navigation work budget cannot fund its unretained preparation", {
+      details: { outcome: "resource_exhausted", resource: "navigation_work",
+        required_work: navigation.constraints.work.required + framingReserve(0), available_work: available,
+        residuals: candidate.retained.residuals }
+    });
+  }
+  const block = candidate.work_block;
+  if (block !== undefined && available !== undefined && block.required_work + candidate.framing > available) {
+    throw new CoreError("CONFLICT", "Recall projection work budget cannot fund its next atomic operation", {
+      details: { outcome: "resource_exhausted", resource: "projection_work", phase: block.phase,
+        required_work: block.required_work + candidate.framing, available_work: available,
+        remaining_work: block.available_work, residuals: candidate.retained.residuals }
+    });
+  }
+}
+
+function retainedPageWorkAdvanced(context: ProjectionContext,
+  candidate: ReturnType<typeof projectMembershipCandidate>): boolean {
+  const hasMembers = candidate.index.entries.length > 0 || (candidate.index.product_updates?.length ?? 0) > 0;
+  // An interrupted nonempty candidate retains preparation, but rolls its scan
+  // frontier back and ships no members through the prepaid control envelope.
+  const preparationAdvanced = retainedProjectionPreparationAdvanced({
+    grounding_progress: candidate.retained.grounding_progress,
+    explanation_progress: candidate.retained.explanation_progress,
+    facet_index: candidate.projectionProgress.facet_index }, {
+    grounding_progress: context.preparation_origin.grounding_progress,
+    explanation_progress: context.preparation_origin.explanation_progress,
+    facet_index: context.projectionProgress.facet_index });
+  return context.progress_delivery?.observation_advanced === true || preparationAdvanced
+    || (!hasMembers && candidate.projectionProgress.offset > context.projectionProgress.offset);
+}
+
 function prepareMembershipNavigation(context: ProjectionContext) {
   const { state, input, interpretation, snapshot, payload, cost, projectionProgress } = context;
   // Reserve codec entry before projection. The incremental envelope scan may
@@ -394,7 +452,11 @@ function prepareMembershipNavigation(context: ProjectionContext) {
     cost.add("index", { budget_work: navigationMeter.spentWork, charged_retained_bytes: navigationMeter.spentBytes });
   }
   // Ordering is paid before projection and framing, including failed attempts.
-  const framing = Math.min(framingReserve(input.budget.page_budget), navigationMeter.work);
+  // Current values and previously delivered products cover native, memory and
+  // withdrawal candidates. A requested ceiling alone is not pending codec work.
+  const population = snapshot.values.length + Object.keys(projectionProgress.delivered_entries).length;
+  const frameWidth = Math.max(0, navigationMeter.work - framingReserve(0) - (1 + MEMORY_PAYLOAD_READ_RESERVE));
+  const framing = Math.min(framingReserve(Math.min(input.budget.page_budget, population, frameWidth)), navigationMeter.work);
   return { navigation, framing, remaining: navigationMeter.work };
 }
 
@@ -416,6 +478,7 @@ function projectMembershipCandidate(context: ProjectionContext) {
     && priorGroundingReferences[3] === state.transition_derivations;
   const groundingReferences = groundingInputUnchanged ? priorGroundingReferences
     : [state.seeds, state.transitions, state.derivations, state.transition_derivations];
+  const blocked: { work?: Parameters<NonNullable<AcceptingProjectionInput["on_atomic_work_block"]>>[0] } = {};
   const projected = cost.time("index", () => projectAcceptingIndex({
     snapshot,
     binding_contexts: state.binding_contexts,
@@ -430,6 +493,7 @@ function projectMembershipCandidate(context: ProjectionContext) {
     result_version: RESULT_VERSION,
     budget: input.budget,
     cost,
+    preparation_advanced: context.progress_delivery?.observation_advanced,
     projection_scan_offset: projectionProgress.offset,
     projection_generation: projectionProgress.generation,
     projection_facet_offset: projectionProgress.facet_offset,
@@ -442,9 +506,9 @@ function projectMembershipCandidate(context: ProjectionContext) {
         ...(facet === undefined ? {} : { facet_offset: facet.scan_offset, facet_index: facet.index }) };
     },
     explanation_progress: state.explanation_progress,
-    on_explanation_progress: (progress, retainedBytes, work) => {
+    on_explanation_progress: (progress, retainedBytes, work, admittedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
-      cost.add("index", { charged_retained_bytes: retainedBytes });
+      cost.add("index", { budget_work: work, charged_retained_bytes: admittedBytes ?? Math.max(0, retainedBytes) });
       retained = { ...retained, explanation_progress: progress,
         explanation_completed_work: (retained.explanation_completed_work ?? 0) + work,
         remaining_memory_bytes: payload.remainingMemoryBytes };
@@ -456,10 +520,9 @@ function projectMembershipCandidate(context: ProjectionContext) {
     grounding_progress: state.grounding_progress,
     ...(groundingInputUnchanged ? { grounding_input_revision: state.grounding_progress!.input_digest } : {}),
     remaining_memory_bytes: payload.remainingMemoryBytes,
-    grounding_transitions: [...state.transitions],
-    grounding_seeds: [...state.seeds],
-    grounding_derivations: [...state.derivations],
-    projection_facets: [...state.facets],
+    grounding_transitions: state.transitions,
+    grounding_seeds: state.seeds,
+    grounding_derivations: state.derivations,
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
       retained = { ...retained, grounding_progress: progress, grounding_input_references: groundingReferences,
@@ -469,18 +532,22 @@ function projectMembershipCandidate(context: ProjectionContext) {
     on_remaining_reserve: (remaining) => {
       retained = { ...retained, ...remainingWorkFields(state, remaining) };
     },
+    on_atomic_work_block: block => { blocked.work = block; },
+    delivery_retention: members => ({ required_bytes: quoteIndexDeliveryRetention(
+      context.projectionProgress.delivered_entries, members, state.projection_progress === undefined),
+      releasable_bytes: payload.releasableSourceBytes }),
     support: state.support,
     expires_at: input.expires_at,
     as_of: input.as_of,
     lifetime_now: input.lifetime_now,
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
-    payload_work_per_entry: PAYLOAD_WORK_PER_ENTRY,
+    payload_work_per_entry: MEMORY_PAYLOAD_READ_RESERVE,
     // Truncated source chunks stay retryable so payload_continuation can fetch the next offset.
     finalize_payload: (entries, allowance) => cost.time("payload", () => {
-      const result = payload.finalize(entries, allowance);
-      const work = payload.takeWork();
-      cost.add("payload", work);
-      return result;
+      try {
+        const result = payload.finalize(entries, allowance);
+        return { ...result, remaining_memory_bytes: payload.remainingMemoryBytes };
+      } finally { cost.add("payload", payload.takeWork()); }
     }),
     prior_continuation: input.continuation == null
       ? null
@@ -499,7 +566,6 @@ function projectMembershipCandidate(context: ProjectionContext) {
       ? {}
       : { interpretation_clock: interpretation.interpretation_clock }),
     payload_generation: interpretation.snapshot_id,
-    ...((state.derivations?.length ?? 0) === 0 ? {} : { derivations: [...state.derivations] }),
     ...(state.support_work_status === undefined ? {} : { support_work_status: state.support_work_status }),
     ...(navigation?.status === "resource_refused" || state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }
@@ -507,7 +573,7 @@ function projectMembershipCandidate(context: ProjectionContext) {
   }));
   return { index: annotatePublicIndex(InformationIndexSchema.parse(
     withNavigationOrder(projected, navigation)), interpretation),
-  projected, navigation, projectionProgress, payload, framing,
+  projected, navigation, projectionProgress, payload, framing, work_block: blocked.work,
   retained: { ...retained, remaining_memory_bytes: payload.remainingMemoryBytes },
   first_retention: state.projection_progress === undefined };
 }

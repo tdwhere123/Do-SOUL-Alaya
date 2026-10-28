@@ -10,6 +10,7 @@ import {
   type Proposal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
+import { isRetiredProposalDossier, isSynthesisCreateProposalDossier } from "@do-soul/alaya-storage";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler.js";
 import { createWorkflowError } from "../tool/mcp-tool-error.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
@@ -65,10 +66,6 @@ type AcceptedProposalScope = Readonly<{
   }> | null;
   readonly target_baseline_updated_at?: string | null;
 }>;
-const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
-  "librarian.synthesis",
-  "bootstrapping.synthesis_candidate"
-]);
 const SYNTHESIS_TOPIC_PREFIXES: readonly string[] = ["synthesis-subject:", "bootstrapping:"];
 const SYNTHESIS_SUMMARY_MAX_LENGTH = 600;
 
@@ -79,6 +76,9 @@ export async function prepareAcceptedProposalApply(
   now: () => string,
   generateObjectId: () => string
 ): Promise<AcceptedProposalApply> {
+  if (isRetiredProposalDossier(scopedProposal.proposal.dossier_ref)) {
+    throw createAcceptanceError("VALIDATION", "Historical proposal kind cannot be accepted");
+  }
   if (scopedProposal.proposal_operation === "privacy_erase") {
     return prepareAcceptedPrivacyProposal(deps, scopedProposal, context, now, generateObjectId);
   }
@@ -116,7 +116,7 @@ async function prepareAcceptedNonPrivacyProposal(
   generateObjectId: () => string
 ): Promise<AcceptedProposalApply> {
   const dossierRef = scopedProposal.proposal.dossier_ref;
-  if (dossierRef !== null && SYNTHESIS_CREATE_DOSSIER_REFS.has(dossierRef)) {
+  if (isSynthesisCreateProposalDossier(dossierRef)) {
     return await prepareAcceptedSynthesisCreate(deps, scopedProposal, context, now, generateObjectId);
   }
 
@@ -400,11 +400,10 @@ async function assertProposedPathAnchorsValid(
     return;
   }
   const payload = scopedProposal.proposed_path_relation ?? null;
+  // Stored retired proposals remain reviewable; Storage owns acceptance refusal.
+  if (payload === null) return;
   const sourceAnchor: PathAnchorRef = { kind: "object", object_id: targetObjectId };
-  const targetAnchor: PathAnchorRef =
-    payload === null
-      ? { kind: "object_facet", object_id: targetObjectId, facet_key: "strictly_governed_constraint" }
-      : payload.target_anchor;
+  const targetAnchor = payload.target_anchor;
   const relationKind = payload?.constitution?.relation_kind ?? "governance_constraint";
   const outcome = await deps.objectAnchorGate.validateProposedObjectAnchors({
     workspaceId,

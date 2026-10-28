@@ -10,17 +10,18 @@ export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
 /** Pinned offline admission: later package/result versions need their own compatibility review. */
-export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "29.0.0";
-export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v6";
+export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "30.0.0";
+export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v7";
 /** Exact saved-capture bindings; remove historical pairs only with their archives.
  * Undefined means no native archive contract, never permission to execute an old ranking. */
 export function nativeRecallArchiveSemantics(version: string) {
   if (version === "27.0.0") return "ordinary-native-field.v4";
   if (version === "28.0.0") return "ordinary-native-field.v5";
+  if (version === "29.0.0") return "ordinary-native-field.v6";
   return version === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION ? ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS : undefined;
 }
 export const RepresentationAwareRecallProtocolVersionSchema = z.enum([
-  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
+  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0", "29.0.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
 ]);
 export const OrdinaryRecallProtocolVersionSchema = z.enum([
   "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options
@@ -39,7 +40,7 @@ const Count = z.number().int().nonnegative();
 
 export const OrdinaryRecallCaptureConfigSchema = z.object({
   capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT),
-  public_semantics: z.enum([ORDINARY_RECALL_PUBLIC_SEMANTICS, "ordinary-native-field.v4", "ordinary-native-field.v5", ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS]),
+  public_semantics: z.enum([ORDINARY_RECALL_PUBLIC_SEMANTICS, "ordinary-native-field.v4", "ordinary-native-field.v5", "ordinary-native-field.v6", ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS]),
   protocol_package_version: OrdinaryRecallProtocolVersionSchema,
   candidate: Commit, tree: Commit, implementation_revision: z.string().refine(isAuthorityRevision),
   snapshot_path: z.string().min(1), snapshot_sha256: Digest,

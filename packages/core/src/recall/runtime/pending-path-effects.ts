@@ -7,6 +7,7 @@ import { facetIdentityIndexOf } from "../conditional-field/engine/field-retentio
 import { pairInRegistry, pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { settledEndpointIndex } from "../conditional-field/engine/state-endpoint-index.js";
+import { interruptObservedField } from "./observe-field-residuals.js";
 
 const PREPARATION_BASE_BYTES = 128;
 
@@ -14,10 +15,25 @@ function preparationBytes(effectCount: number): number {
   return PREPARATION_BASE_BYTES + 8 * effectCount;
 }
 
-export function resumePathEffects(state: FieldEngineState): FieldEngineState {
+export function resumePathEffects(state: FieldEngineState, onRetainedProgress?: () => void,
+  onAtomicWorkBlock?: (required: number, available: number) => void): FieldEngineState {
   while (state.pending_path_effects !== undefined) {
     const prior = state;
     state = advancePathEffects(state);
+    const before = prior.pending_path_effects!;
+    const after = state.pending_path_effects;
+    if (after === undefined || after.offset > before.offset
+      || (after.progress_position ?? 0) > (before.progress_position ?? 0)
+      || (after.preparation?.effect_index ?? 0) > (before.preparation?.effect_index ?? 0)
+      || after.preparation?.stage !== before.preparation?.stage) onRetainedProgress?.();
+    if (state.pending_path_effects !== undefined && !state.memory_exhausted
+      && (state.remaining_exploration === 0 || state.remaining_exploration === prior.remaining_exploration)) {
+      const preparation = state.pending_path_effects.preparation;
+      const effect = preparation?.effects[preparation.effect_index];
+      const required = preparation === undefined ? 2
+        : preparation.stage === "facet" && effect !== undefined ? Math.max(1, facetAdmissionWork(state, effect)) : 1;
+      onAtomicWorkBlock?.(required, state.remaining_exploration);
+    }
     if (state.memory_exhausted || state.retention_rejected !== undefined
       || state.remaining_exploration === prior.remaining_exploration) break;
   }
@@ -121,7 +137,7 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
     // both only when both are available so a later commit cannot reject the page.
     if (stage === "facet" && effect.facet !== undefined && !state.retained_index?.facets.has(effect.facet.path_id)) {
       const target = effect.transition?.to ?? effect.hyperedge?.to;
-      const units = target === undefined ? 1 : 2;
+      const units = facetAdmissionWork(state, effect);
       if (work < units) break;
       work -= units;
       if (target === undefined) facetOffset = 0;
@@ -142,6 +158,11 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       + (state.remaining_memory_bytes - memory),
     remaining_exploration: work, remaining_memory_bytes: memory };
   return index < preparation.effects.length ? interrupted(charged, memoryBlocked) : charged;
+}
+
+function facetAdmissionWork(state: FieldEngineState, effect: PathEffectPreparation["effects"][number]): number {
+  if (effect.facet === undefined || state.retained_index?.facets.has(effect.facet.path_id)) return 0;
+  return effect.transition?.to === undefined && effect.hyperedge?.to === undefined ? 1 : 2;
 }
 
 function commitPathEffects(state: FieldEngineState): FieldEngineState {
@@ -253,7 +274,5 @@ function chargeSequenceReach(state: FieldEngineState, owner: object): FieldEngin
 }
 
 function interrupted(state: FieldEngineState, memory: boolean): FieldEngineState {
-  return { ...state, memory_exhausted: memory, last_observer_status: "interrupted",
-    closure: { ...state.closure, observation: "interrupted", requested_index: "open" },
-    residuals: state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
+  return { ...interruptObservedField(state), memory_exhausted: memory };
 }

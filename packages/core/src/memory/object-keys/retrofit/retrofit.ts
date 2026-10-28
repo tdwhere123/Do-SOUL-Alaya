@@ -23,8 +23,9 @@ export function retrofitMemoryObjectKeys(input: Readonly<{
   readonly replaceOwnerKeys: (
     workspaceId: string,
     ownerId: string,
-    keys: readonly Readonly<MemoryObjectKey>[]
-  ) => void;
+    keys: readonly Readonly<MemoryObjectKey>[],
+    expectedOwner: Readonly<ObjectKeyRetrofitOwner>
+  ) => boolean | void;
 }>): Readonly<ObjectKeyRetrofitReport> {
   const started = Date.now();
   const evidenceById = new Map(input.evidence.map((item) => [item.object_id, item]));
@@ -40,7 +41,7 @@ export function retrofitMemoryObjectKeys(input: Readonly<{
         return source === undefined ? [] : [source];
       })
     });
-    input.replaceOwnerKeys(owner.workspace_id, owner.object_id, keys);
+    if (input.replaceOwnerKeys(owner.workspace_id, owner.object_id, keys, owner) === false) continue;
     if (keys.length > 0) objectsWithKeys += 1;
     keyCount += keys.length;
   }

@@ -5,6 +5,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import type { SqliteConnection } from "../../sqlite/db.js";
+import { requireNoQuarantineRecord } from "../field/privacy-availability.js";
 import { BOUNDED_EMBEDDING_INDEX_SQL } from "../memory/reads/memory-embedding-bounded-read.js";
 import { RELATION_RECALL_INDEX_SQL } from "../path/reads/relation-assertion/bounded-reader.js";
 import { GOVERNANCE_PATH_INDEX_SQL } from "../path/reads/governance-path-reader.js";
@@ -60,6 +61,7 @@ export class SqliteIndexedRecallProjection {
         lexical: "tombstoned", semantic: "tombstoned", embedding: "tombstoned"
       });
     }
+    requireNoQuarantineRecord(this.db, workspaceId, "memory_entry", objectId);
     return Object.freeze({
       objectId,
       sourceEventRevision: row.source_event_revision,
@@ -73,6 +75,7 @@ export class SqliteIndexedRecallProjection {
     const row = this.db.prepare(`SELECT object_id, source_event_revision, semantic_publication_key,
       embedding_content_hash, tombstoned FROM garden_index_revisions
       WHERE workspace_id=? AND object_id=?`).get(workspaceId, objectId) as IndexRevisionRow | undefined;
+    if (row !== undefined && row.tombstoned !== 1) requireNoQuarantineRecord(this.db, workspaceId, "memory_entry", objectId);
     return row ?? null;
   }
 }

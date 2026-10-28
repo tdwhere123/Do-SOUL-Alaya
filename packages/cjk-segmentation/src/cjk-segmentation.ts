@@ -153,9 +153,11 @@ export function readSourceIndexLexicalAnalysisStatus(): CjkSegmentationStatus {
 }
 
 /** Strict SourceIndex variant: never initializes or falls back inside a read snapshot. */
-export function analyzeSourceIndexLexical(text: string, purpose: "source"): string;
-export function analyzeSourceIndexLexical(text: string, purpose: "query"): readonly string[];
-export function analyzeSourceIndexLexical(text: string, purpose: "source" | "query"): string | readonly string[] {
+export const SOURCE_INDEX_SEGMENTED_UNIT_BYTES = 64;
+
+export function analyzeSourceIndexLexical(text: string, purpose: "source", version?: "v1" | "v2"): string;
+export function analyzeSourceIndexLexical(text: string, purpose: "query", version?: "v1" | "v2"): readonly string[];
+export function analyzeSourceIndexLexical(text: string, purpose: "source" | "query", version: "v1" | "v2" = "v1"): string | readonly string[] {
   if (jiebaState.kind !== "ready" || sourceIndexAnalysisFailed) {
     throw new AlayaError("SOURCE_INDEX_FAILED", `segmenter_${readSourceIndexLexicalAnalysisStatus()}`);
   }
@@ -165,15 +167,62 @@ export function analyzeSourceIndexLexical(text: string, purpose: "source" | "que
     if (pieces.length === 0 || pieces.some(piece => typeof piece !== "string" || piece.trim().length === 0)) {
       throw new AlayaError("SOURCE_INDEX_FAILED", "segmenter_invalid_output");
     }
+    if (version === "v2" && pieces.join("") !== token) {
+      throw new AlayaError("SOURCE_INDEX_FAILED", "segmenter_nonconserving_output");
+    }
     return pieces;
   };
   try {
     return purpose === "source" ? projectSegmentedFtsSource(text, isCjkSegmentationCandidate, segment)
-      : tokenizeFtsQuery(text, { shouldSegmentToken: isCjkSegmentationCandidate, segmentToken: segment });
+      : tokenizeFtsQuery(text, { shouldSegmentToken: isCjkSegmentationCandidate,
+        segmentToken: version === "v1" ? segment : token => segmentBoundedToken(token, segment) });
   } catch (error) {
     sourceIndexAnalysisFailed = true;
     throw error;
   }
+}
+
+function segmentBoundedToken(token: string, segment: (token: string) => readonly string[]): readonly string[] {
+  const pieces: string[] = [];
+  let unit = "", bytes = 0;
+  for (const character of token) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > SOURCE_INDEX_SEGMENTED_UNIT_BYTES) {
+      pieces.push(...segmentSourceUnit(unit, segment)); unit = ""; bytes = 0;
+    }
+    unit += character; bytes += size;
+  }
+  if (unit.length > 0) pieces.push(...segmentSourceUnit(unit, segment));
+  return pieces;
+}
+
+function segmentSourceUnit(unit: string, segment: (token: string) => readonly string[]): readonly string[] {
+  return isCjkSegmentationCandidate(unit) ? segment(unit) : [unit];
+}
+
+/** The pending surface unit is at most 64 UTF-8 bytes and continues across source reads. */
+export function advanceSourceIndexLexicalV2(text: string, pending: string, final: boolean, onWork?: (units: number) => void): {
+  projection: string; pending: string; expanded_units: number;
+} {
+  const projections: string[] = [];
+  let unit = pending, bytes = Buffer.byteLength(unit), expanded = 0;
+  const flush = () => {
+    if (unit.length === 0) return;
+    expanded += unit.length;
+    onWork?.(unit.length);
+    const projection = analyzeSourceIndexLexical(unit, "source", "v2");
+    onWork?.(projection.length);
+    projections.push(projection);
+    unit = ""; bytes = 0;
+  };
+  for (const character of text) {
+    if (!/[\p{L}\p{N}_]/u.test(character)) { flush(); continue; }
+    const size = Buffer.byteLength(character);
+    if (bytes + size > SOURCE_INDEX_SEGMENTED_UNIT_BYTES) flush();
+    unit += character; bytes += size;
+  }
+  if (final) flush();
+  return { projection: projections.join(" "), pending: unit, expanded_units: expanded };
 }
 
 /** Internal-only: reset cached jieba state between test scenarios. */

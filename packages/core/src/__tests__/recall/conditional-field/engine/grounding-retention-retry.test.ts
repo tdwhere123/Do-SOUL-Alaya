@@ -13,6 +13,7 @@ describe("grounding retention after memory refusal", () => {
     const input = { seeds: kind === "seed" ? [seed] : [], transitions: kind === "rule" ? [edge] : [],
       derivations: [], transition_derivations: {}, allowance: 1 };
     const admitted = groundedOutputDerivations({ ...input, memory_bytes: 100_000 });
+    expect(admitted.progress.completed_steps).toBe(1);
     const refusedMemory = Math.floor(admitted.retained_bytes * 0.9);
     expect(admitted.retained_bytes).toBeGreaterThan(0);
     let progress: GroundingProgress | undefined;
@@ -24,6 +25,7 @@ describe("grounding retention after memory refusal", () => {
       expect(refused.progress.retained_bytes).toBe(0);
       expect(refused.progress.forest.size).toBe(0);
       expect(refused.progress.incoming.size).toBe(0);
+      expect(refused.progress.completed_steps).toBe(0);
       progress = refused.progress;
     }
     const recovered = groundedOutputDerivations({ ...input, memory_bytes: 100_000, progress });
@@ -31,6 +33,7 @@ describe("grounding retention after memory refusal", () => {
     expect(recovered.retained_bytes).toBe(admitted.retained_bytes);
     expect(recovered.admitted_bytes).toBe(admitted.admitted_bytes);
     expect(recovered.progress.retained_bytes).toBe(admitted.progress.retained_bytes);
+    expect(recovered.progress.completed_steps).toBe(admitted.progress.completed_steps);
     expect([...recovered.progress.forest]).toEqual([...admitted.progress.forest]);
     expect([...recovered.progress.root_map]).toEqual([...admitted.progress.root_map]);
   });

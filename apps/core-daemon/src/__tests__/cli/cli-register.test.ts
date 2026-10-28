@@ -208,6 +208,7 @@ describe("cli registration", () => {
       "review",
       "mcp",
       "temporal-cutover",
+      "source-index-lexical",
       "backup",
       "export",
       "import"

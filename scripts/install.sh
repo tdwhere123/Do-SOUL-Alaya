@@ -36,9 +36,8 @@
 #   7. on success, atomically swaps STAGING -> $ALAYA_HOME (old install -> .bak)
 #   8. symlinks $ALAYA_HOME/bin/alaya.mjs into $ALAYA_BIN_DIR/alaya
 #
-# Local ONNX embeddings are an optional extra (~640MiB). Default pnpm install
-# does not pull @huggingface/transformers. After install:
-#   pnpm --dir "$ALAYA_HOME" add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core
+# The required local ONNX runtime is installed with dependencies. Provision its
+# model artifacts explicitly before use:
 #   node "$ALAYA_HOME/scripts/fetch-local-embedding-model.mjs"
 # Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
 # and apps/inspector/web/dist/index.html already exists.
@@ -262,12 +261,6 @@ pnpm install --frozen-lockfile
 info "building (pnpm build)..."
 pnpm build
 
-# Sanity: the bin shim must be runnable.
-if ! node ./bin/alaya.mjs --help >/dev/null 2>&1; then
-  err "post-build sanity check failed: \`node ./bin/alaya.mjs --help\` did not exit 0"
-fi
-ok "post-build sanity check passed"
-
 # Snapshot the live database before swapping binaries. Schema only moves
 # forward; a binary rollback without this copy cannot read a migrated file.
 DB_BACKUP_PATH=""
@@ -278,6 +271,12 @@ if [ -f "$LIVE_DB" ]; then
     || err "database backup failed (stop the daemon and retry). Live DB: ${LIVE_DB}"
   ok "database backup: ${DB_BACKUP_PATH}"
 fi
+
+# The CLI's normal bootstrap may migrate storage; retain the pre-upgrade DB first.
+if ! node ./bin/alaya.mjs --help >/dev/null 2>&1; then
+  err "post-build sanity check failed: \`node ./bin/alaya.mjs --help\` did not exit 0"
+fi
+ok "post-build sanity check passed"
 
 # Atomic swap.
 if [ -d "$ALAYA_HOME" ]; then
@@ -312,9 +311,8 @@ bold ""
 bold "Installed Do-SOUL Alaya ${VERSION_TAG}."
 info ""
 info "This install came from GitHub Releases, not git HEAD."
-info "Local ONNX embeddings are optional; default install skips @huggingface/transformers."
-info "To enable local_onnx after this install (rewrites the install lockfile):"
-info "  pnpm --dir \"${ALAYA_HOME}\" add @huggingface/transformers@4.2.0 --filter @do-soul/alaya-core"
+info "Local ONNX runtime @huggingface/transformers@4.3.1 is installed as a required dependency."
+info "Provision the local model before enabling local_onnx:"
 info "  node ${ALAYA_HOME}/scripts/fetch-local-embedding-model.mjs"
 if [ -n "$DB_BACKUP_PATH" ]; then
   info ""

@@ -37,14 +37,15 @@ describe("source fact change capture", () => {
     const facts = new ObservedSourceFacts();
     const captured = ["old-dependent-endpoint", "new-endpoint"];
     const tracked = facts.captureChanges(() => {
-      recordObservedAt({ workspace_id: "workspace", authorized_scopes: null, readers: { source: ({ objectId }) => ({
+      recordObservedAt({ workspace_id: "workspace", authorized_scopes: null, sourceCache: new Map(captured.map(objectId => [objectId, {
         row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active", scope_class: "project" },
         rowsRead: 1, bytesRead: 32, unavailable: false
-      }) } }, captured, {}, facts);
+      }])) }, [...captured, "unfunded-endpoint"], {}, facts);
       captured.shift();
     }, { work: 2, bytes: 1024 });
     expect(captured).toEqual(["new-endpoint"]);
     expect([...tracked.changes.keys!]).toEqual(["old-dependent-endpoint", "new-endpoint"]);
+    expect(facts.has("unfunded-endpoint")).toBe(false);
   });
 
   it("restores the capture scope after an exception and preserves enclosing coverage", () => {

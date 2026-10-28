@@ -45,6 +45,11 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     const descriptor = GardenTaskDescriptorSchema.parse(input.payload);
     const taskId = input.id ?? `garden-task-${this.rows.length + 1}`;
     const createdAt = input.created_at ?? new Date().toISOString();
+    if (descriptor.periodic === true) {
+      const existing = this.rows.find((row) => row.workspace_id === input.workspace_id && row.kind === input.kind &&
+        row.descriptor.periodic === true && (row.status === "pending" || row.status === "claimed"));
+      if (existing !== undefined) return { task_id: existing.id };
+    }
     if (this.reservedTaskIds.has(taskId) || this.rows.some((row) => row.id === taskId)) {
       throw new Error(`Garden task ${taskId} already exists.`);
     }

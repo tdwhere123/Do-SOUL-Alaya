@@ -24,8 +24,6 @@ export default function MemoryBrowserPage() {
     <MemoryBrowserPageView
       title={t("nav:memoryBrowser")}
       controller={controller}
-      promoteLabel={t("healthInbox:row.promoteStrictlyGoverned")}
-      promoteAriaLabel={(id) => t("healthInbox:row.promoteStrictlyGovernedAria", { id })}
     />
   );
 }

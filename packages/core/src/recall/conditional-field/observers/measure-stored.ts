@@ -14,6 +14,8 @@ import {
   unavailableOrNotApplicable
 } from "./observe-collect.js";
 import {
+  SOURCE_IDENTITY_HYDRATE_RESERVE,
+  validateSourceObserverPage,
   type ObserveConditionalFieldInput,
   type ObserverActionResult,
   type SourceObserverRow
@@ -172,6 +174,21 @@ function parseMeasurementCursor(value: string | null): { index: number; after: s
   return { index: 16, after: null };
 }
 
+export function measurementCursorAdvanced(before: string | null, after: string | null): boolean {
+  const prior = parseMeasurementCursor(before), next = parseMeasurementCursor(after);
+  return prior.index !== next.index || prior.after !== next.after;
+}
+
+export function measurementWorkRequirement(query: ObserveConditionalFieldInput["query"],
+  readers: ObserveConditionalFieldInput["readers"], cursor: string | null): number {
+  if (readers.embeddingIds === undefined) return 1;
+  const declaration = query.interpretation_proposal?.stored_cosine_admission;
+  if (declaration === undefined) return measurementMinimumWork({ readers });
+  if (!StoredCosineAdmissionSchema.safeParse(declaration).success) return 1;
+  const profile = declaration.obligations[parseMeasurementCursor(cursor).index];
+  return profile === undefined ? 1 : measurementMinimumWork({ readers, measurement_profile: profile });
+}
+
 function observeMeasurementProfile(input: ObserveConditionalFieldInput): ObserverActionResult {
   const embeddingIds = input.readers.embeddingIds;
   if (embeddingIds === undefined) {
@@ -179,6 +196,12 @@ function observeMeasurementProfile(input: ObserveConditionalFieldInput): Observe
       `${input.action.region_id}:missing-measurement`,
       "unavailable"
     )]);
+  }
+  const minimum = measurementMinimumWork(input);
+  if (input.action.work_limit < minimum) {
+    input.on_atomic_work_block?.(minimum);
+    return collectObserved(input, { identities: [], truncated: true, nativeVisits: 0,
+      bytesRead: 0, identityKind: "embedding" });
   }
   const modelId = input.model_id ?? input.expected_model_id;
   const page = embeddingIds({
@@ -273,11 +296,17 @@ function attachPairMeasurements(
       extraBytes += pair?.bytesRead ?? 0;
     }
     if (pair?.resourceLimited === true || (batch?.resourceLimited === true && pair === undefined)) break;
-    const memory = pairNeedsMemoryRevision(pair)
-      ? memoryProductRevision(input, observation.object_id)
-      : { rowVisits: 0, bytesRead: 0 };
+    let memory: ReturnType<typeof memoryProductRevision>;
+    try { memory = pairNeedsMemoryRevision(pair)
+      ? memoryProductRevision(input, observation.object_id) : { rowVisits: 0, bytesRead: 0 }; }
+    catch (error) {
+      input.on_failure_work?.({ native_visits: collected.work.native_visits + extraWork,
+        native_bytes: collected.work.bytes_read + extraBytes });
+      throw error;
+    }
     extraWork += memory.rowVisits;
     extraBytes += memory.bytesRead;
+    if (memory.resourceLimited === true) break;
     if (collected.work.native_visits + extraWork + computeWork + (pair?.object?.dimensions ?? 0) > input.action.work_limit) break;
     const attached = attachOnePair(input, observation, digest, pair, memory);
     computeWork += attached.computeWork;
@@ -286,11 +315,12 @@ function attachPairMeasurements(
   }
   const nativeVisits = collected.work.native_visits + extraWork;
   const truncated = observations.length < collected.page.observations.length;
+  const committed = observations.at(-1)?.object_id ?? input.cursor.committed_through;
   return withMeasurements({
     page: {
       ...collected.page,
       observations,
-      cursor: { ...collected.page.cursor, committed_through: observations.at(-1)?.object_id ?? input.cursor.committed_through },
+      cursor: { ...collected.page.cursor, position: committed, committed_through: committed },
       ...(truncated ? { outcome: { ...collected.page.outcome, status: "interrupted" as const } } : {})
     },
     work: {
@@ -351,18 +381,23 @@ function attachOnePair(
   };
 }
 
-function measurementWorkReserves(input: ObserveConditionalFieldInput): Readonly<{
+function measurementWorkReserves(input: Pick<ObserveConditionalFieldInput, "readers" | "measurement_profile">): Readonly<{
   readonly lookup: number;
   readonly pair: number;
   readonly source: number;
 }> {
-  const pair = input.readers.measureStoredPair === undefined ? 0 : input.measurement_profile === undefined ? 4 : 3 + input.measurement_profile.dimensions;
+  const pair = input.readers.measureStoredPair === undefined && input.readers.measureStoredPairs === undefined ? 0
+    : input.measurement_profile === undefined ? 6 : 5 + input.measurement_profile.dimensions;
   return {
     lookup: input.measurement_profile === undefined ? 2 : 0,
     pair,
-    // Production source pays length, row, and revision; reserving 1 overshoots native visits.
-    source: pair === 0 || input.readers.source === undefined ? 0 : 3
+    source: pair === 0 || input.readers.source === undefined ? 0 : SOURCE_IDENTITY_HYDRATE_RESERVE
   };
+}
+
+function measurementMinimumWork(input: Pick<ObserveConditionalFieldInput, "readers" | "measurement_profile">): number {
+  const reserves = measurementWorkReserves(input);
+  return reserves.lookup + 1 + reserves.pair + reserves.source;
 }
 
 function enumerationBudget(input: ObserveConditionalFieldInput): number {
@@ -420,12 +455,14 @@ function memoryProductRevision(
   readonly row?: SourceObserverRow;
   readonly rowVisits: number;
   readonly bytesRead: number;
+  readonly resourceLimited?: boolean;
 }> {
   const source = input.readers.source;
   if (source === undefined) return { rowVisits: 0, bytesRead: 0 };
-  const page = source({ workspaceId: input.workspace_id, objectId });
+  const page = validateSourceObserverPage(source({ workspaceId: input.workspace_id, objectId }));
   const revision = page.unavailable ? undefined : page.row?.sourceRevision;
   return {
+    ...(page.resourceLimited === true ? { resourceLimited: true } : {}),
     ...(revision === undefined || revision.length === 0 ? {} : { revision }),
     ...(page.row == null ? {} : { row: page.row }),
     ...(page.row?.content === undefined || page.unavailable || page.resourceLimited ? {} : {

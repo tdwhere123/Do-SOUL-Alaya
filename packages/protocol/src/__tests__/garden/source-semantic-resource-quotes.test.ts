@@ -2,6 +2,21 @@ import { expect, it } from "vitest";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 
 const ample = { work_units: 10_000, memory_bytes: 1_000_000 };
+
+it.each([
+  [4, 0, { work: { required: 4, available: 3 } }],
+  [0, 7, { memory: { required: 7, available: 6 } }],
+  [4, 7, { work: { required: 4, available: 3 }, memory: { required: 7, available: 6 } }]
+] as const)("reports every failed constraint for a %s-work/%s-byte reservation without spending it", (work, bytes, constraints) => {
+  const ledger = new SourceSemanticResourceLedger({ work_units: 5, memory_bytes: 10 });
+  ledger.charge(2, 4);
+  let failure: unknown;
+  try { ledger.charge(work, bytes, "atomic read"); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(SourceSemanticResourceExhausted);
+  expect(failure).toMatchObject({ phase: "atomic read", constraints });
+  expect({ work: ledger.work, bytes: ledger.bytes, spentWork: ledger.spentWork, spentBytes: ledger.spentBytes })
+    .toEqual({ work: 3, bytes: 6, spentWork: 2, spentBytes: 4 });
+});
 const quoteRetain = SourceSemanticResourceLedger.quoteRetain.bind(SourceSemanticResourceLedger);
 const overlayRetainObjects = SourceSemanticResourceLedger.overlayRetainObjects.bind(SourceSemanticResourceLedger);
 const measureRetain = SourceSemanticResourceLedger.measureRetain.bind(SourceSemanticResourceLedger);

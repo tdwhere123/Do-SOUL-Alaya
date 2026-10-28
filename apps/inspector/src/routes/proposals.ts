@@ -16,7 +16,6 @@ import {
 export function registerInspectorProposalRoutes(app: Hono, options: InspectorProxyOptions): void {
   registerPendingProposalRoutes(app, options);
   registerMemoryProposalActionRoutes(app, options);
-  registerPromoteStrictlyGovernedRoute(app, options);
 }
 
 function registerPendingProposalRoutes(app: Hono, options: InspectorProxyOptions): void {
@@ -74,41 +73,6 @@ function registerMemoryProposalActionRoutes(app: Hono, options: InspectorProxyOp
   );
   app.post("/api/proposals/:workspaceId/memory/:memoryId/retire", async (context) =>
     await proxyMemoryAction(context, options, "retire")
-  );
-}
-
-function registerPromoteStrictlyGovernedRoute(app: Hono, options: InspectorProxyOptions): void {
-  // The MemoryBrowser "Promote to strictly_governed" action calls the
-  // daemon-style path directly (see apps/inspector/web/src/pages/MemoryBrowser.tsx).
-  // It forwards to the daemon endpoint that opens a path_relation governance
-  // proposal (see apps/core-daemon/src/routes/proposals.ts) — the Inspector
-  // never mutates durable truth, only proposes through the governed lifecycle.
-  app.post(
-    "/api/workspaces/:workspaceId/soul/memory/:memoryId/proposals/promote-strictly-governed",
-    async (context) => {
-      const workspaceId = context.req.param("workspaceId");
-      const memoryId = context.req.param("memoryId");
-      if (workspaceId === undefined || memoryId === undefined) {
-        return context.json({ error: "invalid_request" }, 400);
-      }
-      const forbidden = assertInspectorWorkspace(context, options, workspaceId);
-      if (forbidden !== null) return forbidden;
-      let body: unknown = undefined;
-      try {
-        body = await context.req.json();
-      } catch (error) {
-        if (isRequestBodyTooLargeError(error)) {
-          throw error;
-        }
-        body = undefined;
-      }
-      return await proxyDaemonJson(context, options, {
-        method: "POST",
-        path: `/workspaces/${encodeURIComponent(workspaceId)}/soul/memory/${encodeURIComponent(memoryId)}/proposals/promote-strictly-governed`,
-        body,
-        forwardStructuredError: true
-      });
-    }
   );
 }
 

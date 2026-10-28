@@ -10,7 +10,8 @@ import {
   type Slot
 } from "@do-soul/alaya-protocol";
 
-import type { PreparedClaimLifecycleTransition } from "../claims/claim-service-types.js";
+import type { ElectionTransactionGuard, PreparedClaimLifecycleTransition } from "../claims/claim-service-types.js";
+import { createClaimContestedEventInput } from "../claims/claim-service-helpers.js";
 import { CoreError } from "../../shared/errors.js";
 import { isPromiseLike } from "../../shared/promise-utils.js";
 import { bindEventPublisher } from "../../runtime/event-publisher.js";
@@ -142,7 +143,9 @@ export class ArbitrationService {
 
   public async arbitrateSlot(slotId: string, options: {
       readonly dryRun?: boolean;
+      readonly transactionGuard?: ElectionTransactionGuard;
     } = {}): Promise<ArbitrationResult> {
+    if (options.transactionGuard !== undefined) this.guardElectionConnections(this.eventPublisher(), options.transactionGuard);
     const parsedSlotId = parseObjectId(slotId, "slot_id");
     const slot = await this.dependencies.slotRepo.findById(parsedSlotId);
 
@@ -156,7 +159,7 @@ export class ArbitrationService {
     const selection = await this.selectArbitrationDecision(slot, candidates);
 
     if (options.dryRun !== true) {
-      await this.applySelection(slot, candidates, selection);
+      await this.applySelection(slot, candidates, selection, options.transactionGuard);
     }
 
     const updatedSlot =
@@ -247,9 +250,9 @@ export class ArbitrationService {
     return buildSelectedWinnerDecision(selectedWinner, decisiveChallengers, incumbentId);
   }
 
-  private async applySelection(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], selection: ArbitrationSelection): Promise<void> {
+  private async applySelection(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], selection: ArbitrationSelection, transactionGuard?: ElectionTransactionGuard): Promise<void> {
     if (selection.decision === "contested") {
-      await this.markClaimsContested(candidates, new Set(selection.contestedClaimIds));
+      await this.markClaimsContested(slot, candidates, new Set(selection.contestedClaimIds), transactionGuard);
       return;
     }
 
@@ -257,13 +260,14 @@ export class ArbitrationService {
       await this.applyWinnerChange(slot, candidates, selection.winnerClaimId, {
         causedBy: TransitionCausedBy.SYSTEM,
         lifecycleReasonPrefix: "arbitration",
-        eventReasonCode: `arbitration_${selection.reason}`
+        eventReasonCode: `arbitration_${selection.reason}`,
+        transactionGuard
       });
       return;
     }
   }
 
-  private async markClaimsContested(candidates: readonly Readonly<ClaimForm>[], contestedIds: ReadonlySet<string>): Promise<void> {
+  private async markClaimsContested(slot: Readonly<Slot>, candidates: readonly Readonly<ClaimForm>[], contestedIds: ReadonlySet<string>, transactionGuard?: ElectionTransactionGuard): Promise<void> {
     for (const claim of candidates) {
       if (!contestedIds.has(claim.object_id)) {
         continue;
@@ -275,7 +279,9 @@ export class ArbitrationService {
           ClaimLifecycleState.CONTESTED,
           "arbitration_contested",
           TransitionCausedBy.SYSTEM,
-          { skipSlotElection: true }
+          { skipSlotElection: true, transactionGuard, additionalEventInputs: [createClaimContestedEventInput(
+            claim, slot.winner_claim_id === claim.object_id ? null : slot.winner_claim_id
+          )] }
         );
       }
     }
@@ -297,15 +303,30 @@ export class ArbitrationService {
       await this.prepareWinnerTransition(winnerClaim, options)
     ].filter((transition): transition is PreparedClaimLifecycleTransition => transition !== null);
     const timestamp = this.now();
-    return await this.eventPublisher().appendManyWithMutation(
+    const publisher = this.eventPublisher();
+    return await publisher.appendManyWithMutation(
       [...transitions.map((transition) => transition.eventInput), buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)],
       () => {
+        if (options.transactionGuard !== undefined) {
+          this.guardElectionConnections(publisher, options.transactionGuard);
+        }
         for (const transition of transitions) {
           transition.apply();
         }
         return this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp, slot.winner_claim_id);
       }
     );
+  }
+
+  private guardElectionConnections(publisher: ReturnType<typeof bindEventPublisher>, guard: ElectionTransactionGuard): void {
+    const identity = publisher.getStorageConnectionIdentity();
+    guard(identity);
+    if (identity === undefined || this.dependencies.slotRepo.getStorageConnectionIdentity?.() !== identity ||
+        this.dependencies.claimRepo.getStorageConnectionIdentity?.() !== identity ||
+        this.dependencies.conflictMatrixRepo.getStorageConnectionIdentity?.() !== identity ||
+        this.dependencies.claimService.getStorageConnectionIdentity?.() !== identity) {
+      throw new CoreError("CONFLICT", "Arbitration requires the election transaction connection");
+    }
   }
 
   private async loadEdgesForCandidates(candidates: readonly Readonly<ClaimForm>[]): Promise<readonly Readonly<ConflictMatrixEdge>[]> {

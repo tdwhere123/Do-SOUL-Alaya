@@ -20,6 +20,7 @@ export {
   type KpiPayload,
   type BenchmarkMeasurementAttribution,
   type QualityMetrics,
+  type MeasuredQualityMetrics,
   type RecallWeightOverridesSummary,
   type BenchPolicyShape,
   type BenchSimulateReportMode,

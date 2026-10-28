@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setInspectorToken, setWorkspaceId } from "../../api";
+import { MemorySearchResultSchema, encodeSourceDisclosure } from "@do-soul/alaya-protocol";
 import {
   STABILITY_DASH,
   linkDistance,
@@ -347,7 +348,7 @@ describe("GraphPage (react-force-graph driven)", () => {
   // /soul/search endpoint is called and its returned object_ids drive the
   // spotlight; a chip below the search bar shows the parsed window label
   // and the actual hit count (not the daemon's unsliced total_count).
-  it("calls /api/soul/search and highlights returned ids when a time expression parses", async () => {
+  it.each(["memory", "mixed", "source"])("matches graph memory identities for a valid %s Recall page", async (kind) => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify(SAMPLE_GRAPH), { status: 200 })
@@ -358,7 +359,8 @@ describe("GraphPage (react-force-graph driven)", () => {
           success: true,
           data: {
             delivery_id: "delivery-1",
-            results: [{ object_id: "n1", relevance_score: 0.9 }],
+            results: kind === "memory" ? [searchResult("memory")]
+              : kind === "source" ? [searchResult("source")] : [searchResult("memory"), searchResult("source")],
             total_count: 1
           }
         }),
@@ -371,7 +373,7 @@ describe("GraphPage (react-force-graph driven)", () => {
     await waitFor(() => {
       const chip = screen.getByTestId("search-time-window-chip");
       expect(chip.textContent).toMatch(/showing/i);
-      expect(chip.textContent).toMatch(/1 hits/);
+      expect(chip.textContent).toContain(`${kind === "source" ? 0 : 1} hits`);
     });
     await waitFor(() => {
       const searchCall = fetchMock.mock.calls.find(([url]) =>
@@ -379,6 +381,9 @@ describe("GraphPage (react-force-graph driven)", () => {
       );
       expect(searchCall).toBeDefined();
     });
+    if (kind === "source") expect(screen.getByTestId("fg-node-n1").getAttribute("data-color")).toMatch(/0\.12/);
+    else expect(screen.getByTestId("fg-node-n1").getAttribute("data-color")).not.toMatch(/0\.12/);
+    if (kind !== "source") expect(screen.getByTestId("fg-node-n3").getAttribute("data-color")).toMatch(/0\.12/);
   });
 
   // Inspector is read-only — right-click on the graph viewport never
@@ -392,3 +397,22 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(screen.getByTestId("force-graph-2d")).toBeTruthy();
   });
 });
+
+function searchResult(kind: "memory" | "source") {
+  const target = kind === "memory"
+    ? { kind: "memory_entry", workspace_id: "ws-1", object_id: "n1", source_revision: "revision" }
+    : { kind: "source_evidence", workspace_id: "ws-1", root_kind: "source_record", root_id: "source-1",
+        source_version: "revision", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null };
+  return MemorySearchResultSchema.parse({
+    ...(kind === "memory" ? { object_id: "n1" } : { source_disclosure: encodeSourceDisclosure({
+      material_kind: "retained_excerpt", source_binding: "unbound", evaluated_as_of: "2026-10-28T00:00:00.000Z",
+      validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+      proof_use: { kind: "source_only", qualification: "not_current_proof" }
+    }) }),
+    object_kind: kind === "memory" ? "memory_entry" : "source_evidence", target,
+    relevance_score: 0.9, content_preview: "source", evidence_pointers: [], selection_reason: "match", source_channels: [],
+    score_factors: { activation: 0.9, relevance: 0.9 },
+    budget_state: { token_estimate: 1, max_entries: 50, max_total_tokens: 1000,
+      remaining_entries: 49, remaining_tokens: 999, within_budget: true }
+  });
+}

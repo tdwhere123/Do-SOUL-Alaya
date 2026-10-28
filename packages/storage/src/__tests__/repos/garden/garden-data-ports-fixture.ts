@@ -1,5 +1,9 @@
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { createGardenBackgroundDataPorts } from "../../../repos/garden/garden-data-ports.js";
+import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
+import { EventPublisher } from "../../../../../core/src/runtime/event-publisher.js";
+import { createGardenProposalWriter } from "../../../../../core/src/governance/proposals/garden-proposal-writer.js";
+import { SqliteProposalRepo } from "../../../repos/proposal/sqlite-proposal-repo.js";
 
 export const trackedDatabases = new Set<StorageDatabase>();
 
@@ -13,11 +17,15 @@ export async function createFixture(): Promise<{
   seedWorkspace(database, { workspaceId: "workspace-2" });
   seedRun(database, { workspaceId: "workspace-1", runId: "run-1" });
   seedRun(database, { workspaceId: "workspace-2", runId: "run-2" });
+  const eventPublisher = new EventPublisher({ eventLogRepo: new SqliteEventLogRepo(database),
+    runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: () => {}, notifyEntry: () => {} } });
 
   return {
     database,
     ports: createGardenBackgroundDataPorts(database, {
-      now: () => "2026-04-15T00:00:00.000Z"
+      now: () => "2026-04-15T00:00:00.000Z",
+      proposalWriter: createGardenProposalWriter({ proposalRepo: new SqliteProposalRepo(database), eventPublisher,
+        now: () => "2026-04-15T00:00:00.000Z" })
     })
   };
 }

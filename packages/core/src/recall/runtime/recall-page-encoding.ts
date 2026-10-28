@@ -101,6 +101,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
       target: deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined),
       relevance_score: score, content_preview: content,
+      payload_available: fitted !== null && retainedPreview !== undefined,
       ...(disclosure === undefined ? {} : { source_disclosure: disclosure }), evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(retainedReasons === undefined ? {} : { source_lookup_reasons: retainedReasons }),
@@ -117,7 +118,8 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
 }
 
 export function frameEncodedIndex(index: InformationIndex, results: readonly MemorySearchResult[]): InformationIndex {
-  let partialPayload = results.length < index.entries.length || results.some(row => row.content_preview === "[payload omitted]");
+  const missingPayload = results.length < index.entries.length || results.some(row => row.payload_available !== true);
+  let partialPayload = missingPayload;
   const entries = index.entries.map((entry, offset) => {
     if (entry.target.kind !== "source_evidence") return entry;
     const target = results[offset]?.target;
@@ -132,7 +134,7 @@ export function frameEncodedIndex(index: InformationIndex, results: readonly Mem
   if (!partialPayload && entries.every((entry, offset) => entry === index.entries[offset])) return index;
   return { ...index, entries, completeness: { ...index.completeness,
     payload: projectPayloadCompleteness(index.completeness.payload,
-      results.some(row => row.content_preview === "[payload omitted]") || results.length < index.entries.length,
+      missingPayload,
       partialPayload),
     transport: results.length < index.entries.length && index.completeness.transport === "complete" ? "partial" : index.completeness.transport } };
 }

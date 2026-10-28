@@ -454,9 +454,8 @@ async function patchRuntimeGardenComputeEnvFile(
   if (patch.provider_kind !== undefined) {
     next.set(ALAYA_GARDEN_PROVIDER_KIND_ENV, patch.provider_kind);
   }
-  if (patch.enabled !== undefined) {
-    next.set("ALAYA_ENABLE_GARDEN_OFFICIAL", patch.enabled ? "true" : "false");
-  }
+  // Enablement is persisted in RuntimeGardenComputeConfig, not an env switch.
+  next.delete("ALAYA_ENABLE_GARDEN_OFFICIAL");
   if (patch.secret_ref !== undefined) {
     if (patch.secret_ref === null) {
       next.delete(ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV);

@@ -129,7 +129,9 @@ export class SourceIndexOperationError extends AlayaError {
   public readonly resources: SourceIndexResources;
   /** Visits owned inside the failed operation, including rolled-back copies; caller-owned visits are separate. */
   public readonly visited_roots: number;
-  public constructor(cause: unknown, completed: SourceIndexResources, visitedRoots = 0) {
+  /** Analyzer units admitted before failure; an inner operation may have recorded additional units. */
+  public readonly analysis_units: number;
+  public constructor(cause: unknown, completed: SourceIndexResources, visitedRoots = 0, analysisUnits = 0) {
     super(cause instanceof AlayaError ? cause.code : "SOURCE_INDEX_FAILED",
       cause instanceof Error ? cause.message : "Source index operation failed",
       { cause, statusCode: cause instanceof AlayaError ? cause.statusCode : undefined });
@@ -137,6 +139,7 @@ export class SourceIndexOperationError extends AlayaError {
     const nested = cause instanceof SourceIndexOperationError ? cause.resources : { work: 0, native_bytes: 0 };
     this.resources = Object.freeze({ work: completed.work + nested.work, native_bytes: completed.native_bytes + nested.native_bytes });
     this.visited_roots = visitedRoots + (cause instanceof SourceIndexOperationError ? cause.visited_roots : 0);
+    this.analysis_units = analysisUnits + (cause instanceof SourceIndexOperationError ? cause.analysis_units : 0);
   }
 }
 

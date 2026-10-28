@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenRole, GardenTaskKind, GardenTier } from "@do-soul/alaya-protocol";
 import { buildGardenTaskEvidenceFallbackSignalId, buildGardenTaskSignalId } from "../../../garden/support/task-signal-id.js";
+import { readRetainedPostTurnSource } from "./post-turn-source-fixture.js";
 import {
   cleanupGardenMcpHarnesses,
   createGardenMcpHarness
@@ -11,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("external post-turn evidence finalization", () => {
-  it("emits a stable evidence fallback when extraction returns no candidates", async () => {
+  it("keeps the admitted original without a synthetic fallback when extraction returns no candidates", async () => {
     const taskId = "post-turn-empty";
     const fallbackId = buildGardenTaskEvidenceFallbackSignalId(taskId);
     const harness = await createGardenMcpHarness({
@@ -24,14 +25,13 @@ describe("external post-turn evidence finalization", () => {
       status: "completed"
     });
 
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
-      signal_id: fallbackId,
-      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
-    });
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
+    expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
+      .toBe("User: Remember that evidence must survive extraction.");
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "completed" });
   });
 
-  it("adds a fallback when every candidate is deferred without durable evidence", async () => {
+  it("keeps the admitted original when candidates create no additional durable evidence", async () => {
     const taskId = "post-turn-deferred";
     const fallbackId = buildGardenTaskEvidenceFallbackSignalId(taskId);
     const harness = await createGardenMcpHarness({
@@ -43,12 +43,12 @@ describe("external post-turn evidence finalization", () => {
     await completeTask(harness, taskId, [candidateSignal()]);
 
     await expect(harness.signalRepo.getById(buildGardenTaskSignalId(taskId, 0))).resolves.toBeTruthy();
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
-      raw_payload: { evidence_preservation: { reason: "no_evidence_created" } }
-    });
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
+    expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
+      .toBe("User: Remember that evidence must survive extraction.");
   });
 
-  it("does not complete when the fallback lacks confirmed durable evidence", async () => {
+  it("completes from already retained evidence without claiming synthetic evidence was created", async () => {
     const taskId = "post-turn-no-durable-evidence";
     const harness = await createGardenMcpHarness({
       hasCreatedEvidence: async () => false
@@ -56,16 +56,13 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).rejects.toThrow(
-      "evidence fallback did not create durable evidence"
-    );
-    expect(harness.getGardenTask(taskId)).toMatchObject({
-      status: "pending",
-      completed_at: null
-    });
+    await expect(completeTask(harness, taskId, [])).resolves.toMatchObject({ status: "completed" });
+    expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
+      .toBe("User: Remember that evidence must survive extraction.");
+    expect(harness.database.connection.prepare("SELECT count(*) AS count FROM signals").get()).toEqual({ count: 0 });
   });
 
-  it("freezes an empty completion envelope before fallback side effects", async () => {
+  it("freezes an empty completion envelope before completion audit", async () => {
     const taskId = "post-turn-empty-retry";
     let completionAttempts = 0;
     const harness = await createGardenMcpHarness({
@@ -131,11 +128,9 @@ describe("external post-turn evidence finalization", () => {
       status: "failed"
     });
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "failed" });
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
-      signal_id: fallbackId,
-      object_kind: "source_turn",
-      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
-    });
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
+    expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
+      .toBe("User: Remember that evidence must survive extraction.");
   });
 
   it("failed post-turn complete without a durable receiver fails closed", async () => {

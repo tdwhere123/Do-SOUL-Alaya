@@ -11,14 +11,11 @@ import {
   MemoryService,
   PathRelationProposalService,
   RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
-  SynthesisService,
-  createMemoryObjectKeyWriter
+  SynthesisService
 } from "@do-soul/alaya-core";
 import {
   SqliteGardenTaskRepo,
-  SqliteHealthIssueGroupRepo,
-  SqliteMemoryObjectKeyRepo,
-  readObjectKeyEvidenceSources
+  SqliteHealthIssueGroupRepo
 } from "@do-soul/alaya-storage";
 import { TopologyService } from "@do-soul/alaya-soul";
 import { createGraphHealthService } from "../../../services/status/graph-health-service.js";
@@ -29,6 +26,7 @@ import {
 } from "./daemon-service-wiring.js";
 import { requireAtomicKarmaTransition } from "../support/karma-atomic-wiring-guard.js";
 import type { DaemonServiceFoundationInput } from "./daemon-service-foundation.js";
+import { createDaemonMemoryObjectKeyWriter } from "./memory-object-key-writer.js";
 
 type FoundationEventPublisher = ReturnType<
   typeof createSecurityStatusBootstrapServices
@@ -192,7 +190,6 @@ function createMemoryService(
   greenService: GreenService,
   gardenIntentPort: SqliteGardenTaskRepo
 ) {
-  const objectKeyRepo = new SqliteMemoryObjectKeyRepo(input.database);
   return new MemoryService({
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService,
@@ -205,12 +202,7 @@ function createMemoryService(
     },
     enrichPendingWriter: { enqueue: input.enqueueEnrichPending },
     gardenIntentPort,
-    objectKeyWriter: createMemoryObjectKeyWriter({
-      readEvidenceSources: (workspaceId, evidenceIds) =>
-        readObjectKeyEvidenceSources(input.database, workspaceId, evidenceIds),
-      replaceOwnerKeys: (workspaceId, ownerId, keys) =>
-        objectKeyRepo.replaceOwnerKeys(workspaceId, ownerId, keys)
-    })
+    objectKeyWriter: createDaemonMemoryObjectKeyWriter(input.database)
   });
 }
 

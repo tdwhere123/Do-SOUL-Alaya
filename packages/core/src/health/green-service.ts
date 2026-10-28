@@ -321,7 +321,7 @@ export class GreenService {
   }
 
   public async findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
-    return await this.dependencies.greenStatusRepo.findEligible(parseNonEmptyString(workspaceId, "workspaceId"));
+    return await this.dependencies.greenStatusRepo.findEligible(parseNonEmptyString(workspaceId, "workspaceId"), this.now());
   }
 
   public async findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {

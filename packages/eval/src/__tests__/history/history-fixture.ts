@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { KpiPayload } from "../../contracts/kpi-schema.js";
+import type { KpiPayload, MeasuredQualityMetrics } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
   "../../contracts/longmemeval-selection-contract.js";
 import { VERIFIED_TEST_DATASET_SHA256 } from
@@ -66,7 +66,7 @@ export function buildPayload(commit: string): KpiPayload {
   };
 }
 
-export function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+export function passingQualityMetrics(): MeasuredQualityMetrics {
   return {
     schema_version: "bench-quality-metrics.v1",
     non_monotonic_rate: 0,

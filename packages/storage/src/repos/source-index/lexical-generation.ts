@@ -9,6 +9,7 @@ import {
   type SourceIndexGuardedWriteResult, type SourceIndexTarget, type SourceIndexWriteResult
 } from "@do-soul/alaya-protocol";
 import { analyzeSourceIndexLexical, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
+import { advanceSegmentedLexicalDocument } from "./lexical-progress.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
@@ -83,6 +84,18 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
         ON CONFLICT(workspace_id) DO UPDATE SET selection_revision=excluded.selection_revision,
         representation=excluded.representation,active_generation_id=NULL`)
         .run(workspaceId, (previous?.selection.selection_revision ?? 0) + 1, representation);
+      return this.lexicalState(workspaceId)!.selection;
+    });
+  }
+
+  ensureLexicalSelection(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection {
+    BoundedIdSchema.parse(workspaceId); SourceIndexLexicalRepresentationSchema.parse(representation);
+    return this.atomic(() => {
+      const existing = this.lexicalState(workspaceId);
+      if (existing !== null) return existing.selection;
+      this.database.connection.prepare(`INSERT INTO source_index_lexical_selections
+        (workspace_id,selection_revision,representation,active_generation_id) VALUES(?,1,?,NULL)`)
+        .run(workspaceId, representation);
       return this.lexicalState(workspaceId)!.selection;
     });
   }
@@ -182,6 +195,35 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
     }, true);
   }
 
+  advanceLexicalDocument(workspaceId: string, generationId: string, rootKey: string, maxBytes: number,
+    budget: SourceIndexBudget): SourceIndexGuardedWriteResult & Readonly<{ analysis_units: number; complete: boolean }> {
+    assertIndexBudget(budget);
+    return this.atomic(() => {
+      const rejected = (reason: Extract<SourceIndexGuardedWriteResult, { status: "rejected" }>["reason"]) =>
+        ({ status: "rejected" as const, reason, resources: { work: 0, native_bytes: 0 }, analysis_units: 0, complete: false });
+      const generation = this.lexicalGeneration(workspaceId, generationId);
+      if (generation === null) return rejected("missing_generation");
+      const stale = this.guard(generation);
+      if (stale !== null) return rejected(stale);
+      if (generation.selection.representation !== "segmented-unicode61.v2" || readSourceIndexLexicalAnalysisStatus() !== "ready") {
+        return rejected("incomplete");
+      }
+      const source = this.target(workspaceId, generationId, rootKey);
+      if (source === null) return rejected("missing_target");
+      if (source.body_bytes > maxBytes) return rejected("incomplete");
+      if (budget.work < 1 || budget.native_bytes < 8) return rejected("read_budget");
+      const row = this.database.connection.prepare(`SELECT complete FROM source_index_lexical_targets
+        WHERE workspace_id=? AND generation_id=? AND root_key=?`).get(workspaceId, generationId, rootKey) as { complete: number };
+      if (row.complete === 1) return { status: "accepted" as const, resources: { work: 1, native_bytes: 8 },
+        analysis_units: 0, complete: true };
+      const remaining = { work: budget.work - 1, native_bytes: budget.native_bytes - 8 };
+      try {
+        const result = advanceSegmentedLexicalDocument(this.database, this.records(), source, generationId, remaining);
+        return { ...result, resources: { work: result.resources.work + 1, native_bytes: result.resources.native_bytes + 8 } };
+      } catch (error) { throw new SourceIndexOperationError(error, { work: 1, native_bytes: 8 }); }
+    });
+  }
+
   writeLexicalDocument(workspaceId: string, generationId: string, source: SourceIndexTarget, body: string,
     budget: SourceIndexBudget): SourceIndexGuardedWriteResult & Readonly<{ analysis_units: number }> {
     assertIndexBudget(budget);
@@ -198,6 +240,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
       const target = this.target(workspaceId, generationId, exact.source.root_key);
       if (target === null) return reject("missing_target");
       if (canonicalJson(target) !== canonicalJson(exact.source)) return reject("stale");
+      if (generation.selection.representation === "segmented-unicode61.v2") return reject("incomplete");
       const segmented = generation.selection.representation === "segmented-unicode61.v1";
       if (segmented && readSourceIndexLexicalAnalysisStatus() !== "ready") return reject("incomplete");
       const guard = guardSourceIndexTarget(this.database, this.records(), exact.source, budget);
@@ -215,7 +258,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
       this.database.connection.prepare(`UPDATE source_index_lexical_targets SET complete=1
         WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(workspaceId, generationId, exact.source.root_key);
       return { status: "accepted", resources, analysis_units: analysis };
-    }); } catch (error) { throw new SourceIndexOperationError(error, resources); }
+    }); } catch (error) { throw new SourceIndexOperationError(error, resources, 0, analysis); }
   }
 
   activateLexical(workspaceId: string, generationId: string): SourceIndexWriteResult {
@@ -225,7 +268,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
       const guard = this.guard(generation);
       if (guard !== null) return { status: "rejected", reason: guard };
       if (!generation.enumeration_complete || generation.completed_count !== generation.target_count ||
-          generation.selection.representation === "segmented-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
+          generation.selection.representation !== "raw-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
         return { status: "rejected", reason: "incomplete" };
       }
       this.database.connection.prepare(`UPDATE source_index_lexical_generations SET status='retired',reason='replaced'

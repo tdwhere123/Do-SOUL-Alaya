@@ -1,4 +1,5 @@
 import type { ParsedFlags, ParsedFlagsState } from "./cli-options.js";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
   const variantMap: Record<string, ParsedFlags["variant"]> = {
@@ -9,8 +10,10 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     longmemeval_s: "longmemeval_s",
     longmemeval_m: "longmemeval_m"
   };
+  const variant = variantMap[state.variantRaw];
+  if (variant === undefined) throw new AlayaError("VALIDATION", `Unsupported --variant: ${state.variantRaw}`);
   return {
-    variant: variantMap[state.variantRaw] ?? "longmemeval_oracle",
+    variant,
     limit: state.limit,
     offset: state.offset,
     historyRoot: state.historyRoot,

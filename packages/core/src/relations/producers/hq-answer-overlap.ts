@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { compareUtcInstants } from "@do-soul/alaya-protocol";
 import type {
   AnswerCoRelevancePairSourcePort,
   AnswerCoRelevancePairWitness
@@ -199,7 +200,7 @@ function buildPairWitness(
       decision_sha256: sha256(stableStringify(decision))
     },
     validFrom: evidenceReceipts.reduce(
-      (latest, receipt) => latest < receipt.source_event_anchor.occurred_at
+      (latest, receipt) => compareUtcInstants(latest, receipt.source_event_anchor.occurred_at) === -1
         ? receipt.source_event_anchor.occurred_at
         : latest,
       evidenceReceipts[0]!.source_event_anchor.occurred_at

@@ -14,6 +14,7 @@ import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import type { PathRelationProposalPayload } from "../../../repos/proposal/types.js";
 
 import {
   countGreenPiercedEvents,
@@ -29,6 +30,19 @@ import {
 import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
 const databases = trackedDatabases;
+
+function proposedPath(): PathRelationProposalPayload {
+  return {
+    target_anchor: { kind: "object_facet", object_id: createMemoryEntry().object_id, facet_key: "preference" },
+    constitution: { relation_kind: "preference", why_this_relation_exists: ["reviewed source nomination"] },
+    effect_vector: { salience: 0.5, recall_bias: 0.5, verification_bias: 0.5, unfinishedness_bias: 0,
+      default_manifestation_preference: "lens_entry" },
+    plasticity_state: { strength: 0.5, direction_bias: "source_to_target", stability_class: "normal",
+      support_events_count: 1, contradiction_events_count: 0 },
+    lifecycle: { status: "active", retirement_rule: "manual" },
+    legitimacy: { evidence_basis: ["evidence-1"], governance_class: "recall_allowed" }
+  };
+}
 
 afterEach(() => {
   for (const database of databases) {
@@ -53,8 +67,8 @@ describe("SqliteProposalRepo acceptance workflows", () => {
       workspace_id: "workspace-1",
       run_id: "run-1",
       target_object_kind: "path_relation",
-      proposed_change_summary: "Promote a strictly governed path relation",
-      proposed_path_relation: null
+      proposed_change_summary: "Apply a reviewed source path nomination",
+      proposed_path_relation: proposedPath()
     });
 
     const result = await repo.acceptPendingPathRelationGovernanceWithEvents(
@@ -92,8 +106,8 @@ describe("SqliteProposalRepo acceptance workflows", () => {
       workspace_id: "workspace-1",
       run_id: "run-1",
       target_object_kind: "path_relation",
-      proposed_change_summary: "Promote a strictly governed path relation",
-      proposed_path_relation: null
+      proposed_change_summary: "Apply a reviewed source path nomination",
+      proposed_path_relation: proposedPath()
     });
 
     markTemporalProjectionSelectedForTest(database);
@@ -118,6 +132,49 @@ describe("SqliteProposalRepo acceptance workflows", () => {
       resolution_state: "pending"
     });
     expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+  });
+
+  it.each([
+    { dossier: "inspector.strict_governance_promotion", strictPayload: false },
+    { dossier: "legacy.path_nomination", strictPayload: false },
+    { dossier: "legacy.path_nomination", strictPayload: true }
+  ])("preserves historical $dossier proposals without a blanket promotion writer (strictPayload=$strictPayload)", async ({ dossier, strictPayload }) => {
+    for (const selected of [false, true]) {
+      const { repo, database } = createRepo();
+      await createPathRelationScope(database);
+      const memoryRepo = new SqliteMemoryEntryRepo(database);
+      await memoryRepo.create(createMemoryEntry());
+      const before = await memoryRepo.findById(createMemoryEntry().object_id);
+      const proposal = createProposal({ dossier_ref: dossier });
+      await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "path_relation" });
+      if (strictPayload) {
+        const payload = { ...proposedPath(), legitimacy: { evidence_basis: ["historical-operator"], governance_class: "strictly_governed" } };
+        // Seed bytes written by a historical version; new producers cannot serialize this shape.
+        database.connection.prepare("UPDATE proposals SET proposed_path_relation=? WHERE proposal_id=?")
+          .run(JSON.stringify(payload), proposal.proposal_id);
+      }
+      if (selected) markTemporalProjectionSelectedForTest(database);
+      await expect(repo.findScopedById(proposal.proposal_id)).resolves.toMatchObject({ proposal });
+      await expect(repo.acceptPendingPathRelationGovernanceWithEvents(proposal.proposal_id,
+        "2026-03-21T03:00:00.000Z", createReviewEvents(proposal), {
+          target_object_id: proposal.derived_from!, workspace_id: "workspace-1",
+          path_id_on_create: "62222222-2222-4222-8222-222222222222", updated_at: "2026-03-21T03:00:00.000Z",
+          caused_by: `proposal_accept:${proposal.proposal_id}`
+        }, { reviewerIdentity: "user:alice" })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({ resolution_state: "pending" });
+      expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM path_relations").get()).toEqual({ count: 0 });
+      await expect(memoryRepo.findById(createMemoryEntry().object_id)).resolves.toEqual(before);
+    }
+  });
+
+  it("refuses new blanket-governance payloads before a proposal is stored", async () => {
+    const { repo } = createRepo();
+    const proposal = createProposal();
+    await expect(repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "path_relation",
+      proposed_path_relation: { ...proposedPath(), legitimacy: { evidence_basis: ["operator"], governance_class: "strictly_governed" } }
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(repo.findById(proposal.proposal_id)).resolves.toBeNull();
   });
 
   it("atomically accepts a proposal, applies memory changes, and writes audit events", async () => {

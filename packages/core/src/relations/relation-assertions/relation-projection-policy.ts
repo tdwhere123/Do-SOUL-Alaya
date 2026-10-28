@@ -24,7 +24,8 @@ export function buildTemporalPathProjection(input: Readonly<{
   readonly permittedTimelessPolicyIds: ReadonlySet<string>;
 }>): Readonly<PathRelation> | null {
   const profile = TEMPORAL_RELATION_PROJECTION_PROFILES[input.assertion.relation_kind];
-  if (profile === undefined || hasResolutionAtOrBefore(input.resolutions, input.asOf)) {
+  if (profile === undefined || compareUtcInstants(input.assertion.admitted_at, input.asOf) === 1 ||
+      hasResolutionAtOrBefore(input.resolutions, input.asOf)) {
     return null;
   }
   if (

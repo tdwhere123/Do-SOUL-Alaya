@@ -66,6 +66,24 @@ function targetKey(state: FieldEngineState): string {
 }
 
 describe("claim support dependencies through reassessment and projection", () => {
+  it("reports the atomic receipt assessment floor after bounded evidence preparation stops advancing", () => {
+    let state = field(900);
+    const receipt: { block?: { required_exploration_work: number; available_exploration_work: number } } = {};
+    let advanced = false;
+    for (let page = 0; page < 20; page++) {
+      advanced = false;
+      state = assessUnknownCause({ ...state, remaining_exploration: 6 }, { as_of: NOW,
+        on_retained_progress: () => { advanced = true; }, on_atomic_work_block: next => { receipt.block = next; } });
+      if (!advanced && receipt.block?.required_exploration_work === 12) break;
+    }
+    expect(receipt.block).toMatchObject({ required_exploration_work: 12, available_exploration_work: 5 });
+    expect(advanced).toBe(false);
+    expect(state.support_work_status).toBe("open");
+    const recovered = assessUnknownCause({ ...state, remaining_exploration: 100 }, { as_of: NOW });
+    expect(recovered.support_work_status).toBe("complete");
+    expect(recovered.claims.get(targetKey(recovered))).toBe("supported");
+  });
+
   it("retains assessment progress during an unfinished solve and reassesses when activation closes", () => {
     const prepared = field(900);
     const partial = createConditionalField({ interpretation: prepared.interpretation,

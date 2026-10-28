@@ -191,6 +191,10 @@ export type CreateGardenRuntimeInput = {
   };
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly maintenancePathReader?: {
+    findByAnchors: SqlitePathRelationRepo["findByAnchors"];
+    findActiveAll(workspaceId: string): Promise<readonly Readonly<import("@do-soul/alaya-protocol").PathRelation>[]>;
+  };
   // Legacy topology mutation is opt-in outside the temporal clean break.
   // Garden production wiring must leave this false until every mutation has
   // temporal assertion provenance.

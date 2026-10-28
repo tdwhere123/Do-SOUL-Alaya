@@ -23,6 +23,8 @@ export type NativeFieldNavigation =
     witnessFor: (target: RecallTargetRef) => RecallNavigationWitness | undefined;
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>
   | Readonly<{ status: "resource_refused";
+    constraints?: Readonly<{ work?: Readonly<{ required: number; available: number }>;
+      memory?: Readonly<{ required: number; available: number }> }>;
     witnessFor: (target: RecallTargetRef) => RecallNavigationWitness | undefined;
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>;
 
@@ -111,6 +113,7 @@ function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticR
 
 export function nativeNavigationProjection(state: FieldEngineState, values: readonly FieldValue[],
   meter: SourceSemanticResourceLedger): NativeFieldNavigation {
+  const initial = { work: meter.work, bytes: meter.bytes, spentWork: meter.spentWork, spentBytes: meter.spentBytes };
   const witnesses = new Map<string, RecallNavigationWitness>();
   try {
     const { input, navigation, catalog } = captureNativeNavigation(state, meter);
@@ -147,6 +150,12 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     // Never substitute another order on resource failure or commit a partial sort.
     return { status: "resource_refused" as const,
+      ...(error.constraints === undefined ? {} : { constraints: {
+        ...(error.constraints.work === undefined ? {} : { work: {
+          required: meter.spentWork - initial.spentWork + error.constraints.work.required, available: initial.work } }),
+        ...(error.constraints.memory === undefined ? {} : { memory: {
+          required: meter.spentBytes - initial.spentBytes + error.constraints.memory.required, available: initial.bytes } })
+      } }),
       witnessFor: (_target: RecallTargetRef): RecallNavigationWitness | undefined => undefined,
       values: { size: 0, at: (_index: number): FieldValue | undefined => undefined } };
   }

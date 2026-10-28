@@ -61,6 +61,12 @@ describe("ProposalsPage", () => {
     expect(screen.getByRole("button", { name: "Accept" })).toHaveProperty("disabled", false);
   });
 
+  it("retains the producer total when only a truncated pending page was returned", async () => {
+    fetchMock.mockResolvedValueOnce(pendingResponse([pendingProposal()], 73));
+    renderProposals();
+    expect(await screen.findByText(/Showing 1 of 73 pending proposals/)).toBeTruthy();
+  });
+
   it("disables accept when proposed_changes is unavailable", async () => {
     fetchMock.mockResolvedValueOnce(pendingResponse([{ ...pendingProposal(), proposed_changes: null }]));
 
@@ -177,13 +183,13 @@ function pendingProposal(): PendingProposalFixture {
   };
 }
 
-function pendingResponse(proposals: readonly PendingProposalFixture[]) {
+function pendingResponse(proposals: readonly PendingProposalFixture[], totalCount = proposals.length) {
   return new Response(
     JSON.stringify({
       success: true,
       data: {
         proposals,
-        total_count: proposals.length
+        total_count: totalCount
       }
     }),
     { status: 200 }

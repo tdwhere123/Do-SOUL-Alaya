@@ -1,4 +1,5 @@
 import type { KpiPayload, QualityMetrics } from "@do-soul/alaya-eval";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   accumulateMergedQualityMetric,
   buildMergedQualityMetrics,
@@ -20,6 +21,9 @@ export function mergeQualityMetrics(
   const state = createMergeQualityMetricsState();
   for (const metric of metrics) {
     if (metric !== undefined) {
+      if (metric.schema_version !== "bench-quality-metrics.v1") {
+        throw new AlayaError("VALIDATION", "merge refused: shard diagnostic quality facets are unavailable");
+      }
       accumulateMergedQualityMetric(state, metric);
     }
   }

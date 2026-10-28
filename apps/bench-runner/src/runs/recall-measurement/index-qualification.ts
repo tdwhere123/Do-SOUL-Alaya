@@ -83,6 +83,7 @@ export function frozenIndexMetadataMatchesNativeBinding(frozen: FrozenSourceInde
   native: SourceIndexSnapshotFact | null): boolean {
   if (native === null || native.workspace_id !== frozen.workspace_id || native.source_epoch !== frozen.index.source_epoch) return false;
   return canonicalJson(native.query_state) === canonicalJson(frozen.index.query_state)
+    && canonicalJson(native.lexical) === canonicalJson(frozen.index.lexical)
     && canonicalJson(native.selection) === canonicalJson(frozen.index.selection)
     && canonicalJson(native.generation) === canonicalJson(frozen.index.generation);
 }

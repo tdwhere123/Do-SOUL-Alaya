@@ -396,7 +396,7 @@ export class MemoryWriteService {
     const findByIds = this.dependencies.evidenceService.findByIds;
     if (findByIds !== undefined) {
       const evidence = await findByIds.call(this.dependencies.evidenceService, workspaceId, distinctEvidenceRefs);
-      const foundEvidenceRefs = new Set(evidence.map((entry) => entry.object_id));
+      const foundEvidenceRefs = new Set(evidence.filter((entry) => entry.lifecycle_state !== "tombstone").map((entry) => entry.object_id));
       const firstMissing = distinctEvidenceRefs.find((evidenceRef) => !foundEvidenceRefs.has(evidenceRef));
       if (firstMissing !== undefined) {
         throw new CoreError("VALIDATION", `Evidence reference not found: ${firstMissing}`);
@@ -412,7 +412,8 @@ export class MemoryWriteService {
     );
 
     const firstMissing = results.find(
-      (result) => result.evidence === null || result.evidence.workspace_id !== workspaceId
+      (result) => result.evidence === null || result.evidence.workspace_id !== workspaceId ||
+        result.evidence.lifecycle_state === "tombstone"
     );
 
     if (firstMissing !== undefined) {

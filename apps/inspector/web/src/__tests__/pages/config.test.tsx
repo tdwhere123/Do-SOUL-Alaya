@@ -35,6 +35,12 @@ function renderConfigSection(meta: SectionMeta) {
 }
 
 describe("ConfigPage", () => {
+  it("persists an initial section load failure without a synced indicator", async () => {
+    fetchMock.mockRejectedValue(new Error("offline"));
+    renderConfigSection({ key: "soul", title: "SOUL", icon: null });
+    expect((await screen.findByRole("alert")).textContent).toContain("offline");
+    expect(screen.queryByTestId("dirty-dot-soul")).toBeNull();
+  });
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -66,6 +72,11 @@ describe("ConfigPage", () => {
           secret_ref: null,
           embedding_enabled: false
         });
+      }
+      if (url.endsWith("/embedding-status/ws-1")) {
+        return jsonResponse({ success: true, data: { workspace_id: "ws-1", embedding_enabled: false,
+          provider_configured: false, model_id: null, storage_available: true, effective_mode: "keyword_only",
+          degraded_reason: null, checked_at: "2026-10-28T00:00:00.000Z" } });
       }
       if (url.endsWith("/config/ws-1/garden-compute")) {
         return jsonResponse({

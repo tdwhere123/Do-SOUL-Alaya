@@ -18,7 +18,8 @@ import { type ObserverReaders } from "../conditional-field/observers/observe.js"
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectFromField, annotatePublicIndex, invalidatedPublicIndex } from "./recall-field-projection.js";
 import { deliveryBudgetOf } from "./recall-page-fit.js";
-import { prepareRecallProgressDelivery, progressExecutionBudget, type RecallProgressDelivery } from "./recall-progress-delivery.js";
+import { observedRecallProgressDelivery, prepareRecallProgressDelivery, progressExecutionBudget,
+  type RecallObservationWorkBlock, type RecallProgressDelivery } from "./recall-progress-delivery.js";
 import {
   captureEffectiveAsOf,
   normalizeQueryText,
@@ -34,7 +35,8 @@ import {
   prepareFieldCommit,
   preparedDeliveryId,
   invalidateFieldDelivery,
-  restoreField
+  restoreField,
+  assertMembershipContinuation
 } from "./index-continuation.js";
 import {
   captureIndexPreviews,
@@ -357,8 +359,17 @@ function runCompiledConditionalFieldRecall(
       interpretationIdentity({ interpretation_clock: restored.interpretation.interpretation_clock })));
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
+  if (input.payload_continuation === undefined) assertMembershipContinuation(input.continuation);
   const progressDelivery = prepareRecallProgressDelivery(input, interpretation, restored, cost);
   const executionBudget = progressExecutionBudget(input.budget, progressDelivery);
+  const freshExploration = Math.max(0, executionBudget.work_units - executionBudget.finalization_reserve);
+  const observation: { block?: RecallObservationWorkBlock } = {};
+  const recordWorkBlock = (block: RecallObservationWorkBlock) => {
+    if (observation.block === undefined || block.required_exploration_work > observation.block.required_exploration_work) {
+      observation.block = block;
+    }
+  };
+  let observationAdvanced = false;
   let reusedCostOwner: FieldEngineState | undefined;
   const field = cost.time("observe", () => observeField(interpretation, {
     workspace_id: input.workspace_id,
@@ -367,6 +378,8 @@ function runCompiledConditionalFieldRecall(
     as_of: input.as_of,
     readers: input.readers,
     cost,
+    on_atomic_work_block: recordWorkBlock,
+    on_retained_progress: () => { observationAdvanced = true; },
     on_reused_cost_owner: (owner) => { reusedCostOwner = owner; },
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
     ...(input.source_id === undefined ? {} : { source_id: input.source_id }),
@@ -376,14 +389,20 @@ function runCompiledConditionalFieldRecall(
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   }));
   // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
-  cost.add("observe", thisRequestObservedWork(reusedCostOwner, field, input.budget.memory_bytes));
+  const observedWork = thisRequestObservedWork(reusedCostOwner, field, input.budget.memory_bytes);
+  cost.add("observe", observedWork);
   // Release the uncommitted retention hold into projection; its commit owner
   // will debit it exactly once for whichever fitted response is acknowledged.
   const assessed = assessUnknownCause({ ...field,
-    remaining_memory_bytes: field.remaining_memory_bytes + progressDelivery.retention_hold }, input);
+    remaining_memory_bytes: field.remaining_memory_bytes + progressDelivery.retention_hold },
+    { ...input, on_retained_progress: () => { observationAdvanced = true; },
+      on_atomic_work_block: recordWorkBlock });
+  const progress = observedRecallProgressDelivery(progressDelivery, field, { block: observation.block,
+    advanced: observationAdvanced || observedWork.relaxations > 0 || observedWork.state_creates > 0,
+    fresh_exploration: freshExploration, fresh_execution: executionBudget.work_units });
   cost.add("index", { charged_retained_bytes: Math.max(0,
     (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });
-  const projected = projectMeasuredField(assessed, input, interpretation, cost, restored, progressDelivery);
+  const projected = projectMeasuredField(assessed, input, interpretation, cost, restored, progress);
   const index = projected.index;
   let retained = projected.retained;
   if (restoredFieldFootprint(retained) <= input.budget.memory_bytes) {
@@ -412,7 +431,7 @@ function runCompiledConditionalFieldRecall(
   // Keep resume under the request token so a last page (response continuation
   // null) can still replay the same issued delivery_id.
   if (pendingIssuedDeliveryOf(index) !== undefined) {
-    stageIndexField(index, prepareFieldCommit(retained, index.continuation ?? input.continuation ?? null));
+    stageIndexField(index, prepareFieldCommit(retained, index.continuation ?? input.continuation ?? null, index));
   }
   cost.recordRetainedLevels(retainedFieldLevels(retained, input.budget.memory_bytes));
   return index;

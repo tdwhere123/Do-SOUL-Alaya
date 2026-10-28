@@ -1,4 +1,5 @@
 import { DYNAMICS_CONSTANTS } from "@do-soul/alaya-protocol";
+import { LOW_ACTIVITY_MEMORY_SQL } from "../memory-entry/low-activity-predicate.js";
 import {
   BOUNDARY_COLD_TIER,
   HOT_DEMOTION_LIMIT
@@ -79,9 +80,7 @@ export function createDormantDemotionPort(
     FROM memory_entries
     WHERE workspace_id = ?
       AND lifecycle_state = '${ACTIVE_STATE}'
-      AND storage_tier = 'hot'
-      AND COALESCE(activation_score, 0.0) <= ?
-      AND COALESCE(last_hit_at, last_used_at, created_at) <= ?
+      AND ${LOW_ACTIVITY_MEMORY_SQL}
     ORDER BY COALESCE(activation_score, 0.0) ASC,
              COALESCE(last_hit_at, last_used_at, created_at) ASC,
              object_id ASC
@@ -93,6 +92,7 @@ export function createDormantDemotionPort(
     SET lifecycle_state = 'dormant', updated_at = ?
     WHERE object_id = ?
       AND lifecycle_state = '${ACTIVE_STATE}'
+      AND ${LOW_ACTIVITY_MEMORY_SQL}
   `);
 
   return {
@@ -105,7 +105,8 @@ export function createDormantDemotionPort(
       ) as readonly GardenLowActivityMemoryRecord[];
     },
     setLifecycleDormant: async (memoryId) => {
-      const result = setDormantStatement.run(context.now(), memoryId);
+      const now = context.now();
+      const result = setDormantStatement.run(now, memoryId, SILENT_ACTIVATION_BAND, addMilliseconds(now, -Math.max(0, IDLE_WINDOW_MS)));
       return result.changes === 0 ? "skipped" : "demoted";
     }
   };

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { assertRecallConsumerCompatibility, capableRecallConsumerDeclaration } from "@do-soul/alaya-core";
 import { sourceDisclosure, type EvidenceTextDisclosures, AcceptedBy } from "@do-soul/alaya-protocol";
 import { registerMemoryRoutes } from "../../routes/memory/entries/memories.js";
 import { registerRecallRoutes } from "../../routes/memory/recall/recall.js";
@@ -67,10 +68,10 @@ describe("routes-memory port batch", () => {
       resolveStrategy: vi.fn(() => "chat")
     };
     const recallService = {
-      recall: vi.fn(async () => ({
-        candidates: [{ object_id: "memory-1" }],
-        degradation_reason: "warm_cascade_engaged"
-      }))
+      recall: vi.fn(async (request: Parameters<typeof assertRecallConsumerCompatibility>[0]) => {
+        assertRecallConsumerCompatibility(request);
+        return { candidates: [{ object_id: "memory-1" }], degradation_reason: "warm_cascade_engaged" };
+      })
     };
 
     const app = new Hono();
@@ -98,7 +99,8 @@ describe("routes-memory port batch", () => {
       taskSurface,
       workspaceId: "ws-1",
       runId: "run-1",
-      strategy: "build"
+      strategy: "build",
+      ...capableRecallConsumerDeclaration()
     });
   });
 

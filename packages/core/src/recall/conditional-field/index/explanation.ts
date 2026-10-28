@@ -19,7 +19,7 @@ export type ExplanationSelectionInput = Readonly<{
   readonly support?: readonly SupportRecord[];
   readonly derivations?: readonly Derivation[];
   readonly derivation_forest?: ReadonlyMap<string, Derivation>;
-  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
+  readonly output_derivation_roots?: Readonly<{ get(key: string): readonly string[] | undefined }>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
   readonly page_budget: number;
   readonly expand_payload: boolean;
@@ -39,9 +39,15 @@ export function mixedPayloadGeneration(
   return payloadGeneration !== undefined && payloadGeneration !== snapshotId;
 }
 
+export function hasDerivationForest(input: Readonly<{
+  derivation_forest?: ReadonlyMap<string, Derivation>; derivations?: readonly Derivation[];
+}>): boolean {
+  return input.derivation_forest !== undefined || (input.derivations?.length ?? 0) > 0;
+}
+
 export function explanationIdsForEntry(input: ExplanationSelectionInput): readonly string[] {
   if (!input.expand_payload) return [];
-  if (input.derivation_forest !== undefined || (input.derivations !== undefined && input.derivations.length > 0)) {
+  if (hasDerivationForest(input)) {
     return derivationExplanationIds(input);
   }
   return witnessExplanationIds(input);
@@ -120,24 +126,9 @@ export function witnessAttributionHandle(input: Readonly<{
 
 function derivationExplanationIds(input: ExplanationSelectionInput): readonly string[] {
   if (input.derivation_forest !== undefined) {
-    const owned = input.output_derivation_roots?.get(productStateNodeId(input.value.state)) ?? [];
-    return owned.filter((id) => {
-      const node = input.derivation_forest!.get(id);
-      return node !== undefined && derivationIsFeasible(node, input.support, input.page_budget);
-    });
+    return input.output_derivation_roots?.get(productStateNodeId(input.value.state)) ?? [];
   }
-  const forest = input.derivations ?? [];
-  const owned = new Set(input.output_derivations?.[productStateNodeId(input.value.state)] ?? []);
-  const ids: string[] = [];
-  for (const derivation of forest) {
-    if (!owned.has(derivation.derivation_id)) continue;
-    const recovered = recoverExplanationForest([derivation.derivation_id], forest);
-    if (recovered.length === 0) continue;
-    // Page budget omits a witness; it cannot revoke membership of this product.
-    if (!derivationIsFeasible(derivation, input.support, input.page_budget)) continue;
-    ids.push(derivation.derivation_id);
-  }
-  return ids;
+  return input.output_derivations?.[productStateNodeId(input.value.state)] ?? [];
 }
 
 function witnessExplanationIds(input: ExplanationSelectionInput): readonly string[] {

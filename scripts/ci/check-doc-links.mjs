@@ -18,6 +18,7 @@ const LIVE_CLI_VERBS = Object.freeze([
   "mcp",
   "review",
   "source-grounding-defers",
+  "source-index-lexical",
   "status",
   "temporal-cutover",
   "tools",

@@ -18,6 +18,7 @@ export interface EventLogRepo {
     page: EventLogPageOptions
   ): Promise<readonly EventLogEntry[]>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryByEntityInCurrentTransaction(entityType: string, entityId: string): readonly EventLogEntry[];
   queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   queryByRunPage?(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]>;
   queryByRun(runId: string): Promise<readonly EventLogEntry[]>;

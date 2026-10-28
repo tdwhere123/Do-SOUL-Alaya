@@ -61,6 +61,12 @@ export interface SemanticEnrichmentTask {
   readonly attempts: number;
 }
 
+/** The configured formation authority validates this current task and work. */
+export interface SemanticArtifactAccess {
+  readonly task: SemanticEnrichmentTask;
+  readonly work: SemanticArtifactWork;
+}
+
 export interface SemanticTransportAttempt {
   readonly id: string;
   readonly taskId: string;
@@ -100,7 +106,7 @@ export interface SemanticArtifactRepositoryPort {
   task(workspaceId: string, taskId: string): SemanticEnrichmentTask | null;
   claim(task: SemanticEnrichmentTask, token: string, now: string): boolean;
   recover(task: SemanticEnrichmentTask): boolean;
-  artifact(workspaceId: string, key: string): AdmittedSemanticArtifact | null;
+  artifact(workspaceId: string, key: string, access?: SemanticArtifactAccess): AdmittedSemanticArtifact | null;
   attempt(taskId: string, key: string): SemanticTransportAttempt | null;
   acquireWork(task: SemanticEnrichmentTask, key: string, expiredBefore: string): boolean;
   beginReconcile(task: SemanticEnrichmentTask, attemptId: string): void;
@@ -124,6 +130,7 @@ export interface SemanticArtifactRepositoryPort {
     readonly projectionRowsRead: number;
     readonly sourceRowsRead: number;
     readonly intentRowsRead: number;
+    readonly privacyRowsRead?: number;
     readonly bytesRead: number;
     readonly truncated: boolean;
     readonly byteAccounting: "utf8_candidate_and_validation_columns";

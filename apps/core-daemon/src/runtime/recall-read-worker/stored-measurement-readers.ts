@@ -87,9 +87,12 @@ function measureStoredPairs(database: StorageDatabase, input: MeasureStoredPairs
   const resolved = resolvePairProfile(database, input, uniqueIds[0]!);
   if (resolved.kind === "absent") return resolved.measurement;
   const profile = resolved.profile;
+  if (uniqueIds.length > 256) {
+    return { byObjectId: {}, resourceLimited: true, rowVisits: resolved.metadataWork, bytesRead: resolved.metadataBytes };
+  }
   const reservedBytes = uniqueIds.length * (profile.dimensions * 4 + 2048) + (profile.dimensions * 4 + 2048) + 256;
   if (reservedBytes + resolved.metadataBytes > (input.byteLimit ?? 65536)
-    || profile.dimensions * Math.min(2, uniqueIds.length) + resolved.metadataWork + 3 > (input.workLimit ?? 16388)) {
+    || profile.dimensions * uniqueIds.length + resolved.metadataWork + 2 * uniqueIds.length + 3 > (input.workLimit ?? 16388)) {
     return { byObjectId: {}, resourceLimited: true, rowVisits: resolved.metadataWork, bytesRead: resolved.metadataBytes };
   }
   const options = {
@@ -99,7 +102,7 @@ function measureStoredPairs(database: StorageDatabase, input: MeasureStoredPairs
     expectedDimensions: profile.dimensions,
     maxVectorBytes: profile.dimensions * 4,
     maxMetadataUtf8Bytes: 2048,
-    maxRows: uniqueIds.length,
+    maxRows: uniqueIds.length * 2,
     maxObjectIds: uniqueIds.length
   };
   const objectRead = readBoundedEmbeddings(database, input.workspaceId, uniqueIds, options);
@@ -130,7 +133,7 @@ function measureStoredPairs(database: StorageDatabase, input: MeasureStoredPairs
   }
   return {
     byObjectId,
-    rowVisits: resolved.metadataWork + objectRead.records.length + (query.rowVisits > 0 ? query.rowVisits : 1),
+    rowVisits: resolved.metadataWork + objectRead.rowVisits + query.rowVisits,
     bytesRead: objectBytes + query.bytesRead,
     ...(query.resourceLimited === true ? { resourceLimited: true } : {})
   };
@@ -217,14 +220,14 @@ function loadQueryVector(
     expectedDimensions: profile.dimensions,
     maxVectorBytes: profile.dimensions * 4,
     maxMetadataUtf8Bytes: 2048,
-    maxRows: 1,
+    maxRows: 2,
     maxObjectIds: 1
   });
   const query = queryRead.records[0];
   return {
     vector: query === undefined ? null : vector(query),
     status: query === undefined ? "unavailable" : "ready",
-    rowVisits: 2,
+    rowVisits: 1 + queryRead.rowVisits,
     bytesRead: Buffer.byteLength(queryId.object_id, "utf8") + queryRead.vectorBytes + queryRead.metadataUtf8Bytes
   };
 }

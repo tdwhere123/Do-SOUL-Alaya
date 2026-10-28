@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,19 @@ import {
 } from "../../../runtime/startup/database.js";
 
 describe("daemon startup database", () => {
+  it("retires the installed worker when database initialization fails", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-daemon-invalid-database-"));
+    const filename = join(directory, "invalid.db");
+    writeFileSync(filename, "not a SQLite database");
+    try {
+      await expect(openDaemonDatabase(filename)).rejects.toThrow();
+      expect(getSqliteWriteQueuePort()).toBeNull();
+    } finally {
+      await closeDaemonSqliteWriteQueue();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses the storage default busy timeout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-daemon-database-test-"));
     const database = await openDaemonDatabase(join(directory, "alaya.db"));

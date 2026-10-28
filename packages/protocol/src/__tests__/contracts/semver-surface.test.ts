@@ -21,6 +21,7 @@ import * as MemoryGovernanceEvents from "../../events/memory-governance.js";
 import * as MessageDeltaEvents from "../../events/message-delta.js";
 import * as ObligationTrustNarrativeEvents from "../../events/obligation-trust-narrative.js";
 import * as ProjectMappingEvents from "../../events/project-mapping.js";
+import * as PrivacyRedactionEvents from "../../events/privacy-redaction.js";
 import * as RecallContextEvents from "../../events/recall-context.js";
 import * as RuntimeGovernanceEvents from "../../events/runtime-governance.js";
 import * as SignalEvents from "../../events/signal.js";
@@ -32,12 +33,14 @@ import * as WorkerRuntimeEvents from "../../events/worker-runtime.js";
 import * as WorkspaceRunEvents from "../../events/workspace-run.js";
 import * as TrustState from "../../governance/trust-state.js";
 import * as McpTypes from "../../surfaces/mcp-types.js";
+import { deriveJsonSchema } from "../../surfaces/mcp-json-schema.js";
 import * as BudgetSnapshot from "../../lifecycle/budget-snapshot.js";
 import * as EdgeProposal from "../../relations/edge-proposal.js";
 import * as MemoryEntry from "../../memory/memory-entry.js";
 import * as MemoryGraph from "../../memory/memory-graph.js";
 import * as ObjectKind from "../../memory/object-kind.js";
 import * as Proposal from "../../governance/proposal.js";
+import * as Resolution from "../../governance/resolution.js";
 import * as RecallCandidate from "../../recall/recall-candidate.js";
 import * as RecallPolicy from "../../recall/recall-policy.js";
 
@@ -80,6 +83,7 @@ const mcpSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/memory/memory-graph.ts", exports: MemoryGraph },
   { module: "packages/protocol/src/memory/object-kind.ts", exports: ObjectKind },
   { module: "packages/protocol/src/governance/proposal.ts", exports: Proposal },
+  { module: "packages/protocol/src/governance/resolution.ts", exports: Resolution },
   { module: "packages/protocol/src/recall/recall-candidate.ts", exports: RecallCandidate },
   { module: "packages/protocol/src/recall/recall-policy.ts", exports: RecallPolicy }
 ];
@@ -99,6 +103,7 @@ const eventSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/events/message-delta.ts", exports: MessageDeltaEvents },
   { module: "packages/protocol/src/events/obligation-trust-narrative.ts", exports: ObligationTrustNarrativeEvents },
   { module: "packages/protocol/src/events/project-mapping.ts", exports: ProjectMappingEvents },
+  { module: "packages/protocol/src/events/privacy-redaction.ts", exports: PrivacyRedactionEvents },
   { module: "packages/protocol/src/events/recall-context.ts", exports: RecallContextEvents },
   { module: "packages/protocol/src/events/runtime-governance.ts", exports: RuntimeGovernanceEvents },
   { module: "packages/protocol/src/events/signal.ts", exports: SignalEvents },
@@ -124,6 +129,18 @@ const wrapperTypeNames = new Set([
 ]);
 
 describe("semver-surface", () => {
+  it("covers every registered public request and both resolution boundary schemas", () => {
+    const roots = new Set(collectMcpRootSchemas().map(({ schema }) => schema));
+    const publishedRoots = new Set([...roots].map((schema) => stableStringify(deriveJsonSchema(schema))));
+    for (const [tool, request] of Object.entries(McpTypes.soulToolJsonSchemas)) {
+      expect(publishedRoots.has(stableStringify(request)), `uncollected public request: ${tool}`).toBe(true);
+    }
+    expect(roots.has(Resolution.SoulResolveRequestSchema)).toBe(true);
+    expect(roots.has(Resolution.SoulResolveResponseSchema)).toBe(true);
+    const names = computeMcpSurface().reachableSchemas.map(({ schema }) => schema);
+    expect(names).toContain("SoulResolveRequestSchema");
+    expect(names).toContain("SoulResolveResponseSchema");
+  });
   it("snapshots the public MCP, EventLog, and runtime config surface", () => {
     const mcpSurface = computeMcpSurface();
 
@@ -192,6 +209,10 @@ describe("semver-surface", () => {
         `semver-surface.sidecar.json to { "version": "${currentVersion}", "surfaceHash": "${currentHash}" }.`
     ).not.toBe(sidecar.version);
   });
+
+  it("pins the current checked package and computed surface in the sidecar", () => {
+    expect(sidecar).toEqual({ version: readPackageVersion(), surfaceHash: sha256(computeSurfaceSource()) });
+  });
 });
 
 function computeMcpSurface(): ReturnType<typeof collectMcpSurface> {
@@ -245,7 +266,7 @@ function collectMcpSurface(
 
 function collectMcpRootSchemas(): readonly Readonly<{ readonly name: string; readonly schema: z.ZodTypeAny }>[] {
   return Object.freeze(
-    [...Object.entries(McpTypes), ...Object.entries(mcpEdgeProposalRootSchemas)]
+    [...Object.entries(McpTypes), ...Object.entries(mcpEdgeProposalRootSchemas), ...Object.entries(Resolution)]
       .filter(([name, value]) => /^(Soul|Garden|MemorySearch).*Schema$/.test(name) && isZodSchema(value))
       // isZodSchema narrows in the filter predicate but the guard does not flow
       // through tuple destructuring into the mapped element type.

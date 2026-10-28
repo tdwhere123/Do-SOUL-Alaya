@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, symlinkSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -47,7 +47,7 @@ function locateLiveDb(env, cwd = repoRoot) {
   return { configDir: line.slice(0, tab), dbPath: line.slice(tab + 1) };
 }
 
-test("install.sh prints a pnpm 12-compatible optional embedding command", () => {
+test("install.sh describes the required ONNX runtime and explicit model provisioning", () => {
   const source = readFileSync(installScript, "utf8");
   const uninstallSource = readFileSync(uninstallScript, "utf8");
   assert.doesNotMatch(source, /ALAYA_BIN_DIR=\/usr\//);
@@ -55,10 +55,11 @@ test("install.sh prints a pnpm 12-compatible optional embedding command", () => 
   assert.match(uninstallSource, /\. "\$SCRIPT_DIR\/install\.sh"/);
   assert.doesNotMatch(uninstallSource, /\beval\b|awk '\/\^reject_unsafe_path/);
   assert.doesNotMatch(source, /pnpm add .*--no-frozen-lockfile/);
-  assert.match(
-    source,
-    /pnpm --dir \\"\$\{ALAYA_HOME\}\\" add @huggingface\/transformers@4\.2\.0 --filter @do-soul\/alaya-core/
-  );
+  const corePackage = JSON.parse(readFileSync(path.join(repoRoot, "packages/core/package.json"), "utf8"));
+  assert.ok(source.includes(`@huggingface/transformers@${corePackage.dependencies["@huggingface/transformers"]}`));
+  assert.match(source, /node \$\{ALAYA_HOME\}\/scripts\/fetch-local-embedding-model\.mjs/);
+  assert.doesNotMatch(source, /optional; default install skips|@huggingface\/transformers@4\.2\.0/);
+  assert.ok(source.indexOf('node ./scripts/vacuum-into.mjs') < source.indexOf('node ./bin/alaya.mjs --help'));
 });
 
 test("install.sh rejects a tarball whose package.json version does not match the tag", () => {
@@ -93,6 +94,64 @@ test("install.sh rejects a tarball whose package.json version does not match the
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+});
+
+test("installer snapshots live storage before invoking the staged CLI bootstrap", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-install-backup-order-"));
+  try {
+    const prefixName = "do-soul-alaya-0.3.11";
+    const prefix = path.join(work, prefixName);
+    const fakeBin = path.join(work, "commands");
+    const configDir = path.join(work, "config");
+    const liveDb = path.join(configDir, "alaya.db");
+    mkdirSync(path.join(prefix, "scripts"), { recursive: true });
+    mkdirSync(path.join(prefix, "bin"));
+    mkdirSync(fakeBin); mkdirSync(configDir);
+    writeFileSync(liveDb, "pre-upgrade-storage");
+    writeFileSync(path.join(prefix, "package.json"), JSON.stringify({ version: "0.3.11" }));
+    writeFileSync(path.join(fakeBin, "pnpm"), '#!/bin/sh\nif [ "$1" = "--version" ]; then printf "12.3.4\\n"; fi\n', { mode: 0o755 });
+    writeFileSync(path.join(prefix, "scripts/resolve-live-db-path.mjs"),
+      'process.stdout.write(process.env.ALAYA_CONFIG_DIR + "\\t" + process.env.FIXTURE_LIVE_DB + "\\n");\n');
+    writeFileSync(path.join(prefix, "scripts/vacuum-into.mjs"),
+      'import fs from "node:fs"; import path from "node:path"; fs.mkdirSync(path.dirname(process.argv[3]), {recursive:true}); fs.copyFileSync(process.argv[2], process.argv[3]);\n');
+    writeFileSync(path.join(prefix, "bin/alaya.mjs"),
+      'import fs from "node:fs"; fs.writeFileSync(process.env.FIXTURE_LIVE_DB, "upgraded-by-bootstrap");\n');
+    const tarball = path.join(work, `${prefixName}.tar.gz`);
+    const tar = spawnSync("tar", ["-czf", tarball, prefixName], { cwd: work, encoding: "utf8" });
+    assert.equal(tar.status, 0, tar.stderr);
+    const sums = path.join(work, "SHA256SUMS");
+    writeFileSync(sums, `${createHash("sha256").update(readFileSync(tarball)).digest("hex")}  ${prefixName}.tar.gz\n`);
+    const result = spawnSync("bash", [installScript], { cwd: work, encoding: "utf8", env: {
+      ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, HOME: path.join(work, "operator-home"),
+      ALAYA_VERSION: "v0.3.11", ALAYA_LOCAL_TARBALL: tarball, ALAYA_LOCAL_SHA256SUMS: sums,
+      ALAYA_HOME: path.join(work, "install"), ALAYA_BIN_DIR: path.join(work, "bin"),
+      ALAYA_CONFIG_DIR: configDir, FIXTURE_LIVE_DB: liveDb
+    } });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const backups = readdirSync(path.join(configDir, "backups"));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(path.join(configDir, "backups", backups[0]), "utf8"), "pre-upgrade-storage");
+    assert.equal(readFileSync(liveDb, "utf8"), "upgraded-by-bootstrap");
+  } finally { rmSync(work, { recursive: true, force: true }); }
+});
+
+test("uninstall reports a canceled detach before removing the launcher", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-canceled-detach-"));
+  try {
+    const commands = path.join(work, "commands");
+    const install = path.join(work, "install");
+    mkdirSync(commands); mkdirSync(install);
+    writeFileSync(path.join(commands, "alaya"), '#!/bin/sh\nprintf "canceled\\n"\nexit 77\n', { mode: 0o755 });
+    const result = runUninstall(work, {
+      PATH: `${commands}${path.delimiter}${process.env.PATH}`, HOME: path.join(work, "operator-home"),
+      ALAYA_HOME: install, ALAYA_BIN_DIR: path.join(work, "bin"), ALAYA_CONFIG_DIR: path.join(work, "config"),
+      ALAYA_DETACH_TARGETS: "codex"
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /detach codex failed/);
+    assert.match(result.stderr, /detach failed for: codex/);
+    assert.equal(existsSync(install), false);
+  } finally { rmSync(work, { recursive: true, force: true }); }
 });
 
 test("live db locator follows ALAYA_CONFIG_DIR then XDG_CONFIG_HOME then ~/.config/alaya", () => {

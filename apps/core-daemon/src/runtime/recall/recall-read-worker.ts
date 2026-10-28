@@ -67,7 +67,7 @@ async function handleRequest(message: unknown): Promise<void> {
         message.operation === "conditionalField.sourceSemantics" || message.operation === "conditionalField.recall") &&
         !active.database.connection.inTransaction &&
         readCjkSegmentationStatus() === "uninitialized" && active.database.connection.prepare(
-          `SELECT 1 FROM source_index_lexical_selections WHERE representation='segmented-unicode61.v1'
+          `SELECT 1 FROM source_index_lexical_selections WHERE representation IN ('segmented-unicode61.v1','segmented-unicode61.v2')
             AND active_generation_id IS NOT NULL LIMIT 1`).get() !== undefined) {
       await warmCjkSegmentation();
     }

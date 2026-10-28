@@ -11,6 +11,9 @@ import { seedProgramStates } from "../../../../recall/conditional-field/engine/p
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
 import { ObservedRelations } from "../../../../recall/conditional-field/engine/observed-relations.js";
 import { sequenceReachAccountBytes } from "../../../../recall/conditional-field/engine/sequence-reach.js";
+import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
+import { ExplanationDelivery } from "../../../../recall/conditional-field/index/explanation-delivery.js";
+import { restoredFieldFootprint, restoredFieldRemainingMemory } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
@@ -119,6 +122,29 @@ function observeObligation(state: FieldEngineState): boolean {
 }
 
 describe("withdraw after a path pass", () => {
+  it("releases discarded proof cursors without refunding admitted allocation", () => {
+    const initial = seeded(hop("p", "x", "y"));
+    const grounding = groundedOutputDerivations({ seeds: initial.seeds, transitions: [], derivations: [],
+      transition_derivations: {}, allowance: 3, memory_bytes: 10_000 }).progress;
+    const explanation = new ExplanationDelivery([], [], undefined, 1, 224);
+    const proofBytes = grounding.retained_bytes + explanation.retainedBytes;
+    expect(proofBytes).toBeGreaterThan(0);
+    const priorFootprint = restoredFieldFootprint(initial);
+    const before = { ...initial, grounding_progress: grounding, explanation_progress: explanation,
+      remaining_memory_bytes: initial.remaining_memory_bytes - proofBytes,
+      accounted_retained_bytes: priorFootprint + proofBytes };
+    const baseline = withdrawDerivationLeaves(initial, "withdrawn");
+    const after = withdrawDerivationLeaves(before, "withdrawn");
+    expect(after.grounding_progress).toBeUndefined();
+    expect(after.explanation_progress).toBeUndefined();
+    expect(after.remaining_memory_bytes).toBe(baseline.remaining_memory_bytes);
+    expect(after.accounted_retained_bytes).toBe(priorFootprint);
+    expect(restoredFieldRemainingMemory(after, initial.budget.memory_bytes))
+      .toBe(restoredFieldRemainingMemory(baseline, initial.budget.memory_bytes));
+    expect(after.admitted_allocation_bytes - before.admitted_allocation_bytes)
+      .toBe(baseline.admitted_allocation_bytes - initial.admitted_allocation_bytes);
+  });
+
   it("does not invent a path-effect input when no pass has started", () => {
     const program = orSequenceProgram();
     const withdrawn = withdrawDerivationLeaves(withAutomaton(program), "p2");

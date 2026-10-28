@@ -29,7 +29,7 @@ interface MeasurementDenominatorPayload {
       readonly measurement_cohort?: "answerable" | "dataset_declared_abstention";
     }[];
     readonly quality_metrics?: {
-      readonly no_gold_count: number;
+      readonly no_gold_count?: number;
       readonly evaluator_identity_issue_count?: number;
       readonly evaluator_identity_unscorable_count?: number;
       readonly measurement_cohort_counts?: {

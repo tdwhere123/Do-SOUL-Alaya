@@ -85,29 +85,46 @@ describe("conditional-field actual request cost", () => {
     expect(JSON.stringify(failure)).not.toMatch(/continuation|delivery_id/u);
   });
 
-  it("pays for a serviceable empty SQLite page without leaving a no-progress cursor", async () => {
+  it("pays for useful empty SQLite progress and finishes at the same budget", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
-    const executed = recall(readersFor(slice), defaultBudget({ work_units: 48,
-      finalization_reserve: 12, min_envelope: 1, page_budget: 1 }));
+    const readers = readersFor(slice);
+    const budget = defaultBudget({ work_units: 48,
+      finalization_reserve: 12, min_envelope: 1, page_budget: 1 });
+    const executed = recall(readers, budget);
     expect(executed.index.entries).toEqual([]);
-    expect(executed.index.continuation).toBeNull();
+    expect(executed.index.continuation).not.toBeNull();
+    expect(restoreField(executed.index.continuation)?.compiled_automaton).toBeDefined();
     expect(executed.execution_receipt.actual!.phases.index.budget_work).toBeGreaterThan(0);
     expect(executed.execution_receipt.actual!.native_visits).toBeGreaterThan(0);
+    const pages = collect(readers, budget, 8, executed.index);
+    expect(pages.every(page => page.entries.length === 0)).toBe(true);
+    expect(pages.at(-1)!.continuation).toBeNull();
+    expect(pages.at(-1)!.completeness.logical_index).toBe("complete");
   });
 
-  it("keeps a continuation when a tiny budget interrupts facet indexing", async () => {
+  it("reports incurred cost when a tiny budget cannot compile the program before facet indexing", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantHub(slice, 24);
+    const readers = readersFor(slice);
+    const lexical = vi.fn(readers.lexical!);
     const tiny = defaultBudget({ work_units: 12, finalization_reserve: 4, min_envelope: 0, page_budget: 1 });
-    const first = recall(readersFor(slice), tiny);
-    expect(first.index.continuation).not.toBeNull();
-    const second = recall(readersFor(slice), tiny, first.index.continuation);
-    expect(second.index.completeness.logical_index).not.toBe("invalidated");
-    if (second.index.entries.length === 0) expect(second.index.continuation).not.toBeNull();
-    const pages = collect(readersFor(slice), defaultBudget({
+    expect(() => recall({ ...readers, lexical }, tiny)).toThrowError(expect.objectContaining({
+      code: "CONFLICT", details: expect.objectContaining({ resource: "observation_work", phase: "program_compile",
+        required_work: 7, available_work: 2, execution_receipt: expect.objectContaining({
+          requested_budget: expect.objectContaining({ work_units: 12 }), actual: expect.objectContaining({
+            native_visits: 3, phases: expect.objectContaining({ index: expect.objectContaining({ budget_work: 4 }) })
+          })
+        }) }) }));
+    expect(lexical).not.toHaveBeenCalled();
+    const budget = defaultBudget({
       work_units: 400, finalization_reserve: 40, min_envelope: 1, page_budget: 4
-    }), 40, second.index);
+    });
+    const pages = collect(readers, budget, 40, recall(readers, budget).index);
     expect(pages.at(-1)!.continuation).toBeNull();
+    expect(pages.at(-1)!.completeness).toMatchObject({ logical_index: "open", observed_coverage: "interrupted",
+      transport: "open", payload: "open" });
+    expect(restoreField(pages.at(-2)!.continuation)?.memory_exhausted).toBe(true);
+    expect(pages.some(page => page.entries.length > 0)).toBe(true);
   });
 
   it("makes retained progress under a tiny serviceable budget then finishes on resume", async () => {

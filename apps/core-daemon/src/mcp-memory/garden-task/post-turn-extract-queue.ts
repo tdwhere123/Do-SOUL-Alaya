@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
+  AlayaError,
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  canonicalJson,
   type ContextDeliveryRecord,
   type SoulReportContextUsageRequest,
   type HostOccurrence,
@@ -18,10 +20,6 @@ import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
   admitPostTurnSourceRoot
 } from "../../garden/post-turn-extract/admitted-source-root.js";
-import {
-  createVerifiedDeliverySourceObservation,
-  type VerifiedDeliverySourceObservation
-} from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
@@ -50,11 +48,12 @@ export async function enqueuePostTurnExtractTask(
   const deliveredObjectIds = resolveDeliveredObjectIds(request);
   const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
-  if (params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId) !== null) return;
+  const existing = params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId);
+  if (existing !== null) {
+    assertPostTurnReplay(existing.payload, lastMessages, deliveredObjectIds);
+    return;
+  }
   const createdAt = params.now();
-  const sourceObservation = linkedDelivery === null
-    ? null
-    : createVerifiedDeliverySourceObservation([linkedDelivery]);
   const sourceCapture = await persistAdmittedTurnRoot(params.deps.sourceAdmission, {
     taskId,
     workspaceId,
@@ -76,7 +75,6 @@ export async function enqueuePostTurnExtractTask(
         runId,
         deliveredObjectIds,
         createdAt,
-        sourceObservation,
         turnIndex,
         lastMessages,
         sourceCapture
@@ -84,12 +82,32 @@ export async function enqueuePostTurnExtractTask(
       created_at: createdAt
     });
   } catch (error) {
-    if (isDuplicateKeyError(error)) {
+    const raced = params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId);
+    if (raced !== null) {
+      assertPostTurnReplay(raced.payload, lastMessages, deliveredObjectIds);
       return;
     }
     // report_context_usage is caller-driven; enqueue failure must surface
     // rather than drop an explicit post-turn signal.
     throw error;
+  }
+}
+
+function assertPostTurnReplay(
+  payload: unknown,
+  messages: readonly { readonly role: string; readonly content_excerpt: string }[],
+  deliveredObjectIds: readonly string[]
+): void {
+  const row = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : null;
+  const digest = typeof row?.turn_digest === "object" && row.turn_digest !== null
+    ? row.turn_digest as Record<string, unknown> : null;
+  const manifest = typeof digest?.context_manifest === "object" && digest.context_manifest !== null
+    ? digest.context_manifest as Record<string, unknown> : null;
+  if (digest === null || !Array.isArray(digest.last_messages) ||
+      !Array.isArray(manifest?.delivered_object_ids) ||
+      canonicalJson(digest.last_messages) !== canonicalJson(messages) ||
+      canonicalJson(manifest.delivered_object_ids) !== canonicalJson(deliveredObjectIds)) {
+    throw new AlayaError("CONFLICT", "Post-turn extraction already exists with different or unavailable report content.");
   }
 }
 
@@ -150,7 +168,6 @@ export async function enqueueConversationGardenCompileTask(
         runId: input.runId,
         deliveredObjectIds: [],
         createdAt,
-        sourceObservation: null,
         sourceObservedAt: input.userMessage.created_at,
         turnIndex: buildConversationCompileTurnIndex(
           input.userMessage.message_id,
@@ -210,7 +227,7 @@ async function persistAdmittedTurnRoot(
   }>
 ): Promise<{ rootId: string | undefined; resourceLimitedRecordIds: readonly string[] }> {
   if (admission === undefined) return { rootId: undefined, resourceLimitedRecordIds: [] };
-  if (admission.audit === undefined) throw new Error("post-turn capture requires receipt-first source audit");
+  if (admission.audit === undefined) throw new AlayaError("UNAVAILABLE", "post-turn capture requires receipt-first source audit");
   const speaker = retainedSourceSpeaker(input.lastMessages.map((message) => message.role));
   const sourceRecordIds: string[] = [];
   const resourceLimitedRecordIds: string[] = [];
@@ -285,7 +302,6 @@ function buildPostTurnExtractPayload(input: {
   readonly runId: string;
   readonly deliveredObjectIds: readonly string[];
   readonly createdAt: string;
-  readonly sourceObservation: VerifiedDeliverySourceObservation | null;
   readonly sourceObservedAt?: string;
   readonly turnIndex: number;
   readonly lastMessages: readonly {
@@ -303,7 +319,6 @@ function buildPostTurnExtractPayload(input: {
     target_object_refs: input.deliveredObjectIds,
     priority: 20 as const,
     created_at: input.createdAt,
-    ...(input.sourceObservation === null ? {} : { source_observation: input.sourceObservation }),
     ...(input.sourceObservedAt === undefined ? {} : { source_observed_at: input.sourceObservedAt }),
     ...(input.sourceCapture.rootId === undefined
       ? {}

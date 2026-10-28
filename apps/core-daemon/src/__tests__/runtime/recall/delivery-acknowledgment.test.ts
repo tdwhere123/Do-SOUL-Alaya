@@ -215,6 +215,18 @@ it.each([false, true])("accounts actual acknowledgment and receipt-generation ch
   } finally { await fixture.close(); }
 }, 30_000);
 
+it("delivers literal omission-marker source bytes through real worker acknowledgment and SQLite receipts", async () => {
+  const fixture = await sourceWorkerFixture("[payload omitted]");
+  try {
+    const response = await fixture.handler({ ...fixture.request, query: "payload" }, fixture.context);
+    expect(response.results).toEqual([expect.objectContaining({ content_preview: "[payload omitted]", payload_available: true })]);
+    expect(response.results[0]?.target).toMatchObject({ kind: "source_evidence",
+      span: { content_start: 0, content_end: Buffer.byteLength("[payload omitted]"), content_complete: true } });
+    expect(response.index?.completeness.payload).toBe("open");
+    expect(fixture.receiptCounts()).toEqual([{ n: 1 }, { n: 1 }]);
+  } finally { await fixture.close(); }
+}, 30_000);
+
 async function sourceWorkerFixture(body: string, count = 1) {
   const directory = await mkdtemp(join(tmpdir(), "alaya-source-delivery-"));
   const filename = join(directory, "alaya.db");

@@ -179,7 +179,7 @@ describe("conditional-field observation revision lifecycle", () => {
     });
     for (let step = 0; step < 8; step += 1) {
       const observed = observeConditionalField(observeInput(slice, {
-        action: action("adjacency", 7),
+        action: action("adjacency", step < 2 ? 7 : 8),
         page_limit: 1,
         cursor,
         relation_subject: MEM.r,
@@ -188,6 +188,10 @@ describe("conditional-field observation revision lifecycle", () => {
       }));
       pages.push(...observed.page.observations.map((row) => row.object_id));
       expect(observed.page.cursor.committed_through).not.toBeNull();
+      if (step === 1) {
+        expect(observed.page.outcome.status).toBe("interrupted");
+        expect(observed.page.cursor.committed_through).toBe(cursor.committed_through);
+      }
       cursor = observed.page.cursor;
       if (observed.page.outcome.status === "exhausted") break;
     }

@@ -20,7 +20,15 @@ export async function listWorkspaceMemories(
     return await listWorkspaceMemoriesWithConflict(memoryService, input);
   }
 
-  if (input.scopeClass !== undefined && input.dimension === undefined) {
+  if (input.scopeClass !== undefined && input.dimension !== undefined) {
+    const [memories, totalCount] = await resolveListAndCount(
+      memoryService.findByScopeClassAndDimension(input.workspaceId, input.scopeClass, input.dimension, input.pagination),
+      memoryService.countByScopeClassAndDimension(input.workspaceId, input.scopeClass, input.dimension)
+    );
+    return { memories, totalCount };
+  }
+
+  if (input.scopeClass !== undefined) {
     const [memories, totalCount] = await resolveListAndCount(
       memoryService.findByScopeClass(input.workspaceId, input.scopeClass, input.pagination),
       memoryService.countByScopeClass(input.workspaceId, input.scopeClass)

@@ -22,7 +22,7 @@ export function serializeProposedPathRelation(
     return null;
   }
 
-  const parsed = parsePathRelationProposalPayload(value);
+  const parsed = requireSupportedPathRelationProposal(parsePathRelationProposalPayload(value));
   return JSON.stringify(parsed);
 }
 
@@ -75,50 +75,15 @@ export function parsePathRelationProposalPayload(value: unknown): Readonly<PathR
   }
 }
 
-export function createStrictlyGovernedPathRelation(
-  input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>
-): Readonly<PathRelation> {
-  return PathRelationSchema.parse({
-    path_id: input.path_id_on_create,
-    workspace_id: input.workspace_id,
-    anchors: {
-      source_anchor: { kind: "object", object_id: input.target_object_id },
-      target_anchor: {
-        kind: "object_facet",
-        object_id: input.target_object_id,
-        facet_key: "strictly_governed_constraint"
-      }
-    },
-    constitution: {
-      relation_kind: "governance_constraint",
-      why_this_relation_exists: ["operator accepted strictly_governed governance promotion"]
-    },
-    effect_vector: {
-      salience: 1,
-      recall_bias: 1,
-      verification_bias: 1,
-      unfinishedness_bias: 0,
-      default_manifestation_preference: "stance_bias"
-    },
-    plasticity_state: {
-      strength: 1,
-      direction_bias: "source_to_target",
-      stability_class: "pinned",
-      support_events_count: 1,
-      contradiction_events_count: 0,
-      last_reinforced_at: input.updated_at
-    },
-    lifecycle: {
-      status: "active",
-      retirement_rule: "manual"
-    },
-    legitimacy: {
-      evidence_basis: [input.caused_by],
-      governance_class: PathGovernanceClass.STRICTLY_GOVERNED
-    },
-    created_at: input.updated_at,
-    updated_at: input.updated_at
-  });
+export function requireSupportedPathRelationProposal(
+  payload: Readonly<PathRelationProposalPayload> | null
+): Readonly<PathRelationProposalPayload> {
+  // Historical proposals remain parseable for pending-list/rejection consumers.
+  // A blanket promotion cannot create or overwrite relation truth at acceptance.
+  if (payload === null || payload.legitimacy.governance_class === PathGovernanceClass.STRICTLY_GOVERNED) {
+    throw new StorageError("VALIDATION_FAILED", "Blanket governance promotion is retired; the proposal can be rejected.");
+  }
+  return payload;
 }
 
 export function createPathRelationFromProposalPayload(
@@ -154,9 +119,9 @@ export function createPathRelationFromProposalPayload(
 export function applyPathRelationProposal(
   existing: Readonly<PathRelation>,
   input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
-  payload: Readonly<PathRelationProposalPayload> | null
+  payload: Readonly<PathRelationProposalPayload>
 ): Readonly<PathRelation> {
-  const proposedLegitimacy = payload?.legitimacy ?? existing.legitimacy;
+  const proposedLegitimacy = payload.legitimacy;
   return PathRelationSchema.parse({
     ...existing,
     legitimacy: {
@@ -166,10 +131,7 @@ export function applyPathRelationProposal(
         ...proposedLegitimacy.evidence_basis,
         input.caused_by
       ),
-      governance_class:
-        payload === null
-          ? PathGovernanceClass.STRICTLY_GOVERNED
-          : proposedLegitimacy.governance_class
+      governance_class: proposedLegitimacy.governance_class
     },
     updated_at: input.updated_at
   });

@@ -82,9 +82,8 @@ export function reasonSourceInterpretation(input: Readonly<{
     on_remaining_reserve: (remaining) => { afterProjection = remaining; },
     resource_work: state.memory_exhausted || state.remaining_work.length > 0 ? "open" : "complete",
     transition_derivations: state.transition_derivations,
-    grounding_progress: state.grounding_progress, grounding_transitions: [...state.transitions],
-    grounding_seeds: [...state.seeds], grounding_derivations: [...state.derivations],
-    derivations: [...state.derivations], projection_facets: [...state.facets],
+    grounding_progress: state.grounding_progress, grounding_transitions: state.transitions,
+    grounding_seeds: state.seeds, grounding_derivations: state.derivations,
     remaining_memory_bytes: state.remaining_memory_bytes });
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== bound.packet_id || entry.hypothesis_id !== bound.hypothesis_id)) {
     throw new CoreError("OBLIGATION_VIOLATION", "conditional result escaped its admitted hypothesis");

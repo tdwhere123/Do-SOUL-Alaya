@@ -65,14 +65,10 @@ describe("post-turn extract Garden task", () => {
     expect(payload).toMatchObject({
       run_id: "run-1",
       turn_index: 7,
-      workspace_id: "workspace-1",
-      source_observation: {
-        observed_at: "2026-05-07T00:00:00.000Z",
-        authority: "verified_delivery_observation",
-        source_event_id: "event-delivery"
-      }
+      workspace_id: "workspace-1"
     });
     expect(payload).not.toHaveProperty("source_observed_at");
+    expect(payload).not.toHaveProperty("source_observation");
     expect(payload.turn_digest.context_manifest.delivered_object_ids).toEqual([
       "memory-a",
       "memory-b"
@@ -104,7 +100,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("ignores a public usage timestamp and persists the verified delivery observation", async () => {
+  it("does not promote either a public timestamp or delivery time to source observation", async () => {
     const harness = await createHandlerHarness();
 
     const result = await reportUsage(harness.handler, {
@@ -115,11 +111,7 @@ describe("post-turn extract Garden task", () => {
     expect(result.ok).toBe(true);
     const payload = postTurnRows(harness.gardenTaskRepo)[0]!.payload as PostTurnPayload;
     expect(payload).not.toHaveProperty("source_observed_at");
-    expect(payload.source_observation).toEqual({
-      observed_at: "2026-05-07T00:00:00.000Z",
-      authority: "verified_delivery_observation",
-      source_event_id: "event-delivery"
-    });
+    expect(payload).not.toHaveProperty("source_observation");
   });
 
   it("usage report with no run id and no linked delivery enqueues no extract work", async () => {
@@ -386,7 +378,7 @@ describe("post-turn extract Garden task", () => {
     expect(compile).toHaveBeenCalledTimes(1);
     expect(compile).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ source_observed_at: "2026-05-07T00:00:00.000Z" })
+      expect.not.objectContaining({ source_observed_at: expect.anything() })
     );
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
       status: "completed",
@@ -403,11 +395,7 @@ describe("post-turn extract Garden task", () => {
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId("post-turn-task-1", 0),
       workspace_id: "workspace-1",
-      source_observation: {
-        observed_at: "2026-05-07T00:00:00.000Z",
-        authority: "verified_delivery_observation",
-        source_event_id: "event-delivery"
-      }
+      source_observation: null
     });
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 1))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId("post-turn-task-1", 1),

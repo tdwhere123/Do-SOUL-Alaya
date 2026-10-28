@@ -154,6 +154,7 @@ export * from "./lifecycle/cross-cutting.js";
 export * from "./surfaces/project-mapping.js";
 export * from "./garden/garden-tier.js";
 export * from "./garden/garden-extract-constants.js";
+export * from "./garden/source-corpus.js";
 export * from "./memory/health-journal.js";
 export * from "./memory/health-issue-group.js";
 export * from "./governance/constitutional-fragment.js";
@@ -173,6 +174,7 @@ export * from "./events/memory-governance.js";
 export * from "./events/source-interpretation.js";
 export * from "./events/governance-resolution.js";
 export * from "./events/slot.js";
+export * from "./events/privacy-redaction.js";
 export * from "./events/surface.js";
 export * from "./events/recall-context.js";
 export * from "./recall/selection/capture/capture-execution.js";
@@ -223,7 +225,7 @@ export type { ToolGovernancePort } from "./tools/tool-governance-port.js";
 export * from "./runtime/node-template.js";
 export * from "./workers/auditor-ports.js";
 export * from "./shared/read-error-message.js";
-export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
+export { AlayaError, CommittedObjectError, type AlayaErrorOptions } from "./shared/alaya-error.js";
 export { deepFreeze } from "./shared/deep-freeze.js";
 export { isUniqueConstraintError } from "./shared/sqlite-unique-constraint.js";
 export { hashMemoryContent } from "./shared/memory-content-hash.js";
@@ -252,7 +254,7 @@ export {
   isZodValidationError,
   unwrapStandardResponseData
 } from "./shared/standard-response.js";
-export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation-budget.js";
+export { ManifestationBudgetConfigRouteDataSchema, createDefaultManifestationBudgetConfig } from "./recall/manifestation-budget.js";
 export * from "./garden/semantic-artifact.js";
 export * from "./conversation/utterance-attribution.js";
 export * from "./conversation/host-occurrence.js";

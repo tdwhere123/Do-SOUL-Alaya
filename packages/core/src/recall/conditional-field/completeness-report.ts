@@ -12,3 +12,10 @@ export function uniformCompleteness(status: CompletenessStatus): CompletenessRep
     representation: status
   };
 }
+
+/** Source bytes cannot discharge a terminal proof refusal carried by the same index. */
+export function payloadExpansionCompleteness(prior: CompletenessReport,
+  payload: "complete" | "partial" | "interrupted", transport = prior.transport): CompletenessReport {
+  return { ...prior, payload: prior.payload === "resource_rejected" ? "resource_rejected" : payload,
+    transport: prior.transport === "resource_rejected" ? "resource_rejected" : transport };
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
+import type { ExplanationDelivery } from "../../../../recall/conditional-field/index/explanation-delivery.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   DerivationSchema,
@@ -75,6 +76,7 @@ describe("index representation continuity", () => {
     expect(first.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["z"]);
     expect(scanOffset).toBe(2);
     const resumed = projectAcceptingIndex({ ...input, prior_continuation: first.continuation,
+      remaining_reserve: 100,
       projection_scan_offset: scanOffset, delivered_product_ids: new Set([productStateNodeId(z.state)]),
       derivations: [], output_derivations: undefined, transition_derivations: {}, resource_work: undefined });
     expect(resumed.entries.map((entry) => (entry.object_id ?? ""))).toEqual(accepting ? ["a"] : []);
@@ -286,6 +288,7 @@ describe("index representation continuity", () => {
   it("retains grounding so a one-unit continuation can deliver the requested entry", () => {
     const value = fieldValue("cfg", 850);
     let progress: GroundingProgress | undefined;
+    let explanation: ExplanationDelivery | undefined;
     let remaining = -1;
     const input: AcceptingProjectionInput = {
       ...baseInput({
@@ -299,6 +302,7 @@ describe("index representation continuity", () => {
       output_derivations: undefined,
       transition_derivations: {},
       on_grounding_progress: (next) => { progress = next; },
+      on_explanation_progress: (next) => { explanation = next; },
       on_remaining_reserve: (next) => { remaining = next; }
     };
     const first = projectAcceptingIndex(input);
@@ -309,9 +313,19 @@ describe("index representation continuity", () => {
     expect(remaining).toBe(0);
     const second = continueAcceptingIndex(first, { ...input, grounding_progress: progress });
     expect(second.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["cfg"]);
-    expect(second.continuation).toBeNull();
+    expect(second.entries[0]?.explanation_ids).toEqual([]);
+    expect(second.continuation).not.toBeNull();
     expect(progress?.completed_work).toBe(1);
     expect(remaining).toBe(0);
+    let page = second;
+    for (let attempt = 0; attempt < 12 && page.continuation !== null; attempt++) {
+      page = continueAcceptingIndex(page, { ...input, remaining_reserve: attempt < 2 ? 1 : 100,
+        grounding_progress: progress, explanation_progress: explanation });
+      expect(remaining).toBeGreaterThanOrEqual(0);
+    }
+    expect(page.continuation).toBeNull();
+    expect(page.explanations?.length).toBeGreaterThan(0);
+    expect(page.product_updates?.some(update => update.update_kind === "payload")).toBe(true);
   });
 
   it("stops projection when the remaining reserve is exhausted", () => {

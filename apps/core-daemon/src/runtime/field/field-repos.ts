@@ -1,4 +1,4 @@
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { fieldContractSha256, redactSourceDerivedClaimEvent } from "@do-soul/alaya-core";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import {
   SqliteFieldCausalUsageRepo,
@@ -28,13 +28,15 @@ export function createDaemonFieldRepos(input: Readonly<{
   readonly sha256?: FieldContractSha256;
 }>): DaemonFieldRepos {
   const sha256 = input.sha256 ?? fieldContractSha256;
+  const erase = new SqliteFieldEraseBarrierRepo(input.database, sha256, redactSourceDerivedClaimEvent);
+  erase.repairExistingSourceClosures();
   return Object.freeze({
     records: new SqliteFieldSourceRecordRepo(input.database, sha256),
     spans: new SqliteFieldSourceSpanRepo(input.database, sha256),
     factors: new SqliteFieldFactorRepo(input.database, sha256),
     jobs: new SqliteFieldDerivationJobRepo(input.database, sha256),
     generations: new SqliteFieldProjectionGenerationRepo(input.database, sha256),
-    erase: new SqliteFieldEraseBarrierRepo(input.database, sha256),
+    erase,
     usage: new SqliteFieldCausalUsageRepo(input.database, sha256),
     effects: new SqliteFieldProofEffectRepo(input.database, sha256)
   });

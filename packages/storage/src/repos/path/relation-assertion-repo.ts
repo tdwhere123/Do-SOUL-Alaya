@@ -1,5 +1,6 @@
 import {
   RelationAssertionResolutionSchema,
+  RelationAssertionResolvedPayloadSchema,
   RelationAssertionSchema,
   RelationFormationSourceKind,
   type PathRelation,
@@ -10,6 +11,7 @@ import {
   type RelationFormationSourceObservation
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { requirePrivacyEventsAvailable, requirePrivacyObjectAvailable } from "../field/privacy-availability.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import { EventLogEntryRowParser } from "../runtime/event-log/mappers/event-log-rows.js";
@@ -65,6 +67,7 @@ export interface RelationAssertionRepo {
   ): Readonly<RelationAssertionResolution>;
   listAssertionsInCurrentTransaction(): readonly Readonly<RelationAssertion>[];
   listCurrentResolutionsInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[];
+  listResolutionHistoryInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[];
   writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGeneration,
     options: { readonly activate: boolean }
@@ -109,7 +112,7 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
       LIMIT 1
     `);
     this.findHqFormationSourceStatement = db.connection.prepare(`
-      SELECT observation_id, workspace_id, evidence_id, source_event_type,
+      SELECT observation_id, object_id, workspace_id, evidence_id, source_event_type,
              source_event_id, source_occurred_at, observation_sha256
       FROM memory_hq_observations
       WHERE observation_id = ?
@@ -299,6 +302,7 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     if (entry === null || entry.workspace_id !== workspaceId) {
       throw new StorageError("NOT_FOUND", `Formation EventLog source ${source.source_id} is unavailable.`);
     }
+    requirePrivacyEventsAvailable(this.db, [entry]);
     if (digestRelationFormationEventSource(entry) !== source.source_sha256) {
       throw new StorageError("CONFLICT", `Formation EventLog source ${source.source_id} digest does not match.`);
     }
@@ -317,6 +321,8 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     if (row === null || row.workspace_id !== workspaceId) {
       throw new StorageError("NOT_FOUND", `Formation HQ source ${source.source_id} is unavailable.`);
     }
+    requirePrivacyObjectAvailable(this.db, workspaceId, "memory_entry", row.object_id);
+    requirePrivacyObjectAvailable(this.db, workspaceId, "memory_hq_observation", row.observation_id);
     if (row.observation_sha256 !== source.source_sha256) {
       throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} digest does not match.`);
     }
@@ -356,6 +362,10 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
           assertion_id, resolution_id, workspace_id, resolution_event_id, resolution_kind,
           resolved_at, reason
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(assertion_id) DO UPDATE SET
+          resolution_id = excluded.resolution_id, workspace_id = excluded.workspace_id,
+          resolution_event_id = excluded.resolution_event_id, resolution_kind = excluded.resolution_kind,
+          resolved_at = excluded.resolved_at, reason = excluded.reason
       `).run(
         parsed.assertion_id,
         parsed.resolution_id,
@@ -405,6 +415,26 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     } catch (error) {
       throw wrapRelationAssertionStorageError("list relation assertions", error);
     }
+  }
+
+  public listResolutionHistoryInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[] {
+    const events = parseRows(this.db.connection.prepare(`
+      SELECT * FROM event_log
+      WHERE event_type = 'relation.assertion_resolved'
+      ORDER BY revision ASC, event_id ASC
+    `).all(), EventLogEntryRowParser, "relation resolution history row");
+    return Object.freeze(events.map(event => {
+      const parsed = RelationAssertionResolvedPayloadSchema.safeParse(event.payload_json);
+      if (!parsed.success) {
+        throw new StorageError("CONFLICT", "Relation assertion resolution EventLog payload is not canonical.");
+      }
+      const payload = parsed.data;
+      if (event.entity_type !== "relation_assertion" || event.entity_id !== payload.assertion_id ||
+          event.workspace_id !== payload.workspace_id) {
+        throw new StorageError("CONFLICT", "Relation resolution history identity is not canonical.");
+      }
+      return RelationAssertionResolutionSchema.parse({ ...payload, event_id: event.event_id });
+    }));
   }
 
   public listCurrentResolutionsInCurrentTransaction(): readonly Readonly<RelationAssertionResolution>[] {

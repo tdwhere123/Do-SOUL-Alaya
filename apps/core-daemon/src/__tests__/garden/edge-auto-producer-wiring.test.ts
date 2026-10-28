@@ -51,8 +51,8 @@ describe("edge auto producer daemon wiring", () => {
     const database = initDatabase({ filename: ":memory:" });
     const previousEdgeClassifyHostWorker = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER;
     const previousIngestReconciliation = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
-    process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER = "false";
-    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
+    delete process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER;
+    delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
     try {
       const workspaceRepo = new SqliteWorkspaceRepo(database);
       const runRepo = new SqliteRunRepo(database);
@@ -128,6 +128,7 @@ describe("edge auto producer daemon wiring", () => {
       });
       const warn = vi.fn();
       const edgeRuntime = await createEdgeAndReconciliationRuntime({
+        configEnv: new Map([["ALAYA_EDGE_CLASSIFY_HOST_WORKER", "false"], ["ALAYA_INGEST_RECONCILIATION_ENABLED", "false"]]),
         eventLogRepo,
         eventPublisher,
         runtimeNotifier,

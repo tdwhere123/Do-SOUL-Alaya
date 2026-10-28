@@ -15,6 +15,8 @@ export interface EmbeddingSupplementState {
   readonly embeddingStatus: EmbeddingStatus | null;
   readonly config: RuntimeEmbeddingConfig | null;
   readonly loading: boolean;
+  readonly configError: string | null;
+  readonly statusError: string | null;
 }
 
 export function useEmbeddingSupplementState(workspaceId: string): EmbeddingSupplementState {
@@ -22,10 +24,17 @@ export function useEmbeddingSupplementState(workspaceId: string): EmbeddingSuppl
   const [config, setConfig] = useState<RuntimeEmbeddingConfig | null>(null);
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void loadEmbeddingSupplement(workspaceId, showToast, () => cancelled, setConfig, setEmbeddingStatus)
+    setLoading(true);
+    setConfig(null);
+    setEmbeddingStatus(null);
+    setConfigError(null);
+    setStatusError(null);
+    void loadEmbeddingSupplement(workspaceId, showToast, () => cancelled, setConfig, setEmbeddingStatus, setConfigError, setStatusError)
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -34,7 +43,7 @@ export function useEmbeddingSupplementState(workspaceId: string): EmbeddingSuppl
     };
   }, [showToast, workspaceId]);
 
-  return { config, embeddingStatus, loading };
+  return { config, embeddingStatus, loading, configError, statusError };
 }
 
 async function loadEmbeddingSupplement(
@@ -42,7 +51,9 @@ async function loadEmbeddingSupplement(
   showToast: ReturnType<typeof useToasts>["showToast"],
   isCancelled: () => boolean,
   setConfig: (config: RuntimeEmbeddingConfig) => void,
-  setEmbeddingStatus: (status: EmbeddingStatus | null) => void
+  setEmbeddingStatus: (status: EmbeddingStatus | null) => void,
+  setConfigError: (message: string) => void,
+  setStatusError: (message: string) => void
 ): Promise<void> {
   try {
     const config = await apiFetch<RuntimeEmbeddingConfig>(
@@ -52,6 +63,7 @@ async function loadEmbeddingSupplement(
     setConfig(config);
   } catch (err) {
     if (!isCancelled() && (err as ApiError).status !== 401) {
+      setConfigError(err instanceof Error ? err.message : String(err));
       showToast({
         message: `Failed to load embedding config: ${(err as Error).message}`,
         type: "error"
@@ -59,16 +71,13 @@ async function loadEmbeddingSupplement(
     }
     return;
   }
-  const status = await fetchEmbeddingStatus(workspaceId);
-  if (!isCancelled()) setEmbeddingStatus(status);
-}
-
-async function fetchEmbeddingStatus(workspaceId: string): Promise<EmbeddingStatus | null> {
   try {
     const envelope = await apiFetch<EmbeddingStatusEnvelope>(`/embedding-status/${workspaceId}`);
-    const parsed = EmbeddingStatusSchema.safeParse(envelope.data);
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
+    const status = EmbeddingStatusSchema.parse(envelope.data);
+    if (!isCancelled()) setEmbeddingStatus(status);
+  } catch (err) {
+    if (!isCancelled() && (err as ApiError).status !== 401) {
+      setStatusError(err instanceof Error ? err.message : String(err));
+    }
   }
 }

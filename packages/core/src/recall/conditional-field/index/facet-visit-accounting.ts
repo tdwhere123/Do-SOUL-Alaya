@@ -6,6 +6,25 @@ import {
 } from "@do-soul/alaya-protocol";
 import { composedFacetPathId, facetBelongsToOutput, facetIdentityOf, facetPathId } from "../engine/path-composition-facet.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import type { GroundingProgress } from "../engine/output-derivations.js";
+import type { ExplanationDelivery } from "./explanation-delivery.js";
+
+export type RetainedProjectionPreparation = Readonly<{
+  grounding_progress?: Pick<GroundingProgress, "input_digest" | "completed_steps">;
+  explanation_progress?: ExplanationDelivery;
+  facet_index?: Pick<FacetVisitIndex, "built">;
+}>;
+
+/** Only committed preparation cursors count; attempted work and discarded pages do not. */
+export function retainedProjectionPreparationAdvanced(next: RetainedProjectionPreparation,
+  prior: RetainedProjectionPreparation): boolean {
+  const grounding = next.grounding_progress;
+  const previous = prior.grounding_progress;
+  return (grounding !== undefined && grounding.completed_steps
+    > (grounding.input_digest === previous?.input_digest ? previous.completed_steps : 0))
+    || next.explanation_progress?.advancedSince(prior.explanation_progress) === true
+    || (next.facet_index?.built ?? 0) > (prior.facet_index?.built ?? 0);
+}
 
 export type FacetVisitIndex = Readonly<{
   readonly facets_by_identity: ReadonlyMap<string, readonly FacetVector[]>;

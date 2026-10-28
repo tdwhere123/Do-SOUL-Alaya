@@ -182,8 +182,8 @@ function reportDetachCanceled(
     ctx.stdout.write("canceled\n");
   }
   return {
-    exitCode: ALAYA_SYSEXITS.OK,
-    json: { ok: true, target, changed: false, canceled: true, searched: searchedPaths }
+    exitCode: ALAYA_SYSEXITS.NOPERM,
+    json: { ok: false, target, changed: false, canceled: true, searched: searchedPaths }
   };
 }
 

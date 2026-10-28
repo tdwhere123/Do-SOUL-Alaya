@@ -93,7 +93,7 @@ function readSnapshot(
   const memories: Readonly<MemoryEntry>[] = [];
   const ids = new Set(listActiveConstraintCandidateMemoryIds({ claims, paths: activePaths }));
   for (const id of ids) {
-    if (allowance.native < 2 || allowance.bytes < 64) {
+    if (allowance.native < 3 || allowance.bytes < 64) {
       allowance.complete = false;
       break;
     }
@@ -126,7 +126,9 @@ function readClaims(
     FROM claim_forms INDEXED BY idx_claim_forms_workspace_id
     WHERE workspace_id = ? AND rowid > ? ORDER BY rowid LIMIT 1`);
   const hydrate = db.connection.prepare(`SELECT claim_status, source_object_refs, created_at,
-    updated_at, lifecycle_state FROM claim_forms WHERE rowid = ? AND workspace_id = ?`);
+    updated_at, lifecycle_state, EXISTS (SELECT 1 FROM privacy_dependency_quarantine q
+      WHERE q.workspace_id = c.workspace_id AND q.object_kind = 'claim_form' AND q.object_id = c.object_id) AS unavailable
+    FROM claim_forms c WHERE rowid = ? AND workspace_id = ?`);
   let cursor = 0;
   let used = 0;
   while (used < limit && allowance.bytes >= 64) {
@@ -135,13 +137,13 @@ function readClaims(
     used += 1;
     if (row === undefined) return claims;
     cursor = row.cursor;
-    if (row.bytes * 6 + 256 > allowance.bytes || used >= limit) break;
+    if (row.bytes * 6 + 256 > allowance.bytes || used + 2 > limit || allowance.native < 2) break;
     const data = hydrate.get(cursor, request.workspaceId) as {
       claim_status: ActiveConstraintClaim["claim_status"]; source_object_refs: string;
-      created_at: string; updated_at: string; lifecycle_state: string;
+      created_at: string; updated_at: string; lifecycle_state: string; unavailable: number;
     };
-    debit(allowance, 1, Buffer.byteLength(JSON.stringify(data), "utf8"));
-    used += 1;
+    debit(allowance, 2, Buffer.byteLength(JSON.stringify(data), "utf8"));
+    used += 2;
     if (Date.parse(data.created_at) > Date.parse(request.asOf)) continue;
     if (Date.parse(data.updated_at) > Date.parse(request.asOf)) {
       allowance.complete = false;
@@ -149,6 +151,7 @@ function readClaims(
       continue;
     }
     if (data.lifecycle_state !== "active") continue;
+    if (data.unavailable !== 0) { allowance.complete = false; continue; }
     const refs: unknown = JSON.parse(data.source_object_refs);
     if (!Array.isArray(refs) || !refs.every((id) => typeof id === "string")) {
       allowance.complete = false;
@@ -168,13 +171,16 @@ function readMemory(
 ): Readonly<MemoryEntry> | null {
   const named = request.authorizedScopes.mode === "named" ? request.authorizedScopes.scopes : [];
   const scopeFilter = named.length === 0 ? "" : `AND scope_class IN (${named.map(() => "?").join(",")})`;
-  const row = db.connection.prepare(`SELECT ${MEMORY_BYTES_SQL} AS bytes FROM memory_entries
+  const row = db.connection.prepare(`SELECT ${MEMORY_BYTES_SQL} AS bytes,
+    EXISTS (SELECT 1 FROM privacy_dependency_quarantine q WHERE q.workspace_id = m.workspace_id
+      AND q.object_kind = 'memory_entry' AND q.object_id = m.object_id) AS unavailable FROM memory_entries m
     WHERE workspace_id = ? AND object_id = ?
       ${scopeFilter} LIMIT 1`)
     .get(request.workspaceId, id, ...named) as
-    { bytes: number } | undefined;
-  debit(allowance, 1, row === undefined ? 0 : Buffer.byteLength(JSON.stringify(row), "utf8"));
+    { bytes: number; unavailable: number } | undefined;
+  debit(allowance, 2, row === undefined ? 0 : Buffer.byteLength(JSON.stringify(row), "utf8"));
   if (row === undefined) return null;
+  if (row.unavailable !== 0) { allowance.complete = false; return null; }
   if (row.bytes * 6 + 4096 > allowance.bytes) {
     allowance.complete = false;
     return null;

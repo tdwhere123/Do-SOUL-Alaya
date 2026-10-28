@@ -11,7 +11,7 @@ import {
   isGardenTurnEvidenceFallback
 } from "../../triage/evidence-preservation/turn-evidence-anchor.js";
 import { buildDistilledFact, buildEvidenceInput, buildSynthesisInput, readStringPayload } from "./inputs.js";
-import { materializationFailure, materializationSuccess } from "./materialization-results.js";
+import { materializationFailure, materializationSuccess, readPartialFailureCreatedObjects } from "./materialization-results.js";
 import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
 import { createSignalEvidence } from "./evidence/create-signal-evidence.js";
 
@@ -46,18 +46,23 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
         })
       );
 
-      const evidences = await Promise.all(
+      const outcomes = await Promise.allSettled(
         evidenceInputs.map(async (evidenceInput) => await createSignalEvidence(
           this.dependencies.evidenceService,
           signal,
           evidenceInput
         ))
       );
-
-      const evidenceIds = evidences.map((evidence) => evidence.object_id);
-      for (const evidence of evidences) {
-        createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
+      for (const outcome of outcomes) {
+        if (outcome.status === "fulfilled") {
+          createdObjects.push({ object_kind: outcome.value.object_kind, object_id: outcome.value.object_id });
+        } else {
+          createdObjects.push(...readPartialFailureCreatedObjects(outcome.reason));
+        }
       }
+      const failure = outcomes.find((outcome) => outcome.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+      const evidenceIds = createdObjects.map((evidence) => evidence.object_id);
 
       const synthesis = await this.dependencies.synthesisService.create(
         buildSynthesisInput(signal, evidenceIds)

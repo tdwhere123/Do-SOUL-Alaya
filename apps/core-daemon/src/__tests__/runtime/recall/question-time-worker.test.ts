@@ -113,7 +113,7 @@ it("displaces a generation-scoped native prefix with a time root and retains mix
     const collect = async (preferred: boolean) => {
       const args = { ...request, max_results: 2, ...(preferred ? { interpretation_proposal: proposal } : {}) };
       const first = await call(args), entries = [...first.index!.entries];
-      expect(first.index!.result_version).toBe("ordinary-native-field.v6");
+      expect(first.index!.result_version).toBe("ordinary-native-field.v7");
       if (preferred) {
         const cleanup = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", limits);
         expect(cleanup).toMatchObject({ status: "ready", reclamation: { projections: 19, targets: 19, generations: 1 } });

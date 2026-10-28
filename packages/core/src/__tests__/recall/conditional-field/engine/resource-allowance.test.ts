@@ -23,6 +23,22 @@ import {
 } from "../reference/deployment.fixture.js";
 
 describe("request resource allowance", () => {
+  it("observes a lexical identity when the optional source reader is absent", () => {
+    let reads = 0;
+    const state = observeField(compileQuery("needle"), { workspace_id: "workspace-1", query_text: "needle",
+      as_of: INTERPRETATION_CLOCK, authorized_scopes: null,
+      budget: defaultBudget({ work_units: 3, finalization_reserve: 0, min_envelope: 0 }), readers: {
+        lexical: () => { reads += 1; return { ids: ["memory-1"], nativeVisits: 1, nativeBytes: 1,
+          rowsRead: 1, bytesRead: 1, truncated: false }; }
+      } });
+    expect(reads).toBe(1);
+    expect(state.seeds).toHaveLength(0);
+    expect(state.observations).toHaveLength(1);
+    expect(state.observations.at(0)?.applicability.verdict).toBe("unresolved");
+    expect(state.retention_rejected).toBeUndefined();
+    expect(state.remaining_exploration).toBeGreaterThanOrEqual(0);
+  });
+
   it("reserves hydration, identity admission, and solver work before reading a seed page", () => {
     let pinReads = 0;
     let sourceReads = 0;

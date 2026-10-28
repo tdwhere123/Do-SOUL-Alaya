@@ -157,9 +157,9 @@ function RecallHeader({ controller }: { readonly controller: ReturnType<typeof u
 function RecallLoadState({ controller }: { readonly controller: ReturnType<typeof useRecallController> }) {
   return (
     <>
-      {controller.loading && controller.data === null ? (
+      {controller.loading ? (
         <p data-testid="recall-loading" className="font-mono text-sm text-ink-700/60">
-          {controller.t("recall:loading")}
+          {controller.t(controller.data === null ? "recall:loading" : "recall:pending")}
         </p>
       ) : null}
       {controller.error !== null ? (

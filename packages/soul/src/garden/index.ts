@@ -224,14 +224,10 @@ export {
 export {
   LIBRARIAN_CONSTANTS,
   Librarian,
-  type CompressionCandidate,
   type LibrarianDependencies,
-  type LibrarianMergeDetectionPort,
   type LibrarianNeighborDetectionPort,
-  type LibrarianPathCompressionPort,
   type LibrarianSchedulerPort,
   type LibrarianSynthesisThrottlePort,
-  type MergeCandidate,
   type NeighborGroup
 } from "./maintenance/librarian.js";
 export {

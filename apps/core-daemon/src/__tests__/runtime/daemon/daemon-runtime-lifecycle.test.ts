@@ -317,7 +317,7 @@ describe("createDaemonLifecycleControls", () => {
     expect(database.close).toHaveBeenCalledTimes(1);
   });
 
-  it("closes the embedding provider before the recall worker and database", async () => {
+  it.each([true, false])("closes optional embedding before the recall worker and database (embedding=%s)", async withEmbedding => {
     const order: string[] = [];
     const closeEmbeddingProvider = vi.fn(async () => {
       order.push("embedding");
@@ -333,41 +333,52 @@ describe("createDaemonLifecycleControls", () => {
       })
     };
     const { controls } = createControls("env", {
-      closeEmbeddingProvider,
+      closeEmbeddingProvider: withEmbedding ? closeEmbeddingProvider : undefined,
       recallReadWorkerClient,
       database
     });
 
     await controls.shutdown();
 
-    expect(closeEmbeddingProvider).toHaveBeenCalledTimes(1);
+    expect(closeEmbeddingProvider).toHaveBeenCalledTimes(withEmbedding ? 1 : 0);
     expect(recallReadWorkerClient.close).toHaveBeenCalledTimes(1);
     expect(database.close).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["embedding", "worker", "database"]);
+    expect(order).toEqual(withEmbedding ? ["embedding", "worker", "database"] : ["worker", "database"]);
   });
 
-  it("closes the recall read worker before closing the database", async () => {
-    const order: string[] = [];
-    const recallReadWorkerClient = {
-      close: vi.fn(async () => {
-        order.push("worker");
-      })
-    };
-    const database = {
-      close: vi.fn(() => {
-        order.push("database");
-      })
-    };
-    const { controls } = createControls("env", {
-      recallReadWorkerClient,
-      database
-    });
-
+  it("retains storage ownership and retries the same provider after retirement fails", async () => {
+    const failure = new Error("embedding process cleanup failed");
+    const closeEmbeddingProvider = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(undefined);
+    const database = { close: vi.fn() };
+    const temporalRuntimeLease = { release: vi.fn(async () => undefined) };
+    const { controls } = createControls("env", { closeEmbeddingProvider, database, temporalRuntimeLease });
+    await expect(controls.shutdown()).rejects.toBe(failure);
+    expect(database.close).not.toHaveBeenCalled();
+    expect(temporalRuntimeLease.release).not.toHaveBeenCalled();
+    expect(() => controls.startBackgroundServices()).toThrow(/shutdown has started/u);
     await controls.shutdown();
-
-    expect(recallReadWorkerClient.close).toHaveBeenCalledTimes(1);
+    expect(closeEmbeddingProvider).toHaveBeenCalledTimes(2);
     expect(database.close).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["worker", "database"]);
+    expect(temporalRuntimeLease.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("drains an explicit idle source pass before closing storage or releasing its lease", async () => {
+    let settle!: () => void;
+    const inFlight = new Promise<void>(resolve => { settle = resolve; });
+    const producer = { start: vi.fn(), stop: vi.fn(async () => { await inFlight; }) };
+    const database = { close: vi.fn() };
+    const temporalRuntimeLease = { release: vi.fn(async () => undefined) };
+    const { controls } = createControls("env", { sourceIndexProducer: producer, database, temporalRuntimeLease });
+    const shutdown = controls.shutdown();
+    await Promise.resolve(); await Promise.resolve();
+    expect(producer.start).not.toHaveBeenCalled();
+    expect(producer.stop).toHaveBeenCalledTimes(1);
+    expect(database.close).not.toHaveBeenCalled();
+    expect(temporalRuntimeLease.release).not.toHaveBeenCalled();
+    settle();
+    await shutdown;
+    expect(database.close).toHaveBeenCalledTimes(1);
+    expect(temporalRuntimeLease.release).toHaveBeenCalledTimes(1);
   });
 
   it("releases the temporal runtime lease after database shutdown", async () => {

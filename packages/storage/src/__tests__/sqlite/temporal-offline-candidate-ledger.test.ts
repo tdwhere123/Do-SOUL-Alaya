@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeCachedDatabase, readSchemaMigrationLedger } from "../../sqlite/db.js";
 import { prepareTemporalCandidate } from "../../sqlite/temporal-offline-candidate.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
@@ -14,6 +14,7 @@ const fixtureFilenames: string[] = [];
 const TEMPORAL_CANDIDATE_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 15_000;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const filename of fixtureFilenames.splice(0)) {
     closeCachedDatabase(filename);
   }
@@ -23,6 +24,43 @@ afterEach(() => {
 });
 
 describe("prepareTemporalCandidate migration ledger", () => {
+  it.each([false, true])("preserves a valid publication outcome after receipt directory sync fails (persistent=%s)", async persistent => {
+    const fixture = createFixture();
+    seedLegacySource(fixture.sourceFilename);
+    const link = fs.linkSync.bind(fs);
+    const sync = fs.fsyncSync.bind(fs);
+    let receiptLinked = false;
+    let failures = 0;
+    vi.spyOn(fs, "linkSync").mockImplementation((source, destination) => {
+      link(source, destination);
+      if (destination === fixture.receiptFilename) receiptLinked = true;
+    });
+    vi.spyOn(fs, "fsyncSync").mockImplementation(descriptor => {
+      if (receiptLinked && fs.fstatSync(descriptor).isDirectory() && (persistent || failures === 0)) {
+        failures++;
+        throw new Error("injected receipt directory sync failure");
+      }
+      sync(descriptor);
+    });
+    await expect(prepareTemporalCandidate(fixture)).rejects.toThrow(persistent ? /candidate retained for recovery/u : /directory sync failed/u);
+    expect(fs.existsSync(fixture.candidateFilename)).toBe(persistent);
+    if (!persistent) {
+      expect(JSON.parse(fs.readFileSync(fixture.receiptFilename, "utf8"))).toMatchObject({ status: "failed" });
+    } else {
+      expect(readSchemaMigrationLedger(fixture.candidateFilename)).toEqual(migrationFiles().map(migration => migration.version));
+    }
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
+
+  it("keeps exactly one complete prepared output when callers compete for the same paths", async () => {
+    const fixture = createFixture();
+    seedLegacySource(fixture.sourceFilename);
+    const results = await Promise.allSettled([prepareTemporalCandidate(fixture), prepareTemporalCandidate(fixture)]);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(fixture.receiptFilename, "utf8"))).toMatchObject({ status: "prepared" });
+    expect(readSchemaMigrationLedger(fixture.candidateFilename)).toEqual(migrationFiles().map(migration => migration.version));
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
+
   it("strictly extends a complete legacy ledger through every known migration", async () => {
     const fixture = createFixture();
     seedLegacySource(fixture.sourceFilename);

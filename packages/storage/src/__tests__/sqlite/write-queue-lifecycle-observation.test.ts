@@ -47,6 +47,22 @@ async function persistenceScenario(observe: boolean, brokenObserver = false) {
 }
 
 describe("private SQLite queue lifecycle observation", () => {
+  it("rejects payload and settles shutdown after a ready worker exits before another request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "queue-exited-"));
+    const path = join(root, "worker.mjs");
+    writeFileSync(path, "import { parentPort } from 'node:worker_threads'; parentPort.postMessage({type:'ready'}); process.exit(0);");
+    let exited!: () => void;
+    const terminal = new Promise<void>(resolve => { exited = resolve; });
+    const unsubscribe = observeSqliteWriteQueueLifecycle(row => { if (row.terminal !== null) exited(); });
+    const queue = createWorkerThreadSqliteWriteQueuePort({ workerUrl: pathToFileURL(path) });
+    try {
+      await terminal;
+      await expect(queue.enqueue({ jobId: "after-exit", kind: "maintenance", filename: join(root, "missing.db"),
+        payload: { statements: [{ sql: "CREATE TABLE proof(value INTEGER)" }] } })).rejects.toThrow(/exited unexpectedly/u);
+      await expect(queue.close!()).resolves.toBeUndefined();
+    } finally { await queue.close!(); unsubscribe(); rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("preserves real persistence, failed-work drain, caller jobs and concurrent/repeated close with observation off/on/erroring", async () => {
     const off = await persistenceScenario(false);
     const on = await persistenceScenario(true);
@@ -62,9 +78,9 @@ describe("private SQLite queue lifecycle observation", () => {
     expect(terminal.terminal).not.toBeNull();
     expect(terminal.closes).toHaveLength(4);
     expect(terminal.closes.every(row => row.drained && row.result === "fulfilled")).toBe(true);
-    // Existing close semantics are not single-flight: both callers initiate shutdown.
-    expect(terminal.shutdowns).toHaveLength(2);
-    expect(terminal.shutdowns.map(row => row.closeId)).toEqual([1, 2]);
+    // Concurrent callers share the native shutdown; one cannot terminate another's waiter.
+    expect(terminal.shutdowns).toHaveLength(1);
+    expect(terminal.shutdowns.map(row => row.closeId)).toEqual([1]);
     expect(terminal.shutdowns.every(row => row.result === "acknowledged" && row.terminationRequested)).toBe(true);
     expect(Object.isFrozen(terminal)).toBe(true);
     expect(Object.isFrozen(terminal.shutdowns[0])).toBe(true);

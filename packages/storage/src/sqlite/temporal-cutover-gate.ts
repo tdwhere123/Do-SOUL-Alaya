@@ -17,6 +17,7 @@ import { StorageError } from "../shared/errors.js";
 import { parseRows } from "../repos/shared/parse-row.js";
 import { PathRelationRowParser } from "../repos/path/mappers/path-relation-rows.js";
 import { openSqliteConnection } from "./open-sqlite-connection.js";
+import { markTemporalDatabaseEstablished, temporalEstablishedMarker } from "./temporal-file-publication.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -38,6 +39,9 @@ export function resolveTemporalDatabaseMode(
   filename: string,
   requestedMode: TemporalDatabaseMode | undefined
 ): TemporalDatabaseMode {
+  if (filename !== ":memory:" && !fs.existsSync(filename) && fs.existsSync(temporalEstablishedMarker(filename))) {
+    throw new StorageError("CONFLICT", "Established temporal database is missing; restore it or explicitly recover the storage selection.");
+  }
   if (requestedMode !== undefined) return requestedMode;
   // A non-existent target has no legacy truth to mutate. Existing files must
   // pass the readonly runtime gate before SQLite gains write access.
@@ -126,6 +130,9 @@ function assertTemporalDatabaseReady(
         "CONFLICT",
         "Temporal projection candidate is prepared but not selected. Runtime startup is fail-closed until explicit selection completes."
       );
+    }
+    if (requireSelected && state.temporal_projection_selected === 1) {
+      markTemporalDatabaseEstablished(filename);
     }
   } catch (error) {
     if (error instanceof StorageError) throw error;

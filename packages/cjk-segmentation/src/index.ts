@@ -1,6 +1,8 @@
 export {
   CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
   analyzeSourceIndexLexical,
+  SOURCE_INDEX_SEGMENTED_UNIT_BYTES,
+  advanceSourceIndexLexicalV2,
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,
   isCjkSegmentationCandidate,

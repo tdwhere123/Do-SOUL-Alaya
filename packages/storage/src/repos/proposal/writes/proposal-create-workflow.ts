@@ -21,6 +21,7 @@ import {
   serializeSourceDeliveryIds
 } from "../mappers/mappers.js";
 import { serializeProposedPathRelation } from "../path-relations.js";
+import { assertProposalAcceptanceSupported } from "../mappers/acceptance.js";
 import type { ProposalRow } from "../mappers/rows.js";
 import type { ProposalStatements } from "../statements/sqlite-proposal-statements.js";
 import type {
@@ -227,6 +228,11 @@ function parseProposalCreateRequest(input: ProposalCreateInput): ParsedProposalC
     proposedChangeSummary,
     input.proposed_changes ?? null
   );
+  const proposedPathRelation = serializeProposedPathRelation(input.proposed_path_relation ?? null);
+  if (proposal.resolution_state === "accepted" || proposal.resolution_state === "auto_applied") {
+    assertProposalAcceptanceSupported({ dossier_ref: proposal.dossier_ref,
+      target_object_kind: targetObjectKind, proposed_path_relation: proposedPathRelation });
+  }
   return {
     proposal,
     workspaceId: parseWorkspaceId(input.workspace_id),
@@ -235,7 +241,7 @@ function parseProposalCreateRequest(input: ProposalCreateInput): ParsedProposalC
     targetObjectKind,
     proposedChangeSummary,
     proposedChanges: serializeProposedChanges(input.proposed_changes ?? null),
-    proposedPathRelation: serializeProposedPathRelation(input.proposed_path_relation ?? null),
+    proposedPathRelation,
     createdAt: input.created_at ?? proposal.last_updated_at,
     targetBaselineUpdatedAt: parseNullableTimestamp(input.target_baseline_updated_at ?? null),
     sourceDeliveryIds: serializeSourceDeliveryIds(input.source_delivery_ids ?? null)

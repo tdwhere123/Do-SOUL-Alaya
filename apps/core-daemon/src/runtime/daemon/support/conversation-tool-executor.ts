@@ -56,7 +56,6 @@ async function executeConversationTool(
   const startedAt = new Date().toISOString();
   throwIfAborted(request.abortSignal);
   const result = await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput);
-  throwIfAborted(request.abortSignal);
   const execution = createToolExecutionAuditRecord(request, startedAt, result);
 
   await bindEventPublisher({
@@ -68,6 +67,8 @@ async function executeConversationTool(
     input.toolExecutionRecordRepo.insert(execution.record);
   });
 
+  // Cancellation cannot undo an already completed handler or erase its audit.
+  throwIfAborted(request.abortSignal);
   return { result };
 }
 

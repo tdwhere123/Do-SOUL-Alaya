@@ -2,6 +2,7 @@ import { WorkspaceRunEventType, type EventLogEntry } from "@do-soul/alaya-protoc
 import { getSqliteWriteQueuePort, type StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
+import { requirePrivacyEventsAvailable } from "../field/privacy-availability.js";
 import {
   appendInCurrentTransaction as appendEventLogInTransaction,
   wrapAppendError
@@ -63,6 +64,11 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return this.db;
   }
 
+  private readable(events: readonly EventLogEntry[]): readonly EventLogEntry[] {
+    requirePrivacyEventsAvailable(this.db, events);
+    return events;
+  }
+
   public append(event: EventLogAppendInput): EventLogEntry | Promise<EventLogEntry> {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
@@ -104,12 +110,19 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return await this.queryByEntityPage(entityType, entityId, DEFAULT_EVENT_LOG_PAGE);
   }
 
+  public queryByEntityInCurrentTransaction(entityType: string, entityId: string): readonly EventLogEntry[] {
+    return this.readable(queryEventLogRows(
+      this.activeStatements().queryByEntityPagedStatement.all(entityType, entityId, -1, 0),
+      "Failed to query transactional event log history by entity."
+    ));
+  }
+
   public async queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
-    return await queryEventLogScopeAll(() => this.activeStatements(), {
+    return this.readable(queryEventLogScopeAll(() => this.activeStatements(), {
       kind: "entity",
       entityType,
       entityId
-    });
+    }));
   }
 
   public async queryByEntityPage(
@@ -119,7 +132,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByEntityPagedStatement.all(
         entityType,
         entityId,
@@ -127,7 +140,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
         parsedPage.offset
       ),
       "Failed to query paged event log by entity."
-    );
+    ));
   }
 
   public async queryByRun(runId: string): Promise<readonly EventLogEntry[]> {
@@ -135,7 +148,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByRunAll(runId: string): Promise<readonly EventLogEntry[]> {
-    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "run", runId });
+    return this.readable(queryEventLogScopeAll(() => this.activeStatements(), { kind: "run", runId }));
   }
 
   public async queryNarrativeDigestPayloadsByRun(
@@ -154,24 +167,24 @@ export class SqliteEventLogRepo implements EventLogRepo {
   public async queryByRunPage(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByRunPagedStatement.all(
         runId,
         parsedPage.limit,
         parsedPage.offset
       ),
       "Failed to query paged event log by run."
-    );
+    ));
   }
 
   public async queryByRunAndEntityType(
     runId: string,
     entityType: string
   ): Promise<readonly EventLogEntry[]> {
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByRunAndEntityTypeStatement.all(runId, entityType),
       "Failed to query event log by run and entity type."
-    );
+    ));
   }
 
   public async queryConversationMessageEventsByRun(
@@ -257,7 +270,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByWorkspaceAll(workspaceId: string): Promise<readonly EventLogEntry[]> {
-    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "workspace", workspaceId });
+    return this.readable(queryEventLogScopeAll(() => this.activeStatements(), { kind: "workspace", workspaceId }));
   }
 
   public async queryByWorkspacePage(
@@ -266,14 +279,14 @@ export class SqliteEventLogRepo implements EventLogRepo {
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByWorkspacePagedStatement.all(
         workspaceId,
         parsedPage.limit,
         parsedPage.offset
       ),
       "Failed to query paged event log by workspace."
-    );
+    ));
   }
 
   public async queryByWorkspaceAndType(
@@ -285,7 +298,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     try {
       const since = sinceIso ?? null;
       const until = untilIso ?? null;
-      return queryEventLogRows(
+      return this.readable(queryEventLogRows(
         this.activeStatements().queryByWorkspaceAndTypeStatement.all(
           workspaceId,
           eventType,
@@ -297,7 +310,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
           DEFAULT_EVENT_LOG_PAGE.offset
         ),
         "Failed to query event log by workspace and type."
-      );
+      ));
     } catch (error) {
       throw wrapEventLogQueryError("Failed to query event log by workspace and type.", error);
     }
@@ -350,7 +363,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     runId: string,
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByRunAfterEventIdStatement.all(
         runId,
         runId,
@@ -359,14 +372,14 @@ export class SqliteEventLogRepo implements EventLogRepo {
         DEFAULT_EVENT_LOG_PAGE.offset
       ),
       "Failed to query event log by run after event ID."
-    );
+    ));
   }
 
   public async queryByWorkspaceAfterEventId(
     workspaceId: string,
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByWorkspaceAfterEventIdStatement.all(
         workspaceId,
         workspaceId,
@@ -375,7 +388,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
         DEFAULT_EVENT_LOG_PAGE.offset
       ),
       "Failed to query event log by workspace after event ID."
-    );
+    ));
   }
 
   public async queryByType(eventType: string): Promise<EventLogTypePage> {
@@ -396,13 +409,13 @@ export class SqliteEventLogRepo implements EventLogRepo {
       "Failed to query paged event log by type."
     );
     return {
-      events: rows.slice(0, parsedPage.limit),
+      events: this.readable(rows.slice(0, parsedPage.limit)),
       truncated: rows.length > parsedPage.limit
     };
   }
 
   public async queryByTypeAll(eventType: string): Promise<readonly EventLogEntry[]> {
-    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "type", eventType });
+    return this.readable(queryEventLogScopeAll(() => this.activeStatements(), { kind: "type", eventType }));
   }
 
   public async getLatestEventId(runId: string): Promise<string | null> {
@@ -451,10 +464,10 @@ export class SqliteEventLogRepo implements EventLogRepo {
     runId: string,
     eventType: string
   ): Promise<readonly EventLogEntry[]> {
-    return queryEventLogRows(
+    return this.readable(queryEventLogRows(
       this.activeStatements().queryByRunAndEventTypeStatement.all(runId, eventType),
       "Failed to query event log by run and event type."
-    );
+    ));
   }
 
   public async queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]> {

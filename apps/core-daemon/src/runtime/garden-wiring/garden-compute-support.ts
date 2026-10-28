@@ -113,8 +113,8 @@ export function canResolveOfficialGardenProvider(
   }
 }
 
-export function createConflictDetectionLlmPort(): ConflictDetectionLlmPort | null {
-  const config = readConflictDetectionLlmConfig();
+export function createConflictDetectionLlmPort(env = processEnvLookup()): ConflictDetectionLlmPort | null {
+  const config = readConflictDetectionLlmConfig(env);
   if (config === null) {
     return null;
   }
@@ -146,8 +146,8 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
   }
 }
 
-function readConflictDetectionLlmApiKey(): string | undefined {
-  const secretRef = processEnvLookup().ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
+function readConflictDetectionLlmApiKey(env: ReturnType<typeof processEnvLookup>): string | undefined {
+  const secretRef = env.ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
   if (secretRef !== undefined && secretRef.length > 0) {
     const resolved = resolveSecretRef(secretRef);
     if ("kind" in resolved) {
@@ -156,7 +156,7 @@ function readConflictDetectionLlmApiKey(): string | undefined {
     const value = resolved.value.trim();
     return value.length > 0 ? value : undefined;
   }
-  const raw = processEnvLookup().ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  const raw = env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
   return raw !== undefined && raw.length > 0 ? raw : undefined;
 }
 
@@ -167,22 +167,22 @@ type ConflictDetectionLlmConfig = Readonly<{
   timeoutMs: number;
 }>;
 
-function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
-  const baseUrl = processEnvLookup().ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
+function readConflictDetectionLlmConfig(env: ReturnType<typeof processEnvLookup>): ConflictDetectionLlmConfig | null {
+  const baseUrl = env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
   if (baseUrl === undefined || baseUrl.length === 0) {
     return null;
   }
   // Conflict LLM is optional. Missing model is the same skip as missing
   // URL/key — do not invent a vendor default or read unused credentials.
-  const model = processEnvLookup().ALAYA_CONFLICT_LLM_MODEL?.trim();
+  const model = env.ALAYA_CONFLICT_LLM_MODEL?.trim();
   if (model === undefined || model.length === 0) {
     return null;
   }
-  const apiKey = readConflictDetectionLlmApiKey();
+  const apiKey = readConflictDetectionLlmApiKey(env);
   if (apiKey === undefined || apiKey.length === 0) {
     return null;
   }
-  const parsedTimeout = Number.parseInt(processEnvLookup().ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
+  const parsedTimeout = Number.parseInt(env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
   return {
     baseUrl,
     apiKey,

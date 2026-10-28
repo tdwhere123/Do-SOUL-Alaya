@@ -1,9 +1,9 @@
 import {
   acquireTemporalMaintenanceLease,
+  resolveTemporalResourcePath,
   type TemporalMaintenanceLease
 } from "@do-soul/alaya-storage";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 
 const CUTOVER_LOCK_SUFFIX = ".temporal-cutover.lock.sqlite";
 const RUNTIME_LOCK_SUFFIX = ".temporal-runtime.lock.sqlite";
@@ -95,9 +95,9 @@ function createLease(input: TemporalCutoverLeaseInput): TemporalCutoverLease {
     throw new Error("Temporal cutover config and candidate paths must differ.");
   }
   const runtimeFilenames = Object.freeze(
-    [...new Set(input.runtimeFilenames ?? [])]
+    [...new Set((input.runtimeFilenames ?? [])
       .filter((filename) => filename !== ":memory:")
-      .map(normalizePath)
+      .map(normalizePath))]
       .sort()
   );
   return Object.freeze({ configFilename, candidateFilename, runtimeFilenames, token: randomUUID() });
@@ -150,7 +150,7 @@ function normalizePath(value: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error("Temporal cutover lease requires a non-empty path.");
   }
-  return path.resolve(value);
+  return resolveTemporalResourcePath(value);
 }
 
 function cutoverLockFilename(resourceFilename: string): string {

@@ -199,7 +199,7 @@ describe("source-root seam membership", () => {
       program: relation("observed_log"),
       view: "mixed",
       seed_query: "exact-memory-needle",
-      actionWork: 4,
+      actionWork: 5,
       page_limit: 4,
       readers: {
         sourceRoots: (input) => {
@@ -235,6 +235,9 @@ describe("source-root seam membership", () => {
       }
     });
     const first = observeConditionalField(input);
+    const limited = observeConditionalField({ ...input, action: { ...input.action, work_limit: 4 }, cursor: first.page.cursor });
+    expect(limited.page.observations.some(row => row.object_id === memoryId)).toBe(false);
+    expect(limited.page.outcome.status).toBe("interrupted");
     const observed = observeConditionalField({ ...input, cursor: first.page.cursor });
     expect(observed.work.native_visits).toBeLessThanOrEqual(input.action.work_limit);
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);

@@ -33,6 +33,7 @@ import {
 } from "./garden-task-handler-support.js";
 import type { GardenTaskHandlerDependencies, GardenTaskToolCallContext } from "./garden-task-handlers.js";
 import { normalizeCandidateSignalGraphRefs } from "../tool/tool-handler-support.js";
+import { gardenTaskSourceAvailable, quarantineUnavailablePostTurnTasks } from "../../garden/post-turn-extract/source-provenance.js";
 
 const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 
@@ -47,6 +48,7 @@ type GardenTaskCompletionResult = Readonly<{
   readonly task_id: string;
   readonly status: string;
   readonly events_appended: 1;
+  readonly failed_candidate_signals_count?: number;
 }>;
 
 export function createGardenTaskCompletionHandler(params: GardenTaskCompletionParams): Readonly<{
@@ -57,6 +59,8 @@ export function createGardenTaskCompletionHandler(params: GardenTaskCompletionPa
 }> {
   return {
     completeGardenTask: async (request, context) => {
+      await quarantineUnavailablePostTurnTasks(requireGardenTaskRepo(params.deps), params.now,
+        context.workspaceId, request.task_id);
       const row = requireClaimedGardenTask(params.deps, request.task_id, context);
       const resolvedRunId = resolveTaskRunId(row, context);
       validateTaskResultEnvelope(request, row, resolvedRunId);
@@ -111,6 +115,9 @@ function requireClaimedGardenTask(
     throw new GardenTaskValidationError(
       `Garden task is claimed by a different agent target; only the claimant may complete it: ${row.id}`
     );
+  }
+  if (!gardenTaskSourceAvailable(repo, row)) {
+    throw new GardenTaskValidationError(`Garden task source provenance is unavailable: ${row.id}`);
   }
   return row;
 }
@@ -183,16 +190,19 @@ async function completeCandidateSignalTask(
   throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
+  let failedCount: number;
   try {
-    await commitCandidateSignalCompletion(
+    failedCount = await commitCandidateSignalCompletion(
       params, request, context, row, resolvedRunId, contentOnlySignals, completionClaimedBy
     );
   } catch (error) {
+    await quarantineUnavailablePostTurnTasks(repo, params.now, row.workspace_id, row.id);
     await releaseCompletionClaim(repo, row.id, completionClaimedBy, error, params.warn);
     throw error;
   }
 
-  return { task_id: row.id, status: request.status, events_appended: 1 };
+  return { task_id: row.id, status: request.status, events_appended: 1,
+    ...(failedCount === 0 ? {} : { failed_candidate_signals_count: failedCount }) };
 }
 
 async function commitCandidateSignalCompletion(
@@ -205,17 +215,18 @@ async function commitCandidateSignalCompletion(
     NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
   >,
   completionClaimedBy: string
-): Promise<void> {
+): Promise<number> {
   const postTurnPayload = row.kind === GardenTaskKind.POST_TURN_EXTRACT
     ? readExternalPostTurnPayload(row, context, resolvedRunId)
     : null;
   const candidateSignals = buildCandidateSignals(
     params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId,
-    postTurnPayload?.source_observation ?? resolveGardenTaskSourceObservation(row)
+    postTurnPayload === null ? resolveGardenTaskSourceObservation(row) : null
   );
   throwIfAborted(context.abortSignal);
+  const failedSignalIds = new Set<string>();
   const emittedSignalIds = await emitTaskCandidateSignals(
-    params, request, row, postTurnPayload, candidateSignals, completionClaimedBy
+    params, request, row, postTurnPayload, candidateSignals, completionClaimedBy, failedSignalIds
   );
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
@@ -225,10 +236,11 @@ async function commitCandidateSignalCompletion(
       completed_at: params.now(),
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
-    [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now())],
+    [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now(), failedSignalIds.size)],
     completionClaimedBy,
     context.workspaceId
   );
+  return failedSignalIds.size;
 }
 
 function assertCandidateSignalRetryCompatible(
@@ -396,7 +408,8 @@ function buildCompletedTaskEvent(
   resolvedRunId: string | null,
   status: GardenCompleteTaskRequest["status"],
   objectsAffected: readonly string[],
-  completedAt: string
+  completedAt: string,
+  failedSignalCount = 0
 ): GardenTaskEventInput {
   return {
     event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
@@ -413,6 +426,7 @@ function buildCompletedTaskEvent(
       success: status === "completed",
       objects_affected: [...objectsAffected],
       candidate_signals_count: row.kind === GardenTaskKind.EDGE_CLASSIFY ? 0 : objectsAffected.length,
+      ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
       workspace_id: context.workspaceId,
       occurred_at: completedAt
     })

@@ -36,6 +36,7 @@ const call: ObservationCallScope = { kind: "recall", request_id: 7, session_id: 
   snapshot_id: SNAPSHOT, workspace_id: "ws", as_of: "2026-10-20T00:00:00Z" };
 const index: NonNullable<NonNullable<SourceSemanticNativeFacts["binding"]>["index"]> = {
   workspace_id: "ws", source_epoch: 1, selection: null, generation: null,
+  lexical: { selection: null, selected: { status: "legacy" }, serving: "raw" },
   query_state: { status: "unbound", reason: "no_active_generation" } };
 const origin = (request_id: number, object_id: string) => ({ session_id: "session", request_id, object_id });
 const facts = (scope = call, overrides: Partial<SourceSemanticNativeFacts> = {}): SourceSemanticNativeFacts => ({

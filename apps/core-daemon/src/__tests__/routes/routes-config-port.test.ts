@@ -353,6 +353,34 @@ describe("routes-config port batch", () => {
     });
   });
 
+  it("reads file-only embedding settings and gives process configuration precedence without a stored row", async () => {
+    const env = { OPENAI_EMBEDDING_MODEL: "process-embedding-model" };
+    const harness = await createServiceHarness({ env });
+    await writeFile(harness.paths.envPath, [
+      "ALAYA_EMBEDDING_PROVIDER=openai",
+      "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=false",
+      "OPENAI_EMBEDDING_PROVIDER_URL=https://embedding.example.test/v1",
+      "OPENAI_EMBEDDING_MODEL=file-embedding-model",
+      "ALAYA_OPENAI_SECRET_REF=env:EMBEDDING_TEST_VALUE"
+    ].join("\n"));
+    await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
+      config_version: 1, embedding_enabled: false,
+      provider_url: "https://embedding.example.test/v1", model_id: "process-embedding-model",
+      secret_ref: "env:EMBEDDING_TEST_VALUE"
+    });
+    expect(harness.publishedEvents).toEqual([]);
+  });
+
+  it("reports saved Garden credential provenance instead of stale embedding-fallback environment", async () => {
+    const harness = await createServiceHarness({ env: { ALAYA_OPENAI_SECRET_REF: "env:EMBEDDING_TEST_VALUE" } });
+    await harness.service.patchRuntimeGardenComputeConfig({
+      provider_kind: "official_api", provider_url: "https://garden.example.test/v1",
+      model_id: "garden-model", secret_ref: "keychain:garden:test", enabled: false
+    });
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "keychain" });
+    expect(await readFile(harness.paths.envPath, "utf8")).not.toContain("ALAYA_ENABLE_GARDEN_OFFICIAL");
+  });
+
   it("records the non-secret provider_url and model_id in the runtime Garden compute config audit", async () => {
     const harness = await createServiceHarness();
 

@@ -81,6 +81,35 @@ function hqFormationReceipt(observationId: string, observationSha256: string) {
 
 
 describe("Memory HQ storage repo", () => {
+  it("withholds an HQ observation grounded in unavailable evidence without hiding its independent memory", async () => {
+    const { database, workspaceId, memoryRepo } = await createRepoContext();
+    const repo = await createHqRepo(database);
+    const receipt = await seedHqEvidence(database, "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9", "response-private");
+    const written = await repo.upsert({ object_id: MEM_A, workspace_id: workspaceId,
+      hqs: ["private copied question"], evidence_receipt: receipt, producer_id: "test_hq_producer_v1",
+      created_at: NOW, updated_at: NOW });
+    database.connection.prepare("UPDATE memory_hq SET observation_id = NULL WHERE object_id = ?").run(MEM_A);
+    database.connection.prepare("UPDATE evidence_capsules SET lifecycle_state = 'tombstone' WHERE object_id = ?")
+      .run(receipt.evidence_id);
+    expect((await memoryRepo.findById(MEM_A))?.lifecycle_state).toBe("active");
+    await expect(repo.getHqByObjectIds([MEM_A])).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(() => new SqliteRelationAssertionRepo(database).assertFormationInputsInCurrentTransaction({
+      workspaceId, evidenceReceipts: [receipt], formationReceipt: hqFormationReceipt(written.observation_id, written.observation_sha256)
+    })).toThrow(/provenance/u);
+    await expect(repo.upsert({ object_id: MEM_A, workspace_id: workspaceId, hqs: ["replayed"],
+      evidence_receipt: receipt, producer_id: "test_hq_producer_v1", created_at: NOW, updated_at: NOW }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    database.connection.prepare(`UPDATE memory_hq_observations SET hqs_json = '[]', hq_content_sha256 = 'erased',
+      observation_sha256 = 'erased:' || observation_id WHERE observation_id = ?`).run(written.observation_id);
+    expect(() => database.connection.prepare(`UPDATE memory_hq_observations SET hqs_json = '["restored"]'
+      WHERE observation_id = ?`).run(written.observation_id)).toThrow(/provenance unavailable/u);
+    expect(() => database.connection.prepare(`UPDATE memory_hq SET observation_id = ?, hqs_json = '["restored"]'
+      WHERE object_id = ?`).run(written.observation_id, MEM_A)).toThrow(/provenance unavailable/u);
+    const independent = await seedHqEvidence(database, "95b3671a-d8d8-4848-9e5c-07d0a89f5ae9", "response-independent");
+    await repo.upsert({ object_id: MEM_A, workspace_id: workspaceId, hqs: ["independent question"],
+      evidence_receipt: independent, producer_id: "test_hq_producer_v1", created_at: NOW, updated_at: NOW });
+    expect((await repo.getHqByObjectIds([MEM_A])).get(MEM_A)).toEqual(["independent question"]);
+  });
   it("persists current and immutable observation columns", async () => {
     const { database } = await createRepoContext();
 

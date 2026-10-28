@@ -22,6 +22,13 @@ afterEach(() => {
 });
 
 describe("resolveGardenComputeStatus dedups secret resolution", () => {
+  it("reports local fallback for a saved disabled official provider even with a valid credential", async () => {
+    hoisted.resolveSecretRef.mockReturnValue({ ref: "keychain:alaya:openai", value: "fixture-only", origin: "keychain" });
+    const runtime = createRuntime({ secretRef: "keychain:alaya:openai", providerKind: "official_api", enabled: false });
+    expect(await resolveGardenComputeStatus(runtime, "workspace-1")).toMatchObject({
+      provider_kind: "official_api", routing_decision: "local_heuristics", keychain_check: { ok: true }
+    });
+  });
   it("calls resolveSecretRef exactly once when the keychain ref resolves ok", async () => {
     hoisted.resolveSecretRef.mockReturnValue({
       ref: "keychain:alaya:openai",
@@ -146,6 +153,7 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
 });
 
 function createRuntime(input: {
+  readonly enabled?: boolean;
   readonly secretRef: string | null;
   readonly providerKind: "official_api" | "local_heuristics" | "host_worker";
   readonly gardenStatus?: {
@@ -167,7 +175,7 @@ function createRuntime(input: {
           model_id: "gpt-4.1-mini",
           provider_url: null,
           secret_ref: input.secretRef,
-          enabled: true
+          enabled: input.enabled ?? true
         }),
         getGardenCredentialProvenance: async () => ({ kind: input.secretRef === null ? "none" : "keychain" })
       },

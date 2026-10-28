@@ -66,8 +66,8 @@ it.each([
     try {
       const keys = new SqliteMemoryObjectKeyRepo(reopened);
       const writer = createMemoryObjectKeyWriter({ readEvidenceSources: (workspace, ids) =>
-        readObjectKeyEvidenceSources(reopened, workspace, ids), replaceOwnerKeys: (workspace, owner, minted) =>
-        keys.replaceOwnerKeys(workspace, owner, minted) });
+        readObjectKeyEvidenceSources(reopened, workspace, ids), replaceOwnerKeys: (workspace, owner, minted, expected) =>
+        keys.replaceOwnerKeys(workspace, owner, minted, expected) });
       writer.materializeForMemory(memory);
       const minted = keys.listByOwner(memory.workspace_id, memory.object_id);
       expect(minted.filter(({ key_type }) => key_type === "osf_identity").map(({ surface }) => surface).sort())
@@ -75,7 +75,7 @@ it.each([
       expect(minted.some(({ key_type }) => key_type === "gist_remainder")).toBe(true);
       const scan = scanObjectKeyRetrofitSources(reopened);
       expect(scan.owners.map(({ object_id }) => object_id)).toContain(memory.object_id);
-      retrofitMemoryObjectKeys({ ...scan, replaceOwnerKeys: (workspace, owner, values) => keys.replaceOwnerKeys(workspace, owner, values) });
+      retrofitMemoryObjectKeys({ ...scan, replaceOwnerKeys: (workspace, owner, values, expected) => keys.replaceOwnerKeys(workspace, owner, values, expected) });
       expect(keys.listByOwner(memory.workspace_id, memory.object_id)).toEqual(minted);
       expect((await new SqliteEvidenceCapsuleRepo(reopened).findById(capsule.object_id))?.excerpt).toBe(entry.source);
       expect(reopened.connection.prepare("SELECT semantic_completeness_json FROM evidence_semantic_factor_formations WHERE evidence_object_id = ?")

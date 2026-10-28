@@ -1,9 +1,10 @@
 import { performance } from "node:perf_hooks";
 import { SNAPSHOT_PIN_NATIVE_WORK } from "@do-soul/alaya-protocol";
-import type {
-  ConditionalFieldExecutionReceipt,
-  runConditionalFieldRecallWithReceipt,
-  ObserverReaders
+import {
+  CoreError,
+  type ConditionalFieldExecutionReceipt,
+  type runConditionalFieldRecallWithReceipt,
+  type ObserverReaders
 } from "@do-soul/alaya-core";
 
 /** Live process RSS; not a budget copy or guessed envelope constant. */
@@ -18,15 +19,21 @@ export type WorkerActualCost = Readonly<{
   readonly rss_sampling_method: typeof RSS_SAMPLING_METHOD;
 }>;
 
+type WorkerFailureCost = Omit<WorkerActualCost, "native_visits" | "bytes_read" | "row_visits"> & Readonly<{
+  readonly native_visits: number | null;
+  readonly bytes_read: number | null;
+  readonly row_visits: number | null;
+}>;
+
 /** Worker pages sit beside core `actual`; overlaying them collides with `actual.native_visits`. */
 export type WorkerExecutionReceipt = ConditionalFieldExecutionReceipt & {
   readonly worker: WorkerActualCost;
 };
 
 type NativeCostCounters = {
-  native_visits: number;
-  bytes_read: number;
-  row_visits: number;
+  native_visits: number | null;
+  bytes_read: number | null;
+  row_visits: number | null;
 };
 
 type NativePage = Readonly<{
@@ -49,7 +56,7 @@ export function withWorkerActualCost<T extends {
   const counters: NativeCostCounters = { native_visits: 0, bytes_read: 0, row_visits: 0 };
   const started = performance.now();
   const rssBefore = process.memoryUsage().rss;
-  const settle = (): WorkerActualCost => ({
+  const settle = (): WorkerFailureCost => ({
     native_visits: counters.native_visits,
     bytes_read: counters.bytes_read,
     row_visits: counters.row_visits,
@@ -58,8 +65,12 @@ export function withWorkerActualCost<T extends {
     rss_sampling_method: RSS_SAMPLING_METHOD
   });
   let result: T;
+  let cost: WorkerActualCost;
   try {
     result = run(instrumentObserverReaders(readers, counters));
+    const measured = settle();
+    if (!completeWorkerCost(measured)) throw new CoreError("OBLIGATION_VIOLATION", "Worker reader reported unknown cost");
+    cost = measured;
   } catch (error) {
     // Reads already performed are incurred cost. The refusal boundary carries the
     // measured worker snapshot through the owner's serialized error details; an
@@ -67,26 +78,42 @@ export function withWorkerActualCost<T extends {
     attachMeasuredWorkerCost(error, settle());
     throw error;
   }
-  const cost = settle();
   const executionReceipt = { ...result.execution_receipt, worker: cost };
   return {
     ...result,
     execution_receipt: executionReceipt,
     ...(result.issue === undefined ? {} : { issue: ((issued) => {
-      try { return result.issue!(issued); }
-      finally { Object.assign(executionReceipt, result.execution_receipt, { worker: settle() }); }
+      try {
+        const resultValue = result.issue!(issued);
+        if (!completeWorkerCost(settle())) throw new CoreError("OBLIGATION_VIOLATION", "Worker reader reported unknown cost");
+        return resultValue;
+      } catch (error) {
+        attachMeasuredWorkerCost(error, settle());
+        throw error;
+      } finally {
+        const measured = settle();
+        if (completeWorkerCost(measured)) Object.assign(executionReceipt, result.execution_receipt, { worker: measured });
+      }
     }) as NonNullable<T["issue"]> })
   };
+}
+
+function completeWorkerCost(cost: WorkerFailureCost): cost is WorkerActualCost {
+  return cost.native_visits !== null && cost.bytes_read !== null && cost.row_visits !== null;
 }
 
 /** Measured snapshots survive a refusal even when the error object is frozen or has
  * no writable details. Serialization consults this owner instead of guessing.
  */
-const MEASURED_FAILURE_COST = new WeakMap<Error, WorkerActualCost>();
+const MEASURED_FAILURE_COST = new WeakMap<Error, WorkerFailureCost>();
 
 /** Attach the measured worker snapshot to the refusal the worker already serializes. */
-export function attachMeasuredWorkerCost(error: unknown, cost: WorkerActualCost): void {
+export function attachMeasuredWorkerCost(error: unknown, cost: WorkerFailureCost): void {
   if (!(error instanceof Error)) return;
+  // An outer acknowledgment may only have an older successful receipt. It
+  // cannot replace the newer failure snapshot's explicitly unknown work.
+  const previous = MEASURED_FAILURE_COST.get(error);
+  if (previous !== undefined && !completeWorkerCost(previous)) return;
   MEASURED_FAILURE_COST.set(error, Object.freeze({ ...cost }));
   const target = error as Error & { details?: Readonly<Record<string, unknown>> };
   const details = target.details ?? {};
@@ -101,7 +128,7 @@ export function attachMeasuredWorkerCost(error: unknown, cost: WorkerActualCost)
 }
 
 /** Measured cost a serialization owner must preserve for any error classification. */
-export function measuredWorkerCostOf(error: unknown): WorkerActualCost | undefined {
+export function measuredWorkerCostOf(error: unknown): WorkerFailureCost | undefined {
   return error instanceof Error ? MEASURED_FAILURE_COST.get(error) : undefined;
 }
 
@@ -164,7 +191,7 @@ function instrumentObserverReaders(
     ...readers,
     ...(readers.snapshotPin === undefined ? {} : { snapshotPin: (workspaceId: string) => {
       const pin = readers.snapshotPin!(workspaceId);
-      counters.native_visits += SNAPSHOT_PIN_NATIVE_WORK;
+      counters.native_visits = addKnownCounter(counters.native_visits, SNAPSHOT_PIN_NATIVE_WORK);
       return pin;
     } }),
     ...(readers.lexical === undefined ? {} : {
@@ -193,16 +220,25 @@ function instrumentObserverReaders(
     }),
     ...(readers.measureStoredPair === undefined ? {} : {
       measureStoredPair: (input) => chargeNativePage(counters, readers.measureStoredPair!(input))
+    }),
+    ...(readers.measureStoredPairs === undefined ? {} : {
+      measureStoredPairs: (input) => chargeNativePage(counters, readers.measureStoredPairs!(input))
     })
   };
 }
 
 function chargeNativePage<T extends NativePage>(counters: NativeCostCounters, page: T): T {
-  counters.native_visits += chargedNativeVisits(page);
-  counters.row_visits += page.rowsRead ?? page.rowVisits ?? 0;
-  counters.bytes_read += page.bytesRead ?? 0;
-  counters.bytes_read += page.metadataBytes ?? page.metadataUtf8Bytes ?? 0;
+  counters.native_visits = addKnownCounter(counters.native_visits, chargedNativeVisits(page));
+  counters.row_visits = addKnownCounter(counters.row_visits, page.rowsRead ?? page.rowVisits ?? 0);
+  counters.bytes_read = addKnownCounter(counters.bytes_read, page.bytesRead ?? 0);
+  counters.bytes_read = addKnownCounter(counters.bytes_read, page.metadataBytes ?? page.metadataUtf8Bytes ?? 0);
   return page;
+}
+
+function addKnownCounter(total: number | null, increment: number): number | null {
+  if (total === null || !Number.isSafeInteger(increment) || increment < 0) return null;
+  const next = total + increment;
+  return Number.isSafeInteger(next) ? next : null;
 }
 
 function chargedNativeVisits(page: NativePage): number {
@@ -210,5 +246,5 @@ function chargedNativeVisits(page: NativePage): number {
   if (page.nativeVisits !== undefined && (page.nativeVisits !== 0 || page.nativeWork === undefined)) {
     return page.nativeVisits;
   }
-  return page.nativeWork ?? page.rowVisits ?? 0;
+  return page.nativeWork ?? page.rowVisits ?? page.rowsRead ?? 0;
 }

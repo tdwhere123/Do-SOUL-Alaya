@@ -6,10 +6,11 @@ import type {
   HighFrequencyPattern,
   StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
+import type { GardenProposalWriter } from "./garden-data-port-shared.js";
 
 export interface GardenDataPortFactoryOptions {
   readonly now?: () => string;
-  readonly generateId?: () => string;
+  readonly proposalWriter?: GardenProposalWriter;
 }
 
 export interface GardenHotDemotionCandidate {
@@ -44,29 +45,10 @@ export interface GardenJanitorDormantDemotionPort {
   setLifecycleDormant(memoryId: string, taskId: string): Promise<GardenDormantDemotionOutcome>;
 }
 
-export interface GardenMergeCandidate {
-  readonly primary_id: string;
-  readonly duplicate_ids: readonly string[];
-  readonly object_kind: string;
-  readonly similarity_score: number;
-}
-
-export interface GardenTemplateCluster {
-  readonly representative_id: string;
-  readonly member_ids: readonly string[];
-  readonly pattern_description: string;
-}
-
 export interface GardenNeighborGroup {
   readonly subject: string;
   readonly object_ids: readonly string[];
   readonly overlap_basis: string;
-}
-
-export interface GardenCompressionCandidate {
-  readonly chain_start: string;
-  readonly chain_end: string;
-  readonly intermediate_ids: readonly string[];
 }
 
 export interface GardenSynthesisCandidateCluster {
@@ -74,31 +56,8 @@ export interface GardenSynthesisCandidateCluster {
   readonly evidence_ids: readonly string[];
 }
 
-export interface GardenLibrarianMergeDetectionPort {
-  findMergeCandidates(workspaceId: string): Promise<readonly GardenMergeCandidate[]>;
-  hasPendingMergeProposal(primaryId: string): Promise<boolean>;
-  createMergeProposal(
-    workspaceId: string,
-    candidate: GardenMergeCandidate
-  ): Promise<{ readonly proposal_id: string }>;
-  findTemplateClusters(workspaceId: string, minClusterSize: number): Promise<readonly GardenTemplateCluster[]>;
-  hasPendingTemplateProposal(representativeId: string): Promise<boolean>;
-  createTemplateCandidate(
-    workspaceId: string,
-    cluster: GardenTemplateCluster
-  ): Promise<{ readonly candidate_id: string }>;
-}
-
 export interface GardenLibrarianNeighborDetectionPort {
   findSubjectNeighbors(workspaceId: string): Promise<readonly GardenNeighborGroup[]>;
-}
-
-export interface GardenLibrarianPathCompressionPort {
-  findCompressiblePaths(workspaceId: string): Promise<readonly GardenCompressionCandidate[]>;
-  createCompressionCandidate(
-    workspaceId: string,
-    candidate: GardenCompressionCandidate
-  ): Promise<{ readonly candidate_id: string }>;
 }
 
 export interface GardenLibrarianSynthesisThrottlePort {
@@ -108,7 +67,7 @@ export interface GardenLibrarianSynthesisThrottlePort {
     workspaceId: string,
     subject: string,
     evidenceIds: readonly string[]
-  ): Promise<{ readonly candidate_id: string }>;
+  ): Promise<{ readonly candidate_id: string; readonly created: boolean }>;
 }
 
 export interface GardenAuditorEvidenceCheckPort {
@@ -140,8 +99,7 @@ export interface GardenAuditorBootstrappingPort {
   assessColdStart(workspaceId: string): Promise<ColdStartAssessment>;
   generateDraftCandidates(workspaceId: string): Promise<readonly DraftCandidate[]>;
   findHighFrequencyPatterns(workspaceId: string, minFrequency: number): Promise<readonly HighFrequencyPattern[]>;
-  // Sync so crystallization create can join EventLog appendManyWithMutation mutate.
-  createSynthesisCandidate(workspaceId: string, patternKey: string): { readonly candidate_id: string };
+  createSynthesisCandidate(workspaceId: string, patternKey: string): Promise<{ readonly candidate_id: string; readonly created: boolean }>;
   hasPendingSynthesisCandidate(workspaceId: string, patternKey: string): Promise<boolean>;
 }
 
@@ -152,8 +110,6 @@ export interface GardenBackgroundDataPorts {
   readonly pointerHealthPort: GardenAuditorPointerHealthPort;
   readonly greenMaintenancePort: GardenAuditorGreenMaintenancePort;
   readonly bootstrappingPort: GardenAuditorBootstrappingPort;
-  readonly mergePort: GardenLibrarianMergeDetectionPort;
   readonly neighborPort: GardenLibrarianNeighborDetectionPort;
-  readonly compressionPort: GardenLibrarianPathCompressionPort;
   readonly synthesisPort: GardenLibrarianSynthesisThrottlePort;
 }

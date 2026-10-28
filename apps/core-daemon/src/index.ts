@@ -258,6 +258,8 @@ async function buildGardenWiring(
     healthIssueGroupRepo: foundation.healthIssueGroupRepo,
     pathGraphSnapshotRepo: repositories.pathGraphSnapshotRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    relationAssertionRepo: repositories.relationAssertionRepo,
+    proposalRepo: repositories.proposalRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
     answersWithCrystallizer: createAnswersWithCrystallizer({
@@ -405,8 +407,7 @@ function buildFinalizeGovernanceRuntimeInput(
     conversationService: runtimeWiring.coreWiring.conversationService,
     runHotStateService: foundation.runHotStateService,
     governanceLeaseService: foundation.governanceLeaseService,
-    budgetBankruptcyService: foundation.budgetBankruptcyService,
-    contextLensAssembler: runtimeWiring.recallWiring.contextLensAssembler
+    budgetBankruptcyService: foundation.budgetBankruptcyService
   };
 }
 

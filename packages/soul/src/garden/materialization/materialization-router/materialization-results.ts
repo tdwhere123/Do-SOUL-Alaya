@@ -1,4 +1,4 @@
-import { readErrorMessage, AlayaError } from "@do-soul/alaya-protocol";
+import { readErrorMessage, AlayaError, CommittedObjectError } from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
   MaterializationFailureResult,
@@ -41,7 +41,8 @@ export function readPartialFailureCreatedObjects(
 ): readonly MaterializationCreatedObject[] {
   // Partial failures may leave created_objects durable while the route still
   // reports failure — callers must reconcile orphans explicitly.
-  return error instanceof MaterializationPartialFailureError ? error.createdObjects : [];
+  if (error instanceof MaterializationPartialFailureError) return error.createdObjects;
+  return error instanceof CommittedObjectError ? [error.object] : [];
 }
 
 export function isMaterializationFailure(

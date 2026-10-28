@@ -202,32 +202,32 @@ function consumeFlagToken(
   }
   state.collectingShards = false;
 
-  if (token === "--variant") {
-    state.variantRaw = args[index + 1] ?? "oracle";
-    return index + 1;
+  if (matchFlagToken(token, "--variant")) {
+    state.variantRaw = readRequiredFlagValue(args, index, token, "--variant", "--variant requires a value");
+    return nextIndex(index, token);
   }
-  if (token === "--limit") {
-    state.limit = parsePositiveInt(args[index + 1], "--limit");
-    return index + 1;
+  if (matchFlagToken(token, "--limit")) {
+    state.limit = parsePositiveInt(readRequiredFlagValue(args, index, token, "--limit", "--limit requires a value"), "--limit");
+    return nextIndex(index, token);
   }
-  if (token === "--offset") {
-    state.offset = parseNonNegativeInt(args[index + 1], "--offset");
-    return index + 1;
+  if (matchFlagToken(token, "--offset")) {
+    state.offset = parseNonNegativeInt(readRequiredFlagValue(args, index, token, "--offset", "--offset requires a value"), "--offset");
+    return nextIndex(index, token);
   }
-  if (token === "--rounds") {
-    state.rounds = parsePositiveInt(args[index + 1], "--rounds");
-    return index + 1;
+  if (matchFlagToken(token, "--rounds")) {
+    state.rounds = parsePositiveInt(readRequiredFlagValue(args, index, token, "--rounds", "--rounds requires a value"), "--rounds");
+    return nextIndex(index, token);
   }
-  if (token === "--history-root") {
+  if (matchFlagToken(token, "--history-root")) {
     state.historyRoot = readRequiredFlagValue(args, index, token, "--history-root", "--history-root requires a path value");
     if (state.historyRoot.trim().length === 0 || state.historyRoot.startsWith("--")) {
       throw new AlayaError("VALIDATION", "--history-root requires a path value");
     }
-    return index + 1;
+    return nextIndex(index, token);
   }
-  if (token === "--embedding") {
-    state.embeddingMode = parseEmbeddingMode(args[index + 1] ?? "disabled");
-    return index + 1;
+  if (matchFlagToken(token, "--embedding")) {
+    state.embeddingMode = parseEmbeddingMode(readRequiredFlagValue(args, index, token, "--embedding", "--embedding requires a value"));
+    return nextIndex(index, token);
   }
   return consumeExtendedFlagToken(args, index, token, state);
 }
@@ -341,9 +341,9 @@ function consumeSnapshotCachePathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
-  if (token === "--data-dir") {
-    state.dataDir = args[index + 1];
-    return index + 1;
+  if (matchFlagToken(token, "--data-dir")) {
+    state.dataDir = readRequiredFlagValue(args, index, token, "--data-dir", "--data-dir requires a path");
+    return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--snapshot-out")) {
     state.snapshotOut = readFlagValue(args, index, token, "--snapshot-out");

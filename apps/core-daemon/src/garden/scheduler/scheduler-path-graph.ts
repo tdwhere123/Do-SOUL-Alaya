@@ -32,7 +32,7 @@ export function createPathGraphSnapshotTaskRunner(
 function createPathGraphSnapshotter(
   input: CreateGardenSchedulerRuntimeSupportInput
 ): PathGraphSnapshotter {
-  const pathRelationRepo = input.pathRelationRepo as typeof input.pathRelationRepo & {
+  const pathRelationRepo = (input.maintenancePathReader ?? input.pathRelationRepo) as typeof input.pathRelationRepo & {
     findActiveAll?: (workspaceId: string) => Promise<
       | readonly Readonly<PathRelation>[]
       | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>

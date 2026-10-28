@@ -26,6 +26,7 @@ import {
 } from "../conditional-field/query/compile-query-identity.js";
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
+import { CoreError } from "../../shared/errors.js";
 import { assertCommittedLedgerCapacity, type EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import {
@@ -42,17 +43,19 @@ export type EmittedRevisions = Readonly<Record<string, string>>;
 
 export const OFFSET_CURSOR = /^offset-(\d+)$/u;
 export const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
-export const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?$/u;
+export const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?(?:x(\d+))?(?:d(\d+))?$/u;
 
 const ISSUED_MAX = 32;
 const FIELD_RESUME_MAX = 32;
 const ISSUED_PAGES = new Map<string, IssuedDelivery>();
 const INDEX_ISSUED_DELIVERY = new WeakMap<InformationIndex, string>();
-const FIELD_RESUME = new Map<string, Readonly<{
+type RetainedField = Readonly<{
   state: FieldEngineState;
   token_digest: string;
   issued: Continuation;
-}>>();
+  purpose: "membership" | "payload_only";
+}>;
+const FIELD_RESUME = new Map<string, RetainedField>();
 
 export type IssuedDelivery = Readonly<{
   readonly query_key: string;
@@ -275,8 +278,16 @@ export function retainCommittedRevisions(
 }
 
 export function revisionRetentionBytes(prior: EmittedRevisions, committed: EmittedRevisions, first: boolean): number {
+  return revisionKeyRetentionBytes(prior, Object.keys(committed), first);
+}
+
+export function quoteIndexDeliveryRetention(prior: EmittedRevisions, members: readonly IndexEntry[], first: boolean): number {
+  return revisionKeyRetentionBytes(prior, members.map(productIdOfEntry), first);
+}
+
+function revisionKeyRetentionBytes(prior: EmittedRevisions, keys: Iterable<string>, first: boolean): number {
   let bytes = first ? 256 : 0;
-  for (const key of Object.keys(committed)) {
+  for (const key of new Set(keys)) {
     if (prior[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
   }
   return bytes;
@@ -339,6 +350,17 @@ export function deliveredPayloadEntry(queryKey: string, target: RecallTargetRef)
   return undefined;
 }
 
+/** A terminal proof receipt may retain a capability for independent source bytes. */
+export function assertMembershipContinuation(continuation: Continuation | null | undefined): void {
+  if (continuation == null) return;
+  const retained = lookupResume(continuation);
+  if (retained?.purpose === "payload_only" && retained.token_digest === continuationDigest(continuation)) {
+    throw new CoreError("CONFLICT", "Recall continuation permits source payload expansion only", {
+      details: { outcome: "payload_only", resource: "continuation_purpose" }
+    });
+  }
+}
+
 export function evictIssuedDeliveries(queryKey: string): readonly string[] {
   const removed: string[] = [];
   for (const [digest, issued] of ISSUED_PAGES) {
@@ -388,7 +410,8 @@ export function continuationDigest(continuation: Continuation): string {
   ])).digest("hex");
 }
 
-export function rememberField(state: FieldEngineState, continuation: Continuation | null): void {
+export function rememberField(state: FieldEngineState, continuation: Continuation | null,
+  purpose: RetainedField["purpose"] = "membership"): void {
   const key = fieldResumeKey(
     state.query_id,
     state.snapshot_id,
@@ -399,7 +422,8 @@ export function rememberField(state: FieldEngineState, continuation: Continuatio
   FIELD_RESUME.set(key, {
     state,
     token_digest: continuationDigest(continuation),
-    issued: continuation
+    issued: continuation,
+    purpose
   });
   while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
     const oldest = FIELD_RESUME.keys().next().value;
@@ -410,7 +434,8 @@ export function rememberField(state: FieldEngineState, continuation: Continuatio
 
 export function prepareFieldCommit(
   state: FieldEngineState,
-  continuation: Continuation | null
+  continuation: Continuation | null,
+  index: InformationIndex
 ): () => void {
   const key = fieldResumeKey(state.query_id, state.snapshot_id,
     interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock }));
@@ -419,7 +444,8 @@ export function prepareFieldCommit(
   return () => {
     if (committed) return;
     if (FIELD_RESUME.get(key) !== expected) throw new Error("stale prepared Recall delivery");
-    rememberField(state, continuation);
+    rememberField(state, continuation, index.continuation !== null && index.completeness.payload === "resource_rejected"
+      ? "payload_only" : "membership");
     committed = true;
   };
 }
@@ -476,7 +502,7 @@ function lookupResume(
   continuation: Continuation,
   interpretationClock?: string,
   interpretationId?: string
-): Readonly<{ state: FieldEngineState; token_digest: string; issued: Continuation }> | undefined {
+): RetainedField | undefined {
   return FIELD_RESUME.get(fieldResumeKey(
     continuation.query_id,
     continuation.snapshot_id,

@@ -1,4 +1,5 @@
 import type { ParsedFlagsState } from "../cli-options.js";
+import { AlayaError, parseEnvBoolean } from "@do-soul/alaya-protocol";
 
 export function consumeBooleanFlags(
   _args: ReadonlyArray<string>,
@@ -6,20 +7,21 @@ export function consumeBooleanFlags(
   token: string,
   state: ParsedFlagsState
 ): number {
-  if (token === "--force") state.force = true;
-  if (token === "--extraction-open-semantics") state.extractionOpenSemantics = true;
-  if (token === "--qa" || token === "--answer-judge") state.qa = true;
-  if (token === "--edge-plane") state.edgePlane = true;
-  if (token === "--materialize-question-dbs") state.materializeQuestionDbs = true;
-  if (token === "--experiment") state.experiment = true;
-  if (token === "--tolerate-provider-task-failures") {
-    state.tolerateProviderTaskFailures = true;
-  }
-  if (token === "--rebuild-evidence-search-projections") {
-    state.rebuildEvidenceSearchProjections = true;
-  }
-  if (token === "--backfill-missing-fact-frame-formations") {
-    state.backfillMissingFactFrameFormations = true;
-  }
+  const [flag, value] = token.split("=", 2);
+  const fields: Readonly<Record<string, keyof Pick<ParsedFlagsState,
+    "force" | "extractionOpenSemantics" | "qa" | "edgePlane" | "materializeQuestionDbs" |
+    "experiment" | "tolerateProviderTaskFailures" | "rebuildEvidenceSearchProjections" |
+    "backfillMissingFactFrameFormations">>> = {
+    "--force": "force", "--extraction-open-semantics": "extractionOpenSemantics",
+    "--qa": "qa", "--answer-judge": "qa", "--edge-plane": "edgePlane",
+    "--materialize-question-dbs": "materializeQuestionDbs", "--experiment": "experiment",
+    "--tolerate-provider-task-failures": "tolerateProviderTaskFailures",
+    "--rebuild-evidence-search-projections": "rebuildEvidenceSearchProjections",
+    "--backfill-missing-fact-frame-formations": "backfillMissingFactFrameFormations"
+  };
+  const field = fields[flag ?? ""];
+  if (field === undefined) throw new AlayaError("VALIDATION", `Unknown benchmark argument: ${token}`);
+  if (value !== undefined && value.trim().length === 0) throw new AlayaError("VALIDATION", `${flag} requires a boolean value`);
+  state[field] = value === undefined ? true : parseEnvBoolean(token.slice(token.indexOf("=") + 1), flag ?? token);
   return index;
 }

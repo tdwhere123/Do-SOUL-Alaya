@@ -372,6 +372,7 @@ function buildMergedPayload(
       dataset: first.dataset,
       sample_size: first.sample_size,
       evaluated_count: aggregate.evaluatedTotal,
+      reporting_recall_denominator: aggregate.answerableTotal,
       ...(payloads.every((payload) => payload.answerable_evaluated_count !== undefined)
         ? { answerable_evaluated_count: aggregate.answerableTotal }
         : {}),

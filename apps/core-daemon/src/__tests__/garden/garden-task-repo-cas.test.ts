@@ -322,6 +322,40 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(getGardenTask(database, "edge-claimed").status).toBe("claimed");
   });
 
+  it("does not append an expiry event when a task is claimed after selection", async () => {
+    const { repo, eventLogRepo } = createHarness();
+    repo.enqueue({ id: "edge-race", workspace_id: "workspace-1", role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.EDGE_CLASSIFY, payload: {}, created_at: "2026-05-01T00:00:00.000Z" });
+    const row = repo.peekExpiredUnclaimedTasks(GardenTaskKind.EDGE_CLASSIFY, "2026-05-10T00:00:00.000Z", 1)[0]!;
+    await repo.claimAtomic(row.id, "worker", "2026-05-11T00:00:00.000Z");
+    expect(await repo.expireUnclaimedTasks([{ task_id: row.id, event: {
+      event_type: GardenEventType.SOUL_GARDEN_TASK_EXPIRED, entity_type: "garden_task", entity_id: row.id,
+      workspace_id: row.workspace_id, run_id: null, caused_by: "garden-runtime",
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_EXPIRED, {
+        task_id: row.id, task_kind: row.kind, role: row.role, tier: GardenTier.TIER_2,
+        workspace_id: row.workspace_id, run_id: null, enqueued_at: row.created_at,
+        ttl_ms: 604800000, occurred_at: "2026-05-11T00:00:00.000Z"
+      })
+    } }])).toBe(0);
+    expect(repo.findById(row.id)?.status).toBe("claimed");
+    expect(await eventLogRepo.queryByEntity("garden_task", row.id)).toEqual([]);
+  });
+
+  it("coalesces periodic workspace scans until completion without dropping manual or other-workspace work", async () => {
+    const { repo } = createHarness();
+    const task = { workspace_id: "workspace-1", role: GardenRole.JANITOR, kind: GardenTaskKind.TTL_CLEANUP,
+      payload: { periodic: true }, created_at: "2026-05-01T00:00:00.000Z" } as const;
+    expect(repo.enqueue({ ...task, id: "periodic-1" }).task_id).toBe("periodic-1");
+    expect(repo.enqueue({ ...task, id: "periodic-2" }).task_id).toBe("periodic-1");
+    expect(repo.enqueue({ ...task, id: "manual-1", payload: {} }).task_id).toBe("manual-1");
+    expect(repo.enqueue({ ...task, workspace_id: "workspace-2", id: "other-workspace" }).task_id).toBe("other-workspace");
+    await repo.claimAtomic("periodic-1", "worker", "2026-05-02T00:00:00.000Z");
+    expect(repo.enqueue({ ...task, id: "periodic-3" }).task_id).toBe("periodic-1");
+    await repo.completeWithEvents("periodic-1", { status: "completed", completed_at: "2026-05-02T00:01:00.000Z" },
+      [], "worker", "workspace-1");
+    expect(repo.enqueue({ ...task, id: "periodic-4" }).task_id).toBe("periodic-4");
+  });
+
   it("routes in-process work around persisted host-worker tasks", async () => {
     const { database, eventPublisher, repo } = createHarness();
     const warn = vi.fn();

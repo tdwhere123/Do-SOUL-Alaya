@@ -45,8 +45,8 @@ describe("Janitor GC task kinds", () => {
   it("dormant demotion tolerates a candidate that is no longer active without aborting the batch", async () => {
     const setLifecycleDormant = vi
       .fn<(memoryId: string, taskId: string) => Promise<"demoted" | "skipped">>()
-      .mockResolvedValueOnce("demoted")
-      .mockResolvedValueOnce("skipped");
+      .mockResolvedValueOnce("skipped")
+      .mockResolvedValueOnce("demoted");
     const dormantDemotionPort = {
       findLowActivityActiveMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),
       setLifecycleDormant
@@ -75,7 +75,7 @@ describe("Janitor GC task kinds", () => {
     // objects_affected, not the racy one, and is not a failure result.
     expect(result.success).toBe(true);
     expect(result.error_message).toBeNull();
-    expect(result.objects_affected).toEqual(["memory-1"]);
+    expect(result.objects_affected).toEqual(["memory-2"]);
     expect(result.audit_entries).toEqual([
       "dormant_demotion: 1 memories transitioned to lifecycle_state=dormant (1 skipped: no longer active)"
     ]);

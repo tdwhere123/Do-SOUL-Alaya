@@ -44,6 +44,7 @@ import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import type { BackgroundServiceConfig } from "../../../background/bootstrap.js";
 import { createGardenRuntime } from "../../../garden/runtime/runtime.js";
+import { bindPostTurnTaskSource } from "./post-turn-source-fixture.js";
 import type { PostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import {
   createMcpMemoryToolHandler,
@@ -124,6 +125,7 @@ export interface PostTurnPayload {
   readonly target_object_refs?: readonly string[];
   readonly priority?: number;
   readonly created_at?: string;
+  readonly source_observed_at?: string;
   readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]> | null;
   readonly admitted_source_root_id?: string;
   readonly turn_index: number;
@@ -228,7 +230,8 @@ export async function createRoutingHarness(options: {
         workspace_id: "workspace-1",
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: overrides.payload ?? createPostTurnPayload(),
+        payload: bindPostTurnTaskSource(base.database, overrides.payload ?? createPostTurnPayload(),
+          `post-turn:${overrides.id ?? "post-turn-task-1"}`),
         // Default to "just enqueued" so host_worker rows stay within the
         // in-process fallback wait window — the host worker gets first claim.
         // The bounded-fallback test below enqueues with an explicitly aged

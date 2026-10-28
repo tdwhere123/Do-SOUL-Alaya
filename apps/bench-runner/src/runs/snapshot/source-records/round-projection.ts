@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { LoadedLongMemEvalDataset } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import type { LongMemEvalSourceCensus } from "./census.js";
 import type { SourcePublicationReport } from "./publish.js";
@@ -6,7 +7,7 @@ import type { SourcePublicationReport } from "./publish.js";
  * additional host facts. No second content digest or caller-selected revision is needed.
  * Unknown-host custom pins retain the legacy revision, never the captured revision. */
 export function longMemEvalRoundSourceVersion(datasetSha256: string, hostCaptured: boolean): string {
-  if (!/^[a-f0-9]{64}$/u.test(datasetSha256)) throw new Error("round projection requires a dataset SHA-256");
+  if (!/^[a-f0-9]{64}$/u.test(datasetSha256)) throw new AlayaError("VALIDATION", "round projection requires a dataset SHA-256");
   return hostCaptured ? `bench-round-host-v1:${datasetSha256}` : datasetSha256;
 }
 
@@ -29,7 +30,7 @@ export function assertLongMemEvalRoundSourceRevision(input: Readonly<{
   datasetSha256: string; sourceVersion: string; hostCaptured: boolean;
 }>): void {
   if (input.sourceVersion !== longMemEvalRoundSourceVersion(input.datasetSha256, input.hostCaptured)) {
-    throw new Error("round source revision differs from its dataset-bound host projection");
+    throw new AlayaError("CONFLICT", "round source revision differs from its dataset-bound host projection");
   }
 }
 
@@ -43,7 +44,7 @@ export function bindPublishedLongMemEvalRoundCensus(census: LongMemEvalSourceCen
   if (new Set(census.records.map(source => source.source_id)).size !== census.records.length ||
       published.size !== publication.sources.length || published.size !== census.records.length ||
       publication.census_count !== census.records.length || publication.admitted_count !== census.records.length) {
-    throw new Error("round publication must bind the complete census");
+    throw new AlayaError("CONFLICT", "round publication must bind the complete census");
   }
   return { ...census, records: census.records.map(({ host_capture: _capture, ...record }) => {
     const source = published.get(record.source_id), identity = source?.source_record;
@@ -53,7 +54,7 @@ export function bindPublishedLongMemEvalRoundCensus(census: LongMemEvalSourceCen
         identity.content_digest !== record.content_digest || source.content_digest !== record.content_digest ||
         source.corpus_digest !== record.corpus_digest || source.question_id !== record.question_id ||
         source.session_id !== record.session_id || source.session_index !== record.session_index || source.round_index !== record.round_index) {
-      throw new Error("round publication changed source identity, coordinates or rendered bytes");
+      throw new AlayaError("CONFLICT", "round publication changed source identity, coordinates or rendered bytes");
     }
     assertLongMemEvalRoundSourceRevision({ datasetSha256: census.dataset_sha256, sourceVersion: source.source_version,
       hostCaptured: identity.host_structure !== undefined });

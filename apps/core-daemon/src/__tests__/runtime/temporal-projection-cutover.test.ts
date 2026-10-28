@@ -116,10 +116,13 @@ describe("temporal projection daemon cutover", () => {
     expect(() => initDatabase({ filename: fixture.sourceFilename })).toThrow(/offline candidate cutover/i);
   });
 
-  it("recovers a crash after candidate selection by restoring the pointer before selection rollback", async () => {
+  it("recovers a crash after selection forward and preserves writes accepted by the restarted runtime", async () => {
     const { candidateToml, selectionId } = await createPreparedJournal(fixture);
     fs.writeFileSync(fixture.tomlFilename, candidateToml, "utf8");
     selectFixtureCandidate(fixture, selectionId);
+    const restarted = initDatabase({ filename: fixture.candidateFilename });
+    restarted.connection.exec("CREATE TABLE recovery_write_probe (value TEXT); INSERT INTO recovery_write_probe VALUES ('accepted')");
+    restarted.close();
 
     const recovered = await recoverTemporalProjectionCutover({
       journalFilename: fixture.journalFilename,
@@ -127,16 +130,17 @@ describe("temporal projection daemon cutover", () => {
       now: () => FIXED_NOW
     });
 
-    expect(recovered.status).toBe("compensated");
-    expect(fs.readFileSync(fixture.tomlFilename, "utf8")).toBe(fixture.originalToml);
+    expect(recovered.status).toBe("committed");
+    expect(fs.readFileSync(fixture.tomlFilename, "utf8")).toBe(candidateToml);
     const candidate = initDatabase({ filename: fixture.candidateFilename, temporalMode: "candidate" });
     try {
-      expect(inspectTemporalProjectionSelection(candidate)).toMatchObject({ selected: false });
+      expect(inspectTemporalProjectionSelection(candidate)).toMatchObject({ selected: true, selectionId });
+      expect(candidate.connection.prepare("SELECT value FROM recovery_write_probe").get()).toEqual({ value: "accepted" });
     } finally {
       candidate.close();
     }
     expect(await readTemporalCutoverJournal(fixture.journalFilename)).toMatchObject({
-      status: "compensated"
+      status: "committed"
     });
   });
 
@@ -152,7 +156,7 @@ describe("temporal projection daemon cutover", () => {
       now: () => FIXED_NOW
     })).rejects.toThrow(/different cutover journal/i);
 
-    expect(fs.readFileSync(fixture.tomlFilename, "utf8")).toBe(fixture.originalToml);
+    expect(fs.readFileSync(fixture.tomlFilename, "utf8")).toBe(candidateToml);
     const candidate = initDatabase({ filename: fixture.candidateFilename, temporalMode: "candidate" });
     try {
       expect(inspectTemporalProjectionSelection(candidate)).toMatchObject({
@@ -162,6 +166,46 @@ describe("temporal projection daemon cutover", () => {
     } finally {
       candidate.close();
     }
+  });
+
+  it("compensates an interrupted pointer switch before candidate selection", async () => {
+    const { candidateToml } = await createPreparedJournal(fixture);
+    fs.writeFileSync(fixture.tomlFilename, candidateToml, "utf8");
+    await expect(recoverTemporalProjectionCutover({ journalFilename: fixture.journalFilename,
+      reason: "recover before selection", now: () => FIXED_NOW })).resolves.toMatchObject({ status: "compensated" });
+    expect(readPointer(fixture.tomlFilename)).toBe(fixture.sourceFilename);
+  });
+
+  it.each(["missing", "changed"] as const)("refuses rollback before changing the pointer when the retained source is %s", async mode => {
+    await cutOverTemporalProjection(cutoverInput(fixture));
+    if (mode === "missing") fs.unlinkSync(fixture.sourceFilename);
+    else fs.appendFileSync(fixture.sourceFilename, "changed source witness");
+    await expect(rollbackTemporalProjectionCutover({ journalFilename: fixture.journalFilename,
+      reason: "rollback unavailable source", now: () => FIXED_NOW })).rejects.toThrow(/source no longer matches/u);
+    expect(readPointer(fixture.tomlFilename)).toBe(fixture.candidateFilename);
+    expect(await readTemporalCutoverJournal(fixture.journalFilename)).toMatchObject({ status: "committed" });
+  });
+
+  it("refuses a missing selected database while retaining legitimate fresh initialization", async () => {
+    await cutOverTemporalProjection(cutoverInput(fixture));
+    const alias = path.join(fixture.directory, "selected-alias.db");
+    fs.symlinkSync(fixture.candidateFilename, alias);
+    fs.unlinkSync(fixture.candidateFilename);
+    expect(() => initDatabase({ filename: fixture.candidateFilename })).toThrow(/Established temporal database is missing/u);
+    expect(() => initDatabase({ filename: fixture.candidateFilename, temporalMode: "candidate" })).toThrow(/Established temporal database is missing/u);
+    expect(() => initDatabase({ filename: alias })).toThrow(/Established temporal database is missing/u);
+    expect(fs.existsSync(fixture.candidateFilename)).toBe(false);
+    const fresh = initDatabase({ filename: path.join(fixture.directory, "fresh.db") });
+    fresh.close();
+  });
+
+  it("contends on the same runtime lease through a database-file symlink", async () => {
+    const alias = path.join(fixture.directory, "alias.db");
+    fs.symlinkSync(fixture.sourceFilename, alias);
+    const runtimeLease = await acquireTemporalRuntimeLease(alias);
+    try {
+      await expect(cutOverTemporalProjection(cutoverInput(fixture))).rejects.toThrow(/daemon must be stopped/u);
+    } finally { await runtimeLease.release(); }
   });
 
   it("recovers a crash after rollback restored the pointer but before its journal transition", async () => {

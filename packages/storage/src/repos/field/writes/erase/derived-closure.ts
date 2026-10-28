@@ -6,6 +6,7 @@ import {
   type RowParser
 } from "../../../shared/parse-row.js";
 import type { FieldEraseBarrierRow } from "../../ports.js";
+import { scrubGovernancePrivacyClosure, type EraseAuditRedactor } from "./governance-closure.js";
 
 const idParser: RowParser<string> = {
   parse(value: unknown): string {
@@ -16,7 +17,9 @@ const idParser: RowParser<string> = {
 export function scrubDerivedPrivacyClosure(
   database: StorageDatabase,
   barrier: FieldEraseBarrierRow,
-  evidenceIds: readonly string[]
+  evidenceIds: readonly string[],
+  sourceIds: readonly string[],
+  redact: EraseAuditRedactor | undefined
 ): void {
   const memoryIds = findLinkedMemoryIds(database, barrier.workspace_id, evidenceIds);
   const synthesisIds = findLinkedSynthesisIds(
@@ -25,8 +28,32 @@ export function scrubDerivedPrivacyClosure(
     evidenceIds,
     memoryIds
   );
+  scrubGovernancePrivacyClosure(database, barrier, evidenceIds,
+    [...sourceIds, ...evidenceIds, ...memoryIds, ...synthesisIds], redact);
+  scrubEvidenceLinkedHq(database, barrier, evidenceIds);
   scrubSynthesisCapsules(database, barrier, synthesisIds);
   scrubMemoryEntries(database, barrier, memoryIds);
+}
+
+function scrubEvidenceLinkedHq(
+  database: StorageDatabase, barrier: FieldEraseBarrierRow, evidenceIds: readonly string[]
+): void {
+  if (evidenceIds.length === 0) return;
+  const ids = JSON.stringify(evidenceIds);
+  database.connection.prepare(`
+    UPDATE memory_hq SET hqs_json = '[]', observation_id = NULL, updated_at = ?
+    WHERE workspace_id = ? AND observation_id IN (
+      SELECT observation_id FROM memory_hq_observations
+      WHERE workspace_id = ? AND evidence_id IN (SELECT value FROM json_each(?))
+    )
+  `).run(barrier.erased_at, barrier.workspace_id, barrier.workspace_id, ids);
+  database.connection.prepare(`
+    UPDATE memory_hq_observations SET hqs_json = '[]', hq_content_sha256 = 'erased',
+      observation_sha256 = 'erased:' || observation_id
+    WHERE workspace_id = ? AND evidence_id IN (SELECT value FROM json_each(?))
+      AND NOT (hqs_json = '[]' AND hq_content_sha256 = 'erased'
+        AND observation_sha256 IN ('erased', 'erased:' || observation_id))
+  `).run(barrier.workspace_id, ids);
 }
 
 function findLinkedMemoryIds(
@@ -83,12 +110,14 @@ function scrubMemoryEntries(
     "DELETE FROM recall_routing_key_owners WHERE workspace_id = ? AND owner_id = ?"
   ].map((sql) => connection.prepare(sql));
   const scrubHq = connection.prepare(
-    "UPDATE memory_hq SET hqs_json = '[]', updated_at = ? WHERE workspace_id = ? AND object_id = ?"
+    "UPDATE memory_hq SET hqs_json = '[]', observation_id = NULL, updated_at = ? WHERE workspace_id = ? AND object_id = ?"
   );
   const scrubObservations = connection.prepare(`
     UPDATE memory_hq_observations
-    SET hqs_json = '[]', hq_content_sha256 = 'erased', observation_sha256 = 'erased'
+    SET hqs_json = '[]', hq_content_sha256 = 'erased', observation_sha256 = 'erased:' || observation_id
     WHERE workspace_id = ? AND object_id = ?
+      AND NOT (hqs_json = '[]' AND hq_content_sha256 = 'erased'
+        AND observation_sha256 IN ('erased', 'erased:' || observation_id))
   `);
   const scrubMemory = connection.prepare(`
     UPDATE memory_entries

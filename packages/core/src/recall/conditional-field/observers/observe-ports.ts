@@ -23,6 +23,7 @@ import type {
   StoredPairsMeasurement
 } from "./measure-stored.js";
 import type { ProposalMatchReason } from "./source-proposal-match.js";
+import { CoreError } from "../../../shared/errors.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -304,6 +305,8 @@ export type ObserverWorkReceipt = Readonly<{
 }>;
 
 export type ObserveConditionalFieldInput = Readonly<{
+  readonly on_failure_work?: (work: Readonly<{ native_visits: number; native_bytes: number }>) => void;
+  readonly on_atomic_work_block?: (required: number) => void;
   readonly measurement_profile?: StoredCosineObligation;
   readonly lease: SnapshotReadLease;
   readonly action: ObserverAction;
@@ -329,7 +332,34 @@ export type ObserveConditionalFieldInput = Readonly<{
 
 export const DEFAULT_SOURCE_BYTE_LIMIT = 65_536;
 /** Spare work `collectObserved` needs after native visits before hydrating one identity. */
-export const SOURCE_IDENTITY_HYDRATE_RESERVE = 3;
+export const SOURCE_IDENTITY_HYDRATE_RESERVE = 4;
+
+/** One native identity visit followed by the optional singleton source read. */
+export function sourceIdentityObservationWork(readers: Pick<ObserverReaders, "source">): number {
+  return 1 + (readers.source === undefined ? 0 : SOURCE_IDENTITY_HYDRATE_RESERVE);
+}
+
+/** rowsRead counts native visits, including metadata and revision checks, not objects. */
+export function validateSourceObserverPage(page: SourceObserverPage,
+  onFailure?: (work: Readonly<{ native_visits?: number; native_bytes?: number }>) => void): SourceObserverPage {
+  if (!Number.isSafeInteger(page.rowsRead) || page.rowsRead < 0 || page.rowsRead > SOURCE_IDENTITY_HYDRATE_RESERVE
+    || !Number.isSafeInteger(page.bytesRead) || page.bytesRead < 0) {
+    const visits = Number.isSafeInteger(page.rowsRead) && page.rowsRead >= 0 ? page.rowsRead : undefined;
+    const bytes = Number.isSafeInteger(page.bytesRead) && page.bytesRead >= 0 ? page.bytesRead : undefined;
+    onFailure?.({ ...(visits === undefined ? {} : { native_visits: visits }),
+      ...(bytes === undefined ? {} : { native_bytes: bytes }) });
+    throw new CoreError("OBLIGATION_VIOLATION", "source reader exceeded its singleton hydration reserve", {
+      details: { source_read: { native_visits: visits ?? null, native_bytes: bytes ?? null } }
+    });
+  }
+  return page;
+}
+
+/** Native work includes metadata/revision visits; source objects remain singleton. */
+export function sourceNativeReadCounts(page: SourceObserverPage) {
+  return { native_visits: page.rowsRead, native_rows: page.rowsRead > 0 && page.row !== null ? 1 : 0,
+    native_bytes: page.bytesRead };
+}
 
 export type ObserverActionResult = Readonly<{
   readonly page: ObserverPage;

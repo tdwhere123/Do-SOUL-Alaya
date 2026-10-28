@@ -3,6 +3,7 @@ import {
   type FieldContractSha256, type HostOccurrenceInventory, type SourceScopeClass
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
 import { readSourceProjectionDependencies, SOURCE_DEPENDENCY_METADATA_RESERVATION,
   SOURCE_RECORD_METADATA_BYTE_MAX as METADATA_MAX, SOURCE_RECORD_METADATA_COLUMNS as COLUMNS,
   CURRENT_SOURCE_RECORD_ORDER as CURRENT_ORDER } from "./source-representation-read.js";
@@ -29,7 +30,7 @@ export function readHostInventory(database: StorageDatabase, input: HostInventor
   const result = (status: HostInventoryReadResult["status"], inventory?: HostOccurrenceInventory): HostInventoryReadResult =>
     ({ status, ...(inventory === undefined ? {} : { inventory }), nativeBytes, work, memory });
   if ([input.nativeByteLimit, input.workLimit, input.memoryLimit].some(value => !Number.isSafeInteger(value) || value < 0)) {
-    throw new Error("invalid host inventory allowance");
+    throw new StorageError("VALIDATION_FAILED", "invalid host inventory allowance");
   }
   if (input.authorizedScopes === undefined) return result("unavailable");
   if (input.nativeByteLimit < HEADER_RESERVATION || input.memoryLimit < 3 * HEADER_RESERVATION ||

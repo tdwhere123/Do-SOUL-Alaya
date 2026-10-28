@@ -1,5 +1,6 @@
 import type { MemoryEntry, StorageTier } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable, requirePrivacyWorkspaceAvailable } from "../field/privacy-availability.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
   createMemoryEntry,
@@ -159,13 +160,28 @@ export class SqliteMemoryEntryRepo
   }
 
   public async create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>> {
+    requirePrivacyObjectAvailable(this.db, entry.workspace_id, "memory_entry", entry.object_id);
     return createMemoryEntry.call(this, entry);
+  }
+
+  private requireMutationAvailability(objectId: string): void {
+    this.findByIdSync(objectId);
   }
 
   public async findRecallActivationTopK(
     query: RecallActivationTopKQuery
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    return findRecallActivationTopK(this.workflowStatementHolder.active(), query);
+    const rows = findRecallActivationTopK(this.workflowStatementHolder.active(), query);
+    requirePrivacyRowsAvailable(this.db, "memory_entry", rows);
+    return rows;
+  }
+
+  private requireSearchAvailability(workspaceId: string, objectIds?: readonly string[]): void {
+    if (objectIds === undefined) {
+      requirePrivacyWorkspaceAvailable(this.db, workspaceId, ["memory_entry"]);
+    } else {
+      for (const objectId of objectIds) requirePrivacyObjectAvailable(this.db, workspaceId, "memory_entry", objectId);
+    }
   }
 
   public createWithinTransaction(
@@ -175,6 +191,7 @@ export class SqliteMemoryEntryRepo
       readonly afterCreate?: () => void;
     }
   ): Readonly<MemoryEntry> {
+    requirePrivacyObjectAvailable(this.db, entry.workspace_id, "memory_entry", entry.object_id);
     return createMemoryEntryWithinTransaction.call(this, entry, callbacks);
   }
 
@@ -187,6 +204,7 @@ export class SqliteMemoryEntryRepo
     },
     workspaceId?: string
   ): Readonly<MemoryEntry> {
+    this.requireMutationAvailability(objectId);
     return updateMemoryEntryWithinTransaction.call(
       this,
       objectId,
@@ -211,6 +229,7 @@ export class SqliteMemoryEntryRepo
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    this.requireSearchAvailability(workspaceId);
     return searchByKeyword.call(this, workspaceId, queryText, limit);
   }
 
@@ -222,6 +241,7 @@ export class SqliteMemoryEntryRepo
     refinementDepths: readonly number[] = [],
     capture?: Readonly<MemoryKeywordFieldCapture>
   ) {
+    this.requireSearchAvailability(workspaceId, scope.objectIds);
     try {
       return await searchByKeywordField.call(
         this, workspaceId, queryText, limit, scope, refinementDepths, capture
@@ -240,6 +260,7 @@ export class SqliteMemoryEntryRepo
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    this.requireSearchAvailability(workspaceId, objectIds);
     return searchByKeywordWithinObjectIds.call(
       this,
       workspaceId,
@@ -255,6 +276,7 @@ export class SqliteMemoryEntryRepo
     limit: number,
     tier: StorageTier
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    this.requireSearchAvailability(workspaceId);
     return searchByKeywordWithinTier.call(this, workspaceId, queryText, limit, tier);
   }
 
@@ -265,6 +287,7 @@ export class SqliteMemoryEntryRepo
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    this.requireSearchAvailability(workspaceId, objectIds);
     return searchByAnchorWithinObjectIds.call(
       this,
       workspaceId,
@@ -283,6 +306,7 @@ export class SqliteMemoryEntryRepo
     scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
     refinementDepths: readonly number[] = []
   ) {
+    this.requireSearchAvailability(workspaceId, scope.objectIds);
     try {
       return await searchByAnchorField.call(
         this, workspaceId, anchorTokens, optionalTokens, limit, scope, refinementDepths
@@ -302,6 +326,7 @@ export class SqliteMemoryEntryRepo
     limit: number,
     tier: StorageTier
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    this.requireSearchAvailability(workspaceId);
     return searchByAnchorWithinTier.call(
       this,
       workspaceId,
@@ -316,6 +341,7 @@ export class SqliteMemoryEntryRepo
     input: AutonomousTombstoneInput,
     options?: { readonly onTransition?: () => void }
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(input.objectId);
     return autonomousTombstone.call(this, input, options);
   }
 
@@ -327,6 +353,7 @@ export class SqliteMemoryEntryRepo
       readonly onDeleted?: () => void;
     }
   ): Promise<boolean> {
+    this.requireMutationAvailability(objectId);
     return hardDeleteTombstonedWithDisposition.call(
       this,
       objectId,
@@ -338,6 +365,7 @@ export class SqliteMemoryEntryRepo
     objectId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(objectId);
     return updateMemoryEntry.call(this, objectId, fields);
   }
 
@@ -346,6 +374,7 @@ export class SqliteMemoryEntryRepo
     workspaceId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(objectId);
     return updateScopedMemoryEntry.call(
       this,
       objectId,
@@ -355,6 +384,7 @@ export class SqliteMemoryEntryRepo
   }
 
   public updateTier(input: MemoryEntryRepoTierUpdateInput): Readonly<MemoryEntry> | null {
+    this.requireMutationAvailability(input.objectId);
     return updateMemoryEntryTier.call(this, input);
   }
 
@@ -363,6 +393,7 @@ export class SqliteMemoryEntryRepo
     updatedAt: string,
     onArchived?: () => void
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(objectId);
     return archiveMemoryEntry.call(
       this,
       objectId,
@@ -376,6 +407,7 @@ export class SqliteMemoryEntryRepo
     fields: MemoryEntryRepoDynamicsUpdateFields,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(objectId);
     return updateMemoryEntryDynamics.call(
       this,
       objectId,
@@ -389,6 +421,7 @@ export class SqliteMemoryEntryRepo
     fields: MemoryEntryRepoDynamicsUpdateFields,
     updatedAt: string
   ): Readonly<MemoryEntry> {
+    this.requireMutationAvailability(objectId);
     return updateMemoryEntryDynamicsSync.call(this, objectId, fields, updatedAt);
   }
 
@@ -396,14 +429,17 @@ export class SqliteMemoryEntryRepo
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    expectedFromState?: MemoryEntry["lifecycle_state"]
   ): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(objectId);
     return transitionMemoryEntryLifecycle.call(
       this,
       objectId,
       lifecycleState,
       updatedAt,
-      onTransition
+      onTransition,
+      expectedFromState
     );
   }
 
@@ -411,10 +447,12 @@ export class SqliteMemoryEntryRepo
     objectId: string,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry> | null> {
+    this.requireMutationAvailability(objectId);
     return reviveDormantMemoryEntry.call(this, objectId, updatedAt);
   }
 
   public reviveDormantSync(objectId: string, updatedAt: string): Readonly<MemoryEntry> | null {
+    this.requireMutationAvailability(objectId);
     return reviveDormantMemoryEntrySync.call(this, objectId, updatedAt);
   }
 
@@ -424,23 +462,28 @@ export class SqliteMemoryEntryRepo
     updatedAt: string,
     onTransition?: () => void
   ): Readonly<MemoryEntry> {
+    this.requireMutationAvailability(objectId);
     return transitionMemoryEntryLifecycleSync.call(this, objectId, lifecycleState, updatedAt, onTransition);
   }
 
   public async transitionToDormantIfActive(
     objectId: string,
     updatedAt: string,
-    onTransition?: () => void
+    onTransition?: () => void,
+    eligibility?: { readonly workspaceId: string; readonly maxActivation: number; readonly idleBefore: string }
   ): Promise<Readonly<MemoryEntry> | null> {
+    this.requireMutationAvailability(objectId);
     return transitionMemoryEntryToDormantIfActive.call(
       this,
       objectId,
       updatedAt,
-      onTransition
+      onTransition,
+      eligibility
     );
   }
 
   public async hardDeleteTombstoned(objectId: string, onDeleted?: () => void): Promise<void> {
+    this.requireMutationAvailability(objectId);
     return hardDeleteTombstonedMemoryEntry.call(this, objectId, onDeleted);
   }
 }

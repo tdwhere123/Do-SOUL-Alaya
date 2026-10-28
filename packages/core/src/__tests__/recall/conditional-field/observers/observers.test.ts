@@ -101,15 +101,22 @@ describe("conditional-field resumable observers", () => {
     expect(before.page.outcome.status).toBe("interrupted");
     expect(before.page.open_regions.some((region) => region.status === "open")).toBe(true);
     expect(before.page.outcome.status).not.toBe("exhausted");
-    const during = observeConditionalField(observeInput(slice, {
+    const limited = observeConditionalField(observeInput(slice, {
       action: action("seed", 7),
       page_limit: 1,
       seed_query: "needle"
     }));
+    expect(limited.page.observations).toEqual([]);
+    expect(limited.page.outcome.status).toBe("interrupted");
+    expect(limited.page.cursor.committed_through).toBeNull();
+    expect(limited.work.native_visits).toBe(4);
+    const during = observeConditionalField(observeInput(slice, {
+      action: action("seed", 8), page_limit: 1, seed_query: "needle"
+    }));
     expect(during.page.observations).toHaveLength(1);
     expect(during.page.outcome.status).toBe("open");
-    expect(during.work.native_visits).toBe(7);
-    expect(during.work.work_units).toBe(7);
+    expect(during.work.native_visits).toBe(8);
+    expect(during.work.work_units).toBe(8);
     expect(during.work.work_units).toBeGreaterThan(0);
     expect(during.page.cursor.committed_through).not.toBeNull();
   });

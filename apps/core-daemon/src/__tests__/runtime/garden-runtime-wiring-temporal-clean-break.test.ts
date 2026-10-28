@@ -19,10 +19,14 @@ import {
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
+  SqliteProposalRepo,
+  SqliteRelationAssertionRepo,
   SqliteSignalRepo,
   SqliteWorkspaceRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
+import { markTemporalProjectionSelectedForTest } from "../../../../../packages/storage/src/__tests__/support/temporal-projection-selection.js";
+import { seedMemoryEntry, seedGreenStatus } from "../../../../../packages/storage/src/__tests__/repos/garden/garden-data-ports-fixture.js";
 
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 
@@ -147,6 +151,11 @@ describe("Garden production temporal clean break", () => {
         workspace_state: WorkspaceState.ACTIVE
       });
       const eventLogRepo = new SqliteEventLogRepo(database);
+      for (const id of ["aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222"]) {
+        seedMemoryEntry(database, { objectId: id, workspaceId: "workspace-1", runId: "run-1", evidenceRefs: ["missing"] });
+        seedGreenStatus(database, { objectId: `green-${id}`, workspaceId: "workspace-1", targetObjectId: id, validUntil: null });
+      }
+      markTemporalProjectionSelectedForTest(database);
       const runtimeNotifier = {
         notify: async () => undefined,
         notifyEntry: async (_entry: EventLogEntry) => undefined
@@ -188,6 +197,8 @@ describe("Garden production temporal clean break", () => {
         healthIssueGroupRepo: undefined,
         pathGraphSnapshotRepo: new SqlitePathGraphSnapshotRepo(database),
         pathRelationRepo: new SqlitePathRelationRepo(database),
+        relationAssertionRepo: new SqliteRelationAssertionRepo(database),
+        proposalRepo: new SqliteProposalRepo(database),
         pathPlasticityWatermarkRepo: new SqlitePathPlasticityWatermarkRepo(database),
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({
@@ -250,7 +261,24 @@ describe("Garden production temporal clean break", () => {
         })
       );
 
+      scheduler.queue.splice(0, scheduler.queue.length);
+      await getService(wiring.gardenRuntime, "Auditor").task();
+      const evidenceTask = scheduler.queue.find(task => task.task_kind === GardenTaskKind.EVIDENCE_STALENESS_CHECK)!;
+      scheduler.queue.splice(0, scheduler.queue.length, evidenceTask);
+      await getService(wiring.gardenRuntime, "GardenScheduler").task();
+      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM green_statuses WHERE green_state = 'revoked'").get())
+        .toEqual({ count: 2 });
+
+      scheduler.queue.splice(0, scheduler.queue.length);
+      await getService(wiring.gardenRuntime, "Librarian").task();
       await wiring.gardenRuntime.runEmbeddingBackfillPass("workspace-1");
+      expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE)).toBe(false);
+      const pathPlasticityTask = scheduler.queue.find(task => task.task_kind === GardenTaskKind.PATH_PLASTICITY_UPDATE);
+      expect(pathPlasticityTask).toBeDefined();
+      const snapshotTask = scheduler.queue.find(task => task.task_kind === GardenTaskKind.PATH_GRAPH_SNAPSHOT)!;
+      scheduler.queue.splice(0, scheduler.queue.length, snapshotTask);
+      await getService(wiring.gardenRuntime, "GardenScheduler").task();
+      expect((await input.pathGraphSnapshotRepo.findHistory("workspace-1", 2))).toHaveLength(1);
 
       expect(coherentPairKeys).not.toHaveBeenCalled();
       expect(scheduler.completions).toContainEqual(
@@ -267,13 +295,6 @@ describe("Garden production temporal clean break", () => {
 
       // Garden wiring does not accept a path-plasticity writer. A scheduled
       // residual task must complete as a skip instead of updating a legacy row.
-      scheduler.queue.splice(0, scheduler.queue.length);
-      await getService(wiring.gardenRuntime, "Librarian").task();
-      expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE)).toBe(false);
-      const pathPlasticityTask = scheduler.queue.find(
-        (task) => task.task_kind === GardenTaskKind.PATH_PLASTICITY_UPDATE
-      );
-      expect(pathPlasticityTask).toBeDefined();
       scheduler.queue.splice(0, scheduler.queue.length);
       scheduler.queue.push(pathPlasticityTask!);
 

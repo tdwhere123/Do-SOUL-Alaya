@@ -31,6 +31,7 @@ import {
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { createResolutionElectionLease } from "../../../../../../packages/core/src/__tests__/shared/resolution-election-lease.test-support.js";
 
 // Shared soul.resolve wiring fixture. Parts keep only case differences.
 // Maps + mock publish; not a live EventLog authenticity path.
@@ -60,6 +61,7 @@ export function createHarness(): SoulResolveWiringHarness {
   const memories = new Map<string, MemoryEntry>();
   const obligations = new Map<string, DeferredObligation>();
   const events: EventLogEntry[] = [];
+  const eventLogIdentity = {};
   const deliveries = new Map<string, ContextDeliveryRecord>();
 
   function publish(
@@ -77,20 +79,35 @@ export function createHarness(): SoulResolveWiringHarness {
   }
 
   const eventPublisher = {
+    getStorageConnectionIdentity: () => eventLogIdentity,
     publish: vi.fn(async (input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
       publish(input)
     ),
-    appendManyWithMutation: vi.fn(),
+    appendManyWithMutation: vi.fn(async (inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown) => mutate(inputs.map(publish))),
+    mutateThenAppendMany: vi.fn(async (mutate: () => { readonly events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]; readonly result: unknown }) => {
+      const decision = mutate();
+      return { result: decision.result, entries: decision.events.map(publish) };
+    }),
     appendManyWithMutationAndDetachPropagation: vi.fn()
   } as unknown as ConstructorParameters<typeof ResolutionService>[0]["eventPublisher"];
 
   const claimRepo = {
-    findById: async (id: string) => claims.get(id) ?? null
+    findById: async (id: string) => claims.get(id) ?? null,
+    findByIdSync: (id: string) => claims.get(id) ?? null,
+    getStorageConnectionIdentity: () => eventLogIdentity
   };
   const memoryRepo = {
     findById: async (id: string) => memories.get(id) ?? null
   };
   const claimService = {
+    getStorageConnectionIdentity: () => eventLogIdentity,
+    getEventPublisherConnectionIdentity: () => eventLogIdentity,
+    resumeActivationElection: async (objectId: string) => {
+      const claim = claims.get(objectId);
+      if (claim === undefined) throw new Error(`claim ${objectId} not found`);
+      return claim;
+    },
     // Lifecycle change and composed audit events publish together so the
     // mock matches ClaimService.transitionLifecycle sink order.
     transitionLifecycle: async (
@@ -198,6 +215,10 @@ export function createHarness(): SoulResolveWiringHarness {
 
   const resolutionService = new ResolutionService({
     eventPublisher,
+    electionLease: createResolutionElectionLease(eventLogIdentity),
+    resolutionAuditRepo: { queryByEntityAll: async (type, id) => events.filter((event) => event.entity_type === type && event.entity_id === id),
+      queryByEntityInCurrentTransaction: (type, id) => events.filter(event => event.entity_type === type && event.entity_id === id),
+      getStorageConnectionIdentity: () => eventLogIdentity },
     claimRepo,
     memoryRepo,
     claimService,

@@ -12,6 +12,17 @@ import {
 import { codexConfigPath, codexSlashCommandsPath, codexSlashCommandsInCommandsDir, createProfileTestEnv, PROFILE_TEST_HOME } from "../support/profile-test-home.js";
 import path from "node:path";
 describe("cli detach", () => {
+  it("returns a failing exit status on cancellation so uninstall can report the retained attachment", async () => {
+    const fs = new MemoryProfileFs();
+    const setupPlan = await buildAttachProfileMutationPlan("codex", { env: createProfileTestEnv(), fs });
+    await applyProfileMutationPlan(setupPlan, { fs, allowConflicts: true });
+    const before = fs.files.get(codexConfigPath());
+    const command = createDetachCommandSpec({ fs, confirm: async () => false });
+    const result = await command.handler(createProfileCommandContext(), ["codex"]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.json).toMatchObject({ ok: false, canceled: true, changed: false });
+    expect(fs.files.get(codexConfigPath())).toBe(before);
+  });
   it("removes Alaya profile records with preview/confirm plumbing bypassed by --yes", async () => {
     const fs = new MemoryProfileFs();
     const setupPlan = await buildAttachProfileMutationPlan("codex", {

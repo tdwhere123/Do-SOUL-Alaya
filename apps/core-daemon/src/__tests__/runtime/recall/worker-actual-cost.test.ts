@@ -33,6 +33,7 @@ import {
   type WorkerActualCost
 } from "../../../runtime/recall/worker-actual-cost.js";
 import { MEM, NOW, WS, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { validateSourceObserverPage } from "../../../../../../packages/core/src/recall/conditional-field/observers/observe-ports.js";
 import {
   FAR_FUTURE_EXPIRY,
   defaultBudget
@@ -86,6 +87,84 @@ describe("native worker actual cost", () => {
     expect(cost.elapsed_ms).toBeGreaterThanOrEqual(0);
     expect(executed.execution_receipt).not.toHaveProperty("native_visits");
     expect(executed.execution_receipt.worker.native_visits).toBe(4);
+  });
+
+  it("counts the visits and bytes reported by the SQLite source reader", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await slice.writeMemory(MEM.r, "source body", MemoryDimension.FACT);
+    const expected = slice.memoryReader.source(WS, MEM.r);
+    expect(expected.row?.object_id).toBe(MEM.r);
+    expect(expected.rowsRead).toBe(4);
+    const executed = withWorkerActualCost({
+      source: (input) => slice.memoryReader.source(input.workspaceId, input.objectId, input.byteLimit)
+    }, (instrumented) => {
+      const page = instrumented.source!({ workspaceId: WS, objectId: MEM.r });
+      expect(page.row?.object_id).toBe(MEM.r);
+      return { execution_receipt: compileReceipt(defaultBudget()) };
+    });
+    expect(workerActualCostOf(executed.execution_receipt)).toMatchObject({
+      native_visits: 4, row_visits: 4, bytes_read: expected.bytesRead
+    });
+  });
+
+  it("counts work from the batched stored-pair reader, including a partial result", () => {
+    const calls: string[][] = [];
+    const executed = withWorkerActualCost({
+      measureStoredPairs: (input) => {
+        calls.push([...input.objectIds]);
+        return { byObjectId: {}, rowVisits: 3, bytesRead: 40, resourceLimited: true };
+      }
+    }, (instrumented) => {
+      const page = instrumented.measureStoredPairs!({ workspaceId: WS, objectIds: [MEM.r, MEM.c], queryDigest: "digest" });
+      expect(page.resourceLimited).toBe(true);
+      return { execution_receipt: compileReceipt(defaultBudget()) };
+    });
+    expect(calls).toEqual([[MEM.r, MEM.c]]);
+    expect(workerActualCostOf(executed.execution_receipt)).toMatchObject({
+      native_visits: 3, row_visits: 3, bytes_read: 40
+    });
+  });
+
+  it.each([
+    { rowsRead: Number.NaN, bytesRead: 7, visits: null, bytes: 10 },
+    { rowsRead: 4, bytesRead: Number.NaN, visits: 6, bytes: null },
+    { rowsRead: 4, bytesRead: -1, visits: 6, bytes: null }
+  ])("serializes unknown source counters without falsifying the worker failure receipt: %j", invalid => {
+    let failure: unknown;
+    try {
+      withWorkerActualCost({ source: ({ objectId }) => objectId === "prior"
+        ? { row: null, rowsRead: 2, bytesRead: 3, unavailable: true }
+        : { row: null, rowsRead: invalid.rowsRead, bytesRead: invalid.bytesRead, unavailable: true }
+      }, (instrumented) => {
+        validateSourceObserverPage(instrumented.source!({ workspaceId: WS, objectId: "prior" }));
+        validateSourceObserverPage(instrumented.source!({ workspaceId: WS, objectId: "invalid" }));
+        return { execution_receipt: compileReceipt(defaultBudget()) };
+      });
+    } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(CoreError);
+    attachMeasuredWorkerCost(failure, { native_visits: 2, row_visits: 2, bytes_read: 3,
+      elapsed_ms: 1, rss_bytes: 1, rss_sampling_method: RSS_SAMPLING_METHOD });
+    const wire = JSON.parse(JSON.stringify(serializeWorkerError(failure)));
+    expect(wire.core.code).toBe("OBLIGATION_VIOLATION");
+    expect(wire.core.details.source_read).toEqual({
+      native_visits: Number.isSafeInteger(invalid.rowsRead) ? invalid.rowsRead : null,
+      native_bytes: Number.isSafeInteger(invalid.bytesRead) && invalid.bytesRead >= 0 ? invalid.bytesRead : null
+    });
+    expect(wire.core.details.worker).toMatchObject({
+      native_visits: invalid.visits, row_visits: invalid.visits, bytes_read: invalid.bytes
+    });
+  });
+
+  it("keeps a measured zero source receipt distinct from unknown work", () => {
+    const executed = withWorkerActualCost({
+      source: () => ({ row: null, rowsRead: 0, bytesRead: 0, unavailable: false })
+    }, (instrumented) => {
+      instrumented.source!({ workspaceId: WS, objectId: "missing" });
+      return { execution_receipt: compileReceipt(defaultBudget()) };
+    });
+    expect(workerActualCostOf(executed.execution_receipt)).toMatchObject({
+      native_visits: 0, row_visits: 0, bytes_read: 0
+    });
   });
 
   it("keeps actual.native_visits unchanged and distinct from worker pages", () => {

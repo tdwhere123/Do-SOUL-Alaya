@@ -4,26 +4,54 @@ import {
   SoulMemorySearchResponseSchema,
   SourceLookupReasonsSchema,
   indexEntryCacheKey,
-  sourceIndexEntry
+  sourceIndexEntry,
+  type InformationIndex
 } from "@do-soul/alaya-protocol";
 import {
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
   encodeIndexResults, frameEncodedIndex,
+  encodeRecallResult,
   capableRecallConsumerDeclaration
 } from "@do-soul/alaya-core";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
+import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import {
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics
 } from "../../../mcp-memory/recall/recall-result.js";
 
-import { context, createDeps, stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { capableRecallRequest, context, createDeps, stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 
 function memoryEntry(objectId = "memory-1") {
   return stubRecallIndex([objectId]).entries[0]!;
 }
 
 describe("conditional-field result encoding", () => {
+  it.each(["literal", "unavailable", "historical"] as const)(
+    "preserves %s payload state through the Core encoder, MCP dispatch, and delivery acknowledgment", async mode => {
+      const entry = sourceIndexEntry({ workspace_id: context.workspaceId, root_kind: "source_record", root_id: "marker-source",
+        source_version: "v1", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null,
+        association_milligrades: 500, hypothesis_id: "h0", output_binding: "source", program_state: "matched", time_state: "current" });
+      const index = { ...stubRecallIndex([]), as_of: "2026-09-25T00:00:00Z", entries: [entry] };
+      const key = indexEntryCacheKey(entry);
+      const result = encodeRecallResult(index, mode === "unavailable" ? new Map() : new Map([[key, "[payload omitted]"]]));
+      if (mode === "historical") Reflect.deleteProperty(result.candidates[0]!, "payload_available");
+      const acknowledged: ReadonlyMap<string, string>[] = [];
+      const deps = createDeps();
+      deps.recallService.recall = async () => ({ ...result,
+        acknowledge_delivery: async (_issued: InformationIndex, captured: ReadonlyMap<string, string>) => { acknowledged.push(captured); } });
+      const handler = createMcpMemoryToolHandler(deps);
+      const delivered = await handler.call({ toolName: "soul.recall", context, arguments: capableRecallRequest({
+        query: "marker", scope_class: null, dimension: null, domain_tags: null, max_results: 1
+      }) });
+      if (!delivered.ok) throw new Error(JSON.stringify(delivered.error));
+      const response = SoulMemorySearchResponseSchema.parse(delivered.output);
+      expect(response.results[0]).toMatchObject({ content_preview: "[payload omitted]", payload_available: mode !== "unavailable" });
+      expect(response.index?.completeness.payload).toBe(mode === "unavailable" ? "omitted" : "complete");
+      expect([...acknowledged[0]!.entries()]).toEqual(mode === "unavailable" ? [] : [[key, "[payload omitted]"]]);
+    }
+  );
+
   it("keeps original text, disclosure, and later rows ahead of optional lookup diagnostics", () => {
     const sources = ["first", "second"].map((rootId) => sourceIndexEntry({
       workspace_id: "ws", root_kind: "source_record", root_id: rootId,

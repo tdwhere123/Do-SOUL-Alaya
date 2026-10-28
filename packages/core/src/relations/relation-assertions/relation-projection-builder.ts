@@ -4,6 +4,7 @@ import {
   RELATION_ASSERTION_EVENT_CONTRACT_GENERATION,
   RELATION_ASSERTION_SCHEMA_GENERATION,
   RELATION_PATH_PROJECTION_SCHEMA_GENERATION,
+  compareUtcInstants,
   type RelationAssertion,
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
@@ -146,13 +147,13 @@ function findNextProjectionRefreshAt(
   resolutions: readonly Readonly<RelationAssertionResolution>[],
   asOf: string
 ): string | null {
-  const asOfMs = Date.parse(asOf);
-  let nextMs = Number.POSITIVE_INFINITY;
+  let next: string | null = null;
   const consider = (timestamp: string): void => {
-    const timestampMs = Date.parse(timestamp);
-    if (timestampMs > asOfMs && timestampMs < nextMs) nextMs = timestampMs;
+    if (compareUtcInstants(timestamp, asOf) === 1 &&
+        (next === null || compareUtcInstants(timestamp, next) === -1)) next = timestamp;
   };
   for (const assertion of assertions) {
+    consider(assertion.admitted_at);
     if (assertion.validity.kind === "open") consider(assertion.validity.valid_from);
     if (assertion.validity.kind === "bounded") {
       consider(assertion.validity.valid_from);
@@ -160,7 +161,7 @@ function findNextProjectionRefreshAt(
     }
   }
   for (const resolution of resolutions) consider(resolution.resolved_at);
-  return Number.isFinite(nextMs) ? new Date(nextMs).toISOString() : null;
+  return next;
 }
 
 export function sha256RelationAssertionValue(value: string): string {

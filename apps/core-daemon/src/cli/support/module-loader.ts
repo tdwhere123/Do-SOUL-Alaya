@@ -1,7 +1,8 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { AlayaCliBridge, AlayaCliBridgeOptions, AlayaCliResult } from "../bridge.js";
+import type { AlayaCliBridge, AlayaCliBridgeOptions, AlayaCliDaemonRuntime, AlayaCliResult } from "../bridge.js";
 import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
+import type { AlayaDaemonRuntimeOptions } from "../../index.js";
 import { writeCliFailure } from "../errors/error-reporting.js";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
@@ -14,11 +15,12 @@ export const SOFTWARE_EXIT_FALLBACK = 70;
 
 export interface LoadedAlayaCliModules {
   readonly createAlayaCliBridge: (
-    runtime: AlayaDaemonRuntime,
+    runtime: AlayaCliDaemonRuntime,
     options: AlayaCliBridgeOptions
   ) => AlayaCliBridge;
   readonly registerAlayaCliCommands: (bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime) => void;
-  readonly createAlayaDaemonRuntime: () => Promise<AlayaDaemonRuntime>;
+  readonly registerAlayaOfflineCliCommands?: (bridge: AlayaCliBridge) => void;
+  readonly createAlayaDaemonRuntime: (options?: AlayaDaemonRuntimeOptions) => Promise<AlayaDaemonRuntime>;
   readonly softwareExit: number;
 }
 
@@ -63,6 +65,8 @@ export async function loadAlayaCliModules(
     createAlayaCliBridge: bridgeModule.createAlayaCliBridge as LoadedAlayaCliModules["createAlayaCliBridge"],
     registerAlayaCliCommands:
       registerModule.registerAlayaCliCommands as LoadedAlayaCliModules["registerAlayaCliCommands"],
+    registerAlayaOfflineCliCommands:
+      registerModule.registerAlayaOfflineCliCommands as LoadedAlayaCliModules["registerAlayaOfflineCliCommands"],
     createAlayaDaemonRuntime:
       daemonModule.createAlayaDaemonRuntime as LoadedAlayaCliModules["createAlayaDaemonRuntime"],
     softwareExit
@@ -112,12 +116,25 @@ export async function runAlayaCli(
   const loadModules = options.loadModules ?? loadAlayaCliModules;
 
   let softwareExit = SOFTWARE_EXIT_FALLBACK;
+  let exitCode = softwareExit;
   let runtime: AlayaDaemonRuntime | null = null;
 
   try {
     const loaded = await loadModules();
     softwareExit = loaded.softwareExit;
-    runtime = await loaded.createAlayaDaemonRuntime();
+    const command = argv.find((token) => !token.startsWith("-"));
+    if (command === "temporal-cutover") {
+      const bridge = loaded.createAlayaCliBridge({ startupSteps: [] }, { cwd, env, stdin, stdout, stderr, isTTY });
+      if (loaded.registerAlayaOfflineCliCommands === undefined) {
+        stderr.write("Offline maintenance CLI registration is unavailable; rebuild Alaya.\n");
+        return softwareExit;
+      }
+      loaded.registerAlayaOfflineCliCommands(bridge);
+      const result = await bridge.dispatch([...argv]);
+      return toExitCode(result.exitCode, softwareExit);
+    }
+    runtime = await loaded.createAlayaDaemonRuntime(command === "source-index-lexical"
+      ? { embeddingStartupProbe: "omit" } : undefined);
     const bridge = loaded.createAlayaCliBridge(runtime, {
       cwd,
       env,
@@ -128,17 +145,19 @@ export async function runAlayaCli(
     });
     loaded.registerAlayaCliCommands(bridge, runtime);
     const result: AlayaCliResult | undefined = await bridge.dispatch([...argv]);
-    return toExitCode(result?.exitCode, softwareExit);
+    exitCode = toExitCode(result?.exitCode, softwareExit);
   } catch (error) {
     writeCliFailure(stderr, error, "bootstrap");
-    return softwareExit;
+    exitCode = softwareExit;
   } finally {
     if (runtime !== null && typeof runtime.shutdown === "function") {
       try {
         await runtime.shutdown();
       } catch (shutdownError) {
         writeCliFailure(stderr, shutdownError, "shutdown");
+        exitCode = softwareExit;
       }
     }
   }
+  return exitCode;
 }

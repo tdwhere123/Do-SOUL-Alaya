@@ -10,6 +10,7 @@ import {
 } from "../../mappers/mappers.js";
 import type { ProposalConnectionHost } from "../../proposal-connection-host.js";
 import type { ProposalRow } from "../../mappers/rows.js";
+import { assertProposalAcceptanceSupported } from "../../mappers/acceptance.js";
 import type {
   ProposalResolutionEventInput,
   TransactionBoundProposalMutation,
@@ -91,6 +92,7 @@ function assertPendingPrivacyErase(ctx: PrivacyAcceptContext, proposalId: string
   const row = ctx.connectionHost.findByIdStatement.get(proposalId) as ProposalRow | undefined;
   if (row === undefined) throw new StorageError("NOT_FOUND", `Proposal ${proposalId} was not found.`);
   if (row.resolution_state !== "pending") throw ctx.createPendingResolutionFailure(proposalId);
+  assertProposalAcceptanceSupported(row);
   if (row.proposal_operation !== "privacy_erase") {
     throw new StorageError("VALIDATION_FAILED", "Proposal is not a privacy erase operation.");
   }

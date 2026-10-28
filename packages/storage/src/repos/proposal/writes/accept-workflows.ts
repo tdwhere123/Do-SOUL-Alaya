@@ -16,6 +16,7 @@ import { insertEventLogEntry } from "../../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
   assertAcceptedMemoryUpdateMatchesProposal,
+  assertProposalAcceptanceSupported,
   assertAcceptedPathRelationGovernanceMatchesProposal,
   assertAcceptedSynthesisCreateMatchesProposal,
   parseAcceptedMemoryUpdateInput,
@@ -37,7 +38,8 @@ import type {
   UpdatePendingResolutionOptions
 } from "../types.js";
 import type { ProposalRow } from "../mappers/rows.js";
-import { upsertStrictlyGovernedPathRelation } from "./path-relation-accept-workflow.js";
+import { upsertProposedPathRelation } from "./path-relation-accept-workflow.js";
+import { parseProposedPathRelation, requireSupportedPathRelationProposal } from "../path-relations.js";
 import type { MemoryEntryEvidenceRefIndexHost } from "../../memory-entry/writes/evidence-ref-index.js";
 
 interface SqliteStatement {
@@ -48,6 +50,7 @@ interface SqliteStatement {
 
 export interface SqliteProposalWorkflowContext extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
+  readonly materializeMemoryKeys?: (memory: Readonly<MemoryEntry>) => void;
   transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
   readonly eventLogWriter: Parameters<typeof insertEventLogEntry>[0];
   readonly findByIdStatement: SqliteStatement;
@@ -110,7 +113,6 @@ export async function acceptPendingPathRelationGovernanceWithEvents(
   readonly path_relation: Readonly<PathRelation>;
   readonly events: readonly EventLogEntry[];
 }>> {
-  assertLegacyPathRelationReadAllowed(ctx.db.connection);
   const request = parseAcceptRequest(proposalId, updatedAt, options);
   const parsedPathRelationGovernance = parseAcceptedPathRelationGovernanceInput(
     pathRelationGovernance
@@ -174,6 +176,13 @@ function acceptMemoryUpdateTransaction(
   assertAcceptedMemoryUpdateMatchesProposal(proposalRow, memoryUpdate);
   const existingMemory = loadMemoryForAcceptedUpdate(ctx, memoryUpdate);
   assertBaselineFresh(existingMemory, memoryUpdate);
+  if (ctx.materializeMemoryKeys === undefined && (
+    memoryUpdate.proposed_changes.content !== undefined ||
+    memoryUpdate.proposed_changes.evidence_refs !== undefined ||
+    memoryUpdate.proposed_changes.retention_state === "tombstoned"
+  )) {
+    throw new StorageError("CONFLICT", "Reviewed memory update requires the object-key projection writer.");
+  }
 
   const storedReviewEvents = insertReviewEvents(ctx, events);
   resolvePendingProposal(ctx, request);
@@ -183,6 +192,7 @@ function acceptMemoryUpdateTransaction(
     existingMemory,
     memoryUpdate
   );
+  ctx.materializeMemoryKeys?.(memoryResult.memory);
   const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
   return deepFreeze({
@@ -205,10 +215,12 @@ function acceptPathRelationGovernanceTransaction(
   const proposalRow = loadPendingProposal(ctx, request.proposalId);
   assertAcceptedPathRelationGovernanceMatchesProposal(proposalRow, pathRelationGovernance);
   assertMemoryExistsInWorkspace(ctx, pathRelationGovernance.target_object_id, pathRelationGovernance.workspace_id);
+  const payload = requireSupportedPathRelationProposal(parseProposedPathRelation(proposalRow.proposed_path_relation));
+  assertLegacyPathRelationReadAllowed(ctx.db.connection);
 
   const storedReviewEvents = insertReviewEvents(ctx, events);
   resolvePendingProposal(ctx, request);
-  const pathApply = upsertStrictlyGovernedPathRelation(ctx, pathRelationGovernance, proposalRow);
+  const pathApply = upsertProposedPathRelation(ctx, pathRelationGovernance, proposalRow, payload);
   const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
   return deepFreeze({
@@ -276,6 +288,7 @@ function loadPendingProposal(
   if (proposalRow.resolution_state !== "pending") {
     throw ctx.createPendingResolutionFailure(proposalId);
   }
+  assertProposalAcceptanceSupported(proposalRow);
   return proposalRow;
 }
 

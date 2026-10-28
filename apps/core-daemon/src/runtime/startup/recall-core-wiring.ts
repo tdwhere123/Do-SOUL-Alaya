@@ -1,5 +1,4 @@
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
-import { appendSourceRecordAdmitted, createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
 import {
   createDaemonCoreServices,
@@ -155,19 +154,7 @@ function buildCoreServiceInput(
     trustStateRepo: repositories.trustStateRepo,
     pathRelationRepo: repositories.pathRelationRepo,
     signalService: recallWiring.signalService,
-    contextLensAssembler: recallWiring.conversationContextLensAssembler,
-    governanceLeaseService: foundation.governanceLeaseService,
-    budgetBankruptcyService: foundation.budgetBankruptcyService,
-    healthJournalService: foundation.healthJournalService,
     warn: bootstrap.warnLogger.warn,
-    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available,
-    database: bootstrap.database,
-    sourceAdmission: createSourceAdmissionPort({
-      stores: repositories.fieldComposition.stores,
-      sha256: fieldContractSha256,
-      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
-        producer: "post-turn", basis: "reported_excerpt" }),
-      audit: record => appendSourceRecordAdmitted(repositories.eventLogRepo, record, bootstrap.runtimeNotifier)
-    })
+    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available
   };
 }

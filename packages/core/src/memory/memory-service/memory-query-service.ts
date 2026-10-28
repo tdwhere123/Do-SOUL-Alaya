@@ -195,6 +195,26 @@ export class MemoryQueryService {
     return (await this.findByScopeClassAll(workspaceId, scopeClass)).length;
   }
 
+  public findByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"], page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    const find = this.memoryEntryRepo.findByScopeClassAndDimension;
+    if (find === undefined) {
+      throw new CoreError("CONFLICT", "Memory repository does not support combined scope and dimension filtering.", { subCode: "PORT_UNAVAILABLE" });
+    }
+    return find.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension, page);
+  }
+
+  public countByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    const count = this.memoryEntryRepo.countByScopeClassAndDimension;
+    if (count === undefined) {
+      throw new CoreError("CONFLICT", "Memory repository does not support combined scope and dimension counting.", { subCode: "PORT_UNAVAILABLE" });
+    }
+    return count.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension);
+  }
+
   public findByWorkspaceIdWithConflict(
     workspaceId: string,
     page?: MemoryListPageOptions

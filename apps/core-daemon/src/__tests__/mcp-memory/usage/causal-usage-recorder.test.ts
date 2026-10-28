@@ -71,6 +71,24 @@ describe("causal usage recorder", () => {
       harness.database.close();
     }
   });
+
+  it("rolls back the whole usage set when a later object fails", async () => {
+    const harness = createHarness();
+    let attempts = 0;
+    const failing: CausalUsagePort = { recordUsage(receipt) {
+      const result = harness.usagePort.recordUsage(receipt);
+      if (++attempts === 2) throw new Error("second usage failed");
+      return result;
+    } };
+    try {
+      await expect(recordCausalUsedReceipts(failing, input(harness, FIRST, ["memory-1", "memory-2"])))
+        .rejects.toThrow("second usage failed");
+      expect(harness.database.connection.prepare("SELECT COUNT(*) AS count FROM causal_usage_receipts").get())
+        .toEqual({ count: 0 });
+      expect((await harness.eventLogRepo.queryByType(FieldGenerationEventType.SOUL_FIELD_USAGE_CAUSAL_RECORDED)).events)
+        .toEqual([]);
+    } finally { harness.database.close(); }
+  });
 });
 
 function createHarness() {

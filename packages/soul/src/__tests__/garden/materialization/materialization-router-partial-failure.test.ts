@@ -1,25 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { MaterializationResult } from "@do-soul/alaya-soul";
 import { MaterializationRouter } from "@do-soul/alaya-soul";
+import { CommittedObjectError } from "@do-soul/alaya-protocol";
 import { createDeps, createSignal } from "./materialization-router-fixture.js";
 
-function readFailureError(result: MaterializationResult): string {
-  if (result.success) {
-    throw new Error("expected materialization failure");
-  }
-  return result.error;
-}
-
 describe("MaterializationRouter partial-failure contract", () => {
-  it("narrows failures to a required error string", async () => {
-    const deps = createDeps();
-    deps.memoryService.create.mockRejectedValueOnce(new Error("memory create failed"));
-    const router = new MaterializationRouter(deps);
-
-    const result = await router.materializeSignal(createSignal());
-    expect(readFailureError(result)).toBe("memory create failed");
-  });
-
   it("returns success:false with partial created_objects when claim creation fails after memory", async () => {
     const deps = createDeps();
     deps.claimService.create.mockRejectedValueOnce(new Error("claim create failed"));
@@ -61,5 +45,37 @@ describe("MaterializationRouter partial-failure contract", () => {
       { object_kind: "evidence_capsule", object_id: "evidence-2" }
     ]);
     expect(deps.synthesisService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for sibling evidence and reports committed objects when one create fails", async () => {
+    const deps = createDeps();
+    let completeSibling!: () => void;
+    const sibling = new Promise<{ object_kind: string; object_id: string }>((resolve) => {
+      completeSibling = () => resolve({ object_kind: "evidence_capsule", object_id: "committed-evidence" });
+    });
+    deps.evidenceService.create.mockRejectedValueOnce(new Error("first failed"))
+      .mockImplementationOnce(async () => await sibling);
+    const resultPromise = new MaterializationRouter(deps).materializeSignal(createSignal({
+      signal_kind: "potential_synthesis", evidence_refs: ["msg-1", "msg-2"]
+    }));
+    completeSibling();
+    const result = await resultPromise;
+    expect(result).toMatchObject({ success: false, error: "first failed",
+      created_objects: [{ object_kind: "evidence_capsule", object_id: "committed-evidence" }] });
+    expect(deps.synthesisService.create).not.toHaveBeenCalled();
+  });
+
+  it("reports an evidence commit even when its notification failed", async () => {
+    const deps = createDeps();
+    deps.evidenceService.create.mockRejectedValueOnce(new CommittedObjectError("notification failed", {
+      object_kind: "evidence_capsule", object_id: "committed-before-notify"
+    }));
+    const result = await new MaterializationRouter(deps).materializeSignal(createSignal({
+      signal_kind: "potential_synthesis", evidence_refs: ["msg-1", "msg-2"]
+    }));
+    expect(result).toMatchObject({ success: false, error: "notification failed", created_objects: [
+      { object_kind: "evidence_capsule", object_id: "committed-before-notify" },
+      { object_kind: "evidence_capsule", object_id: "evidence-1" }
+    ] });
   });
 });

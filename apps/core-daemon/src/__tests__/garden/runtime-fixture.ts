@@ -177,7 +177,7 @@ export function createGardenDataPorts(
       })),
       generateDraftCandidates: vi.fn(async () => []),
       findHighFrequencyPatterns: vi.fn(async () => []),
-      createSynthesisCandidate: vi.fn( () => ({ candidate_id: "candidate-1" })),
+      createSynthesisCandidate: vi.fn( async () => ({ candidate_id: "candidate-1", created: true })),
       hasPendingSynthesisCandidate: vi.fn(async () => false)
     },
     tieringPort: {
@@ -189,23 +189,11 @@ export function createGardenDataPorts(
       setLifecycleDormant: vi.fn(async () => "skipped" as const),
       ...(overrides.dormantDemotionPort ?? {})
     },
-    mergePort: {
-      findMergeCandidates: vi.fn(async () => []),
-      hasPendingMergeProposal: vi.fn(async () => false),
-      createMergeProposal: vi.fn(async () => ({ proposal_id: "proposal-1" })),
-      findTemplateClusters: vi.fn(async () => []),
-      hasPendingTemplateProposal: vi.fn(async () => false),
-      createTemplateCandidate: vi.fn(async () => ({ candidate_id: "template-1" }))
-    },
     neighborPort: { findSubjectNeighbors: vi.fn(async () => []) },
-    compressionPort: {
-      findCompressiblePaths: vi.fn(async () => []),
-      createCompressionCandidate: vi.fn(async () => ({ candidate_id: "compression-1" }))
-    },
     synthesisPort: {
       findSynthesisCandidateClusters: vi.fn(async () => []),
       hasPendingSynthesisForSubject: vi.fn(async () => false),
-      createSynthesisReviewCandidate: vi.fn(async () => ({ candidate_id: "synthesis-1" }))
+      createSynthesisReviewCandidate: vi.fn(async () => ({ candidate_id: "synthesis-1", created: true }))
     }
   } as GardenRuntimeInput["gardenDataPorts"];
 }

@@ -108,9 +108,11 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
       renameSync(parent, parked);
       symlinkSync(parked, parent);
       displaced = true;
-      await expect(first.close()).rejects.toThrow("private tree root is not a directory");
+      await expect(first.close()).rejects.toMatchObject({ name: "CoreError", code: "CONFLICT",
+        subCode: "CONCURRENT_MODIFICATION", message: "Local ONNX private tree root is not a directory" });
       await warmupFailure;
-      await expect(successor.warmup(new AbortController().signal)).rejects.toThrow("private tree root is not a directory");
+      await expect(successor.warmup(new AbortController().signal)).rejects.toMatchObject({ name: "CoreError", code: "CONFLICT",
+        subCode: "CONCURRENT_MODIFICATION", message: "Local ONNX private tree root is not a directory" });
       expect(spawns).toBe(1);
       expect(existsSync(root)).toBe(true);
       unlinkSync(parent);

@@ -3,6 +3,7 @@ import {
   GardenCompleteTaskResponseSchema,
   GardenListPendingTasksResponseSchema,
   GardenTaskKind,
+  GARDEN_TASK_PAYLOAD_MAX_CHARS,
   type CandidateMemorySignal,
   type EdgeClassifyVerdict,
   type GardenClaimTaskRequest,
@@ -26,6 +27,8 @@ import {
 } from "./garden-task-handler-support.js";
 import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
+import { gardenTaskSourceAvailable, quarantineUnavailablePostTurnTasks,
+  type GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
 export interface GardenTaskToolCallContext {
   readonly workspaceId: string;
@@ -35,7 +38,7 @@ export interface GardenTaskToolCallContext {
 }
 
 export interface GardenTaskHandlerDependencies {
-  readonly gardenTaskRepo?: {
+  readonly gardenTaskRepo?: GardenTaskSourceGuardPort & {
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
@@ -94,7 +97,7 @@ export function createGardenTaskHandlers(params: Readonly<{
 }>): GardenTaskOperations {
   const completion = createGardenTaskCompletionHandler(params);
   return {
-    listPendingGardenTasks: createListPendingGardenTasks(params.deps),
+    listPendingGardenTasks: createListPendingGardenTasks(params.deps, params.now),
     claimGardenTask: createClaimGardenTaskHandler(params),
     completeGardenTask: async (request, context) => {
       throwIfAborted(context.abortSignal);
@@ -103,7 +106,7 @@ export function createGardenTaskHandlers(params: Readonly<{
   };
 }
 
-function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
+function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: () => string) {
   return async function listPendingGardenTasks(
     request: GardenListPendingTasksRequest,
     context: GardenTaskToolCallContext
@@ -112,12 +115,23 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
     throwIfAborted(context.abortSignal);
+    await quarantineUnavailablePostTurnTasks(deps.gardenTaskRepo, now, context.workspaceId);
     const rows = deps.gardenTaskRepo.peekPending(
       mapGardenMcpWorkerRole(request.role),
       context.workspaceId,
       request.limit
     );
-    return GardenListPendingTasksResponseSchema.parse({ tasks: rows.map(toGardenTaskSnapshot) });
+    const tasks: ReturnType<typeof toGardenTaskSnapshot>[] = [];
+    let payloadChars = 0;
+    for (const row of rows) {
+      if (!gardenTaskSourceAvailable(deps.gardenTaskRepo, row)) continue;
+      const snapshot = toGardenTaskSnapshot(row);
+      const size = JSON.stringify(snapshot).length;
+      if (tasks.length > 0 && payloadChars + size > GARDEN_TASK_PAYLOAD_MAX_CHARS) break;
+      tasks.push(snapshot);
+      payloadChars += size;
+    }
+    return GardenListPendingTasksResponseSchema.parse({ tasks });
   };
 }
 
@@ -134,6 +148,14 @@ function createClaimGardenTaskHandler(params: Readonly<{
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
     throwIfAborted(context.abortSignal);
+    await quarantineUnavailablePostTurnTasks(repo, params.now, context.workspaceId, request.task_id);
+    const beforeClaim = repo.findByIdInWorkspace(request.task_id, context.workspaceId);
+    if (beforeClaim !== null && !gardenTaskSourceAvailable(repo, beforeClaim)) {
+      return toSilentAlreadyClaimed(request.task_id);
+    }
+    if (beforeClaim !== null) {
+      GardenClaimTaskResponseSchema.parse({ status: "claimed", ...toGardenClaimTaskPayload(beforeClaim) });
+    }
     const claimResult = await repo.claimAtomic(
       request.task_id,
       context.agentTarget,
@@ -141,7 +163,7 @@ function createClaimGardenTaskHandler(params: Readonly<{
       context.workspaceId
     );
     const row = repo.findByIdInWorkspace(request.task_id, context.workspaceId);
-    if (row === null) {
+    if (row === null || row.status !== "claimed" || !gardenTaskSourceAvailable(repo, row)) {
       return toSilentAlreadyClaimed(request.task_id);
     }
     if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {

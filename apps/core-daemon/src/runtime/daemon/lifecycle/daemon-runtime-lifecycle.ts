@@ -132,7 +132,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
   return Object.freeze({
     startBackgroundServices,
     runSourceIndexPass: async (remaining, representation, windowing) => {
-      if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runPass === undefined) {
+      if (state.backgroundStarted || input.lifecycleState.drainState.isDraining || input.sourceIndexProducer?.runPass === undefined) {
         throw new AlayaError(
           "UNAVAILABLE",
           "Source-only preparation requires an idle, unscheduled daemon producer"
@@ -141,7 +141,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       return await input.sourceIndexProducer.runPass(remaining, representation, windowing);
     },
     runSourceIndexLexicalPass: async (workspaceId, representation, remaining) => {
-      if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runLexicalPass === undefined) {
+      if (state.backgroundStarted || input.lifecycleState.drainState.isDraining || input.sourceIndexProducer?.runLexicalPass === undefined) {
         throw new AlayaError("UNAVAILABLE", "Source-only preparation requires an idle, unscheduled daemon producer");
       }
       return await input.sourceIndexProducer.runLexicalPass(workspaceId, representation, remaining);
@@ -186,6 +186,9 @@ function createBackgroundServiceStarter(
   state: LifecycleState
 ): () => void {
   return () => {
+    if (input.lifecycleState.drainState.isDraining) {
+      throw new AlayaError("UNAVAILABLE", "Daemon shutdown has started");
+    }
     if (state.backgroundStarted) {
       return;
     }
@@ -256,7 +259,13 @@ function createShutdownHandler(
       }
     })();
 
-    return await state.shuttingDown;
+    try {
+      return await state.shuttingDown;
+    } catch (error) {
+      // Preserve the same provider session and lease so failed retirement is retryable.
+      state.shuttingDown = null;
+      throw error;
+    }
   };
 }
 
@@ -267,6 +276,9 @@ function createHttpServerStarter(
   shutdown: () => Promise<void>
 ): (options?: AlayaDaemonListenOptions) => Promise<AlayaDaemonServer> {
   return async (options: AlayaDaemonListenOptions = {}) => {
+    if (input.lifecycleState.drainState.isDraining) {
+      throw new AlayaError("UNAVAILABLE", "Daemon shutdown has started");
+    }
     validateEphemeralTokenPolicy(input.requestProtection, options);
     ensureServerNotRunning(state);
     logEphemeralTokenStartup(input, options);
@@ -421,6 +433,8 @@ async function stopBackgroundServices(
   input: CreateDaemonLifecycleControlsInput,
   state: LifecycleState
 ): Promise<"drained" | "timed_out" | "not_started" | "failed"> {
+  // Explicit idle passes also own writes and must settle before storage releases.
+  await input.sourceIndexProducer?.stop();
   if (!state.backgroundStarted) {
     return "not_started";
   }
@@ -439,16 +453,6 @@ async function stopBackgroundServices(
       error: error instanceof Error ? error.message : String(error)
     });
     stopResult = "failed";
-  }
-  if (input.sourceIndexProducer !== undefined) {
-    try {
-      await input.sourceIndexProducer.stop();
-    } catch (error) {
-      input.warnLogger.warn("source index producer shutdown failed", {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      stopResult = "failed";
-    }
   }
   await awaitStartupBackgroundPassInFlight(state);
   if (state.startupBackgroundPassFailure !== null) {
@@ -553,11 +557,14 @@ async function closeEmbeddingProvider(
   input: CreateDaemonLifecycleControlsInput
 ): Promise<void> {
   if (input.closeEmbeddingProvider === undefined) return;
-  await closeRuntimeResourceStepAsync(
-    input,
-    "embedding provider shutdown failed",
-    input.closeEmbeddingProvider
-  );
+  try {
+    await input.closeEmbeddingProvider();
+  } catch (error) {
+    input.warnLogger.warn("embedding provider shutdown failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 async function closeRecallReadWorkerClient(

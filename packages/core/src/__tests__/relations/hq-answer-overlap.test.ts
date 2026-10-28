@@ -83,6 +83,18 @@ describe("answerCoRelevantPairWitnessesFromHq", () => {
     });
   });
 
+  it("chooses the later evidence instant across different timestamp precision", () => {
+    const rows = observations(HQ);
+    const first = rows.get("a")!;
+    const second = rows.get("b")!;
+    rows.set("a", { ...first, evidence_receipt: { ...first.evidence_receipt,
+      source_event_anchor: { ...first.evidence_receipt.source_event_anchor, occurred_at: "2026-07-17T00:00:00Z" } } });
+    rows.set("b", { ...second, evidence_receipt: { ...second.evidence_receipt,
+      source_event_anchor: { ...second.evidence_receipt.source_event_anchor, occurred_at: "2026-07-17T00:00:00.5Z" } } });
+    expect(answerCoRelevantPairWitnessesFromHq(rows, ["a", "b"], 3)[0]?.validFrom)
+      .toBe("2026-07-17T00:00:00.5Z");
+  });
+
   it("does not pair memories below the bar (template-word overlap is stripped)", () => {
     // a∩c shares only "user" (1) after stop/template removal -> no pair at bar 3.
     expect(pairKeys(HQ, ["a", "c"], 3)).toEqual(new Set());

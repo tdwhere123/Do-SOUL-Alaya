@@ -4,11 +4,9 @@ import {
   seedClaimForm,
   seedEvidenceCapsule,
   seedMemoryEntry,
-  seedRecallsPath,
   seedSynthesisCapsule,
   trackedDatabases
 } from "./garden-data-ports-fixture.js";
-import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
 const databases = trackedDatabases;
 
@@ -21,33 +19,22 @@ afterEach(() => {
 });
 
 describe("garden background data ports bootstrapping and candidate scans", () => {
-  it("fails closed after selection before compression reads legacy paths", async () => {
+  it("finds a later eligible pattern beyond the pending prefix in the same workspace", async () => {
     const { database, ports } = await createFixture();
-    seedRecallsPath(database, {
-      pathId: "path-selected-1",
-      workspaceId: "workspace-1",
-      sourceObjectId: "memory-a",
-      targetObjectId: "memory-b"
-    });
-    seedRecallsPath(database, {
-      pathId: "path-selected-2",
-      workspaceId: "workspace-1",
-      sourceObjectId: "memory-b",
-      targetObjectId: "memory-c"
-    });
-
-    await expect(ports.compressionPort.findCompressiblePaths("workspace-1")).resolves.toEqual([
-      {
-        chain_start: "memory-a",
-        chain_end: "memory-c",
-        intermediate_ids: ["memory-b"]
-      }
+    const insertPending = database.connection.prepare(`INSERT INTO proposals
+      (runtime_id, proposal_id, derived_from, dossier_ref, resolution_state, last_updated_at, workspace_id)
+      VALUES (?, ?, ?, 'bootstrapping.synthesis_candidate', 'pending', '2026-04-15T00:00:00.000Z', ?)`);
+    for (let index = 0; index <= 120; index++) {
+      const pattern = `pattern-${String(index).padStart(3, "0")}`;
+      for (let occurrence = 0; occurrence < 3; occurrence++) seedMemoryEntry(database, {
+        objectId: `memory-${index}-${occurrence}`, workspaceId: "workspace-1", runId: "run-1", content: pattern
+      });
+      if (index < 120) insertPending.run(`runtime-${index}`, `proposal-${index}`, `bootstrapping:memory:${pattern}`, "workspace-1");
+    }
+    insertPending.run("foreign-runtime", "foreign-proposal", "bootstrapping:memory:pattern-120", "workspace-2");
+    expect(await ports.bootstrappingPort.findHighFrequencyPatterns("workspace-1", 3)).toEqual([
+      { pattern_key: "memory:pattern-120", frequency: 3 }
     ]);
-
-    markTemporalProjectionSelectedForTest(database);
-
-    await expect(ports.compressionPort.findCompressiblePaths("workspace-1"))
-      .rejects.toThrow(/Legacy path relation reads are disabled after temporal projection selection/);
   });
 
   it("assesses bootstrapping cold-start state and pattern candidate lifecycle", async () => {
@@ -221,7 +208,7 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
     ]);
   });
 
-  it("finds Librarian merge, neighbor, compression, and synthesis candidates", async () => {
+  it("finds Librarian neighbors and synthesizes evidence without treating prior synthesis as evidence", async () => {
     const { database, ports } = await createFixture();
     seedMemoryEntry(database, {
       objectId: "memory-a",
@@ -252,19 +239,6 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
       dimension: "fact"
     });
 
-    seedRecallsPath(database, {
-      pathId: "path-1",
-      workspaceId: "workspace-1",
-      sourceObjectId: "memory-a",
-      targetObjectId: "memory-b"
-    });
-    seedRecallsPath(database, {
-      pathId: "path-2",
-      workspaceId: "workspace-1",
-      sourceObjectId: "memory-b",
-      targetObjectId: "memory-c"
-    });
-
     seedEvidenceCapsule(database, {
       objectId: "evidence-1",
       workspaceId: "workspace-1",
@@ -284,41 +258,12 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
       topicKey: "alpha"
     });
 
-    const mergeCandidates = await ports.mergePort.findMergeCandidates("workspace-1");
-    expect(mergeCandidates.length).toBeGreaterThan(0);
-    expect(mergeCandidates[0]?.duplicate_ids.length).toBeGreaterThan(0);
-    expect(await ports.mergePort.hasPendingMergeProposal(mergeCandidates[0]!.primary_id)).toBe(false);
-    const mergeProposal = await ports.mergePort.createMergeProposal("workspace-1", mergeCandidates[0]!);
-    expect(mergeProposal.proposal_id).not.toHaveLength(0);
-    expect(await ports.mergePort.hasPendingMergeProposal(mergeCandidates[0]!.primary_id)).toBe(true);
-
-    const templateClusters = await ports.mergePort.findTemplateClusters("workspace-1", 3);
-    expect(templateClusters.length).toBeGreaterThan(0);
-    expect(await ports.mergePort.hasPendingTemplateProposal(templateClusters[0]!.representative_id)).toBe(false);
-    const templateCandidate = await ports.mergePort.createTemplateCandidate("workspace-1", templateClusters[0]!);
-    expect(templateCandidate.candidate_id).not.toHaveLength(0);
-    expect(await ports.mergePort.hasPendingTemplateProposal(templateClusters[0]!.representative_id)).toBe(true);
-
     const neighbors = await ports.neighborPort.findSubjectNeighbors("workspace-1");
     expect(neighbors.some((group) => group.object_ids.length >= 2)).toBe(true);
 
-    const compressible = await ports.compressionPort.findCompressiblePaths("workspace-1");
-    expect(compressible).toEqual([
-      {
-        chain_start: "memory-a",
-        chain_end: "memory-c",
-        intermediate_ids: ["memory-b"]
-      }
-    ]);
-    const compressionCandidate = await ports.compressionPort.createCompressionCandidate(
-      "workspace-1",
-      compressible[0]!
-    );
-    expect(compressionCandidate.candidate_id).not.toHaveLength(0);
-
     const clusters = await ports.synthesisPort.findSynthesisCandidateClusters("workspace-1");
     expect(clusters).toEqual([
-      { subject: "alpha", evidence_ids: ["evidence-1", "evidence-2", "synthesis-1"] }
+      { subject: "alpha", evidence_ids: ["evidence-1", "evidence-2"] }
     ]);
     expect(await ports.synthesisPort.hasPendingSynthesisForSubject("workspace-1", "alpha")).toBe(false);
     const synthesisCandidate = await ports.synthesisPort.createSynthesisReviewCandidate("workspace-1", "alpha", [
@@ -327,6 +272,35 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
     ]);
     expect(synthesisCandidate.candidate_id).not.toHaveLength(0);
     expect(await ports.synthesisPort.hasPendingSynthesisForSubject("workspace-1", "alpha")).toBe(true);
+  });
+
+  it("finds a later synthesis subject after more than a scan page of pending subjects", async () => {
+    const { database, ports } = await createFixture();
+    for (let index = 0; index <= 80; index += 1) {
+      const subject = `subject-${String(index).padStart(3, "0")}`;
+      const evidenceIds = [`evidence-${index}-a`, `evidence-${index}-b`];
+      for (const objectId of evidenceIds) seedEvidenceCapsule(database, {
+        objectId, workspaceId: "workspace-1", runId: "run-1", semanticAnchor: { subject }
+      });
+      if (index < 80) await ports.synthesisPort.createSynthesisReviewCandidate("workspace-1", subject, evidenceIds);
+    }
+    const remaining = await ports.synthesisPort.findSynthesisCandidateClusters("workspace-1");
+    expect(remaining).toEqual([{ subject: "subject-080", evidence_ids: ["evidence-80-a", "evidence-80-b"] }]);
+  });
+
+  it("does not let a pending synthesis subject in one workspace hide another", async () => {
+    const { database, ports } = await createFixture();
+    for (const [workspaceId, runId] of [["workspace-1", "run-1"], ["workspace-2", "run-2"]] as const) {
+      for (const suffix of ["a", "b"]) seedEvidenceCapsule(database, {
+        objectId: `${workspaceId}-${suffix}`, workspaceId, runId, semanticAnchor: { subject: "shared" }
+      });
+    }
+    await ports.synthesisPort.createSynthesisReviewCandidate("workspace-1", "shared", ["workspace-1-a", "workspace-1-b"]);
+    expect(await ports.synthesisPort.findSynthesisCandidateClusters("workspace-1")).toEqual([]);
+    expect(await ports.synthesisPort.hasPendingSynthesisForSubject("workspace-2", "shared")).toBe(false);
+    expect(await ports.synthesisPort.findSynthesisCandidateClusters("workspace-2")).toEqual([
+      { subject: "shared", evidence_ids: ["workspace-2-a", "workspace-2-b"] }
+    ]);
   });
 
   it("returns empty arrays gracefully for an empty database", async () => {
@@ -341,9 +315,7 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
       maxLastHitAgeMs: 10_000,
       minActivationScore: 0.5
     })).toEqual([]);
-    expect(await ports.mergePort.findMergeCandidates("workspace-1")).toEqual([]);
     expect(await ports.neighborPort.findSubjectNeighbors("workspace-1")).toEqual([]);
-    expect(await ports.compressionPort.findCompressiblePaths("workspace-1")).toEqual([]);
     expect(await ports.synthesisPort.findSynthesisCandidateClusters("workspace-1")).toEqual([]);
   });
 });

@@ -232,6 +232,7 @@ export interface DoctorReport {
   }>;
   readonly garden: Readonly<{
     status: "healthy" | "degraded";
+    health_basis: "scheduler_activity";
     last_pass_at: string | null;
     schema_ok: boolean;
     credential_provenance: GardenCredentialProvenance;
@@ -340,6 +341,7 @@ async function buildDoctorReport(
     mcp: services.mcp,
     garden: {
       ...services.garden,
+      health_basis: "scheduler_activity",
       schema_ok: services.gardenCompute.schema_ok !== false,
       credential_provenance: services.gardenCredentialProvenance
     },

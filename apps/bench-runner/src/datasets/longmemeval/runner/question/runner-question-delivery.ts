@@ -42,7 +42,7 @@ export function resolveQaDeliveryBudget(questionType: string): {
     };
   }
   const useWideDelivery =
-    process.env.ALAYA_BENCH_QA_WIDE_AGG !== undefined &&
+    parseEnvBoolean(process.env.ALAYA_BENCH_QA_WIDE_AGG, "ALAYA_BENCH_QA_WIDE_AGG") &&
     WIDE_QA_DELIVERY_QUESTION_TYPES.has(questionType);
   return {
     deliverK: useWideDelivery ? 20 : 10,
@@ -314,7 +314,7 @@ async function resolveQaDeliverySelection(input: {
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
 }): Promise<QaDeliverySelection> {
   const candidates = buildQaDeliveryCandidatesForQuestion(input);
-  const goldOnlyRequested = process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined;
+  const goldOnlyRequested = parseEnvBoolean(process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY, "ALAYA_BENCH_DELIVER_GOLD_ONLY");
   const delivered = await refineQaDeliveryCandidates(
     input,
     candidates,
@@ -350,7 +350,7 @@ async function refineQaDeliveryCandidates(
     input.question.question_type,
     goldOnlyRequested
   );
-  if (!goldOnlyRequested && process.env.ALAYA_BENCH_QA_LLM_FILTER !== undefined) {
+  if (!goldOnlyRequested && parseEnvBoolean(process.env.ALAYA_BENCH_QA_LLM_FILTER, "ALAYA_BENCH_QA_LLM_FILTER")) {
     delivered = await applyQaLlmFilter(
       input.question.question,
       candidates.deliveryCandidates,
@@ -358,7 +358,7 @@ async function refineQaDeliveryCandidates(
       input.qaChat
     );
   }
-  if (!goldOnlyRequested && process.env.ALAYA_BENCH_QA_SUPPORT_PACK !== undefined) {
+  if (!goldOnlyRequested && parseEnvBoolean(process.env.ALAYA_BENCH_QA_SUPPORT_PACK, "ALAYA_BENCH_QA_SUPPORT_PACK")) {
     delivered = buildQaSupportPack({
       questionType: input.question.question_type,
       selected: delivered,
@@ -380,7 +380,7 @@ function selectInitialQaDelivery(
 ): QaDeliveredCandidate[] {
   const { deliverK } = resolveQaDeliveryBudget(questionType);
   const deliveryPool =
-    process.env.ALAYA_BENCH_QA_SESSION_SPREAD !== undefined
+    parseEnvBoolean(process.env.ALAYA_BENCH_QA_SESSION_SPREAD, "ALAYA_BENCH_QA_SESSION_SPREAD")
       ? selectSessionSpread(deliveryCandidates)
       : deliveryCandidates;
   return goldOnlyRequested

@@ -5,6 +5,7 @@ import {
   type ConflictMatrixEdge
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable } from "../field/privacy-availability.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
 import {
@@ -59,6 +60,7 @@ interface ConflictMatrixEdgeRow {
 }
 
 export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
+  private readonly connectionIdentity: StorageDatabase;
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findBySourceClaimStatement;
@@ -68,6 +70,7 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
   private readonly deleteStatement;
 
   public constructor(db: StorageDatabase) {
+    this.connectionIdentity = db;
     this.createStatement = db.connection.prepare(`
       INSERT INTO conflict_matrix_edges (
         object_id,
@@ -126,6 +129,8 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     `);
   }
 
+  public getStorageConnectionIdentity(): StorageDatabase { return this.connectionIdentity; }
+
   public create(edge: Readonly<ConflictMatrixEdge>): Readonly<ConflictMatrixEdge> {
     const parsedEdge = parseConflictMatrixEdge(edge);
 
@@ -159,8 +164,10 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
 
     try {
       const row = this.findByIdStatement.get(parsedObjectId) as ConflictMatrixEdgeRow | undefined;
+      if (row !== undefined) requirePrivacyObjectAvailable(this.connectionIdentity, row.workspace_id, "conflict_matrix_edge", row.object_id);
       return row === undefined ? null : parseConflictMatrixEdgeRow(row);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to load conflict matrix edge ${parsedObjectId}.`,
@@ -173,12 +180,15 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedClaimId = parseClaimId(claimId);
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.findBySourceClaimStatement.all(parsedClaimId),
         ConflictMatrixEdgeRowParser,
         "conflict matrix edge row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "conflict_matrix_edge", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict matrix edges by source claim ${parsedClaimId}.`,
@@ -191,12 +201,15 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedClaimId = parseClaimId(claimId);
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.findByTargetClaimStatement.all(parsedClaimId),
         ConflictMatrixEdgeRowParser,
         "conflict matrix edge row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "conflict_matrix_edge", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict matrix edges by target claim ${parsedClaimId}.`,
@@ -209,12 +222,15 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.findByWorkspaceStatement.all(parsedWorkspaceId),
         ConflictMatrixEdgeRowParser,
         "conflict matrix edge row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "conflict_matrix_edge", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict matrix edges for workspace ${parsedWorkspaceId}.`,
@@ -231,7 +247,7 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
     const parsedTargetClaimId = parseClaimId(targetClaimId);
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.findBetweenClaimsStatement.all(
           parsedSourceClaimId,
           parsedTargetClaimId,
@@ -241,7 +257,10 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
         ConflictMatrixEdgeRowParser,
         "conflict matrix edge row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "conflict_matrix_edge", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict matrix edges between claims ${parsedSourceClaimId} and ${parsedTargetClaimId}.`,

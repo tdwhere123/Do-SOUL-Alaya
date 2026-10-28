@@ -43,12 +43,14 @@ export interface ReconciliationLeaseRepo {
   findByKey(leaseKey: string): Readonly<ReconciliationLease> | null;
 }
 
-export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
+class SqliteOperationalLeaseRepo implements ReconciliationLeaseRepo {
+  private readonly connectionIdentity: StorageDatabase;
   private readonly acquireStatement;
   private readonly releaseStatement;
   private readonly findByKeyStatement;
 
-  public constructor(db: StorageDatabase) {
+  public constructor(db: StorageDatabase, table: "reconciliation_leases" | "claim_election_leases") {
+    this.connectionIdentity = db;
     // invariant: the INSERT-OR-CONFLICT CAS. The INSERT wins outright when
     // no row exists. On a key collision the DO UPDATE fires, but the
     // `WHERE` clause restricts the overwrite to a lease whose stored
@@ -57,7 +59,7 @@ export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
     // an expired lease and a first acquire are the only ways `changes`
     // becomes 1.
     this.acquireStatement = db.connection.prepare(`
-      INSERT INTO reconciliation_leases (
+      INSERT INTO ${table} (
         lease_key,
         owner_token,
         acquired_at,
@@ -67,20 +69,24 @@ export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
         owner_token = excluded.owner_token,
         acquired_at = excluded.acquired_at,
         expires_at = excluded.expires_at
-      WHERE alaya_utc_compare(reconciliation_leases.expires_at, @now) <= 0
+      WHERE alaya_utc_compare(${table}.expires_at, @now) <= 0
     `);
 
     this.releaseStatement = db.connection.prepare(`
-      DELETE FROM reconciliation_leases
+      DELETE FROM ${table}
       WHERE lease_key = ? AND owner_token = ?
     `);
 
     this.findByKeyStatement = db.connection.prepare(`
       SELECT lease_key, owner_token, acquired_at, expires_at
-      FROM reconciliation_leases
+      FROM ${table}
       WHERE lease_key = ?
       LIMIT 1
     `);
+  }
+
+  public getStorageConnectionIdentity(): StorageDatabase {
+    return this.connectionIdentity;
   }
 
   public tryAcquire(
@@ -153,6 +159,15 @@ export class SqliteReconciliationLeaseRepo implements ReconciliationLeaseRepo {
       );
     }
   }
+}
+
+export class SqliteReconciliationLeaseRepo extends SqliteOperationalLeaseRepo {
+  public constructor(db: StorageDatabase) { super(db, "reconciliation_leases"); }
+}
+
+/** Election leases have a separate key space from workspace reconciliation leases. */
+export class SqliteClaimElectionLeaseRepo extends SqliteOperationalLeaseRepo {
+  public constructor(db: StorageDatabase) { super(db, "claim_election_leases"); }
 }
 
 function parseReconciliationLeaseRow(

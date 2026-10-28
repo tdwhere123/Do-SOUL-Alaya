@@ -173,6 +173,7 @@ export const GardenTaskDescriptorSchema = z
     target_object_refs: z.array(NonEmptyStringSchema).readonly(),
     priority: NonNegativeIntSchema.max(100),
     created_at: IsoDatetimeStringSchema,
+    periodic: z.boolean().optional(),
     turn_index: NonNegativeIntSchema.optional(),
     turn_digest: BoundedJsonObjectSchema.optional(),
     source_object_id: NonEmptyStringSchema.optional(),

@@ -89,6 +89,15 @@ describe("source interpretation dependency erase", () => {
         content_digest: projection.content_digest, evidence_object_id: null })
     }));
     seedDerivedPrivacyClosure(database, interpretationId);
+    const taskPayload = JSON.stringify({
+      admitted_source_root_id: projection.record_id,
+      turn_digest: { last_messages: [{ role: "user", content_excerpt: "private source body" }] }
+    });
+    database.connection.prepare(`
+      INSERT INTO garden_tasks (id, workspace_id, role, kind, payload_json, status, created_at, completion_envelope_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run("private-task", "workspace-1", "librarian", "post_turn_extract", taskPayload, "claimed", CLOCK,
+      JSON.stringify({ candidate: "private source body" }));
     expect(records.findById("workspace-1", projection.record_id)?.source_body).toBe(projection.source_body);
 
     erase.apply(barrier(origin.record_id));
@@ -106,12 +115,42 @@ describe("source interpretation dependency erase", () => {
     expect.soft(factors.findDescriptor("workspace-1", factor.factor_id)?.canonical_payload).toBeNull();
     expect.soft(readCapsule(database, aliasId)).toEqual({ lifecycle_state: "tombstone", gist: "erased" });
     expect.soft(readCapsule(database, interpretationId)).toEqual({ lifecycle_state: "tombstone", gist: "erased" });
+    expect(() => database.connection.prepare(`
+      INSERT INTO memory_entries (object_id, object_kind, schema_version, lifecycle_state, created_at,
+        updated_at, created_by, dimension, source_kind, formation_kind, scope_class, content,
+        domain_tags, evidence_refs, workspace_id, run_id, storage_tier)
+      VALUES ('reattach', 'memory_entry', 1, 'active', ?, ?, 'test', 'fact', 'user', 'explicit',
+        'project', 'caller retained text', '[]', ?, 'workspace-1', 'run-private', 'hot')
+    `).run(CLOCK, CLOCK, JSON.stringify([interpretationId]))).toThrow(/tombstoned evidence/u);
+    database.connection.prepare(`
+      INSERT INTO memory_entries (object_id, object_kind, schema_version, lifecycle_state, created_at,
+        updated_at, created_by, dimension, source_kind, formation_kind, scope_class, content,
+        domain_tags, evidence_refs, workspace_id, run_id, storage_tier)
+      VALUES ('reattach-update', 'memory_entry', 1, 'active', ?, ?, 'test', 'fact', 'user', 'explicit',
+        'project', 'unrelated text', '[]', '[]', 'workspace-1', 'run-private', 'hot')
+    `).run(CLOCK, CLOCK);
+    expect(() => database.connection.prepare(`UPDATE memory_entries SET content = ?, evidence_refs = ?
+      WHERE object_id = 'reattach-update'`).run("caller retained text", JSON.stringify([interpretationId])))
+      .toThrow(/tombstoned evidence/u);
     expect.soft(readDerivedPrivacyState(database)).toMatchObject({
       memory: { content: "erased", lifecycle_state: "tombstone" },
       synthesis: { summary: "erased", lifecycle_state: "tombstone" },
       hq: { hqs_json: "[]" }
     });
     expect.soft(derivedPrivacyArtifactCounts(database)).toEqual([0, 0, 0, 0, 0]);
+    const task = database.connection.prepare(`
+      SELECT payload_json, status, completion_envelope_json FROM garden_tasks WHERE id = ?
+    `).get("private-task") as { payload_json: string; status: string; completion_envelope_json: string | null };
+    expect(task.status).toBe("failed");
+    expect(task.payload_json).not.toContain("private source body");
+    expect(task.completion_envelope_json).toBeNull();
+    expect(() => database.connection.prepare(`
+      INSERT INTO garden_tasks (id, workspace_id, role, kind, payload_json, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("late-task", "workspace-1", "librarian", "post_turn_extract", taskPayload, "pending", CLOCK))
+      .toThrow(/source erased/u);
+    expect(() => database.connection.prepare("UPDATE garden_tasks SET payload_json = ? WHERE id = ?")
+      .run(taskPayload, "private-task")).toThrow(/source erased/u);
     expect(records.findById("workspace-1", other.record_id)?.source_body).toBe(other.source_body);
     expect(erase.isErased("workspace-1", other.record_id)).toBe(false);
   });

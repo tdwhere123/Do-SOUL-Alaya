@@ -18,6 +18,7 @@ import {
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
   SOURCE_IDENTITY_HYDRATE_RESERVE,
+  validateSourceObserverPage,
   type ObserveConditionalFieldInput,
   type ObserverActionResult,
   type ObserverReaders,
@@ -54,7 +55,12 @@ export function collectObserved(
       resourceLimited = true;
       break;
     }
-    const prepared = prepareObservation(input, native, identity, index);
+    let prepared: ReturnType<typeof prepareObservation>;
+    try { prepared = prepareObservation(input, native, identity, index); }
+    catch (error) {
+      input.on_failure_work?.({ native_visits: workUnits, native_bytes: bytes });
+      throw error;
+    }
     workUnits += prepared.extraWork;
     bytes += prepared.extraBytes;
     if (prepared.unavailable === true) {
@@ -128,7 +134,7 @@ function prepareObservation(
       };
     }
     const page = readSource(input, source, row.targetObjectId);
-    if (page.unavailable) {
+    if (page.unavailable || page.resourceLimited === true) {
       return {
         observation: null,
         extraWork: Math.max(1, page.rowsRead),
@@ -199,7 +205,7 @@ function hydrateSeedObservation(
   const page = readSource(input, source, objectId);
   const extraWork = Math.max(1, page.rowsRead);
   const extraBytes = page.bytesRead;
-  if (page.unavailable) {
+  if (page.unavailable || page.resourceLimited === true) {
     return { observation: null, extraWork, extraBytes, unavailable: true, resourceLimited: page.resourceLimited };
   }
   if (page.row === null) {
@@ -231,11 +237,11 @@ function readSource(
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 1) {
     return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
   }
-  return source({
+  return validateSourceObserverPage(source({
     workspaceId: input.workspace_id,
     objectId,
     byteLimit
-  });
+  }));
 }
 
 export function unavailableOrNotApplicable(

@@ -26,7 +26,6 @@ const DOCUMENTED_OUTSIDE_REGISTRY = Object.freeze({
   ALAYA_CONFIG_DIR: "CLI/config directory override",
   ALAYA_WORKSPACE_ID: "default workspace for attach/CLI",
   ALAYA_ALLOWED_MCP_SERVERS: "MCP server name allowlist",
-  ALAYA_DEBUG: "CLI debug logging",
   ALAYA_BENCH_ARTIFACT_ROOT: "bench-runner artifact root",
   ALAYA_BENCH_DATA_DIR: "bench-runner dataset directory",
   ALAYA_BENCH_FAST_PRAGMA: "bench-runner SQLite pragma",

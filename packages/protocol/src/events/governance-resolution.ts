@@ -22,7 +22,8 @@ const governanceResolutionEventTypeValues = [
   "soul.resolution.correct_applied",
   "soul.resolution.stale_applied",
   "soul.resolution.defer_applied",
-  "soul.resolution.not_relevant_applied"
+  "soul.resolution.not_relevant_applied",
+  "soul.resolution.confirm_election_completed"
 ] as const;
 
 export const GovernanceResolutionEventType = {
@@ -31,7 +32,8 @@ export const GovernanceResolutionEventType = {
   SOUL_RESOLUTION_CORRECT_APPLIED: "soul.resolution.correct_applied",
   SOUL_RESOLUTION_STALE_APPLIED: "soul.resolution.stale_applied",
   SOUL_RESOLUTION_DEFER_APPLIED: "soul.resolution.defer_applied",
-  SOUL_RESOLUTION_NOT_RELEVANT_APPLIED: "soul.resolution.not_relevant_applied"
+  SOUL_RESOLUTION_NOT_RELEVANT_APPLIED: "soul.resolution.not_relevant_applied",
+  SOUL_RESOLUTION_CONFIRM_ELECTION_COMPLETED: "soul.resolution.confirm_election_completed"
 } as const;
 
 export const GovernanceResolutionEventTypeSchema = z.enum(
@@ -78,6 +80,17 @@ const GovernanceResolutionPayloadObjectSchema = z.object({
 export const GovernanceResolutionPayloadSchema =
   GovernanceResolutionPayloadObjectSchema.readonly();
 
+export const GovernanceConfirmElectionCompletedPayloadSchema = z.object({
+  confirmation_event_id: NonEmptyStringSchema,
+  target_object_id: NonEmptyStringSchema,
+  workspace_id: NonEmptyStringSchema,
+  run_id: NonEmptyStringSchema.nullable(),
+  agent_target: NonEmptyStringSchema,
+  delivery_id: NonEmptyStringSchema,
+  reviewer_identity: NonEmptyStringSchema,
+  occurred_at: IsoDatetimeStringSchema
+}).strict().readonly();
+
 const governanceResolutionPayloadSchemas = {
   [GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED]:
     GovernanceResolutionPayloadSchema,
@@ -90,7 +103,9 @@ const governanceResolutionPayloadSchemas = {
   [GovernanceResolutionEventType.SOUL_RESOLUTION_DEFER_APPLIED]:
     GovernanceResolutionPayloadSchema,
   [GovernanceResolutionEventType.SOUL_RESOLUTION_NOT_RELEVANT_APPLIED]:
-    GovernanceResolutionPayloadSchema
+    GovernanceResolutionPayloadSchema,
+  [GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_ELECTION_COMPLETED]:
+    GovernanceConfirmElectionCompletedPayloadSchema
 } as const;
 
 export type GovernanceResolutionEventPayloadMap = {

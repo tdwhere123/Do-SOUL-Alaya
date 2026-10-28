@@ -15,6 +15,14 @@ schema export helpers. It must not depend on other workspace packages.
 - `src/soul/mcp-types.ts` contains MCP tool input/output schemas.
 - `src/engine/` contains conversation engine protocol types.
 
+## Privacy redaction in EventLog
+
+Source erasure can redact source-derived canonicalization and slot-creation
+payload fields. Their nullable fields and `source_erase` marker distinguish an
+unavailable historical value from the original value. The event identity,
+type, revision and time remain unchanged; the marker names the erase barrier.
+Readers must not replay redacted fields as if they were the original facts.
+
 ## Retained root indexing compatibility
 
 Protocol 22.0.0 expands SourceIndex targets to standalone `evidence_capsule`
@@ -44,7 +52,11 @@ Absent binding retains the historical raw/default reader. Exact source bytes and
 vector profiles are unchanged. Protocol 26.0.0 makes `segmented-unicode61.v1`
 (`SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`) the representation the daemon prepares
 for every workspace without an explicit selection (invariant §25 major: ordinary
-lexical candidates change once it publishes; until then the raw reader serves). See the [lexical policy](../../docs/handbook/recall.md#source-index-lexical-representations).
+lexical candidates change once it publishes; until then the raw reader serves).
+Protocol 30.0.0 changes the default for unselected workspaces to
+`segmented-unicode61.v2`, with bounded resumable segmentation. Existing v1
+selections remain pinned and the raw representation remains available. See the
+[lexical policy](../../docs/handbook/recall.md#source-index-lexical-representations).
 
 ## Ordinary field delivery compatibility
 
@@ -88,7 +100,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `29.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `30.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

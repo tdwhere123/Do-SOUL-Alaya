@@ -377,6 +377,7 @@ describe("ClaimService", () => {
 
   it("marks claim as contested when slot election requires review", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    let current = existing;
     let appendSeq = 0;
     const contestedAppendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.event_type}-${(appendSeq += 1)}`,
@@ -400,16 +401,17 @@ describe("ClaimService", () => {
       },
       claimFormRepo: {
         create: vi.fn((claim) => claim),
-        findById: vi.fn(async () => existing),
+        findById: vi.fn(async () => current),
         findByWorkspaceId: vi.fn(async () => []),
         findByStatus: vi.fn(async () => []),
         findByCanonicalKey: vi.fn(async () => []),
         updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
           Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
         ),
-        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
-          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
-        )
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) => {
+          current = Object.freeze({ ...current, claim_status: status, updated_at: updatedAt });
+          return current;
+        })
       },
       eventLogRepo: {
         queryByEntity: vi.fn(async () => []),

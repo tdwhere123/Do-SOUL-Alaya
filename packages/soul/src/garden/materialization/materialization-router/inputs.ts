@@ -150,15 +150,10 @@ export function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySig
 }
 
 function computeEvidenceHealthState(
-  signal: CandidateMemorySignal,
   hasVerifiedSourceReceipt: boolean
 ): EvidenceHealthStateValue {
-  // Invariant #16: objects without evidence_refs must default to questionable,
-  // not verified. Signals from local heuristics carry no supporting evidence.
-  if (signal.evidence_refs.length === 0 && !hasVerifiedSourceReceipt) {
-    return EvidenceHealthState.QUESTIONABLE;
-  }
-  return EvidenceHealthState.VERIFIED;
+  // Caller-provided reference labels do not establish source verification.
+  return hasVerifiedSourceReceipt ? EvidenceHealthState.VERIFIED : EvidenceHealthState.QUESTIONABLE;
 }
 
 // invariant: evidence_kind diversifies producer-side so the live ontology
@@ -219,7 +214,6 @@ export function buildEvidenceInput(
     event_anchor: opts?.context?.source_event_anchor ?? null,
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
     evidence_health_state: computeEvidenceHealthState(
-      signal,
       projection.sourceHash !== null
     ),
     gist,

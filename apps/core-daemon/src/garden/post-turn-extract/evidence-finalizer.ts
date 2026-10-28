@@ -9,6 +9,7 @@ import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-
 import {
   receivedEvidenceCapsule,
   isWritePathMaterializationDeferral,
+  signalMaterializationFailed,
   type PostTurnSignalReceiver
 } from "./signal-receiver.js";
 
@@ -24,6 +25,7 @@ export interface PostTurnEvidenceFinalizationInput {
   readonly signalReceiver: PostTurnSignalReceiver;
   readonly admittedSourceRootId?: string;
   readonly beforeReceive?: () => Promise<void>;
+  readonly failedSignalIds?: Set<string>;
 }
 
 export async function finalizePostTurnEvidence(
@@ -76,6 +78,7 @@ async function receiveCandidateSignals(
       received = await input.signalReceiver.receiveSignal(signal);
     }
     signalIds.push(received.signal.signal_id);
+    if (signalMaterializationFailed(received)) input.failedSignalIds?.add(received.signal.signal_id);
     createdEvidence ||= receivedEvidenceCapsule(received) ||
       await input.signalReceiver.hasCreatedEvidence(received);
   }

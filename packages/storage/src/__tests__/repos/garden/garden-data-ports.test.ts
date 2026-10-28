@@ -48,6 +48,8 @@ describe("garden background data ports", () => {
       runId: "run-1",
       evidenceRefs: ["evidence-ok"]
     });
+    seedGreenStatus(database, { objectId: "green-stale", targetObjectId: "memory-stale",
+      workspaceId: "workspace-1", validUntil: null });
 
     const stale = await ports.evidenceCheckPort.findMemoriesWithStaleEvidence("workspace-1");
     expect(stale).toEqual([
@@ -59,6 +61,25 @@ describe("garden background data ports", () => {
 
     const freshOnly = await ports.evidenceCheckPort.findMemoriesWithStaleEvidence("workspace-2");
     expect(freshOnly).toEqual([]);
+  });
+
+  it("skips a stable non-revocable prefix and advances to later Green memories", async () => {
+    const { database, ports } = await createFixture();
+    for (let index = 0; index < 25; index += 1) {
+      seedMemoryEntry(database, { objectId: `old-${String(index).padStart(2, "0")}`,
+        workspaceId: "workspace-1", runId: "run-1", evidenceRefs: ["missing"] });
+    }
+    for (const id of ["later-one", "later-two"]) {
+      seedMemoryEntry(database, { objectId: id, workspaceId: "workspace-1", runId: "run-1", evidenceRefs: ["missing"] });
+      seedGreenStatus(database, { objectId: `green-${id}`, targetObjectId: id,
+        workspaceId: "workspace-1", validUntil: null });
+    }
+    expect((await ports.evidenceCheckPort.findMemoriesWithStaleEvidence("workspace-1"))
+      .map((entry) => entry.memory_entry_id)).toEqual(["later-one", "later-two"]);
+    database.connection.prepare("UPDATE green_statuses SET green_state = 'revoked' WHERE object_id = ?")
+      .run("green-later-one");
+    expect((await ports.evidenceCheckPort.findMemoriesWithStaleEvidence("workspace-1"))
+      .map((entry) => entry.memory_entry_id)).toEqual(["later-two"]);
   });
 
   it("detects broken pointers across memory, claim, and synthesis references", async () => {

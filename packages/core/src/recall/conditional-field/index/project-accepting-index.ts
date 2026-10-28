@@ -10,7 +10,6 @@ import {
   type Continuation,
   type Derivation,
   type FacetMode,
-  type FacetVector,
   type FieldSnapshot,
   type FieldValue,
   type IndexEntry,
@@ -56,11 +55,9 @@ import {
   withCapContractConflict,
   type ObserverCoverage
 } from "./completeness.js";
-import {
-  recoverExplanationForest,
-  mixedPayloadGeneration,
-  omittedStructuredPayload
-} from "./explanation.js";
+import { hasDerivationForest, mixedPayloadGeneration, omittedStructuredPayload } from "./explanation.js";
+import { SeedProofIndex } from "./seed-proof-index.js";
+import { projectPageExplanations } from "./project-page-explanations.js";
 import { acceptingEntries } from "./project-accepting-entries.js";
 import {
   bindCommittedDelivery,
@@ -122,11 +119,17 @@ export type AcceptingProjectionInput = Readonly<{
   readonly projection_facet_index?: FacetVisitIndex;
   readonly cost?: RequestCostLedger;
   readonly on_semantic_entries?: (entries: readonly IndexEntry[]) => void;
+  /** An owner-issued immutable revision covering the entire supplied forest and support.
+   * It must change whenever either input changes. Without one, changed references reset proof progress. */
+  readonly explanation_source_revision?: string;
   readonly explanation_progress?: import("./explanation-delivery.js").ExplanationDelivery;
+  /** Owner-confirmed retained work before projection can leave only a transient copy shortage. */
+  readonly preparation_advanced?: boolean;
   readonly on_explanation_progress?: (
     progress: import("./explanation-delivery.js").ExplanationDelivery | undefined,
     retainedBytes: number,
-    work: number
+    work: number,
+    admittedBytes?: number
   ) => void;
   readonly expires_at?: string;
   readonly as_of?: string;
@@ -143,23 +146,30 @@ export type AcceptingProjectionInput = Readonly<{
   readonly model_id?: string;
   readonly derivations?: readonly Derivation[];
   readonly derivation_forest?: ReadonlyMap<string, Derivation>;
-  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
+  readonly output_derivation_roots?: Readonly<{ get(key: string): readonly string[] | undefined }>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
   readonly transition_derivations?: import("../engine/path-derivation.js").DerivationRootLookup;
   readonly grounding_progress?: GroundingProgress;
   /** Revision of immutable grounding inputs, not of the page-local projection arrays. */
   readonly grounding_input_revision?: string;
-  readonly grounding_transitions?: FieldSnapshot["retained_transitions"];
-  readonly grounding_seeds?: FieldSnapshot["seeds"];
-  readonly grounding_derivations?: readonly Derivation[];
-  readonly projection_facets?: readonly FacetVector[];
+  readonly grounding_transitions?: Readonly<{ length: number; at(index: number): FieldSnapshot["retained_transitions"][number] | undefined }>;
+  readonly grounding_seeds?: Readonly<{ length: number; at(index: number): FieldSnapshot["seeds"][number] | undefined }>;
+  readonly grounding_derivations?: Readonly<{ length: number; at(index: number): Derivation | undefined }>;
   readonly grounding_complete?: boolean;
   readonly remaining_memory_bytes?: number;
   readonly on_grounding_progress?: (progress: GroundingProgress, retainedBytes: number) => void;
+  readonly seed_proof_index?: SeedProofIndex;
+  readonly on_seed_proof_index?: (progress: SeedProofIndex, retainedBytes: number, work: number) => void;
   readonly claim_propositions?: ReadonlyMap<string, Proposition>;
   readonly on_remaining_reserve?: (remaining: number) => void;
+  /** The delivery owner quotes the mandatory ledger; page-local hydration is released before its commit. */
+  readonly delivery_retention?: (members: readonly IndexEntry[]) => Readonly<{ required_bytes: number; releasable_bytes: number }>;
+  readonly on_atomic_work_block?: (block: Readonly<{
+    phase: "grounding" | "facet_index" | "membership" | "refinement" | "proof_index" | "explanation";
+    required_work: number; available_work: number;
+  }>) => void;
   readonly finalize_payload?: (entries: readonly IndexEntry[], remaining: number) => {
-    readonly remaining: number; readonly complete: boolean; readonly retryable?: boolean };
+    readonly remaining: number; readonly complete: boolean; readonly retryable?: boolean; readonly remaining_memory_bytes?: number };
   readonly payload_work_per_entry?: number;
   readonly payload_generation?: string;
   readonly relation_facet_modes?: ReadonlyMap<string, FacetMode>;
@@ -169,6 +179,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly remaining_reserve?: number;
   readonly resource_work?: "complete" | "open";
   readonly payload_work?: "complete" | "open";
+  readonly explanation_materialization_refused?: boolean;
 }>;
 
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
@@ -291,8 +302,9 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
   const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
   const payloadMemory = input.finalize_payload === undefined ? 0
     : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-  const groundingInput = { seeds: input.snapshot.seeds,
-    transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
+  const groundingInput = { seeds: input.grounding_seeds ?? input.snapshot.seeds,
+    transitions: input.grounding_transitions ?? input.snapshot.retained_transitions,
+    derivations: input.grounding_derivations ?? input.derivations ?? [],
     transition_derivations: input.transition_derivations ?? {},
     progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
     ...(input.grounding_input_revision === undefined ? {} : { input_revision: input.grounding_input_revision }),
@@ -306,10 +318,18 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
     charged_retained_bytes: grounded.admitted_bytes
   });
   input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
-  return { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
+  if (!grounded.complete && groundingAllowance < 1) input.on_atomic_work_block?.({
+    phase: "grounding", required_work: 1, available_work: groundingAllowance });
+  return { ...input, derivations: undefined,
+    derivation_forest: grounded.progress.forest.size === 0 ? undefined : grounded.progress.forest,
+    ...(input.explanation_source_revision === undefined ? {} : { explanation_source_revision: JSON.stringify([
+      input.explanation_source_revision, grounded.progress.input_digest, grounded.progress.completed_work
+    ]) }),
+    output_derivation_roots: grounded.progress.root_map, grounding_progress: grounded.progress,
     grounding_complete: grounded.complete,
     ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
     remaining_reserve: allowance - grounded.work,
+    remaining_memory_bytes: Math.max(0, availableMemory - grounded.retained_bytes),
     ...(!grounded.complete ? { resource_work: "open" } : {}) };
 }
 
@@ -317,13 +337,15 @@ function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  input = applyProjectionGrounding(input);
   const policy = input.view.enumeration_policy ?? "canonical";
+  const preparationOrigin = { grounding_progress: input.grounding_progress,
+    explanation_progress: input.explanation_progress, facet_index: input.projection_facet_index };
   const emitted = emittedRevisionsOf(input);
   const useEmittedSet = usesEmittedSet(input, policy);
   if (useEmittedSet && missingEmittedIdentities(emitted, input.snapshot.values).length > 0) {
     return closedIndex(input, representation, invalidatedCompleteness());
   }
+  input = prepareProjectionInput(input);
   // Offset lives with continuation; pass pageEnd so scan/entry does not import it.
   const scanSize = !useEmittedSet && input.ordered_values !== undefined
     ? input.ordered_values.size
@@ -340,6 +362,7 @@ function pageAcceptingIndex(
       continuation: input.prior_continuation ?? null };
   }
   if (!useEmittedSet && continuationSetMismatch(input, entries)) {
+    input.on_remaining_reserve?.(projected.remaining);
     return closedIndex(input, representation, invalidatedCompleteness());
   }
   input.on_projection_progress?.(projected.next, projected.facet);
@@ -356,8 +379,8 @@ function pageAcceptingIndex(
     : entries.slice(offset, offset + input.budget.page_budget);
   const candidates = useEmittedSet ? projected.updates : [];
   const ledger = input.delivered_product_states ?? committedProductStatesOf(input.prior_continuation) ?? {};
-  const pendingUpdates = [...retractionUpdates(projected.retracted, ledger),
-    ...candidates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))];
+  const retractions = retractionUpdates(projected.retracted, ledger);
+  const pendingUpdates = [...retractions, ...candidates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))];
   // Retractions and retained refinements precede new exposure; only selected
   // envelopes spend page width or advance the component ledger.
   const productUpdates = pendingUpdates.slice(0, input.budget.page_budget);
@@ -368,16 +391,69 @@ function pageAcceptingIndex(
   const remaining = useEmittedSet
     ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length, deliveryPending)
     : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
-  // Typed updates are not a second membership exposure of the same product.
-  const prepared = members;
-  if (!useEmittedSet || members.length > 0) input.on_semantic_entries?.(prepared);
-  const finalized = input.finalize_payload?.(prepared, projected.remaining);
+  const finalized = input.finalize_payload?.(members, projected.remaining);
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
-  input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
+  const explanation = projectPageExplanations({ input, members, updates, productUpdates, retractions, remaining,
+    preparation_origin: preparationOrigin, facet_index: projected.facet?.index,
+    available: finalized?.remaining ?? projected.remaining,
+    memory: finalized?.remaining_memory_bytes ?? input.remaining_memory_bytes ?? input.budget.memory_bytes,
+    updatesFor: entry => componentUpdatesFor(entry, emitted, ledger) });
+  input = explanation.input;
+  if (explanation.terminal !== undefined) {
+    input.on_remaining_reserve?.(explanation.available);
+    return closedIndex(input, representation, explanation.terminal === "invalid"
+      ? invalidatedCompleteness() : resourceRejectedCompleteness());
+  }
+  const prepared = explanation.members;
+  if (!useEmittedSet || prepared.length > 0) input.on_semantic_entries?.(prepared);
+  input.on_remaining_reserve?.(explanation.available);
   return encodeAcceptingIndex({
-    input, representation, projected, emitted, useEmittedSet, entries, members, updates,
-    remaining, offset, prepared, productUpdates
+    input, representation, projected, emitted, useEmittedSet, entries, members: explanation.members, updates: explanation.updates,
+    remaining: explanation.remaining, offset, prepared, productUpdates: explanation.productUpdates, explanations: explanation.explanations
   });
+}
+
+function prepareProjectionInput(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  input = applyProjectionGrounding(input);
+  if (input.grounding_complete === false && input.derivation_forest === undefined && (input.derivations?.length ?? 0) > 0) {
+    const rows = input.derivations!;
+    const previous = input.seed_proof_index;
+    const same = previous?.matchesSource(rows, input.explanation_source_revision) === true;
+    const owner = same && previous !== undefined ? previous.fork() : new SeedProofIndex(rows, input.explanation_source_revision);
+    const released = previous !== undefined && !same ? previous.retainedBytes : 0;
+    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+    const memory = (input.remaining_memory_bytes ?? input.budget.memory_bytes) + released;
+    const step = owner.advance(allowance, memory);
+    if (!step.complete && allowance < 1) input.on_atomic_work_block?.({
+      phase: "proof_index", required_work: 1, available_work: allowance });
+    input.cost?.add("index", { budget_work: step.work, charged_retained_bytes: step.bytes });
+    input.on_seed_proof_index?.(owner, step.bytes - released, step.work);
+    const roots = input.output_derivations;
+    input = { ...input, derivations: undefined, derivation_forest: owner.forest, seed_proof_index: owner,
+      output_derivation_roots: { get: key => roots?.[key] }, remaining_reserve: allowance - step.work,
+      remaining_memory_bytes: memory - step.bytes, ...(!step.complete ? { expand_payload: false, resource_work: "open" as const } : {}) };
+  }
+  if (input.explanation_progress !== undefined && !input.explanation_progress.matchesSource(
+    input.derivation_forest ?? input.derivations, input.support, input.explanation_source_revision)) {
+    const released = input.explanation_progress.retainedBytes;
+    input.on_explanation_progress?.(undefined, -released, 0);
+    input = { ...input, explanation_progress: undefined,
+      remaining_memory_bytes: (input.remaining_memory_bytes ?? input.budget.memory_bytes) + released };
+  }
+  if (input.explanation_progress !== undefined) {
+    // A one-unit continuation must be able to advance its retained proof before
+    // the same update is scanned again; otherwise projection can consume every page.
+    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+    const memory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
+    const owner = input.explanation_progress.fork();
+    const progress = owner.advance(allowance, memory);
+    if (!progress.complete && allowance < 1) input.on_atomic_work_block?.({
+      phase: "explanation", required_work: 1, available_work: allowance });
+    input.on_explanation_progress?.(owner, progress.bytes, progress.work);
+    input = { ...input, explanation_progress: owner, remaining_reserve: allowance - progress.work,
+      remaining_memory_bytes: memory - progress.bytes };
+  }
+  return input;
 }
 
 function encodeAcceptingIndex(page: Readonly<{
@@ -393,18 +469,20 @@ function encodeAcceptingIndex(page: Readonly<{
   readonly offset: number;
   readonly prepared: readonly IndexEntry[];
   readonly productUpdates: readonly ProductUpdate[];
+  readonly explanations?: readonly Derivation[];
 }>): InformationIndex {
   const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared, productUpdates } = page;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
-  const omittedPayload = mixedPayload || input.payload_work === "open"
-    || (expandPayload && omittedStructuredPayload(
+  const retryableOmission = mixedPayload || input.payload_work === "open"
+    || (expandPayload && !hasDerivationForest(input) && omittedStructuredPayload(
       input.support,
       input.derivations,
       input.budget.page_budget
     ));
+  const omittedPayload = retryableOmission || input.explanation_materialization_refused === true;
   const resourceOpen = projected.truncated || input.resource_work === "open";
-  const completeness = indexCompleteness(input, {
+  const assessedCompleteness = indexCompleteness(input, {
     total: members.length + updates.length + Object.keys(emitted).length,
     remaining,
     omitted_payload: omittedPayload,
@@ -413,6 +491,10 @@ function encodeAcceptingIndex(page: Readonly<{
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
   }, projected.has_incomparable_activations);
+  const refused = input.explanation_materialization_refused === true;
+  const completeness = refused ? { ...assessedCompleteness, payload: "resource_rejected" as const,
+    ...(remaining > 0 || resourceOpen ? { logical_index: "resource_rejected" as const,
+      transport: "resource_rejected" as const } : {}) } : assessedCompleteness;
 
   const nextOffset = offset + members.length;
   const scanOffset = projected.truncated || useEmittedSet
@@ -442,16 +524,13 @@ function encodeAcceptingIndex(page: Readonly<{
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     entries: prepared,
-    explanations: recoverExplanationForest(
-      (members.length > 0 ? members : updates).flatMap((entry) => entry.explanation_ids),
-      input.derivations ?? []
-    ),
+    explanations: page.explanations ?? [],
     completeness: completenessWithOrder(completeness, order),
-    continuation: nextContinuation({
+    continuation: refused ? null : nextContinuation({
       ...input,
       projection_facet_offset: projected.facet.scan_offset,
       projection_facet_index: projected.facet.index,
-      ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}),
+      ...(resourceOpen || retryableOmission ? { resource_work: "open" } : {}),
       delivered_entry_revisions: committedRevisions
     }, remaining, nextOffset, useEmittedSet ? [...members, ...updates] : entries, scanOffset,
       committedRevisions, useEmittedSet),

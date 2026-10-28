@@ -220,6 +220,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         sourceFacts: input.sourceFacts,
         bindingContexts: input.bindingContexts,
         toProgramStates: advance.to,
+        destinationAutomaton: automaton,
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
         coldPrograms,

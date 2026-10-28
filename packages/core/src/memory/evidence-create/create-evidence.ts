@@ -1,5 +1,6 @@
 import {
   EvidenceCapsuleSchema,
+  CommittedObjectError,
   OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
@@ -105,7 +106,13 @@ export async function createEvidenceCapsule(input: Readonly<{
   if (input.sourceFieldFormation !== SOURCE_PROVENANCE_CAPSULE) {
     await admitOptionalFieldFormation(input, created, formation);
   }
-  await input.runtimeNotifier.notifyEntry(event);
+  try {
+    await input.runtimeNotifier.notifyEntry(event);
+  } catch (cause) {
+    throw new CommittedObjectError("Evidence was committed but runtime notification failed.", {
+      object_kind: created.object_kind, object_id: created.object_id
+    }, { cause });
+  }
   return created;
 }
 

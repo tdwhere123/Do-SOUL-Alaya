@@ -80,9 +80,9 @@ describe("garden janitor and librarian SQL workspace isolation", () => {
     expect(row?.storage_tier).toBe("hot");
   });
 
-  it("librarian merge detection ignores duplicate content in other workspaces", async () => {
+  it("librarian subject neighbors stay within the requested workspace", async () => {
     const { database, ports } = await createFixture();
-    const sharedContent = "Shared subject line for merge";
+    const sharedContent = "Shared subject line for a template";
 
     seedMemoryEntry(database, {
       objectId: "memory-ws1-a",
@@ -113,14 +113,14 @@ describe("garden janitor and librarian SQL workspace isolation", () => {
       dimension: "fact"
     });
 
-    const ws1Merges = await ports.mergePort.findMergeCandidates("workspace-1");
-    const ws2Merges = await ports.mergePort.findMergeCandidates("workspace-2");
+    const ws1Clusters = await ports.neighborPort.findSubjectNeighbors("workspace-1");
+    const ws2Clusters = await ports.neighborPort.findSubjectNeighbors("workspace-2");
 
-    expect(ws1Merges.length).toBeGreaterThan(0);
-    expect(ws2Merges.length).toBeGreaterThan(0);
-    expect(ws1Merges[0]?.duplicate_ids.every((id) => id.startsWith("memory-ws1-"))).toBe(true);
-    expect(ws2Merges[0]?.duplicate_ids.every((id) => id.startsWith("memory-ws2-"))).toBe(true);
-    expect(ws1Merges[0]?.duplicate_ids).not.toContain("memory-ws2-a");
-    expect(ws2Merges[0]?.duplicate_ids).not.toContain("memory-ws1-a");
+    expect(ws1Clusters.length).toBeGreaterThan(0);
+    expect(ws2Clusters.length).toBeGreaterThan(0);
+    expect(ws1Clusters[0]?.object_ids.every((id) => id.startsWith("memory-ws1-"))).toBe(true);
+    expect(ws2Clusters[0]?.object_ids.every((id) => id.startsWith("memory-ws2-"))).toBe(true);
+    expect(ws1Clusters[0]?.object_ids).not.toContain("memory-ws2-a");
+    expect(ws2Clusters[0]?.object_ids).not.toContain("memory-ws1-a");
   });
 });

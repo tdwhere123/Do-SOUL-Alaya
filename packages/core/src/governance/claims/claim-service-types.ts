@@ -41,6 +41,8 @@ export interface ClaimServiceEventLogRepoPort {
 export interface ClaimServiceClaimFormRepoPort {
   create(claim: ClaimForm): Readonly<ClaimForm>;
   findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
+  findByIdSync?(objectId: string): Readonly<ClaimForm> | null;
+  getStorageConnectionIdentity?(): object;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
   findByStatus(workspaceId: string, status: ClaimLifecycleStateType): Promise<readonly Readonly<ClaimForm>[]>;
   findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]>;
@@ -59,8 +61,11 @@ export interface ClaimServiceClaimFormRepoPort {
 }
 
 export interface ClaimServiceSlotServicePort {
-  onClaimActivated(claim: Readonly<ClaimForm>, deferredNotificationEvents?: EventLogEntry[]): Promise<SlotElectionResult>;
+  onClaimActivated(claim: Readonly<ClaimForm>, deferredNotificationEvents?: EventLogEntry[], transactionGuard?: ElectionTransactionGuard, activeClaimGuard?: ElectionTransactionGuard): Promise<SlotElectionResult>;
+  resumeContestedElection?(claim: Readonly<ClaimForm>, transactionGuard?: ElectionTransactionGuard): Promise<SlotElectionResult>;
 }
+
+export type ElectionTransactionGuard = (connectionIdentity: object | undefined) => void;
 
 export interface EffectDecisionStore {
   insert(receipt: EffectDecisionReceipt): EffectDecisionReceipt;
@@ -72,6 +77,7 @@ export interface ClaimLifecycleTransitionOptions {
   readonly additionalEventInputs?: readonly EventPublisherInput[];
   readonly additionalEventsSink?: EventLogEntry[];
   readonly effectDecisionReceipt?: EffectDecisionReceipt;
+  readonly transactionGuard?: ElectionTransactionGuard;
 }
 
 /** Apply only after appending eventInput in the same synchronous SQLite transaction. */
@@ -89,7 +95,7 @@ export interface ClaimServiceDependencies {
   readonly eventLogRepo: ClaimServiceEventLogRepoPort;
   readonly runtimeNotifier: ClaimRuntimeNotifierPort;
   readonly canonicalAliasService?: Pick<CanonicalAliasService, "planGovernanceSubjectCanonicalization">;
-  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation" | "publish">;
+  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation" | "publish"> & Partial<Pick<EventPublisher, "getStorageConnectionIdentity">>;
   readonly slotService?: ClaimServiceSlotServicePort;
   readonly effectDecisionStore?: EffectDecisionStore;
   readonly generateObjectId?: () => string;

@@ -18,12 +18,12 @@ const fixture = {
 
 it.each([
   ["27.0.0", "ordinary-native-field.v4"], ["28.0.0", "ordinary-native-field.v5"],
-  ["29.0.0", "ordinary-native-field.v6"]
+  ["29.0.0", "ordinary-native-field.v6"], ["30.0.0", "ordinary-native-field.v7"]
 ])("admits only the reviewed native archive version pair for %s", (version, semantics) => {
   expect(nativeRecallArchiveSemantics(version)).toBe(semantics);
   const config = { ...fixture, protocol_package_version: version, public_semantics: semantics };
   expect(OrdinaryRecallMultiSourceConfigSchema.safeParse(config).success).toBe(true);
-  for (const other of ["ordinary-native-field.v4", "ordinary-native-field.v5", "ordinary-native-field.v6"]) {
+  for (const other of ["ordinary-native-field.v4", "ordinary-native-field.v5", "ordinary-native-field.v6", "ordinary-native-field.v7"]) {
     if (other !== semantics) expect(OrdinaryRecallMultiSourceConfigSchema.safeParse({ ...config,
       public_semantics: other }).success).toBe(false);
   }
@@ -32,7 +32,7 @@ it.each([
   }).success).toBe(false);
 });
 
-it.each(["26.0.0", "27.1.0", "28.1.0", "29.1.0", "30.0.0"])("does not infer native archive support for %s", version => {
+it.each(["26.0.0", "27.1.0", "28.1.0", "29.1.0", "30.1.0"])("does not infer native archive support for %s", version => {
   expect(nativeRecallArchiveSemantics(version)).toBeUndefined();
   expect(OrdinaryRecallMultiSourceConfigSchema.safeParse({ ...fixture,
     protocol_package_version: version, public_semantics: "ordinary-native-field.v5"

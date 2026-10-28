@@ -1,4 +1,5 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import { LOW_ACTIVITY_MEMORY_SQL } from "../low-activity-predicate.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "../mappers/row-mapper.js";
 import {
   prepareStatementGroup,
@@ -44,6 +45,8 @@ interface MemoryEntryBaseReadStatements {
   readonly findByScopeClassHotStatement: SqliteStatement;
   readonly findByScopeClassHotPagedStatement: SqliteStatement;
   readonly countByScopeClassHotStatement: SqliteStatement;
+  readonly findByScopeClassAndDimensionHotPagedStatement: SqliteStatement;
+  readonly countByScopeClassAndDimensionHotStatement: SqliteStatement;
   readonly findByWorkspaceHotConflictPagedStatement: SqliteStatement;
   readonly countByWorkspaceHotConflictStatement: SqliteStatement;
   readonly findByDimensionHotConflictPagedStatement: SqliteStatement;
@@ -252,6 +255,18 @@ ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       FROM memory_entries
       WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
 ${ACTIVE_MEMORY_FILTER_SQL}    `,
+  findByScopeClassAndDimensionHotPagedStatement: `
+      SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
+      LIMIT ? OFFSET ?
+    `,
+  countByScopeClassAndDimensionHotStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND dimension = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}    `,
   findByWorkspaceHotConflictPagedStatement: `
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -389,7 +404,7 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
   transitionLifecycleStatement: `
       UPDATE memory_entries
       SET lifecycle_state = ?, updated_at = ?
-      WHERE object_id = ?
+      WHERE object_id = ? AND (? IS NULL OR lifecycle_state = ?)
     `,
   transitionLifecycleClearForgetStatement: `
       UPDATE memory_entries
@@ -397,7 +412,7 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
           updated_at = ?,
           forget_disposition = NULL,
           forget_disposition_ref = NULL
-      WHERE object_id = ?
+      WHERE object_id = ? AND (? IS NULL OR lifecycle_state = ?)
     `,
   reviveDormantStatement: `
       UPDATE memory_entries
@@ -416,6 +431,7 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
           forget_disposition_ref = NULL
       WHERE object_id = ?
         AND lifecycle_state = 'active'
+        AND (? IS NULL OR (workspace_id = ? AND ${LOW_ACTIVITY_MEMORY_SQL}))
     `,
   archiveStatement: `
       UPDATE memory_entries

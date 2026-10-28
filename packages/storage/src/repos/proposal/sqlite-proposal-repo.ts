@@ -28,6 +28,7 @@ import { ProposalCreateWorkflow } from "./writes/proposal-create-workflow.js";
 import { ProposalReadQueries } from "./reads/proposal-read-queries.js";
 import { acceptPendingPrivacyEraseWithEvents } from "./writes/privacy/accept-workflow.js";
 import { type ProposalRow } from "./mappers/rows.js";
+import { assertProposalAcceptanceSupported } from "./mappers/acceptance.js";
 import {
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,
@@ -62,7 +63,10 @@ export class SqliteProposalRepo implements ProposalRepo {
   private readonly createWorkflow: ProposalCreateWorkflow;
   private readonly readQueries: ProposalReadQueries;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(
+    private readonly db: StorageDatabase,
+    private readonly materializeMemoryKeys?: (memory: Readonly<MemoryEntry>) => void
+  ) {
     this.connectionHost = new ProposalConnectionHost(db);
     this.createWorkflow = new ProposalCreateWorkflow(this.connectionHost);
     this.readQueries = new ProposalReadQueries(db, this.connectionHost);
@@ -184,8 +188,9 @@ export class SqliteProposalRepo implements ProposalRepo {
         : parseNonEmptyString(reviewerIdentity, "reviewer_identity");
 
     try {
-      const result =
-        parsedReviewerIdentity === undefined
+      const result = this.connectionHost.transaction(() => {
+        this.assertResolutionSupported(parsedProposalId, parsedState);
+        return parsedReviewerIdentity === undefined
           ? this.connectionHost.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
           : this.connectionHost.updateResolutionWithIdentityStatement.run(
               parsedState,
@@ -193,6 +198,7 @@ export class SqliteProposalRepo implements ProposalRepo {
               parsedReviewerIdentity,
               parsedProposalId
             );
+      });
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
@@ -224,11 +230,10 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.connectionHost.updatePendingResolutionStatement.run(
-        parsedState,
-        parsedUpdatedAt,
-        parsedProposalId
-      );
+      const result = this.connectionHost.transaction(() => {
+        this.assertResolutionSupported(parsedProposalId, parsedState);
+        return this.connectionHost.updatePendingResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId);
+      });
 
       if (result.changes === 0) {
         const existing = await this.findById(parsedProposalId);
@@ -379,6 +384,7 @@ export class SqliteProposalRepo implements ProposalRepo {
   private createWorkflowContext(): SqliteProposalWorkflowContext {
     return {
       db: this.db,
+      ...(this.materializeMemoryKeys === undefined ? {} : { materializeMemoryKeys: this.materializeMemoryKeys }),
       transaction: (fn, options) => this.connectionHost.transaction(fn, options),
       eventLogWriter: this.connectionHost.eventLogWriter,
       findByIdStatement: this.connectionHost.findByIdStatement,
@@ -407,6 +413,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     readonly events: readonly EventLogEntry[];
   }> {
     return this.connectionHost.transaction(() => {
+      this.assertResolutionSupported(parsed.proposalId, parsed.state);
       const storedEvents = events.map((event) =>
         insertEventLogEntry(this.connectionHost.eventLogWriter, event)
       );
@@ -441,6 +448,12 @@ export class SqliteProposalRepo implements ProposalRepo {
       parsed.reviewerIdentity,
       parsed.proposalId
     );
+  }
+
+  private assertResolutionSupported(proposalId: string, state: ProposalResolutionState): void {
+    if (state !== "accepted" && state !== "auto_applied") return;
+    const row = this.connectionHost.findByIdStatement.get(proposalId) as ProposalRow | undefined;
+    if (row !== undefined) assertProposalAcceptanceSupported(row);
   }
 
   private findRequiredProposalAfterPendingUpdate(proposalId: string): Readonly<Proposal> {

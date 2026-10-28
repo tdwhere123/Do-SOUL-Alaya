@@ -25,13 +25,7 @@
  */
 import type { QaChatFn } from "./qa-chat.js";
 import { isEnvFlagDisabled, parseDefaultOnFlag, parseEnvBoolean } from "@do-soul/alaya-protocol";
-
-/** Max chars of stitched memory context handed to the answer model. Override
- * with ALAYA_BENCH_QA_CONTEXT_CHARS to test wider aggregation delivery. */
-function qaContextCharCap(): number {
-  const raw = Number(process.env.ALAYA_BENCH_QA_CONTEXT_CHARS);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 60_000;
-}
+import { buildQaAnswerContextReceipt, type QaContextExposure } from "./qa-answer-context.js";
 
 /** Default answer口径: ground strictly in context, abstain when truly absent. */
 const ANSWER_SYSTEM_DEFAULT =
@@ -162,22 +156,32 @@ export interface QaQuestionVerdict {
   readonly questionType: string;
   readonly isAbstention: boolean;
   /** True when the answer matched gold (or correctly abstained). */
-  readonly correct: boolean;
+  readonly correct: boolean | null;
+  readonly evaluatorValidity: "valid" | "empty" | "malformed";
   readonly modelAnswer: string;
   /** Raw judge verdict text (yes/no). */
   readonly judgeVerdict: string;
   readonly contextChars: number;
+  readonly contextExposure: readonly QaContextExposure[];
+  readonly contextClipped: boolean;
 }
 
 export interface QaTypeTally {
   readonly total: number;
   readonly correct: number;
+  readonly invalid_judge_count?: number;
 }
 
 export interface QaAggregate {
   readonly qa_total: number;
   readonly qa_correct: number;
-  readonly qa_accuracy: number;
+  readonly qa_accuracy: number | null;
+  readonly qa_invalid_judge_count: number;
+  readonly qa_invalid_judgments?: {
+    readonly question_id: string;
+    readonly validity: "empty" | "malformed";
+    readonly raw_verdict: string;
+  }[];
   readonly qa_abstention_total: number;
   readonly qa_abstention_correct: number;
   /** Per `question_type` accuracy — how SOTA tables report; verifies no
@@ -232,27 +236,6 @@ export function buildQaDeliverySettings(): QaDeliverySettings {
     v2_prompts_enabled: envEnabled("ALAYA_BENCH_QA_V2_PROMPTS"),
     temporal_enum_enabled: envEnabled("ALAYA_BENCH_QA_TEMPORAL_ENUM")
   };
-}
-
-/** Stitch delivered top-k content into a single role-blind memory context. */
-export function buildQaAnswerContext(
-  delivered: readonly QaDeliveredCandidate[]
-): string {
-  const text = delivered
-    .filter((candidate) => candidate.content.length > 0)
-    .map((candidate, index) => {
-      const parts = [`Memory ${index + 1}`];
-      if (candidate.eventDate !== undefined && candidate.eventDate.length > 0) {
-        parts.push(`recorded=${candidate.eventDate}`);
-      }
-      if (typeof candidate.sessionId === "string" && candidate.sessionId.length > 0) {
-        parts.push(`session=${candidate.sessionId}`);
-      }
-      parts.push(`rank=${candidate.sourceRank ?? index + 1}`);
-      return `[${parts.join(" | ")}]\n${candidate.content}`;
-    })
-    .join("\n\n");
-  return text.slice(0, qaContextCharCap());
 }
 
 /**
@@ -423,7 +406,7 @@ export async function scoreQaQuestion(
   // gpt-4o); defaults to the answer chat for backward compatibility.
   judgeChat: QaChatFn = chat
 ): Promise<QaQuestionVerdict> {
-  const context = buildQaAnswerContext(input.delivered);
+  const { context, exposures, clipped } = buildQaAnswerContextReceipt(input.delivered);
   const modelAnswer = await chat(
     answerSystemFor(input.questionType, input.isAbstention),
     // question date = "now"; temporal Qs anchor elapsed-day math against it.
@@ -439,14 +422,19 @@ export async function scoreQaQuestion(
       modelAnswer
     )
   );
+  const evaluatorValidity = judgeVerdict.trim().length === 0 ? "empty"
+    : /\b(?:yes|no)\b/iu.test(judgeVerdict) ? "valid" : "malformed";
   return {
     questionId: input.questionId,
     questionType: input.questionType,
     isAbstention: input.isAbstention,
-    correct: judgeIsCorrect(judgeVerdict),
+    correct: evaluatorValidity === "valid" ? judgeIsCorrect(judgeVerdict) : null,
+    evaluatorValidity,
     modelAnswer,
     judgeVerdict,
-    contextChars: context.length
+    contextChars: context.length,
+    contextExposure: exposures,
+    contextClipped: clipped
   };
 }
 
@@ -457,22 +445,30 @@ export function aggregateQaVerdicts(
   let correct = 0;
   let absTotal = 0;
   let absCorrect = 0;
-  const byType: Record<string, { total: number; correct: number }> = {};
+  let invalid = 0;
+  const byType: Record<string, { total: number; correct: number; invalid_judge_count?: number }> = {};
   for (const verdict of verdicts) {
-    if (verdict.correct) correct += 1;
+    if (verdict.evaluatorValidity !== "valid") invalid += 1;
+    const isCorrect = verdict.evaluatorValidity === "valid" && verdict.correct === true;
+    if (isCorrect) correct += 1;
     if (verdict.isAbstention) {
       absTotal += 1;
-      if (verdict.correct) absCorrect += 1;
+      if (isCorrect) absCorrect += 1;
     }
     const tally = (byType[verdict.questionType] ??= { total: 0, correct: 0 });
     tally.total += 1;
-    if (verdict.correct) tally.correct += 1;
+    if (verdict.evaluatorValidity !== "valid") tally.invalid_judge_count = (tally.invalid_judge_count ?? 0) + 1;
+    if (isCorrect) tally.correct += 1;
   }
   const total = verdicts.length;
   return {
     qa_total: total,
     qa_correct: correct,
-    qa_accuracy: total === 0 ? 0 : correct / total,
+    qa_accuracy: invalid > 0 ? null : total === 0 ? 0 : correct / total,
+    qa_invalid_judge_count: invalid,
+    ...(invalid === 0 ? {} : { qa_invalid_judgments: verdicts.flatMap((verdict) =>
+      verdict.evaluatorValidity === "valid" ? [] : [{ question_id: verdict.questionId,
+        validity: verdict.evaluatorValidity, raw_verdict: verdict.judgeVerdict }]) }),
     qa_abstention_total: absTotal,
     qa_abstention_correct: absCorrect,
     qa_by_type: byType

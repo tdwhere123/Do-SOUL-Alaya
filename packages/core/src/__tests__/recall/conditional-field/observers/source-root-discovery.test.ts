@@ -96,6 +96,20 @@ describe("source-root discovery admission", () => {
     expect(observed.page.outcome.status).toBe("exhausted");
   });
 
+  it("admits a matching conjunction inside an alternative when its sibling misses", () => {
+    const root = sourceRoot({ content: ROOT_BODY, content_complete: true });
+    const literal = (value: string) => relation("observed_log", "r", "l", {
+      kind: "query_predicate", predicate_name: "source.literal.nfc.v1", entity_id: value, variable: "r"
+    });
+    const observed = observeConditionalField(seedInput(interpretation({
+      schema_version: SCHEMA, kind: "alternative", options: [
+        { schema_version: SCHEMA, kind: "hyperedge", join: "and", premises: [literal("deployment"), literal("failed")] },
+        literal(LATER_NEEDLE)
+      ]
+    }), [root], NL_QUERY));
+    expect(observed.page.observations.find(row => row.object_id === root.root_id)?.applicability.verdict).toBe("true");
+  });
+
   it("treats a complete literal miss as absence", () => {
     const root = sourceRoot({ content: ROOT_BODY, content_complete: true });
     const observed = observeConditionalField(seedInput(

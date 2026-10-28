@@ -69,6 +69,7 @@ export const en: Record<keyof typeof zh, string> = {
   "overview:bench.loading": "Loading bench summary…",
   "overview:bench.error": "Benchmark unavailable: {message}",
   "recall:stale": "Showing previously loaded data; refresh failed.",
+  "recall:pending": "Loading the selected window; showing previously loaded data.",
   "overview:bench.delta": "Δ vs prev {delta}",
   "overview:bench.firstBaseline": "first baseline",
   "overview:bench.history": "{count} historical entries",
@@ -129,8 +130,6 @@ export const en: Record<keyof typeof zh, string> = {
   "memoryBrowser:error.unknown": "unknown error",
   "memoryBrowser:toast.memoryListFetchFailed": "Memory list fetch failed: {message}",
   "memoryBrowser:toast.evidenceOpenFailed": "Evidence open failed: {message}",
-  "memoryBrowser:toast.proposalCreated": "Proposal created: {id} (path_relation → strictly_governed)",
-  "memoryBrowser:toast.promoteFailed": "Promote failed: {message}",
 
   // graph
   "graph:loading": "Loading graph surface...",
@@ -231,6 +230,7 @@ export const en: Record<keyof typeof zh, string> = {
   "proposals:reviewer.required": "Reviewer identity is required.",
   "proposals:loading": "Loading proposals...",
   "proposals:empty": "No pending proposals.",
+  "proposals:queueCount": "Showing {shown} of {total} pending proposals. Review these entries to load the remaining queue.",
   "proposals:errorPrefix": "Error: {message}",
   "proposals:loadFailedNoWorkspace": "No workspaceId in URL. Re-run `alaya inspect` with --workspace.",
   "proposals:row.proposedChanges": "Proposed changes",
@@ -268,6 +268,7 @@ export const en: Record<keyof typeof zh, string> = {
   "config:diagnostic.heading": "Diagnostic Information",
   "config:loadingSection": "Loading {section}...",
   "config:error.load": "Failed to load {section}: {message}",
+  "config:embedding.statusUnavailable": "Embedding status unavailable: {message}",
   "config:toast.patchedRestart": "{section} patched · daemon restart pending",
   "config:toast.saved": "{section} saved",
   "config:error.save": "Failed to save {section}: {message}",
@@ -370,14 +371,13 @@ export const en: Record<keyof typeof zh, string> = {
   "healthInbox:cause.green_revoked": "green revoked",
   "healthInbox:cause.evidence_failure": "evidence failure",
   "healthInbox:cause.path_relation_failure": "path relation failure",
+  "healthInbox:cause.recall_auxiliary_failure": "recall auxiliary failure",
   "healthInbox:row.count": "count",
   "healthInbox:row.confidence": "confidence",
   "healthInbox:row.firstSeen": "first seen",
   "healthInbox:row.lastSeen": "last {ts}",
   "healthInbox:row.resolutionState": "resolution",
   "healthInbox:row.suggestedActions": "suggested",
-  "healthInbox:row.promoteStrictlyGoverned": "Promote to strictly_governed",
-  "healthInbox:row.promoteStrictlyGovernedAria": "Submit a strictly_governed proposal for memory {id}",
 
   // session
   "session:expired.title": "Session expired",

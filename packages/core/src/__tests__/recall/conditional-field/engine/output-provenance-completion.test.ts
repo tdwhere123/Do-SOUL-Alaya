@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
@@ -46,22 +47,41 @@ const expected = (direct: Transition, start: Transition, end: Transition) => [
 ].sort();
 
 function project(transitions: readonly Transition[], grounding: ReturnType<typeof groundedOutputDerivations>,
-  seeds: readonly SeedActivation[] = [seed], expectedGrade = 900) {
+  seeds: readonly SeedActivation[] = [seed], expectedGrade = 900, finalizationReserve = 100,
+  expectExplanation = true) {
   const field = createConditionalField({ interpretation: { schema_version: 1, query_id: "proof-paths",
     snapshot_id: SNAPSHOT_ID, status: "resolved", program: { schema_version: 1, kind: "epsilon" },
     view: defaultView(), holes: [], hypotheses: [] }, budget: defaultBudget(), seeds, transitions });
   if (field.binding.kind !== "bound") throw new Error("field binding rejected");
   const index = projectAcceptingIndex({ snapshot: field.binding.snapshot, query_id: field.query_id,
-    snapshot_id: SNAPSHOT_ID, result_version: "v1", view: defaultView(), budget: defaultBudget(),
+    snapshot_id: SNAPSHOT_ID, result_version: "v1", view: defaultView(),
+    budget: defaultBudget({ finalization_reserve: finalizationReserve }),
     derivations: grounding.derivations, output_derivations: grounding.roots, grounding_complete: grounding.complete });
   const entry = index.entries.find((candidate) => candidate.object_id === "b");
   if (entry === undefined) throw new Error("destination not delivered");
   expect(entry.association_milligrades).toBe(expectedGrade);
-  expect(entry.explanation_ids).toHaveLength(1);
+  if (expectExplanation) expect(entry.explanation_ids).toHaveLength(1);
   return { entry, index };
 }
 
 describe("output proof completion after numeric settlement", () => {
+  it("refuses a resumed proof whose retained parent rule is missing", () => {
+    const input = { seeds: [seed], transitions: [sToB, sToC, cToB], derivations: [], transition_derivations: {} };
+    let progress: GroundingProgress | undefined;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const result = groundedOutputDerivations({ ...input, progress, allowance: 1 });
+      progress = result.progress;
+      if (progress.proof_frame?.parent !== undefined) break;
+    }
+    expect(progress?.proof_frame?.parent).toBeDefined();
+    if (progress === undefined) throw new Error("expected retained grounding progress");
+    const damaged: GroundingProgress = { ...progress, incoming: new PersistentStringMap() };
+    let failure: unknown;
+    try { groundedOutputDerivations({ ...input, progress: damaged, allowance: 1 }); }
+    catch (error) { failure = error; }
+    expect(failure).toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION", message: "missing retained proof rule" });
+  });
+
   it.each([
     [sToB, sToC, cToB],
     [cToB, sToC, sToB],
@@ -327,7 +347,10 @@ describe("output proof completion after numeric settlement", () => {
     expect(resumed.admitted_bytes).toBe(ninth.admitted_bytes);
     const completed = groundedOutputDerivations({ ...input, progress: resumed.progress, allowance: 1000 });
     expect(completed.complete).toBe(true);
-    const { entry, index } = project(transitions, completed);
+    const limited = project(transitions, completed, [seed], 900, 100, false);
+    expect(limited.entry.explanation_ids).toEqual([]);
+    expect(limited.index.completeness).toMatchObject({ logical_index: "open", payload: "partial", pending_computation: "open" });
+    const { entry, index } = project(transitions, completed, [seed], 900, 1000);
     expect(paths(entry.explanation_ids[0]!, index.explanations ?? [])).toEqual([
       [seedId, ruleId(sToB)].join(" -> "),
       [seedId, ...transitions.slice(1).map(ruleId)].join(" -> ")

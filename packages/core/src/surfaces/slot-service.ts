@@ -16,6 +16,7 @@ import {
 import { CoreError } from "../shared/errors.js";
 import { bindEventPublisher, type EventPublisher } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
+import type { ElectionTransactionGuard } from "../governance/claims/claim-service-types.js";
 
 export type SlotElectionDecision = "new_slot_created" | "auto_won" | "contested" | "no_change";
 
@@ -26,7 +27,8 @@ export type SlotElectionResult = {
 };
 
 export interface SlotServiceSlotRepoPort {
-  create(slot: Readonly<Slot>): Readonly<Slot>;
+  getStorageConnectionIdentity?(): object;
+  create(slot: Readonly<Slot>, subjectClaimId?: string): Readonly<Slot>;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   findByUniqueKey(
     canonicalKey: string,
@@ -65,6 +67,7 @@ export interface SlotServiceArbitrationServicePort {
     slotId: string,
     options?: {
       readonly dryRun?: boolean;
+      readonly transactionGuard?: ElectionTransactionGuard;
     }
   ): Promise<SlotServiceArbitrationResult>;
 }
@@ -127,9 +130,12 @@ export class SlotService {
 
   public async onClaimActivated(
     claim: Readonly<ClaimForm>,
-    deferredNotifyEvents?: EventLogEntry[]
+    deferredNotifyEvents?: EventLogEntry[],
+    transactionGuard?: ElectionTransactionGuard,
+    activeClaimGuard?: ElectionTransactionGuard
   ): Promise<SlotElectionResult> {
     const parsedClaim = parseClaim(claim);
+    if (transactionGuard !== undefined) this.guardElectionMutation(this.eventPublisher(), transactionGuard);
 
     if (parsedClaim.claim_status !== "active") {
       throw new CoreError("VALIDATION", "Slot election requires claim_status=active");
@@ -143,13 +149,13 @@ export class SlotService {
     );
 
     if (sameScopeSlot !== null) {
-      return await this.evaluateSameScopeElection(sameScopeSlot, parsedClaim, deferredNotifyEvents);
+      return await this.evaluateSameScopeElection(sameScopeSlot, parsedClaim, deferredNotifyEvents, transactionGuard, activeClaimGuard);
     }
 
     const relatedSlots = await this.findRelatedSlots(parsedClaim);
 
     if (relatedSlots.length === 0) {
-      const created = await this.createSlotForClaim(parsedClaim, deferredNotifyEvents);
+      const created = await this.createSlotForClaim(parsedClaim, deferredNotifyEvents, transactionGuard, activeClaimGuard);
       return {
         slot: created,
         decision: "new_slot_created",
@@ -157,7 +163,29 @@ export class SlotService {
       };
     }
 
-    return await this.evaluateCrossScopeElection(relatedSlots, parsedClaim, deferredNotifyEvents);
+    return await this.evaluateCrossScopeElection(relatedSlots, parsedClaim, deferredNotifyEvents, transactionGuard, activeClaimGuard);
+  }
+
+  /** Re-run arbitration when a previous election committed only some contested transitions. */
+  public async resumeContestedElection(claim: Readonly<ClaimForm>, transactionGuard?: ElectionTransactionGuard): Promise<SlotElectionResult> {
+    const parsed = parseClaim(claim);
+    if (transactionGuard !== undefined) this.guardElectionMutation(this.eventPublisher(), transactionGuard);
+    if (parsed.claim_status !== "contested") throw new CoreError("VALIDATION", "Claim is not contested");
+    const slot = await this.dependencies.slotRepo.findByUniqueKey(
+      parsed.governance_subject.canonical_key, parsed.claim_kind, parsed.scope_class, parsed.workspace_id
+    );
+    if (slot === null || this.dependencies.arbitrationService === undefined) {
+      throw new CoreError("CONFLICT", "Contested election recovery is unavailable");
+    }
+    const result = transactionGuard === undefined
+      ? await this.dependencies.arbitrationService.arbitrateSlot(slot.object_id)
+      : await this.dependencies.arbitrationService.arbitrateSlot(slot.object_id, { transactionGuard });
+    return {
+      slot: result.slot,
+      decision: result.decision === "contested" ? "contested" :
+        result.decision === "winner_changed" && result.winner_claim_id === parsed.object_id ? "auto_won" : "no_change",
+      reason: result.reason
+    };
   }
 
   public async findByWorkspace(workspaceId: string): Promise<readonly Readonly<Slot>[]> {
@@ -189,7 +217,9 @@ export class SlotService {
   private async evaluateSameScopeElection(
     existingSlot: Readonly<Slot>,
     claim: Readonly<ClaimForm>,
-    deferredNotifyEvents?: EventLogEntry[]
+    deferredNotifyEvents?: EventLogEntry[],
+    transactionGuard?: ElectionTransactionGuard,
+    activeClaimGuard?: ElectionTransactionGuard
   ): Promise<SlotElectionResult> {
     if (existingSlot.winner_claim_id === claim.object_id) {
       return {
@@ -200,7 +230,7 @@ export class SlotService {
     }
 
     if (existingSlot.winner_claim_id === null) {
-      const updated = await this.changeWinner(existingSlot, claim.object_id, "seed_winner", TransitionCausedBy.SYSTEM, deferredNotifyEvents);
+      const updated = await this.changeWinner(existingSlot, claim.object_id, "seed_winner", TransitionCausedBy.SYSTEM, deferredNotifyEvents, transactionGuard, activeClaimGuard);
       return {
         slot: updated,
         decision: "auto_won",
@@ -214,7 +244,9 @@ export class SlotService {
         claim.object_id,
         "user_override",
         TransitionCausedBy.REVIEW,
-        deferredNotifyEvents
+        deferredNotifyEvents,
+        transactionGuard,
+        activeClaimGuard
       );
       return {
         slot: updated,
@@ -226,7 +258,9 @@ export class SlotService {
     const arbitrationService = this.dependencies.arbitrationService;
 
     if (arbitrationService !== undefined) {
-      const arbitrationResult = await arbitrationService.arbitrateSlot(existingSlot.object_id);
+      const arbitrationResult = transactionGuard === undefined
+        ? await arbitrationService.arbitrateSlot(existingSlot.object_id)
+        : await arbitrationService.arbitrateSlot(existingSlot.object_id, { transactionGuard });
 
       if (arbitrationResult.decision === "winner_changed") {
         if (arbitrationResult.winner_claim_id === claim.object_id) {
@@ -269,12 +303,14 @@ export class SlotService {
   private async evaluateCrossScopeElection(
     relatedSlots: readonly Readonly<Slot>[],
     claim: Readonly<ClaimForm>,
-    deferredNotifyEvents?: EventLogEntry[]
+    deferredNotifyEvents?: EventLogEntry[],
+    transactionGuard?: ElectionTransactionGuard,
+    activeClaimGuard?: ElectionTransactionGuard
   ): Promise<SlotElectionResult> {
     const incumbent = selectHighestScopeSlot(relatedSlots);
 
     if (incumbent === null) {
-      const created = await this.createSlotForClaim(claim, deferredNotifyEvents);
+      const created = await this.createSlotForClaim(claim, deferredNotifyEvents, transactionGuard, activeClaimGuard);
       return {
         slot: created,
         decision: "new_slot_created",
@@ -286,7 +322,7 @@ export class SlotService {
     const incumbentPriority = scopePriority[incumbent.scope_class];
 
     if (challengerPriority > incumbentPriority) {
-      const created = await this.createSlotForClaim(claim, deferredNotifyEvents);
+      const created = await this.createSlotForClaim(claim, deferredNotifyEvents, transactionGuard, activeClaimGuard);
       return {
         slot: created,
         decision: "auto_won",
@@ -301,7 +337,7 @@ export class SlotService {
     };
   }
 
-  private async createSlotForClaim(claim: Readonly<ClaimForm>, deferredNotifyEvents?: EventLogEntry[]): Promise<Readonly<Slot>> {
+  private async createSlotForClaim(claim: Readonly<ClaimForm>, deferredNotifyEvents?: EventLogEntry[], transactionGuard?: ElectionTransactionGuard, activeClaimGuard?: ElectionTransactionGuard): Promise<Readonly<Slot>> {
     const now = this.now();
     const slot = parseSlot({
       object_id: this.generateObjectId(),
@@ -337,8 +373,10 @@ export class SlotService {
         winner_claim_id: slot.winner_claim_id
       })
     };
-    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
-      const created = this.dependencies.slotRepo.create(slot);
+    const publisher = this.eventPublisher();
+    return await publisher.appendManyWithMutation([eventInput], (entries) => {
+      this.guardElectionMutation(publisher, transactionGuard, activeClaimGuard);
+      const created = this.dependencies.slotRepo.create(slot, claim.object_id);
       const event = entries[0];
       if (event !== undefined) {
         deferredNotifyEvents?.push(event);
@@ -352,7 +390,9 @@ export class SlotService {
     winnerClaimId: string,
     reasonCode: string,
     causedBy: TransitionCausedByType,
-    deferredNotifyEvents?: EventLogEntry[]
+    deferredNotifyEvents?: EventLogEntry[],
+    transactionGuard?: ElectionTransactionGuard,
+    activeClaimGuard?: ElectionTransactionGuard
   ): Promise<Readonly<Slot>> {
     const now = this.now();
     const parsedCausedBy = parseTransitionCausedBy(causedBy);
@@ -376,7 +416,9 @@ export class SlotService {
         occurred_at: now
       })
     };
-    return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
+    const publisher = this.eventPublisher();
+    return await publisher.appendManyWithMutation([eventInput], (entries) => {
+      this.guardElectionMutation(publisher, transactionGuard, activeClaimGuard);
       const updated = this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now, slot.winner_claim_id);
       const event = entries[0];
       if (event !== undefined) {
@@ -384,6 +426,16 @@ export class SlotService {
       }
       return updated;
     });
+  }
+
+  private guardElectionMutation(publisher: EventPublisher, guard?: ElectionTransactionGuard, active?: ElectionTransactionGuard): void {
+    if (guard === undefined && active === undefined) return;
+    const identity = publisher.getStorageConnectionIdentity();
+    guard?.(identity);
+    active?.(identity);
+    if (identity === undefined || this.dependencies.slotRepo.getStorageConnectionIdentity?.() !== identity) {
+      throw new CoreError("CONFLICT", "Slot mutation requires the election transaction connection");
+    }
   }
 
   private eventPublisher() {

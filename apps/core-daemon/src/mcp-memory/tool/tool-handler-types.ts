@@ -52,6 +52,7 @@ import type {
 import type { ReviewerIdentityBinding } from "../proposal/proposal-workflow.js";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
+import type { GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
 // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
 type SoulResolveHandler = ReturnType<typeof createSoulResolveHandler>;
@@ -233,7 +234,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly total_count: number;
     }>>;
   };
-  readonly gardenTaskRepo?: {
+  readonly gardenTaskRepo?: GardenTaskSourceGuardPort & {
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(

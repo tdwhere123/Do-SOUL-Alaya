@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { hashLabeledIdentity } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../../../sqlite/db.js";
+import { SqliteMemoryHqRepo } from "../../../../../repos/memory/memory-hq-repo.js";
+import { SqliteEventLogRepo } from "../../../../../repos/runtime/event-log-repo.js";
 import {
   parseEvidenceCapsuleRow,
   type EvidenceCapsuleRow
@@ -27,6 +29,8 @@ import {
   seedWorkspaces
 } from "../../field-contract-fixture.js";
 import {
+  DERIVED_MEMORY_ID,
+  DERIVED_SYNTHESIS_ID,
   derivedPrivacyArtifactCounts,
   readDerivedPrivacyState,
   restoreDerivedMemoryContent,
@@ -138,6 +142,7 @@ describe("field privacy erase", () => {
     const cleanGeneration = environment.generations.insert(
       hashedGeneration("workspace-1", "event-after-erase", "verified")
     );
+    environment.erase.apply(barrier(graph.record.record_id));
     expect(() => environment.generations.putArtifacts({
       workspace_id: "workspace-1",
       generation_id: cleanGeneration.generation_id,
@@ -156,13 +161,13 @@ describe("field privacy erase", () => {
     expect(() => restoreDerivedHq(environment.database))
       .toThrow(/erased source memory HQ/u);
     expect(() => restoreDerivedHqObservation(environment.database, graph.evidenceId))
-      .toThrow(/erased source memory HQ observation/u);
+      .toThrow(/erased source memory HQ observation|HQ provenance unavailable/u);
     expect(() => restoreDerivedRouting(environment.database))
       .toThrow(/erased source routing owner/u);
     expect(() => restoreDerivedSynthesis(environment.database))
-      .toThrow(/erased source synthesis/u);
+      .toThrow(/erased source synthesis|tombstoned evidence/u);
     expect(() => restoreSourceMemorySynthesis(environment.database))
-      .toThrow(/erased source synthesis/u);
+      .toThrow(/erased source synthesis|tombstoned evidence/u);
     expect(() => restoreSourceMemorySynthesisRouting(environment.database))
       .toThrow(/erased source routing owner/u);
   });
@@ -184,6 +189,64 @@ describe("field privacy erase", () => {
       .toThrow(/erased|check failed/u);
     expect(count(environment.database, "projection_erase_barriers")).toBe(4);
   });
+
+  it.each(["erased", "independent"] as const)(
+    "scrubs evidence-linked HQ observations with %s current provenance",
+    async (current) => {
+      const environment = createEnvironment(openFieldDatabase());
+      const graph = seedSourceGraph(environment);
+      const independentId = "00000000-0000-4000-8000-000000000002";
+      seedEvidenceCapsule(environment.database, independentId);
+      seedDerivedPrivacyClosure(environment.database, independentId);
+      const sourceEvent = await new SqliteEventLogRepo(environment.database).append({
+        event_type: "engine.response.received", entity_type: "engine_response", entity_id: "hq-source",
+        workspace_id: "workspace-1", run_id: "run-private", caused_by: "test", payload_json: {}
+      });
+      const anchor = { event_type: "engine.response.received", event_id: sourceEvent.event_id, occurred_at: CLOCK };
+      environment.database.connection.prepare("UPDATE evidence_capsules SET event_anchor = ? WHERE object_id IN (?, ?)")
+        .run(JSON.stringify(anchor), graph.evidenceId, independentId);
+      const hq = new SqliteMemoryHqRepo(environment.database);
+      const writeHq = (evidenceId: string, value: string) => hq.upsert({ object_id: DERIVED_MEMORY_ID,
+        workspace_id: "workspace-1", hqs: [value], evidence_receipt: { evidence_id: evidenceId, source_event_anchor: anchor },
+        producer_id: "test", created_at: CLOCK, updated_at: CLOCK });
+      let independentObservation;
+      if (current === "erased") independentObservation = await writeHq(independentId, "independent HQ");
+      const privateA = await writeHq(graph.evidenceId, "private first HQ");
+      const privateB = await writeHq(graph.evidenceId, "private second HQ");
+      if (current === "independent") independentObservation = await writeHq(independentId, "independent HQ");
+      const memoryBefore = environment.database.connection.prepare(
+        "SELECT lifecycle_state, content, evidence_refs FROM memory_entries WHERE object_id = ?"
+      ).get(DERIVED_MEMORY_ID);
+      const synthesisBefore = environment.database.connection.prepare(
+        "SELECT lifecycle_state, summary FROM synthesis_capsules WHERE object_id = ?"
+      ).get(DERIVED_SYNTHESIS_ID);
+
+      environment.erase.apply(barrier(graph.record.record_id));
+      expect(environment.database.connection.prepare("SELECT lifecycle_state, content, evidence_refs FROM memory_entries WHERE object_id = ?")
+        .get(DERIVED_MEMORY_ID)).toEqual(memoryBefore);
+      expect(environment.database.connection.prepare("SELECT lifecycle_state, summary FROM synthesis_capsules WHERE object_id = ?")
+        .get(DERIVED_SYNTHESIS_ID)).toEqual(synthesisBefore);
+      for (const observation of [privateA, privateB]) {
+        expect(environment.database.connection.prepare(`SELECT hqs_json, hq_content_sha256, observation_sha256
+          FROM memory_hq_observations WHERE observation_id = ?`).get(observation.observation_id)).toEqual({
+          hqs_json: "[]", hq_content_sha256: "erased", observation_sha256: `erased:${observation.observation_id}`
+        });
+      }
+      expect(environment.database.connection.prepare("SELECT observation_id, hqs_json FROM memory_hq WHERE object_id = ?")
+        .get(DERIVED_MEMORY_ID)).toEqual(current === "erased"
+        ? { observation_id: null, hqs_json: "[]" }
+        : { observation_id: independentObservation!.observation_id, hqs_json: '["independent HQ"]' });
+      expect((await hq.getHqByObjectIds([DERIVED_MEMORY_ID])).get(DERIVED_MEMORY_ID))
+        .toEqual(current === "erased" ? undefined : ["independent HQ"]);
+      expect(() => environment.database.connection.prepare(`UPDATE memory_hq_observations
+        SET hqs_json = '["restored"]', hq_content_sha256 = 'restored', observation_sha256 = 'restored'
+        WHERE observation_id = ?`).run(privateA.observation_id)).toThrow();
+      expect(() => environment.database.connection.prepare(`UPDATE memory_hq
+        SET hqs_json = '["restored"]', observation_id = ? WHERE object_id = ?`)
+        .run(privateA.observation_id, DERIVED_MEMORY_ID)).toThrow();
+      expect(environment.erase.apply(barrier(graph.record.record_id))).toEqual(expect.objectContaining({ subject_id: graph.record.record_id }));
+    }
+  );
 
   it("rolls back the barrier and every scrub when a derived delete fails", () => {
     const environment = createEnvironment(openFieldDatabase());

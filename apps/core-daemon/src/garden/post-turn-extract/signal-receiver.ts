@@ -10,6 +10,7 @@ export interface PostTurnSignalReceiveResult {
   readonly signal: Readonly<{
     readonly signal_id: string;
     readonly workspace_id: string;
+    readonly signal_state?: CandidateMemorySignal["signal_state"];
   }>;
   readonly triage_result?: "accepted" | "dropped" | "deferred";
   readonly materialization?: Readonly<{
@@ -17,10 +18,15 @@ export interface PostTurnSignalReceiveResult {
       readonly object_kind: string;
       readonly object_id: string;
     }>[];
+    readonly success?: boolean;
     readonly target_kind?: string;
     readonly defer_class?: "source_grounding" | "write_path";
     readonly deferral?: "prewrite_unavailable" | "lease_busy";
   }> | null;
+}
+
+export function signalMaterializationFailed(result: PostTurnSignalReceiveResult): boolean {
+  return result.signal.signal_state === "failed" || result.materialization?.success === false;
 }
 
 export interface PostTurnSignalReceiver {

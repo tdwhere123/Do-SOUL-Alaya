@@ -56,11 +56,11 @@ export interface SynthesisServiceSynthesisCapsuleRepoPort {
 }
 
 export interface SynthesisServiceEvidenceServicePort {
-  findById(objectId: string): Promise<unknown | null>;
+  findByIdScoped(objectId: string, workspaceId: string): Promise<unknown | null>;
 }
 
 export interface SynthesisServiceMemoryServicePort {
-  findById(objectId: string): Promise<unknown | null>;
+  findByIdScoped(objectId: string, workspaceId: string): Promise<unknown | null>;
 }
 
 export interface SynthesisRuntimeNotifier {
@@ -101,8 +101,8 @@ export class SynthesisService {
 
     // EventLog-first: reference validation runs before any EventLog write.
     await Promise.all([
-      this.validateEvidenceRefs(synthesis.evidence_refs),
-      this.validateSourceMemoryRefs(synthesis.source_memory_refs)
+      this.validateEvidenceRefs(synthesis.workspace_id, synthesis.evidence_refs),
+      this.validateSourceMemoryRefs(synthesis.workspace_id, synthesis.source_memory_refs)
     ]);
     const { event, created } = this.persistCreatedSynthesis(synthesis);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
@@ -207,11 +207,11 @@ export class SynthesisService {
     return this.dependencies.synthesisCapsuleRepo.findByTopicKey(workspaceId, topicKey);
   }
 
-  private async validateEvidenceRefs(evidenceRefs: readonly string[]): Promise<void> {
+  private async validateEvidenceRefs(workspaceId: string, evidenceRefs: readonly string[]): Promise<void> {
     const results = await Promise.all(
       evidenceRefs.map(async (evidenceRef) => ({
         evidenceRef,
-        evidence: await this.dependencies.evidenceService.findById(evidenceRef)
+        evidence: await this.dependencies.evidenceService.findByIdScoped(evidenceRef, workspaceId)
       }))
     );
 
@@ -222,11 +222,11 @@ export class SynthesisService {
     }
   }
 
-  private async validateSourceMemoryRefs(sourceMemoryRefs: readonly string[]): Promise<void> {
+  private async validateSourceMemoryRefs(workspaceId: string, sourceMemoryRefs: readonly string[]): Promise<void> {
     const results = await Promise.all(
       sourceMemoryRefs.map(async (sourceMemoryRef) => ({
         sourceMemoryRef,
-        memory: await this.dependencies.memoryService.findById(sourceMemoryRef)
+        memory: await this.dependencies.memoryService.findByIdScoped(sourceMemoryRef, workspaceId)
       }))
     );
 

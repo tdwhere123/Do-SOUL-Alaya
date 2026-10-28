@@ -172,13 +172,14 @@ function isAllowedExtensionEndpoint(value: string): boolean {
   return isTrustedLocalHostname(endpoint.hostname);
 }
 
-function isTrustedLocalHostname(hostname: string): boolean {
+export function isTrustedLocalHostname(hostname: string): boolean {
   const normalizedHostname =
     hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
 
   return (
     normalizedHostname === "localhost" ||
-    normalizedHostname === "127.0.0.1" ||
+    /^127(?:\.\d{1,3}){3}$/u.test(normalizedHostname) &&
+      normalizedHostname.split(".").every((part) => Number(part) <= 255) ||
     normalizedHostname === "::1" ||
     normalizedHostname === "0:0:0:0:0:0:0:1"
   );

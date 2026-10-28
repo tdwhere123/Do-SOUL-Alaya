@@ -226,12 +226,12 @@ type MeasurementCohortCounts = z.infer<typeof MeasurementCohortCountsSchema>;
 interface QualityMeasurementAccounting {
   readonly measurement_cohort_counts?: MeasurementCohortCounts;
   readonly unscorable_reason_distribution?: Readonly<Record<string, number>>;
-  readonly miss_taxonomy_distribution: Readonly<Record<string, number>>;
+  readonly miss_taxonomy_distribution?: Readonly<Record<string, number>>;
   readonly evaluator_identity_unscorable_count?: number;
   readonly abstention?: { readonly total: number };
 }
 
-export const QualityMetricsSchema = z
+const QualityMetricsObjectSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
     non_monotonic_rate: RatioSchema,
@@ -309,8 +309,37 @@ export const QualityMetricsSchema = z
     ]).optional(),
     miss_distribution: z.record(z.string(), z.number().int().nonnegative())
   })
-  .strict()
-  .superRefine(validateQualityMeasurementAccounting);
+  .strict();
+const MeasuredQualityMetricsSchema = QualityMetricsObjectSchema.superRefine(validateQualityMeasurementAccounting);
+
+// A shard merge can reconstruct cohort counts without reconstructing the
+// diagnostic facets. Absence is explicit and cannot satisfy numeric gates.
+const UnavailableQualityMetricsSchema = QualityMetricsObjectSchema.partial().extend({
+  schema_version: z.literal("bench-quality-metrics.unavailable.v1"),
+  unavailable_reason: z.literal("not_recomputed_from_shard_archives"),
+  non_monotonic_rate: z.never().optional(),
+  non_monotonic_count: z.never().optional(),
+  non_monotonic_denominator: z.never().optional(),
+  budget_drop_distribution: z.never().optional(),
+  high_lexical_demoted_rate: z.never().optional(),
+  high_lexical_demoted_count: z.never().optional(),
+  high_lexical_demoted_denominator: z.never().optional(),
+  candidate_absent_count: z.never().optional(),
+  candidate_absent_denominator: z.never().optional(),
+  no_gold_count: z.never().optional(),
+  no_gold_denominator: z.never().optional(),
+  evidence_stream_gold_delivery_rate: z.never().optional(),
+  evidence_stream_gold_delivery_count: z.never().optional(),
+  evidence_stream_gold_delivery_denominator: z.never().optional(),
+  path_stream_top10_rate: z.never().optional(),
+  path_stream_top10_count: z.never().optional(),
+  path_stream_top10_denominator: z.never().optional(),
+  per_plane_recall_coverage: z.never().optional(),
+  miss_taxonomy_distribution: z.never().optional(),
+  miss_distribution: z.never().optional()
+}).superRefine(validateQualityMeasurementAccounting);
+export const QualityMetricsSchema = z.union([MeasuredQualityMetricsSchema, UnavailableQualityMetricsSchema]);
+export type MeasuredQualityMetrics = z.infer<typeof MeasuredQualityMetricsSchema>;
 export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
 
 function validateQualityMeasurementAccounting(
@@ -331,7 +360,7 @@ function validateQualityMeasurementAccounting(
     "unscorable reason conservation failed",
     sumCounts(reasons) === counts.abstention + counts.unscorable_answerable
   );
-  addQualityMeasurementIssue(
+  if (value.miss_taxonomy_distribution !== undefined) addQualityMeasurementIssue(
     context,
     "miss taxonomy conservation failed",
     sumCounts(value.miss_taxonomy_distribution) === counts.miss_at_5

@@ -4,7 +4,6 @@ import type { ConditionalFieldRecallRequest } from "./recall-service-runner-type
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex,
   type RecallResultEncodingObservation } from "./recall-page-encoding.js";
-import { PAYLOAD_OMITTED_PREVIEW } from "./recall-result-encoding.js";
 import { preparedDeliveryId } from "./index-continuation.js";
 import { RecallEnvelopeFraming } from "./recall-envelope-framing.js";
 import { CoreError } from "../../shared/errors.js";
@@ -142,11 +141,10 @@ export function fitProjectedRecallPage(input: Readonly<{
     const results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
       () => framing.entry(), observation => { encoding = observation; });
     const index = frameEncodedIndex(input.index, results);
-    // An omission placeholder is not a captured preview; keeping it out of the surface
-    // cache lets a zero-payload page prove that it exposed no text.
+    // Availability comes from hydration and fitting, never from source text.
     const previews = new Map(index.entries.flatMap((entry, offset) => {
       const preview = results[offset]?.content_preview;
-      return preview === undefined || preview === PAYLOAD_OMITTED_PREVIEW ? []
+      return preview === undefined || results[offset]?.payload_available !== true ? []
         : [[indexEntryCacheKey(entry), input.previews.get(indexEntryCacheKey(entry)) === ""
           && entry.target.kind === "source_evidence" && preview === "[empty source]" ? "" : preview] as const];
     }));

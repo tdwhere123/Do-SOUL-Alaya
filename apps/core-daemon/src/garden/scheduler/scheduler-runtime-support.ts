@@ -41,7 +41,7 @@ export function createGardenSchedulerRuntimeSupport(
           kind: "object" as const,
           object_id: objectId
         }));
-        const paths = await input.pathRelationRepo.findByAnchors(workspaceId, anchors);
+        const paths = await (input.maintenancePathReader ?? input.pathRelationRepo).findByAnchors(workspaceId, anchors);
         return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
       }
     })

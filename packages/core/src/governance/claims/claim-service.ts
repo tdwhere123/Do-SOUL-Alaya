@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
   ClaimLifecycleState,
-  MemoryGovernanceEventType,
-  SoulClaimContestedPayloadSchema,
   TransitionCausedBy,
   type ClaimForm,
   type ClaimLifecycleState as ClaimLifecycleStateType,
@@ -15,6 +13,7 @@ import { parseObjectId } from "../../shared/validators.js";
 import { isPromiseLike } from "../../shared/promise-utils.js";
 import {
   collectAdditionalEvents,
+  createClaimContestedEventInput,
   createClaimCreatedEventInput,
   createLifecycleChangedEventInput,
   ensureAllowedLifecycleTransition,
@@ -29,6 +28,7 @@ import type {
   ClaimFormInput,
   ClaimLifecycleTransitionOptions,
   ClaimServiceDependencies,
+  ElectionTransactionGuard,
   PreparedClaimLifecycleTransition
 } from "./claim-service-types.js";
 import type { EffectDecisionReceipt } from "@do-soul/alaya-protocol";
@@ -68,6 +68,15 @@ interface LifecycleAuditComposition {
   readonly additionalEventInputs?: readonly EventPublisherInput[];
   readonly additionalEventsSink?: EventLogEntry[];
   readonly effectDecisionReceipt?: ClaimLifecycleTransitionOptions["effectDecisionReceipt"];
+  readonly transactionGuard?: ElectionTransactionGuard;
+}
+
+/** Activation and its audit are durable; only the subsequent election failed. */
+export class ClaimElectionAfterActivationError extends CoreError {
+  public constructor(public readonly claim: Readonly<ClaimForm>, cause: unknown) {
+    super("CONFLICT", "Claim activation committed but slot election failed", { cause });
+    this.name = "ClaimElectionAfterActivationError";
+  }
 }
 
 export class ClaimService {
@@ -112,13 +121,35 @@ export class ClaimService {
       {
         additionalEventInputs: options.additionalEventInputs,
         additionalEventsSink: options.additionalEventsSink,
-        effectDecisionReceipt: options.effectDecisionReceipt
+        effectDecisionReceipt: options.effectDecisionReceipt,
+        transactionGuard: options.transactionGuard
       }
     );
 
-    return slotElectionRequired
-      ? await this.resolveActivatedClaimElection(updated, options.deferredNotificationEvents)
-      : updated;
+    if (!slotElectionRequired) return updated;
+    try {
+      return await this.resolveActivatedClaimElection(updated, options.deferredNotificationEvents);
+    } catch (cause) {
+      throw new ClaimElectionAfterActivationError(updated, cause);
+    }
+  }
+
+  /** Retry the election of an already activated claim without repeating activation. */
+  public async resumeActivationElection(objectId: string, transactionGuard?: ElectionTransactionGuard): Promise<Readonly<ClaimForm>> {
+    const current = await this.requireExistingClaim(parseObjectId(objectId));
+    if (current.claim_status === ClaimLifecycleState.ACTIVE) {
+      return await this.resolveActivatedClaimElection(current, undefined, transactionGuard);
+    }
+    if (current.claim_status === ClaimLifecycleState.CONTESTED) {
+      const resume = this.requireSlotService().resumeContestedElection;
+      if (resume === undefined) throw new CoreError("CONFLICT", "Contested election recovery is unavailable");
+      await resume.call(this.requireSlotService(), current, transactionGuard);
+      return await this.requireExistingClaim(current.object_id);
+    }
+    if (current.claim_status === ClaimLifecycleState.WINNER || current.claim_status === ClaimLifecycleState.SUPERSEDED) {
+      return current;
+    }
+    throw new CoreError("CONFLICT", "Claim no longer permits activation election recovery");
   }
 
   /**
@@ -144,6 +175,14 @@ export class ClaimService {
 
   public findById(objectId: string): Promise<Readonly<ClaimForm> | null> {
     return this.dependencies.claimFormRepo.findById(objectId);
+  }
+
+  public getStorageConnectionIdentity(): object | undefined {
+    return this.dependencies.claimFormRepo.getStorageConnectionIdentity?.();
+  }
+
+  public getEventPublisherConnectionIdentity(): object | undefined {
+    return this.dependencies.eventPublisher?.getStorageConnectionIdentity?.();
   }
 
   // invariant: scoped lookup hides cross-workspace claims so handlers cannot
@@ -223,43 +262,6 @@ export class ClaimService {
         return updated;
       }
     };
-  }
-
-  private async emitContestedEvent(
-    claim: Readonly<ClaimForm>,
-    contestedBy: string | null,
-    deferredNotificationEvents?: EventLogEntry[]
-  ): Promise<void> {
-    const eventInput = {
-      event_type: MemoryGovernanceEventType.SOUL_CLAIM_CONTESTED,
-      entity_type: "claim_form",
-      entity_id: claim.object_id,
-      workspace_id: claim.workspace_id,
-      run_id: null,
-      caused_by: TransitionCausedBy.SYSTEM,
-      payload_json: SoulClaimContestedPayloadSchema.parse({
-        object_id: claim.object_id,
-        object_kind: claim.object_kind,
-        workspace_id: claim.workspace_id,
-        run_id: null,
-        contested_by: contestedBy,
-        triage_result: "deferred"
-      })
-    };
-    const event = await this.requireEventPublisher().appendManyWithMutation(
-      [eventInput],
-      (entries) => {
-        const entry = entries[0];
-        if (entry === undefined) {
-          throw new CoreError("CONFLICT", "Claim contested audit was not appended atomically");
-        }
-        return entry;
-      }
-    );
-
-    if (deferredNotificationEvents !== undefined) {
-      deferredNotificationEvents.push(event);
-    }
   }
 
   private buildClaimCreationContext(input: ClaimFormInput, timestamp: string): ClaimCreationContext {
@@ -371,25 +373,34 @@ export class ClaimService {
 
   private async resolveActivatedClaimElection(
     updated: Readonly<ClaimForm>,
-    deferredNotificationEvents?: EventLogEntry[]
+    deferredNotificationEvents?: EventLogEntry[],
+    transactionGuard?: ElectionTransactionGuard
   ): Promise<Readonly<ClaimForm>> {
+    const activeClaimGuard: ElectionTransactionGuard = connectionIdentity => {
+      const find = this.dependencies.claimFormRepo.findByIdSync;
+      if (connectionIdentity === undefined || this.getStorageConnectionIdentity() !== connectionIdentity || find === undefined ||
+          find.call(this.dependencies.claimFormRepo, updated.object_id)?.claim_status !== ClaimLifecycleState.ACTIVE) {
+        throw new CoreError("CONFLICT", "Activated claim changed before slot election committed");
+      }
+    };
     const election = await this.requireSlotService().onClaimActivated(
       updated,
-      deferredNotificationEvents
+      deferredNotificationEvents,
+      transactionGuard,
+      activeClaimGuard
     );
-    if (election.decision !== "contested") {
-      return updated;
-    }
+    if (election.decision !== "contested") return updated;
+    const current = await this.requireExistingClaim(updated.object_id);
+    if (current.claim_status !== ClaimLifecycleState.ACTIVE) return current;
 
-    const contested = await this.applyLifecycleTransition(
-      updated,
+    return await this.applyLifecycleTransition(
+      current,
       ClaimLifecycleState.CONTESTED,
       "slot_conflict_review_required",
       TransitionCausedBy.SYSTEM,
-      deferredNotificationEvents
+      deferredNotificationEvents,
+      { additionalEventInputs: [createClaimContestedEventInput(current, election.slot.winner_claim_id)], transactionGuard }
     );
-    await this.emitContestedEvent(contested, election.slot.winner_claim_id, deferredNotificationEvents);
-    return contested;
   }
 
   private assertAtomicLifecycleAvailable(
@@ -423,9 +434,17 @@ export class ClaimService {
     auditComposition: LifecycleAuditComposition
   ): Promise<Readonly<ClaimForm>> {
     const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
-    return await this.requireEventPublisher().appendManyWithMutation(
+    const publisher = this.requireEventPublisher();
+    return await publisher.appendManyWithMutation(
       [prepared.eventInput, ...additionalEventInputs],
       (persistedEntries) => {
+        if (auditComposition.transactionGuard !== undefined) {
+          const identity = publisher.getStorageConnectionIdentity?.();
+          auditComposition.transactionGuard(identity);
+          if (identity === undefined || this.getStorageConnectionIdentity() !== identity) {
+            throw new CoreError("CONFLICT", "Claim transition requires the election transaction connection");
+          }
+        }
         collectAdditionalEvents(persistedEntries, additionalEventInputs.length, auditComposition.additionalEventsSink);
         if (auditComposition.effectDecisionReceipt !== undefined) {
           this.requireEffectDecisionStore().insert(auditComposition.effectDecisionReceipt);

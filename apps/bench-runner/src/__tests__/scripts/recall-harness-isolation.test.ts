@@ -6,6 +6,17 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
+it("rejects missing workload arguments with a typed validation failure and exit one", async () => {
+  const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));
+  const result = await promisify(execFile)(process.execPath, [harness], { timeout: 15_000 })
+    .then(() => { throw new Error("missing workload arguments must fail the harness"); },
+      (error: Error & { code: number; stdout: string; stderr: string }) => error);
+  expect(result.code).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("--out and --arms are required");
+  expect(result.stderr).toMatch(/code:\s*['"]VALIDATION['"]/u);
+});
+
 it("guards the harness main thread, explicit-argv recall workers and child processes before native imports", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-harness-isolation-"));
   const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));

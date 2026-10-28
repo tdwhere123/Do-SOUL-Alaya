@@ -40,6 +40,20 @@ These rules always win over lower-level docs and task-card convenience.
    `packages/storage` may provide mechanical persistence helpers behind
    those owners, but it must not decide or originate business / runtime
    transitions.
+   An authorized source erase may replace proven source-derived claim
+   canonicalization and slot-creation payload fields with explicitly marked
+   unavailable values. Preserve the event envelope and independent erase
+   receipt; never replay a redacted value as the original fact. Independent
+   review and resolution text is not inferred to be source-derived.
+   When a legacy object directly or transitively names an unavailable
+   dependency but the original source cannot be identified, persist an
+   unavailable-dependency quarantine for the affected identity. This is not
+   an erase receipt and does not identify an erased source. Removing a reference
+   alone does not clear it. Plain read APIs fail with a conflict when their
+   result includes unavailable data; bounded reads report incompleteness.
+   Independently addressed, available objects and explicitly redacted audit
+   envelopes remain readable. Only a validated owning repair can release an
+   affected identity.
 9. New event names use dot notation, for example `memory.created` and
    `garden.audit_pass.completed`. Existing frozen underscore names
    require coordinated contract migration before renaming.
@@ -130,6 +144,11 @@ These rules always win over lower-level docs and task-card convenience.
     not ontology truth.
 17. Garden, Auditor, Janitor, Librarian, and other maintenance work
     are fire-and-forget relative to the main consumer-agent path.
+    Librarian does not create merge, template, or path-compression proposals
+    without a supported effect; textual resemblance alone does not establish
+    identity. Historical tasks of those kinds terminate as failed. Historical
+    proposals remain visible and rejectable but cannot be accepted. Synthesis
+    remains an organizing operation, subject to evidence and review.
 18. **Embedding is recall supplement only.** Embedding signals can
     influence ranking and recall, but never decide whether a memory is
     durable truth.
@@ -245,7 +264,7 @@ These rules always win over lower-level docs and task-card convenience.
 24. Alaya-original CLI and memory-tooling surfaces
     (`attach` / `backup` / `detach` / `doctor` / `export` / `import` /
     `inspect` / `install` / `mcp` / `review` /
-    `source-grounding-defers` / `status` / `temporal-cutover` /
+    `source-grounding-defers` / `source-index-lexical` / `status` / `temporal-cutover` /
     `tools` / `update`) are Alaya-original (no upstream equivalent)
     and any new work in these areas MUST cite the relevant Surface
     invariant (§21-§23) and `docs/handbook/architecture.md` §Surface

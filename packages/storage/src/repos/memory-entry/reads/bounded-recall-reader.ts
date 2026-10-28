@@ -21,7 +21,9 @@ export const LEXICAL_RECALL_SQL = `SELECT object_id, rowid AS rowid
       AND rowid > ? ORDER BY rowid LIMIT ?`;
 
 const SOURCE_LENGTH_SQL =
-  `SELECT ${SOURCE_BYTES_SQL} AS byte_length FROM memory_entries WHERE workspace_id = ? AND object_id = ? LIMIT 1`;
+  `SELECT ${SOURCE_BYTES_SQL} AS byte_length, EXISTS (SELECT 1 FROM privacy_dependency_quarantine q
+    WHERE q.workspace_id = m.workspace_id AND q.object_kind = 'memory_entry' AND q.object_id = m.object_id) AS privacy_unavailable
+    FROM memory_entries m WHERE workspace_id = ? AND object_id = ? LIMIT 1`;
 const SOURCE_ROW_SQL =
   `SELECT${MEMORY_ENTRY_SELECT_COLUMNS} FROM memory_entries WHERE workspace_id = ? AND object_id = ? LIMIT 1`;
 const SOURCE_REVISION_SQL = `SELECT revision FROM event_log
@@ -31,10 +33,10 @@ const SOURCE_REVISION_SQL = `SELECT revision FROM event_log
 const LEXICAL_AFTER_ROWID_SQL =
   `SELECT rowid AS rowid FROM memory_content_fts_porter WHERE object_id = ? LIMIT 1`;
 
-const ByteLengthRowParser: RowParser<{ readonly byte_length: number }> = {
-  parse(value: unknown): { readonly byte_length: number } {
+const ByteLengthRowParser: RowParser<{ readonly byte_length: number; readonly privacy_unavailable: number }> = {
+  parse(value: unknown): { readonly byte_length: number; readonly privacy_unavailable: number } {
     const record = readRecord(value, "source byte length row");
-    return { byte_length: readIntegerField(record, "byte_length") };
+    return { byte_length: readIntegerField(record, "byte_length"), privacy_unavailable: readIntegerField(record, "privacy_unavailable") };
   }
 };
 
@@ -83,11 +85,15 @@ export class SqliteMemoryRecallReader {
           row: null, rowsRead: 0, sourceRowsRead: 0, revisionRowsRead: 0, bytesRead: 0, unavailable: false
         };
       }
+      if (lengthRow.privacy_unavailable !== 0) {
+        return { row: null, rowsRead: 2, sourceRowsRead: 2, revisionRowsRead: 0,
+          bytesRead: Buffer.byteLength(JSON.stringify(lengthRow), "utf8"), unavailable: true };
+      }
       if (lengthRow.byte_length > byteLimit) {
         return {
           row: null,
-          rowsRead: 1,
-          sourceRowsRead: 1,
+          rowsRead: 2,
+          sourceRowsRead: 2,
           revisionRowsRead: 0,
           bytesRead: Buffer.byteLength(JSON.stringify(lengthRow), "utf8"),
           unavailable: true,
@@ -108,8 +114,8 @@ export class SqliteMemoryRecallReader {
         : readNonEmptyStringField(readRecord(rawRows[0], "memory entry row"), "evidence_refs");
       const row = raw && revision !== undefined ? { ...raw, sourceEventRevision: revision,
         sourceRevision: memorySourceRevision(revision, raw.content, evidenceRefsJson, raw.updated_at) } : null;
-      return { row, rowsRead: 1 + rows.length + revisions.length, sourceRowsRead: 1 + rows.length, revisionRowsRead: revisions.length,
-        bytesRead: Buffer.byteLength(JSON.stringify(rows), "utf8") +
+      return { row, rowsRead: 2 + rows.length + revisions.length, sourceRowsRead: 2 + rows.length, revisionRowsRead: revisions.length,
+        bytesRead: Buffer.byteLength(JSON.stringify(lengthRow), "utf8") + Buffer.byteLength(JSON.stringify(rows), "utf8") +
           (rows.length ? Buffer.byteLength(JSON.stringify(revisions), "utf8") : 0), unavailable: row === null };
     })();
   }

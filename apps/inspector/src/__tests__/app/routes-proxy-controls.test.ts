@@ -308,93 +308,22 @@ describe("inspector routes", () => {
     ]);
   });
 
-  // Inspector forwards the Health Inbox projection GET and the
-  // promote-to-strictly_governed proposal POST to the daemon's
-  // workspace-scoped HTTP endpoints without importing daemon code.
-
-  it("proxies health-inbox and promote-strictly-governed through to the daemon", async () => {
-    const calls: {
-      url: string;
-      method: string;
-      body: string | null;
-      requestToken: string | null;
-      desktop: string | null;
-    }[] = [];
-    const app = createInspectorApp({
-      token: "token",
-      workspaceId: "ws1",
-      daemonUrl: "http://daemon.local",
-      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
-      env: { ALAYA_REQUEST_TOKEN: "daemon-request-token" },
-      fetchImpl: async (input, init) => {
-        const headers = new Headers(init?.headers);
-        calls.push({
-          url: String(input),
-          method: init?.method ?? "GET",
-          body: init?.body === undefined ? null : String(init.body),
-          requestToken: headers.get("x-request-token"),
-          desktop: headers.get("x-alaya-desktop")
-        });
-        return Response.json({ success: true, data: { ok: true } });
-      }
-    });
-
-    await authenticatedRequest(app, "/api/workspaces/ws1/health-inbox?state=pending");
-    await authenticatedRequest(
-      app,
-      "/api/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed",
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-        headers: { "content-type": "application/json" }
-      }
-    );
-
-    expect(calls).toEqual([
-      {
-        url: "http://daemon.local/workspaces/ws1/health-inbox?state=pending",
-        method: "GET",
-        body: null,
-        requestToken: "daemon-request-token",
-        desktop: "1"
-      },
-      {
-        url: "http://daemon.local/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed",
-        method: "POST",
-        body: "{}",
-        requestToken: "daemon-request-token",
-        desktop: "1"
-      }
-    ]);
-  });
-
-
-  it("rejects health-inbox and promote paths that do not match the launch workspace", async () => {
+  it("keeps health-inbox forwarding and removes blanket promotion forwarding", async () => {
     const calls: string[] = [];
     const app = createInspectorApp({
-      token: "token",
-      workspaceId: "ws1",
-      daemonUrl: "http://daemon.local",
-      fetchImpl: async (input) => {
-        calls.push(String(input));
-        return Response.json({ success: true, data: { ok: true } });
-      }
+      token: "token", workspaceId: "ws1", daemonUrl: "http://daemon.local",
+      fetchImpl: async input => { calls.push(String(input)); return Response.json({ success: true, data: {} }); }
     });
-
-    const healthInbox = await authenticatedRequest(app, "/api/workspaces/ws2/health-inbox");
-    const promote = await authenticatedRequest(
-      app,
-      "/api/workspaces/ws2/soul/memory/mem-1/proposals/promote-strictly-governed",
-      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
-    );
-
-    expect(healthInbox.status).toBe(403);
-    expect(promote.status).toBe(403);
-    await expect(healthInbox.json()).resolves.toEqual({ error: "workspace_forbidden" });
-    await expect(promote.json()).resolves.toEqual({ error: "workspace_forbidden" });
-    expect(calls).toEqual([]);
+    const health = await authenticatedRequest(app, "/api/workspaces/ws1/health-inbox?state=pending");
+    expect(health.status).toBe(200);
+    const promotion = await authenticatedRequest(app,
+      "/api/workspaces/ws1/soul/memory/mem-1/proposals/promote-strictly-governed", { method: "POST" });
+    expect(promotion.status).toBe(404);
+    expect(calls).toEqual(["http://daemon.local/workspaces/ws1/health-inbox?state=pending"]);
+    const foreignHealth = await authenticatedRequest(app, "/api/workspaces/ws2/health-inbox");
+    expect(foreignHealth.status).toBe(403);
+    expect(calls).toHaveLength(1);
   });
-
 
   it("rejects workspace-scoped API paths that do not match the launch workspace", async () => {
     const calls: string[] = [];

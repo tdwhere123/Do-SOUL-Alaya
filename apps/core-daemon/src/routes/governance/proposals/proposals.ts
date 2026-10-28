@@ -3,20 +3,15 @@ import type { Context, Hono } from "hono";
 import type { ProposalRouteServices } from "./proposals-types.js";
 import { createInspectorToolContext, findExistingPendingMatch } from "./proposals-pending-match.js";
 import { clamp01, parsePendingListLimit, parseProposalListState, readJsonObject } from "./proposals-request-helpers.js";
-import { promoteStrictlyGovernedProposal } from "./proposals-strict-governance.js";
 import {
   parseListPagination,
   rejectUnexpectedRequestBody,
   writeListPaginationHeaders
 } from "../../shared/shared.js";
 import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
-export type {
-  PromoteStrictlyGovernedProposalRepoPort,
-  PromoteStrictlyGovernedRuntimeNotifier,
-  ProposalRouteServices
-} from "./proposals-types.js";
+export type { ProposalRouteServices } from "./proposals-types.js";
 
-// Governance-class promotion stays auditable through a pending path_relation Proposal; PathRelation changes wait for review.
+// Inspector memory actions originate proposals; their guarded review owns durable effects.
 // HTTP route surface:
 //   GET  /workspaces/:wsId/proposals                    (list pending or all)
 //   GET  /workspaces/:wsId/proposals/pending            (Inspector summary)
@@ -105,12 +100,6 @@ function registerMemoryActionProposalRoutes(app: Hono, services: ProposalRouteSe
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", boundedPathParams("wsId", "memoryId"), (context) => keepMemoryProposal(context, services));
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/rewrite", boundedPathParams("wsId", "memoryId"), (context) => rewriteMemoryProposal(context, services));
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", boundedPathParams("wsId", "memoryId"), (context) => downgradeMemoryProposal(context, services));
-
-  app.post(
-    "/workspaces/:wsId/soul/memory/:memoryId/proposals/promote-strictly-governed",
-    boundedPathParams("wsId", "memoryId"),
-    (context) => promoteStrictlyGovernedProposal(context, services)
-  );
 
   app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", boundedPathParams("wsId", "memoryId"), (context) => retireMemoryProposal(context, services));
 }

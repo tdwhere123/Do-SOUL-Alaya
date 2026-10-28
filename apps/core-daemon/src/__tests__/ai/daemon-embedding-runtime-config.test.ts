@@ -17,6 +17,18 @@ beforeEach(() => { process.env = {}; });
 afterEach(() => { process.env = environment; vi.restoreAllMocks(); });
 
 describe("readEmbeddingRuntimeConfig fail-closed openai", () => {
+  it("does not include a pasted credential in malformed-reference startup errors", () => {
+    const raw = "fixture-pasted-credential-without-a-reference-scheme";
+    try {
+      readEmbeddingRuntimeConfig(new Map([["ALAYA_EMBEDDING_PROVIDER", "openai"],
+        ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"], ["ALAYA_OPENAI_SECRET_REF", raw]]), vi.fn(), EXTRA_MISSING);
+      throw new Error("Expected malformed-reference rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("ALAYA_OPENAI_SECRET_REF is malformed");
+      expect((error as Error).message).not.toContain(raw);
+    }
+  });
   it("throws when explicit openai is on and the secret cannot be resolved", () => {
     expect(() => readEmbeddingRuntimeConfig(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "openai"],

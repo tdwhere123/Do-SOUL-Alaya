@@ -16,11 +16,11 @@ const QUERY = "find observed_log from x to y";
 const CLOCK = "2026-09-07T00:00:00.000Z";
 
 describe("runner facet hold does not trap a truncated-open index", () => {
-  it("keeps continuation while payload hold zeros the facet cap, then emits once the index completes", async () => {
+  it("retains bounded facet preparation and recovers every member after an explicit proof resource rejection", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const ids = await plantHub(slice, 24);
     const readers = readersFor(slice);
-    // Runner always installs payload_work_per_entry: 5, so hold = min(page_budget, n) * 6.
+    // The memory payload read reserve is 6, so hold = min(page_budget, n) * 7.
     // page_budget 800 with 24 spokes zeros cap against this remaining reserve.
     const starved = defaultBudget({
       memory_bytes: 10_000_000,
@@ -35,7 +35,7 @@ describe("runner facet hold does not trap a truncated-open index", () => {
     expect(first.index.completeness.logical_index).toBe("open");
     expect(first.index.continuation).not.toBeNull();
 
-    const starvedPages = collect(readers, starved, 48, first.index);
+    const starvedPages = collect(readers, starved, 64, first.index);
     const delivered = new Set(starvedPages.flatMap((page) => page.entries.map((entry) => entry.object_id ?? "")));
     for (const page of starvedPages) {
       if (delivered.size === 0) {
@@ -52,7 +52,12 @@ describe("runner facet hold does not trap a truncated-open index", () => {
       page_budget: 4
     });
     const seed = starvedPages.at(-1) ?? first.index;
-    const pages = seed.continuation === null ? starvedPages : collect(readers, ample, 40, seed);
+    expect(seed.continuation).toBeNull();
+    expect(seed.completeness.logical_index).toBe("resource_rejected");
+    expect(seed.completeness.payload).toBe("resource_rejected");
+    expect(seed.completeness.transport).toBe("resource_rejected");
+    const recovery = recall(readers, ample).index;
+    const pages = collect(readers, ample, 40, recovery);
     const members = new Set(pages.flatMap((page) => page.entries.map((entry) => entry.object_id ?? "")));
     expect([...members]).toEqual(expect.arrayContaining(ids.slice(1)));
   });

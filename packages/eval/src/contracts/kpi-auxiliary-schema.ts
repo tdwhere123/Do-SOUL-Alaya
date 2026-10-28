@@ -285,7 +285,11 @@ export const QaMetricsSchema = z
   .object({
     qa_total: z.number().int().nonnegative(),
     qa_correct: z.number().int().nonnegative(),
-    qa_accuracy: RatioSchema,
+    // Invalid evaluator evidence leaves the full attempted cohort ungraded.
+    qa_accuracy: RatioSchema.nullable(),
+    qa_invalid_judge_count: z.number().int().nonnegative().optional(),
+    qa_invalid_judgments: z.array(z.object({ question_id: z.string().min(1),
+      validity: z.enum(["empty", "malformed"]), raw_verdict: z.string() }).strict()).optional(),
     qa_abstention_total: z.number().int().nonnegative(),
     qa_abstention_correct: z.number().int().nonnegative(),
     // Per question_type accuracy — how SOTA tables report; surfaces a category
@@ -295,7 +299,8 @@ export const QaMetricsSchema = z
       z
         .object({
           total: z.number().int().nonnegative(),
-          correct: z.number().int().nonnegative()
+          correct: z.number().int().nonnegative(),
+          invalid_judge_count: z.number().int().nonnegative().optional()
         })
         .strict()
     ),
@@ -319,5 +324,13 @@ export const QaMetricsSchema = z
     answer_model: z.string().min(1),
     judge_model: z.string().min(1)
   })
-  .strict();
+  .strict().superRefine((metrics, context) => {
+    const invalid = metrics.qa_invalid_judge_count ?? 0;
+    if (invalid > metrics.qa_total || metrics.qa_correct > metrics.qa_total - invalid ||
+        (metrics.qa_invalid_judgments?.length ?? 0) !== invalid ||
+        (invalid > 0) !== (metrics.qa_accuracy === null)) {
+      context.addIssue({ code: "custom", path: ["qa_accuracy"],
+        message: "invalid judge evidence must retain the attempted cohort and leave accuracy unavailable" });
+    }
+  });
 export type QaMetrics = z.infer<typeof QaMetricsSchema>;

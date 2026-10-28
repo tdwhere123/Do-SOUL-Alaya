@@ -1,4 +1,4 @@
-import type { QualityMetrics } from "@do-soul/alaya-eval";
+import type { MeasuredQualityMetrics as QualityMetrics } from "@do-soul/alaya-eval";
 import {
   buildPerPlaneRecallCoverage,
   emptyGoldRankBucketTally,

@@ -145,10 +145,12 @@ export * from "./relations/path-plasticity/index.js";
 export * from "./runtime/runs/project-mapping-service.js";
 export * from "./tooling/prompt-asset-registry.js";
 export * from "./governance/proposals/proposal-service.js";
+export * from "./governance/proposals/garden-proposal-writer.js";
 export * from "./governance/proposals/resolution-service.js";
 export * from "./governance/proposals/resolution-service-effects.js";
 export * from "./governance/effects/proof-effect-policy.js";
 export { buildEraseBarrierEventInput } from "./governance/effects/erase-barrier.js";
+export { redactSourceDerivedClaimEvent } from "./governance/effects/erase-audit-redaction.js";
 export { createProjectionEraseBarrier } from
   "./recall/field/retrieval/projection/generation-erase.js";
 export * from "./governance/reconciliation/reconciliation-service.js";

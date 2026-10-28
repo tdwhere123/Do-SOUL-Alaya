@@ -49,12 +49,15 @@ export type SourceAdmissionRequest = Readonly<{
 export type SourceAdmissionResult = Readonly<{
   readonly record: SourceRecordIdentity;
   readonly spans: readonly AddressableSourceSpan[];
+  readonly host_capture_limited?: true;
 }>;
 
 export type SourceAdmissionContext = Readonly<{
   workspaceId: string;
   /** Host composition only; functions cannot arrive through request JSON. */
   hostCapture?: (request: SourceAdmissionRequest) => HostCaptureIssuer;
+  /** Retain a source when optional host capture alone hits its canonical resource limit. */
+  allowHostCaptureResourceLimit?: boolean;
 }>;
 
 export interface SourceAdmissionPort {
@@ -62,6 +65,7 @@ export interface SourceAdmissionPort {
   /** Exact receipt lookup for producer recovery, not permission to enrich or bypass admission. */
   findRetained?(input: Pick<SourceAdmissionRequest, "workspace_id" | "source_id" | "source_version" |
     "content_bytes" | "source_representation">, context: SourceAdmissionContext): SourceRecordIdentity | null;
+  hostCaptureResourceLimited?(record: SourceRecordIdentity, context: SourceAdmissionContext): boolean;
   /** Receipt-first orchestration must await this before publishing/enqueuing captured sources. */
   audit?(record: SourceRecordIdentity): Promise<void>;
 }

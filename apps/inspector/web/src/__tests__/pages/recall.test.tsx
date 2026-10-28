@@ -170,17 +170,19 @@ describe("RecallPage", () => {
     expect(screen.getByTestId("recall-kpi-total").textContent).toContain("42");
   });
 
-  it("requeries when the window toggle changes", async () => {
+  it("labels retained KPIs as pending until the selected window response arrives", async () => {
     renderRecall();
     await screen.findByTestId("recall-kpi-total");
-    const callsBefore = fetchMock.mock.calls.length;
-    const toggle = screen.getByRole("group", { name: /recall window/i });
+    let resolveWindow!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveWindow = resolve; }));
     const dayButton = await screen.findByRole("button", { pressed: false, name: /24h/i });
     await userEvent.click(dayButton);
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBefore);
-    });
-    expect(toggle).toBeTruthy();
+    expect(dayButton.getAttribute("aria-pressed")).toBe("true");
+    expect((await screen.findByTestId("recall-loading")).textContent).toContain("showing previously loaded data");
+    expect(screen.getByTestId("recall-kpi-total").textContent).toContain("42");
+    resolveWindow(jsonResponse({ success: true, data: { ...SAMPLE_STATS, recall: { ...SAMPLE_STATS.recall, total: 7 } } }));
+    await waitFor(() => expect(screen.queryByTestId("recall-loading")).toBeNull());
+    expect(screen.getByTestId("recall-kpi-total").textContent).toContain("7");
   });
 
   it("renders the workspace-missing alert without fetching", async () => {

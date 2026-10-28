@@ -32,9 +32,10 @@ it("audits reported open-role capture before enqueue, retries a committed receip
     expect((await reportUsage(harness.handler, input)).ok).toBe(false);
     const retained = records.listByWorkspace("workspace-1");
     expect(retained).toHaveLength(2);
-    // The retry's automatic report cannot rewrite the already captured open role or issuer.
+    // A retry cannot attach a changed role to the already captured inventory.
     expect((await reportUsage(harness.handler, { ...input,
-      last_messages: [{ ...input.last_messages[0]!, role: "function" }] })).ok).toBe(true);
+      last_messages: [{ ...input.last_messages[0]!, role: "function" }] })).ok).toBe(false);
+    expect((await reportUsage(harness.handler, input)).ok).toBe(true);
     expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
     expect(records.listByWorkspace("workspace-1")).toEqual(retained);
     expect(new SqliteFieldSourceSpanRepo(harness.database, fieldContractSha256).listByWorkspace("workspace-1")
@@ -80,6 +81,24 @@ it("admits and enqueues a valid large open-role report while recording the optio
   expect(postTurnRows(harness.gardenTaskRepo)[0]!.payload).toMatchObject({
     admitted_source_root_id: projection.record_id,
     host_capture_limitations: [{ record_id: projection.record_id, status: "uncaptured", reason: "resource_limit" }]
+  });
+});
+
+it("retains a capture resource refusal across failed enqueue and recovery", async () => {
+  const harness = await createHandlerHarness();
+  const messages = Array.from({ length: 23 }, () => ({ role: "雪".repeat(1024), content_excerpt: "ok" }));
+  const report = { turn_index: 89, last_messages: messages };
+  vi.spyOn(harness.gardenTaskRepo, "enqueue").mockImplementationOnce(() => { throw new Error("queue unavailable"); });
+  expect((await reportUsage(harness.handler, report)).ok).toBe(false);
+  expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+  const retained = new SqliteFieldSourceRecordRepo(harness.database, fieldContractSha256)
+    .listByWorkspace("workspace-1").find(row => row.source_representation?.kind === "canonical_projection")!;
+  expect(harness.database.connection.prepare("SELECT reason FROM source_host_capture_limitations WHERE record_id = ?")
+    .get(retained.record_id)).toEqual({ reason: "resource_limit" });
+  expect((await reportUsage(harness.handler, report)).ok).toBe(true);
+  expect(postTurnRows(harness.gardenTaskRepo)[0]!.payload).toMatchObject({
+    admitted_source_root_id: retained.record_id,
+    host_capture_limitations: [{ record_id: retained.record_id, status: "uncaptured", reason: "resource_limit" }]
   });
 });
 

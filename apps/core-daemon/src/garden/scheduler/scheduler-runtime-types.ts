@@ -143,6 +143,10 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
   };
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly maintenancePathReader?: {
+    findByAnchors: SqlitePathRelationRepo["findByAnchors"];
+    findActiveAll(workspaceId: string): Promise<readonly Readonly<import("@do-soul/alaya-protocol").PathRelation>[]>;
+  };
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly requestBacklogTelemetryCapture: (reason: string) => void;
   readonly runtimeGardenScheduler: RuntimeGardenScheduler;

@@ -323,12 +323,15 @@ describe("worker stored measurement producer", () => {
     expect(page.rowVisits).toBe(maxRows + 2);
     expect(page.objectIds.every((id) => id !== QUERY_A && id !== OBJECT_A)).toBe(true);
     let pairCalls = 0;
+    let refusedPairs = 0;
     const counted = {
       ...readers,
       measureStoredPairs: undefined,
       measureStoredPair: (input: Parameters<NonNullable<typeof readers.measureStoredPair>>[0]) => {
         pairCalls += 1;
-        return readers.measureStoredPair!(input);
+        const result = readers.measureStoredPair!(input);
+        if (result.resourceLimited === true) refusedPairs += 1;
+        return result;
       }
     };
     const interpretation = compileForReaders(readers);
@@ -365,7 +368,9 @@ describe("worker stored measurement producer", () => {
       model_id: MODEL_B
     });
     expect(measured.page.observations.length).toBeLessThanOrEqual(maxIdentities);
-    expect(pairCalls).toBe(measured.page.observations.length);
+    expect(pairCalls).toBe(measured.page.observations.length + refusedPairs);
+    expect(refusedPairs).toBeLessThanOrEqual(1);
+    if (refusedPairs > 0) expect(measured.page.outcome.status).toBe("interrupted");
     expect(pairCalls).toBeLessThanOrEqual(maxIdentities);
     expect(measured.work.native_visits).toBeLessThanOrEqual(workLimit);
     expect(measured.work.native_visits).toBeGreaterThan(pairCalls);

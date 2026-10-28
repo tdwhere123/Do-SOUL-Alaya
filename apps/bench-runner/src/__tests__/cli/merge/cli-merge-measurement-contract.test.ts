@@ -15,6 +15,22 @@ import {
 } from "./cli-merge-validations-fixture.js";
 
 describe("merge LongMemEval measurement contract", () => {
+  it("uses the same diagnostic denominator for legacy merged rates, report confidence, and regression bands", () => {
+    const base = makeShardKpi();
+    const legacy = makeShardKpi({ evaluated_count: 3, kpi: { ...base.kpi, per_scenario: [
+      { id: "legacy-hit", version: 1, hit_at_1: true, hit_at_5: true, hit_at_10: true, tier: "warm" },
+      { id: "legacy-miss", version: 1, hit_at_1: false, hit_at_5: false, hit_at_10: false, tier: "warm" },
+      { id: "legacy_abs", version: 1, hit_at_1: false, hit_at_5: false, hit_at_10: false, tier: "warm" }
+    ] } });
+    const payload = buildMergedLongMemEvalPayload({ payloads: [legacy], first: legacy, archiveRefs: [], questionDiagnostics: [] }).payload;
+    expect(payload).toMatchObject({ evaluated_count: 3, reporting_recall_denominator: 2 });
+    expect(payload.answerable_evaluated_count).toBeUndefined();
+    expect(payload.kpi.r_at_5).toBe(0.5);
+    const previous = { ...payload, kpi: { ...payload.kpi, r_at_5: 0.89 } };
+    const diff = diffKpis(payload, previous);
+    expect(diff.deltas.find((delta) => delta.key === "r_at_5")?.verdict).toBe("ok");
+    expect(renderReport(payload, previous, diff)).toContain("[9.45%, 90.55%]");
+  });
   it("conserves mixed evaluated, non-abstention, scorable and hit cohorts", () => {
     const payloads = ["a", "b"].map((prefix) => {
       const base = shard(prefix, 3, 1);

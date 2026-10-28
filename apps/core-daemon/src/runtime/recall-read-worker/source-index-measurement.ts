@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AlayaError, SourceIndexConfigurationSchema, SourceIndexGenerationStatusSchema,
+  SourceIndexLexicalBindingSchema, SourceIndexLexicalSelectionSchema,
   SourceIndexTargetSchema, SourceSemanticAcquisitionSchema } from "@do-soul/alaya-protocol";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 
@@ -26,7 +27,12 @@ export const SourceIndexSnapshotFactSchema: z.ZodType<SourceIndexSnapshotFact> =
   selection: Selection.nullable(), generation: z.object({ selection: Selection, generation_id: z.string(), source_epoch: Count,
     status: SourceIndexGenerationStatusSchema, enumeration_complete: z.boolean(), after_source_id: z.string().nullable(),
     target_count: Count, completed_count: Count, reason: z.string().nullable(),
-    preparation_revision: Count, records_complete: z.boolean(), after_capsule_cursor: z.string().nullable() }).strict().nullable()
+    preparation_revision: Count, records_complete: z.boolean(), after_capsule_cursor: z.string().nullable() }).strict().nullable(),
+  lexical: z.object({ selection: SourceIndexLexicalSelectionSchema.nullable(),
+    selected: z.union([z.object({ status: z.literal("legacy") }).strict(),
+      z.object({ status: z.literal("unavailable"), reason: z.string() }).strict(),
+      z.object({ status: z.enum(["ready", "partial", "valid_empty"]), binding: SourceIndexLexicalBindingSchema }).strict()]),
+    serving: z.enum(["raw", "generation", "unavailable"]) }).strict()
 }).strict();
 const Status = z.lazy(() => {
   try { return z.enum(owner().statuses); } catch { return z.never(); }

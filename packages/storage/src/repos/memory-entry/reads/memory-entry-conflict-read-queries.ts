@@ -6,16 +6,16 @@ import {
 import { StorageError } from "../../../shared/errors.js";
 import {
   parseMemoryDimension,
-  parseScopeClass,
-  MemoryEntryRowParser
+  parseScopeClass
 } from "../mappers/row-mapper.js";
 import type { MemoryEntryStatements } from "../statements/sqlite-memory-entry-statements.js";
 import { DEFAULT_MEMORY_ENTRY_PAGE, parseMemoryEntryPage } from "./memory-entry-read-page.js";
 import type { MemoryEntryListPageOptions } from "../types.js";
-import { parseRows } from "../../shared/parse-row.js";
+import { parseRows, type RowParser } from "../../shared/parse-row.js";
 
 export class MemoryEntryConflictReadQueries {
-  public constructor(private readonly statements: () => MemoryEntryStatements) {}
+  public constructor(private readonly statements: () => MemoryEntryStatements,
+    private readonly memoryRowParser: RowParser<Readonly<MemoryEntry>>) {}
 
   public async findByWorkspaceIdWithConflict(
     workspaceId: string,
@@ -28,11 +28,12 @@ export class MemoryEntryConflictReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
       return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict memory entries for workspace ${workspaceId}.`,
@@ -48,6 +49,7 @@ export class MemoryEntryConflictReadQueries {
         | undefined;
       return row?.total ?? 0;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count conflict memory entries for workspace ${workspaceId}.`,
@@ -70,11 +72,12 @@ export class MemoryEntryConflictReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
       return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
@@ -95,6 +98,7 @@ export class MemoryEntryConflictReadQueries {
       ) as { readonly total: number } | undefined;
       return row?.total ?? 0;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count conflict memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
@@ -117,11 +121,12 @@ export class MemoryEntryConflictReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
       return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
@@ -142,6 +147,7 @@ export class MemoryEntryConflictReadQueries {
       ) as { readonly total: number } | undefined;
       return row?.total ?? 0;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count conflict memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
@@ -167,11 +173,12 @@ export class MemoryEntryConflictReadQueries {
           parsedPage.limit,
           parsedPage.offset
         ),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
       return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list conflict memory entries for workspace ${workspaceId}, scope ${parsedScopeClass}, dimension ${parsedDimension}.`,
@@ -195,6 +202,7 @@ export class MemoryEntryConflictReadQueries {
       ) as { readonly total: number } | undefined;
       return row?.total ?? 0;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to count conflict memory entries for workspace ${workspaceId}, scope ${parsedScopeClass}, dimension ${parsedDimension}.`,

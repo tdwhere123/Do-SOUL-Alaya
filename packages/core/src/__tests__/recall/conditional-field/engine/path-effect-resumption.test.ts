@@ -75,6 +75,36 @@ function facetLookupInput(matches: boolean, rowCount = 40) {
 }
 
 describe("bounded path effect continuation", () => {
+  it("reports the generator's two-unit allowance floor without inventing progress", () => {
+    const { prepared } = preparedFrontier();
+    const { preparation: _preparation, ...pending } = prepared.pending_path_effects!;
+    const blocks: number[] = [];
+    let progress = 0;
+    const blocked = resumePathEffects({ ...prepared, pending_path_effects: pending, remaining_exploration: 1 },
+      () => { progress += 1; }, required => blocks.push(required));
+    expect(blocked.remaining_exploration).toBe(1);
+    expect(blocks).toEqual([2]);
+    expect(progress).toBe(0);
+    const advanced = resumePathEffects({ ...blocked, remaining_exploration: 2 }, () => { progress += 1; });
+    expect(advanced.pending_path_effects?.progress_position).toBeGreaterThan(blocked.pending_path_effects?.progress_position ?? 0);
+    expect(progress).toBeGreaterThan(0);
+  });
+
+  it("reports a two-unit facet admission while retaining the funded prepared frontier", () => {
+    const { prepared, oldEffect } = preparedFrontier();
+    const pending = prepared.pending_path_effects!, preparation = pending.preparation!;
+    const facet = { ...oldEffect.facet!, path_id: composedFacetPathId(oldEffect.transition!.to, "pending-facet") };
+    const blocks: number[] = [];
+    const blocked = resumePathEffects({ ...prepared, remaining_exploration: 1,
+      pending_path_effects: { ...pending, preparation: { ...preparation, stage: "facet",
+        effects: [{ ...preparation.effects[0]!, facet }], next_offset: 1 } } }, undefined, required => blocks.push(required));
+    expect(blocks).toEqual([2]);
+    expect(blocked.pending_path_effects?.preparation?.effect_index).toBe(0);
+    const completed = resumePathEffects({ ...blocked, remaining_exploration: 1_000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    expect(completed.facets.some(row => row.path_id === facet.path_id)).toBe(true);
+  });
+
   it.each(["unchanged", "earlier-batch"])("keeps the %s frontier while committing useful effects beside a duplicate facet", (frontier) => {
     const { prepared, oldEffect } = preparedFrontier();
     const pending = prepared.pending_path_effects!, preparation = pending.preparation!;

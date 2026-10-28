@@ -230,6 +230,7 @@ function releaseRows(): KpiPayload["kpi"]["per_scenario"] {
 function releaseQualityMetrics(
   base: NonNullable<KpiPayload["kpi"]["quality_metrics"]>
 ) {
+  if (base.schema_version !== "bench-quality-metrics.v1") throw new Error("Release fixture requires measured quality facets");
   return {
     ...base,
     measurement_cohort_counts: {

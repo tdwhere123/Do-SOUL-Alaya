@@ -20,8 +20,6 @@ type Translate = ReturnType<typeof useI18n>["t"];
 interface MemoryBrowserPageViewProps {
   readonly title: string;
   readonly controller: MemoryBrowserController;
-  readonly promoteLabel: string;
-  readonly promoteAriaLabel: (id: string) => string;
 }
 
 export function MemoryBrowserPageView(props: MemoryBrowserPageViewProps) {
@@ -37,13 +35,9 @@ export function MemoryBrowserPageView(props: MemoryBrowserPageViewProps) {
             t={t}
             pointer={controller.pointer}
             pointerLoading={controller.pointerLoading}
-            promoteAriaLabel={props.promoteAriaLabel}
-            promoteBusyIds={controller.promoteBusyIds}
-            promoteLabel={props.promoteLabel}
             row={controller.selectedRow}
             onClose={controller.closeSelection}
             onOpenEvidence={controller.openEvidence}
-            onPromote={controller.promoteToStrictlyGoverned}
           />
         ) : null}
       </div>
@@ -221,12 +215,8 @@ function EvidencePanel(props: {
   readonly row: MemoryEntryRow;
   readonly pointer: EvidenceCapsuleShape | null;
   readonly pointerLoading: boolean;
-  readonly promoteBusyIds: ReadonlySet<string>;
-  readonly promoteLabel: string;
-  readonly promoteAriaLabel: (id: string) => string;
   readonly onClose: () => void;
   readonly onOpenEvidence: (evidenceId: string) => Promise<void>;
-  readonly onPromote: (memoryId: string) => Promise<void>;
 }) {
   return (
     <aside
@@ -236,7 +226,6 @@ function EvidencePanel(props: {
       <EvidencePanelHeader t={props.t} onClose={props.onClose} />
       <div className="space-y-3 p-4 font-mono text-xs">
         <MemoryDetail t={props.t} row={props.row} />
-        <PromoteButton {...props} />
         <EvidenceRefs t={props.t} row={props.row} onOpenEvidence={props.onOpenEvidence} />
         {props.pointerLoading ? (
           <div className="text-ink-500">{props.t("memoryBrowser:evidence.loading")}</div>
@@ -281,29 +270,6 @@ function MemoryDetail(props: { readonly t: Translate; readonly row: MemoryEntryR
         <div className="whitespace-pre-wrap">{props.row.content}</div>
       </div>
     </>
-  );
-}
-
-function PromoteButton(props: {
-  readonly row: MemoryEntryRow;
-  readonly promoteBusyIds: ReadonlySet<string>;
-  readonly promoteLabel: string;
-  readonly promoteAriaLabel: (id: string) => string;
-  readonly onPromote: (memoryId: string) => Promise<void>;
-}) {
-  return (
-    <div>
-      <button
-        type="button"
-        data-testid="promote-strictly-governed"
-        aria-label={props.promoteAriaLabel(props.row.object_id)}
-        disabled={props.promoteBusyIds.has(props.row.object_id)}
-        onClick={() => void props.onPromote(props.row.object_id)}
-        className="w-full border border-ink-600 px-3 py-1.5 font-mono text-xs uppercase text-ink-600 hover:bg-ink-600 hover:text-beige-50 disabled:opacity-50"
-      >
-        {props.promoteLabel}
-      </button>
-    </div>
   );
 }
 

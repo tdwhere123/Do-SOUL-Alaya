@@ -86,6 +86,42 @@ function fixture(program: QueryProgram, rows: readonly ReturnType<typeof edge>[]
 }
 
 describe("consumer-directed physical observation", () => {
+  it("refuses an over-budget source receipt before caching it", () => {
+    const cache = new Map<string, SourceObserverPage>();
+    const cost = new RequestCostLedger();
+    const readers = meterReaders({ source: () => ({ row: null, rowsRead: 5, bytesRead: 1, unavailable: true }) },
+      { remaining: 64, cachedBytes: 0 }, cache, work => cost.add("observe", work));
+    expect(() => readers.source!({ workspaceId: "ws", objectId: "x" })).toThrowError(expect.objectContaining({
+      code: "OBLIGATION_VIOLATION", message: "source reader exceeded its singleton hydration reserve"
+    }));
+    expect(cache.size).toBe(0);
+    expect(cost.snapshot().phases.observe).toMatchObject({ native_visits: 5, native_bytes: 1 });
+  });
+
+  it("keeps the preceding lexical visit when source receipt validation fails", () => {
+    const cost = new RequestCostLedger();
+    expect(() => fixture(relation("p", "s", "t"), [], { cost, sourceReader: () => ({
+      row: null, rowsRead: 5, bytesRead: 7, unavailable: true
+    }) })).toThrowError(expect.objectContaining({ code: "OBLIGATION_VIOLATION" }));
+    expect(cost.snapshot().native_visits).toBe(6);
+    expect(cost.snapshot().native_bytes).toBe(8);
+  });
+
+  it.each([
+    { rowsRead: -1, bytesRead: 7, visits: null, bytes: 7 },
+    { rowsRead: Number.NaN, bytesRead: 7, visits: null, bytes: 7 },
+    { rowsRead: 4, bytesRead: Number.NaN, visits: 4, bytes: null }
+  ])("preserves unknown source receipt counters without admitting %j", row => {
+    const cache = new Map<string, SourceObserverPage>();
+    const readers = meterReaders({ source: () => ({ row: null, rowsRead: row.rowsRead,
+      bytesRead: row.bytesRead, unavailable: true }) }, { remaining: 64, cachedBytes: 0 }, cache);
+    let failure: unknown;
+    try { readers.source!({ workspaceId: "ws", objectId: "x" }); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "OBLIGATION_VIOLATION",
+      details: { source_read: { native_visits: row.visits, native_bytes: row.bytes } } });
+    expect(cache.size).toBe(0);
+  });
+
   it("keeps a memory refusal and a limited source page out of the completed source cache", () => {
     let calls = 0;
     const memory = { remaining: 0, cachedBytes: 0 };
@@ -213,18 +249,24 @@ describe("consumer-directed physical observation", () => {
     expect(next.state.residuals.find((row) => row.kind === "guard")?.status).toBe("exhausted");
   });
 
-  it("reserves lookup and one-row work before reading a pending fact", () => {
+  it("reserves lookup, singleton hydration and completion before reading a pending fact", () => {
     const first = fixture(relation("p", "s", "t"), [edge("a", "b", "p")]);
     const pending = { ...first.state,
       source_fact_demands: new PersistentStringMap<"pending" | "done">().with("x", "pending"),
       source_fact_pending_count: 1, source_fact_scan_offset: 0, source_fact_demand_bytes: 97 };
-    const short = fixture(relation("p", "s", "t"), [], { resume: pending, work: 2, reserve: 0 });
+    const sourceReader = (objectId: string) => ({ row: { object_id: objectId, sourceRevision: "rev",
+      lifecycle_state: "active", scope_class: "project" }, rowsRead: 4, bytesRead: 32, unavailable: false });
+    const short = fixture(relation("p", "s", "t"), [], { resume: pending, work: 6, reserve: 0, sourceReader });
     expect(short.sourceCalls).not.toContain("x");
     expect(short.state.source_fact_demands.get("x")).toBe("pending");
-    const enough = fixture(relation("p", "s", "t"), [], { resume: pending, work: 4, reserve: 0 });
+    const enough = fixture(relation("p", "s", "t"), [], { resume: pending, work: 7, reserve: 0, sourceReader });
     expect(enough.sourceCalls).toContain("x");
     expect(enough.state.source_fact_demands.get("x")).toBe("done");
-    expect(enough.state.remaining_exploration).toBeGreaterThanOrEqual(0);
+    expect(enough.state.remaining_exploration).toBe(0);
+    const cost = new RequestCostLedger();
+    fixture(relation("p", "s", "t"), [], { resume: pending, work: 7, reserve: 0, cost,
+      sourceReader: objectId => ({ ...sourceReader(objectId), rowsRead: 0, bytesRead: 0 }) });
+    expect(cost.snapshot().phases.observe).toMatchObject({ native_visits: 0, native_rows: 0 });
   });
 
   it("charges a changed source pin even when it invalidates a pending fact read", () => {
@@ -235,13 +277,13 @@ describe("consumer-directed physical observation", () => {
       source_fact_pending_count: 1, source_fact_scan_offset: 0, source_fact_demand_bytes: 97 };
     let pins = 0;
     const cost = new RequestCostLedger();
-    const next = fixture(program, [], { resume: pending, work: 8, reserve: 0, expectedRevision: "rev", cost,
+    const next = fixture(program, [], { resume: pending, work: 10, reserve: 0, expectedRevision: "rev", cost,
       snapshotPin: () => { pins += 1; return { source_revision: "changed" }; } });
     expect(pins).toBe(1);
     expect(next.sourceCalls).not.toContain("x");
     expect(next.state.last_observer_status).toBe("invalidated");
     expect(cost.snapshot().phases.observe.native_visits).toBeGreaterThanOrEqual(1);
-    expect(next.state.remaining_exploration).toBe(4);
+    expect(next.state.remaining_exploration).toBe(6);
   });
 
   it("meters mixed completed and pending fact demands across small continuations", () => {
@@ -277,6 +319,34 @@ describe("consumer-directed physical observation", () => {
     const beforeSettled = indexed;
     fixture(program, [], { resume: state, work: 16, reserve: 0 });
     expect(indexed).toBe(beforeSettled);
+  });
+
+  it.each([1, 9])("retains pair-scan progress with %s seed hypotheses while reserving the next adjacency row", count => {
+    const program = relation("p", "s", "t");
+    const interpretation = { hypotheses: Array.from({ length: count }, (_, index) => ({
+      schema_version: 1 as const, hypothesis_id: `hypothesis-${index}`, bindings: []
+    })) };
+    const first = fixture(program, [edge("a", "b", "p")], { interpretation });
+    let demands = new PersistentStringMap<true>();
+    let progress = new PersistentStringMap<string | null>();
+    for (let index = 0; index < 4; index += 1) {
+      const key = `done-${index}\0p`;
+      demands = demands.with(key, true);
+      progress = progress.with(`${key}:done`, "1");
+    }
+    demands = demands.with("zz\0p", true);
+    let state: FieldEngineState = { ...first.state, pair_demands: demands, pair_progress: progress,
+      pair_completed_count: 4, pair_revision: 4, pair_scan_offset: 0 };
+    const calls: string[] = [];
+    for (let turn = 0; turn < 5; turn += 1) {
+      const next = fixture(program, [], { resume: state, work: 16, reserve: 0, interpretation });
+      calls.push(...next.relationCalls);
+      expect(next.state.remaining_exploration).toBeGreaterThanOrEqual(0);
+      if (turn < 4) expect(next.state.pair_scan_offset).toBe(turn + 1);
+      state = next.state;
+    }
+    expect(calls).toEqual(["zz\0p"]);
+    expect(state.pair_progress.get("zz\0p:done")).toBe("1");
   });
 
   it("closes a single relation kind with local empty reads", () => {

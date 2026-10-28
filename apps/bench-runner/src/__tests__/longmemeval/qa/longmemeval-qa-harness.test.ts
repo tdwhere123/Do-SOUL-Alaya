@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateQaVerdicts,
-  buildQaAnswerContext,
   judgeIsCorrect,
   scoreQaQuestion,
   type QaQuestionVerdict
 } from "../../../runs/qa/qa-harness.js";
+import { buildQaAnswerContext } from "../../../runs/qa/qa-answer-context.js";
 import type { QaChatFn } from "../../../runs/qa/qa-chat.js";
 import {
   QA_ENV_API_KEY,
@@ -19,6 +19,7 @@ import {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // A fake chat fn that records every (system,user) call and replays scripted
@@ -84,6 +85,15 @@ describe("qa-harness judge verdict (one-word yes/no)", () => {
 });
 
 describe("scoreQaQuestion judge routing", () => {
+  it.each(["", "  ", "ungraded"])("preserves invalid evaluator evidence as unknown for %j", async (judgeText) => {
+    const { chat } = fakeChat(["Paris", judgeText]);
+    const verdict = await scoreQaQuestion({ questionId: "q", questionType: "single-session-user",
+      isAbstention: false, question: "Where?", questionDate: "2026-10-28", goldAnswer: "Paris", delivered: [] }, chat);
+    expect(verdict.correct).toBeNull();
+    expect(verdict.evaluatorValidity).toBe(judgeText.trim().length === 0 ? "empty" : "malformed");
+    expect(aggregateQaVerdicts([verdict])).toMatchObject({ qa_total: 1, qa_invalid_judge_count: 1, qa_accuracy: null,
+      qa_invalid_judgments: [{ question_id: "q", validity: verdict.evaluatorValidity, raw_verdict: judgeText }] });
+  });
   it("sends the judge call to judgeChat when provided, answer to chat", async () => {
     const answer = fakeChat(["Paris"]);
     const judge = fakeChat(["yes"]);
@@ -256,7 +266,7 @@ describe("aggregateQaVerdicts", () => {
       { questionId: "q2", questionType: "multi-session", isAbstention: false, correct: false, modelAnswer: "", judgeVerdict: "no", contextChars: 0 },
       { questionId: "a_abs", questionType: "single-session-user", isAbstention: true, correct: true, modelAnswer: "", judgeVerdict: "yes", contextChars: 0 },
       { questionId: "b_abs", questionType: "single-session-user", isAbstention: true, correct: false, modelAnswer: "", judgeVerdict: "no", contextChars: 0 }
-    ];
+    ].map((verdict) => ({ ...verdict, evaluatorValidity: "valid" as const, contextExposure: [], contextClipped: false }));
     const agg = aggregateQaVerdicts(verdicts);
     expect(agg.qa_total).toBe(4);
     expect(agg.qa_correct).toBe(2);

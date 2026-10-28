@@ -11,6 +11,8 @@ import {
 import { startObserverCursor } from "../conditional-field/observers/observe.js";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { isPhysicalRegionKind } from "../conditional-field/engine/field-update.js";
+import type { ObservationSession } from "./conditional-field-observe-session.js";
+import type { ObserveFieldInput } from "./conditional-field-observe.js";
 import { ObservationPairs } from "../conditional-field/engine/observation-frontier.js";
 
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
@@ -234,4 +236,24 @@ function residual(
     coverage_role: kind === "discovery" ? "optional_accelerator" : "required",
     ...(kind === "discovery" ? { source_domain: "source_evidence" } : {})
   };
+}
+
+export function interruptObservedField(state: FieldEngineState): FieldEngineState {
+  return { ...state, last_observer_status: "interrupted",
+    closure: { ...state.closure, observation: "interrupted", requested_index: "open" },
+    residuals: state.residuals.some(region => region.status === "open")
+      ? state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region)
+      : state.residuals };
+}
+
+export function interruptAtomicWork(session: Pick<ObservationSession, "input" | "state">,
+  phase: Parameters<NonNullable<ObservationSession["input"]["on_atomic_work_block"]>>[0]["phase"], required: number): FieldEngineState {
+  reportAtomicWorkBlock(session.input, phase, required, session.state.remaining_exploration);
+  return interruptObservedField(session.state);
+}
+
+export function reportAtomicWorkBlock(input: ObserveFieldInput,
+  phase: Parameters<NonNullable<ObserveFieldInput["on_atomic_work_block"]>>[0]["phase"], required: number, available: number): void {
+  input.on_atomic_work_block?.({ phase, required_exploration_work: required + (input.repeated_setup_work ?? 0),
+    available_exploration_work: available });
 }

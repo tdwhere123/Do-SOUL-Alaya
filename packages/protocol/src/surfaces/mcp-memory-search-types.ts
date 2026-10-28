@@ -61,6 +61,8 @@ export const MemorySearchResultSchema = z
     // Do not re-sort on this field or score_factors.relevance.
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
+    // Absent on historical results; display text never proves payload availability.
+    payload_available: z.boolean().optional(),
     source_disclosure: SourceDisclosureSchema.optional(),
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
     hypothesis_id: NonEmptyStringSchema.optional(),

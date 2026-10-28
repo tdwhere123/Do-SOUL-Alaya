@@ -17,6 +17,8 @@ import { MemoryAutonomousForget } from "./memory-autonomous-forget.js";
 import { MemoryLifecycleManager } from "./memory-lifecycle-manager.js";
 import { MemoryQueryService } from "./memory-query-service.js";
 import { MemoryWriteService } from "./memory-write-service.js";
+import type { EventPublisherInput } from "../../runtime/event-publisher.js";
+import type { EventLogEntry } from "@do-soul/alaya-protocol";
 
 export class MemoryService {
   private readonly write: MemoryWriteService;
@@ -94,17 +96,19 @@ export class MemoryService {
     objectId: string,
     nextState: MemoryEntry["lifecycle_state"],
     reason: string,
-    causedBy: TransitionCausedBy
+    causedBy: TransitionCausedBy,
+    options?: { readonly additionalEventInputs?: readonly EventPublisherInput[]; readonly additionalEventsSink?: EventLogEntry[] }
   ): Promise<Readonly<MemoryEntry>> {
-    return this.lifecycle.transitionLifecycle(objectId, nextState, reason, causedBy);
+    return this.lifecycle.transitionLifecycle(objectId, nextState, reason, causedBy, options);
   }
 
   public demoteActiveToDormantIfActive(
     objectId: string,
     reason: string,
-    causedBy: TransitionCausedBy
+    causedBy: TransitionCausedBy,
+    options?: { readonly requireLowActivity: boolean }
   ): Promise<{ readonly status: "demoted"; readonly entry: Readonly<MemoryEntry> } | { readonly status: "skipped" }> {
-    return this.lifecycle.demoteActiveToDormantIfActive(objectId, reason, causedBy);
+    return this.lifecycle.demoteActiveToDormantIfActive(objectId, reason, causedBy, options);
   }
 
   public hardDeleteTombstoned(
@@ -214,6 +218,18 @@ export class MemoryService {
 
   public countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
     return this.query.countByScopeClass(workspaceId, scopeClass);
+  }
+
+  public findByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"], page?: MemoryListPageOptions
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return this.query.findByScopeClassAndDimension(workspaceId, scopeClass, dimension, page);
+  }
+
+  public countByScopeClassAndDimension(
+    workspaceId: string, scopeClass: ScopeClass, dimension: MemoryEntry["dimension"]
+  ): Promise<number> {
+    return this.query.countByScopeClassAndDimension(workspaceId, scopeClass, dimension);
   }
 
   public findByWorkspaceIdWithConflict(

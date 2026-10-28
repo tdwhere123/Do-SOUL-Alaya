@@ -10,6 +10,7 @@ import {
   verifyAddressableSourceSpan,
   verifySourceRecordIdentity,
   bindUtteranceAttribution, UNKNOWN_UTTERANCE_ATTRIBUTION, canonicalJson, compareUtcInstants,
+  isHostOccurrenceResourceLimit,
   type AddressableSourceSpan,
   type FieldContractSha256,
   type SourceAdmissionPort,
@@ -51,6 +52,12 @@ export function createSourceAdmissionPort(input: Readonly<{
       }
       return record;
     },
+    hostCaptureResourceLimited(record, context) {
+      if (record.workspace_id !== context.workspaceId || input.stores.getStoredRecord(context.workspaceId, record.identity) === null) {
+        throw new CoreError("VALIDATION", "capture diagnostic requires a retained source in the caller workspace");
+      }
+      return input.stores.hasHostCaptureResourceLimit(context.workspaceId, record.identity);
+    },
     admit(incoming, context) {
       // Capture once before validation and any composition callback; caller mutation cannot change the write.
       const request = structuredClone(incoming);
@@ -64,14 +71,27 @@ export function createSourceAdmissionPort(input: Readonly<{
       }
       return input.stores.runAtomic(() => {
         input.admitHook?.();
-        const { record, messageSpans } = persistRecord(request, input.sha256, input.stores, hostBinding);
+        let persisted: ReturnType<typeof persistRecord>;
+        let hostCaptureLimited = false;
+        try {
+          persisted = persistRecord(request, input.sha256, input.stores, hostBinding);
+        } catch (error) {
+          if (context?.allowHostCaptureResourceLimit !== true || request.host_occurrences === undefined ||
+              !isHostOccurrenceResourceLimit(error)) throw error;
+          const { host_occurrences: _refused, ...withoutCapture } = request;
+          persisted = persistRecord(withoutCapture, input.sha256, input.stores, hostBinding);
+          hostCaptureLimited = true;
+        }
+        const { record, messageSpans } = persisted;
         const spans = [...request.spans, ...messageSpans].map((span) => persistSpan(
           request, record.identity, assertSpanInContent(request.content_bytes, span), input.sha256, input.stores
         ));
         if (input.stores.getStoredRecord(request.workspace_id, record.identity) === null) {
           throw new CoreError("VALIDATION", "retired source record cannot be admitted");
         }
-        return Object.freeze({ record, spans: Object.freeze(spans) });
+        if (hostCaptureLimited) input.stores.putHostCaptureResourceLimit(request.workspace_id, record.identity);
+        return Object.freeze({ record, spans: Object.freeze(spans),
+          ...(hostCaptureLimited ? { host_capture_limited: true as const } : {}) });
       });
     }
   };

@@ -4,6 +4,10 @@ import { MemoryRouter } from "react-router-dom";
 import HealthInboxPage from "../../pages/health-inbox";
 import { ToastProvider } from "../../components/toast";
 import { setInspectorToken, setWorkspaceId } from "../../api";
+import { HealthIssueCauseKindSchema } from "@do-soul/alaya-protocol";
+import { CAUSE_OPTIONS } from "../../pages/health-inbox-types";
+import { en } from "../../i18n/dict-en";
+import { zh } from "../../i18n/dict-zh";
 
 function renderHealthInbox() {
   return render(
@@ -72,6 +76,13 @@ interface HealthIssueGroupShape {
 }
 
 describe("HealthInboxPage", () => {
+  it("offers and translates every public health cause including historical auxiliary failures", () => {
+    expect(CAUSE_OPTIONS).toEqual(["all", ...HealthIssueCauseKindSchema.options]);
+    for (const cause of HealthIssueCauseKindSchema.options) {
+      expect(en[`healthInbox:cause.${cause}`]).toBeTruthy();
+      expect(zh[`healthInbox:cause.${cause}`]).toBeTruthy();
+    }
+  });
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     setInspectorToken("t");

@@ -13,8 +13,6 @@ import { parseAcceptedPathRelationGovernanceInput } from "../mappers/acceptance.
 import {
   applyPathRelationProposal,
   createPathRelationFromProposalPayload,
-  createStrictlyGovernedPathRelation,
-  parseProposedPathRelation,
   parseProposalPathRelationRow,
   pathRelationMatchesProposalPayload,
   ProposalPathRelationRowParser
@@ -23,13 +21,14 @@ import type {
   ProposalPathRelationRow,
   ProposalRow
 } from "../mappers/rows.js";
+import type { PathRelationProposalPayload } from "../types.js";
 
-export function upsertStrictlyGovernedPathRelation(
+export function upsertProposedPathRelation(
   ctx: SqliteProposalWorkflowContext,
   input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
-  proposalRow: ProposalRow
+  proposalRow: ProposalRow,
+  proposedPathRelation: Readonly<PathRelationProposalPayload>
 ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
-  const proposedPathRelation = parseProposedPathRelation(proposalRow.proposed_path_relation);
   const existingRows = parseRows(ctx.findPathRelationByAnchorMemoryIdStatement.all(
       input.workspace_id,
       input.target_object_id,
@@ -40,16 +39,9 @@ export function upsertStrictlyGovernedPathRelation(
     ProposalPathRelationRowParser,
     "proposal path relation row"
   );
-  const existingRow =
-    proposedPathRelation === null
-      ? existingRows[0]
-      : existingRows.find((row) =>
-          pathRelationMatchesProposalPayload(
-            parseProposalPathRelationRow(row),
-            input.target_object_id,
-            proposedPathRelation
-          )
-        );
+  const existingRow = existingRows.find((row) =>
+    pathRelationMatchesProposalPayload(parseProposalPathRelationRow(row), input.target_object_id, proposedPathRelation)
+  );
 
   if (existingRow !== undefined) {
     return updateExistingPathRelation(ctx, input, proposalRow, existingRow, proposedPathRelation);
@@ -63,7 +55,7 @@ function updateExistingPathRelation(
   input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
   proposalRow: ProposalRow,
   existingRow: ProposalPathRelationRow,
-  proposedPathRelation: ReturnType<typeof parseProposedPathRelation>
+  proposedPathRelation: Readonly<PathRelationProposalPayload>
 ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
   const existing = parseProposalPathRelationRow(existingRow);
   const updated = applyPathRelationProposal(existing, input, proposedPathRelation);
@@ -102,12 +94,9 @@ function createGovernedPathRelation(
   ctx: SqliteProposalWorkflowContext,
   input: ReturnType<typeof parseAcceptedPathRelationGovernanceInput>,
   proposalRow: ProposalRow,
-  proposedPathRelation: ReturnType<typeof parseProposedPathRelation>
+  proposedPathRelation: Readonly<PathRelationProposalPayload>
 ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
-  const created =
-    proposedPathRelation === null
-      ? createStrictlyGovernedPathRelation(input)
-      : createPathRelationFromProposalPayload(input, proposedPathRelation);
+  const created = createPathRelationFromProposalPayload(input, proposedPathRelation);
   const pathEvent = insertEventLogEntry(ctx.eventLogWriter, {
     event_type: RuntimeGovernanceEventType.PATH_RELATION_CREATED,
     entity_type: "path_relation",

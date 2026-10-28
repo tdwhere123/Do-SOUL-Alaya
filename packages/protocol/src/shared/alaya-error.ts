@@ -18,3 +18,15 @@ export class AlayaError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+/** A durable object exists even though a later side effect failed. */
+export class CommittedObjectError extends AlayaError {
+  public constructor(
+    message: string,
+    public readonly object: Readonly<{ object_kind: string; object_id: string }>,
+    options?: ErrorOptions
+  ) {
+    super("COMMITTED_OBJECT_SIDE_EFFECT_FAILED", message, options);
+    this.name = "CommittedObjectError";
+  }
+}

@@ -260,9 +260,6 @@ export function proposalRouteServices(
     readonly workspaceService?: LooseStub<WorkspaceService>;
     readonly memoryService?: LooseStub<Pick<MemoryService, "findByIdScoped">>;
     readonly proposalService?: LooseStub<ProposalService>;
-    readonly proposalRepo?: LooseStub<ProposalRouteServices["proposalRepo"]>;
-    readonly eventLogRepo?: LooseStub<ProposalRouteServices["eventLogRepo"]>;
-    readonly runtimeNotifier?: LooseStub<ProposalRouteServices["runtimeNotifier"]>;
     readonly mcpMemoryToolHandler?: LooseStub<McpMemoryToolHandler>;
   } = {}
 ): ProposalRouteServices {
@@ -270,9 +267,6 @@ export function proposalRouteServices(
     workspaceService: workspaceServiceStub(overrides.workspaceService),
     memoryService: implementPort<Pick<MemoryService, "findByIdScoped">>(overrides.memoryService ?? {}),
     proposalService: implementPort<ProposalService>(overrides.proposalService ?? {}),
-    proposalRepo: implementPort<ProposalRouteServices["proposalRepo"]>(overrides.proposalRepo ?? {}),
-    eventLogRepo: implementPort<ProposalRouteServices["eventLogRepo"]>(overrides.eventLogRepo ?? {}),
-    runtimeNotifier: implementPort<ProposalRouteServices["runtimeNotifier"]>(overrides.runtimeNotifier ?? {}),
     mcpMemoryToolHandler: implementPort<McpMemoryToolHandler>(overrides.mcpMemoryToolHandler ?? {})
   };
 }

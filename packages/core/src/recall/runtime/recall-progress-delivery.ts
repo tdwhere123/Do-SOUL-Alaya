@@ -1,7 +1,7 @@
 import { SourceSemanticResourceLedger, sourceEvidenceRootTarget, type InformationIndex,
   type QueryInterpretation, type RequestBudget } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
-import { uniformCompleteness } from "../conditional-field/completeness-report.js";
+import { payloadExpansionCompleteness, uniformCompleteness } from "../conditional-field/completeness-report.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
 import { annotatePublicIndex, invalidatedPublicIndex } from "./recall-field-projection.js";
@@ -10,6 +10,11 @@ import { deliveredPayloadEntry, recallDeliveryIdentity, replayIssuedDelivery,
   revisionRetentionBytes, sealRetainedContinuation } from "./index-continuation.js";
 import { restoredFieldFootprint } from "./request-cost-engine-snapshot.js";
 import { nextContinuation } from "../conditional-field/index/project-accepting-continuation.js";
+import type { ObserveFieldInput } from "./conditional-field-observe.js";
+import { CoreError } from "../../shared/errors.js";
+import type { SupportWorkBlock } from "./semantic-attribution.js";
+
+export type RecallObservationWorkBlock = Parameters<NonNullable<ObserveFieldInput["on_atomic_work_block"]>>[0] | SupportWorkBlock;
 
 export type RecallProgressDelivery = ReturnType<typeof recallDeliveryIdentity> & Readonly<{
   /** A fully fitted immutable response, not a sizing estimate or a free fallback. */
@@ -18,7 +23,30 @@ export type RecallProgressDelivery = ReturnType<typeof recallDeliveryIdentity> &
   spent_memory: number;
   retention_hold: number;
   control_generation?: number;
+  /** Observer-owned progress made before projection on this request. */
+  observation_advanced?: boolean;
+  execution_work_limit?: number;
+  /** Present only when the fresh request cannot fund the blocked atomic operation. */
+  refuse_idle_observation?: () => never;
 }>;
+
+/** Keep an unaffordable observation separate from still-useful projection work.
+ * The projection commit owner invokes refusal only if that work cannot advance. */
+export function observedRecallProgressDelivery(prepared: RecallProgressDelivery, field: FieldEngineState,
+  observed: Readonly<{ block?: RecallObservationWorkBlock;
+    advanced: boolean; fresh_exploration: number; fresh_execution: number }>): RecallProgressDelivery {
+  const block = observed.block;
+  return { ...prepared, observation_advanced: observed.advanced, execution_work_limit: observed.fresh_execution,
+    ...(block !== undefined && block.required_exploration_work > observed.fresh_exploration ? {
+      refuse_idle_observation: (): never => {
+        throw new CoreError("CONFLICT", "Recall work budget cannot fund its next atomic operation", {
+          details: { outcome: "resource_exhausted", resource: block.phase === "support" ? "support_work" : "observation_work", phase: block.phase,
+            required_work: block.required_exploration_work, available_work: observed.fresh_exploration,
+            remaining_work: block.available_exploration_work, residuals: field.residuals }
+        });
+      }
+    } : {}) };
+}
 
 /** Pay for a bounded progress response before observation/solve can exhaust work.
  * Its token acknowledges the retained server state, not membership or a client
@@ -96,5 +124,5 @@ function payloadControl(input: ConditionalFieldRecallRequest, queryKey: string):
   return { ...delivered.index, entries: [{ ...delivered.entry, target: delivered.entry.target.kind === "source_evidence"
     ? sourceEvidenceRootTarget(delivered.entry.target) : delivered.entry.target }],
     continuation: input.continuation ?? null, page_purpose: "payload", product_updates: [],
-    completeness: { ...delivered.index.completeness, payload: "interrupted", transport: "interrupted" } };
+    completeness: payloadExpansionCompleteness(delivered.index.completeness, "interrupted", "interrupted") };
 }

@@ -29,8 +29,8 @@ export function wireArtifacts(database: StorageDatabase) {
   const publisher = new EventPublisher({ eventLogRepo: events,
     runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: async () => {}, notifyEntry: async () => {} } });
   const garden = new SqliteGardenTaskRepo(database.connection, publisher);
-  const repo = new SqliteSemanticArtifactRepo(database.connection, garden, PROFILE);
   const codec = new OfficialApiSemanticArtifactCodec();
+  const repo = new SqliteSemanticArtifactRepo(database.connection, garden, PROFILE, undefined, codec);
   let now = NOW;
   const audit = <T>(action: string, task: SemanticEnrichmentTask, mutate: () => T) =>
     publisher.appendManyWithMutation([{ event_type: "soul.garden.semantic_enrichment",

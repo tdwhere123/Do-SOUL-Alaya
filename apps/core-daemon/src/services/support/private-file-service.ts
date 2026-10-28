@@ -57,16 +57,11 @@ export async function writePrivateTextAtomic(
 }
 
 export async function syncDirectory(directoryPath: string): Promise<void> {
+  const handle = await open(directoryPath, fsConstants.O_RDONLY);
   try {
-    const handle = await open(directoryPath, fsConstants.O_RDONLY);
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // Some filesystems do not support fsync on directories; exclusive temp
-    // creation plus rename still preserves the write contract.
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 

@@ -1,21 +1,20 @@
-import { MaterializationRouter, InMemoryHandoffGapHandler } from "@do-soul/alaya-soul";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  EvidenceHealthState,
   GardenEventType,
   GardenRole,
   GardenTaskKind,
   GardenTier,
   SignalSource,
 } from "@do-soul/alaya-protocol";
-import { EvidenceService, SignalService, fieldContractSha256 } from "@do-soul/alaya-core";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo,
   SqliteSourceRootRecallReader
 } from "@do-soul/alaya-storage";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../../../garden/support/task-signal-id.js";
+import { readRetainedPostTurnSource } from "./post-turn-source-fixture.js";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
@@ -65,7 +64,7 @@ describe("post-turn extract Garden task", () => {
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.not.toBeNull();
   });
 
-  it("persists one evidence anchor when in-process extraction returns no candidates", async () => {
+  it("retains the admitted original when in-process extraction returns no candidates", async () => {
     const compile = vi.fn(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "official_api",
@@ -79,19 +78,12 @@ describe("post-turn extract Garden task", () => {
       status: "completed"
     });
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toHaveLength(1);
-    expect(signals[0]).toMatchObject({
-      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1"),
-      source: "garden_compile",
-      signal_kind: "potential_evidence_anchor",
-      object_kind: "source_turn",
-      raw_payload: {
-        evidence_preservation: { reason: "empty_extraction" }
-      }
-    });
+    expect(signals).toHaveLength(0);
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
   });
 
-  it("adds a stable evidence fallback when nonempty extraction creates no evidence", async () => {
+  it("preserves admitted evidence when nonempty extraction creates no additional evidence", async () => {
     const fallbackId = buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1");
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
@@ -103,13 +95,13 @@ describe("post-turn extract Garden task", () => {
     await harness.runScheduler();
 
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
-      signal_id: fallbackId,
-      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
-    });
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.not.toBeNull();
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
   });
 
-  it("fails the task when the evidence fallback cannot satisfy the durable postcondition", async () => {
+  it("completes empty extraction from retained evidence without synthetic evidence claims", async () => {
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
       localCompile: vi.fn(async () => []),
@@ -120,9 +112,11 @@ describe("post-turn extract Garden task", () => {
     await harness.runScheduler();
 
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "failed",
-      last_error_text: expect.stringContaining("evidence fallback did not create durable evidence")
+      status: "completed"
     });
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
+    expect(await harness.signalService.listByRun("run-1")).toEqual([]);
   });
 
   it("host_worker routing falls back to the zero-cloud local heuristic after the wait window with no claim", async () => {
@@ -234,10 +228,9 @@ describe("post-turn extract Garden task", () => {
     });
     await expect(harness.signalRepo.getById(
       buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
-    )).resolves.toMatchObject({
-      object_kind: "source_turn",
-      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
-    });
+    )).resolves.toBeNull();
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
   });
 
   it("failed compile still leaves a discoverable SQLite source root", async () => {
@@ -246,22 +239,7 @@ describe("post-turn extract Garden task", () => {
     });
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
-      localCompile: compile,
-      receiveSignal: async (signal) => {
-        const evidenceService = new EvidenceService({
-          evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(harness.database),
-          eventLogRepo: harness.eventLogRepo,
-          runtimeNotifier: harness.runtimeNotifier
-        });
-        const unused = { create: async (): Promise<never> => { throw new Error("unexpected memory materialization"); } };
-        const router = new MaterializationRouter({ evidenceService,
-          memoryService: unused, synthesisService: unused, claimService: unused,
-          handoffGapHandler: new InMemoryHandoffGapHandler(), fullTurnEvidenceExcerpt: true });
-        return new SignalService({ eventLogRepo: harness.eventLogRepo, signalRepo: harness.signalRepo,
-          runtimeNotifier: harness.runtimeNotifier,
-          postTriageMaterializer: { materialize: (candidate, context) => router.materializeSignal(candidate, context) }
-        }).receiveSignal(signal);
-      }
+      localCompile: compile
     });
     harness.enqueuePostTurnTask();
 
@@ -281,7 +259,7 @@ describe("post-turn extract Garden task", () => {
       afterCursor: null
     });
     expect(roots.rows.some((row) =>
-      row.kind === "evidence_capsule"
+      row.kind === "source_record"
       && (row.content ?? "").includes("I prefer pnpm commands")
     )).toBe(true);
   });
@@ -402,7 +380,7 @@ describe("post-turn extract Garden task", () => {
       status: "completed"
     });
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toHaveLength(2);
+    expect(signals).toHaveLength(1);
     expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
       signal_state: "triaged",
@@ -410,9 +388,8 @@ describe("post-turn extract Garden task", () => {
       incompatible_with_refs: ["memory-b"],
       raw_payload: { observation: "user prefers vitest watch mode" }
     });
-    expect(signals.find((signal) => signal.object_kind === "source_turn")).toMatchObject({
-      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
-    });
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
   });
 
   it("preserves first-class graph refs and ignores raw-payload arrays when completing Garden tasks", async () => {
@@ -461,7 +438,7 @@ describe("post-turn extract Garden task", () => {
 
     expect(completeResult.status).toBe("completed");
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toHaveLength(2);
+    expect(signals).toHaveLength(1);
     expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
       signal_state: "triaged",
@@ -473,9 +450,8 @@ describe("post-turn extract Garden task", () => {
         incompatible_with_refs: ["raw-conflict"]
       }
     });
-    expect(signals.find((signal) => signal.object_kind === "source_turn")).toMatchObject({
-      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
-    });
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
+      .toContain("I prefer pnpm commands in this repo.");
   });
 
   it("scheduler reclaims abandoned claims (status=claimed older than stale TTL) back to pending", async () => {
@@ -541,12 +517,8 @@ describe("post-turn extract Garden task", () => {
         signal_id: gardenTaskSignalId("post-turn-task-1", 0),
         source: SignalSource.GARDEN_COMPILE,
         signal_state: "triaged"
-      }),
-      expect.objectContaining({
-        signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1"),
-        object_kind: "source_turn"
       })
     ]));
-    expect(signals).toHaveLength(2);
+    expect(signals).toHaveLength(1);
   });
 });

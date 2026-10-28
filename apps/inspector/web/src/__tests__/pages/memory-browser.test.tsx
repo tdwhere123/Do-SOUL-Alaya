@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { encodeSourceDisclosure } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, MemoryDimensionSchema } from "@do-soul/alaya-protocol";
+import { DIMENSION_OPTIONS } from "../../pages/memory-browser-support";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SAMPLE_ROWS,
@@ -15,7 +16,12 @@ import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
 import MemoryBrowserPage from "../../pages/memory-browser";
 
-describe("MemoryBrowserPage promote-to-strictly_governed", () => {
+describe("MemoryBrowserPage", () => {
+  it("offers every supported dimension and no invalid protocol dimensions", () => {
+    expect([...DIMENSION_OPTIONS]).toEqual(MemoryDimensionSchema.options);
+    expect(DIMENSION_OPTIONS).toContain("observation");
+    expect(DIMENSION_OPTIONS).not.toContain("concept");
+  });
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     setInspectorToken("t");
@@ -29,89 +35,15 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     window.localStorage.removeItem("alaya-inspector-locale");
   });
 
-  it("POSTs a typed path_relation Proposal when the promote button is clicked", async () => {
-    fetchMock.mockImplementation(async (input: FetchInput, init?: RequestInit) => {
-      const url = urlOf(input);
-      if (url.includes("/memory-entries/ws1")) {
-        return jsonResponse({ success: true, data: SAMPLE_ROWS }, 200, {
-          "x-total-count": "1",
-          "x-limit": "200",
-          "x-offset": "0"
-        });
-      }
-      if (url.includes("/proposals/promote-strictly-governed") && init?.method === "POST") {
-        return jsonResponse({
-          success: true,
-          data: {
-            proposal_id: "promo-1",
-            status: "created",
-            target_object_id: "mem-abc-1234567890",
-            target_object_kind: "path_relation",
-            requested_governance_class: "strictly_governed"
-          }
-        });
-      }
-      return jsonResponse({}, 404);
-    });
-
-    renderMemoryBrowser();
-
-    const row = await screen.findByText(/remember preference/);
-    fireEvent.click(row);
-
-    const button = await screen.findByTestId("promote-strictly-governed");
-    fireEvent.click(button);
-
-    await waitFor(() => {
-      const matched = fetchMock.mock.calls.some((call) => {
-        const url = urlOf(call[0] as FetchInput);
-        const init = call[1] as RequestInit | undefined;
-        return (
-          url.includes("/workspaces/ws1/soul/memory/") &&
-          url.includes("/proposals/promote-strictly-governed") &&
-          init?.method === "POST"
-        );
-      });
-      expect(matched).toBe(true);
-    });
-  });
-
-  it("keeps each promotion busy until its own request settles", async () => {
-    const firstPromotion = deferred<Response>();
-    const secondPromotion = deferred<Response>();
-    const rows = [
-      SAMPLE_ROWS[0]!,
-      { ...SAMPLE_ROWS[0]!, object_id: "mem-second", content: "second memory" }
-    ];
-    let promotionCalls = 0;
-    fetchMock.mockImplementation(async (input: FetchInput, init?: RequestInit) => {
-      const url = urlOf(input);
-      if (url.includes("/memory-entries/ws1")) {
-        return jsonResponse({ success: true, data: rows }, 200, {
-          "x-total-count": "2",
-          "x-limit": "200",
-          "x-offset": "0"
-        });
-      }
-      if (url.includes("/proposals/promote-strictly-governed") && init?.method === "POST") {
-        promotionCalls += 1;
-        return promotionCalls === 1 ? firstPromotion.promise : secondPromotion.promise;
-      }
-      return jsonResponse({}, 404);
-    });
-
+  it("shows evidence without offering blanket governance promotion", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, data: SAMPLE_ROWS }, 200, {
+      "x-total-count": "1", "x-limit": "200", "x-offset": "0"
+    }));
     renderMemoryBrowser();
     fireEvent.click(await screen.findByText("remember preference"));
-    fireEvent.click(screen.getByTestId("promote-strictly-governed"));
-    fireEvent.click(await screen.findByText("second memory"));
-    fireEvent.click(screen.getByTestId("promote-strictly-governed"));
-
-    await waitFor(() => expect(promotionCalls).toBe(2));
-    firstPromotion.resolve(jsonResponse({ success: true, data: { proposal_id: "promo-1" } }));
-    await waitFor(() => expect((screen.getByTestId("promote-strictly-governed") as HTMLButtonElement).disabled).toBe(true));
-
-    secondPromotion.resolve(jsonResponse({ success: true, data: { proposal_id: "promo-2" } }));
-    await waitFor(() => expect((screen.getByTestId("promote-strictly-governed") as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByTestId("memory-evidence-panel")).not.toBeNull();
+    expect(screen.queryByTestId("promote-strictly-governed")).toBeNull();
+    expect(fetchMock.mock.calls.every(call => (call[1] as RequestInit | undefined)?.method !== "POST")).toBe(true);
   });
 
   it.each(["Enter", " "])("selects a memory row with %s", async (key) => {

@@ -1,12 +1,13 @@
-﻿import { SlotSchema, type Slot } from "@do-soul/alaya-protocol";
+import { SlotSchema, type Slot } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable } from "../field/privacy-availability.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseRows, readJsonColumn, readNonEmptyStringField, readNullableStringField, readPositiveIntField, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 
 export interface SlotRepo {
-  create(slot: Slot): Readonly<Slot>;
+  create(slot: Slot, subjectClaimId?: string): Readonly<Slot>;
   findById(objectId: string): Promise<Readonly<Slot> | null>;
   findByUniqueKey(
     canonicalKey: string,
@@ -60,6 +61,7 @@ interface SlotRow {
 }
 
 export class SqliteSlotRepo implements SlotRepo {
+  private readonly connectionIdentity: StorageDatabase;
   private readonly createStatement;
   private readonly findByIdStatement;
   private readonly findByUniqueKeyStatement;
@@ -68,6 +70,7 @@ export class SqliteSlotRepo implements SlotRepo {
   private readonly updateWinnerStatement;
 
   public constructor(db: StorageDatabase) {
+    this.connectionIdentity = db;
     this.createStatement = db.connection.prepare(`
       INSERT INTO slots (
         object_id,
@@ -83,8 +86,9 @@ export class SqliteSlotRepo implements SlotRepo {
         winner_claim_id,
         incumbent_since,
         flip_conditions,
-        workspace_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        workspace_id,
+        subject_claim_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.findByIdStatement = db.connection.prepare(`
@@ -125,7 +129,9 @@ export class SqliteSlotRepo implements SlotRepo {
     `);
   }
 
-  public create(slot: Slot): Readonly<Slot> {
+  public getStorageConnectionIdentity(): StorageDatabase { return this.connectionIdentity; }
+
+  public create(slot: Slot, subjectClaimId?: string): Readonly<Slot> {
     const parsedSlot = parseSlot(slot);
 
     try {
@@ -143,7 +149,8 @@ export class SqliteSlotRepo implements SlotRepo {
         parsedSlot.winner_claim_id,
         parsedSlot.incumbent_since,
         JSON.stringify(parsedSlot.flip_conditions),
-        parsedSlot.workspace_id
+        parsedSlot.workspace_id,
+        subjectClaimId === undefined ? null : parseNonEmptyString(subjectClaimId, "subject claim id")
       );
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create slot ${parsedSlot.object_id}.`, error);
@@ -156,6 +163,7 @@ export class SqliteSlotRepo implements SlotRepo {
     try {
       return this.loadById(objectId);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", `Failed to load slot ${objectId}.`, error);
     }
   }
@@ -176,8 +184,11 @@ export class SqliteSlotRepo implements SlotRepo {
         scopeClass,
         parsedWorkspaceId
       ) as SlotRow | undefined;
-      return row === undefined ? null : parseSlotRow(row);
+      if (row === undefined) return null;
+      requirePrivacyObjectAvailable(this.connectionIdentity, row.workspace_id, "slot", row.object_id);
+      return parseSlotRow(row);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to load slot by unique key ${parsedCanonicalKey}.`,
@@ -190,12 +201,15 @@ export class SqliteSlotRepo implements SlotRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      return parseRows(
+      const rows = parseRows(
         this.findByWorkspaceStatement.all(parsedWorkspaceId),
         SlotRowParser,
         "slot row"
       );
+      requirePrivacyRowsAvailable(this.connectionIdentity, "slot", rows);
+      return rows;
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", `Failed to list slots for workspace ${parsedWorkspaceId}.`, error);
     }
   }
@@ -205,8 +219,11 @@ export class SqliteSlotRepo implements SlotRepo {
 
     try {
       const row = this.findByWinnerClaimIdStatement.get(parsedClaimId) as SlotRow | undefined;
-      return row === undefined ? null : parseSlotRow(row);
+      if (row === undefined) return null;
+      requirePrivacyObjectAvailable(this.connectionIdentity, row.workspace_id, "slot", row.object_id);
+      return parseSlotRow(row);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to find slot by winner claim ID ${parsedClaimId}.`,
@@ -229,6 +246,7 @@ export class SqliteSlotRepo implements SlotRepo {
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
     try {
+      this.loadById(parsedObjectId);
       const result = this.updateWinnerStatement.run(
         parsedWinnerClaimId,
         parsedIncumbentSince,
@@ -262,7 +280,9 @@ export class SqliteSlotRepo implements SlotRepo {
 
   private loadById(objectId: string): Readonly<Slot> | null {
     const row = this.findByIdStatement.get(objectId) as SlotRow | undefined;
-    return row === undefined ? null : parseSlotRow(row);
+    if (row === undefined) return null;
+    requirePrivacyObjectAvailable(this.connectionIdentity, row.workspace_id, "slot", row.object_id);
+    return parseSlotRow(row);
   }
 }
 

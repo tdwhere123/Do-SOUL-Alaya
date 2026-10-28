@@ -2,14 +2,15 @@ import { readFile, rm, mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
+import type { KpiPayload, MeasuredQualityMetrics, PerScenarioRow } from "@do-soul/alaya-eval";
 import type { LongMemEvalSnapshotManifest } from "../../../runs/snapshot/materialize.js";
 import type { LongMemEvalWorkerShardPlan } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-worker.js";
 import { mergeRecallEvalShardArchives } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge.js";
 import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   writeShardRoot,
-  makeShardKpi
+  makeShardKpi,
+  makeQualityMetrics
 } from "../../cli/merge/cli-merge-validations-fixture.js";
 
 describe("mergeRecallEvalShardArchives — shard measurement truth", () => {
@@ -352,7 +353,11 @@ describe("mergeRecallEvalShardArchives — shard measurement truth", () => {
       await readFile(join(historyRoot, "public", result.slug, "kpi.json"), "utf8")
     ) as { kpi: Record<string, unknown> };
     expect(written.kpi.token_saved_ratio_vs_full_prompt).toBeNull();
-    expect(result.payload.kpi.quality_metrics?.non_monotonic_count).not.toBe(99);
+    expect(result.payload.kpi.quality_metrics).toMatchObject({
+      schema_version: "bench-quality-metrics.unavailable.v1", unavailable_reason: "not_recomputed_from_shard_archives"
+    });
+    expect(result.payload.kpi.quality_metrics?.non_monotonic_count).toBeUndefined();
+    expect(written.kpi.quality_metrics).not.toHaveProperty("non_monotonic_denominator");
     expect(result.payload.selection_contract).toBeUndefined();
   });
 
@@ -453,7 +458,7 @@ function createTestShardKpi(opts: {
   limit: number;
   abstentionIndices: readonly number[];
   hitIndices: readonly number[];
-}): KpiPayload {
+}): KpiPayload & { readonly kpi: KpiPayload["kpi"] & { readonly quality_metrics: MeasuredQualityMetrics } } {
   const rows: PerScenarioRow[] = Array.from({ length: opts.limit }, (_, index) => {
     const isAbstention = opts.abstentionIndices.includes(index);
     const isHit = opts.hitIndices.includes(index);
@@ -477,6 +482,7 @@ function createTestShardKpi(opts: {
     answerable_evaluated_count: answerableCount,
     kpi: {
       ...base.kpi,
+      quality_metrics: makeQualityMetrics(),
       per_scenario: rows,
       r_at_1: rate,
       r_at_5: rate,

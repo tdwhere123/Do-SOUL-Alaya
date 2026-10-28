@@ -44,23 +44,11 @@ function createLibrarian(
   const scheduler = { reportCompletion: vi.fn(async () => undefined) };
   const clearPendingWorkspace = vi.fn(async () => undefined);
   const librarian = new Librarian({
-    mergePort: {
-      findMergeCandidates: vi.fn(async () => []),
-      hasPendingMergeProposal: vi.fn(async () => false),
-      createMergeProposal: vi.fn(async () => ({ proposal_id: "proposal-1" })),
-      findTemplateClusters: vi.fn(async () => []),
-      hasPendingTemplateProposal: vi.fn(async () => false),
-      createTemplateCandidate: vi.fn(async () => ({ candidate_id: "template-1" }))
-    },
     neighborPort: { findSubjectNeighbors: vi.fn(async () => []) },
-    compressionPort: {
-      findCompressiblePaths: vi.fn(async () => []),
-      createCompressionCandidate: vi.fn(async () => ({ candidate_id: "compression-1" }))
-    },
     synthesisPort: {
       findSynthesisCandidateClusters: vi.fn(async () => []),
       hasPendingSynthesisForSubject: vi.fn(async () => false),
-      createSynthesisReviewCandidate: vi.fn(async () => ({ candidate_id: "synthesis-1" }))
+      createSynthesisReviewCandidate: vi.fn(async () => ({ candidate_id: "synthesis-1", created: true }))
     },
     ...(plasticityPort === undefined ? {} : { pathPlasticityPort: plasticityPort }),
     pathPlasticityPendingPort: options.pathPlasticityPendingPort ?? { clearPendingWorkspace },

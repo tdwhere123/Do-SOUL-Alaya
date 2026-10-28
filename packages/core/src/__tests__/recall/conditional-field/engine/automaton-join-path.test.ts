@@ -86,14 +86,14 @@ describe("automaton, compatible join, and composed path identity", () => {
     ))).toContain("end");
   });
 
-  it("closure re-enters and accepts seed, middle, and end of a two-edge chain", () => {
+  it.each(["relation", "hyperedge"] as const)("closure re-enters a scoped %s and accepts the chain", kind => {
     const ids = acceptedIds(observeProgram(
       {
         schema_version: 1,
         kind: "closure",
         product_state_sufficient: true,
         local_variables: ["s", "t"],
-        body: rel("observed_log")
+        body: scopedBody(kind)
       },
       [
         edge("seed", "middle", "observed_log", "a1"),
@@ -103,9 +103,9 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(ids).toEqual(expect.arrayContaining(["seed", "middle", "end"]));
   });
 
-  it("bounded repeat keeps distinct control states and reaches the second edge", () => {
+  it.each(["relation", "hyperedge"] as const)("bounded repeat clears locals before its second %s", kind => {
     expect(acceptedIds(observeProgram(
-      { schema_version: 1, kind: "repeat", count: 2, local_variables: ["s", "t"], body: rel("observed_log") },
+      { schema_version: 1, kind: "repeat", count: 2, local_variables: ["s", "t"], body: scopedBody(kind) },
       [
         edge("seed", "middle", "observed_log", "a1"),
         edge("middle", "end", "observed_log", "a2")
@@ -500,6 +500,11 @@ function interpretation(program: QueryProgram): QueryInterpretation {
     holes: [],
     hypotheses: []
   };
+}
+
+function scopedBody(kind: "relation" | "hyperedge"): QueryProgram {
+  const relation = rel("observed_log");
+  return kind === "relation" ? relation : { schema_version: 1, kind: "hyperedge", join: "and", premises: [relation] };
 }
 
 function rel(

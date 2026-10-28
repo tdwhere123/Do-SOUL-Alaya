@@ -5,6 +5,7 @@ import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import { SqliteGardenTaskRepo } from "../../../repos/garden/garden-task-repo.js";
 import { SqliteSemanticArtifactRepo } from "../../../repos/garden/semantic-artifact-repo.js";
 import { initializeSemanticArtifactCandidateSchema } from "../../../repos/garden/semantic-artifact-schema.js";
+import { SqliteIndexedRecallProjection } from "../../../repos/garden/indexed-recall-projection.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => {
@@ -65,5 +66,29 @@ describe("semantic artifact source eligibility", () => {
     database.connection.prepare("INSERT INTO garden_semantic_fts VALUES (?, ?, ?)")
       .run(WS, OBJECT, "Alice owns Orion");
     expect(repo.searchReady(WS, "Orion", 10)).toEqual([]);
+  });
+
+  it("refuses quarantined copied content at both enrichment and existing projection search", () => {
+    const { database, repo } = openRepo();
+    const source = repo.source(WS, OBJECT)!;
+    const taskId = database.connection.transaction(() => repo.enqueue(WS, OBJECT, PROFILE, NOW))();
+    database.connection.prepare(`INSERT INTO garden_semantic_projections
+      (workspace_id, object_id, source_revision, publication_key, task_id, source_content, search_text,
+       published_at, source_evidence_refs, source_updated_at, source_event_revision)
+      VALUES (?, ?, ?, 'publication', ?, ?, ?, ?, '[]', ?, 1)`)
+      .run(WS, OBJECT, source.revision, taskId, source.content, "Alice owns Orion", NOW, NOW);
+    database.connection.prepare("INSERT INTO garden_semantic_fts VALUES (?, ?, ?)")
+      .run(WS, OBJECT, "Alice owns Orion");
+    expect(repo.searchReady(WS, "Orion", 10)).toMatchObject([{ objectId: OBJECT, projectionText: "Alice owns Orion" }]);
+    const index = new SqliteIndexedRecallProjection(database.connection);
+    const before = index.observablePin(WS);
+    database.connection.prepare(`INSERT INTO privacy_dependency_quarantine (workspace_id, object_kind, object_id)
+      VALUES (?, 'memory_entry', ?)`).run(WS, OBJECT);
+    expect(index.observablePin(WS).source_revision).not.toBe(before.source_revision);
+    expect(() => index.freshness(WS, OBJECT)).toThrow(/provenance is unknown/u);
+    expect(() => repo.source(WS, OBJECT)).toThrow(/provenance is unknown/u);
+    expect(() => database.connection.transaction(() => repo.enqueue(WS, OBJECT, PROFILE, NOW))())
+      .toThrow(/provenance is unknown/u);
+    expect(() => repo.searchReady(WS, "Orion", 10)).toThrow(/provenance is unknown/u);
   });
 });

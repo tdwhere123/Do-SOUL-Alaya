@@ -13,13 +13,26 @@ import type {
   AcceptedPathRelationGovernanceInput,
   AcceptedSynthesisCreateInput
 } from "../types.js";
-import { SYNTHESIS_CREATE_DOSSIER_REFS } from "../types.js";
+import { isSynthesisCreateProposalDossier } from "../types.js";
 import type { ProposalRow } from "./rows.js";
+import { isRetiredProposalDossier } from "../types.js";
+import { parseProposedPathRelation, requireSupportedPathRelationProposal } from "../path-relations.js";
 import {
   parseProposedChanges,
   parseUpdatedAt,
   parseWorkspaceId
 } from "./mappers.js";
+
+export function assertProposalAcceptanceSupported(
+  row: Pick<ProposalRow, "dossier_ref" | "target_object_kind" | "proposed_path_relation">
+): void {
+  if (isRetiredProposalDossier(row.dossier_ref)) {
+    throw new StorageError("VALIDATION_FAILED", "This retired proposal remains readable and can be rejected, but cannot be accepted.");
+  }
+  if (row.target_object_kind === "path_relation") {
+    requireSupportedPathRelationProposal(parseProposedPathRelation(row.proposed_path_relation));
+  }
+}
 
 export function parseAcceptedMemoryUpdateInput(
   input: AcceptedMemoryUpdateInput
@@ -150,8 +163,7 @@ export function assertAcceptedSynthesisCreateMatchesProposal(
 ): void {
   if (
     row.workspace_id !== create.workspace_id ||
-    row.dossier_ref === null ||
-    !SYNTHESIS_CREATE_DOSSIER_REFS.has(row.dossier_ref)
+    !isSynthesisCreateProposalDossier(row.dossier_ref)
   ) {
     throw createAcceptedSynthesisCreateMismatch(row.proposal_id);
   }

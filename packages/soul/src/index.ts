@@ -235,11 +235,8 @@ export {
   type JanitorSchedulerPort,
   type JanitorTombstoneGcPort,
   type TombstonedMemoryRecord,
-  type CompressionCandidate,
   type LibrarianDependencies,
-  type LibrarianMergeDetectionPort,
   type LibrarianNeighborDetectionPort,
-  type LibrarianPathCompressionPort,
   type LibrarianSchedulerPort,
   type LibrarianSynthesisThrottlePort,
   type PathGraphSnapshotHistoryReview,
@@ -264,7 +261,6 @@ export {
   type OpenSemanticFactorFormationEligibility,
   type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus,
-  type MergeCandidate,
   type NeighborGroup,
   type StaleMemoryEntry
 } from "./garden/index.js";

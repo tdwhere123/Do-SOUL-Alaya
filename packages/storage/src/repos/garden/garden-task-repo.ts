@@ -29,10 +29,12 @@ import {
 } from "./mappers/garden-task-rows.js";
 import type { GardenTaskBacklogCount, GardenTaskClaimResult, GardenTaskCompletionResult, GardenTaskEnqueueInput, GardenTaskEventInput, GardenTaskEventPublisherPort, GardenTaskExpiryInput, GardenTaskKindBacklogCount, GardenTaskReclaimInput, GardenTaskRepoPort, GardenTaskRow } from "./garden-task-types.js";
 import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row.js";
+import { GardenTaskSourceProvenance } from "./garden-task-source-provenance.js";
 
 export type * from "./garden-task-types.js";
 
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
+  private readonly sourceProvenance;
   private readonly enqueueStatement;
   private readonly findByIdStatement;
   private readonly findByIdInWorkspaceStatement;
@@ -57,6 +59,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     private readonly connection: SqliteConnection,
     private readonly eventPublisher: GardenTaskEventPublisherPort
   ) {
+    this.sourceProvenance = new GardenTaskSourceProvenance(connection);
     const statements = prepareGardenTaskStatements(connection);
     this.enqueueStatement = statements.enqueueStatement;
     this.findByIdStatement = statements.findByIdStatement;
@@ -91,6 +94,13 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       this.enqueueStatement.run(id, workspaceId, role, kind, payloadJson, createdAt);
       return { task_id: id };
     } catch (error) {
+      if (isPeriodicTask(input.payload) && isUniqueConstraintError(error, "garden_tasks.workspace_id, garden_tasks.kind")) {
+        const row = this.connection.prepare(`SELECT id FROM garden_tasks
+          WHERE workspace_id = ? AND kind = ? AND status IN ('pending', 'claimed')
+            AND json_valid(payload_json) AND json_extract(payload_json, '$.periodic') = 1 LIMIT 1`)
+          .get(workspaceId, kind) as { id: string } | undefined;
+        if (row !== undefined) return { task_id: row.id };
+      }
       if (isUniqueConstraintError(error, "garden_tasks.id")) {
         return resolveDuplicateGardenEnqueue(this.findById(id), id, input.payload, payloadJson, error);
       }
@@ -159,7 +169,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
               parsedKind,
               parsedLimit
             ), GardenTaskDbRowParser, "garden task row"));
-      return rows.map((row) => parseGardenTaskRow(row));
+      return rows.map((row) => parseGardenTaskRow(row)).filter(row => this.sourceProvenance.available(row));
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -178,14 +188,16 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     const request = parseClaimRequest(taskId, claimedBy, claimedAt, workspace_id);
 
     try {
-      const result = this.claimStatement.run(
-        request.claimedBy,
-        request.claimedAt,
-        request.taskId,
-        request.workspaceId,
-        request.workspaceId
-      );
-      return result.changes === 1 ? "claimed" : "already-claimed";
+      return this.withAvailableSource(request.taskId, request.workspaceId ?? undefined, "already-claimed", () => {
+        const result = this.claimStatement.run(
+          request.claimedBy,
+          request.claimedAt,
+          request.taskId,
+          request.workspaceId,
+          request.workspaceId
+        );
+        return result.changes === 1 ? "claimed" : "already-claimed";
+      });
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to claim Garden task ${request.taskId}.`, error);
     }
@@ -198,6 +210,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     dispatchedEvents: readonly GardenTaskEventInput[],
     workspace_id?: string
   ): Promise<GardenTaskClaimResult> {
+    if (dispatchedEvents.length === 0) return await this.claimAtomic(taskId, claimedBy, claimedAt, workspace_id);
     return await claimGardenTaskWithEvents(
       this.eventPublisher,
       this.claimStatement,
@@ -205,7 +218,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       claimedBy,
       claimedAt,
       dispatchedEvents,
-      workspace_id
+      workspace_id,
+      () => this.hasAvailableSource(taskId, workspace_id)
     );
   }
 
@@ -249,8 +263,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     const parsedClaimedAt = parseTimestamp(claimedAt);
 
     try {
-      const result = this.refreshClaimStatement.run(parsedClaimedAt, parsedTaskId, parsedClaimedBy);
-      return result.changes === 1;
+      return this.withAvailableSource(parsedTaskId, undefined, false, () =>
+        this.refreshClaimStatement.run(parsedClaimedAt, parsedTaskId, parsedClaimedBy).changes === 1);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -280,15 +294,17 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         : parseNullableString(completionEnvelopeJson, "garden_task.completion_envelope_json");
 
     try {
-      const result = this.beginCompletionAttemptStatement.run(
-        parsedCompletionClaimedBy,
-        parsedClaimedAt,
-        parsedCompletionEnvelopeJson,
-        parsedTaskId,
-        parsedClaimedBy,
-        parsedCompletionEnvelopeJson
-      );
-      return result.changes === 1;
+      return this.withAvailableSource(parsedTaskId, undefined, false, () => {
+        const result = this.beginCompletionAttemptStatement.run(
+          parsedCompletionClaimedBy,
+          parsedClaimedAt,
+          parsedCompletionEnvelopeJson,
+          parsedTaskId,
+          parsedClaimedBy,
+          parsedCompletionEnvelopeJson
+        );
+        return result.changes === 1;
+      });
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -443,21 +459,20 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       event: expiration.event
     }));
     try {
-      return await this.eventPublisher.appendManyWithMutation(
-        parsedExpirations.map((expiration) => expiration.event),
-        () => {
-          let expired = 0;
-          for (const expiration of parsedExpirations) {
-            const result = this.expireUnclaimedStatement.run(expiration.task_id);
-            // CAS lost (a worker claimed it between peek and delete) -> skip,
-            // not an error: the task is now live work, not an orphan.
-            if (result.changes === 1) {
-              expired += 1;
+      let expired = 0;
+      for (const expiration of parsedExpirations) {
+        try {
+          await this.eventPublisher.appendManyWithMutation([expiration.event], () => {
+            if (this.expireUnclaimedStatement.run(expiration.task_id).changes !== 1) {
+              throw new GardenTaskExpiryLostRace();
             }
-          }
-          return expired;
+          });
+          expired += 1;
+        } catch (error) {
+          if (!(error instanceof GardenTaskExpiryLostRace)) throw error;
         }
-      );
+      }
+      return expired;
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -542,6 +557,9 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     claimedBy: string,
     workspaceId: string
   ): void {
+    if (status === "completed" && !this.hasAvailableSource(taskId, workspaceId)) {
+      throw new StorageError("CONFLICT", `Garden task ${taskId} source provenance is unavailable.`);
+    }
     const update = this.completeStatement.run(
       status,
       completedAt,
@@ -574,4 +592,28 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     return row.workspace_id;
   }
 
+  public hasAvailableSource(taskId: string, workspaceId?: string): boolean {
+    return this.sourceProvenance.available(workspaceId === undefined
+      ? this.findById(taskId) : this.findByIdInWorkspace(taskId, workspaceId));
+  }
+
+  private withAvailableSource<T>(taskId: string, workspaceId: string | undefined, unavailable: T, action: () => T): T {
+    return this.connection.transaction(() => this.hasAvailableSource(taskId, workspaceId) ? action() : unavailable)();
+  }
+
+  public async quarantineUnavailablePostTurnTasks(
+    completedAt: string,
+    eventForTask: (task: GardenTaskRow, reason: string) => GardenTaskEventInput,
+    workspaceId?: string,
+    taskId?: string
+  ): Promise<number> {
+    return await this.sourceProvenance.quarantine(this.eventPublisher, completedAt, eventForTask, workspaceId, taskId);
+  }
+
+}
+
+class GardenTaskExpiryLostRace extends Error {}
+
+function isPeriodicTask(payload: unknown): boolean {
+  return typeof payload === "object" && payload !== null && "periodic" in payload && payload.periodic === true;
 }

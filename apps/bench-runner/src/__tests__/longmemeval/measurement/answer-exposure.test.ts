@@ -16,6 +16,7 @@ import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import type { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
 import { admitEmittedSourcePreview } from "../../../runs/recall-measurement/library-admission.js";
+import { admittedSourcePreviewInterval, hasDeliveredSourcePayload } from "../../../runs/measurement/source-delivery-visibility.js";
 import { assemble, sourceOnly, workerRecall, GOLD, DIGEST, REQUEST } from "./source-semantic-library-measurement-fixture.js";
 
 afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
@@ -47,6 +48,7 @@ function observed(start: number, end: number, emitted = Buffer.from(content).sub
   if (response.operation !== "recall" || response.results === undefined) throw new Error("public recall required");
   const publicResponse = SoulInterpretationRecallDeliverySchema.parse({ ...response,
     results: response.results.map(result => ({ ...result, content_preview: emitted,
+      payload_available: !(emitted === "[payload omitted]" && !within),
       budget_state: { ...result.budget_state, within_budget: within } })) });
   const exposure = recordSourceSemanticLibraryFirstExposure(publicResponse);
   const evaluated = measureSourceSemanticLibraryResponse({ recallResult: publicResponse, firstExposurePage: exposure,
@@ -67,6 +69,21 @@ function score(value: ReturnType<typeof observed>, gold = answerGold) {
 }
 
 describe("published answer-turn exposure", () => {
+  it("admits literal omission-marker source bytes using explicit payload availability", () => {
+    const result = observed(0, 4).replay.response.results![0]!;
+    const text = "[payload omitted]";
+    const target = { kind: "source_evidence" as const, ...GOLD, evidence_object_id: null, span: { content_start: 0,
+      content_end: Buffer.byteLength(text), retained_extent: "body" as const,
+      content_complete: true, original_complete: true } };
+    const row = { ...result, target,
+      content_preview: text, payload_available: true };
+    expect(() => admitEmittedSourcePreview(target.span, row, undefined, target, text, false)).not.toThrow();
+    expect(hasDeliveredSourcePayload(row)).toBe(true);
+    expect(admittedSourcePreviewInterval(target, row)).toEqual({ start: 0, end: 17 });
+    expect(hasDeliveredSourcePayload({ ...row, payload_available: false })).toBe(false);
+    expect(admittedSourcePreviewInterval(target, { ...row, payload_available: false })).toEqual({ start: 0, end: 0 });
+  });
+
   it("maps the actual published round mechanically to UTF-8 bytes, not JS indices", () => {
     expect(content.indexOf("東京有答案")).toBe(25);
     expect(answerGold).toMatchObject({ complete: true, annotated_turns: 1,

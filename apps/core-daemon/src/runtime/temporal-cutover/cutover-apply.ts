@@ -4,7 +4,8 @@ import {
   initDatabase,
   inspectTemporalProjectionSelection,
   rollbackTemporalProjection,
-  selectTemporalProjection
+  selectTemporalProjection,
+  verifyTemporalProjectionRollbackSource
 } from "@do-soul/alaya-storage";
 import { writeTextAtomic } from "../config/storage-pointer-file.js";
 import {
@@ -95,6 +96,12 @@ export async function switchPointerToCandidate(journal: TemporalCutoverJournal):
 export async function restoreOriginalPointer(journal: TemporalCutoverJournal): Promise<void> {
   const pointerState = await readPointerState(journal);
   if (pointerState === "original") return;
+  const database = initDatabase({ filename: journal.candidatePointer, temporalMode: "candidate" });
+  try {
+    verifyTemporalProjectionRollbackSource(database, journal.candidateReceiptFilename);
+  } finally {
+    database.close();
+  }
   await replaceTomlCas(journal.configFilename, journal.candidateToml, journal.originalToml);
 }
 

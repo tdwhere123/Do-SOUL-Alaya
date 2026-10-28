@@ -16,6 +16,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSy
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
 
 // Install before runtime imports: only local inference and loopback transport are authorized.
@@ -42,13 +43,13 @@ const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" }
 } });
-if (!values.out || !values.arms) throw new Error("--out and --arms are required");
+if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
 const out = resolve(values.out);
 const arms = JSON.parse(readFileSync(values.arms, "utf8"));
-if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new Error("question_time requires --coordinates");
+if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new AlayaError("VALIDATION", "question_time requires --coordinates");
 const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
 const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
-if (coordinates.size !== coordinateRows.length) throw new Error("duplicate frozen question coordinates");
+if (coordinates.size !== coordinateRows.length) throw new AlayaError("VALIDATION", "duplicate frozen question coordinates");
 const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data/longmemeval/longmemeval_s.json"));
 const pinnedMeta = join(repo, "docs/bench-history/datasets");
 const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
@@ -83,7 +84,7 @@ const done = new Set(existsSync(rowsPath)
 
 function clockOf(questionDate) {
   const m = /^(\d{4})\/(\d{2})\/(\d{2}) \(\w+\) (\d{2}):(\d{2})$/u.exec(questionDate);
-  if (!m) throw new Error(`unparsed question_date ${questionDate}`);
+  if (!m) throw new AlayaError("VALIDATION", `unparsed question_date ${questionDate}`);
   return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00.000Z`;
 }
 
@@ -126,7 +127,7 @@ async function prepared(question, index, arm) {
       requestProfile: "gemini-3.1-minimal-v1", cacheRoots: [] }],
     recordedAt: "2026-10-26T00:00:00.000Z", producerCommit: revision.split(":")[1], workspaceId: workspace, runId: workspace,
     importEffects: { configDirectoryRoot: dir, sqliteWriteQueue: "disabled", embeddingStartupProbe: "omit", gardenCompute: "disabled" } });
-  if (publication.admitted_count !== publication.census_count) throw new Error(`publication admitted ${publication.admitted_count}/${publication.census_count}`);
+  if (publication.admitted_count !== publication.census_count) throw new AlayaError("CONFLICT", `publication admitted ${publication.admitted_count}/${publication.census_count}`);
   rmSync(join(dir, "publish"), { recursive: true, force: true });
   const caches = { query: join(dir, "empty-query-cache"), correspondence: join(dir, "empty-correspondence-cache") };
   mkdirSync(caches.query); mkdirSync(caches.correspondence);
@@ -134,13 +135,13 @@ async function prepared(question, index, arm) {
   const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}),
     ...(arm.lexical ? { lexical: arm.lexical } : {}), ...(arm.representation ? { representation: arm.representation } : {}) };
   const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined, { maxPasses: 10_000 });
-  if (result.config === null) throw new Error(`preparation failed: ${result.report.reason}`);
+  if (result.config === null) throw new AlayaError("UNAVAILABLE", `preparation failed: ${result.report.reason}`);
   return result.config;
 }
 
 for (const id of ids) {
   const entry = byId.get(id);
-  if (!entry) throw new Error(`unknown question ${id}`);
+  if (!entry) throw new AlayaError("VALIDATION", `unknown question ${id}`);
   const { question, index } = entry;
   for (const arm of arms) {
     if (done.has(`${id}:${arm.name}`)) continue;
@@ -148,7 +149,7 @@ for (const id of ids) {
     const row = { question_id: id, question_type: question.question_type, arm: arm.name };
     try {
       const frozen = coordinates.get(id);
-      if (arm.question_time === true && frozen === undefined) throw new Error(`missing frozen coordinates for ${id}`);
+      if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
       const proposal = arm.question_time === true
         ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
       const config = await prepared(question, index, arm);

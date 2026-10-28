@@ -247,6 +247,7 @@ export function encodeSourceSemanticLibraryResults(
       target: entry.target,
       relevance_score: score,
       content_preview: content,
+      payload_available: payload.available && prefix.length > 0,
       source_disclosure: disclosure,
       evidence_pointers: [],
       hypothesis_id: entry.hypothesis_id,

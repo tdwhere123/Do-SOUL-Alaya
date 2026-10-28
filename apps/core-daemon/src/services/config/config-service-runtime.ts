@@ -19,6 +19,8 @@ import type { ConfigRepo } from "@do-soul/alaya-storage";
 import { ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV, selectGardenCredentialProvenance } from "../../garden/support/credential.js";
 import type { GardenCredentialProvenance } from "../../garden/support/credential.js";
 import type { AlayaConfigPaths } from "../../cli/support/config-files.js";
+import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
+import { DAEMON_ONLY_CONFIG_ENV_KEYS, processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { loadConfigEnv, readConfigEnvValue, readNonEmptyEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import {
   ALAYA_GARDEN_PROVIDER_KIND_ENV,
@@ -74,11 +76,26 @@ type VersionedRuntimeConfig = Record<string, unknown> & {
   readonly config_version?: number;
 };
 
-export async function getRuntimeEmbeddingConfig(repo: ConfigRepo): Promise<RuntimeEmbeddingConfig> {
+export async function getRuntimeEmbeddingConfig(
+  repo: ConfigRepo,
+  paths: AlayaConfigPaths,
+  env: NodeJS.ProcessEnv = processEnvLookup()
+): Promise<RuntimeEmbeddingConfig> {
   const version = readConfigVersion(DEFAULT_RUNTIME_EMBEDDING_CONFIG);
-  return repo.getParsed(RUNTIME_EMBEDDING_CONFIG_KEY, {
+  const persisted = repo.getParsed(RUNTIME_EMBEDDING_CONFIG_KEY, {
     parse: (value) => RuntimeEmbeddingConfigSchema.parse(normalizeLegacyConfigVersion(value, version))
-  }) ?? DEFAULT_RUNTIME_EMBEDDING_CONFIG;
+  });
+  const configEnv = await loadConfigEnv(paths.envPath);
+  const keys = DAEMON_ONLY_CONFIG_ENV_KEYS.embedding;
+  const read = (key: string) => env[key] ?? configEnv.get(key);
+  const posture = resolveEffectiveEmbeddingPosture(read);
+  return RuntimeEmbeddingConfigSchema.parse({
+    config_version: persisted?.config_version ?? version,
+    provider_url: readNonEmptyEnv(read(keys.openaiProviderUrl)),
+    secret_ref: readNonEmptyEnv(read(keys.openaiSecretRef)),
+    model_id: readNonEmptyEnv(read(keys.openaiModel)),
+    embedding_enabled: posture.embeddingSupplementEnabled
+  });
 }
 
 export async function getRuntimeGardenComputeConfig(
@@ -152,7 +169,14 @@ export async function patchRuntimeGardenComputeConfig(input: Readonly<{
 export async function getGardenCredentialProvenance(input: Readonly<{
   readonly paths: AlayaConfigPaths;
   readonly env: NodeJS.ProcessEnv;
+  readonly repo?: ConfigRepo;
 }>): Promise<GardenCredentialProvenance> {
+  const persisted = input.repo?.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
+    parse: (value) => parseGardenComputeConfigWithLegacyFallback(value, "garden-compute config", () => undefined)
+  });
+  if (persisted !== undefined && persisted !== null) {
+    return { kind: persisted.secret_ref === null ? "none" : secretRefScheme(persisted.secret_ref) ?? "none" };
+  }
   const configEnv = await loadConfigEnv(input.paths.envPath);
   return selectGardenCredentialProvenance({
     env: input.env,

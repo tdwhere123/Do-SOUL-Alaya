@@ -425,7 +425,7 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
     // Missing question in dataset
     expect(() =>
       scoreRecallHarnessRow({ question_id: "nonexistent", question_type: "t", arm: "a", status: "complete" }, dataset)
-    ).toThrow(/not found in dataset/);
+    ).toThrowError(expect.objectContaining({ code: "VALIDATION", message: expect.stringMatching(/not found in dataset/) }));
 
     const question: LongMemEvalQuestion = {
       question_id: "q-real",
@@ -443,7 +443,7 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
     // Nonfailed row missing intervals
     expect(() =>
       scoreRecallHarnessRow({ question_id: "q-real", question_type: "t", arm: "a", status: "complete" }, dataset)
-    ).toThrow(/requires intervals array/);
+    ).toThrowError(expect.objectContaining({ code: "VALIDATION", message: expect.stringMatching(/requires intervals array/) }));
 
     // Nonfailed row pointing to nonexistent SQLite snapshot
     expect(() =>

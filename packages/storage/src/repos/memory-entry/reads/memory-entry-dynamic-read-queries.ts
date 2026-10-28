@@ -1,10 +1,11 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import type { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prepared-statement-cache.js";
+import type { StorageDatabase } from "../../../sqlite/db.js";
+import { requirePrivacyWorkspaceAvailable } from "../../field/privacy-availability.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
-  MEMORY_ENTRY_SELECT_COLUMNS,
-  MemoryEntryRowParser
+  MEMORY_ENTRY_SELECT_COLUMNS
 } from "../mappers/row-mapper.js";
 import { parseRows, readNonEmptyStringField, readRecord, type RowParser } from "../../shared/parse-row.js";
 import {
@@ -16,7 +17,9 @@ import {
 export class MemoryEntryDynamicReadQueries {
   public constructor(
     private readonly statementCache: DynamicPreparedStatementCache,
-    private readonly diagnostics: MemoryEntryRepoDiagnosticSink
+    private readonly diagnostics: MemoryEntryRepoDiagnosticSink,
+    private readonly memoryRowParser: RowParser<Readonly<MemoryEntry>>,
+    private readonly database: StorageDatabase
   ) {}
 
   public async findByIds(
@@ -43,10 +46,11 @@ export class MemoryEntryDynamicReadQueries {
     try {
       return parseRows(
         statement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)),
-        MemoryEntryRowParser,
+        this.memoryRowParser,
         "memory entry row"
       );
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError("QUERY_FAILED", "Failed to load memory entries by ids.", error);
     }
   }
@@ -79,11 +83,12 @@ export class MemoryEntryDynamicReadQueries {
       return Object.freeze(
         parseRows(
           statement.all(JSON.stringify(uniqueTags), workspaceId),
-          MemoryEntryRowParser,
+          this.memoryRowParser,
           "memory entry row"
         )
       );
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to find memory entries by shared domain tags in workspace ${workspaceId}.`,
@@ -102,10 +107,11 @@ export class MemoryEntryDynamicReadQueries {
       return Object.freeze([]);
     }
     try {
-      const rows = queryEvidenceRefRows(this.statementCache, parsedWorkspaceId, cappedIds);
+      const rows = queryEvidenceRefRows(this.statementCache, parsedWorkspaceId, cappedIds, this.memoryRowParser);
       reportEvidenceRefRowCap(parsedWorkspaceId, cappedIds.length, rows.length, this.diagnostics);
       return Object.freeze(rows);
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to find memory entries by evidence_refs in workspace ${parsedWorkspaceId}.`,
@@ -118,6 +124,7 @@ export class MemoryEntryDynamicReadQueries {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly string[]> {
+    requirePrivacyWorkspaceAvailable(this.database, workspaceId, ["memory_entry"]);
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
     const parsedEvidenceIds = Array.from(new Set(
       evidenceObjectIds.map((id) => parseNonEmptyString(id, "evidence_ref"))
@@ -132,6 +139,7 @@ export class MemoryEntryDynamicReadQueries {
         parsedEvidenceIds
       ));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to find bound evidence refs in workspace ${parsedWorkspaceId}.`,
@@ -185,7 +193,8 @@ function capEvidenceRefLookupIds(
 function queryEvidenceRefRows(
   statementCache: DynamicPreparedStatementCache,
   workspaceId: string,
-  evidenceObjectIds: readonly string[]
+  evidenceObjectIds: readonly string[],
+  memoryRowParser: RowParser<Readonly<MemoryEntry>>
 ): readonly Readonly<MemoryEntry>[] {
   return parseRows(
     statementCache
@@ -205,7 +214,7 @@ function queryEvidenceRefRows(
        LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
       )
       .all(workspaceId, workspaceId, JSON.stringify(evidenceObjectIds)),
-    MemoryEntryRowParser,
+    memoryRowParser,
     "memory entry row"
   );
 }
