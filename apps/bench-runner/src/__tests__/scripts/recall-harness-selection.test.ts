@@ -28,6 +28,10 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
     expect(selection.recallExecutionIdentity({}, executionA, revision, chainIdentity)).toBeUndefined();
     expect(identityA).not.toBe(identityB);
     expect(keyA).not.toBe(keyB);
+    let selectionError: unknown;
+    try { selection.assertRecallCachedPreparation(configA, revision, executionB, arm); }
+    catch (error) { selectionError = error; }
+    expect(selectionError).toMatchObject({ code: "CONFLICT", message: "cached Source preparation uses a different execution selection" });
     mkdirSync(join(cache, "fixture", keyA, "prepare"), { recursive: true });
     mkdirSync(join(cache, "fixture", keyB, "prepare"), { recursive: true });
     writeFileSync(configAPath, JSON.stringify(configA));

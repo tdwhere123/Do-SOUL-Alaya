@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SourceIndexAcquisition, authorizeSourceIndexScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { StorageDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
-import { hashContentDigest } from "@do-soul/alaya-protocol";
+import { AlayaError, hashContentDigest } from "@do-soul/alaya-protocol";
 import { readCjkSegmentationStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { withRecallSnapshot } from "./recall-bound-snapshot.mjs";
 import { projectHostContainer } from "./recall-host-container.mjs";
@@ -32,7 +32,7 @@ export function readInventory(db, workspace) {
   }
   const byRoot = new Map();
   for (const root of roots) {
-    if (byRoot.has(root.record_id)) throw new Error(`ambiguous indexed root: ${root.record_id}`);
+    if (byRoot.has(root.record_id)) throw new AlayaError("CONFLICT", `ambiguous indexed root: ${root.record_id}`);
     byRoot.set(root.record_id, JSON.parse(root.target_json));
   }
   const byId = new Map(records.flatMap(record => {

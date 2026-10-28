@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { analyzeSourceIndexLexical, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
-import { hashContentDigest, splitFtsLanes } from "@do-soul/alaya-protocol";
+import { AlayaError, hashContentDigest, splitFtsLanes } from "@do-soul/alaya-protocol";
 import { authorizeSourceIndexScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { buildFtsMatchExpression } from "../../../packages/storage/dist/repos/shared/fts-lane-routing.js";
 import { observedAccessOrder } from "./recall-simulator-delivery.mjs";
@@ -26,17 +26,17 @@ export async function preparePolicyInputs(_capture, options) {
     for await (const line of createInterface({ input: createReadStream(options.coordinates), crlfDelay: Infinity })) {
       if (!line.trim()) continue;
       const row = JSON.parse(line);
-      if (coordinates.has(row.question_id)) throw new Error("duplicate frozen coordinates");
+      if (coordinates.has(row.question_id)) throw new AlayaError("CONFLICT", "duplicate frozen coordinates");
       coordinates.set(row.question_id, row);
     }
   }
   const statements = new Map();
   if (options.statements) {
     const view = JSON.parse(readFileSync(options.statements, "utf8"));
-    if (!Array.isArray(view.entries)) throw new Error("invalid statement view");
+    if (!Array.isArray(view.entries)) throw new AlayaError("VALIDATION", "invalid statement view");
     for (const entry of view.entries) {
       const key = spanKey(entry.workspace, entry.root_id, entry.span?.[0]);
-      if (statements.has(key)) throw new Error("duplicate statement source span");
+      if (statements.has(key)) throw new AlayaError("CONFLICT", "duplicate statement source span");
       statements.set(key, entry);
     }
   }
@@ -56,7 +56,7 @@ function readContext(row) {
     const records = new Map(), messages = [], rounds = [];
     for (const source of sources) {
       try { authorizeSourceIndexScope(source.scope_class, JSON.parse(source.target_json), ["project"]); } catch { continue; }
-      if (records.has(source.record_id)) throw new Error(`ambiguous indexed root: ${source.record_id}`);
+      if (records.has(source.record_id)) throw new AlayaError("CONFLICT", `ambiguous indexed root: ${source.record_id}`);
       const occurrences = source.canonical_inventory === null ? [] : JSON.parse(source.canonical_inventory).occurrences;
       const container = projectHostContainer(occurrences).key;
       records.set(source.record_id, { container, event_time: source.event_time });
@@ -65,7 +65,7 @@ function readContext(row) {
       for (const occurrence of occurrences) {
         const [start, end] = occurrence.utf8_span;
         if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end > bytes.length || end < start) {
-          throw new Error("invalid recorded message span");
+          throw new AlayaError("VALIDATION", "invalid recorded message span");
         }
         messages.push({ id: source.record_id, key: `${source.root_key}\0m${String(start).padStart(8, "0")}`,
           start, end, text: bytes.subarray(start, end).toString("utf8") });
@@ -78,7 +78,7 @@ function readContext(row) {
 
 /** The historical message-unit control has its own temporary corpus; native root rankings remain separate. */
 export async function messageFtsRanking(docs, query) {
-  if (!await warmCjkSegmentation()) throw new Error("segmentation unavailable");
+  if (!await warmCjkSegmentation()) throw new AlayaError("UNAVAILABLE", "segmentation unavailable");
   const db = new Database(":memory:");
   try {
     db.exec("CREATE VIRTUAL TABLE p USING fts5(projection, tokenize='unicode61'); CREATE VIRTUAL TABLE t USING fts5(body, tokenize='trigram');");
@@ -110,14 +110,14 @@ function statementDocs(row, native, context, statements) {
     if (!top.has(container(message.id))) { docs.push(message); continue; }
     const entry = statements.get(spanKey(row.workspace, message.id, message.start));
     if (!entry || entry.span?.[1] !== message.end || entry.text_sha256 !== digest(message.text)) {
-      throw new Error("statement view does not bind a first-five-container source message");
+      throw new AlayaError("CONFLICT", "statement view does not bind a first-five-container source message");
     }
     if (!["represented", "valid_empty", "incomplete", "invalid", "unknown", "missing"].includes(entry.status)) {
-      throw new Error("unrecognized statement status");
+      throw new AlayaError("VALIDATION", "unrecognized statement status");
     }
     if (entry.status === "represented") {
       if (!Array.isArray(entry.statements) || entry.statements.length === 0 || !entry.statements.every(text => typeof text === "string" && text.trim())) {
-        throw new Error("invalid represented statements");
+        throw new AlayaError("VALIDATION", "invalid represented statements");
       }
       entry.statements.forEach((text, index) => {
         const doc = { ...message, key: `${message.key}\0t${String(index).padStart(8, "0")}`, text };
@@ -125,7 +125,7 @@ function statementDocs(row, native, context, statements) {
       });
     } else {
       if (entry.status === "valid_empty" ? !Array.isArray(entry.statements) || entry.statements.length !== 0 : entry.statements !== null) {
-        throw new Error("unavailable statements cannot be consumed");
+        throw new AlayaError("VALIDATION", "unavailable statements cannot be consumed");
       }
       docs.push(message); inScope.push(message);
     }
@@ -140,7 +140,7 @@ export function anchored(preferred, native, stream, records) {
     const group = container(id);
     if (group === null || !anchored.has(group)) { if (group !== null) anchored.add(group); used.add(id); head.push(id); continue; }
     const selected = [...preferred, ...first].find(candidate => container(candidate) === group && !used.has(candidate));
-    if (selected === undefined) throw new Error("anchored container lacks an unused source");
+    if (selected === undefined) throw new AlayaError("CONFLICT", "anchored container lacks an unused source");
     used.add(selected); head.push(selected);
   }
   return [...new Set([...head, ...first, ...stream])];
@@ -149,15 +149,15 @@ export function anchored(preferred, native, stream, records) {
 function vectorRanking(docs, evidence, profile, vectors) {
   const lookup = text => {
     const result = vectors.get(`${profile}\0${digest(text)}`);
-    if (!result) throw new Error("required statement or question vector is not cached");
+    if (!result) throw new AlayaError("UNAVAILABLE", "required statement or question vector is not cached");
     return result;
   };
   const queries = evidence.map(lookup);
   const cosine = (a, b) => {
-    if (a.length !== b.length) throw new Error("cached vector dimensions differ");
+    if (a.length !== b.length) throw new AlayaError("CONFLICT", "cached vector dimensions differ");
     let dot = 0, aa = 0, bb = 0;
     for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
-    if (!(aa > 0 && bb > 0)) throw new Error("cached vector has zero norm");
+    if (!(aa > 0 && bb > 0)) throw new AlayaError("VALIDATION", "cached vector has zero norm");
     return dot / Math.sqrt(aa * bb);
   };
   return rootsOf(docs.map(doc => ({ ...doc, score: Math.max(...queries.map(query => cosine(lookup(doc.text), query))) }))

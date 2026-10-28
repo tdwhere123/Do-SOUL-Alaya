@@ -16,7 +16,7 @@ import {
   type EmbeddingRecallServiceDependencies,
   type HqProvider
 } from "@do-soul/alaya-core";
-import { parseEnvBoolean, type RecallPolicy, type SourceIndexProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, parseEnvBoolean, type RecallPolicy, type SourceIndexProfile } from "@do-soul/alaya-protocol";
 import {
   RecallQualifiedEvidenceReader,
   type SqliteMemoryEntryRepo,
@@ -112,7 +112,7 @@ function createSourceEmbeddingProviderState(
     env: processEnvLookup(), cacheDir: config.sourceLocalEmbedding.cacheDir, modelId: config.sourceLocalEmbedding.modelId
   }) : input.sourceEmbeddingProviderOverride;
   if (resolved !== null && resolved === input.embeddingProviderOverride) {
-    throw new Error("Separately selected Source provider must not share the Memory provider instance.");
+    throw new AlayaError("VALIDATION", "Separately selected Source provider must not share the Memory provider instance.");
   }
   const readiness = createEmbeddingProviderReadiness(resolved);
   return { provider: observeEmbeddingProviderReadiness(resolved, readiness), readiness };
@@ -145,7 +145,7 @@ function createEmbeddingProviderState(
     providerOverride: input.embeddingProviderOverride
   });
   if (resolvedProvider instanceof LocalOnnxEmbeddingClient && resolvedProvider.sourceOnly) {
-    throw new Error("Source-only local ONNX models cannot be selected as the Memory provider.");
+    throw new AlayaError("VALIDATION", "Source-only local ONNX models cannot be selected as the Memory provider.");
   }
   const readiness = createEmbeddingProviderReadiness(resolvedProvider);
   const embeddingProvider = observeEmbeddingProviderReadiness(resolvedProvider, readiness);

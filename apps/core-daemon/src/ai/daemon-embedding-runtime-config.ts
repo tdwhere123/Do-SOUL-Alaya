@@ -4,7 +4,7 @@ import {
   type LocalOnnxTransformersAvailability,
   type LocalOnnxTransformersProbe
 } from "@do-soul/alaya-core";
-import type { EmbeddingProviderKind } from "@do-soul/alaya-protocol";
+import { AlayaError, type EmbeddingProviderKind } from "@do-soul/alaya-protocol";
 import { isAbsolute } from "node:path";
 import type { ResolveSecretError } from "../secrets/index.js";
 import { resolveSecretRef } from "../secrets/index.js";
@@ -81,7 +81,7 @@ export function readEmbeddingRuntimeConfig(
   const sourceCacheDir = readNonEmptyEnv(readConfigEnvValue(configEnv, EMBEDDING_KEYS.sourceLocalCacheDir));
   const sourceModelId = readNonEmptyEnv(readConfigEnvValue(configEnv, EMBEDDING_KEYS.sourceLocalModel));
   if ((sourceCacheDir === null) !== (sourceModelId === null) || sourceCacheDir !== null && !isAbsolute(sourceCacheDir)) {
-    throw new Error("Source index local model and absolute cache directory must be configured together.");
+    throw new AlayaError("VALIDATION", "Source index local model and absolute cache directory must be configured together.");
   }
   return {
     embeddingApiKey: posture.providerKind === "openai"

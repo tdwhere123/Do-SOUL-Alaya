@@ -101,13 +101,31 @@ describe("Source capability readiness (mock provider, no model execution)", () =
     const database = initDatabase({ filename: ":memory:" });
     const provider = new core.LocalOnnxEmbeddingClient({ modelId: "Xenova/bge-m3", cacheDir: "/tmp/source-models" });
     try {
-      expect(() => createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: "omit",
+      let rejected: unknown;
+      try { createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: "omit",
         configEnv: new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"], ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"]]),
         eventLogRepo: new SqliteEventLogRepo(database), memoryEntryRepo: new SqliteMemoryEntryRepo(database),
         runtimeNotifier: { notifyEntry: () => undefined },
         healthJournalService: { getRecentEvents: vi.fn(async () => []), record: vi.fn(async () => undefined) },
         warn: vi.fn(), embeddingProviderOverride: provider
-      })).toThrow(/Source-only.*Memory provider/u);
+      }); } catch (error) { rejected = error; }
+      expect(rejected).toMatchObject({ code: "VALIDATION", message: "Source-only local ONNX models cannot be selected as the Memory provider." });
+    } finally { database.close(); }
+  });
+
+  it("rejects a separately selected Source provider that shares the Memory instance", () => {
+    const database = initDatabase({ filename: ":memory:" }), provider = sourceProvider().provider;
+    try {
+      let rejected: unknown;
+      try { createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: "omit",
+        configEnv: new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"], ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/source-models"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]),
+        eventLogRepo: new SqliteEventLogRepo(database), memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+        runtimeNotifier: { notifyEntry: () => undefined },
+        healthJournalService: { getRecentEvents: vi.fn(async () => []), record: vi.fn(async () => undefined) },
+        warn: vi.fn(), embeddingProviderOverride: provider, sourceEmbeddingProviderOverride: provider
+      }); } catch (error) { rejected = error; }
+      expect(rejected).toMatchObject({ code: "VALIDATION", message: "Separately selected Source provider must not share the Memory provider instance." });
     } finally { database.close(); }
   });
 

@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, parseArgs } from "node:util";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { scoreRecallHarnessRow } from "./recall-harness-score.mjs";
 import { observedAccessOrder, simulateRecallDelivery } from "./recall-simulator-delivery.mjs";
 import { preparePolicyInputs, selectPolicy } from "./recall-simulator-policies.mjs";
@@ -26,10 +27,10 @@ async function readRows(path) {
 
 function uniqueRows(rows, arm, count, label) {
   const selected = arm === undefined ? rows : rows.filter(row => row.arm === arm);
-  if (selected.length !== count) throw new Error(`${label}: expected ${count} rows, found ${selected.length}`);
+  if (selected.length !== count) throw new AlayaError("VALIDATION", `${label}: expected ${count} rows, found ${selected.length}`);
   const result = new Map();
   for (const row of selected) {
-    if (result.has(row.question_id)) throw new Error(`${label}: duplicate question ${row.question_id}`);
+    if (result.has(row.question_id)) throw new AlayaError("CONFLICT", `${label}: duplicate question ${row.question_id}`);
     result.set(row.question_id, row);
   }
   return result;
@@ -43,7 +44,7 @@ export function assertPairedScreenInputs(row, expected) {
     || row.initial_request == null || !isDeepStrictEqual(row.initial_request, expected.initial_request)
     || row.snapshot_identity == null || !isDeepStrictEqual(row.snapshot_identity, expected.snapshot_identity)
     || typeof row.snapshot_sha256 !== "string" || row.snapshot_sha256 !== expected.snapshot_sha256) {
-    throw new Error("capture and plain baseline do not bind the same inputs");
+    throw new AlayaError("CONFLICT", "capture and plain baseline do not bind the same inputs");
   }
 }
 
@@ -103,45 +104,45 @@ function paired(baseRows, rows) {
 
 export async function runRecallSimulation(options) {
   const mode = options.mode ?? "screen", cohort = options.cohort ?? "original100";
-  if (!["screen", "verify"].includes(mode)) throw new Error("unknown simulator mode");
-  if (mode === "verify" && (options.policies?.length ?? 0) > 0) throw new Error("verification mode cannot score policies");
-  if (mode === "screen" && options.expectedCount !== undefined) throw new Error("screening cannot override cohort size");
-  if (realpathSync(options.capture) === realpathSync(options.baseline)) throw new Error("capture and S1 must be independent files");
+  if (!["screen", "verify"].includes(mode)) throw new AlayaError("VALIDATION", "unknown simulator mode");
+  if (mode === "verify" && (options.policies?.length ?? 0) > 0) throw new AlayaError("VALIDATION", "verification mode cannot score policies");
+  if (mode === "screen" && options.expectedCount !== undefined) throw new AlayaError("VALIDATION", "screening cannot override cohort size");
+  if (realpathSync(options.capture) === realpathSync(options.baseline)) throw new AlayaError("CONFLICT", "capture and S1 must be independent files");
   let manifest = null;
   if (mode === "screen") {
-    if (!["original100", "dev2"].includes(cohort)) throw new Error("unknown screening cohort");
+    if (!["original100", "dev2"].includes(cohort)) throw new AlayaError("VALIDATION", "unknown screening cohort");
     const name = cohort === "original100" ? "longmemeval_s.stratified-100.v1.json" : "longmemeval_s.dev2-288.v1.json";
     manifest = JSON.parse(readFileSync(join(DATASETS, name), "utf8"));
     const size = cohort === "original100" ? 100 : 288;
     if (manifest.target_count !== size || manifest.question_ids?.length !== size || new Set(manifest.question_ids).size !== size) {
-      throw new Error("invalid frozen screening cohort");
+      throw new AlayaError("VALIDATION", "invalid frozen screening cohort");
     }
   }
   const count = manifest?.target_count ?? options.expectedCount ?? 100, out = resolve(options.out);
-  if (!Number.isSafeInteger(count) || count < 1) throw new Error("expected question count must be a positive integer");
-  if (existsSync(out)) throw new Error("simulator requires a fresh output directory");
+  if (!Number.isSafeInteger(count) || count < 1) throw new AlayaError("VALIDATION", "expected question count must be a positive integer");
+  if (existsSync(out)) throw new AlayaError("CONFLICT", "simulator requires a fresh output directory");
   const capture = uniqueRows(await readRows(options.capture), options.captureArm, count, "capture");
   const baseline = uniqueRows(await readRows(options.baseline), options.baselineArm, count, "baseline");
-  if ([...capture.keys()].some(id => !baseline.has(id))) throw new Error("capture and S1 question membership differs");
+  if ([...capture.keys()].some(id => !baseline.has(id))) throw new AlayaError("CONFLICT", "capture and S1 question membership differs");
   let revision = null;
   if (manifest !== null) {
-    if (manifest.question_ids.some(id => !capture.has(id))) throw new Error("rows do not match the frozen screening cohort");
+    if (manifest.question_ids.some(id => !capture.has(id))) throw new AlayaError("CONFLICT", "rows do not match the frozen screening cohort");
     if ([...capture.values()].some(row => row.capture_requested !== true)
-      || [...baseline.values()].some(row => row.capture_requested === true)) throw new Error("capture and plain S1 roles are not independent");
+      || [...baseline.values()].some(row => row.capture_requested === true)) throw new AlayaError("CONFLICT", "capture and plain S1 roles are not independent");
     const revisions = new Set([...capture.values()].map(row => row.implementation_revision));
     if (revisions.size !== 1 || typeof [...revisions][0] !== "string" || ![...revisions][0]) {
-      throw new Error("capture implementation revision is missing or mixed");
+      throw new AlayaError("CONFLICT", "capture implementation revision is missing or mixed");
     }
     revision = [...revisions][0];
-    if (revision !== readCurrentExtractionAuthorityRevision()) throw new Error("capture revision does not match the loaded simulator checkout");
+    if (revision !== readCurrentExtractionAuthorityRevision()) throw new AlayaError("CONFLICT", "capture revision does not match the loaded simulator checkout");
     if ([...baseline.values()].some(row => row.implementation_revision !== revision)) {
-      throw new Error("plain baseline revision is missing or differs from the capture candidate");
+      throw new AlayaError("CONFLICT", "plain baseline revision is missing or differs from the capture candidate");
     }
     if (cohort === "dev2") {
-      if (!options.referenceParity) throw new Error("Dev2 requires the independent Original100 parity report");
+      if (!options.referenceParity) throw new AlayaError("VALIDATION", "Dev2 requires the independent Original100 parity report");
       const reference = JSON.parse(readFileSync(options.referenceParity, "utf8"));
       if (reference.authorization !== "original100" || reference.expected !== 100 || reference.matched !== 100
-        || reference.implementation_revision !== revision) throw new Error("Original100 parity does not authorize this candidate");
+        || reference.implementation_revision !== revision) throw new AlayaError("CONFLICT", "Original100 parity does not authorize this candidate");
     }
   }
   mkdirSync(out, { recursive: true });
@@ -150,19 +151,19 @@ export async function runRecallSimulation(options) {
     const expected = baseline.get(id);
     try {
       if (row.status !== "complete" || expected.status !== "complete" || row.pool_capture?.status !== "captured") {
-        throw new Error("capture or baseline incomplete");
+        throw new AlayaError("UNAVAILABLE", "capture or baseline incomplete");
       }
       if (row.question_type !== expected.question_type || row.workspace !== expected.workspace) {
-        throw new Error("capture and S1 question identity differ");
+        throw new AlayaError("CONFLICT", "capture and S1 question identity differ");
       }
       if (manifest !== null) {
         assertPairedScreenInputs(row, expected);
         withRecallSnapshot(expected, () => undefined);
       }
-      if (!sameIntervals(row.intervals, expected.intervals)) throw new Error("capture arm differs from S1 intervals");
+      if (!sameIntervals(row.intervals, expected.intervals)) throw new AlayaError("CONFLICT", "capture arm differs from S1 intervals");
       const order = observedAccessOrder(row.pool_capture);
       const delivery = simulateRecallDelivery(row, order);
-      if (!sameIntervals(delivery.intervals, expected.intervals)) throw new Error("production encoder replay differs from S1 intervals");
+      if (!sameIntervals(delivery.intervals, expected.intervals)) throw new AlayaError("CONFLICT", "production encoder replay differs from S1 intervals");
       parity.push({ question_id: id, status: "matched" });
       nativeRows.push({ question_id: id, question_type: row.question_type, arm: "native", status: "counterfactual",
         snapshot: row.snapshot, snapshot_sha256: row.snapshot_sha256, workspace: row.workspace,
@@ -174,7 +175,7 @@ export async function runRecallSimulation(options) {
   writeFileSync(join(out, "parity.json"), JSON.stringify({ expected: count, matched, authorization,
     implementation_revision: revision, capture: realpathSync(options.capture), baseline: realpathSync(options.baseline),
     capture_arm: options.captureArm ?? null, baseline_arm: options.baselineArm ?? null, rows: parity }, null, 2) + "\n");
-  if (matched !== count) throw new Error(`native parity failed: ${matched}/${count}; no policies were scored`);
+  if (matched !== count) throw new AlayaError("CONFLICT", `native parity failed: ${matched}/${count}; no policies were scored`);
   if (mode === "verify") return { parity, authorization: "none" };
 
   // Policies receive only captured observations and optional question/source representations.
@@ -203,7 +204,7 @@ export async function runRecallSimulation(options) {
 
   const datasetBytes = readFileSync(options.dataset);
   if (createHash("sha256").update(datasetBytes).digest("hex") !== manifest.dataset_sha256) {
-    throw new Error("scoring dataset does not match the frozen cohort");
+    throw new AlayaError("CONFLICT", "scoring dataset does not match the frozen cohort");
   }
   const dataset = new Map(JSON.parse(datasetBytes.toString("utf8")).map(question => [question.question_id, question]));
   const scored = outputRows.map(row => row.status === "unavailable" ? scoreRecallHarnessRow(row, dataset)
@@ -231,7 +232,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     policies: { type: "string" }, coordinates: { type: "string" }, statements: { type: "string" },
     "vector-cache": { type: "string" }, conflicts: { type: "string" }
   } });
-  if (!values.capture || !values.baseline || !values.out) throw new Error("--capture, --baseline and --out are required");
+  if (!values.capture || !values.baseline || !values.out) throw new AlayaError("VALIDATION", "--capture, --baseline and --out are required");
   await runRecallSimulation({ capture: resolve(values.capture), baseline: resolve(values.baseline), out: values.out,
     dataset: resolve(values.dataset ?? join(dirname(fileURLToPath(import.meta.url)), "../data/longmemeval/longmemeval_s.json")),
     captureArm: values["capture-arm"], baselineArm: values["baseline-arm"],

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 export function recallExecutionIdentity(values, execution, revision, chainIdentity) {
   const explicit = ["model", "model-cache", "model-artifact-digest", "source-model", "source-cache", "source-artifact-digest"]
@@ -20,6 +21,6 @@ export function assertRecallCachedPreparation(config, revision, execution, arm) 
   if (config.implementation_revision !== revision || !actual ||
       fields.some(field => !isDeepStrictEqual(actual[field], expected[field])) ||
       expected.windowing !== undefined && actual.windowing !== expected.windowing) {
-    throw new Error("cached Source preparation uses a different execution selection");
+    throw new AlayaError("CONFLICT", "cached Source preparation uses a different execution selection");
   }
 }

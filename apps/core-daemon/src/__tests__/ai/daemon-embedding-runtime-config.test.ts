@@ -23,7 +23,12 @@ describe("separate Source embedding selection", () => {
       [["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/models"]],
       [["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "relative"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]
     ];
-    for (const entries of invalid) expect(() => readEmbeddingRuntimeConfig(new Map(entries), vi.fn(), EXTRA_AVAILABLE)).toThrow(/configured together/);
+    for (const entries of invalid) {
+      let rejected: unknown;
+      try { readEmbeddingRuntimeConfig(new Map(entries), vi.fn(), EXTRA_AVAILABLE); }
+      catch (error) { rejected = error; }
+      expect(rejected).toMatchObject({ code: "VALIDATION", message: "Source index local model and absolute cache directory must be configured together." });
+    }
   });
 
   it("keeps Source configuration independent of the Memory provider", () => {
