@@ -21,6 +21,7 @@ import { isAuthorityRevision } from "../extraction/authority/receipt.js";
 import { SemanticChainSourceIndexBindingSchema } from "./source-index-binding-schema.js";
 import { assertSemanticChainSourceIndex } from "./source-index-binding.js";
 import { SemanticChainSourceFailureSchema } from "./source-index-observation.js";
+import { MemoryEmbeddingProfileSchema, captureMemoryEmbeddingProfile, matchesMemoryEmbeddingProfile, memorySelection } from "./memory-embedding-profile.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const SemanticChainConfigSchema = z.object({
@@ -181,6 +182,8 @@ export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, ro
 async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
   body: (daemon: BenchDaemonHandle) => Promise<T>, options: SemanticChainDaemonOptions): Promise<T> {
   const { signal, embeddingStartupProbe } = options;
+  const selectedMemory = config.source_index === undefined ? undefined : memorySelection(config.source_index);
+  assertMemoryEmbeddingReceipts(config, root, "prior");
   mkdirSync(root, { recursive: true });
   const directory = mkdtempSync(join(root, "native-session-"));
   const snapshotPath = config.snapshot_path;
@@ -198,11 +201,34 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
       ...(options.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: options.sourceSemanticObservations }),
       ...(config.source_index === undefined ? { embeddingMode: "disabled" as const,
         ...(embeddingStartupProbe === undefined ? {} : { embeddingStartupProbe }) } : {
-        embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const, embeddingStartupProbe: "omit" as const,
-        cachedLocalEmbedding: { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } }),
+        embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const,
+        embeddingStartupProbe: config.source_index.memory_warmup ?? "omit" as const,
+        cachedLocalEmbedding: config.source_index.source_scope === "separate" ? config.source_index.memory! :
+          { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id },
+        ...(config.source_index.source_scope === "separate" ? { cachedLocalSourceEmbedding:
+          { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } } : {}) }),
       fieldProjectionAdmissionMode: "explicit_checkpoint" });
     daemon = started;
     if (config.source_index !== undefined) assertSemanticChainSourceIndex(config, restoration.databasePath);
+    if (config.source_index !== undefined && (config.source_index.memory_warmup === "eager" || selectedMemory !== undefined)) {
+      const status = await started.runtime.services.embeddingProviderWarmup;
+      const dimensions = started.runtime.services.getEmbeddingProviderDimensions();
+      const profile = selectedMemory === undefined || config.source_index.memory_warmup === "eager" && status !== "ready"
+        ? undefined : await captureMemoryEmbeddingProfile(started);
+      writeChainArtifact(join(root, "memory-embedding-readiness.json"), { status, dimensions,
+        ...(profile === undefined ? {} : { profile }) });
+      if (config.source_index.memory_warmup === "eager" && status !== "ready") {
+        throw new AlayaError("UNAVAILABLE", "Memory embedding readiness differs from preparation");
+      }
+      if (selectedMemory !== undefined) assertMemoryEmbeddingReceipts(config, root, "started");
+      else if (config.source_index.memory_warmup === "eager") {
+        const preparation = z.object({ memory_readiness: z.object({ dimensions: z.number().int().positive() }) }).passthrough()
+          .parse(readChainArtifact(config.source_index.preparation_path));
+        if (dimensions !== preparation.memory_readiness.dimensions) {
+          throw new AlayaError("UNAVAILABLE", "Memory embedding readiness differs from preparation");
+        }
+      }
+    }
     removeDataDirWhenBenchDaemonCancelled(directory);
     const scope = currentBenchScope();
     if (scope === undefined) throw new AlayaError("CANCELLED", "bench work has no owning scope");
@@ -211,6 +237,11 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     const shutdown = started.shutdown.bind(started);
     started.shutdown = () => { daemonRestorations.delete(started); return shutdown(); };
     const result = await trackBenchBody(scope, () => body(started));
+    if (selectedMemory !== undefined) {
+      const finalProfile = await captureMemoryEmbeddingProfile(started);
+      writeChainArtifact(join(root, "memory-embedding-profile-final.json"), finalProfile);
+      assertMemoryEmbeddingReceipts(config, root, "complete");
+    }
     complete = true;
     return result;
   } catch (error) {
@@ -228,5 +259,44 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
         "semantic chain operation and daemon shutdown failed", { cause: { earlier: operationFailure, cleanup } });
     }
     if (complete) rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/** One receipt authority for daemon recovery and every retained native result consumer. */
+export function assertMemoryEmbeddingReceipts(config: SemanticChainConfig, root: string, mode: "prior" | "started" | "complete"): void {
+  const binding = config.source_index;
+  const selectedMemory = binding === undefined ? undefined : memorySelection(binding);
+  if (binding === undefined || selectedMemory === undefined) return;
+  const readiness = readChainArtifact(join(root, "memory-embedding-readiness.json"));
+  const final = readChainArtifact(join(root, "memory-embedding-profile-final.json"));
+  if (mode === "prior" && readiness === undefined && final === undefined) return;
+  const observed = z.object({ status: z.enum(["not_requested", "ready", "failed"]),
+    dimensions: z.number().int().positive().nullable(), profile: MemoryEmbeddingProfileSchema }).passthrough().safeParse(readiness);
+  const preparation = z.object({ memory_profile: MemoryEmbeddingProfileSchema,
+    memory_readiness: z.object({ status: z.literal("ready"), dimensions: z.number().int().positive() }).optional() }).passthrough()
+    .safeParse(readChainArtifact(binding.preparation_path));
+  const message = mode === "prior" ? "prior Memory embedding profile verification is unresolved or changed"
+    : mode === "started" ? "Loaded Memory embedding profile differs from preparation"
+      : "Loaded Memory embedding profile changed during replay or is unresolved";
+  if (!observed.success || !preparation.success ||
+      !matchesMemoryEmbeddingProfile(observed.data.profile, selectedMemory, observed.data.dimensions) ||
+      canonicalJson(observed.data.profile) !== canonicalJson(preparation.data.memory_profile) ||
+      binding.memory_warmup === "eager" && (observed.data.status !== "ready" ||
+        observed.data.dimensions !== preparation.data.memory_readiness?.dimensions) ||
+      mode !== "started" && final === undefined ||
+      final !== undefined && canonicalJson(observed.data.profile) !== canonicalJson(final)) {
+    throw new AlayaError("CONFLICT", message);
+  }
+}
+
+/** A completed prior daemon may be recovered, but its receipt cannot fund new rows. */
+export function assertMemoryEmbeddingRecovery(config: SemanticChainConfig, root: string, rowPaths: readonly string[]): void {
+  if (config.source_index === undefined || memorySelection(config.source_index) === undefined) return;
+  const hasReceipt = existsSync(join(root, "memory-embedding-readiness.json")) ||
+    existsSync(join(root, "memory-embedding-profile-final.json"));
+  if (!hasReceipt && !rowPaths.some(path => existsSync(path) || existsSync(`${path}.reserved`))) return;
+  assertMemoryEmbeddingReceipts(config, root, "complete");
+  if (rowPaths.some(path => !existsSync(path) || !existsSync(`${path}.reserved`))) {
+    throw new AlayaError("CONFLICT", "completed Memory embedding replay has incomplete durable rows");
   }
 }

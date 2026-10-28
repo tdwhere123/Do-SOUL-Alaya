@@ -133,6 +133,9 @@ async function createBenchDaemonState(
   if (opts.cachedLocalEmbedding !== undefined && (embeddingMode !== "env" || embeddingProviderKind !== "local_onnx" || preparedLaunch !== undefined)) {
     throw new AlayaError("VALIDATION", "cached-local execution requires an explicit local embedding launch");
   }
+  if (opts.cachedLocalSourceEmbedding !== undefined && preparedLaunch !== undefined) {
+    throw new AlayaError("VALIDATION", "separate Source execution requires an explicit bench launch");
+  }
   const launch = preparedLaunch ?? createBenchDaemonLaunchConfig({
     dataDir,
     embeddingMode,
@@ -141,6 +144,7 @@ async function createBenchDaemonState(
     sqliteWriteQueue: opts.sqliteWriteQueue,
     gardenCompute: opts.gardenCompute,
     embeddingStartupProbe: opts.embeddingStartupProbe,
+    cachedLocalSourceEmbedding: opts.cachedLocalSourceEmbedding,
     ...(opts.cachedLocalEmbedding === undefined ? {} : { ambientEnv: { ...process.env,
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: opts.cachedLocalEmbedding.cache_root,
       ALAYA_LOCAL_EMBEDDING_MODEL: opts.cachedLocalEmbedding.model_id } }),

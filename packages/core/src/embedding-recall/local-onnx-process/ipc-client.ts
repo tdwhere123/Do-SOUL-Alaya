@@ -13,6 +13,7 @@ import {
   type LocalOnnxEmbeddingIpcSuccess
 } from "./protocol.js";
 import { decodeLocalOnnxIpcVectors, decodeLocalOnnxSourceResults } from "./vectors.js";
+import { localOnnxSourceModelContract } from "../local-onnx-source-contract.js";
 import { createEmbeddingDeadline } from "../local-onnx-inference-budget.js";
 import {
   captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, captureSourceEmbeddingBindingOptions, sourceEmbeddingRefusals,
@@ -152,7 +153,11 @@ export class LocalOnnxEmbeddingIpcSession {
       if (binding.status !== "ready" || typeof binding.binding_id !== "string" || !binding.binding_id ||
           typeof binding.profile_id !== "string") throw new CoreError("OBLIGATION_VIOLATION", "Invalid child Source binding");
       const profile = captureSourceEmbeddingProfile(binding.profile, binding.profile_id);
-      if (profile.model_id !== this.modelId || profile.provider_kind !== "local_onnx" || profile.dimensions !== 384 ||
+      const contract = localOnnxSourceModelContract(this.modelId);
+      if (profile.model_id !== this.modelId || profile.provider_kind !== "local_onnx" || profile.dimensions !== contract.dimensions ||
+          contract.sourceOnly && (profile.normalization !== contract.normalization ||
+            !profile.preprocessing.startsWith(`${contract.preprocessing};`) || profile.representation !== undefined ||
+            profile.max_input_tokens > contract.maxInputTokens!) ||
           profile.window_bytes !== captured.window_bytes ||
           profile.windowing !== captured.windowing ||
           canonicalJson(profile.representation ?? null) !== canonicalJson(captured.representation ?? null) ||

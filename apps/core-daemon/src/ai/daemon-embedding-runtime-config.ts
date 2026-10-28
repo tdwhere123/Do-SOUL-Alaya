@@ -5,6 +5,7 @@ import {
   type LocalOnnxTransformersProbe
 } from "@do-soul/alaya-core";
 import type { EmbeddingProviderKind } from "@do-soul/alaya-protocol";
+import { isAbsolute } from "node:path";
 import type { ResolveSecretError } from "../secrets/index.js";
 import { resolveSecretRef } from "../secrets/index.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../runtime/config/daemon-config-environment.js";
@@ -33,6 +34,7 @@ export interface EmbeddingRuntimeConfig {
   readonly embeddingProviderKind: EffectiveEmbeddingProviderKind;
   readonly localEmbeddingCacheDir: string | null;
   readonly localEmbeddingModel: string | null;
+  readonly sourceLocalEmbedding: Readonly<{ cacheDir: string; modelId: string }> | null;
   readonly embeddingSupplementEnabled: boolean;
   readonly recallPolicyEmbeddingEnabled: boolean;
   readonly d2qEnabled: boolean;
@@ -76,6 +78,11 @@ export function readEmbeddingRuntimeConfig(
     embedding_supplement_enabled: posture.embeddingSupplementEnabled,
     local_onnx_availability: posture.localOnnxAvailability
   });
+  const sourceCacheDir = readNonEmptyEnv(readConfigEnvValue(configEnv, EMBEDDING_KEYS.sourceLocalCacheDir));
+  const sourceModelId = readNonEmptyEnv(readConfigEnvValue(configEnv, EMBEDDING_KEYS.sourceLocalModel));
+  if ((sourceCacheDir === null) !== (sourceModelId === null) || sourceCacheDir !== null && !isAbsolute(sourceCacheDir)) {
+    throw new Error("Source index local model and absolute cache directory must be configured together.");
+  }
   return {
     embeddingApiKey: posture.providerKind === "openai"
       ? resolveOpenAiEmbeddingApiKey(readConfigEnvValue(configEnv, EMBEDDING_KEYS.openaiSecretRef), posture)
@@ -93,6 +100,7 @@ export function readEmbeddingRuntimeConfig(
     localEmbeddingModel: readNonEmptyEnv(
       readConfigEnvValue(configEnv, EMBEDDING_KEYS.localModel)
     ),
+    sourceLocalEmbedding: sourceCacheDir === null || sourceModelId === null ? null : { cacheDir: sourceCacheDir, modelId: sourceModelId },
     embeddingSupplementEnabled: posture.embeddingSupplementEnabled,
     recallPolicyEmbeddingEnabled: posture.embeddingSupplementEnabled,
     d2qEnabled: parseEnvBoolean(

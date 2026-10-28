@@ -9,6 +9,7 @@ import type {
   LocalOnnxFeatureExtractor, LocalOnnxPipelineOptions, LocalOnnxEmbeddingTransformersModule
 } from "./local-onnx-embedding-client.js";
 import { snapshotLocalOnnxArtifacts, type VerifiedLocalOnnxArtifacts } from "./local-onnx-artifacts.js";
+import { localOnnxSourceModelContract, type LocalOnnxSourceModelContract } from "./local-onnx-source-contract.js";
 import {
   captureSourceEmbeddingInputs, captureSourceEmbeddingBindingOptions, prepareSourceEmbeddingText,
   sourceEmbeddingInputDigest, sourceEmbeddingRefusals, sourceEmbeddingSha256,
@@ -77,13 +78,16 @@ export async function loadVerifiedLocalOnnxExtractor(modelId: string, cacheDir: 
         ...(options.sessionOptions === undefined ? {} : { session_options: options.sessionOptions }) }
     )) as LoadedPipeline;
     // Both limits must come from the loaded encoder/tokenizer, not a model-name guess.
-    const maxTokens = Math.min(pipeline.tokenizer.model_max_length, pipeline.model.config.max_position_embeddings ?? NaN);
-    if (pipeline.model.config.model_type !== "bert" || pipeline.model.config.hidden_size !== 384 ||
-        artifacts.config.hidden_size !== 384 || !Number.isSafeInteger(maxTokens) || maxTokens < 1) {
+    const contract = localOnnxSourceModelContract(modelId);
+    const maxTokens = Math.min(pipeline.tokenizer.model_max_length, pipeline.model.config.max_position_embeddings ?? NaN,
+      contract.maxInputTokens ?? Number.MAX_SAFE_INTEGER);
+    if (pipeline.model.config.model_type !== contract.modelType || pipeline.model.config.hidden_size !== contract.dimensions ||
+        artifacts.config.hidden_size !== contract.dimensions || contract.sourceOnly && artifacts.config.model_type !== contract.modelType ||
+        !Number.isSafeInteger(maxTokens) || maxTokens < 1) {
       throw new CoreError("VALIDATION", "Unsupported local ONNX encoder dimensions or token limits");
     }
     const runtimeVersion = await installedRuntimeVersion(transformers.env.version);
-    const runtime = createLoadedSourceRuntime(modelId, pipeline, artifacts, maxTokens, runtimeVersion, transformers.mean_pooling);
+    const runtime = createLoadedSourceRuntime(modelId, pipeline, artifacts, contract, maxTokens, runtimeVersion, transformers.mean_pooling);
     // Tokenizer and ORT sessions are fully loaded. Retain their descriptor, not disposable disk copies.
     await artifacts.dispose();
     const extractor: LocalOnnxFeatureExtractor = (texts, callOptions) => pipeline!(texts, callOptions);
@@ -95,7 +99,7 @@ export async function loadVerifiedLocalOnnxExtractor(modelId: string, cacheDir: 
   }
 }
 
-function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, artifacts: VerifiedLocalOnnxArtifacts,
+function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, artifacts: VerifiedLocalOnnxArtifacts, contract: LocalOnnxSourceModelContract,
   maxTokens: number, runtimeVersion: string, meanPool: (tensor: Tensor, mask: Tensor) => Tensor): LocalOnnxLoadedSourceRuntime {
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -104,13 +108,14 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
     bind: options => {
       const captured = captureSourceEmbeddingBindingOptions(options);
       if (closed) return { status: "unsupported", reason: "runtime_closed" };
+      if (contract.sourceOnly && captured.representation !== undefined) return { status: "unsupported", reason: "source_representation_unsupported" };
       const profile = SourceIndexProfileSchema.parse({ provider_kind: "local_onnx", model_id: modelId,
         model_revision: `sha256:${artifacts.weightSha256}`, artifact_digest: `sha256:${artifacts.treeSha256}`,
         // Full tree includes tokenizer.json, tokenizer config and special token definitions.
-        tokenizer_revision: `sha256:${artifacts.treeSha256}`, dimensions: 384,
-        preprocessing: `${captured.representation === undefined ? "raw-string" : "paired-prefix"}.special-tokens.no-truncation.v1;${runtimeVersion}`,
+        tokenizer_revision: `sha256:${artifacts.treeSha256}`, dimensions: contract.dimensions,
+        preprocessing: `${contract.preprocessing ?? `${captured.representation === undefined ? "raw-string" : "paired-prefix"}.special-tokens.no-truncation.v1`};${runtimeVersion}`,
         ...(captured.representation === undefined ? {} : { representation: captured.representation }),
-        normalization: "attention-mask-mean.l2.q8.v1", max_input_tokens: Math.min(maxTokens, captured.max_input_tokens ?? maxTokens),
+        normalization: contract.normalization, max_input_tokens: Math.min(maxTokens, captured.max_input_tokens ?? maxTokens),
         windowing: captured.windowing, window_bytes: captured.window_bytes });
       const profileId = sourceIndexProfileId(profile, sourceEmbeddingSha256);
       return Object.freeze<SourceEmbeddingBinding>({ status: "ready", profile, profile_id: profileId,
@@ -120,7 +125,7 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
           const reason = closed ? "runtime_closed" : callOptions.profile_id !== profileId ? "profile_mismatch"
             : callOptions.signal?.aborted ? "cancelled" : null;
           if (reason !== null) return Promise.resolve(sourceEmbeddingRefusals(capturedInputs, reason));
-          const work = embedPreparedInputs(pipeline, meanPool, capturedInputs, profile, callOptions.signal);
+          const work = embedPreparedInputs(pipeline, meanPool, contract, capturedInputs, profile, callOptions.signal);
           pending.add(work);
           void work.finally(() => pending.delete(work)).catch(() => undefined);
           return work.then(results => closed || callOptions.signal?.aborted
@@ -139,7 +144,7 @@ function createLoadedSourceRuntime(modelId: string, pipeline: LoadedPipeline, ar
 }
 
 async function embedPreparedInputs(pipeline: LoadedPipeline, meanPool: (tensor: Tensor, mask: Tensor) => Tensor,
-  inputs: readonly SourceEmbeddingInput[], profile: SourceIndexProfile,
+  contract: LocalOnnxSourceModelContract, inputs: readonly SourceEmbeddingInput[], profile: SourceIndexProfile,
   signal?: AbortSignal): Promise<readonly SourceEmbeddingResult[]> {
   const results: SourceEmbeddingResult[] = [];
   for (const input of inputs) {
@@ -169,11 +174,13 @@ async function embedPreparedInputs(pipeline: LoadedPipeline, meanPool: (tensor: 
       if (signal?.aborted) throw new CoreError("CONFLICT", "cancelled", { cause: signal.reason });
       const output = await pipeline.model(prepared);
       if (signal?.aborted) throw new CoreError("CONFLICT", "cancelled", { cause: signal.reason });
-      const hidden = output.last_hidden_state ?? output.logits ?? output.token_embeddings;
+      const hidden = contract.pooling === "cls" ? output.last_hidden_state ?? output.token_embeddings
+        : output.last_hidden_state ?? output.logits ?? output.token_embeddings;
       if (!hidden || hidden.dims[0] !== 1 || hidden.dims[1] !== tokenCount || hidden.dims[2] !== profile.dimensions) {
         throw new CoreError("OBLIGATION_VIOLATION", "invalid_model_output");
       }
-      const rows = meanPool(hidden, prepared.attention_mask).normalize(2, -1).tolist();
+      const pooled = contract.pooling === "cls" ? hidden.slice(null, 0) : meanPool(hidden, prepared.attention_mask);
+      const rows = pooled.normalize(2, -1).tolist();
       results.push(validateSourceEmbeddingResults([input], [{ ...evidence, ...preparation, status: "embedded",
         vector: new Float32Array(rows[0]!), token_count: tokenCount, truncated: false }], profile)[0]!);
     } catch (error) {

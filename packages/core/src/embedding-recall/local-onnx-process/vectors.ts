@@ -23,14 +23,14 @@ export function decodeLocalOnnxIpcVectors(
   return Object.freeze(Array.from(rows, (row, index) => decodeLocalOnnxIpcRow(row, index)));
 }
 
-function decodeLocalOnnxIpcRow(row: unknown, index: number): Float32Array {
+function decodeLocalOnnxIpcRow(row: unknown, index: number, dimensions = LOCAL_ONNX_EMBEDDING_DIMENSIONS): Float32Array {
   if (!Array.isArray(row) || row.length === 0) {
     throw new Error(`Local ONNX embedding row ${index} was empty.`);
   }
-  if (row.length !== LOCAL_ONNX_EMBEDDING_DIMENSIONS) {
+  if (row.length !== dimensions) {
     throw new Error(
       `Local ONNX embedding row ${index} had ${row.length} dimensions; ` +
-        `expected ${LOCAL_ONNX_EMBEDDING_DIMENSIONS}.`
+        `expected ${dimensions}.`
     );
   }
   const values = new Float32Array(row.length);
@@ -54,7 +54,7 @@ export function decodeLocalOnnxSourceResults(rows: readonly LocalOnnxSourceResul
   if (rows.length !== inputs.length) {
     throw new CoreError("OBLIGATION_VIOLATION", "Source embedding result count mismatch");
   }
-  const results = Array.from(rows, row => row.status === "embedded" ? { ...row, vector: decodeLocalOnnxIpcRow(row.vector, 0) } : row);
+  const results = Array.from(rows, row => row.status === "embedded" ? { ...row, vector: decodeLocalOnnxIpcRow(row.vector, 0, profile.dimensions) } : row);
   return validateSourceEmbeddingResults(inputs, results, profile);
 }
 

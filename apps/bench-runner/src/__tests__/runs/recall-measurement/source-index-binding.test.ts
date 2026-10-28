@@ -69,7 +69,8 @@ function setup(empty = false, sources = 2) {
 const producerPassRemaining: Array<SourceIndexProducerPassRemaining | undefined> = [];
 const nativeShutdown = new WeakMap<object, ReturnType<typeof vi.fn>>();
 function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-local-model",
-  fault?: "backfill_failed" | "token_limit" | "binding_failed") {
+  fault?: "backfill_failed" | "token_limit" | "binding_failed", memoryStatus: "ready" | "failed" = "ready",
+  memoryDigest = `sha256:${"c".repeat(64)}`, laterMemoryDigest = memoryDigest) {
   const checkpoint = vi.fn(async () => undefined);
   producerPassRemaining.length = 0;
   vi.mocked(startBenchDaemon).mockImplementation(async options => {
@@ -96,7 +97,15 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
           } };
       } });
     const shutdown = vi.fn(async () => { await producer.stop(); database.close(); });
-    const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining,
+    let memoryBinds = 0;
+    const handle = { dataDir: options!.dataDirRoot!, runtime: { services: {
+      embeddingProviderWarmup: Promise.resolve(memoryStatus), getEmbeddingProviderDimensions: () => memoryStatus === "ready" ? 384 : null,
+      bindMemoryEmbeddingProfile: async () => {
+        const profile = configuration({ provider_kind: "local_onnx", model_id: options!.cachedLocalEmbedding?.model_id ?? "fixture-memory-model",
+          dimensions: 384, artifact_digest: ++memoryBinds === 1 ? memoryDigest : laterMemoryDigest, window_bytes: 4 }).profile;
+        return { status: "ready", profile, profile_id: sourceIndexProfileId(profile, fieldContractSha256) };
+      }
+    }, runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining,
       representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
       windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing) => {
       producerPassRemaining.push(remaining);
@@ -111,6 +120,78 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
   });
   return checkpoint;
 }
+
+it("binds separate Source and Memory selections, preserving actual Memory readiness through preparation and replay", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false);
+  const separate = { ...execution, source_scope: "separate" as const, artifact_digest: `sha256:${"a".repeat(64)}`,
+    memory: { cache_root: join(root, "memory-cache"), model_id: "fixture-memory-model", artifact_digest: `sha256:${"c".repeat(64)}` },
+    memory_warmup: "eager" as const };
+  const prepared = await prepareSemanticChainSourceIndex(config, separate, join(root, "separate"));
+  expect(prepared.report).toMatchObject({ memory_readiness: { status: "ready", dimensions: 384 },
+    memory_profile: { status: "ready", profile: { artifact_digest: separate.memory.artifact_digest } }, execution: separate });
+  if (prepared.config === null) throw new Error("fixture Source generation must activate");
+  expect(startBenchDaemon).toHaveBeenLastCalledWith(expect.objectContaining({ embeddingStartupProbe: "eager",
+    cachedLocalEmbedding: separate.memory, cachedLocalSourceEmbedding: expect.objectContaining(execution) }));
+  const restoredRoot = join(root, "separate-replay");
+  await withSemanticChainDaemon(prepared.config, restoredRoot, async () => undefined);
+  expect(readChainArtifact(join(restoredRoot, "memory-embedding-readiness.json"))).toMatchObject({ status: "ready", dimensions: 384,
+    profile: { status: "ready", profile: { artifact_digest: separate.memory.artifact_digest } } });
+  expect(readChainArtifact(join(restoredRoot, "memory-embedding-profile-final.json")))
+    .toMatchObject({ status: "ready", profile: { artifact_digest: separate.memory.artifact_digest } });
+  bindProducer(false, 8, "fixture-local-model", undefined, "ready", `sha256:${"d".repeat(64)}`);
+  await expect(withSemanticChainDaemon(prepared.config, join(root, "changed-memory-replay"), async () => undefined))
+    .rejects.toThrow(/Memory embedding profile differs/u);
+  expect(readChainArtifact(join(root, "changed-memory-replay", "memory-embedding-readiness.json")))
+    .toMatchObject({ profile: { status: "ready", profile: { artifact_digest: `sha256:${"d".repeat(64)}` } } });
+  bindProducer(false, 8, "fixture-local-model", undefined, "ready", separate.memory.artifact_digest, `sha256:${"d".repeat(64)}`);
+  await expect(withSemanticChainDaemon(prepared.config, join(root, "memory-changed-during-replay"), async () => undefined))
+    .rejects.toThrow(/Memory embedding profile changed during replay/u);
+  expect(readChainArtifact(join(root, "memory-changed-during-replay", "memory-embedding-profile-final.json")))
+    .toMatchObject({ status: "ready", profile: { artifact_digest: `sha256:${"d".repeat(64)}` } });
+  bindProducer(false);
+  const recover = vi.fn(async () => undefined);
+  await expect(withSemanticChainDaemon(prepared.config, join(root, "memory-changed-during-replay"), recover))
+    .rejects.toThrow(/prior Memory embedding profile verification is unresolved or changed/u);
+  expect(recover).not.toHaveBeenCalled();
+  await expect(withSemanticChainDaemon(prepared.config, join(root, "memory-profile-unresolved"), async () => {
+    throw new Error("fixture interruption");
+  })).rejects.toThrow(/fixture interruption/u);
+  await expect(withSemanticChainDaemon(prepared.config, join(root, "memory-profile-unresolved"), recover))
+    .rejects.toThrow(/prior Memory embedding profile verification is unresolved or changed/u);
+  expect(recover).not.toHaveBeenCalled();
+});
+
+it("retains the actual Memory artifact mismatch before starting Source preparation", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false);
+  const separate = { ...execution, source_scope: "separate" as const, artifact_digest: `sha256:${"a".repeat(64)}`,
+    memory: { cache_root: join(root, "memory-cache"), model_id: "fixture-memory-model", artifact_digest: `sha256:${"d".repeat(64)}` } };
+  const result = await prepareSemanticChainSourceIndex(config, separate, join(root, "memory-artifact-mismatch"));
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({ reason: "memory_artifact_mismatch", setup: { status: "not_run", reason: "memory_artifact_mismatch" },
+    memory_profile: { status: "ready", profile: { artifact_digest: `sha256:${"c".repeat(64)}` } } });
+  expect(producerPassRemaining).toHaveLength(0);
+});
+
+it("retains Memory warmup failure and never starts the Source producer", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false, 8, "fixture-local-model", undefined, "failed");
+  const result = await prepareSemanticChainSourceIndex(config, { ...execution, memory_warmup: "eager" }, join(root, "memory-failed"));
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({ reason: "memory_provider_not_ready", memory_readiness: { status: "failed", dimensions: null },
+    setup: { status: "not_run", reason: "memory_provider_not_ready" } });
+  expect(producerPassRemaining).toHaveLength(0);
+});
+
+it("does not publish a Source preparation under a different artifact digest", async () => {
+  const { root, config, execution } = setup();
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, { ...execution, source_scope: "separate", artifact_digest: `sha256:${"b".repeat(64)}`,
+    memory: { cache_root: join(root, "memory-cache"), model_id: "fixture-memory-model", artifact_digest: `sha256:${"c".repeat(64)}` } }, join(root, "artifact-mismatch"));
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({ reason: "source_artifact_mismatch" });
+});
 
 it.each([undefined, "recorded-message-windows.v1"] as const)(
   "seals the producer's resolved window strategy for requested %s without reinterpreting receipt defaults", async windowing => {
@@ -440,6 +521,10 @@ it("rejects output aliases into inputs and leaves disabled configuration unbound
   const { root, config, execution } = setup();
   mkdirSync(execution.cache_root);
   await expect(prepareSemanticChainSourceIndex(config, execution, join(execution.cache_root, "output"))).rejects.toThrow(/overlaps/u);
+  const memoryCache = join(root, "memory-cache"); mkdirSync(memoryCache);
+  await expect(prepareSemanticChainSourceIndex(config, { ...execution, source_scope: "separate", artifact_digest: `sha256:${"a".repeat(64)}`,
+    memory: { cache_root: memoryCache, model_id: "fixture-memory-model", artifact_digest: `sha256:${"c".repeat(64)}` } },
+    join(memoryCache, "output"))).rejects.toThrow(/overlaps/u);
   await expect(prepareSemanticChainSourceIndex(config, { ...execution, cache_root: "relative-cache" }, join(root, "output"))).rejects.toThrow();
   expect(config.source_index).toBeUndefined();
   expect(startBenchDaemon).not.toHaveBeenCalled();

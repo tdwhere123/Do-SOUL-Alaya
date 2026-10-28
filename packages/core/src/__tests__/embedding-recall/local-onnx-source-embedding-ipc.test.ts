@@ -18,6 +18,29 @@ afterEach(async () => {
 
 // Real fork/IPC and deterministic fixture evidence; no tokenizer, model, or provider execution.
 describe("Source embedding (real fork transport, fixture capability)", () => {
+  it("binds and transports a 1024-dimensional Source-only model without exposing legacy embeddings", async () => {
+    const tracking = forkFixture();
+    const client = openClient(tracking.host, "Xenova/bge-m3");
+    const binding = await bind(client);
+    expect(binding.profile).toMatchObject({ model_id: "Xenova/bge-m3", dimensions: 1024, normalization: "cls.l2.q8.v1" });
+    const result = await binding.embedInputs([{ input_id: "source", text: "raw" }], { profile_id: binding.profile_id, timeoutMs: 5_000 });
+    expect(result[0]).toMatchObject({ status: "embedded", token_count: 3, truncated: false });
+    if (result[0]?.status !== "embedded") throw new Error("fixture must embed");
+    expect(result[0].vector).toHaveLength(1024);
+    await expect(client.embedTexts(["memory"], { timeoutMs: 5_000 })).rejects.toThrow(/Source-only/);
+    expect(tracking.requests.some(request => request.op === "embed")).toBe(false);
+  });
+
+  it("rejects a Source-only child that advertises the wrong pooling contract", async () => {
+    const tracking = forkFixture({ response(response, request) {
+      if (request.op !== "bind_source" || response.sourceBinding?.status !== "ready") return;
+      const binding = response.sourceBinding, profile = { ...binding.profile, normalization: "attention-mask-mean.l2.q8.v1" };
+      response.sourceBinding = { ...binding, profile, profile_id: sourceIndexProfileId(profile, sha256) };
+    } });
+    await expect(openClient(tracking.host, "Xenova/bge-m3").bindSourceEmbedding({ window_bytes: 1024 }))
+      .rejects.toThrow(/profile/i);
+  });
+
   it("binds the child's profile and preserves raw input evidence with deterministic fixture vectors", async () => {
     const tracking = forkFixture();
     const client = openClient(tracking.host);
@@ -333,8 +356,8 @@ function forkFixture(hooks: {
   return tracking;
 }
 
-function openClient(host: LocalOnnxEmbeddingIpcHost): LocalOnnxEmbeddingClient {
-  const client = new LocalOnnxEmbeddingClient({ ipcHost: host });
+function openClient(host: LocalOnnxEmbeddingIpcHost, modelId?: string): LocalOnnxEmbeddingClient {
+  const client = new LocalOnnxEmbeddingClient({ ipcHost: host, ...(modelId === undefined ? {} : { modelId }) });
   clients.push(client);
   return client;
 }

@@ -29,10 +29,12 @@ async function handle(message) {
     return;
   }
   if (op === "bind_source") {
+    const sourceDimensions = message.modelId === "Xenova/bge-m3" ? 1024 : DIMENSIONS;
     const profile = {
       provider_kind: "local_onnx", model_id: message.modelId, model_revision: "fork-fixture-only",
       artifact_digest: `sha256:${"a".repeat(64)}`, tokenizer_revision: "fork-fixture-tokenizer",
-      dimensions: DIMENSIONS, preprocessing: "fixture-raw", normalization: "fixture-unit",
+      dimensions: sourceDimensions, preprocessing: sourceDimensions === 1024 ? "raw-string.special-tokens.no-truncation.v1;fixture" : "fixture-raw",
+      normalization: sourceDimensions === 1024 ? "cls.l2.q8.v1" : "fixture-unit",
       max_input_tokens: message.bindingOptions.max_input_tokens ?? 32,
       windowing: message.bindingOptions.windowing ?? "utf8-byte-windows.v1", window_bytes: message.bindingOptions.window_bytes
     };
@@ -59,7 +61,7 @@ async function handle(message) {
     if (inputs[0]?.text === "__crash__") { process.exit(7); return; }
     process.send({ id, ok: true, sourceBinding: binding, sourceResults: inputs.map((input, index) => ({
       status: "embedded", input_id: input.input_id, input_digest: `sha256:${sha256(input.text)}`,
-      vector: stubRow(index), token_count: 3, truncated: false
+      vector: stubRow(index, binding.profile.dimensions), token_count: 3, truncated: false
     })) });
     return;
   }
@@ -97,8 +99,8 @@ async function handle(message) {
 
 function sha256(text) { return createHash("sha256").update(text, "utf8").digest("hex"); }
 
-function stubRow(seed) {
-  return Array.from({ length: DIMENSIONS }, (_unused, index) =>
+function stubRow(seed, dimensions = DIMENSIONS) {
+  return Array.from({ length: dimensions }, (_unused, index) =>
     Math.sin(seed + index + 1) * 0.01
   );
 }

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SoulInterpretationResponse, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
@@ -16,7 +16,7 @@ import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import type { SourceSemanticObservedCall } from "../../../../core-daemon/src/runtime/recall/source-semantic-observation.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { admitSealedSemanticChainLibraryDelivery, semanticChainLibraryRecallRequest } from "./library-admission.js";
-import { assertChainSnapshot, chainIdentity, readChainArtifact, SemanticChainPlanSchema, withSemanticChainDaemon,
+import { assertChainSnapshot, assertMemoryEmbeddingReceipts, chainIdentity, readChainArtifact, SemanticChainPlanSchema, withSemanticChainDaemon,
   writeChainArtifact, type SemanticChainPlan } from "./contract.js";
 import { readSemanticChainCorrespondences, semanticChainCacheInputPaths, semanticChainQueryCorrespondences,
   verifySemanticChainQueries } from "./inputs.js";
@@ -211,6 +211,10 @@ export function admitSemanticChainLibraryCapture(root: string, outputRoot: strin
   const retained = readSemanticChainCorrespondences(plan, header.arm);
   if (identity !== chainIdentity(material) || output !== header.output_root || header.plan_identity !== chainIdentity(plan)
     || header.correspondence_identity !== retained.identity) throw new AlayaError("CONFLICT", "library capture owner changed");
+  if (plan.queries.some(query => query.status !== "blocked" && ["initial.json", "execution-observation.json"]
+    .some(name => existsSync(join(output, query.query_key, name))))) {
+    assertMemoryEmbeddingReceipts(plan.config, output, "complete");
+  }
   const aggregate = readChainArtifact(join(output, "capture.json"));
   if (aggregate !== undefined) same(aggregate, { contract: CONTRACT, identity, query_keys: plan.queries.map(query => query.query_key) });
   const rows = plan.queries.map((query): SemanticChainLibraryCaptureRow => {

@@ -50,6 +50,8 @@ export const BENCH_DAEMON_MANAGED_ENV_KEYS = [
   "ALAYA_EMBEDDING_PROVIDER",
   "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
   "ALAYA_LOCAL_EMBEDDING_MODEL",
+  "ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR",
+  "ALAYA_SOURCE_INDEX_LOCAL_MODEL",
   "ALAYA_LOCAL_ONNX_THREADS",
   "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
   "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
@@ -101,6 +103,7 @@ export function createBenchDaemonLaunchConfig(input: {
   readonly sqliteWriteQueue?: BenchDaemonOptions["sqliteWriteQueue"];
   readonly gardenCompute?: BenchDaemonOptions["gardenCompute"];
   readonly embeddingStartupProbe?: BenchDaemonOptions["embeddingStartupProbe"];
+  readonly cachedLocalSourceEmbedding?: BenchDaemonOptions["cachedLocalSourceEmbedding"];
   readonly dataDir: string;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
@@ -190,11 +193,14 @@ function buildBenchDaemonEnvironment(input: {
   readonly configDir: string;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
+  readonly cachedLocalSourceEmbedding?: BenchDaemonOptions["cachedLocalSourceEmbedding"];
   readonly openAiSecretRef: string;
   readonly ambientEnv: Readonly<Record<string, string | undefined>>;
   readonly reviewerCredentials: BenchReviewerCredentials;
 }): BenchDaemonEnvironment {
   const environment: Record<string, string | undefined> = { ...input.ambientEnv };
+  setEnvironmentValue(environment, "ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", input.cachedLocalSourceEmbedding?.cache_root);
+  setEnvironmentValue(environment, "ALAYA_SOURCE_INDEX_LOCAL_MODEL", input.cachedLocalSourceEmbedding?.model_id);
   setEnvironmentValue(environment, "DATA_DIR", input.dataDir);
   applyEmbeddingEnvironment(environment, input);
   if (input.sqliteWriteQueue === "disabled") environment.ALAYA_SQLITE_WRITE_QUEUE = "0";

@@ -20,6 +20,8 @@ export function semanticChainCacheInputPaths(value: unknown): readonly string[] 
     const path = retainedArtifactPathField(value, "config", "source_index", key);
     if (path !== undefined) paths.push(path);
   }
+  const memoryCache = retainedArtifactPathField(value, "config", "source_index", "memory", "cache_root");
+  if (memoryCache !== undefined) paths.push(memoryCache);
   const tokens = retainedArtifactField(value, "config", "max_output_tokens");
   const generationCap = retainedArtifactField(value, "config", "correspondence_generation", "max_output_tokens");
   const correspondenceTokens = typeof generationCap === "number" ? generationCap : tokens;

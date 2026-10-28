@@ -16,7 +16,7 @@ import {
   type EmbeddingRecallServiceDependencies,
   type HqProvider
 } from "@do-soul/alaya-core";
-import { parseEnvBoolean, type RecallPolicy } from "@do-soul/alaya-protocol";
+import { parseEnvBoolean, type RecallPolicy, type SourceIndexProfile } from "@do-soul/alaya-protocol";
 import {
   RecallQualifiedEvidenceReader,
   type SqliteMemoryEntryRepo,
@@ -49,6 +49,9 @@ import {
 import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
 
 export type EmbeddingStartupProbe = "eager" | "omit";
+export type LoadedMemoryEmbeddingProfile =
+  | Readonly<{ status: "ready"; profile_id: string; profile: SourceIndexProfile }>
+  | Readonly<{ status: "unsupported"; reason: string }>;
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
@@ -62,6 +65,7 @@ export function createDaemonEmbeddingRuntime(input: {
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
   readonly embeddingProviderOverride?: EmbeddingProviderPort | null;
+  readonly sourceEmbeddingProviderOverride?: EmbeddingProviderPort | null;
   readonly localOnnxTransformersProbe?: LocalOnnxTransformersProbe;
 }) {
   const runtimeConfig = readEmbeddingRuntimeConfig(
@@ -70,6 +74,7 @@ export function createDaemonEmbeddingRuntime(input: {
     resolveLocalOnnxTransformersProbe(input)
   );
   const providerState = createEmbeddingProviderState(input, runtimeConfig);
+  const sourceState = createSourceEmbeddingProviderState(input, runtimeConfig, providerState);
   const services = createEmbeddingRuntimeServices(input, runtimeConfig, providerState);
 
   return {
@@ -79,18 +84,38 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
-    // Source/query preparation uses the same provider, independently of memory backfill storage.
+    // A separately selected Source provider is shared by index preparation and query binding only.
     bindSourceEmbedding: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
-      providerState.embeddingProvider?.bindSourceEmbedding?.(structuredClone(options)) ??
-        Promise.resolve({ status: "unsupported" as const, reason: providerState.embeddingProvider === null
+      runtimeConfig.sourceLocalEmbedding !== null ? bindLocalSourceIndex(sourceState.provider, options) :
+      sourceState.provider?.bindSourceEmbedding?.(structuredClone(options)) ??
+        Promise.resolve({ status: "unsupported" as const, reason: sourceState.provider === null
           ? "embedding_provider_unavailable" : "provider_source_evidence_pending" }),
     // Source-index producer binds only a cached local runtime. Missing/API providers stay unbound.
     bindLocalSourceIndex: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
-      bindLocalSourceIndex(providerState.embeddingProvider, options),
+      bindLocalSourceIndex(sourceState.provider, options),
     getProviderDimensions: () => providerState.readiness.dimensions,
+    getSourceProviderDimensions: () => sourceState.readiness.dimensions,
+    bindMemoryEmbeddingProfile: async (): Promise<LoadedMemoryEmbeddingProfile> => {
+      const binding = await bindLocalSourceIndex(providerState.embeddingProvider, { window_bytes: 4 });
+      return binding.status === "ready" ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
+    },
     getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status),
-    closeProvider: () => closeEmbeddingProvider(providerState.embeddingProvider)
+    closeProvider: () => closeEmbeddingProviders(providerState.embeddingProvider, sourceState.provider)
   };
+}
+
+function createSourceEmbeddingProviderState(
+  input: Parameters<typeof createDaemonEmbeddingRuntime>[0], config: EmbeddingRuntimeConfig, memory: EmbeddingProviderState
+): Readonly<{ provider: EmbeddingProviderPort | null; readiness: EmbeddingProviderReadiness }> {
+  if (config.sourceLocalEmbedding === null) return { provider: memory.embeddingProvider, readiness: memory.readiness };
+  const resolved = input.sourceEmbeddingProviderOverride === undefined ? new LocalOnnxEmbeddingClient({
+    env: processEnvLookup(), cacheDir: config.sourceLocalEmbedding.cacheDir, modelId: config.sourceLocalEmbedding.modelId
+  }) : input.sourceEmbeddingProviderOverride;
+  if (resolved !== null && resolved === input.embeddingProviderOverride) {
+    throw new Error("Separately selected Source provider must not share the Memory provider instance.");
+  }
+  const readiness = createEmbeddingProviderReadiness(resolved);
+  return { provider: observeEmbeddingProviderReadiness(resolved, readiness), readiness };
 }
 
 interface EmbeddingProviderState {
@@ -119,6 +144,9 @@ function createEmbeddingProviderState(
     localSchemaVersion: isD2qActive(config) ? D2Q_SCHEMA_VERSION : null,
     providerOverride: input.embeddingProviderOverride
   });
+  if (resolvedProvider instanceof LocalOnnxEmbeddingClient && resolvedProvider.sourceOnly) {
+    throw new Error("Source-only local ONNX models cannot be selected as the Memory provider.");
+  }
   const readiness = createEmbeddingProviderReadiness(resolvedProvider);
   const embeddingProvider = observeEmbeddingProviderReadiness(resolvedProvider, readiness);
   return {
@@ -379,6 +407,12 @@ function resolveEmbeddingProvider(input: {
 async function closeEmbeddingProvider(provider: EmbeddingProviderPort | null): Promise<void> {
   if (provider?.close === undefined) return;
   await provider.close();
+}
+
+async function closeEmbeddingProviders(...providers: readonly (EmbeddingProviderPort | null)[]): Promise<void> {
+  const results = await Promise.allSettled([...new Set(providers)].map(closeEmbeddingProvider));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure !== undefined) throw failure.reason;
 }
 
 function bindLocalSourceIndex(

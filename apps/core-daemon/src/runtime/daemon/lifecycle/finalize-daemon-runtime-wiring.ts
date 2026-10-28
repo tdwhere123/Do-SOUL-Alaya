@@ -274,6 +274,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     embeddingStatusService: input.embeddingStatusService,
     embeddingProviderWarmup: input.embeddingProviderWarmup,
     getEmbeddingProviderDimensions: input.getEmbeddingProviderDimensions,
+    bindMemoryEmbeddingProfile: input.bindMemoryEmbeddingProfile,
     ...(input.embeddingRecallService === undefined
       ? {}
       : { embeddingRecallService: input.embeddingRecallService }),

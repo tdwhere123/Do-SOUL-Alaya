@@ -113,6 +113,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly embeddingStatusService: EmbeddingStatusService;
   readonly embeddingProviderWarmup: Promise<"not_requested" | "ready" | "failed">;
   readonly getEmbeddingProviderDimensions: () => number | null;
+  readonly bindMemoryEmbeddingProfile: () => Promise<import("../../../ai/daemon-embedding-runtime.js").LoadedMemoryEmbeddingProfile>;
   readonly embeddingRecallService?: Pick<
     EmbeddingRecallService,
     "warmQueryEmbeddings" | "coherentPairKeys" | "lastQueryEmbeddingWarmup"

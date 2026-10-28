@@ -16,6 +16,24 @@ const environment = process.env;
 beforeEach(() => { process.env = {}; });
 afterEach(() => { process.env = environment; vi.restoreAllMocks(); });
 
+describe("separate Source embedding selection", () => {
+  it("requires the model and an absolute cache together", () => {
+    const invalid: readonly (readonly (readonly [string, string])[])[] = [
+      [["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]],
+      [["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/models"]],
+      [["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "relative"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]
+    ];
+    for (const entries of invalid) expect(() => readEmbeddingRuntimeConfig(new Map(entries), vi.fn(), EXTRA_AVAILABLE)).toThrow(/configured together/);
+  });
+
+  it("keeps Source configuration independent of the Memory provider", () => {
+    const config = readEmbeddingRuntimeConfig(new Map([["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"],
+      ["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/models"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]), vi.fn(), EXTRA_AVAILABLE);
+    expect(config.embeddingSupplementEnabled).toBe(false);
+    expect(config.sourceLocalEmbedding).toEqual({ cacheDir: "/tmp/models", modelId: "Xenova/bge-m3" });
+  });
+});
+
 describe("readEmbeddingRuntimeConfig fail-closed openai", () => {
   it("does not include a pasted credential in malformed-reference startup errors", () => {
     const raw = "fixture-pasted-credential-without-a-reference-scheme";

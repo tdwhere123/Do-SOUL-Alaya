@@ -11,6 +11,19 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 const defaults = { dataDir: "/fixture-data", embeddingMode: "disabled" as const,
   embeddingProviderKind: "local_onnx" as const, tokenFactory: () => "fixture" };
 
+it("uses only an explicitly selected Source model and does not change Memory settings", () => {
+  const ambientEnv = { ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR: "/stale-source", ALAYA_SOURCE_INDEX_LOCAL_MODEL: "stale/model",
+    ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/memory", ALAYA_LOCAL_EMBEDDING_MODEL: "memory/model" };
+  const base = createBenchDaemonLaunchConfig({ ...defaults, embeddingMode: "env", ambientEnv });
+  expect(base.environment.ALAYA_SOURCE_INDEX_LOCAL_MODEL).toBeUndefined();
+  expect(base.environment.ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR).toBeUndefined();
+  const selected = createBenchDaemonLaunchConfig({ ...defaults, embeddingMode: "env", ambientEnv,
+    cachedLocalSourceEmbedding: { cache_root: "/source", model_id: "Xenova/bge-m3" } });
+  expect(selected.environment).toMatchObject({ ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR: "/source",
+    ALAYA_SOURCE_INDEX_LOCAL_MODEL: "Xenova/bge-m3", ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/memory",
+    ALAYA_LOCAL_EMBEDDING_MODEL: "memory/model" });
+});
+
 it("leaves ambient queue and Garden defaults intact unless launch effects are selected", () => {
   const launch = createBenchDaemonLaunchConfig({ ...defaults, ambientEnv: {
     ALAYA_SQLITE_WRITE_QUEUE: "1", ALAYA_GARDEN_PROVIDER_KIND: "host_worker",

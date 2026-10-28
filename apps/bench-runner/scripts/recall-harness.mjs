@@ -12,6 +12,9 @@
 // --coordinates FILE loads frozen question-only coordinates; only arms with "question_time": true send time proposals.
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
 // --capture-pool adds private native observation and separately marked diagnostic rankings to each row.
+// --source-model, --source-cache and --source-artifact-digest select a separately bound Source model;
+// --model and --model-cache select Memory; --model-artifact-digest binds its sealed tree.
+// --warm-memory probes the Memory provider independently.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -20,6 +23,7 @@ import { parseArgs } from "node:util";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
 import { loadRecallVectorCache } from "./recall-vector-cache.mjs";
+import { recallExecutionIdentity, recallPreparationKey, assertRecallCachedPreparation } from "./recall-harness-selection.mjs";
 
 // Install before runtime imports: only local inference and loopback transport are authorized.
 const providerFree = installProviderFreeBoundary({
@@ -45,6 +49,9 @@ const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
+  "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
+  "source-model": { type: "string" }, "source-cache": { type: "string" },
+  "source-artifact-digest": { type: "string" }, "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" }
 } });
 if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
@@ -61,8 +68,30 @@ const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data
 const pinnedMeta = join(repo, "docs/bench-history/datasets");
 const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
 const cacheRoot = resolve(values.cache ?? join(repo, "../../.do-it/bench-runs/recall-harness/cache"));
-const execution = { cache_root: join(process.env.HOME, ".cache/do-soul-alaya/models"),
+const memory = { cache_root: resolve(values["model-cache"] ?? join(process.env.HOME, ".cache/do-soul-alaya/models")),
   model_id: values.model ?? "Xenova/paraphrase-multilingual-MiniLM-L12-v2" };
+for (const name of ["model", "model-cache", "model-artifact-digest", "source-model", "source-cache", "source-artifact-digest"]) {
+  if (values[name] === "") throw new AlayaError("VALIDATION", `--${name} must not be empty`);
+}
+const sourceOptions = [values["source-model"], values["source-cache"], values["source-artifact-digest"]];
+if (sourceOptions.some(Boolean) && !sourceOptions.every(Boolean)) {
+  throw new AlayaError("VALIDATION", "separate Source execution requires model, cache and artifact digest");
+}
+if (values["source-artifact-digest"] && !/^sha256:[a-f0-9]{64}$/u.test(values["source-artifact-digest"])) {
+  throw new AlayaError("VALIDATION", "Source artifact digest must be sha256 plus 64 lowercase hex digits");
+}
+if (values["model-artifact-digest"] && !/^sha256:[a-f0-9]{64}$/u.test(values["model-artifact-digest"])) {
+  throw new AlayaError("VALIDATION", "Memory artifact digest must be sha256 plus 64 lowercase hex digits");
+}
+if (sourceOptions.every(Boolean) && !values["model-artifact-digest"]) {
+  throw new AlayaError("VALIDATION", "separate Source execution requires the Memory artifact digest");
+}
+const execution = sourceOptions.every(Boolean) ? { cache_root: resolve(values["source-cache"]),
+  model_id: values["source-model"], source_scope: "separate", artifact_digest: values["source-artifact-digest"],
+  memory: { ...memory, artifact_digest: values["model-artifact-digest"] },
+  ...(values["warm-memory"] ? { memory_warmup: "eager" } : {}) } :
+  { ...memory, ...(values["model-artifact-digest"] ? { artifact_digest: values["model-artifact-digest"] } : {}),
+    ...(values["warm-memory"] ? { memory_warmup: "eager" } : {}) };
 const revision = readCurrentExtractionAuthorityRevision();
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -86,6 +115,10 @@ if (values.shard) {
 mkdirSync(out, { recursive: true });
 const rowsPath = join(out, "rows.jsonl");
 const previous = existsSync(rowsPath) ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
+const executionIdentity = recallExecutionIdentity(values, execution, revision, chainIdentity);
+if (previous.some(row => row.source_execution_identity !== executionIdentity)) {
+  throw new AlayaError("CONFLICT", "existing rows use a different Source or Memory execution");
+}
 if (previous.some(row => (row.capture_requested === true) !== values["capture-pool"])) {
   throw new AlayaError("CONFLICT", "existing rows use a different pool-capture mode");
 }
@@ -117,14 +150,18 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return sha256(JSON.stringify([revision, execution.model_id, arm.host !== false, arm.windowing ?? null, arm.lexical ?? null, ...(arm.representation ? [arm.representation] : [])])).slice(0, 16);
+  return recallPreparationKey(revision, executionIdentity, execution, arm);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
 async function prepared(question, index, arm) {
   const dir = join(cacheRoot, question.question_id, prepKey(arm));
   const configPath = join(dir, "prepare", "chain-config.json");
-  if (existsSync(configPath)) return JSON.parse(readFileSync(configPath, "utf8"));
+  if (existsSync(configPath)) {
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    assertRecallCachedPreparation(config, revision, execution, arm);
+    return config;
+  }
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const workspace = `harness-${question.question_id}`;
@@ -157,6 +194,7 @@ for (const id of ids) {
     const started = performance.now();
     const row = { question_id: id, question_type: question.question_type, arm: arm.name,
       arm_identity: chainIdentity(arm),
+      ...(executionIdentity === undefined ? {} : { source_execution_identity: executionIdentity }),
       ...(values["capture-pool"] ? { capture_requested: true } : {}) };
     try {
       const frozen = coordinates.get(id);

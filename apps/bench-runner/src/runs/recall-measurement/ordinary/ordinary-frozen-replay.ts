@@ -9,7 +9,7 @@ import { readBenchMcpToolOutput } from "../../../harness/daemon/runtime/daemon-m
 import { exposureSlots, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
 import { admittedSourceDeliveryTail } from "../../measurement/source-delivery-visibility.js";
 import type { ConsumerVisibilityPage } from "../../longmemeval-semantic/message-visibility.js";
-import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../contract.js";
+import { SemanticChainConfigSchema, assertMemoryEmbeddingReceipts, chainIdentity, readChainArtifact } from "../contract.js";
 import { assertSemanticChainSourceIndex } from "../source-index-binding.js";
 import { hashRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import { OrdinaryRecallArchiveSchema, ORDINARY_RECALL_ENTRY_CONTRACT, mapOrdinaryRecallScope, buildOrdinaryRecallRequest,
@@ -43,6 +43,9 @@ export function admitOrdinaryFrozenExecution(input: Readonly<{
   check(execution.config_identity === chainIdentity(config) && execution.rows.length === 1
     && execution.rows[0]!.query_key === input.query.query_key
     && execution.rows[0]!.original_query === input.query.original_query, "ordinary archive/config/query binding mismatch");
+  if (execution.mapping.status === "mapped") {
+    assertMemoryEmbeddingReceipts(config, join(input.executionRoot, "ordinary"), "complete");
+  }
   const row = execution.rows[0]!;
   check(row.status !== "failed" && row.pages.every(page => !["transport_error", "public_error", "invalid_response"].includes(page.response_state)),
     "ordinary capture failed");

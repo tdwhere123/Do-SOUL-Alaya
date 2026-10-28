@@ -11,6 +11,8 @@ export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
     allowPrivateProviderUrl: "ALAYA_ALLOW_PRIVATE_PROVIDER_URL",
     localCacheDir: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
     localModel: "ALAYA_LOCAL_EMBEDDING_MODEL",
+    sourceLocalCacheDir: "ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR",
+    sourceLocalModel: "ALAYA_SOURCE_INDEX_LOCAL_MODEL",
     d2q: "ALAYA_RECALL_D2Q"
   }),
   mcp: Object.freeze({

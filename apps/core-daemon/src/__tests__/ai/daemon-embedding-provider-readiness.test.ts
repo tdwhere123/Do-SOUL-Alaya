@@ -97,6 +97,68 @@ describe("embedding provider dimensional readiness", () => {
 });
 
 describe("Source capability readiness (mock provider, no model execution)", () => {
+  it("rejects a Source-only local model selected for shared Memory readiness", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    const provider = new core.LocalOnnxEmbeddingClient({ modelId: "Xenova/bge-m3", cacheDir: "/tmp/source-models" });
+    try {
+      expect(() => createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: "omit",
+        configEnv: new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"], ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"]]),
+        eventLogRepo: new SqliteEventLogRepo(database), memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+        runtimeNotifier: { notifyEntry: () => undefined },
+        healthJournalService: { getRecentEvents: vi.fn(async () => []), record: vi.fn(async () => undefined) },
+        warn: vi.fn(), embeddingProviderOverride: provider
+      })).toThrow(/Source-only.*Memory provider/u);
+    } finally { database.close(); }
+  });
+
+  it.each(["omit", "eager"] as const)("keeps separate Source readiness and closes both providers when Memory warmup is %s", async startupProbe => {
+    const memory = sourceProvider(384), source = sourceProvider(1024, "Xenova/bge-m3");
+    const database = initDatabase({ filename: ":memory:" });
+    const runtime = createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: startupProbe,
+      configEnv: new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"], ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+        ["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/source-models"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]),
+      eventLogRepo: new SqliteEventLogRepo(database), memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+      runtimeNotifier: { notifyEntry: () => undefined },
+      healthJournalService: { getRecentEvents: vi.fn(async () => []), record: vi.fn(async () => undefined) },
+      warn: vi.fn(), embeddingProviderOverride: memory.provider, sourceEmbeddingProviderOverride: source.provider
+    });
+    try {
+      expect(await runtime.providerWarmup).toBe(startupProbe === "eager" ? "ready" : "not_requested");
+      const query = await runtime.bindSourceEmbedding({ window_bytes: 1024 });
+      const index = await runtime.bindLocalSourceIndex({ window_bytes: 1024 });
+      const memoryProfile = await runtime.bindMemoryEmbeddingProfile();
+      expect(memoryProfile).toMatchObject({ status: "ready", profile: { dimensions: 384, model_id: "fixture-model" } });
+      expect(memory.bind).toHaveBeenCalledTimes(1);
+      if (query.status !== "ready" || index.status !== "ready") throw new Error("Source bindings required");
+      expect(query.profile_id).toBe(index.profile_id);
+      await query.embedInputs([{ input_id: "source", text: "raw" }], { profile_id: query.profile_id, timeoutMs: 1000 });
+      expect(runtime.getSourceProviderDimensions()).toBe(1024);
+      expect(runtime.getProviderDimensions()).toBe(startupProbe === "eager" ? 384 : null);
+      expect(memory.embedTexts).toHaveBeenCalledTimes(startupProbe === "eager" ? 1 : 0);
+      expect(source.embedTexts).not.toHaveBeenCalled();
+    } finally { await runtime.closeProvider(); database.close(); }
+    expect(memory.close).toHaveBeenCalledTimes(1);
+    expect(source.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not silently fall back to the Memory provider when the selected Source provider is unavailable", async () => {
+    const memory = sourceProvider(384), database = initDatabase({ filename: ":memory:" });
+    const runtime = createDaemonEmbeddingRuntime({ database, embeddingStartupProbe: "omit",
+      configEnv: new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"], ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+        ["ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR", "/tmp/source-models"], ["ALAYA_SOURCE_INDEX_LOCAL_MODEL", "Xenova/bge-m3"]]),
+      eventLogRepo: new SqliteEventLogRepo(database), memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+      runtimeNotifier: { notifyEntry: () => undefined },
+      healthJournalService: { getRecentEvents: vi.fn(async () => []), record: vi.fn(async () => undefined) },
+      warn: vi.fn(), embeddingProviderOverride: memory.provider, sourceEmbeddingProviderOverride: null
+    });
+    try {
+      await expect(runtime.bindSourceEmbedding({ window_bytes: 1024 })).resolves.toMatchObject({ status: "unsupported" });
+      await expect(runtime.bindLocalSourceIndex({ window_bytes: 1024 })).resolves.toMatchObject({ status: "unsupported" });
+      expect(memory.bind).not.toHaveBeenCalled();
+      expect(runtime.getProviderDimensions()).toBeNull();
+    } finally { await runtime.closeProvider(); database.close(); }
+  });
+
   it("preserves absent and unsupported capabilities instead of manufacturing Source readiness", async () => {
     const provider = createProvider(async () => []);
     const readiness = createEmbeddingProviderReadiness(provider);
@@ -202,20 +264,20 @@ describe("Source capability readiness (mock provider, no model execution)", () =
 });
 
 function sha256(text: string): string { return createHash("sha256").update(text, "utf8").digest("hex"); }
-function sourceProvider() {
-  const profile: SourceIndexProfile = { provider_kind: "local_onnx", model_id: "fixture-model", model_revision: "fixture-only",
-    artifact_digest: `sha256:${"a".repeat(64)}`, tokenizer_revision: "fixture-tokenizer", dimensions: 2,
+function sourceProvider(dimensions = 2, modelId = "fixture-model") {
+  const profile: SourceIndexProfile = { provider_kind: "local_onnx", model_id: modelId, model_revision: "fixture-only",
+    artifact_digest: `sha256:${"a".repeat(64)}`, tokenizer_revision: "fixture-tokenizer", dimensions,
     preprocessing: "fixture-raw", normalization: "fixture-unit", max_input_tokens: 32,
     windowing: "utf8-byte-windows.v1", window_bytes: 1024 };
   type BindingResult = Awaited<ReturnType<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>>;
   type Binding = Extract<BindingResult, { status: "ready" }>;
   const embed = vi.fn<Binding["embedInputs"]>(async inputs => inputs.map(input => ({ status: "embedded", input_id: input.input_id,
-    input_digest: `sha256:${sha256(input.text)}`, vector: unitVector(2), token_count: 3, truncated: false })));
+    input_digest: `sha256:${sha256(input.text)}`, vector: unitVector(dimensions), token_count: 3, truncated: false })));
   const binding = { status: "ready" as const, profile, profile_id: sourceIndexProfileId(profile, sha256), embedInputs: embed };
   const bind = vi.fn<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>(async () => binding);
   const close = vi.fn(async () => undefined);
-  const embedTexts = vi.fn<EmbeddingProviderPort["embedTexts"]>(async texts => texts.map(() => unitVector(2)));
-  return { provider: { ...createProvider(embedTexts), providerKind: "local_onnx" as const, bindSourceEmbedding: bind, close },
+  const embedTexts = vi.fn<EmbeddingProviderPort["embedTexts"]>(async texts => texts.map(() => unitVector(dimensions)));
+  return { provider: { ...createProvider(embedTexts), modelId, providerKind: "local_onnx" as const, bindSourceEmbedding: bind, close },
     binding, bind, embed, embedTexts, close };
 }
 

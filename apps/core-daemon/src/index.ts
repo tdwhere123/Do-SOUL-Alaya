@@ -404,6 +404,7 @@ function buildFinalizeGovernanceRuntimeInput(
     embeddingStatusService: runtimeWiring.recallWiring.embeddingStatusService,
     embeddingProviderWarmup: runtimeWiring.recallWiring.embeddingProviderWarmup,
     getEmbeddingProviderDimensions: runtimeWiring.recallWiring.getEmbeddingProviderDimensions,
+    bindMemoryEmbeddingProfile: runtimeWiring.recallWiring.bindMemoryEmbeddingProfile,
     conversationService: runtimeWiring.coreWiring.conversationService,
     runHotStateService: foundation.runHotStateService,
     governanceLeaseService: foundation.governanceLeaseService,

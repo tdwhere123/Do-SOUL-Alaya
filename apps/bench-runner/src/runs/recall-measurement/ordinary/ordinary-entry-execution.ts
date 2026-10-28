@@ -13,7 +13,7 @@ import {
   FirstExposureSession, firstExposureMismatch, exposureSlots, type FirstExposurePage
 } from "../../measurement/first-exposure-session.js";
 import {
-  SemanticChainConfigSchema, assertChainSnapshot, withSemanticChainDaemon, writeChainArtifact, readChainArtifact,
+  SemanticChainConfigSchema, assertChainSnapshot, assertMemoryEmbeddingReceipts, assertMemoryEmbeddingRecovery, withSemanticChainDaemon, writeChainArtifact, readChainArtifact,
   chainIdentity, type SemanticChainConfig
 } from "../contract.js";
 import { semanticChainCacheInputPaths } from "../inputs.js";
@@ -66,6 +66,9 @@ export async function executeOrdinaryRecallEntry(value: unknown, capture?: Captu
         if (parsed.input_identity !== identity) {
           throw new AlayaError("CONFLICT", "ordinary entry artifact does not bind the requested config and queries");
         }
+        if (parsed.mapping.status === "mapped" && parsed.rows.length > 0) {
+          assertMemoryEmbeddingReceipts(config, input.root, "complete");
+        }
         return parsed;
       }
       const execution = freezeOrdinaryArtifact(OrdinaryRecallExecutionSchema, mapped.status === "not_run"
@@ -109,6 +112,7 @@ async function runMappedOrdinaryRecall(
   capture?: CaptureOrdinaryEntryObservation
 ): Promise<OrdinaryRecallExecution> {
   const rows: OrdinaryRecallQueryRow[] = [];
+  assertMemoryEmbeddingRecovery(config, root, queries.map(query => join(root, "ordinary-entry", `${query.query_key}.json`)));
   await withSemanticChainDaemon(config, root, async daemon => {
     for (const query of queries) {
       refuseBenchWorkAfterCancel();
@@ -117,6 +121,7 @@ async function runMappedOrdinaryRecall(
       const prior = readChainArtifact(rowPath);
       const reserved = readChainArtifact(reservation);
       if (prior !== undefined) {
+        assertMemoryEmbeddingReceipts(config, root, "complete");
         if (capture !== undefined) throw new AlayaError("CONFLICT", "observation cannot recover an already captured ordinary row");
         if (canonicalJson(reserved) !== canonicalJson({ entry_identity: identity, query_key: query.query_key })) {
           throw new AlayaError("CONFLICT", "ordinary public row does not bind its requested entry identity");

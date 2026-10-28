@@ -395,6 +395,19 @@ the token cap and leave a partial generation. This opt-in representation is not 
 empirically chosen default. Old persisted generations remain readable under their own
 profile, but selection/unbind fencing never revives retired eligibility.
 
+An independently selected local Source encoder uses both
+`ALAYA_SOURCE_INDEX_LOCAL_MODEL` and the absolute
+`ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR`; omit both to retain the existing shared
+embedding provider. The separately selected `Xenova/bge-m3` Source contract uses
+q8, CLS pooling, L2 normalization and unprefixed query and source text. Its
+1024-dimensional Source vectors never enter Memory or Evidence embedding
+backfill. The selected provider has its own readiness and shutdown lifetime; an
+unavailable selection does not fall back to the Memory model. Artifacts still
+pass the local sealed-tree and self-contained ONNX checks, and the loaded profile
+and tokenizer identity bind a new SourceIndex generation. An 8192-token loaded
+limit produces an 8184-byte native window; exact token counting may still refuse
+an individual window, so that byte limit alone does not establish readiness.
+
 ## SourceIndex lexical representations
 
 The explicit `SourceIndexLifecycle.prepareLexical` entry and the idle daemon's

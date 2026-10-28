@@ -17,7 +17,7 @@ import { FirstExposurePageSchema, type FirstExposureSession } from "../measureme
 import { admitDeliveredSources, admitSemanticChainLibraryBinding, sameSealedSnapshotObservation,
   semanticChainLibraryRecallRequest } from "./library-admission.js";
 import { SemanticChainPlanSchema, SemanticChainQuerySchema, SemanticChainDiscoveryTraceSchema, chainIdentity, readChainArtifact, writeChainArtifact,
-  assertChainSnapshot, withSemanticChainDaemon, type SemanticChainPlan } from "./contract.js";
+  assertChainSnapshot, assertMemoryEmbeddingReceipts, assertMemoryEmbeddingRecovery, withSemanticChainDaemon, type SemanticChainPlan } from "./contract.js";
 import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
 import { semanticChainCacheInputPaths } from "./inputs.js";
 import { discoverSemanticChainQuery } from "./prepare.js";
@@ -46,6 +46,10 @@ function semanticChainReplayRowPath(root: string, identity: string, queryKey: st
   return join(root, `replay-${identity}`, `${queryKey}.json`);
 }
 
+function semanticChainReplayReceiptRoot(root: string, identity: string): string {
+  return join(root, `replay-${identity}`);
+}
+
 export async function replaySemanticChain(root: string, arm: "retained" | "without_semantic_correspondences" = "retained",
   expectedIdentity?: string) {
   const scope = currentBenchScope();
@@ -57,22 +61,32 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
     }
     return withSnapshotPublishLock(output, async () => {
       const retained = readChainArtifact(output);
-      if (retained !== undefined) return { path: output, result: retained };
+      if (retained !== undefined) {
+        if (plan.queries.some(query => query.status !== "blocked")) {
+          assertMemoryEmbeddingReceipts(config, semanticChainReplayReceiptRoot(root, identity), "complete");
+        }
+        return { path: output, result: retained };
+      }
       const rows: unknown[] = [];
       if (plan.queries.every((query) => query.status === "blocked")) rows.push(...plan.queries);
-      else await withSemanticChainDaemon(config, root, async (daemon) => {
-        for (const query of plan.queries) {
-          if (query.status === "blocked") { rows.push(query); continue; }
-          const { ready, outcomes } = query.status === "ready"
-            ? semanticChainQueryCorrespondences(query, semantic_correspondences) : { ready: [], outcomes: [] };
-          const rowPath = rowPaths.get(query.query_key)!;
-          const prior = readChainArtifact(rowPath);
-          if (prior !== undefined) { rows.push(prior); continue; }
-          const row = await executeSemanticChainQuery({ daemon, config, query,
-            ready: arm === "retained" ? ready : [], outcomes, rowPath, replayIdentity: identity });
-          rows.push(row);
-        }
-      });
+      else {
+        const receiptRoot = semanticChainReplayReceiptRoot(root, identity);
+        assertMemoryEmbeddingRecovery(config, receiptRoot, plan.queries.filter(query => query.status !== "blocked")
+          .map(query => rowPaths.get(query.query_key)!));
+        await withSemanticChainDaemon(config, receiptRoot, async (daemon) => {
+          for (const query of plan.queries) {
+            if (query.status === "blocked") { rows.push(query); continue; }
+            const { ready, outcomes } = query.status === "ready"
+              ? semanticChainQueryCorrespondences(query, semantic_correspondences) : { ready: [], outcomes: [] };
+            const rowPath = rowPaths.get(query.query_key)!;
+            const prior = readChainArtifact(rowPath);
+            if (prior !== undefined) { rows.push(prior); continue; }
+            const row = await executeSemanticChainQuery({ daemon, config, query,
+              ready: arm === "retained" ? ready : [], outcomes, rowPath, replayIdentity: identity });
+            rows.push(row);
+          }
+        });
+      }
       refuseBenchWorkAfterCancel();
       const result = semanticChainReplayAggregate(plan, identity, arm, rows);
       writeChainArtifact(output, result);
@@ -97,7 +111,12 @@ export async function closeSemanticChainReplayFromDurableRows(root: string,
     const { plan, identity, output, rowPaths } = inspectSemanticChainReplayTarget(root, arm);
     return withSnapshotPublishLock(output, async () => {
       const prior = readChainArtifact(output);
-      if (prior !== undefined) return { path: output, result: ReplaySchema.parse(prior) };
+      if (prior !== undefined) {
+        if (plan.queries.some(query => query.status !== "blocked")) {
+          assertMemoryEmbeddingReceipts(plan.config, semanticChainReplayReceiptRoot(root, identity), "complete");
+        }
+        return { path: output, result: ReplaySchema.parse(prior) };
+      }
       const rows: unknown[] = [];
       for (const query of plan.queries) {
         if (query.status === "blocked") { rows.push(query); continue; }
@@ -109,6 +128,9 @@ export async function closeSemanticChainReplayFromDurableRows(root: string,
           throw new AlayaError("CONFLICT", "durable native response row lacks its exact exposure reservation");
         }
         rows.push(row);
+      }
+      if (plan.queries.some(query => query.status !== "blocked")) {
+        assertMemoryEmbeddingReceipts(plan.config, semanticChainReplayReceiptRoot(root, identity), "complete");
       }
       const result = ReplaySchema.parse(semanticChainReplayAggregate(plan, identity, arm, rows));
       writeChainArtifact(output, result);
@@ -334,10 +356,12 @@ export function semanticChainReplayInputPaths(root: string, replayPath: string, 
   const paths = [join(root, "prepare.json"), replayPath];
   const match = /^replay-([a-f0-9]{64})\.json$/u.exec(basename(replayPath));
   if (resolve(replayPath) !== resolve(root, basename(replayPath)) || match === null) return paths;
-  return [...paths, ...queryKeys.flatMap(key => {
-    const path = semanticChainReplayRowPath(root, match[1]!, key);
-    return [path, `${path}.reserved`];
-  })];
+  const receiptRoot = semanticChainReplayReceiptRoot(root, match[1]!);
+  return [...paths, join(receiptRoot, "memory-embedding-readiness.json"), join(receiptRoot, "memory-embedding-profile-final.json"),
+    ...queryKeys.flatMap(key => {
+      const path = semanticChainReplayRowPath(root, match[1]!, key);
+      return [path, `${path}.reserved`];
+    })];
 }
 
 /** All archive consumers re-admit frozen inputs and native delivery before using retained results. */
@@ -355,6 +379,9 @@ export function admitSemanticChainReplay(root: string, replayPath: string) {
     throw new AlayaError("CONFLICT", "archive requires exact query denominator coverage");
   }
   assertChainSnapshot(plan.config);
+  if (plan.queries.some(query => query.status !== "blocked")) {
+    assertMemoryEmbeddingReceipts(plan.config, semanticChainReplayReceiptRoot(root, replay.identity), "complete");
+  }
   verifySemanticChainQueries(plan);
   const retained = readSemanticChainCorrespondences(plan, replay.arm);
   if (retained.identity !== replay.identity) throw new AlayaError("CONFLICT", "retained native semantic-correspondence state changed");

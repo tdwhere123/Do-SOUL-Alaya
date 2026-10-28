@@ -7,6 +7,7 @@ import {
   type LocalOnnxEmbeddingIpcHost
 } from "./local-onnx-process/ipc-client.js";
 import { LOCAL_ONNX_EMBEDDING_DIMENSIONS } from "./local-onnx-process/protocol.js";
+import { localOnnxSourceModelContract } from "./local-onnx-source-contract.js";
 import type { EnvLookup } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { loadVerifiedLocalOnnxExtractor, withLocalTransformersOfflineLoad, type LocalOnnxLoadedSourceRuntime } from "./local-onnx-loaded-runtime.js";
@@ -226,6 +227,10 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     return this.currentlyAvailable;
   }
 
+  public get sourceOnly(): boolean {
+    return localOnnxSourceModelContract(this.modelId).sourceOnly;
+  }
+
   public async embedTexts(
     texts: readonly string[],
     options: {
@@ -235,6 +240,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   ): Promise<readonly Float32Array[]> {
     texts = [...texts];
     if (this.closed) throw new CoreError("CONFLICT", "Local ONNX embedding runtime is closed");
+    if (this.sourceOnly) throw new CoreError("VALIDATION", "Local ONNX model is Source-only");
     if (texts.length === 0) {
       return Object.freeze([]);
     }

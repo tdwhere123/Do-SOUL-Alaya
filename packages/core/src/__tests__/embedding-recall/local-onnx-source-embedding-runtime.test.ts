@@ -31,6 +31,41 @@ afterEach(async () => {
 });
 
 describe("loaded local ONNX Source embedding runtime (controlled tokenizer/model seams)", () => {
+  it("uses the first token and L2 normalization for the separately selected 1024-dimensional Source model", async () => {
+    const seam = createControlledSeam({ modelType: "xlm-roberta", dimensions: 1024, tokenCap: 8192 });
+    seam.model = prepared => {
+      const count = prepared.attention_mask.dims[1]!, data = new Float32Array(count * 1024);
+      data[0] = 3; data[1] = 4;
+      for (let i = 1; i < count; i++) data[i * 1024] = 100;
+      return { last_hidden_state: new Tensor("float32", data, [1, count, 1024]) };
+    };
+    const { runtime } = await loadRuntime(seam, "Xenova/bge-m3");
+    const binding = runtime.bind({ window_bytes: 8184 });
+    if (binding.status !== "ready") throw new Error("controlled Source binding required");
+    expect(binding.profile).toMatchObject({ dimensions: 1024, max_input_tokens: 8192,
+      normalization: "cls.l2.q8.v1", windowing: "recorded-message-windows.v1" });
+    const rows = await binding.embedInputs([{ input_id: "source", text: "raw" }], { profile_id: binding.profile_id, timeoutMs: 5000 });
+    if (rows[0]?.status !== "embedded") throw new Error("controlled Source vector required");
+    expect(rows[0].vector).toHaveLength(1024);
+    expect(rows[0].vector[0]).toBeCloseTo(0.6, 6);
+    expect(rows[0].vector[1]).toBeCloseTo(0.8, 6);
+    expect(Math.hypot(...rows[0].vector)).toBeCloseTo(1, 6);
+    expect(runtime.bind({ window_bytes: 8184, representation: { kind: "paired-prefix.v1", query_prefix: "Q: ", passage_prefix: "P: " } }))
+      .toMatchObject({ status: "unsupported", reason: "source_representation_unsupported" });
+  });
+
+  it("refuses a prepared Source input over the loaded token cap before calling the model", async () => {
+    const seam = createControlledSeam({ modelType: "xlm-roberta", dimensions: 1024, tokenCap: 8192,
+      tokenize: () => ({ input_ids: new ControlledTensor([1, 8193], [Array(8193).fill(1)]),
+        attention_mask: new ControlledTensor([1, 8193], [Array(8193).fill(1)]) }) });
+    const { runtime } = await loadRuntime(seam, "Xenova/bge-m3");
+    const binding = runtime.bind({ window_bytes: 8184 });
+    if (binding.status !== "ready") throw new Error("controlled Source binding required");
+    await expect(binding.embedInputs([{ input_id: "long", text: "raw" }], { profile_id: binding.profile_id, timeoutMs: 5000 }))
+      .resolves.toMatchObject([{ status: "not_embedded", reason: "input_token_limit", token_count: 8193 }]);
+    expect(seam.modelCalls).toHaveLength(0);
+  });
+
   it("defaults to message windows but keeps prepared-token refusal before model execution", async () => {
     const seam = createControlledSeam();
     const { binding, runtime } = await loadBoundRuntime(seam, { window_bytes: 8,
@@ -393,8 +428,11 @@ interface ControlledSeam {
   normalizeCalls: Array<{ ord: number; dim: number }>;
   pipelineOptions: unknown;
   allowRemoteModelsAtLoad: boolean | undefined;
+  modelType?: string;
+  dimensions?: number;
+  tokenCap?: number;
   tokenize?: () => PreparedTensors;
-  model?: (prepared: PreparedTensors) => Promise<Record<string, ControlledTensor>> | Record<string, ControlledTensor>;
+  model?: (prepared: PreparedTensors) => Promise<Record<string, ControlledTensor | Tensor>> | Record<string, ControlledTensor | Tensor>;
   dispose?: () => Promise<void>;
 }
 
@@ -420,12 +458,12 @@ async function loadBoundRuntime(
   return { ...loaded, binding: bindingResult, profile: bindingResult.profile };
 }
 
-async function loadRuntime(seam: ControlledSeam) {
+async function loadRuntime(seam: ControlledSeam, modelId = "fixture-encoder") {
   const cacheRoot = mkdtempSync(join(tmpdir(), "alaya-onnx-cache-"));
   caches.push(cacheRoot);
-  writeEncoderTree(cacheRoot, "fixture-encoder");
+  writeEncoderTree(cacheRoot, modelId, seam.dimensions, seam.modelType);
   const extractor = await loadVerifiedLocalOnnxExtractor(
-    "fixture-encoder",
+    modelId,
     cacheRoot,
     {},
     controlledTransformers(seam)
@@ -446,11 +484,12 @@ function controlledTransformers(seam: ControlledSeam): LocalOnnxEmbeddingTransfo
       const prepared = seam.tokenize?.() ?? tokenizeWithSpecials(texts[0] ?? "");
       seam.prepared.push(prepared);
       return prepared;
-    }, { model_max_length: LOADED_TOKEN_CAP }),
+    }, { model_max_length: seam.tokenCap ?? LOADED_TOKEN_CAP }),
     model: Object.assign(async (prepared: PreparedTensors) => {
       seam.modelCalls.push(prepared);
       return seam.model ? seam.model(prepared) : hiddenOutput(prepared.attention_mask.dims[1]!);
-    }, { config: { hidden_size: DIMENSIONS, max_position_embeddings: LOADED_TOKEN_CAP, model_type: "bert" } }),
+    }, { config: { hidden_size: seam.dimensions ?? DIMENSIONS, max_position_embeddings: seam.tokenCap ?? LOADED_TOKEN_CAP,
+      model_type: seam.modelType ?? "bert" } }),
     dispose: async () => {
       await seam.dispose?.();
     }
@@ -508,11 +547,11 @@ function goldenInputDigest(text: string): string {
   return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
-function writeEncoderTree(cacheRoot: string, modelId: string): void {
+function writeEncoderTree(cacheRoot: string, modelId: string, dimensions = 384, modelType = "bert"): void {
   const modelRoot = join(cacheRoot, modelId);
   mkdirSync(join(modelRoot, "onnx"), { recursive: true });
   writeFileSync(join(modelRoot, "onnx/model_quantized.onnx"), selfContainedOnnx());
-  writeFileSync(join(modelRoot, "config.json"), JSON.stringify({ hidden_size: 384, model_type: "bert" }));
+  writeFileSync(join(modelRoot, "config.json"), JSON.stringify({ hidden_size: dimensions, model_type: modelType }));
   writeFileSync(join(modelRoot, "tokenizer_config.json"), "{}");
   writeFileSync(join(modelRoot, "tokenizer.json"), "{}");
   writeFileSync(join(modelRoot, "special_tokens_map.json"), "{}");

@@ -17,6 +17,9 @@ import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { SemanticChainConfigSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
   writeChainArtifact, writeChainJson, type SemanticChainConfig } from "./contract.js";
 import { CachedLocalSourceExecutionSchema, IndexBindingSchema } from "./source-index-binding-schema.js";
+import { MemoryEmbeddingProfileSchema, captureMemoryEmbeddingProfile, matchesMemoryEmbeddingProfile, memorySelection,
+  type MemoryEmbeddingProfile } from "./memory-embedding-profile.js";
+import { semanticChainCacheInputPaths } from "./inputs.js";
 import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProgressBindingMatches,
   type SourceIndexProgressSnapshot, type SourceIndexProgressComparison } from "./source-index-progress.js";
 import type {
@@ -74,12 +77,19 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
   const retained = z.object({ contract: z.literal("semantic-chain-source-preparation-v1"),
     execution: CachedLocalSourceExecutionSchema, snapshot_path: z.string(), snapshot_sha256: Digest,
     workspace_id: z.string(), index: IndexBindingSchema.nullable(),
+    memory_readiness: z.object({ status: z.enum(["ready", "failed", "not_requested"]), dimensions: z.number().int().positive().nullable() }).optional(),
+    memory_profile: MemoryEmbeddingProfileSchema.optional(),
     setup: z.object({ status: z.literal("settled"), binding: z.object({ status: z.literal("ready"),
       profile_id: z.string(), profile: SourceIndexProfileSchema }).passthrough() }).passthrough()
   }).passthrough().parse(report);
+  const selectedMemory = memorySelection(binding);
   if (retained.snapshot_path !== config.snapshot_path || retained.snapshot_sha256 !== config.snapshot_sha256 ||
       retained.workspace_id !== config.workspace_id || canonicalJson(retained.execution) !== canonicalJson({
         cache_root: binding.cache_root, model_id: binding.model_id,
+        ...(binding.source_scope === undefined ? {} : { source_scope: binding.source_scope }),
+        ...(binding.artifact_digest === undefined ? {} : { artifact_digest: binding.artifact_digest }),
+        ...(binding.memory === undefined ? {} : { memory: binding.memory }),
+        ...(binding.memory_warmup === undefined ? {} : { memory_warmup: binding.memory_warmup }),
         ...(binding.representation === undefined ? {} : { representation: binding.representation }),
         ...(binding.windowing === undefined ? {} : { windowing: binding.windowing }),
         ...(binding.lexical === undefined ? {} : { lexical: binding.lexical }) }) ||
@@ -88,6 +98,10 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
       canonicalJson(retained.index) !== canonicalJson(binding.index) || !observed.complete ||
       retained.setup.binding.profile_id !== binding.index.profile_id ||
       canonicalJson(retained.setup.binding.profile) !== canonicalJson(binding.index.configuration.profile) ||
+      (binding.memory_warmup === "eager" && (retained.memory_readiness?.status !== "ready" || retained.memory_readiness.dimensions === null)) ||
+      (selectedMemory !== undefined && (retained.memory_profile === undefined ||
+        !matchesMemoryEmbeddingProfile(retained.memory_profile, selectedMemory, retained.memory_readiness?.dimensions ?? null))) ||
+      (binding.artifact_digest !== undefined && binding.index.configuration.profile.artifact_digest !== binding.artifact_digest) ||
       binding.index.configuration.profile.provider_kind !== "local_onnx" ||
       binding.index.configuration.profile.model_id !== binding.model_id ||
       canonicalJson(observed.index) !== canonicalJson(binding.index)) {
@@ -102,7 +116,8 @@ type CapturedAllowance = { maxPasses: number; softElapsedMs?: number; leftover?:
 type SourceIndexPassRemainingBuilder = { [K in typeof SETUP_METER_KEYS[number]]?: number };
 
 type SourceIndexSetupReceipt = SourceIndexProducerPassReceipt | Readonly<{
-  status: "not_run"; reason: "setup_pass_exhausted" | "setup_allowance_exhausted" | "setup_soft_deadline";
+  status: "not_run"; reason: "setup_pass_exhausted" | "setup_allowance_exhausted" | "setup_soft_deadline" |
+    "memory_provider_not_ready" | "memory_artifact_mismatch" | "memory_profile_unavailable";
   binding: { status: "not_run" }; resources: { work: 0; native_bytes: 0; model_inputs: 0; input_bytes: 0 };
   accounting: "lower_bound"; model_execution_work: "unknown"; warmup: "not_separately_measured"; elapsed_ms: 0;
 }>;
@@ -111,6 +126,8 @@ const SETUP_DIAGNOSTIC_ZERO = { snapshots: 0, metadata_transactions: 0, target_r
   work: 0, native_bytes: 0, sql_internal_work: "unknown" as const };
 type SourceIndexPreparationBase = {
   execution: z.infer<typeof CachedLocalSourceExecutionSchema>;
+  memory_readiness?: { status: "ready" | "failed" | "not_requested"; dimensions: number | null };
+  memory_profile?: MemoryEmbeddingProfile;
   setup: SourceIndexSetupReceipt;
   setup_passes: number;
   setup_resources: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
@@ -172,7 +189,10 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   if (config.source_index !== undefined) throw new AlayaError("CONFLICT", "Source setup requires an unbound input snapshot");
   assertChainSnapshot(config);
   const root = resolve(rootValue);
-  for (const input of [config.snapshot_path, config.query_cache_root, config.correspondence_cache_root, execution.cache_root]) {
+  // Setup also protects the configured default C root when per-key C owners are present.
+  const inputs = [config.snapshot_path, ...semanticChainCacheInputPaths({ config: { ...config, source_index: execution } }),
+    ...(config.correspondence_cache_owners === undefined ? [] : [config.correspondence_cache_root])];
+  for (const input of inputs) {
     if (canonicalPathsOverlap(canonicalPath(root), canonicalPath(input))) {
       throw new AlayaError("CONFLICT", "Source setup output overlaps an input or model cache");
     }
@@ -188,8 +208,10 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
       restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
       if (expired()) return retainedSoftDeadline(execution, idleDeadlineRun(), allowance, performance.now() - started);
       daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
-        embeddingMode: "env", embeddingProviderKind: "local_onnx", cachedLocalEmbedding: execution,
-        embeddingStartupProbe: "omit",
+        embeddingMode: "env", embeddingProviderKind: "local_onnx",
+        cachedLocalEmbedding: execution.source_scope === "separate" ? execution.memory! : execution,
+        ...(execution.source_scope === "separate" ? { cachedLocalSourceEmbedding: execution } : {}),
+        embeddingStartupProbe: execution.memory_warmup ?? "omit",
         sourceSemanticInterpretationClock: config.interpretation_clock, fieldProjectionAdmissionMode: "explicit_checkpoint" });
       removeDataDirWhenBenchDaemonCancelled(directory);
       const scope = currentBenchScope();
@@ -206,7 +228,8 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   refuseBenchWorkAfterCancel();
   if (owningSignal?.aborted) throw new AlayaError("CANCELLED", "Source setup was cancelled before publication");
   if (expired()) {
-    const report = retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started).report;
+    const report = retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started,
+      result.report.memory_readiness, result.report.memory_profile).report;
     writeChainArtifact(join(root, "preparation.json"), report);
     return { config: null, report };
   }
@@ -229,15 +252,34 @@ async function prepareLiveSourceIndex(input: {
 }): Promise<SourceIndexPreparationFailure | SourceIndexPreparationSuccess> {
   const { live, config, execution, allowance, filename, root, expired, started, consume } = input;
   if (live.runtime.runSourceIndexPass === undefined) throw new AlayaError("UNAVAILABLE", "Source producer preparation is unwired");
+  const memoryReadiness = execution.memory_warmup === "eager" ? { status: await live.runtime.services.embeddingProviderWarmup,
+    dimensions: live.runtime.services.getEmbeddingProviderDimensions() } : undefined;
+  if (memoryReadiness !== undefined && (memoryReadiness.status !== "ready" || memoryReadiness.dimensions === null)) {
+    return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
+      reason: "memory_provider_not_ready", memory_readiness: memoryReadiness,
+      ...setupReport({ ...idleDeadlineRun(), setup: idleSetupReceipt("memory_provider_not_ready"), stop_reason: "memory_provider_not_ready" }, allowance, performance.now() - started) } };
+  }
+  const selectedMemory = memorySelection(execution);
+  const memoryProfile = selectedMemory === undefined ? undefined : await captureMemoryEmbeddingProfile(live);
+  if (memoryProfile !== undefined && selectedMemory !== undefined && !matchesMemoryEmbeddingProfile(memoryProfile, selectedMemory, memoryReadiness?.dimensions ?? null)) {
+    const reason = memoryProfile.status === "ready" ? "memory_artifact_mismatch" : "memory_profile_unavailable";
+    return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
+      reason, memory_profile: memoryProfile,
+      ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
+      ...setupReport({ ...idleDeadlineRun(), setup: idleSetupReceipt(reason), stop_reason: reason }, allowance, performance.now() - started) } };
+  }
   const before = inspectSemanticChainSourceIndex(filename, config.workspace_id, config.budget);
-  const run = await runBoundedSourceIndexPasses(live, allowance, filename, config.workspace_id, root, expired, execution.representation, execution.windowing);
+  const run = await runBoundedSourceIndexPasses(live, allowance, filename, config.workspace_id, root, expired, execution.representation, execution.windowing, execution.artifact_digest);
   refuseBenchWorkAfterCancel();
   const failure = (reason: string): SourceIndexPreparationFailure => ({ config: null, report: {
     contract: "semantic-chain-source-preparation-failure-v1", execution, reason,
+    ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
+    ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
     ...setupReport(run, allowance, performance.now() - started) } });
   // No scheduling was started. Refused/incomplete work and native uncertainty cannot authorize a checkpoint.
   const setup = run.setup, binding = setup.binding;
   if (expired()) return failure("setup_soft_deadline");
+  if (run.stop_reason === "source_artifact_mismatch") return failure(run.stop_reason);
   if (setup.status !== "settled" || binding.status !== "ready") return failure(setup.reason);
   if (run.stop_reason !== "settled") return failure(run.stop_reason);
   if (execution.lexical !== undefined) {
@@ -248,6 +290,7 @@ async function prepareLiveSourceIndex(input: {
   const usable = (observed: ReturnType<typeof inspectSemanticChainSourceIndex>) =>
     observed.complete && observed.index !== null && binding.profile_id === observed.index.profile_id &&
     binding.profile.provider_kind === "local_onnx" && binding.profile.model_id === execution.model_id &&
+    (execution.artifact_digest === undefined || binding.profile.artifact_digest === execution.artifact_digest) &&
     canonicalJson(binding.profile.representation ?? null) === canonicalJson(execution.representation ?? null) &&
     (execution.windowing === undefined || binding.profile.windowing === execution.windowing) &&
     canonicalJson(binding.profile) === canonicalJson(observed.index.configuration.profile);
@@ -270,6 +313,8 @@ async function prepareLiveSourceIndex(input: {
     // Persist the producer's resolved choice. Omission on archived bindings still
     // means their historical raw windows; new receipts never depend on a default.
     execution: { ...execution, windowing: binding.profile.windowing },
+    ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
+    ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
     ...setupReport(run, allowance, performance.now() - started), index_status: observed.status, index: observed.index,
     inspection: observed.inspection, before_inspection: before.inspection, admission: reuse ? "reused_complete" : "prepared_complete",
     snapshot_path: snapshotPath, snapshot_sha256: hashRegularFileNoFollow(snapshotPath) };
@@ -336,9 +381,13 @@ function retainedSoftDeadline(
   execution: z.infer<typeof CachedLocalSourceExecutionSchema>,
   run: Omit<SourceIndexSetupRun, "stop_reason">,
   allowance: CapturedAllowance,
-  elapsed: number
+  elapsed: number,
+  memoryReadiness?: SourceIndexPreparationBase["memory_readiness"],
+  memoryProfile?: SourceIndexPreparationBase["memory_profile"]
 ): SourceIndexPreparationFailure {
   return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
+    ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
+    ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
     reason: "setup_soft_deadline", ...setupReport({ ...run, stop_reason: "setup_soft_deadline" }, allowance, elapsed) } };
 }
 
@@ -396,7 +445,7 @@ function debitSetupLeftover(leftover: SourceIndexProducerPassRemaining, spent: {
   return next;
 }
 
-function idleSetupReceipt(reason: "setup_pass_exhausted" | "setup_allowance_exhausted" | "setup_soft_deadline"): SourceIndexSetupReceipt {
+function idleSetupReceipt(reason: Extract<SourceIndexSetupReceipt, { status: "not_run" }>["reason"]): SourceIndexSetupReceipt {
   return { status: "not_run", reason, binding: { status: "not_run" }, resources: SETUP_RESOURCE_ZERO,
     accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0 };
 }
@@ -404,7 +453,7 @@ function idleSetupReceipt(reason: "setup_pass_exhausted" | "setup_allowance_exha
 async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance: CapturedAllowance,
   filename: string, workspace: string, root: string, expired: () => boolean,
   representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
-  windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<SourceIndexSetupRun> {
+  windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing, expectedArtifact?: string): Promise<SourceIndexSetupRun> {
   const run = daemon.runtime.runSourceIndexPass!;
   let leftover = allowance.leftover === undefined ? undefined : { ...allowance.leftover };
   let last: SourceIndexSetupReceipt | undefined;
@@ -453,6 +502,9 @@ async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance:
       refuseBenchWorkAfterCancel();
       if (expired()) { stop_reason = "setup_soft_deadline"; break; }
       if (exceeded) { stop_reason = "setup_accounting_exceeded"; break; }
+      if (pass.binding.status === "ready" && expectedArtifact !== undefined && pass.binding.profile.artifact_digest !== expectedArtifact) {
+        stop_reason = "source_artifact_mismatch"; break;
+      }
       if (pass.binding.status !== "ready" || !sourceIndexProgressBindingMatches(after, pass.binding)) {
         stop_reason = "source_binding_invalid"; break;
       }
