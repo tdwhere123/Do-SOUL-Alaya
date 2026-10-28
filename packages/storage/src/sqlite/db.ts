@@ -387,7 +387,7 @@ function runMigrations(
   const afterHost = later.filter(fileName => parseMigrationVersion(fileName) > SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION);
   applyMigrationBatch(database, migrationsDirectory, beforeHost, temporalMode, false, busyTimeoutMs);
   applyMigrationBatch(database, migrationsDirectory, host, temporalMode, true, busyTimeoutMs);
-  applyMigrationBatch(database, migrationsDirectory, afterHost, temporalMode, false, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, afterHost, temporalMode, false, busyTimeoutMs, true);
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {
@@ -461,7 +461,8 @@ function applyMigrationBatch(
   fileNames: readonly string[],
   temporalMode: TemporalDatabaseMode,
   rebuildsReferencedTable: boolean,
-  busyTimeoutMs: number
+  busyTimeoutMs: number,
+  finalBatch = false
 ): void {
   if (fileNames.length === 0) {
     return;
@@ -479,6 +480,11 @@ function applyMigrationBatch(
         const statements = prepareMigrationStatements(database);
         for (const fileName of fileNames) {
           applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
+        }
+        // Current observers depend on the complete schema, including tables added
+        // or rebuilt after their original migration. Refresh even on a no-op reopen.
+        if (finalBatch && database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='garden_projection_cursor'").get() !== undefined) {
+          initializeObservableMutationGeneration(database);
         }
       }).immediate();
     }, {
@@ -579,12 +585,7 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
   },
   13: migrateRetainedSourceChunks,
   [EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION]: migrateEmbeddingVectorValidity,
-  28: (database) => {
-    rebuildSourceIndexLexicalDomains(database);
-    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='garden_projection_cursor'").get() !== undefined) {
-      initializeObservableMutationGeneration(database);
-    }
-  }
+  28: rebuildSourceIndexLexicalDomains
 };
 
 function runDataMigrationIfPresent(
