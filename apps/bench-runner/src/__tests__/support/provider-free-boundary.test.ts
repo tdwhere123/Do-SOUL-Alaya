@@ -2,12 +2,41 @@ import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, linkSync, rmSync
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import childProcess from "node:child_process";
+import workerThreads from "node:worker_threads";
+import type { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { installProviderFreeBoundary } from "./provider-free-boundary.js";
 
 const directories: string[] = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
 const temporary = () => { const path = mkdtempSync(join(tmpdir(), "provider-boundary-fixture-")); directories.push(path); return path; };
+
+type DescendantObservation = { entry: string; execArgv: string[]; refusal: string | null };
+function descendantFixture() {
+  const path = join(temporary(), "provider-isolation-child.mjs");
+  writeFileSync(path, `import { parentPort } from "node:worker_threads";
+let refusal = null;
+try { await fetch("https://provider-fixture.invalid/v1"); }
+catch (error) { refusal = error.message; }
+const observation = { entry: import.meta.url, execArgv: process.execArgv, refusal };
+if (parentPort) parentPort.postMessage(observation);
+else process.send(observation);
+`);
+  return path;
+}
+async function observeDescendant(descendant: EventEmitter) {
+  const message = new Promise<DescendantObservation>((resolve, reject) => {
+    descendant.once("message", resolve); descendant.once("error", reject);
+    descendant.once("exit", () => reject(new Error("descendant exited before its intended entry reported")));
+  });
+  const exit = new Promise<number>((resolve, reject) => {
+    descendant.once("exit", resolve); descendant.once("error", reject);
+  });
+  const [observation, code] = await Promise.all([message, exit]);
+  return { observation, code };
+}
 
 it("admits only credential fixtures in directories allocated after the unit boundary, including missing files", async () => {
   const existing = temporary();
@@ -62,4 +91,49 @@ it("leaves local fixture transport available without following redirects", async
     expect(native).toHaveBeenCalledWith("http://127.0.0.1:1234/fixture", { redirect: "error" });
     expect(isolation.violations).toEqual([]);
   } finally { isolation.restore(); globalThis.fetch = original; }
+});
+
+it.each(["supplied", "default", "already-present"] as const)("preserves repeated fork flags and provider refusal with %s execArgv", async mode => {
+  const path = descendantFixture(), preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const flag = `--import=${preload}`, supplied = ["--conditions", "node", "--conditions", "development",
+    ...(mode === "already-present" ? [flag] : [])];
+  const expected = ["--conditions", "node", "--conditions", "development", flag];
+  const isolation = installProviderFreeBoundary({ descendantPreload: preload }), before = process.execArgv;
+  let child: ReturnType<typeof childProcess.fork> | undefined;
+  try {
+    // Exercise the helper's default branch with a deterministic caller vector.
+    // Restore it immediately after the synchronous child creation boundary.
+    try {
+      if (mode === "default") process.execArgv = supplied;
+      child = childProcess.fork(path, [], { silent: true, ...(mode === "default" ? {} : { execArgv: supplied }) });
+    } finally { process.execArgv = before; }
+    const deadline = setTimeout(() => child?.kill("SIGKILL"), 5000);
+    try {
+      const { observation, code } = await observeDescendant(child);
+      expect(observation.entry).toBe(pathToFileURL(path).href);
+      expect(observation.execArgv).toEqual(expected);
+      expect(observation.refusal).toBe("Provider-free test refused non-loopback fetch");
+      expect(code).toBe(1); // The preload refuses even a caught provider attempt at exit.
+      expect(supplied).toEqual(mode === "already-present" ? expected : expected.slice(0, -1));
+    } finally { clearTimeout(deadline); }
+  } finally { child?.kill("SIGKILL"); isolation.restore(); }
+});
+
+it("preserves repeated Worker flags and an already-present guard while retaining provider refusal", async () => {
+  const path = descendantFixture(), preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const supplied = ["--conditions", "node", "--conditions", "development", `--import=${preload}`];
+  const expected = [...supplied], isolation = installProviderFreeBoundary({ descendantPreload: preload });
+  let worker: workerThreads.Worker | undefined;
+  try {
+    worker = new workerThreads.Worker(pathToFileURL(path), { execArgv: supplied });
+    let deadlineFired = false;
+    const deadline = setTimeout(() => { deadlineFired = true; void worker?.terminate(); }, 5000);
+    try {
+      const { observation, code } = await observeDescendant(worker);
+      expect(deadlineFired).toBe(false);
+      expect(observation.entry).toBe(pathToFileURL(path).href); expect(observation.execArgv).toEqual(expected);
+      expect(observation.refusal).toBe("Provider-free test refused non-loopback fetch"); expect(code).toBe(1);
+      expect(supplied).toEqual(expected);
+    } finally { clearTimeout(deadline); }
+  } finally { await worker?.terminate(); isolation.restore(); }
 });

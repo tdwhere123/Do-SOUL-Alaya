@@ -35,7 +35,12 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
   if (options.descendantPreload !== undefined) {
     const preload = `--import=${options.descendantPreload}`;
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${preload}`.trim();
-    const argv = (supplied?: readonly string[]) => [...new Set([...(supplied ?? process.execArgv), preload])];
+    const argv = (supplied?: readonly string[]) => {
+      // Repeated valued flags (for example --conditions) must keep their order
+      // and multiplicity. Only our complete preload token is idempotent.
+      const selected = [...(supplied ?? process.execArgv)];
+      return selected.includes(preload) ? selected : [...selected, preload];
+    };
     // ONNX deliberately clears inherited loader flags; recall workers supply
     // explicit argv. Apply the fixture guard at those actual creation boundaries.
     const fork = childProcess.fork;
