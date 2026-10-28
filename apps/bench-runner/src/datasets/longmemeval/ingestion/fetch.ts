@@ -82,6 +82,17 @@ export interface LoadedLongMemEvalDatasetWindow extends LoadedLongMemEvalDataset
   readonly datasetQuestionCount: number;
 }
 
+export type LongMemEvalQuestionMetadata = Pick<LongMemEvalQuestion,
+  "question_id" | "question_type" | "question_date" | "question">;
+
+export interface LoadedLongMemEvalQuestionMetadata {
+  readonly entries: readonly Readonly<{ question: LongMemEvalQuestionMetadata; index: number }>[];
+  readonly datasetQuestionCount: number;
+  readonly sha256: string;
+  readonly checksumSource: string;
+  readonly sourcePath: string;
+}
+
 declare const verifiedDatasetAuthorityBrand: unique symbol;
 
 export interface VerifiedLongMemEvalDatasetAuthority {
@@ -215,17 +226,11 @@ export async function loadDatasetWindowWithIdentity(
   }
 ): Promise<LoadedLongMemEvalDatasetWindow> {
   assertDatasetWindow(options.offset, options.limit);
-  const { sourcePath: localPath, checksumSource: pinnedPath } = longMemEvalDatasetInputPaths(variant, options);
   const pinnedMetaRoot = path.resolve(options.pinnedMetaRoot ?? PINNED_META_ROOT);
-  const pinned = await readPinnedDatasetIdentity(variant, pinnedPath);
   const questions: LongMemEvalQuestion[] = [];
   const assignments: LongMemEvalSelectionAssignment[] = [];
   const inputDigests = new Map<string, string>();
-  const identity = await streamLongMemEvalDataset(localPath, {
-    datasetLabel: variant,
-    expectedBytes: pinned.sizeBytes,
-    maxQuestionCount: pinned.questionCount
-  }, (question, index) => {
+  const identity = await scanPinnedDataset(variant, options, (question, index) => {
     assignments.push(datasetAssignment(question));
     if (index >= options.offset &&
         (options.limit === undefined || index < options.offset + options.limit)) {
@@ -233,23 +238,55 @@ export async function loadDatasetWindowWithIdentity(
       questions.push(question);
     }
   });
-  assertStreamedDatasetIdentity({
-    variant,
-    localPath,
-    pinned,
-    identity,
-    dataDir: options.dataDir
-  });
   return {
     questions,
-    datasetQuestionCount: identity.questionCount,
+    datasetQuestionCount: identity.datasetQuestionCount,
     sha256: identity.sha256,
-    checksumSource: pinnedPath,
-    sourcePath: localPath,
+    checksumSource: identity.checksumSource,
+    sourcePath: identity.sourcePath,
     promotionAuthority: pinnedMetaRoot === PINNED_META_ROOT
       ? mintVerifiedDatasetAuthority(identity.sha256, assignments, variant, inputDigests)
       : null
   };
+}
+
+/** Verify the whole pinned dataset but retain only requested query metadata and original offsets. */
+export async function loadSelectedQuestionMetadata(
+  variant: LongMemEvalVariant,
+  options: { readonly dataDir?: string; readonly pinnedMetaRoot?: string; readonly questionIds: readonly string[] }
+): Promise<LoadedLongMemEvalQuestionMetadata> {
+  const ids = [...options.questionIds], requested = new Set(ids);
+  if (requested.size !== ids.length) throw new AlayaError("VALIDATION", "duplicate requested question ids");
+  const seen = new Set<string>();
+  const selected = new Map<string, { question: LongMemEvalQuestionMetadata; index: number }>();
+  let duplicate: string | undefined;
+  const identity = await scanPinnedDataset(variant, options, (question, index) => {
+    if (seen.has(question.question_id)) duplicate ??= question.question_id;
+    seen.add(question.question_id);
+    if (requested.has(question.question_id)) {
+      const { question_id, question_type, question_date, question: text } = question;
+      selected.set(question_id, { question: { question_id, question_type, question_date, question: text }, index });
+    }
+  });
+  if (duplicate !== undefined) throw new AlayaError("VALIDATION", `duplicate dataset question id ${duplicate}`);
+  const entries = ids.map(id => {
+    const entry = selected.get(id);
+    if (entry === undefined) throw new AlayaError("VALIDATION", `unknown question ${id}`);
+    return entry;
+  });
+  return { ...identity, entries };
+}
+
+async function scanPinnedDataset(variant: LongMemEvalVariant,
+  options: { readonly dataDir?: string; readonly pinnedMetaRoot?: string },
+  onQuestion: (question: LongMemEvalQuestion, index: number) => void) {
+  const { sourcePath, checksumSource } = longMemEvalDatasetInputPaths(variant, options);
+  const pinned = await readPinnedDatasetIdentity(variant, checksumSource);
+  const identity = await streamLongMemEvalDataset(sourcePath, {
+    datasetLabel: variant, expectedBytes: pinned.sizeBytes, maxQuestionCount: pinned.questionCount
+  }, onQuestion);
+  assertStreamedDatasetIdentity({ variant, localPath: sourcePath, pinned, identity, dataDir: options.dataDir });
+  return { datasetQuestionCount: identity.questionCount, sha256: identity.sha256, checksumSource, sourcePath };
 }
 
 function assertStreamedDatasetIdentity(input: {

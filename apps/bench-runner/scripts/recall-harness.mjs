@@ -45,6 +45,7 @@ const { executeOrdinaryRecallEntry } = await import(join(dist, "runs/recall-meas
 const { questionTimeProposalFromCoordinates } = await import(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js"));
 const { chainIdentity } = await import(join(dist, "runs/recall-measurement/contract.js"));
 const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs/extraction/authority/inspection.js"));
+const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(join(dist, "datasets/longmemeval/ingestion/fetch.js"));
 
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
@@ -95,21 +96,24 @@ const execution = sourceOptions.every(Boolean) ? { cache_root: resolve(values["s
 const revision = readCurrentExtractionAuthorityRevision();
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-// Without the repository pin the loader withholds host capture, so sources fall back to lines.
-const unpinnedMeta = join(cacheRoot, "unpinned-meta");
-if (!existsSync(join(unpinnedMeta, "longmemeval_s.meta.json"))) {
-  mkdirSync(unpinnedMeta, { recursive: true });
-  copyFileSync(join(pinnedMeta, "longmemeval_s.meta.json"), join(unpinnedMeta, "longmemeval_s.meta.json"));
-}
-
-const dataset = JSON.parse(readFileSync(datasetPath, "utf8"));
-const datasetSha = sha256(readFileSync(datasetPath));
-const byId = new Map(dataset.map((question, index) => [question.question_id, { question, index }]));
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
 if (values.limit) ids = ids.slice(0, Number(values.limit));
 if (values.shard) {
   const [shard, shards] = values.shard.split("/").map(Number);
   ids = ids.filter((_, offset) => offset % shards === shard);
+}
+const datasetOptions = { dataDir: dirname(datasetPath), pinnedMetaRoot: pinnedMeta };
+const canonicalDataset = longMemEvalDatasetInputPaths("longmemeval_s", datasetOptions).sourcePath;
+if (resolve(canonicalDataset) !== datasetPath) throw new AlayaError("VALIDATION", "--dataset must name the canonical longmemeval_s.json file");
+const metadata = await loadSelectedQuestionMetadata("longmemeval_s", { ...datasetOptions, questionIds: ids });
+const datasetSha = metadata.sha256;
+const byId = new Map(metadata.entries.map(entry => [entry.question.question_id, entry]));
+
+// Without the repository pin the loader withholds host capture, so sources fall back to lines.
+const unpinnedMeta = join(cacheRoot, "unpinned-meta");
+if (!existsSync(join(unpinnedMeta, "longmemeval_s.meta.json"))) {
+  mkdirSync(unpinnedMeta, { recursive: true });
+  copyFileSync(join(pinnedMeta, "longmemeval_s.meta.json"), join(unpinnedMeta, "longmemeval_s.meta.json"));
 }
 
 mkdirSync(out, { recursive: true });

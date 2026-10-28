@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
   loadDataset,
+  loadSelectedQuestionMetadata,
   loadDatasetWindowWithIdentity,
   loadDatasetWithIdentity
 } from "../../../datasets/longmemeval/ingestion/fetch.js";
@@ -278,6 +279,49 @@ describe("loadDatasetWindowWithIdentity", () => {
       offset: 0,
       limit: 1
     })).rejects.toThrow(/dataset checksum mismatch: longmemeval_oracle/u);
+  });
+});
+
+describe("loadSelectedQuestionMetadata", () => {
+  it("returns only requested metadata in requested order with original offsets and full dataset identity", async () => {
+    const sha = await seedLocalDataset(); await seedPinnedMeta(sha);
+    const result = await loadSelectedQuestionMetadata(VARIANT, {
+      dataDir, pinnedMetaRoot, questionIds: ["fixture-2", "fixture-1"]
+    });
+    expect(result).toEqual({ sha256: sha, sourcePath: join(dataDir, `${VARIANT}.json`),
+      checksumSource: join(pinnedMetaRoot, `${VARIANT}.meta.json`), datasetQuestionCount: 2,
+      entries: [{ index: 1, question: { question_id: "fixture-2", question_type: "single_session",
+        question: "second fixture probe", question_date: "2026-01-02" } },
+      { index: 0, question: { question_id: "fixture-1", question_type: "single_session",
+        question: "fixture probe", question_date: "2026-01-01" } }] });
+  });
+
+  it("rejects duplicate requests, unknown requests and duplicate dataset IDs", async () => {
+    const sha = await seedLocalDataset(); await seedPinnedMeta(sha);
+    const options = { dataDir, pinnedMetaRoot };
+    await expect(loadSelectedQuestionMetadata(VARIANT, { ...options, questionIds: ["fixture-1", "fixture-1"] }))
+      .rejects.toThrow(/duplicate requested question ids/u);
+    await expect(loadSelectedQuestionMetadata(VARIANT, { ...options, questionIds: ["missing"] }))
+      .rejects.toThrow(/unknown question missing/u);
+    const duplicate = JSON.stringify([FIXTURE_QUESTIONS[0], { ...FIXTURE_QUESTIONS[1], question_id: "fixture-1" }]);
+    const duplicateSha = await seedLocalDataset(duplicate); await seedPinnedMeta(duplicateSha);
+    await expect(loadSelectedQuestionMetadata(VARIANT, { ...options, questionIds: [] }))
+      .rejects.toThrow(/duplicate dataset question id fixture-1/u);
+  });
+
+  it("validates unselected questions and the complete pin before returning metadata", async () => {
+    const invalid = JSON.stringify([FIXTURE_QUESTIONS[0], { ...FIXTURE_QUESTIONS[1], question_id: 42 }]);
+    const invalidSha = await seedLocalDataset(invalid); await seedPinnedMeta(invalidSha);
+    const options = { dataDir, pinnedMetaRoot, questionIds: ["fixture-1"] };
+    await expect(loadSelectedQuestionMetadata(VARIANT, options)).rejects.toThrow(/invalid LongMemEval question/u);
+    const validSha = await seedLocalDataset(); await seedPinnedMeta(validSha);
+    await writeFile(join(dataDir, `${VARIANT}.json`), invalidUtf8DatasetBytes());
+    await expect(loadSelectedQuestionMetadata(VARIANT, options)).rejects.toThrow(/dataset checksum mismatch/u);
+    await seedLocalDataset();
+    await writeFile(join(pinnedMetaRoot, `${VARIANT}.meta.json`), JSON.stringify({
+      sha256: validSha, size_bytes: committedPinRead.sizeBytes, question_count: 3
+    }));
+    await expect(loadSelectedQuestionMetadata(VARIANT, options)).rejects.toThrow(/does not match pinned question count/u);
   });
 });
 
