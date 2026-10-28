@@ -34,7 +34,8 @@ export class LibraryFieldObserver {
     this.pool(nomination, bound, bound !== undefined || reused ? "reused" : "created");
     if (reused) return;
     this.observer?.event("field_nomination", "observe", () => ({ result: nomination.result,
-      witness: nomination.witness, beyond_observed_prefix: "unknown_not_nomination_limit" }));
+      witness: nomination.witness, admitted_roots: nomination.admitted_roots,
+      question_time_order: nomination.question_time_order, beyond_observed_prefix: "unknown_not_nomination_limit" }));
   }
 
   public sourceRead(input: Parameters<SourceRead>[0], page: ReturnType<SourceRead>): void {

@@ -446,7 +446,7 @@ function prepareMembershipNavigation(context: ProjectionContext) {
       && ((state.native_sources?.admitted_roots?.length ?? state.native_sources?.result?.nominations.length ?? 0) > 0)
       && projectionProgress.offset < snapshot.values.length
       ? context.navigation
-        ?? cost.time("index", () => nativeNavigationProjection(state, snapshot.values, navigationMeter)) : undefined;
+        ?? cost.time("index", () => nativeNavigationProjection(state, snapshot.values, navigationMeter, input.observe_navigation)) : undefined;
   } finally {
     payload.remainingMemoryBytes = navigationMeter.bytes;
     cost.add("index", { budget_work: navigationMeter.spentWork, charged_retained_bytes: navigationMeter.spentBytes });

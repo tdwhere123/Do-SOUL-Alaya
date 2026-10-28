@@ -149,6 +149,7 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
         readers: readers.adapter,
         capture_budget_work: captureBudgetWork,
         observe_page_fit: fit => observer.fit(fit),
+        ...(meter.observer === undefined ? {} : { observe_navigation: capture => meter.observer?.event("field_access_order", "index", capture) }),
         encode_page: (index, previews, metadata, owner) => libraryFitEnvelope(libraryFieldDelivery(
           { index, previews, metadata }, { ...context, meter: owner }, reservedLibraryWork(request.budget), false))
       }), executed => {
@@ -168,6 +169,7 @@ function libraryReaders(runtime: RecallReadWorkerRuntime, payload: SourceSemanti
   observation: SourceQueryProofObservation, meter: SourceSemanticReadBudget,
   boundPool: SourceSemanticLease["access_pool"], observer: LibraryFieldObserver,
   retainedNomination?: NativeSourceNomination | null) {
+  meter.observer?.queryVector(payload.prepared_query?.vector);
   const base = createConditionalFieldObserverReaders(runtime.database, [],
     payload.prepared_query?.vector ?? { status: "unavailable", reason: "embedding_preparation_unwired" }, meter.observer, "request");
   const capture: { roots: readonly SourceEvidenceTarget[];

@@ -22,6 +22,7 @@ import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
 import { verifyExposure } from "./ordinary-recall-delivery.js";
 import { admitOrdinaryEntryCursor, ordinaryEntryStopCause, type OrdinaryEntryCursorSeen } from "./ordinary-entry-policy.js";
 import { admittedSourceDeliveryTail } from "../../measurement/source-delivery-visibility.js";
+import { observeOrdinaryEntry, type CaptureOrdinaryEntryObservation } from "./ordinary-entry-observation.js";
 import {
   OrdinaryRecallEntryInputSchema, OrdinaryRecallExecutionSchema, OrdinaryRecallQueryRowSchema,
   OrdinaryRecallSourceIntervalSchema, ORDINARY_RECALL_ENTRY_CONTRACT, ORDINARY_RECALL_OBSERVED_SLOT_TARGET,
@@ -44,7 +45,7 @@ type EntryPage = OrdinaryRecallQueryRow["pages"][number];
  * slots or admitted occupancy-tail exhaustion. Each observed page sets `occupied_slots` from
  * admitted `exposureSlots`, not `source_intervals.length` (0 when the page is not admitted).
  */
-export async function executeOrdinaryRecallEntry(value: unknown): Promise<OrdinaryRecallExecution> {
+export async function executeOrdinaryRecallEntry(value: unknown, capture?: CaptureOrdinaryEntryObservation): Promise<OrdinaryRecallExecution> {
   const input = OrdinaryRecallEntryInputSchema.parse(value);
   const config = SemanticChainConfigSchema.parse(structuredClone(input.config));
   assertChainSnapshot(config);
@@ -60,6 +61,7 @@ export async function executeOrdinaryRecallEntry(value: unknown): Promise<Ordina
       });
       const retained = readChainArtifact(output);
       if (retained !== undefined) {
+        if (capture !== undefined) throw new AlayaError("CONFLICT", "observation requires a fresh ordinary entry root");
         const parsed = OrdinaryRecallExecutionSchema.parse(retained);
         if (parsed.input_identity !== identity) {
           throw new AlayaError("CONFLICT", "ordinary entry artifact does not bind the requested config and queries");
@@ -68,7 +70,7 @@ export async function executeOrdinaryRecallEntry(value: unknown): Promise<Ordina
       }
       const execution = freezeOrdinaryArtifact(OrdinaryRecallExecutionSchema, mapped.status === "not_run"
         ? notRunExecution(config, mapped, identity, input.queries)
-        : await runMappedOrdinaryRecall(config, input.root, input.queries, mapped, identity));
+        : await runMappedOrdinaryRecall(config, input.root, input.queries, mapped, identity, capture));
       refuseBenchWorkAfterCancel();
       writeChainArtifact(output, execution);
       return execution;
@@ -103,7 +105,8 @@ function notRunExecution(
 async function runMappedOrdinaryRecall(
   config: SemanticChainConfig, root: string,
   queries: readonly { query_key: string; original_query: string }[],
-  mapping: Extract<OrdinaryRecallMapping, { status: "mapped" }>, identity: string
+  mapping: Extract<OrdinaryRecallMapping, { status: "mapped" }>, identity: string,
+  capture?: CaptureOrdinaryEntryObservation
 ): Promise<OrdinaryRecallExecution> {
   const rows: OrdinaryRecallQueryRow[] = [];
   await withSemanticChainDaemon(config, root, async daemon => {
@@ -114,6 +117,7 @@ async function runMappedOrdinaryRecall(
       const prior = readChainArtifact(rowPath);
       const reserved = readChainArtifact(reservation);
       if (prior !== undefined) {
+        if (capture !== undefined) throw new AlayaError("CONFLICT", "observation cannot recover an already captured ordinary row");
         if (canonicalJson(reserved) !== canonicalJson({ entry_identity: identity, query_key: query.query_key })) {
           throw new AlayaError("CONFLICT", "ordinary public row does not bind its requested entry identity");
         }
@@ -123,12 +127,12 @@ async function runMappedOrdinaryRecall(
         throw new AlayaError("CONFLICT", "ordinary public first exposure is unresolved after interruption; retained reservation forbids re-exposure");
       }
       writeChainArtifact(reservation, { entry_identity: identity, query_key: query.query_key });
-      const row = await executeOrdinaryQuery(daemon, config, mapping, query);
+      const row = await observeOrdinaryEntry(daemon, query.query_key, () => executeOrdinaryQuery(daemon, config, mapping, query), capture);
       const frozen = freezeOrdinaryArtifact(OrdinaryRecallQueryRowSchema, row);
       writeChainArtifact(rowPath, frozen);
       rows.push(frozen);
     }
-  });
+  }, capture === undefined ? {} : { sourceSemanticObservations: true });
   return {
     contract: ORDINARY_RECALL_ENTRY_CONTRACT, input_identity: identity, config_identity: chainIdentity(config), mapping,
     consumer_model_calls: 0, rows

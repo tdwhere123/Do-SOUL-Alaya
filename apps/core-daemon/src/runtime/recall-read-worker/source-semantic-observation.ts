@@ -1,12 +1,15 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import type { SourceIndexAcquisition } from "@do-soul/alaya-core";
+import type { SourceIndexQueryVector } from "@do-soul/alaya-protocol";
 import { SourceSemanticNativeFactsSchema, SourceSemanticObservationFacts, type SourceSemanticNativeFacts } from "./source-semantic-provenance.js";
 
 /** Private Node/worker metadata only; never part of an operation payload or public result. */
 export const SourceSemanticObservationRequestSchema = z.object({
   max_events: z.number().int().min(0).max(2048).default(512),
-  max_bytes: z.number().int().min(0).max(524288).default(262144)
+  max_bytes: z.number().int().min(0).max(524288).default(262144),
+  rank_prefix: z.number().int().min(1).max(128).optional(),
+  capture_query_vector: z.boolean().optional()
 }).strict();
 export type SourceSemanticObservationOptions = z.input<typeof SourceSemanticObservationRequestSchema>;
 export type SourceSemanticObservationRequest = z.output<typeof SourceSemanticObservationRequestSchema>;
@@ -31,6 +34,7 @@ export type SourceSemanticObservation = Readonly<{
   facts?: SourceSemanticNativeFacts;
   diagnostics?: Readonly<{ status: "complete" | "overflow"; compacted_events: number; omitted_events: number;
     counts: Readonly<Record<string, number>>;
+    filtered_counts?: Readonly<Record<string, number>>;
     /** Absent historically. Count-only or capacity-omitted detail, not missing causal progress events. */
     omitted_counts?: Readonly<Record<string, number>> }>;
   costs: readonly ObservationCost[];
@@ -85,6 +89,7 @@ export class SourceSemanticObserver {
   private omittedDiagnostics = 0;
   private readonly diagnosticCounts: Record<string, number> = {};
   private readonly omittedDiagnosticCounts: Record<string, number> = {};
+  private readonly filteredDiagnosticCounts: Record<string, number> = {};
   private readonly diagnosticPayloads = new Set<string>();
 
   constructor(private readonly requestId: number, private readonly limits: SourceSemanticObservationRequest) {
@@ -188,8 +193,23 @@ export class SourceSemanticObserver {
   sourceIndexAcquisition(invocation: "original" | "hint", phase: string,
     capture: Parameters<AcquisitionObserver>[0], kind: Parameters<AcquisitionObserver>[1]): void {
     if (kind === "vector_inspected") this.omitDiagnostic(`source_index_${invocation}_${kind}`);
-    else this.event("source_index_acquisition", phase, () => ({ invocation, ...capture() }),
+    else if (this.limits.rank_prefix !== undefined && (kind === "vector_ranked" || kind === "lexical_candidate")) {
+      this.safely(() => {
+        const fact = capture(), key: AcquisitionDiagnosticKind = `source_index_${invocation}_${kind}`;
+        if ((fact.kind === "vector_ranked" || fact.kind === "lexical_candidate") && fact.rank > this.limits.rank_prefix!) {
+          this.filteredDiagnosticCounts[key] = (this.filteredDiagnosticCounts[key] ?? 0) + 1; return;
+        }
+        this.event("source_index_acquisition", phase, () => ({ invocation, ...fact }), key);
+      });
+    } else this.event("source_index_acquisition", phase, () => ({ invocation, ...capture() }),
       kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
+  }
+
+  queryVector(vector: SourceIndexQueryVector | undefined): void {
+    if (this.limits.capture_query_vector !== true) return;
+    this.event("source_query_vector", "field", () => vector === undefined
+      ? { status: "unavailable", reason: "query_vector_unprovided" }
+      : vector.status === "unavailable" ? vector : { ...vector, embedding: Array.from(vector.embedding) });
   }
 
   event(kind: string, phase: string, data: () => unknown, diagnosticKind?: AcquisitionDiagnosticKind): void {
@@ -252,7 +272,8 @@ export class SourceSemanticObserver {
         root_spent: { ...this.meterTotals.root_spent }, child_spent: { ...this.meterTotals.child_spent } },
       facts: this.facts.finish(!this.failed), diagnostics: { status: this.omittedDiagnostics > 0 ? "overflow" : "complete",
         compacted_events: this.compactedDiagnostics, omitted_events: this.omittedDiagnostics, counts: { ...this.diagnosticCounts },
-        omitted_counts: { ...this.omittedDiagnosticCounts } },
+        omitted_counts: { ...this.omittedDiagnosticCounts },
+        ...(this.limits.rank_prefix === undefined ? {} : { filtered_counts: { ...this.filteredDiagnosticCounts } }) },
       dropped_events: this.dropped, aggregates_complete: this.aggregatesComplete && !this.failed,
       overhead: { capture_ms: this.captureMs, event_json_bytes: this.eventBytes, ipc_bytes: null,
         ipc_time: "not_measured", physical_peak_memory: "not_measured", physical_sql_work: "not_measured" },
@@ -277,6 +298,7 @@ const ObservationSchema: z.ZodType<SourceSemanticObservation> = z.object({
   facts: SourceSemanticNativeFactsSchema.optional(),
   diagnostics: z.object({ status: z.enum(["complete", "overflow"]), compacted_events: Nonnegative,
     omitted_events: Nonnegative, counts: z.record(z.string().max(80), Nonnegative),
+    filtered_counts: z.record(z.string().max(80), Nonnegative).optional(),
     omitted_counts: z.record(z.string().max(80), Nonnegative).optional() }).strict().optional(),
   costs: z.array(z.object({ phase: z.string().max(80), reason: z.string().max(160), operation: z.string().max(32),
     count: Nonnegative, work: Nonnegative, bytes: Nonnegative }).strict()).max(270),

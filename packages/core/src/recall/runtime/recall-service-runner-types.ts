@@ -31,6 +31,8 @@ export type ConditionalFieldRecallRequest = Readonly<{
   /** Internal surface codec: selection remains owned by the shared field projection. */
   /** Private diagnostics observe an executed fit, never decide or pay for it. */
   readonly observe_page_fit?: (fit: import("./recall-page-fit.js").RecallPageFit & { readonly codec_invocations: number }) => void;
+  /** Private diagnostics observe the completed native navigation, without choosing it. */
+  readonly observe_navigation?: (capture: () => import("./native-navigation-projection.js").NativeNavigationObservation) => void;
   readonly encode_page?: (index: import("@do-soul/alaya-protocol").InformationIndex,
     previews: ReadonlyMap<string, string>, metadata: Readonly<Record<string, import("./recall-service-results.js").RecallSourceMetadata>>,
     meter: import("@do-soul/alaya-protocol").SourceSemanticResourceLedger) => unknown;

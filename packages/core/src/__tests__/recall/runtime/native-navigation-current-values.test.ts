@@ -48,6 +48,23 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     state => { retained = state; }, startRequestCost());
     expect(first.entries.map(entry => entry.object_id)).toContain(MEM.r);
     if (retained?.binding.kind !== "bound") throw new Error("bound fixture expected");
+    const values = retained.binding.snapshot.values;
+    const ordinary = nativeNavigationProjection(captured, values,
+      new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 }));
+    let observed = false;
+    const diagnostic = nativeNavigationProjection(captured, values,
+      new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 }), read => {
+        const frame = read();
+        expect(frame.total).toBe(values.length);
+        expect(frame.entries.length).toBeGreaterThan(0);
+        expect(Reflect.set(frame.entries[0]!.target, "workspace_id", "tampered")).toBe(true);
+        observed = true;
+        throw new Error("observer failure");
+      });
+    expect(observed).toBe(true);
+    expect(diagnostic.status).toBe(ordinary.status);
+    expect(Array.from({ length: diagnostic.values.size }, (_, index) => diagnostic.values.at(index)))
+      .toEqual(Array.from({ length: ordinary.values.size }, (_, index) => ordinary.values.at(index)));
     const changed: FieldEngineState = { ...retained, projection_progress: undefined, binding: { ...retained.binding,
       snapshot: { ...retained.binding.snapshot, values: retained.binding.snapshot.values.map(value => ({ ...value,
         activation: { kind: "unreachable" as const }, milligrades: undefined, low_milligrades: undefined, high_milligrades: undefined })) } } };

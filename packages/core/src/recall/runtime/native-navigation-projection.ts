@@ -28,6 +28,11 @@ export type NativeFieldNavigation =
     witnessFor: (target: RecallTargetRef) => RecallNavigationWitness | undefined;
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>;
 
+export type NativeNavigationObservation = Readonly<{
+  status: "ordered" | "non_total"; total: number; truncated: boolean;
+  entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
+}>;
+
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
     const digest = hashContentDigest(state.observation_query_text ?? "", fieldContractSha256);
     const lanes = new Map<NativeRouteLane["lane"], NativeRouteOccurrence[]>([
@@ -112,7 +117,8 @@ function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticR
 }
 
 export function nativeNavigationProjection(state: FieldEngineState, values: readonly FieldValue[],
-  meter: SourceSemanticResourceLedger): NativeFieldNavigation {
+  meter: SourceSemanticResourceLedger,
+  observe?: (capture: () => NativeNavigationObservation) => void): NativeFieldNavigation {
   const initial = { work: meter.work, bytes: meter.bytes, spentWork: meter.spentWork, spentBytes: meter.spentBytes };
   const witnesses = new Map<string, RecallNavigationWitness>();
   try {
@@ -143,6 +149,10 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     });
     const shared = { witnessFor: (target: RecallTargetRef) => witnesses.get(sourceFactKey(target)),
       values: { size: result.length, at: (index: number) => result[index] } };
+    try { observe?.(() => ({ status: ordered.status === "ordered" ? "ordered" : "non_total", total: result.length,
+      truncated: result.length > 128, entries: result.slice(0, 128).map(value => ({ target: structuredClone(value.state.target),
+        access_ordinal: witnesses.get(sourceFactKey(value.state.target))?.access_ordinal ?? null })) })); }
+    catch { /* Diagnostic capture cannot change the native result. */ }
     return ordered.status === "ordered"
       ? { status: "ordered", ...shared }
       : { status: "non_total", missing_record_ids: ordered.missing_record_ids, ...shared };

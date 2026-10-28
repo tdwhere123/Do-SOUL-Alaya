@@ -11,6 +11,7 @@
 // Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
 // --coordinates FILE loads frozen question-only coordinates; only arms with "question_time": true send time proposals.
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
+// --capture-pool adds private native observation and separately marked diagnostic rankings to each row.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
+import { loadRecallVectorCache } from "./recall-vector-cache.mjs";
 
 // Install before runtime imports: only local inference and loopback transport are authorized.
 const providerFree = installProviderFreeBoundary({
@@ -37,12 +39,17 @@ const { publishSourceSemanticSnapshot } = await import(join(dist, "runs/snapshot
 const { prepareSemanticChainSourceIndex } = await import(join(dist, "runs/recall-measurement/source-index-binding.js"));
 const { executeOrdinaryRecallEntry } = await import(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js"));
 const { questionTimeProposalFromCoordinates } = await import(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js"));
+const { chainIdentity } = await import(join(dist, "runs/recall-measurement/contract.js"));
 const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs/extraction/authority/inspection.js"));
 
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
-  coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" }
+  coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
+  "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" }
 } });
+if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
+const captureRecallPool = values["capture-pool"] ? (await import("./recall-harness-pool.mjs")).captureRecallPool : undefined;
+const diagnosticVectors = await loadRecallVectorCache(values["diagnostic-vectors"]);
 if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
 const out = resolve(values.out);
 const arms = JSON.parse(readFileSync(values.arms, "utf8"));
@@ -78,9 +85,11 @@ if (values.shard) {
 
 mkdirSync(out, { recursive: true });
 const rowsPath = join(out, "rows.jsonl");
-const done = new Set(existsSync(rowsPath)
-  ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(line => { const r = JSON.parse(line); return `${r.question_id}:${r.arm}`; })
-  : []);
+const previous = existsSync(rowsPath) ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
+if (previous.some(row => (row.capture_requested === true) !== values["capture-pool"])) {
+  throw new AlayaError("CONFLICT", "existing rows use a different pool-capture mode");
+}
+const done = new Set(previous.map(row => `${row.question_id}:${row.arm}`));
 
 function clockOf(questionDate) {
   const m = /^(\d{4})\/(\d{2})\/(\d{2}) \(\w+\) (\d{2}):(\d{2})$/u.exec(questionDate);
@@ -146,29 +155,43 @@ for (const id of ids) {
   for (const arm of arms) {
     if (done.has(`${id}:${arm.name}`)) continue;
     const started = performance.now();
-    const row = { question_id: id, question_type: question.question_type, arm: arm.name };
+    const row = { question_id: id, question_type: question.question_type, arm: arm.name,
+      arm_identity: chainIdentity(arm),
+      ...(values["capture-pool"] ? { capture_requested: true } : {}) };
     try {
       const frozen = coordinates.get(id);
       if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
       const proposal = arm.question_time === true
         ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
-      const config = await prepared(question, index, arm);
       const root = join(out, "runs", id, arm.name);
-      rmSync(root, { recursive: true, force: true });
+      if (captureRecallPool !== undefined && existsSync(root)) {
+        throw new AlayaError("CONFLICT", "capture root already exists; prior first exposure may be unresolved");
+      }
+      const config = await prepared(question, index, arm);
+      if (captureRecallPool === undefined) rmSync(root, { recursive: true, force: true });
       const saved = Object.fromEntries(Object.keys(arm.env ?? {}).map(key => [key, process.env[key]]));
       Object.assign(process.env, arm.env ?? {});
-      let result;
+      let result, observation;
       try {
         result = await executeOrdinaryRecallEntry({ config, root,
           queries: [{ query_key: sha256(question.question), original_query: question.question,
-            ...(proposal === undefined ? {} : { interpretation_proposal: proposal }) }] });
+            ...(proposal === undefined ? {} : { interpretation_proposal: proposal }) }] },
+          captureRecallPool === undefined ? undefined : (_key, captured) => { observation = captured; });
       } finally {
         for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       }
       const query = result.rows[0];
       Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
-        workspace: config.workspace_id, intervals: query.source_intervals, pages: query.page_count,
+        snapshot_sha256: config.snapshot_sha256, workspace: config.workspace_id, implementation_revision: config.implementation_revision,
+        input_identity: result.input_identity, snapshot_identity: query.snapshot_identity,
+        initial_request: query.pages[0]?.request ?? null,
+        intervals: query.source_intervals, pages: query.page_count,
         first_page_slots: query.pages[0]?.occupied_slots ?? null });
+      if (captureRecallPool !== undefined) {
+        try { row.pool_capture = await captureRecallPool({ row, query, observation, generation: config.source_index?.index,
+          coordinates: frozen, vectorCache: diagnosticVectors }); }
+        catch (error) { row.pool_capture = { status: "unavailable", issues: [error instanceof Error ? error.message : String(error)] }; }
+      }
     } catch (error) {
       Object.assign(row, { status: "error", error: error instanceof Error ? error.message : String(error) });
     }

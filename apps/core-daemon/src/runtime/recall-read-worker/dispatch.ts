@@ -21,6 +21,8 @@ import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { settleWorkerDelivery } from "./prepared-delivery.js";
 
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
+import { readSourceIndexSnapshotFact } from "./source-index-measurement.js";
+import { sourceSemanticRevision } from "./source-semantic-leases.js";
 
 const boundedConstraintsReaders = new WeakMap<RecallReadWorkerRuntime, ReturnType<typeof createBoundedActiveConstraintsReader>>();
 
@@ -65,13 +67,19 @@ export async function runOperation(
       parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">, observer);
   }
   if (request.operation === "conditionalField.recall") {
-    return parseWorkerOperationResult(
-      request.operation,
-      runConditionalFieldWorkerRecall(
-        runtime,
-        parsedPayload as WorkerOperationPayload<"conditionalField.recall">
-      )
-    );
+    const payload = parsedPayload as WorkerOperationPayload<"conditionalField.recall">;
+    const context = { operation: "recall", workspace_id: payload.workspace_id, as_of: payload.as_of,
+      preparation: payload.prepared_query === undefined ? null
+        : { status: payload.prepared_query.receipt.status, reason: payload.prepared_query.receipt.reason } };
+    observer?.context(runtime, () => ({ ...context, snapshot_revision: null, index: null }));
+    try {
+      return parseWorkerOperationResult(request.operation,
+        runConditionalFieldWorkerRecall(runtime, payload, observer === undefined ? {} : { observer }));
+    } finally {
+      // Observe the already pinned snapshot only after the native operation has read it.
+      if (runtime.database.connection.inTransaction) observer?.context(runtime, () => ({ ...context,
+        snapshot_revision: sourceSemanticRevision(runtime), index: readSourceIndexSnapshotFact(runtime.database, payload.workspace_id) }));
+    }
   }
   if (request.operation === "conditionalField.acknowledge") {
     const payload = parsedPayload as WorkerOperationPayload<"conditionalField.acknowledge">;

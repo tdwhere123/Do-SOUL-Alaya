@@ -349,7 +349,7 @@ export class RecallReadWorkerLifecycle {
     deadline.check();
     this.assertUsable(resource);
     const id = this.nextRequestId++;
-    const scope = operation === "conditionalField.sourceSemantics" || operation === "conditionalField.acknowledge"
+    const scope = operation === "conditionalField.sourceSemantics" || operation === "conditionalField.recall" || operation === "conditionalField.acknowledge"
       ? this.observations.getStore() : undefined;
     const observe = scope === undefined ? undefined : (value: unknown) => {
       if (scope.rows.length >= 16) { scope.overflow = true; return; }

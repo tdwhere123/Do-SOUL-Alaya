@@ -6,12 +6,13 @@ import type { ConditionalFieldRecallRequest } from "./recall-service-runner-type
 /** Ports and caller-supplied codecs stay live environment. They are functions or
  * foreign instances that the field calls; copying or freezing them would either
  * clone service behavior or mutate the caller. */
-const ENVIRONMENT_FIELDS = ["readers", "encode_page", "observe_page_fit"] as const satisfies
+const ENVIRONMENT_FIELDS = ["readers", "encode_page", "observe_page_fit", "observe_navigation"] as const satisfies
   readonly (keyof ConditionalFieldRecallRequest)[];
 
 type RecallRequestEnvironment = Readonly<{
   readonly readers: ObserverReaders;
   readonly observe_page_fit?: ConditionalFieldRecallRequest["observe_page_fit"];
+  readonly observe_navigation?: ConditionalFieldRecallRequest["observe_navigation"];
   readonly encode_page?: ConditionalFieldRecallRequest["encode_page"];
 }>;
 
@@ -44,6 +45,7 @@ export function captureRecallRequest(sent: ConditionalFieldRecallRequest): Captu
     environment: Object.freeze({
       readers: sent.readers,
       ...(sent.observe_page_fit === undefined ? {} : { observe_page_fit: sent.observe_page_fit }),
+      ...(sent.observe_navigation === undefined ? {} : { observe_navigation: sent.observe_navigation }),
       ...(sent.encode_page === undefined ? {} : { encode_page: sent.encode_page })
     })
   });

@@ -1,4 +1,4 @@
-import { sourceGoldRootIdentity, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
@@ -50,14 +50,26 @@ export function runConditionalFieldWorkerRecall(
   payload: ConditionalFieldRecallWorkerPayload,
   adapters: Readonly<{ readers?: ObserverReaders; encode_page?: ConditionalFieldRecallRequest["encode_page"];
     observe_page_fit?: ConditionalFieldRecallRequest["observe_page_fit"];
+    observe_navigation?: ConditionalFieldRecallRequest["observe_navigation"];
+    observer?: SourceSemanticObserver;
     capture_budget_work?: (work: number | undefined) => void }> = {}
 ): ConditionalFieldRecallPortResult {
   assertRecallConsumerCompatibility(payload);
   const workspaceId = payload.workspace_id;
   const reserved = reserveSnapshotPinWork(payload.budget);
-  const readers: ObserverReaders = reserved.permitted && payload.cancelled !== true
-    ? adapters.readers ?? (payload.prepared_query === undefined ? readersFor(runtime)
-      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query.vector)) : {};
+  const observer = adapters.observer;
+  observer?.queryVector(payload.prepared_query?.vector);
+  const base: ObserverReaders = reserved.permitted && payload.cancelled !== true
+    ? adapters.readers ?? (payload.prepared_query === undefined && observer === undefined ? readersFor(runtime)
+      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer)) : {};
+  const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
+    ...base, nominateSources: input => {
+      const nomination = base.nominateSources!(input);
+      observer.event("field_nomination", "observe", () => ({ result: nomination.result, witness: nomination.witness,
+        admitted_roots: nomination.admitted_roots, question_time_order: nomination.question_time_order }));
+      return nomination;
+    }
+  };
   let governance = payload.governance;
   const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
     ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
@@ -75,6 +87,8 @@ export function runConditionalFieldWorkerRecall(
     query_text: payload.query_text,
     encode_page: adapters.encode_page,
     observe_page_fit: adapters.observe_page_fit,
+    observe_navigation: adapters.observe_navigation ?? (observer === undefined ? undefined
+      : capture => observer.event("field_access_order", "index", capture)),
     delivery_budget: payload.delivery_budget,
     delivery_context: payload.delivery_context,
     ...(payload.prepared_query === undefined ? {} : { prepared_query: payload.prepared_query }),
@@ -127,6 +141,8 @@ export function runConditionalFieldWorkerRecall(
   const index = executed.index;
   const previews = captureIndexPreviews(executed.index, readers, workspaceId);
   const source_metadata = captureIndexSourceMetadata(executed.index);
+  observer?.event("field_page_metadata", "index", () => ({ entries: index.entries.map(entry => ({
+    entry, metadata: source_metadata[indexEntryCacheKey(entry)] ?? null })) }));
   const issuedDeliveryId = executed.delivery_id ?? issuedDeliveryIdOf(executed.index);
   const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
   return {
