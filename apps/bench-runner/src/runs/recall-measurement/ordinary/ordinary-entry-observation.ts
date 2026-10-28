@@ -14,7 +14,7 @@ export async function observeOrdinaryEntry<T>(daemon: BenchDaemonHandle, queryKe
     return result;
   }
   const observed = await daemon.observeSourceSemantics({
-    max_events: 2048, max_bytes: 524288, rank_prefix: 50, capture_query_vector: true
+    max_events: 2048, max_bytes: 524288, rank_prefix: 50, capture_query_vector: true, capture_page_attempts: true
   }, work);
   try { capture(queryKey, { status: observed.status, observations: observed.observations }); }
   catch { /* Diagnostics cannot replace the ordinary outcome or its error. */ }

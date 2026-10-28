@@ -198,7 +198,7 @@ export async function captureRecallPool({ row, query, observation, generation, c
     const events = allEvents.filter(event => activeFrame(event, row.workspace, query.snapshot_identity?.as_of));
     const rejected = observation.observations.filter(frame => (frame.execution !== "success" || frame.events.some(event =>
       event.kind === "field_nomination" || event.kind === "field_access_order" || event.kind === "source_index_routes"
-        || event.kind === "field_page_metadata"))
+        || event.kind === "field_page_metadata" || event.kind === "field_page_attempt"))
       && !frame.events.some(event => activeFrame({ ...event, binding: frame.facts?.binding ?? null,
         frame_status: frame.status, execution: frame.execution, facts_complete: frame.facts?.complete === true,
         dropped_events: frame.dropped_events,
@@ -229,8 +229,16 @@ export async function captureRecallPool({ row, query, observation, generation, c
       request_id: event.request_id, ...event.data }));
     const pageMetadata = events.filter(event => event.kind === "field_page_metadata").map(event => ({
       request_id: event.request_id, ...event.data }));
+    const attemptEvents = events.filter(event => event.kind === "field_page_attempt");
+    const pageAttempts = pageMetadata.map(page => ({ request_id: page.request_id,
+      attempts: attemptEvents.filter(event => event.request_id === page.request_id).map(event => event.data) }));
+    const observedPages = query.pages.filter(page => page.observation === "observed");
     if (orders.length === 0) issues.push("field_access_order_not_observed");
     if (pageMetadata.length === 0) issues.push("field_page_metadata_not_observed");
+    if (pageAttempts.length !== observedPages.length || pageAttempts.some(page => page.attempts.length === 0)
+      || attemptEvents.some(event => !pageMetadata.some(page => page.request_id === event.request_id))) {
+      issues.push("field_page_attempts_incomplete");
+    }
     if (orders.some(order => order.truncated || order.status !== "ordered" || !Array.isArray(order.entries)
       || order.total !== order.entries.length)) issues.push("field_access_order_incomplete");
     const selected = new Set(nominated.map(item => item.source.target.root_id));
@@ -249,13 +257,13 @@ export async function captureRecallPool({ row, query, observation, generation, c
       source_revision: query.snapshot_identity, generation, routes: routeRows(events, inventory, witness),
       route_phases: events.filter(event => event.kind === "source_index_routes").map(event => event.data),
       pool: nominated.map(item => ({ ...item, host: sourceFact(inventory.get(item.source.target.root_id)) })), rejected_frames: rejected,
-      access_orders: orders, page_metadata: pageMetadata, witness,
+      access_orders: orders, page_metadata: pageMetadata, page_attempts: pageAttempts, witness,
       diagnostic_beyond_allowance: { rankings: diagnostic, sibling_scope: "first_five_containers",
         sibling_scope_status: missingContainers.length ? "partial" : "complete", missing_container_roots: missingContainers,
         siblings: siblings.map(sourceFact), native_work: "not_measured" },
       observation_limits: events.map(event => ({ request_id: event.request_id, dropped_events: event.dropped_events,
         diagnostics: event.diagnostics })).filter((row, index, rows) => rows.findIndex(other => other.request_id === row.request_id) === index),
-      pages: query.pages.filter(page => page.observation === "observed").map(page => ({
+      pages: observedPages.map(page => ({
         request: page.request, output: page.output, occupied_slots: page.occupied_slots })) };
     } finally { db.close(); }
   });

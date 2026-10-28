@@ -87,6 +87,8 @@ export function runConditionalFieldWorkerRecall(
     query_text: payload.query_text,
     encode_page: adapters.encode_page,
     observe_page_fit: adapters.observe_page_fit,
+    observe_page_attempt: observer === undefined ? undefined
+      : capture => observer.pageAttempt(capture),
     observe_navigation: adapters.observe_navigation ?? (observer === undefined ? undefined
       : capture => observer.event("field_access_order", "index", capture)),
     delivery_budget: payload.delivery_budget,

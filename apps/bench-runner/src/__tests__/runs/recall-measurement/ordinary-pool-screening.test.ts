@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import BetterSqlite3 from "better-sqlite3";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
-import { hashContentDigest, indexEntryCacheKey, type IndexEntry } from "@do-soul/alaya-protocol";
+import { hashContentDigest, indexEntryCacheKey } from "@do-soul/alaya-protocol";
 import { ordinaryIndexedSnapshot } from "./ordinary-indexed-snapshot.test-support.js";
 import { executeOrdinaryRecallEntry } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
 import type { OrdinaryEntryObservation } from "../../../runs/recall-measurement/ordinary/ordinary-entry-observation.js";
@@ -58,6 +58,7 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   const policy = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-simulator-policies.mjs", import.meta.url))).href);
   const simulator = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-harness-simulator.mjs", import.meta.url))).href);
   const row = { question_id: "project", question_type: "fixture", arm: "capture", status: captured.status,
+    stop_cause: captured.stop_cause,
     snapshot: fixture.config.snapshot_path, snapshot_sha256: fixture.config.snapshot_sha256,
     workspace: fixture.config.workspace_id, intervals: captured.source_intervals, arm_identity: "same-arm",
     input_identity: capturedExecution.input_identity, initial_request: captured.pages[0]?.request,
@@ -100,23 +101,18 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   expect(delivery.simulateRecallDelivery(completed, order).intervals).toEqual(plain.source_intervals);
   const group = new Map(order.slice(0, 5).map((id: string) => [id, { container: "shared" }]));
   const reordered = policy.anchored([order[2], order[1], ...order.slice(3)], { intervals: plain.source_intervals }, order, group);
-  const changed = delivery.simulateRecallDelivery(completed, reordered);
-  expect(changed.intervals.slice(0, 3).map((item: { target: { root_id: string } }) => item.target.root_id))
-    .toEqual([order[0], order[2], order[1]]);
-  expect(changed.intervals).not.toEqual(plain.source_intervals);
+  expect(() => delivery.simulateRecallDelivery(completed, reordered)).toThrow("counterfactual projection attempts were not observed");
   const altered = structuredClone(poolCapture);
-  const entry = altered.pages.flatMap((page: { output: { index: { entries: unknown[] } } }) => page.output.index.entries)[0];
+  const attempt = altered.page_attempts[0].attempts[0];
+  const entry = attempt.index.entries[0];
   const entryKey = indexEntryCacheKey(entry);
-  const metadata = altered.page_metadata.flatMap((frame: { entries: { entry: IndexEntry; metadata: unknown }[] }) => frame.entries)
-    .find((item: { entry: IndexEntry }) => indexEntryCacheKey(item.entry) === entryKey);
-  expect(metadata).toBeDefined();
-  metadata.metadata = { ...(metadata.metadata ?? {}), evidence_refs: ["x".repeat(4000)] };
-  expect(() => delivery.simulateRecallDelivery({ ...row, pool_capture: altered }, order)).toThrow("production encoder refused");
+  attempt.metadata[entryKey] = { ...(attempt.metadata[entryKey] ?? {}), evidence_refs: ["x".repeat(4000)] };
+  expect(() => delivery.simulateRecallDelivery({ ...row, pool_capture: altered }, order)).toThrow("native page fit replay differs");
   const unseen = order.find((id: string) => !plain.source_intervals.some(interval =>
     interval.target.kind === "source_evidence" && interval.target.root_id === id));
   expect(unseen).toBeDefined();
   expect(() => delivery.simulateRecallDelivery(completed, [unseen, ...order.filter((id: string) => id !== unseen)]))
-    .toThrow("native source metadata not captured");
+    .toThrow("counterfactual projection attempts were not observed");
   const changedSnapshot = join(fixture.root, "changed.sqlite");
   copyFileSync(row.snapshot, changedSnapshot);
   const changedDb = new BetterSqlite3(changedSnapshot);
@@ -272,3 +268,32 @@ it("preserves the ordinary error when the observation callback also throws", asy
   await expect(observeOrdinaryEntry(daemon, "q", async () => { throw original; }, () => { throw new Error("observer failure"); }))
     .rejects.toBe(original);
 });
+
+it("replays multiple native membership windows and keeps the final page past ten slots", async () => {
+  const texts = Array.from({ length: 16 }, (_, index) => `Project item ${index}: ${"evidence ".repeat(38)}`);
+  const fixture = await ordinaryIndexedSnapshot(texts); roots.push(fixture.root);
+  const query = fixture.queries[0]!;
+  const input = { config: fixture.config, queries: [{ query_key: query.query_key, original_query: query.original_query }] };
+  const plain = (await executeOrdinaryRecallEntry({ ...input, root: join(fixture.root, "plain") })).rows[0]!;
+  const observations: OrdinaryEntryObservation[] = [];
+  const captured = (await executeOrdinaryRecallEntry({ ...input, root: join(fixture.root, "capture") },
+    (_key, observation) => { observations.push(observation); })).rows[0]!;
+  expect(captured.status).toBe("complete");
+  expect(captured.source_intervals).toEqual(plain.source_intervals);
+  expect(captured.source_intervals.length, JSON.stringify(captured.pages.map(page => page.occupied_slots))).toBeGreaterThan(10);
+  expect(captured.pages.length).toBeGreaterThan(2);
+  const pool = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-harness-pool.mjs", import.meta.url))).href);
+  const delivery = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-simulator-delivery.mjs", import.meta.url))).href);
+  const row = { snapshot: fixture.config.snapshot_path, snapshot_sha256: fixture.config.snapshot_sha256,
+    workspace: fixture.config.workspace_id, stop_cause: captured.stop_cause };
+  const poolCapture = await pool.captureRecallPool({ row, query: captured, observation: observations[0] });
+  expect(poolCapture.status, JSON.stringify(poolCapture.issues)).toBe("captured");
+  expect(poolCapture.page_attempts.length).toBe(captured.pages.length);
+  expect(poolCapture.page_attempts.some((page: { attempts: { outcome: { fits: boolean } }[] }) =>
+    page.attempts.some(attempt => !attempt.outcome.fits))).toBe(true);
+  const order = delivery.observedAccessOrder(poolCapture), original = structuredClone(poolCapture);
+  const replay = delivery.simulateRecallDelivery({ ...row, pool_capture: poolCapture }, order);
+  expect(replay.intervals).toEqual(plain.source_intervals);
+  expect(replay.intervals.length).toBeGreaterThan(10);
+  expect(poolCapture).toEqual(original);
+}, 120000);

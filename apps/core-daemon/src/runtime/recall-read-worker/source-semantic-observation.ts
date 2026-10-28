@@ -9,7 +9,8 @@ export const SourceSemanticObservationRequestSchema = z.object({
   max_events: z.number().int().min(0).max(2048).default(512),
   max_bytes: z.number().int().min(0).max(524288).default(262144),
   rank_prefix: z.number().int().min(1).max(128).optional(),
-  capture_query_vector: z.boolean().optional()
+  capture_query_vector: z.boolean().optional(),
+  capture_page_attempts: z.boolean().optional()
 }).strict();
 export type SourceSemanticObservationOptions = z.input<typeof SourceSemanticObservationRequestSchema>;
 export type SourceSemanticObservationRequest = z.output<typeof SourceSemanticObservationRequestSchema>;
@@ -212,6 +213,10 @@ export class SourceSemanticObserver {
       : vector.status === "unavailable" ? vector : { ...vector, embedding: Array.from(vector.embedding) });
   }
 
+  pageAttempt(capture: () => unknown): void {
+    if (this.limits.capture_page_attempts === true) this.event("field_page_attempt", "index", capture);
+  }
+
   event(kind: string, phase: string, data: () => unknown, diagnosticKind?: AcquisitionDiagnosticKind): void {
     this.safely(() => {
       const diagnostic = diagnosticKind ?? (["selection_attempt", "selection_result", "selection_failure", "encoding_attempt", "encoding_result", "capacity_adjustment"].includes(kind) ? kind : undefined);
@@ -249,7 +254,7 @@ export class SourceSemanticObserver {
       if (size > this.limits.max_bytes - this.eventBytes || diagnostic !== undefined && size > Math.floor(this.limits.max_bytes / 4) - this.diagnosticBytes) {
         omit(); return;
       }
-      // Snapshot metadata, never retain mutable producer objects or source bodies.
+      // Snapshot bounded diagnostic payloads; never retain mutable producer objects.
       this.events.push(JSON.parse(json) as { kind: string; phase: string; data: unknown });
       this.eventBytes += size;
       if (diagnostic !== undefined) { this.diagnosticPayloads.add(json); this.diagnosticEvents++; this.diagnosticBytes += size; }

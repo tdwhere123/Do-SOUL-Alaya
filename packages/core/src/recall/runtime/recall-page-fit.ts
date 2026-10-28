@@ -1,4 +1,4 @@
-import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, indexEntryCacheKey,
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, indexEntryCacheKey, indexMemoryObjectId,
   type InformationIndex } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
@@ -81,6 +81,19 @@ export type RecallPageFit = Readonly<{
   readonly observation: RecallPageFitObservation;
   /** Set only when the resource owner refused the attempt; `fits` is then false. */
   readonly interruption?: RecallPageInterruption;
+}>;
+
+/** Diagnostic evidence from the actual fit inputs, before any membership commits. */
+export type RecallPageAttempt = Readonly<{
+  readonly index: InformationIndex;
+  readonly previews: readonly (readonly [string, string])[];
+  readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  readonly request: Pick<ConditionalFieldRecallRequest, "budget" | "requested_budget" | "delivery_budget" | "governance">;
+  readonly request_digest: string;
+  readonly codec: "default" | "custom";
+  readonly allowance: Readonly<{ work_units: number; memory_bytes: number }>;
+  readonly outcome: Readonly<{ fits: boolean; bytes: number; result_count: number;
+    interruption: RecallPageInterruption | null; observation: RecallPageFitObservation }>;
 }>;
 
 /** Fit the actual public codec on the fully assembled page. The caller supplies the
@@ -175,6 +188,27 @@ export function fitProjectedRecallPage(input: Readonly<{
       cause: error, details: { outcome: "codec_failed", resource: "public_envelope" }
     });
   }
+}
+
+/** Snapshot only the current candidate's own inputs, without retaining producer references. */
+export function captureRecallPageAttempt(input: Readonly<{
+  index: InformationIndex; previews: ReadonlyMap<string, string>; metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  request: ConditionalFieldRecallRequest; request_digest: string;
+  allowance: RecallPageAttempt["allowance"]; fit: RecallPageFit;
+}>): RecallPageAttempt {
+  const keys = new Set(input.index.entries.flatMap(entry => {
+    const objectId = indexMemoryObjectId(entry);
+    return objectId === undefined ? [indexEntryCacheKey(entry)] : [indexEntryCacheKey(entry), objectId];
+  }));
+  const previews = [...keys].flatMap(key => input.previews.has(key) ? [[key, input.previews.get(key)!] as const] : []);
+  const metadata = Object.fromEntries([...keys].flatMap(key => Object.hasOwn(input.metadata, key)
+    ? [[key, input.metadata[key]!] as const] : []));
+  return structuredClone({ index: input.index, previews, metadata,
+    request: { budget: input.request.budget, requested_budget: input.request.requested_budget,
+      delivery_budget: input.request.delivery_budget, governance: input.request.governance },
+    request_digest: input.request_digest, codec: input.request.encode_page === undefined ? "default" : "custom",
+    allowance: input.allowance, outcome: { fits: input.fit.fits, bytes: input.fit.bytes, result_count: input.fit.result_count,
+      interruption: input.fit.interruption ?? null, observation: input.fit.observation } });
 }
 
 /** Codecs may retain their arguments, but cannot mutate the measured page or the

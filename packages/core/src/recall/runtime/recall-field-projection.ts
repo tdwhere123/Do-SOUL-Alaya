@@ -1,5 +1,5 @@
 import { nativeNavigationProjection, type NativeFieldNavigation } from "./native-navigation-projection.js";
-import { deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
+import { captureRecallPageAttempt, deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
   type RecallPageInterruption, type RecallPageFitObservation } from "./recall-page-fit.js";
 import type { RecallProgressDelivery } from "./recall-progress-delivery.js";
 import { payloadExpansionCompleteness } from "../conditional-field/completeness-report.js";
@@ -267,6 +267,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     // the codec allowance; a rejected/shrunk page releases this hold exactly once.
     const meter = new SourceSemanticResourceLedger({ work_units: available + candidate.framing,
       memory_bytes: candidate.payload.remainingMemoryBytes - prepared.retention_bytes });
+    const allowance = { work_units: meter.work, memory_bytes: meter.bytes };
     let fitted;
     try {
       fitted = context.cost.time("index", () => fitProjectedRecallPage({ index: prepared.index,
@@ -275,6 +276,10 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     } finally {
       context.cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
     }
+    try { current.input.observe_page_attempt?.(() => captureRecallPageAttempt({ index: prepared.index,
+      previews: candidate.payload.previews, metadata: candidate.payload.sourceMetadata, request: current.input,
+      request_digest: context.requestDigest, allowance, fit: fitted })); }
+    catch { /* Diagnostic consumers cannot change fitting or issuance. */ }
     candidate.payload.remainingMemoryBytes = meter.bytes + prepared.retention_bytes;
     // A refused fit is never a committed delivery, including an empty membership.
     // Resource interruption is separate from a measured oversized envelope.

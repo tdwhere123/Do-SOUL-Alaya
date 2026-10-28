@@ -47,6 +47,16 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     const first = projectFromField(captured, request, interpretation,
     state => { retained = state; }, startRequestCost());
     expect(first.entries.map(entry => entry.object_id)).toContain(MEM.r);
+    let fitObserved = false;
+    const isolated = projectFromField(captured, { ...request, observe_page_attempt: read => {
+      const attempt = read();
+      expect(attempt.index.entries.length).toBeGreaterThan(0);
+      expect(Reflect.set(attempt.index.entries[0]!.target, "workspace_id", "tampered")).toBe(true);
+      fitObserved = true;
+      throw new Error("attempt observer failure");
+    } }, interpretation, undefined, startRequestCost());
+    expect(fitObserved).toBe(true);
+    expect(isolated.entries).toEqual(first.entries);
     if (retained?.binding.kind !== "bound") throw new Error("bound fixture expected");
     const values = retained.binding.snapshot.values;
     const ordinary = nativeNavigationProjection(captured, values,

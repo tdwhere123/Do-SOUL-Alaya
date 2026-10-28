@@ -1,13 +1,10 @@
-// Re-encode captured candidates with the same production page codec as ordinary recall.
-import { createRequire } from "node:module";
+// Replay the actual pre-commit page attempts through the production fit owner.
 import { isDeepStrictEqual } from "node:util";
-import { indexEntryCacheKey } from "@do-soul/alaya-protocol";
-import { authorizeSourceIndexScope } from "@do-soul/alaya-core";
-import { encodeIndexResults } from "../../../packages/core/dist/recall/runtime/recall-page-encoding.js";
-import { sourceDeliveryPrefix } from "../../../packages/core/dist/recall/runtime/source-delivery-prefix.js";
+import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { fitProjectedRecallPage } from "../../../packages/core/dist/recall/runtime/recall-page-fit.js";
+import { ordinaryEntryStopCause } from "../dist/runs/recall-measurement/ordinary/ordinary-entry-policy.js";
 import { withRecallSnapshot } from "./recall-bound-snapshot.mjs";
 
-const Database = createRequire(new URL("../package.json", import.meta.url))("better-sqlite3");
 const rootId = target => target?.kind === "source_evidence" ? target.root_id : null;
 
 /** This order is the observed field order, not a reconstruction from delivered answers. */
@@ -25,91 +22,61 @@ export function observedAccessOrder(capture) {
   return result;
 }
 
-function recordedInputs(db, workspace, pages, pageMetadata) {
-  const records = new Map(db.prepare("SELECT record_id, source_body, event_time, scope_class FROM source_records WHERE workspace_id=?")
-    .all(workspace).map(row => [row.record_id, row]));
-  const targets = new Map();
-  for (const row of db.prepare("SELECT record_id, target_json FROM source_index_roots WHERE workspace_id=? AND root_kind='source_record'").all(workspace)) {
-    if (targets.has(row.record_id)) throw new Error(`ambiguous indexed root: ${row.record_id}`);
-    targets.set(row.record_id, JSON.parse(row.target_json));
+function replayAttempt(attempt) {
+  if (attempt.codec !== "default" || !Array.isArray(attempt.previews) || !attempt.metadata || !attempt.index
+    || !attempt.request || !attempt.outcome || !attempt.allowance) throw new Error("native page fit inputs unavailable");
+  const { work_units, memory_bytes } = attempt.allowance;
+  if (![work_units, memory_bytes].every(value => Number.isSafeInteger(value) && value >= 0)) {
+    throw new Error("native page fit allowance unavailable");
   }
-  const entries = new Map(), metadata = new Map();
-  for (const frame of pageMetadata) for (const item of frame.entries) {
-    const key = indexEntryCacheKey(item.entry);
-    if (metadata.has(key) && !isDeepStrictEqual(metadata.get(key), item.metadata)) {
-      throw new Error("ambiguous native source metadata");
-    }
-    metadata.set(key, item.metadata);
-  }
-  for (const page of pages) {
-    if (!page.output?.index) continue;
-    page.output.results.forEach((result, index) => {
-      const id = rootId(result.target);
-      if (id !== null) entries.set(id, page.output.index.entries[index]);
-    });
-  }
-  return { records, targets, entries, metadata };
+  const previews = new Map(attempt.previews);
+  if (previews.size !== attempt.previews.length) throw new Error("ambiguous native page preview keys");
+  const fit = fitProjectedRecallPage({ index: attempt.index, previews, metadata: attempt.metadata,
+    request: attempt.request, request_digest: attempt.request_digest,
+    meter: new SourceSemanticResourceLedger({ work_units, memory_bytes }) });
+  const outcome = { fits: fit.fits, bytes: fit.bytes, result_count: fit.result_count,
+    interruption: fit.interruption ?? null, observation: fit.observation };
+  if (!isDeepStrictEqual(outcome, attempt.outcome)) throw new Error("native page fit replay differs from observed attempt");
+  if (fit.interruption !== undefined) throw new Error(`native page fit interrupted: ${fit.interruption}`);
+  return fit;
 }
 
-function createEncoder(inputs, pages) {
-  const page = pages.find(item => item.output?.index && item.output.results.length > 0);
-  if (!page) throw new Error("no captured page encoding template");
-  const template = page.output.index, budget = page.output.results[0].budget_state.max_total_tokens;
-  const previews = new Map(), metadata = {}, entries = new Map();
-  const entryFor = (id, start = 0) => {
-    const key = `${id}\0${start}`;
-    if (entries.has(key)) return entries.get(key);
-    const record = inputs.records.get(id), source = inputs.targets.get(id);
-    if (!record || !source) throw new Error(`source not present in captured SQLite generation: ${id}`);
-    authorizeSourceIndexScope(record.scope_class, source, ["project"]);
-    const target = source.target;
-    const bytes = Buffer.from(record.source_body, "utf8");
-    if (!Number.isSafeInteger(start) || start < 0 || start > bytes.length || start < bytes.length && (bytes[start] & 0xc0) === 0x80) {
-      throw new Error(`invalid UTF-8 display start: ${id}`);
-    }
-    const text = bytes.subarray(start).toString("utf8");
-    const preview = sourceDeliveryPrefix(text, value => Buffer.byteLength(value) <= budget);
-    const base = inputs.entries.get(id);
-    if (base === undefined || !inputs.metadata.has(indexEntryCacheKey(base))) {
-      throw new Error(`native source metadata not captured for ${id}`);
-    }
-    const entry = { ...base, target: { ...target, span: { content_start: start,
-      content_end: start + Buffer.byteLength(preview), retained_extent: "body",
-      content_complete: preview === text, original_complete: false } } };
-    const cacheKey = indexEntryCacheKey(entry);
-    previews.set(cacheKey, preview);
-    metadata[cacheKey] = structuredClone(inputs.metadata.get(indexEntryCacheKey(base)) ?? {});
-    entries.set(key, entry);
-    return entry;
-  };
-  const encode = selected => encodeIndexResults({ ...template, entries: selected,
-    representation: { ...template.representation, page_budget: selected.length } }, previews, budget, metadata);
-  return { entryFor, encode, width: page.request.max_results };
-}
-
-/** A display is a byte start per root; omitted starts retain the ordinary root prefix. */
+/** Native attempts witness one execution. Other orders and displays need their own projection. */
 export function simulateRecallDelivery(row, order, display = {}) {
-  const pages = row.pool_capture?.pages;
-  if (!Array.isArray(pages) || pages.length === 0) throw new Error("captured page templates unavailable");
+  const capture = row.pool_capture, pages = capture?.pages, frames = capture?.page_attempts;
+  if (capture?.status !== "captured" || !Array.isArray(pages) || !Array.isArray(frames)
+    || pages.length === 0 || frames.length !== pages.length) throw new Error("complete native page attempts unavailable");
   if (!Array.isArray(order) || new Set(order).size !== order.length) throw new Error("policy order must contain unique roots");
-  return withRecallSnapshot(row, snapshot => {
-    const db = new Database(snapshot, { readonly: true, fileMustExist: true });
-    try {
-    const inputs = recordedInputs(db, row.workspace, pages, row.pool_capture.page_metadata ?? []), encoder = createEncoder(inputs, pages);
-    const results = [];
-    let cursor = 0, pagesUsed = 0;
-    while (cursor < order.length && results.length < 10) {
-      let width = Math.min(encoder.width, order.length - cursor);
-      while (width > 0) {
-        const selected = order.slice(cursor, cursor + width).map(id => encoder.entryFor(id, display[id] ?? 0));
-        const encoded = encoder.encode(selected);
-        if (encoded.length === 0) throw new Error("production encoder refused every selected root");
-        if (encoded.length < width) { width = encoded.length; continue; }
-        results.push(...encoded); cursor += width; pagesUsed++; break;
-      }
+  if (!isDeepStrictEqual(order, observedAccessOrder(capture)) || Object.keys(display).length > 0) {
+    throw new Error("counterfactual projection attempts were not observed");
+  }
+  return withRecallSnapshot(row, () => {
+    const intervals = [];
+    let occupied = 0, previous = null, stop = null;
+    for (let pageIndex = 0; pageIndex < frames.length; pageIndex++) {
+      const frame = frames[pageIndex], page = pages[pageIndex], metadata = capture.page_metadata?.[pageIndex];
+      if (!Array.isArray(frame.attempts) || frame.attempts.length === 0 || frame.request_id !== metadata?.request_id
+        || !isDeepStrictEqual(page.request?.continuation ?? null, previous)) throw new Error("native page attempt sequence unavailable");
+      let fit;
+      frame.attempts.forEach((attempt, attemptIndex) => {
+        fit = replayAttempt(attempt);
+        if (fit.fits !== (attemptIndex === frame.attempts.length - 1)) throw new Error("native page fit commit sequence unavailable");
+      });
+      if (!fit || fit.result_count !== fit.index.entries.length
+        || !isDeepStrictEqual(fit.index.entries, metadata.entries.map(item => item.entry))
+        || fit.result_count !== page.occupied_slots) throw new Error("native fitted membership is not bound to its page");
+      fit.index.entries.forEach((entry, offset) => {
+        if (rootId(entry.target) !== null) intervals.push({ slot_index: occupied + offset,
+          target: entry.target, span: entry.target.span ?? null });
+      });
+      occupied += fit.result_count;
+      previous = fit.index.continuation;
+      stop = ordinaryEntryStopCause(fit.index, occupied, pageIndex + 1);
+      if (pageIndex < frames.length - 1 && stop !== null) throw new Error("native page sequence continued after its stop");
     }
-    return { pages: pagesUsed, metadata_scope: "captured_native",
-      intervals: results.map((result, slot_index) => ({ slot_index, target: result.target, span: result.target.span })) };
-    } finally { db.close(); }
+    if (!["observed_ten_slot_prefix", "occupancy_tail_exhausted"].includes(stop) || stop !== row.stop_cause) {
+      throw new Error("native page sequence has no matching completed stop");
+    }
+    return { pages: frames.length, metadata_scope: "captured_native", intervals };
   });
 }
