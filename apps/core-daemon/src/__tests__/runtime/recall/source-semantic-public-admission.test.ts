@@ -38,7 +38,7 @@ it("captures public request and principal before asynchronous admission and excl
     if (!result.ok) throw new Error(JSON.stringify(result.error));
     const delivered = SoulInterpretationResponseSchema.parse(result.output);
     expect(delivered).toMatchObject({ operation: "recall", protocol_version: 12,
-      index: { result_version: "ordinary-native-field.v5" } });
+      index: { result_version: "ordinary-native-field.v6" } });
     if (delivered.operation !== "recall" || delivered.protocol_version !== 12) throw new Error("field recall expected");
     expect(delivered.index.entries).toHaveLength(2);
     expect(delivered.index.entries.every(row => row.target.kind === "source_evidence" && row.target.workspace_id === WS)).toBe(true);

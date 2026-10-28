@@ -63,7 +63,7 @@ function prepareCapture(base: IndexedFixture, mode: Mode) {
   const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
   const config = OrdinaryRecallCaptureConfigSchema.parse({ capture_contract: "ordinary-recall-local-capture-v1",
-    public_semantics: "ordinary-native-field.v5", protocol_package_version: installedRecallProtocolVersion(),
+    public_semantics: "ordinary-native-field.v6", protocol_package_version: installedRecallProtocolVersion(),
     candidate, tree, implementation_revision: readCurrentExtractionAuthorityRevision(),
     snapshot_path: plan.snapshot_path, snapshot_sha256: plan.snapshot_sha256,
     workspace_id: plan.workspace_id, run_id: plan.run_id,

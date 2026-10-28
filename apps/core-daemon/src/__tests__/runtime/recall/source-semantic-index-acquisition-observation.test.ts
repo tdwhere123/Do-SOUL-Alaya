@@ -436,7 +436,7 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
         { record_id: identity.root_id, source_id: source.source_id, snapshot_id: snapshot, identity }]]),
       answer_gold: answer, visibility });
     expect(diagnostic.protocol_version).toBe(12);
-    expect(diagnostic.index.result_version).toBe("ordinary-native-field.v5");
+    expect(diagnostic.index.result_version).toBe("ordinary-native-field.v6");
     expect(encoded.results).toHaveLength(1);
     expect(diagnostic.index.continuation).not.toBeNull();
     expect(visibility.any_at_5).toEqual({ status: "unknown", reason: "second_page_not_observed" });

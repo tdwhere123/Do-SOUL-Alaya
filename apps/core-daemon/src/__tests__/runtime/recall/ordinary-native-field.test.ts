@@ -13,12 +13,18 @@ import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixtur
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { CLOCK, WS, withIndexedSources, QUERY_BUDGET, publicMcp, SCOPES } from "./source-semantic-index-acquisition.test-support.js";
 
-it("preserves segmented binding through built-worker acquisition codec and ordinary MCP continuation without delivering search text", async () => {
+it("preserves segmented binding and frozen MCP continuation through retired-domain reclamation without delivering search text", async () => {
   const text = "自动部署流水线：Alpha-BETA, release!";
   await withIndexedSources([{ id: "first", text }, { id: "second", text }], async fixture => {
-    const prepared = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", {
-      work: 100_000, native_bytes: 16 * 1024 * 1024, capture_page: 8, max_capture_pages: 4, max_roots: 8, max_body_bytes: 65536
-    });
+    const limits = { work: 100_000, native_bytes: 16 * 1024 * 1024,
+      capture_page: 8, max_capture_pages: 4, max_roots: 8, max_body_bytes: 65536 };
+    const raw = await fixture.lifecycle.prepareLexical(WS, "raw-unicode61.v1", limits);
+    expect(raw.status).toBe("ready");
+    const store = fixture.repository.lexical;
+    const selected = store.beginLexical(store.selectLexical(WS, "segmented-unicode61.v1"));
+    store.captureLexicalPage(WS, selected.generation_id, 8, limits);
+    // The prepared census permits publication with no maintenance/capture pages this pass.
+    const prepared = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", { ...limits, max_capture_pages: 0 });
     expect(prepared.status).toBe("ready");
     prepareIndexedRecallProjection(fixture.database);
     const client = await fixture.openClient();
@@ -46,6 +52,9 @@ it("preserves segmented binding through built-worker acquisition codec and ordin
     expect(first.index?.continuation).not.toBeNull();
     const calls = fixture.queryBinding.embedInputs.mock.calls.length;
     const continuation = { ...request, continuation: first.index?.continuation };
+    const cleanup = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", limits);
+    expect(cleanup).toMatchObject({ status: "ready", reclamation: { projections: 2, targets: 2, generations: 1 } });
+    expect(store.lexicalGeneration(WS, raw.generation!.generation_id)).toBeNull();
     const next = await call(continuation), replay = await call(continuation);
     expect(next.results[0]?.content_preview).toBe(text);
     expect(next.results[0]?.target).not.toEqual(first.results[0]?.target);
@@ -74,7 +83,7 @@ it("ordinary Core entry prepares the original query before its compiled worker s
       ...capableRecallConsumerDeclaration(), result_kind_view: "mixed" });
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(1);
     expect(fixture.queryBinding.embedInputs.mock.calls[0]?.[0]?.[0]?.text).toBe("Harbor");
-    expect(result.index.result_version).toBe("ordinary-native-field.v5");
+    expect(result.index.result_version).toBe("ordinary-native-field.v6");
     expect(result.index.entries[0]).toMatchObject({ target: { kind: "source_evidence" },
       navigation: { operator: "source_lexical" }, claim: "unknown" });
     expect(result.candidates[0]?.content_preview).toContain("Harbor opening");

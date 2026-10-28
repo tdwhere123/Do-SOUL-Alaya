@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 28.0.0, engine gateway 2.0.0
+## Unreleased — protocol 29.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,21 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 29.0.0 scopes lexical BM25 statistics to each active generation, identified by
+`ordinary-native-field.v6` (invariant §25 major), retaining the question-time preference
+and factual capture-domain ranks introduced in Protocol 28. Restricted time queries use
+the same generation-owned statistics, not a per-question corpus. SQLite 028 atomically
+replaces shared projection FTS with generation-owned Unicode61 and raw-trigram domains;
+foreign, preparing and retired generations no longer affect active scores. The explicit
+raw fallback remains database-wide. The SourceIndex owner reclaims retired payloads,
+postings and metadata in bounded resumable pages, without changing active order or
+invalidating pinned WAL reads. Original source bytes and vectors are unchanged. Upgrade
+clients and daemon together and start fresh queries. Retain a pre-028 database for an
+older-binary rollback; current-binary raw selection prepares a new generation, not the
+old statistics. Frozen historical benchmark snapshots remain untouched; comparisons
+require a new native baseline, not relabeling old captures. Exact 27/v4 and 28/v5 archives
+remain offline-readable only. No natural-data quality improvement is claimed.
 
 Protocol 28.0.0 adds typed question-time preference and retires the ordinary English
 failed-deployment demo compiler (invariant §25 major). `ordinary-native-field.v5`

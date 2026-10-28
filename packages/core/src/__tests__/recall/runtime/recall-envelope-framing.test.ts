@@ -14,7 +14,7 @@ const request: ConditionalFieldRecallRequest = {
 };
 const index: InformationIndex = {
   schema_version: 1, query_id: `sha256:${"b".repeat(64)}`, snapshot_id: request.snapshot_id,
-  result_version: "ordinary-native-field.v5", entries: [], continuation: null,
+  result_version: "ordinary-native-field.v6", entries: [], continuation: null,
   completeness: { schema_version: 1, logical_index: "open", observed_coverage: "unknown",
     transport: "complete", payload: "complete", representation: "complete" },
   representation: { schema_version: 1, policy: "construct_index_then_page_then_payload",

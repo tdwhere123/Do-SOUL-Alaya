@@ -188,8 +188,10 @@ orders in-window roots from the original bounded prefix first, then time-restric
 lexical candidates with the original query and existing lexical statistics, then the
 remaining original prefix. One shared 128-attempt and 16-retained-root allowance still
 applies; a preferred candidate can displace a fallback root, never make it ineligible.
-There is no per-question FTS corpus or unbounded union. Unknown source time is not
-inferred from ingestion time. Empty and outside-corpus windows preserve nomination
+There is no per-question FTS corpus or unbounded union. Under Protocol 29, restricted
+and unrestricted queries use the same selected generation's FTS statistics; an unbound
+or cold raw fallback explicitly retains database-wide statistics. Unknown source time
+is not inferred from ingestion time. Empty and outside-corpus windows preserve nomination
 order. Unavailable time reads remain explicit partial outcomes, not successful absence.
 Public `since`/`until` retain their hard-filter semantics independently of preference.
 
@@ -204,8 +206,8 @@ public navigation exposes factual capture provenance and the separate access ord
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v5`, Protocol
-28.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v6`, Protocol
+29.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -405,6 +407,31 @@ The separately stored word projection appends supported CJK pieces without chang
 Han/Hiragana/Katakana path is not Hangul segmentation or uniform multilingual quality.
 There is no English natural-efficacy claim, stemming, synonyms or stop-word policy.
 
+Protocol 29.0.0 scopes both Unicode61 and raw-trigram BM25 statistics to the selected
+active lexical generation (invariant §25 major). Each generation owns two contentless
+FTS domains; neither foreign workspaces nor preparing/retired generations contribute
+statistics. The fallback raw reader retains its database-wide corpus and reports that
+limitation explicitly. Query/source tokenization and lane alternation are unchanged.
+Migration 028 atomically rebuilds existing generation domains from retained projections
+and exact raw text, then removes the shared projection FTS. No source, vector, selection
+or coverage identity is relabeled. Ranking changes once at migration; existing handles
+must restart under the new ordinary result version, and frozen benchmark snapshots are
+not migrated in place.
+
+The SourceIndex lifecycle reclaims retired generations in bounded transactional pages
+under the existing pass work/byte/deadline allowances. Projection deletion scrubs both
+FTS lanes, then targets and empty-domain metadata are removed. The active selection and
+preparing generations are excluded inside the same SQLite transaction; retries resume
+from remaining rows and a failed page rolls back. Retired-only maintenance does not
+invalidate the current observable pin. A reader already pinned to an older WAL snapshot
+retains its old schema and rows until release; SQLite prevents physical page reclamation
+past that snapshot. The writer refuses a caller-owned transaction rather than mutating
+its own frozen read. Reclamation receipts report committed pages/rows separately from
+native root visits and census calls; SQL-internal deletion and disk cost remain unmeasured.
+There is no query-time maintenance or vector/raw-source deletion. Current-binary rollback
+selects and prepares raw lexical anew, still with generation-scoped statistics. Restoring
+the old ranking/binary requires a retained pre-028 database, never downgrading the live DB.
+
 Migration 025 is additive, with no automatic backfill. Selection/epoch CAS fences
 superseded producers; durable pending targets allow bounded restart and payload repair.
 Source/dependency mutation and erasure scrub affected historical search projections
@@ -529,11 +556,11 @@ lives in the
 Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
-14.1.0–20.0.0 listed in its schema, plus separately qualified 27.0.0 and 28.0.0 branches.
-Historical captures retain `conditional-field-source-only-v1` and their canonical
-request policy; 27.0.0 requires `ordinary-native-field.v4` and 28.0.0 requires
-`ordinary-native-field.v5`, both with `native_query`, current compact disclosures
-and the matching result/continuation version. This is offline
+14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5 and
+29.0.0/v6 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+canonical request policy. Every native pair requires its matching
+`ordinary-native-field.vN` public semantics and result/continuation version,
+`native_query`, and current compact disclosures; cross-pairs are refused. This is offline
 source-record delivery validation, not support for intervening majors, capsule
 captures or historical execution. Installed reader provenance is recorded separately
 from the untouched producer version. Authored historical-format tests demonstrate

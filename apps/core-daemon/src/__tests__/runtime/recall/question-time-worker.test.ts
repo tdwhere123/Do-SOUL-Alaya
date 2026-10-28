@@ -7,11 +7,11 @@ afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks()
 afterAll(() => isolation.restore());
 import { MemoryService, RecallService, capableRecallConsumerDeclaration } from "@do-soul/alaya-core";
 import { SqliteMemoryEntryRepo, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
-import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, SoulMemorySearchResponseSchema, sourceSemanticAccessPhases } from "@do-soul/alaya-protocol";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
-import { CLOCK, WS, digest, withIndexedSources, type IndexFixture } from "./source-semantic-index-acquisition.test-support.js";
+import { CLOCK, WS, digest, withIndexedSources, publicMcp, QUERY_BUDGET, SCOPES, type IndexFixture } from "./source-semantic-index-acquisition.test-support.js";
 
 const request = { ...capableRecallConsumerDeclaration(), query: "needle", max_results: 10,
   scope_class: "project", dimension: null, domain_tags: null, result_kind_view: "mixed" };
@@ -41,7 +41,7 @@ async function mixedRecall(fixture: IndexFixture) {
     if (!response.ok) throw new Error(JSON.stringify(response.error));
     return SoulMemorySearchResponseSchema.parse(response.output);
   };
-  return { call, executions };
+  return { call, executions, client };
 }
 
 it("delivers a time-preferred mixed SQLite pool through the built worker and MCP, continuing without reacquisition", async () => {
@@ -86,17 +86,40 @@ it("delivers a time-preferred mixed SQLite pool through the built worker and MCP
   });
 });
 
-it("displaces a full native prefix with a newly acquired time root while preserving mixed slots and issued continuation", async () => {
+it("displaces a generation-scoped native prefix with a time root and retains mixed continuation through retired cleanup", async () => {
   await withIndexedSources([
     ...Array.from({ length: 18 }, (_, i) => ({ id: `native-${i}`, text: i === 0 ? "needle needle" : "needle a",
       eventTime: i === 0 ? "2020-01-02T23:59:59.999Z" : "2020-01-01T00:00:00.000Z", vector: [1, 0, 0] })),
     { id: "time-only", text: `needle ${"noise ".repeat(100)}`, eventTime: "2020-01-02T00:00:00.000Z", vector: [-1, 0, 0] }
   ], async fixture => {
-    const { call, executions } = await mixedRecall(fixture);
+    const limits = { work: 1_000_000, native_bytes: 16 * 1024 * 1024,
+      capture_page: 64, max_capture_pages: 4, max_roots: 32, max_body_bytes: 65536 };
+    const retired = await fixture.lifecycle.prepareLexical(WS, "raw-unicode61.v1", limits);
+    expect(retired.status).toBe("ready");
+    const store = fixture.repository.lexical;
+    const selected = store.beginLexical(store.selectLexical(WS, "segmented-unicode61.v1"));
+    store.captureLexicalPage(WS, selected.generation_id, 64, limits);
+    const active = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", { ...limits, max_capture_pages: 0 });
+    expect(active.status).toBe("ready");
+    const { call, executions, client } = await mixedRecall(fixture);
+    const semantic = await publicMcp(client)({ operation: "prepare_query", original_query: "needle",
+      budget: QUERY_BUDGET, authorized_scopes: SCOPES });
+    if (semantic.operation !== "prepare_query" || semantic.access === undefined) throw new Error("worker acquisition required");
+    const lexical = sourceSemanticAccessPhases(semantic.access).acquisition.result?.lexical;
+    expect(lexical?.tokenization?.lexical_binding).toMatchObject({
+      generation_id: active.generation!.generation_id, representation: "segmented-unicode61.v1" });
+    expect(lexical?.limitations).toContain("generation_scoped_bm25_statistics");
     const root = (id: string) => fixture.targets.find(target => target.source_id === id)!.target.root_id;
     const collect = async (preferred: boolean) => {
       const args = { ...request, max_results: 2, ...(preferred ? { interpretation_proposal: proposal } : {}) };
       const first = await call(args), entries = [...first.index!.entries];
+      expect(first.index!.result_version).toBe("ordinary-native-field.v6");
+      if (preferred) {
+        const cleanup = await fixture.lifecycle.prepareLexical(WS, "segmented-unicode61.v1", limits);
+        expect(cleanup).toMatchObject({ status: "ready", reclamation: { projections: 19, targets: 19, generations: 1 } });
+        expect(store.lexicalGeneration(WS, retired.generation!.generation_id)).toBeNull();
+        expect(store.lexicalState(WS)?.active_generation_id).toBe(active.generation!.generation_id);
+      }
       const receipt = (await executions.mock.results.at(-1)!.value).execution_receipt!;
       expect(receipt.actual!.phases.acquire!.native_bytes).toBeGreaterThan(0);
       const preparations = fixture.prepareQuery.mock.calls.length;

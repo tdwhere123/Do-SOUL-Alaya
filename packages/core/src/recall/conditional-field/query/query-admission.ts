@@ -158,7 +158,7 @@ export function fallbackQueryId(value: string | undefined, fallback: string): st
   return parsed?.success === true ? parsed.data : fallback;
 }
 
-export function denotation(
+function denotation(
   proposal: QueryInterpretationProposal | undefined,
   parts: Omit<QueryDenotationParts, "interpretation_proposal" | "proposal_registry_policy_version" | "proposal_effective_limits">,
   extra?: Pick<QueryDenotationParts, "proposal_registry_policy_version" | "proposal_effective_limits">

@@ -1,5 +1,6 @@
 export { measureSqliteBlockingOnEventLoop, type SqliteBlockingProbeResult } from "./diagnostics/sqlite-blocking-probe.js";
 export { SqliteSourceIndexRepository } from "./repos/source-index/source-index-repo.js";
+export { isLexicalDomainTable, isLexicalDomainTrigger, rebuildSourceIndexLexicalDomains } from "./repos/source-index/lexical-domain.js";
 export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./shared/index.js";
 export {
   initDatabase,

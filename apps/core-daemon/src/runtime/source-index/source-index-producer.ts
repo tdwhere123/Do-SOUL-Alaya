@@ -74,6 +74,7 @@ export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
   elapsed_ms: number;
   visited_roots: number;
   capture_pages: number;
+  reclamation: Readonly<{ pages: number; projections: number; targets: number; generations: number }>;
   limits: SourceIndexProducerLimits;
 }>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
@@ -85,6 +86,7 @@ type Pass = {
   spent: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
   capturePages: number;
   visitedRoots: number;
+  reclamation: { pages: number; projections: number; targets: number; generations: number };
   limits: SourceIndexProducerLimits;
 };
 
@@ -160,7 +162,7 @@ export class SourceIndexProducer {
         binding: { status: "not_run" },
         resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
         accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
-        visited_roots: 0, capture_pages: 0, limits };
+        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
@@ -204,7 +206,8 @@ export class SourceIndexProducer {
     const pass: Pass = { signal: AbortSignal.any([this.signal.signal, deadline.signal]),
       deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
       outcome: { status: "settled", reason: "pass_complete" },
-      spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0, limits };
+      spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0,
+      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
     try {
       await this.reconcilePass(pass, representation, windowing);
     } catch (error) {
@@ -220,7 +223,7 @@ export class SourceIndexProducer {
     const outcome: PassOutcome = this.signal.signal.aborted ? { status: "stopped", reason: "producer_stopped" }
       : deadline.signal.aborted ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
     return { ...outcome, binding: pass.binding, resources: { ...pass.spent }, accounting: "lower_bound", limits,
-      visited_roots: pass.visitedRoots, capture_pages: pass.capturePages,
+      visited_roots: pass.visitedRoots, capture_pages: pass.capturePages, reclamation: pass.reclamation,
       model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
   }
 
@@ -278,6 +281,7 @@ export class SourceIndexProducer {
     pass.spent.native_bytes += result.resources.native_bytes;
     pass.visitedRoots += result.visited_roots;
     pass.capturePages += result.capture_pages;
+    for (const key of ["pages", "projections", "targets", "generations"] as const) pass.reclamation[key] += result.reclamation[key];
     if (result.status === "unavailable" && result.reason !== "segmenter_unavailable" && !pass.signal.aborted) {
       this.input.warn("source index lexical preparation unavailable", { workspace_id: workspaceId, reason: boundedProducerFailureReason(result.reason ?? "") });
     }

@@ -45,7 +45,7 @@ it("bounds copied roots by the same visit allowance and debits their real costs"
   await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", limits);
   publishSource(environment, "new epoch root", "third");
   const operations = ["captureLexicalPage", "reuseLexicalProjections", "pendingLexicalTarget",
-    "readLexicalDocument", "writeLexicalDocument"] as const;
+    "readLexicalDocument", "writeLexicalDocument", "reclaimLexicalPage"] as const;
   const calls = operations.map(name => vi.spyOn(index.lexical, name));
   const copy = await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", { ...limits, max_roots: 1 });
   expect(copy).toMatchObject({ status: "partial", visited_roots: 1, capture_pages: 1, analysis_units: 0,
@@ -63,7 +63,7 @@ it("bounds copied roots by the same visit allowance and debits their real costs"
       .toMatchObject({ visited_roots: 1, capture_pages: 0 });
   }
   expect(await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", limits)).toMatchObject({ status: "ready",
-    visited_roots: 0, capture_pages: 0, resources: { work: 0, native_bytes: 0 } });
+    visited_roots: 0, capture_pages: 0, reclamation: { projections: 2, targets: 2, generations: 1 } });
 });
 
 it("retains attempted copy visits across transaction rollback and resumes from durable pending roots", async () => {
@@ -78,7 +78,7 @@ it("retains attempted copy visits across transaction rollback and resumes from d
     BEGIN SELECT RAISE(ABORT, 'authored copy failure'); END`);
   const failed = await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", { ...limits, max_roots: 2 });
   expect(failed).toMatchObject({ status: "unavailable", accounting: "lower_bound", reason: "authored copy failure",
-    visited_roots: 2, capture_pages: 0, resources: { work: 3 } });
+    visited_roots: 2, capture_pages: 0, resources: { work: 4 } });
   expect(failed.resources.native_bytes).toBeGreaterThan(0);
   expect(index.lexical.lexicalGeneration(WORKSPACE, generation.generation_id)).toMatchObject({ completed_count: 0 });
   database.connection.exec("DROP TRIGGER refuse_second_lexical_copy");
@@ -104,6 +104,7 @@ it("counts a failed census call without inventing root visits and retries its ro
 it("keeps the attempted root and real read cost when a native operation fails after reading", async () => {
   const { lifecycle, index } = setup();
   const read = index.lexical.readLexicalDocument.bind(index.lexical);
+  const reclaim = vi.spyOn(index.lexical, "reclaimLexicalPage");
   const capture = vi.spyOn(index.lexical, "captureLexicalPage");
   const pending = vi.spyOn(index.lexical, "pendingLexicalTarget");
   let readCost = { work: 0, native_bytes: 0 };
@@ -114,7 +115,8 @@ it("keeps the attempted root and real read cost when a native operation fails af
   const failed = await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", limits);
   expect(failed).toMatchObject({ status: "unavailable", accounting: "lower_bound", visited_roots: 1, capture_pages: 1 });
   expect(readCost.work).toBeGreaterThan(0);
-  const costs = [capture.mock.results[0]!.value.resources, pending.mock.results[0]!.value.resources, readCost];
+  const costs = [reclaim.mock.results[0]!.value.resources, capture.mock.results[0]!.value.resources,
+    pending.mock.results[0]!.value.resources, readCost];
   expect(failed.resources).toEqual({ work: costs.reduce((sum, cost) => sum + cost.work, 0),
     native_bytes: costs.reduce((sum, cost) => sum + cost.native_bytes, 0) });
   expect(await lifecycle.prepareLexical(WORKSPACE, "raw-unicode61.v1", limits))

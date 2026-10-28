@@ -10,15 +10,17 @@ export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
 /** Pinned offline admission: later package/result versions need their own compatibility review. */
-export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "28.0.0";
-export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v5";
-/** Named historical consumer: saved native captures; remove only when Protocol 27 archives retire. */
+export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "29.0.0";
+export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v6";
+/** Exact saved-capture bindings; remove historical pairs only with their archives.
+ * Undefined means no native archive contract, never permission to execute an old ranking. */
 export function nativeRecallArchiveSemantics(version: string) {
-  return version === "27.0.0" ? "ordinary-native-field.v4"
-    : version === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION ? ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS : undefined;
+  if (version === "27.0.0") return "ordinary-native-field.v4";
+  if (version === "28.0.0") return "ordinary-native-field.v5";
+  return version === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION ? ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS : undefined;
 }
 export const RepresentationAwareRecallProtocolVersionSchema = z.enum([
-  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
+  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
 ]);
 export const OrdinaryRecallProtocolVersionSchema = z.enum([
   "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options
@@ -37,7 +39,7 @@ const Count = z.number().int().nonnegative();
 
 export const OrdinaryRecallCaptureConfigSchema = z.object({
   capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT),
-  public_semantics: z.enum([ORDINARY_RECALL_PUBLIC_SEMANTICS, "ordinary-native-field.v4", ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS]),
+  public_semantics: z.enum([ORDINARY_RECALL_PUBLIC_SEMANTICS, "ordinary-native-field.v4", "ordinary-native-field.v5", ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS]),
   protocol_package_version: OrdinaryRecallProtocolVersionSchema,
   candidate: Commit, tree: Commit, implementation_revision: z.string().refine(isAuthorityRevision),
   snapshot_path: z.string().min(1), snapshot_sha256: Digest,
@@ -80,7 +82,7 @@ function validInitialContract(config: Pick<OrdinaryRecallCaptureConfig,
   const request = config.first_request;
   const native = nativeRecallArchiveSemantics(config.protocol_package_version);
   return config.public_semantics === (native ?? ORDINARY_RECALL_PUBLIC_SEMANTICS) &&
-    request.result_kind_view === "source_only" && request.enumeration_policy === (native ? "native_query" : "canonical") &&
+    request.result_kind_view === "source_only" && request.enumeration_policy === (native !== undefined ? "native_query" : "canonical") &&
     request.protocol_version === 1 && request.supports_source_evidence === true &&
     request.continuation == null && request.payload_continuation == null &&
     request.scope_class === "project" && Time.safeParse(request.source_observed_at).success &&

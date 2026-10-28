@@ -29,7 +29,7 @@ it("exposes the current field protocol over real daemon MCP without a private co
       expect(mcp).toHaveBeenCalledTimes(1);
       const ordinary = SoulInterpretationResponseSchema.parse(observed.outcome.value);
       expect(ordinary).toMatchObject({ operation: "recall", protocol_version: 12,
-        index: { result_version: "ordinary-native-field.v5" } });
+        index: { result_version: "ordinary-native-field.v6" } });
       expect(observed.status).toBe("available");
       expect(observed.observations).toHaveLength(2);
       expect(observed.observations[1]).toMatchObject({ execution: "success", status: "observed",

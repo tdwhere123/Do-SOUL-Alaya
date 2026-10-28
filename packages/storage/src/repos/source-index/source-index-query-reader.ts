@@ -20,6 +20,7 @@ import { readSourceIndexQueryState, sourceIndexEpoch, SOURCE_INDEX_LEXICAL_CURRE
 import { assertIndexPageLimit, guardSourceIndexTarget, SOURCE_INDEX_STANDALONE_BUDGET } from "./native-source.js";
 import { questionTimeSql } from "./question-time-domain.js";
 import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
+import { lexicalDomainTables } from "./lexical-domain.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
 // Only schema-owned immutable targets whose canonical identity was checked here
@@ -98,7 +99,7 @@ class QueryReadMeter {
 // the remaining work could decode are not worth reading.
 const LEXICAL_ROW_WORK_ESTIMATE = 512;
 const LEXICAL_LIMITATIONS = Object.freeze([
-  "database_wide_bm25_statistics", "short_or_unadmitted_tokens_are_not_absence", "lexical_corpus_coverage_untracked"
+  "short_or_unadmitted_tokens_are_not_absence", "lexical_corpus_coverage_untracked"
 ]);
 
 /** Fund bounded native acquisition from the active snapshot, independently of a field page.
@@ -163,11 +164,12 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
   const meter = new QueryReadMeter(budget), candidates: SourceIndexLexicalCandidate[] = [];
   let tokenization: SourceIndexLexicalRead["tokenization"] = null, shortCjk = false;
   let resourceRefusal: QueryResourceRefusal | null = null;
-  let partialGeneration = false;
+  let partialGeneration = false, generationStatistics = false;
   const result = (completion: SourceIndexLexicalRead["completion"], reason: string | null): SourceIndexLexicalRead => ({
     candidates, completion, reason, resources: meter.resources(), index_coverage: "partial", tokenization,
-    resource_refusal: resourceRefusal, limitations: shortCjk
-      ? [...LEXICAL_LIMITATIONS, "short_cjk_unicode61_exact_tokens_only"] : LEXICAL_LIMITATIONS
+    resource_refusal: resourceRefusal, limitations: [
+      generationStatistics ? "generation_scoped_bm25_statistics" : "database_wide_bm25_statistics", ...LEXICAL_LIMITATIONS,
+      ...(shortCjk ? ["short_cjk_unicode61_exact_tokens_only"] : [])]
   });
   try {
     const captured = capture?.begin(database, workspaceId, meter) === true;
@@ -201,9 +203,12 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
     tokenization = { ...material, binding_digest: hashContentDigest(bindingMaterial, sha256) };
     shortCjk = split.porterTokens.some(token => CJK_SCRIPT_PATTERN.test(token) &&
       Array.from(token).length < TRIGRAM_MIN_CODEPOINTS && (!segmented || !isCjkSegmentationCandidate(token)));
+    const tables = binding === undefined ? { unicode61: "source_index_fts", trigram: "source_index_fts_trigram" }
+      : lexicalDomainTables(binding.generation_id);
+    generationStatistics = binding !== undefined;
     const lanes = [
-      { lane: "unicode61" as const, table: segmented ? "source_index_lexical_fts" : "source_index_fts", tokens: split.porterTokens },
-      { lane: "trigram" as const, table: "source_index_fts_trigram", tokens: split.trigramTokens }
+      { lane: "unicode61" as const, table: tables.unicode61, tokens: split.porterTokens },
+      { lane: "trigram" as const, table: tables.trigram, tokens: split.trigramTokens }
     ].filter(lane => lane.tokens.length > 0).map(lane => new LexicalLane(database, lane.lane, lane.table,
       buildFtsMatchExpression(lane.tokens), binding?.generation_id, questionTime));
     meter.ledger.retain(lanes.map(lane => lane.match));
@@ -253,14 +258,12 @@ class LexicalLane {
     readonly match: string, private readonly generationId: string | undefined, questionTime?: QuestionTimePreference) {
     const time = questionTime === undefined ? undefined : questionTimeSql(questionTime);
     this.timeParameters = time?.parameters ?? [];
-    const projected = table === "source_index_lexical_fts";
+    const projected = generationId !== undefined;
     const projectionJoin = projected
       ? `JOIN source_index_lexical_projections p ON p.id=${table}.rowid AND p.workspace_id=?
          JOIN source_index_text x ON x.workspace_id=p.workspace_id AND x.root_key=p.root_key`
       : `JOIN source_index_text x ON x.id=${table}.rowid AND x.workspace_id=?`;
-    const generationJoin = generationId === undefined ? "" : `${projected ? "" : `JOIN source_index_lexical_projections p
-      ON p.workspace_id=x.workspace_id AND p.root_key=x.root_key`}
-      JOIN source_index_lexical_targets t ON t.workspace_id=p.workspace_id AND t.generation_id=p.generation_id
+    const generationJoin = generationId === undefined ? "" : `JOIN source_index_lexical_targets t ON t.workspace_id=p.workspace_id AND t.generation_id=p.generation_id
         AND t.root_key=p.root_key AND t.complete=1`;
     this.statement = cachedReadStatement(database, `SELECT bm25(${table}) AS score,r.root_key,r.target_json,
       octet_length(r.target_json) AS metadata_bytes FROM ${table} ${projectionJoin} ${generationJoin}

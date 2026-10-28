@@ -22,6 +22,7 @@ import {
   explodePackedWorkingCopy,
   explodeRecallEvalWorkingCopyIfNeeded,
   installWorkspaceSlice,
+  loadSliceIntoOpenDatabase,
   readValidWorkspaceSliceSnapshotDigest,
   digestWorkspaceSliceSnapshotIdentity,
   workspaceSliceDbPath,
@@ -137,23 +138,37 @@ describe("workspace slice source index explode", () => {
       assertLaneHits(restored, WORKSPACE_A, SOURCE_LATIN_A, SOURCE_TRIGRAM_A);
       assertLaneMisses(restored, WORKSPACE_A, SOURCE_LATIN_B, SOURCE_TRIGRAM_B);
       assertNativeVectorCurrentness(restored, WORKSPACE_A, packedA, FIXTURE_VECTOR_A);
+      // Replace a live workspace set, not only an empty destination. Old domain triggers must
+      // disappear with their tables; replacement triggers must still scrub both FTS lanes.
+      const custom = restored.connection.prepare(`SELECT name FROM sqlite_master
+        WHERE type='table' AND name GLOB 'source_lexical_*_unicode61'`).get() as { name: string };
+      // A table-shaped trigger name is not one of the domain owner's exact trigger identities.
+      restored.connection.exec(`CREATE TRIGGER ${custom.name} AFTER INSERT ON source_index_text BEGIN SELECT 1; END`);
+      loadSliceIntoOpenDatabase(restored, sliceBPath);
+      expect(restored.connection.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name=?").get(custom.name)).toEqual(custom);
+      expect(snapshotLexicalIndex(restored, WORKSPACE_B)).toEqual(lexicalB);
+      expect(snapshotLexicalIndex(restored, WORKSPACE_A)).toEqual(snapshotLexicalIndex(restored, "absent"));
+      assertLaneHits(restored, WORKSPACE_B, SOURCE_LATIN_B, SOURCE_TRIGRAM_B);
+      const domains = restored.connection.prepare(`SELECT name FROM sqlite_master
+        WHERE type='table' AND (name GLOB 'source_lexical_*_unicode61' OR name GLOB 'source_lexical_*_trigram')`)
+        .all() as { name: string }[];
+      expect(domains).toHaveLength(2);
+      restored.connection.prepare("DELETE FROM source_index_text WHERE workspace_id=?").run(WORKSPACE_B);
+      for (const { name } of domains) expect(restored.connection.prepare(`SELECT count(*) AS n FROM ${name}`).get()).toEqual({ n: 0 });
     } finally {
       restored.close();
     }
   });
 
   it("refuses unknown FTS names before rebuild mutations or snapshot receipts", async () => {
-    const recorded: string[] = [];
-    expect(() => rebuildWorkspaceFts({
-      exec(sql: string) { recorded.push(sql); },
-      prepare(sql: string) {
-        recorded.push(sql);
-        return { all: () => [] };
-      }
-    }, ["memory_content_fts", "unhandled_fts_probe"])).toThrow(
-      /unhandled FTS table unhandled_fts_probe/u
-    );
-    expect(recorded).toEqual([]);
+    const probe = initDatabase();
+    try {
+      const exec = vi.spyOn(probe.connection, "exec"), prepare = vi.spyOn(probe.connection, "prepare");
+      expect(() => rebuildWorkspaceFts(probe.connection, ["memory_content_fts", "unhandled_fts_probe"]))
+        .toThrow(/unhandled FTS table unhandled_fts_probe/u);
+      expect(exec).not.toHaveBeenCalled(); expect(prepare).not.toHaveBeenCalled();
+      exec.mockRestore(); prepare.mockRestore();
+    } finally { probe.close({ optimize: false }); }
 
     const packed = initDatabase({ filename: packedPath });
     packed.connection.exec("CREATE VIRTUAL TABLE unhandled_fts_probe USING fts5(body)");
@@ -170,7 +185,7 @@ describe("workspace slice source index explode", () => {
     ))).toBe(false);
   });
 
-  it.each(["v1", "v2"])("refuses a %s sidecar instead of relabelling it as a lexical-complete snapshot", async (recipeVersion) => {
+  it.each(["v1", "v2", "v3"])("refuses a %s sidecar instead of relabelling it as a lexical-complete snapshot", async (recipeVersion) => {
     const dataDir = join(root, `${recipeVersion}-data`);
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
@@ -261,12 +276,14 @@ function snapshotLexicalIndex(database: StorageDatabase, workspace: string) {
 }
 
 function lexicalHits(database: StorageDatabase, term: string) {
-  return database.connection.prepare(`SELECT p.id, source_index_lexical_fts.rowid AS fts_rowid,
-    p.workspace_id, p.projection FROM source_index_lexical_fts
-    JOIN source_index_lexical_projections p ON p.id = source_index_lexical_fts.rowid
-    WHERE source_index_lexical_fts MATCH ? ORDER BY p.id`).all(term) as {
+  const tables = database.connection.prepare(`SELECT name FROM sqlite_master
+    WHERE type='table' AND name GLOB 'source_lexical_*_unicode61'`).all() as { name: string }[];
+  return tables.flatMap(({ name }) => database.connection.prepare(`SELECT p.id, ${name}.rowid AS fts_rowid,
+    p.workspace_id, p.projection FROM ${name}
+    JOIN source_index_lexical_projections p ON p.id = ${name}.rowid
+    WHERE ${name} MATCH ? ORDER BY p.id`).all(term) as {
       id: number; fts_rowid: number; workspace_id: string; projection: string
-    }[];
+    }[]);
 }
 
 function assertNativeVectorCurrentness(

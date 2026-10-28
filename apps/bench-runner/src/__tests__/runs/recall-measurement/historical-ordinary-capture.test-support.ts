@@ -16,10 +16,13 @@ export function authorHistoricalOrdinaryCapture(capture: Awaited<ReturnType<type
   root: string, protocolVersion: string) {
   const execution = join(root, "execution"), at = "2026-09-13T00:00:00.000Z";
   mkdirSync(execution, { recursive: true });
+  const nativeSemantics = protocolVersion === "27.0.0" ? "ordinary-native-field.v4"
+    : protocolVersion === "28.0.0" ? "ordinary-native-field.v5" : undefined;
+  const native = nativeSemantics !== undefined;
   const config = { ...capture.config, protocol_package_version: protocolVersion,
-    public_semantics: "conditional-field-source-only-v1", candidate: "a".repeat(40), tree: "b".repeat(40),
+    public_semantics: nativeSemantics ?? "conditional-field-source-only-v1", candidate: "a".repeat(40), tree: "b".repeat(40),
     implementation_revision: "a".repeat(40), fixture_kind: "authored_historical_format_not_producer_evidence",
-    first_request: { ...capture.config.first_request, enumeration_policy: "canonical" as const } };
+    first_request: { ...capture.config.first_request, enumeration_policy: native ? "native_query" as const : "canonical" as const } };
   const connection = new BetterSqlite3(config.snapshot_path, { readonly: true });
   const stored = sourceLookupStores(new StorageDatabase(config.snapshot_path, connection))
     .getStoredRecord(config.workspace_id, config.expected_target.root_id);
@@ -45,14 +48,14 @@ export function authorHistoricalOrdinaryCapture(capture: Awaited<ReturnType<type
       score_factors: { activation: 0, relevance: 0 }, budget_state: { token_estimate: 1, max_entries: 8,
         max_total_tokens: 4096, remaining_entries: 7, remaining_tokens: 4095, within_budget: true } }],
     index: { schema_version: 1, query_id: "authored-query", snapshot_id: `sha256:${config.snapshot_sha256}`,
-      result_version: "v1", interpretation_id: "authored-interpretation", as_of: config.first_request.source_observed_at,
+      result_version: nativeSemantics ?? "v1", interpretation_id: "authored-interpretation", as_of: config.first_request.source_observed_at,
       entries: [{ ...sourceIndexEntry({ ...target, ...coordinates, association_milligrades: 0 }), target }],
       completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
         transport: "complete", payload: "partial", representation: "complete" }, continuation: null,
       representation: { schema_version: 1, policy: "construct_index_then_page_then_payload", page_budget: 8,
         identity_tie_break: "serialization" } } });
   const payload = { ok: true, output: { ...output, results: output.results.map(row => ({ ...row,
-    source_disclosure: ["19.0.0", "19.1.0", "20.0.0"].includes(protocolVersion)
+    source_disclosure: native || ["19.0.0", "19.1.0", "20.0.0"].includes(protocolVersion)
       ? disclosure : sourceDisclosure(disclosure) })) } };
   const envelope = { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload };
   const context = { workspaceId: config.workspace_id, runId: config.run_id, agentTarget: "bench-runner",

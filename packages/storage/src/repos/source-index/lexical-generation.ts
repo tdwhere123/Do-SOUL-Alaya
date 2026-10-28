@@ -16,11 +16,17 @@ import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
 import { enumerateSourceIndexTargets, persistSourceIndexLexical } from "./capture-targets.js";
 import { sourceIndexEpoch } from "./generation-state.js";
+import { createLexicalDomain } from "./lexical-domain.js";
+import { reclaimLexicalPage } from "./lexical-reclamation.js";
 import { assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument } from "./native-source.js";
 
 /** Independent lexical persistence behind SourceIndexLifecycle; no vector configuration or writes. */
 export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalRepository {
   constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256) {}
+
+  reclaimLexicalPage(workspaceId: string, limit: number, budget: SourceIndexBudget) {
+    return reclaimLexicalPage(this.database, workspaceId, limit, budget);
+  }
 
   /** Roots unchanged since the active generation (same root_key, digest, body bytes) copy its projection; no analysis.
    * The trigger-maintained FTS rows follow the insert. Reads and writes of each projection are charged as native bytes. */
@@ -101,6 +107,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
       this.database.connection.prepare(`INSERT INTO source_index_lexical_generations
         (workspace_id,generation_id,selection_revision,representation,source_epoch,status) VALUES(?,?,?,?,?,'building')
         ON CONFLICT DO NOTHING`).run(captured.workspace_id, id, captured.selection_revision, captured.representation, epoch);
+      createLexicalDomain(this.database.connection, captured.workspace_id, id);
       return this.requireGeneration(captured.workspace_id, id);
     });
   }

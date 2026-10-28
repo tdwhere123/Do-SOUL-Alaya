@@ -48,6 +48,16 @@ lexical candidates change once it publishes; until then the raw reader serves). 
 
 ## Ordinary field delivery compatibility
 
+Protocol 29.0.0 scopes active lexical BM25 statistics to the selected generation and
+identifies the combined ranking as `ordinary-native-field.v6` (invariant §25 major).
+Question-time preference and factual capture-domain ranks remain; restricted queries
+use the same generation corpus, never per-question FTS statistics. Retired-generation
+reclamation cannot change active order. SQLite 028 rebuilds both FTS lanes transactionally;
+raw fallback stays explicitly database-wide. Start fresh queries after upgrading clients
+and daemon together. Old binaries require a retained pre-028 database; selecting raw in
+the current binary does not restore the former statistics domain. Exact 27/v4 and 28/v5
+captures remain bound to their historical producer and never execute old rankings.
+
 Protocol 28.0.0 introduces typed question-time preference as `ordinary-native-field.v5`
 (invariant §25 major) and removes the ordinary failed-deployment demo compiler.
 `interpretation_proposal.question_time` binds closed UTC calendar-day intervals to the
@@ -78,7 +88,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `28.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `29.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

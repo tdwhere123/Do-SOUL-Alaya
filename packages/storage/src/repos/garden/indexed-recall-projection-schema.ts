@@ -160,7 +160,11 @@ function installMutationTriggers(db: SqliteConnection, table: string): void {
       const workspace = table === "relation_assertion_evidence"
         ? `(SELECT workspace_id FROM relation_assertions WHERE assertion_id = ${row}.assertion_id)` : `${row}.workspace_id`;
       const relevant = table === "event_log"
-        ? ` AND ${row}.event_type IN ('soul.memory.created', 'soul.memory.updated', 'relation.assertion_admitted', 'relation.assertion_resolved')` : "";
+        ? ` AND ${row}.event_type IN ('soul.memory.created', 'soul.memory.updated', 'relation.assertion_admitted', 'relation.assertion_resolved')`
+        : table === "source_index_lexical_generations" ? ` AND ${row}.status!='retired'`
+        : table === "source_index_lexical_targets" || table === "source_index_lexical_projections"
+          ? ` AND EXISTS (SELECT 1 FROM source_index_lexical_generations g WHERE g.workspace_id=${row}.workspace_id
+              AND g.generation_id=${row}.generation_id AND g.status!='retired')` : "";
       return `SELECT ${workspace} AS workspace_id WHERE ${workspace} IS NOT NULL${relevant}`;
     }).join(" UNION ");
     const writes = `INSERT INTO garden_projection_cursor(workspace_id, applied_event_revision, applied_at, observable_epoch, observable_generation)

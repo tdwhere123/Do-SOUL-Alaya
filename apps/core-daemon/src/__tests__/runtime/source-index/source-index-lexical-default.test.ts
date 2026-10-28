@@ -83,8 +83,8 @@ it("analyzes only the new root in the next epoch and keeps unchanged roots searc
     expect(second.generation!.generation_id).not.toBe(first.generation!.generation_id);
     expect(roots(index, "部署")).toEqual([old.record.identity]);
     expect(roots(index, "迁移")).toEqual([added.record.identity]);
-    expect(database.connection.prepare(`SELECT count(*) AS n FROM source_index_lexical_fts f JOIN source_index_lexical_projections p ON p.id=f.rowid
-      WHERE source_index_lexical_fts MATCH '部署' AND p.generation_id=?`).get(second.generation!.generation_id)).toEqual({ n: 1 });
+    expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget).tokenization?.lexical_binding?.generation_id)
+      .toBe(second.generation!.generation_id);
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_projections WHERE generation_id=?")
       .get(second.generation!.generation_id)).toEqual({ n: 2 });
     expect(await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", limits)).toMatchObject({ status: "ready", analysis_units: 0 });

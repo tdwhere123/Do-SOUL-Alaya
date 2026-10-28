@@ -1,9 +1,7 @@
+import { isLexicalDomainTable, rebuildSourceIndexLexicalDomains, type StorageDatabase } from "@do-soul/alaya-storage";
 import { quoteIdent } from "./names.js";
 
-export interface FtsRebuildConnection {
-  exec(sql: string): unknown;
-  prepare(sql: string): { all(): unknown[] };
-}
+export type FtsRebuildConnection = Pick<StorageDatabase["connection"], "exec" | "prepare">;
 
 interface FtsRebuildSpec {
   readonly fts: string;
@@ -92,11 +90,6 @@ const FTS_REBUILDS: readonly FtsRebuildSpec[] = Object.freeze([
     fts: "source_index_fts_trigram",
     mode: "native_rebuild",
     sql: "INSERT INTO source_index_fts_trigram(source_index_fts_trigram) VALUES('rebuild')"
-  },
-  {
-    fts: "source_index_lexical_fts",
-    mode: "native_rebuild",
-    sql: "INSERT INTO source_index_lexical_fts(source_index_lexical_fts) VALUES('rebuild')"
   }
 ]);
 
@@ -106,10 +99,11 @@ export function rebuildWorkspaceFts(
 ): void {
   const known = new Set(FTS_REBUILDS.map((spec) => spec.fts));
   for (const name of ftsVirtual) {
-    if (!known.has(name)) {
+    if (!known.has(name) && !isLexicalDomainTable(name)) {
       throw new Error(`packed working copy has unhandled FTS table ${name}`);
     }
   }
+  rebuildSourceIndexLexicalDomains(connection);
   for (const spec of FTS_REBUILDS) {
     if (!ftsVirtual.includes(spec.fts)) continue;
     if (spec.mode === "replace") connection.exec(`DELETE FROM ${quoteIdent(spec.fts)}`);

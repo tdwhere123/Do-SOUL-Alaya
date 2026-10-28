@@ -31,7 +31,7 @@ export async function captureMultipleSources(base: Awaited<ReturnType<typeof ord
   const plan = base.config;
   const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
-  const config = { capture_contract: "ordinary-recall-local-capture-v2", public_semantics: "ordinary-native-field.v5",
+  const config = { capture_contract: "ordinary-recall-local-capture-v2", public_semantics: "ordinary-native-field.v6",
     protocol_package_version: installedRecallProtocolVersion(), candidate, tree,
     implementation_revision: readCurrentExtractionAuthorityRevision(), snapshot_path: plan.snapshot_path,
     snapshot_sha256: plan.snapshot_sha256, workspace_id: plan.workspace_id, run_id: plan.run_id,

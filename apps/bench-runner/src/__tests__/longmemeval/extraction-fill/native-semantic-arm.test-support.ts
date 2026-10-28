@@ -150,7 +150,7 @@ function assertNativeReplays(
     // The prepared library pool includes both original haystack sources, independently of proof availability.
     expect(response.order).toEqual({ enumeration_policy: "native_query", tie_policy: "canonical_identity",
       occupancy: "tagged_target_identity", occupancy_prefix: 2, page_budget: pageBudget });
-    expect(response.index.result_version).toBe("ordinary-native-field.v5");
+    expect(response.index.result_version).toBe("ordinary-native-field.v6");
     const publication = readChainArtifact(row.publication_path) as { sources: {
       source_id: string; record_id: string; source_version: string; content_digest: string
     }[] };

@@ -2,7 +2,8 @@ import { z } from "zod";
 import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
 import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
 
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v5" as const;
+/** Generation-local lexical statistics with question-time preference; old identities cannot execute this ranking. */
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v6" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({

@@ -1,6 +1,7 @@
 import {
   bindEmbeddingOverlayIfPresent,
   detachEmbeddingOverlay,
+  isLexicalDomainTrigger,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createSqliteCatalogReader } from "./catalog-reader.js";
@@ -25,12 +26,12 @@ export function loadSliceIntoOpenDatabase(
   const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
   dropTriggers(live, triggers);
   live.connection.pragma("foreign_keys = OFF");
-  let attached = false;
+  let attached = false, replaced = false;
   try {
     attachSlice(live, sliceDbPath);
     attached = true;
     replaceAttachedTables(live, catalog);
-    rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
+    replaced = true;
     // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
     live.connection.exec("ANALYZE main");
   } finally {
@@ -42,7 +43,8 @@ export function loadSliceIntoOpenDatabase(
       }
     }
     live.connection.pragma("foreign_keys = ON");
-    restoreTriggers(live, triggers);
+    // Domain triggers are rebuilt with the replacement rows, never restored from the old workspace set.
+    restoreTriggers(live, replaced ? triggers.filter(trigger => !isLexicalDomainTrigger(trigger.name)) : triggers);
     bindEmbeddingOverlayIfPresent(live.connection, live.filename);
   }
 }
@@ -66,6 +68,7 @@ function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog
     for (const table of catalog.global) {
       applyAttachedGlobalTable(live, table.name, table.policy.action);
     }
+    rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
     live.connection.exec("COMMIT");
   } catch (error) {
     try {

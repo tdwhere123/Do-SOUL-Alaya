@@ -51,9 +51,9 @@ function rewriteCapturedEnvelope(root: string, ordinal: number,
 it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ordered %s public envelopes without consumer execution", mode => {
   const capture = captures[mode], observation = admitOrdinaryRecallObservation(capture.root);
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
-  expect(installedRecallProtocolVersion()).toBe("28.0.0");
-  expect(observation.binding).toMatchObject({ protocol_package_version: "28.0.0", reader_protocol_package_version: "28.0.0",
-    public_semantics: "ordinary-native-field.v5", producer_revision: capture.config.implementation_revision });
+  expect(installedRecallProtocolVersion()).toBe("29.0.0");
+  expect(observation.binding).toMatchObject({ protocol_package_version: "29.0.0", reader_protocol_package_version: "29.0.0",
+    public_semantics: "ordinary-native-field.v6", producer_revision: capture.config.implementation_revision });
   expect(capture.config.first_request.enumeration_policy).toBe("native_query");
   expect(observation.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
     (_, index) => readJson(join(capture.execution, `${String(index + 1).padStart(2, "0")}-public-envelope.json`))));
@@ -62,17 +62,42 @@ it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ord
   if (mode === "prefix_error") expect(observation.evidence.calls.at(-1)).toMatchObject({ response_state: "public_error" });
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("admits an authored %s format control without rewriting its declared provenance", protocolVersion => {
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0"])("admits an authored %s format control without rewriting its declared provenance", protocolVersion => {
   const { root, config } = authoredHistoricalCapture(`authored-historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
   const originalEnvelope = readFileSync(join(root, "execution/01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "28.0.0",
+  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "29.0.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision });
   expect(observation.state).toBe("partial");
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
   expect(readFileSync(join(root, "execution/01-public-envelope.json"), "utf8")).toBe(originalEnvelope);
 });
+
+it.each([
+  ["27.0.0", "ordinary-native-field.v5"], ["27.0.0", "ordinary-native-field.v6"],
+  ["28.0.0", "ordinary-native-field.v4"], ["28.0.0", "ordinary-native-field.v6"]
+])("refuses an authored %s archive with another supported result identity %s", (version, resultVersion) => {
+  const { root } = authoredHistoricalCapture(`cross-pair-${version}-${resultVersion}`, version);
+  rewriteCapturedEnvelope(root, 1, envelope => {
+    const payload = JSON.parse(String(envelope.content[0]!.text));
+    payload.output.index.result_version = resultVersion;
+    return { ...envelope, structuredContent: payload, content: [{ type: "text", text: JSON.stringify(payload) }] };
+  });
+  expect(() => admitOrdinaryRecallObservation(root)).toThrow("supported public contract");
+});
+
+it.each(["ordinary-native-field.v4", "ordinary-native-field.v5"])(
+  "refuses a current native continuation carrying historical identity %s", resultVersion => {
+    const root = join(base.root, `cross-pair-continuation-${resultVersion}`);
+    cpSync(captures.prefix.root, root, { recursive: true });
+    rewriteCapturedEnvelope(root, 1, envelope => {
+      const payload = JSON.parse(String(envelope.content[0]!.text));
+      payload.output.index.continuation.result_version = resultVersion;
+      return { ...envelope, structuredContent: payload, content: [{ type: "text", text: JSON.stringify(payload) }] };
+    });
+    expect(() => admitOrdinaryRecallObservation(root)).toThrow("supported public contract");
+  });
 
 it.each(["18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
   const { root, config } = authoredHistoricalCapture(`original-overclaim-${protocolVersion}`, "17.0.0");
@@ -227,7 +252,7 @@ it.each([
   writeJson(join(root, path), change(readJson(join(root, path))));
   expect(() => admitOrdinaryRecallObservation(root)).toThrow();
 });
-it.each(["15.0.1", "18.2.0", "20.1.0", "21.0.0", "22.0.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "27.0.1", "28.0.0", "99.0.0"])("refuses unsupported producer version %s despite recomputed binding", protocolVersion => {
+it.each(["15.0.1", "18.2.0", "20.1.0", "21.0.0", "22.0.0", "23.0.0", "24.0.0", "25.0.0", "26.0.0", "27.0.1", "28.1.0", "29.0.1", "99.0.0"])("refuses unsupported producer version %s despite recomputed binding", protocolVersion => {
   const { root } = authoredHistoricalCapture(`unsupported-${protocolVersion}`, protocolVersion);
   expect(() => admitOrdinaryRecallObservation(root)).toThrow();
 });

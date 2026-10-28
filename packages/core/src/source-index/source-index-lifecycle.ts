@@ -3,6 +3,7 @@ import {
   SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexCapacityExceeded, SourceIndexConfigurationSchema, SourceIndexOperationError,
   AlayaError, BoundedIdSchema, canonicalJson, SourceIndexLexicalRepresentationSchema,
   type SourceIndexLexicalRepresentation, type SourceIndexLexicalPassBudget, type SourceIndexLexicalPassResult,
+  type SourceIndexLexicalRepository,
   prepareSourceIndexDocument,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexConfiguration, type SourceIndexDocument,
   type SourceIndexGuardedWriteResult, type SourceIndexReadResult, type SourceIndexRepository, type SourceIndexResources,
@@ -106,13 +107,14 @@ export class SourceIndexLifecycle {
     const selection = store.selectLexical(workspaceId, representation);
     const resources = { work: 0, native_bytes: 0 };
     let analysis = 0, visitedRoots = 0, capturePages = 0, generation: SourceIndexLexicalPassResult["generation"] = null;
+    const reclamation = { pages: 0, projections: 0, targets: 0, generations: 0, complete: false };
     const left = () => ({ work: Math.max(0, limits.work - resources.work),
       native_bytes: Math.max(0, limits.native_bytes - resources.native_bytes) });
     const debit = (cost: SourceIndexResources) => { resources.work += cost.work; resources.native_bytes += cost.native_bytes; };
     const result = (status: SourceIndexLexicalPassResult["status"], reason: string | null,
       accounting: "complete" | "lower_bound" = "complete"): SourceIndexLexicalPassResult =>
       ({ status, reason, resources, analysis_units: analysis, selection, generation, accounting, model_inputs: 0,
-        visited_roots: visitedRoots, capture_pages: capturePages });
+        visited_roots: visitedRoots, capture_pages: capturePages, reclamation });
     // A budget-limited stop is not an interruption: report the generation it actually advanced.
     const settled = (status: SourceIndexLexicalPassResult["status"], reason: string | null) => {
       if (generation !== null) generation = store.lexicalGeneration(workspaceId, generation.generation_id) ?? generation;
@@ -120,6 +122,7 @@ export class SourceIndexLifecycle {
     };
     try {
       checkpoint();
+      await reclaimRetiredLexical(store, workspaceId, limits, left, debit, checkpoint, reclamation);
       const warmed = representation !== "segmented-unicode61.v1" || await warmCjkSegmentation();
       checkpoint();
       if (!warmed || representation === "segmented-unicode61.v1" && readSourceIndexLexicalAnalysisStatus() !== "ready") {
@@ -212,6 +215,24 @@ export class SourceIndexLifecycle {
 
   public fail(workspaceId: string, generationId: string, reason: string): void {
     this.repository.fail(workspaceId, generationId, reason);
+  }
+}
+
+/** Maintenance shares the preparation budget/deadline, but not its native census/root-visit counters.
+ * Page receipts distinguish committed cleanup from interrupted preparation; no unbounded drain loop. */
+async function reclaimRetiredLexical(store: SourceIndexLexicalRepository, workspaceId: string,
+  limits: SourceIndexLexicalPassBudget, left: () => SourceIndexBudget, debit: (cost: SourceIndexResources) => void,
+  checkpoint: () => void, receipt: { pages: number; projections: number; targets: number; generations: number; complete: boolean }) {
+  for (let page = 0; page < limits.max_capture_pages; page++) {
+    checkpoint();
+    const remaining = left();
+    if (remaining.work < 4 || remaining.native_bytes < 71) return;
+    const reclaimed = store.reclaimLexicalPage(workspaceId, limits.capture_page, remaining);
+    debit(reclaimed.resources); receipt.pages++; receipt.complete = reclaimed.complete;
+    receipt.projections += reclaimed.projections; receipt.targets += reclaimed.targets; receipt.generations += reclaimed.generations;
+    checkpoint();
+    if (reclaimed.complete || reclaimed.projections + reclaimed.targets + reclaimed.generations === 0) return;
+    await yieldToEventLoop(); checkpoint();
   }
 }
 

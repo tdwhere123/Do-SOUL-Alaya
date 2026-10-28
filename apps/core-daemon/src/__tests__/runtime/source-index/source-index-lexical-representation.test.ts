@@ -47,7 +47,8 @@ it("uses the idle daemon preparation entry on a fresh admitted source with embed
     const database = initDatabase({ filename: join(directory, "alaya.db") });
     try {
       expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_vectors").get()).toEqual({ n: 0 });
-      expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_fts WHERE source_index_lexical_fts MATCH '部署'").get()).toEqual({ n: 1 });
+      expect(new SqliteSourceIndexRepository(database, fieldSha256)
+        .readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget).candidates).toHaveLength(1);
       expect(database.connection.prepare("SELECT body FROM source_index_text").get()).toEqual({ body });
     } finally { database.close({ optimize: false }); }
   } finally { await daemon?.shutdown(); rmSync(directory, { recursive: true, force: true }); }

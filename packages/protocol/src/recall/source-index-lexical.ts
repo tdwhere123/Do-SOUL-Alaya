@@ -26,6 +26,11 @@ export type SourceIndexLexicalCaptureResult = Readonly<{ generation: SourceIndex
   added: number; resources: SourceIndexResources }>;
 export type SourceIndexLexicalReuseResult = Readonly<{ reused: number; resources: SourceIndexResources;
   complete: boolean }>;
+export type SourceIndexLexicalReclamationResult = Readonly<{
+  projections: number; targets: number; generations: number; resources: SourceIndexResources;
+  /** True only when the retired queue was observed empty, not after a bounded page. */
+  complete: boolean;
+}>;
 /** Work additionally charges one analysis unit per UTF-16 input code unit actually analyzed.
  * This is neither measured CPU nor model work. Native bytes retain their existing read meaning. */
 export type SourceIndexLexicalPreparationResult = Readonly<{ status: "ready" | "partial" | "unavailable" | "stale" | "superseded" | "unbound";
@@ -41,10 +46,12 @@ export type SourceIndexLexicalPassResult = SourceIndexLexicalPreparationResult &
   visited_roots: number;
   /** Census calls attempted, including empty, refused and failed pages. */
   capture_pages: number;
+  reclamation: Readonly<{ pages: number; projections: number; targets: number; generations: number; complete: boolean }>;
 }>;
 
 /** Independent lexical selection and generation, under the existing SourceIndex owner and source epoch. */
 export interface SourceIndexLexicalRepository {
+  reclaimLexicalPage(workspaceId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReclamationResult;
   /** Active generation's reusable projections: copies projection and FTS rows for roots whose digest is unchanged. */
   reuseLexicalProjections(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexLexicalReuseResult;
   selectLexical(workspaceId: string, representation: SourceIndexLexicalRepresentation): SourceIndexLexicalSelection;

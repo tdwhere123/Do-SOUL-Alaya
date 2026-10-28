@@ -34,6 +34,8 @@ import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-diges
 import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
 import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
 import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
+import { rebuildSourceIndexLexicalDomains } from "../repos/source-index/lexical-domain.js";
+import { initializeObservableMutationGeneration } from "../repos/garden/indexed-recall-projection-schema.js";
 import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
 import { diagnosticWarn } from "@do-soul/alaya-protocol";
 
@@ -576,7 +578,13 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
     migrateVerifiedProjectionBindKey(database);
   },
   13: migrateRetainedSourceChunks,
-  [EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION]: migrateEmbeddingVectorValidity
+  [EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION]: migrateEmbeddingVectorValidity,
+  28: (database) => {
+    rebuildSourceIndexLexicalDomains(database);
+    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='garden_projection_cursor'").get() !== undefined) {
+      initializeObservableMutationGeneration(database);
+    }
+  }
 };
 
 function runDataMigrationIfPresent(
