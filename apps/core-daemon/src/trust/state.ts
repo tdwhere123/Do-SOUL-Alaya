@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  AlayaError,
   ContextDeliveryRecordSchema,
   canonicalJson,
   IsoDatetimeStringSchema,
@@ -266,7 +267,7 @@ export class TrustStateRecorder {
       }
       );
     } catch (error) {
-      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "CONFLICT") throw error;
+      if (!(error instanceof AlayaError) || error.code !== "CONFLICT") throw error;
       const raced = (await this.repo.listUsageByDeliveryIds([draftRecord.delivery_id]))[0];
       if (raced === undefined) throw error;
       return requireMatchingUsageReplay(raced, draftRecord);
@@ -440,9 +441,7 @@ function requireMatchingUsageReplay(existing: Readonly<UsageProofRecord>, incomi
     reason: record.reason
   });
   if (canonicalJson(relevant(existing)) !== canonicalJson(relevant(incoming))) {
-    const error = new Error(`Usage report for delivery ${incoming.delivery_id} conflicts with the existing report.`);
-    Object.assign(error, { code: "CONFLICT" });
-    throw error;
+    throw new AlayaError("CONFLICT", `Usage report for delivery ${incoming.delivery_id} conflicts with the existing report.`);
   }
   return existing;
 }

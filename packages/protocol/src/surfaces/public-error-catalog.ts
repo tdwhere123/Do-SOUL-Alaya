@@ -4,6 +4,7 @@ export const PUBLIC_ERROR_CODES = [
   "UNAVAILABLE",
   "NOT_FOUND",
   "NEEDS_CONTEXT",
+  "CONFLICT",
   "INTERNAL"
 ] as const;
 
@@ -15,6 +16,7 @@ export const PUBLIC_ERROR_CODE_MESSAGES = Object.freeze({
   UNAVAILABLE: "Tool is unavailable.",
   NOT_FOUND: "Resource not found.",
   NEEDS_CONTEXT: "Additional context is required.",
+  CONFLICT: "Request conflicts with existing state.",
   INTERNAL: "MCP memory tool call failed."
 } as const satisfies Readonly<Record<PublicErrorCode, string>>);
 

@@ -48,9 +48,9 @@ describe("McpToolError", () => {
     expect(classifyError(error)).toBe("INTERNAL");
   });
 
-  it("classifies CoreError VALIDATION and NOT_FOUND by instanceof AlayaError", () => {
+  it("classifies CoreError VALIDATION, NOT_FOUND and CONFLICT by instanceof AlayaError", () => {
     expect(classifyError(new CoreError("VALIDATION", "denied by policy"))).toBe("VALIDATION");
     expect(classifyError(new CoreError("NOT_FOUND", "missing"))).toBe("NOT_FOUND");
-    expect(classifyError(new CoreError("CONFLICT", "lost race"))).toBe("INTERNAL");
+    expect(classifyError(new CoreError("CONFLICT", "lost race"))).toBe("CONFLICT");
   });
 });

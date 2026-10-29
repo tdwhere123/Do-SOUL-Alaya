@@ -433,7 +433,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     if (!divergentArgs.success) throw new Error("CLI parse failed");
     const divergent = await command.handler({ cwd: dir, env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
       stderr: new PassThrough(), isTTY: false, jsonRequested: true, daemon: { startupSteps: [] } }, divergentArgs.data);
-    expect(divergent.exitCode).not.toBe(0);
+    expect(divergent.json).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     expect(await new SqliteTrustStateRepo(reopened).listUsageByDeliveryIds([delivered.delivery_id])).toEqual(history);
   });
 });

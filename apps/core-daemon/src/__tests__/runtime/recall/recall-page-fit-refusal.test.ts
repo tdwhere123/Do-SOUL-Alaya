@@ -134,7 +134,7 @@ it("retains a below-byte-cap metadata refusal through direct Core, worker IPC an
       supports_source_evidence: true, supports_product_updates: true
     } });
     expect(response).toEqual({ ok: false, tool_name: "soul.recall",
-      error: { code: "INTERNAL", message: PUBLIC_ERROR_CODE_MESSAGES.INTERNAL } });
+      error: { code: "CONFLICT", message: PUBLIC_ERROR_CODE_MESSAGES.CONFLICT } });
     expect(warn).toHaveBeenCalledTimes(2);
     expect(unavailable).not.toHaveBeenCalled();
     expect(JSON.stringify(warn.mock.calls)).not.toContain(CONTENT);

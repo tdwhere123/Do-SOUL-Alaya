@@ -95,7 +95,7 @@ export class RecallHitTierPromotionCasMiss extends McpToolError {
   }
 }
 
-export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {
+export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "CONFLICT" | "INTERNAL" {
   if (error instanceof McpToolError) {
     return classifyMcpToolErrorCode(error.code);
   }
@@ -110,12 +110,13 @@ export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "N
 
 function classifyMcpToolErrorCode(
   code: string
-): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {
+): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "CONFLICT" | "INTERNAL" {
   if (
     code === "VALIDATION" ||
     code === "UNAVAILABLE" ||
     code === "NOT_FOUND" ||
-    code === "NEEDS_CONTEXT"
+    code === "NEEDS_CONTEXT" ||
+    code === "CONFLICT"
   ) {
     return code;
   }

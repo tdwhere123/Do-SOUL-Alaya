@@ -73,7 +73,7 @@ describe("accepted worker rejection private evidence", () => {
         const failure = record.failure as { error: { core?: { code: string; subCode: string; details: unknown }; details?: unknown } };
         if (kind === "core") expect(failure.error.core).toEqual({ code: "CONFLICT", subCode: "CONCURRENT_MODIFICATION", details: error.details });
         else { expect(failure.error.core).toBeUndefined(); expect(failure.error.details).toEqual(error.details); }
-        expect(classifyError(error)).toBe("INTERNAL");
+        expect(classifyError(error)).toBe(kind === "core" ? "CONFLICT" : "INTERNAL");
         expect(sanitizeError(error)).not.toContain("private");
         await h.lifecycle.readSnapshot.rollback();
         await expect(h.lifecycle.request("memory.findByWorkspaceId", {})).resolves.toEqual([]);
@@ -101,8 +101,9 @@ describe("accepted worker rejection private evidence", () => {
         protocol_version: 1, supported_result_kinds: ["memory_entry", "source_evidence"],
         supports_source_evidence: true, supports_product_updates: true
       } });
+      const code = kind === "core" ? "CONFLICT" : "INTERNAL";
       expect(result).toEqual({ ok: false, tool_name: "soul.recall",
-        error: { code: "INTERNAL", message: PUBLIC_ERROR_CODE_MESSAGES.INTERNAL } });
+        error: { code, message: PUBLIC_ERROR_CODE_MESSAGES[code] } });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(JSON.stringify(warn.mock.calls)).not.toContain("query-body-must-not-be-logged");
     } finally { await h.cleanup(); }
