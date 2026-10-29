@@ -3,6 +3,7 @@ import {
   SOURCE_INDEX_MAX_BODY_BYTES,
   SourceIndexOperationError,
   SourceEmbeddingRepresentationSchema, type SourceEmbeddingRepresentation,
+  captureSourceIndexLexicalPreparationAllocation, type SourceIndexLexicalPreparationAllocation,
   SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION,
   SourceIndexWindowingSchema, type SourceIndexWindowing,
   type SourceIndexBackfillBudget,
@@ -59,6 +60,10 @@ const PASS_REMAINING_KEYS = ["work", "nativeBytes", "modelInputs", "inputBytes",
 /** Internal-consumer restriction of one pass; never raises constructor caps. */
 export type SourceIndexProducerPassRemaining = Partial<Pick<SourceIndexProducerLimits,
   typeof PASS_REMAINING_KEYS[number]>>;
+
+export type SourceIndexLexicalProducerPassReceipt = SourceIndexLexicalPassResult & Readonly<{
+  preparation_allocation?: Readonly<{ requested_work: number; effective_work: number }>;
+}>;
 
 type PassOutcome = Readonly<{
   status: "settled" | "busy" | "stopped" | Exclude<SourceIndexBackfillResult["status"], "root_complete">;
@@ -176,11 +181,13 @@ export class SourceIndexProducer {
 
   /** Explicit existing preparation entry; never scheduled by start() and never binds an embedding model. */
   public async runLexicalPass(workspaceId: string, representation: SourceIndexLexicalRepresentation,
-    remaining?: SourceIndexProducerPassRemaining): Promise<SourceIndexLexicalPassResult> {
+    remaining?: SourceIndexProducerPassRemaining,
+    allocation?: SourceIndexLexicalPreparationAllocation): Promise<SourceIndexLexicalProducerPassReceipt> {
+    const captured = allocation === undefined ? undefined : captureSourceIndexLexicalPreparationAllocation(allocation);
     if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping) {
       throw new AlayaError("CONFLICT", this.stopping ? "producer_stopped" : "producer_occupied");
     }
-    const limits = restrictPassLimits(this.limits, remaining);
+    const limits = restrictPassLimits(captured === undefined ? this.limits : { ...this.limits, work: captured.work }, remaining);
     // A timer cannot interrupt synchronous SQLite/Jieba work. Core checks the actual clock
     // between bounded operations and yields between batches; occupancy lasts through settlement.
     const deadlineMs = Date.now() + limits.stepDeadlineMs, signal = this.signal.signal;
@@ -189,7 +196,11 @@ export class SourceIndexProducer {
       max_capture_pages: limits.maxCapturePages, max_roots: limits.maxRootsPerPass, max_body_bytes: limits.maxBodyBytes
     }, signal, deadlineMs));
     this.inFlight = work;
-    try { return await work; }
+    try {
+      const result = await work;
+      return captured === undefined ? result : { ...result,
+        preparation_allocation: { requested_work: captured.work, effective_work: limits.work } };
+    }
     finally { if (this.inFlight === work) this.inFlight = null; }
   }
 

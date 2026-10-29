@@ -15,12 +15,13 @@
 // --source-model, --source-cache and --source-artifact-digest select a separately bound Source model;
 // --model and --model-cache select Memory; --model-artifact-digest binds its sealed tree.
 // --warm-memory probes the Memory provider independently.
+// --source-lexical-work explicitly allocates model-free lexical preparation work per pass.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, captureSourceIndexLexicalPreparationAllocation } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
 import { loadRecallVectorCache } from "./recall-vector-cache.mjs";
 import { recallExecutionIdentity, recallPreparationKey, assertRecallCachedPreparation } from "./recall-harness-selection.mjs";
@@ -52,7 +53,7 @@ const { values } = parseArgs({ options: {
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
   "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
   "source-model": { type: "string" }, "source-cache": { type: "string" },
-  "source-artifact-digest": { type: "string" }, "warm-memory": { type: "boolean", default: false },
+  "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" }
 } });
 if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
@@ -61,6 +62,11 @@ const diagnosticVectors = await loadRecallVectorCache(values["diagnostic-vectors
 if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
 const out = resolve(values.out);
 const arms = JSON.parse(readFileSync(values.arms, "utf8"));
+const lexicalPreparation = values["source-lexical-work"] === undefined ? undefined
+  : captureSourceIndexLexicalPreparationAllocation({ work: Number(values["source-lexical-work"]) });
+if (lexicalPreparation !== undefined && arms.some(arm => arm.lexical === undefined)) {
+  throw new AlayaError("VALIDATION", "--source-lexical-work requires an explicit lexical representation on every arm");
+}
 if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new AlayaError("VALIDATION", "question_time requires --coordinates");
 const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
 const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
@@ -154,7 +160,7 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return recallPreparationKey(revision, executionIdentity, execution, arm);
+  return recallPreparationKey(revision, executionIdentity, execution, arm, lexicalPreparation);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
@@ -184,7 +190,8 @@ async function prepared(question, index, arm) {
   const config = baseConfig({ question, snapshot, snapshotSha: publication.db_sha256, workspace, caches });
   const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}),
     ...(arm.lexical ? { lexical: arm.lexical } : {}), ...(arm.representation ? { representation: arm.representation } : {}) };
-  const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined, { maxPasses: 10_000 });
+  const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined,
+    { maxPasses: 10_000, ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }) });
   if (result.config === null) throw new AlayaError("UNAVAILABLE", `preparation failed: ${result.report.reason}`);
   return result.config;
 }

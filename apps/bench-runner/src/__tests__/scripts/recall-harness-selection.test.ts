@@ -9,6 +9,20 @@ import { expect, it } from "vitest";
 import { chainIdentity } from "../../runs/recall-measurement/contract.js";
 import { readCurrentExtractionAuthorityRevision } from "../../runs/extraction/authority/inspection.js";
 
+it("keeps lexical preparation work in cache identity without changing semantic execution identity", async () => {
+  const selection = await import(pathToFileURL(fileURLToPath(new URL("../../../scripts/recall-harness-selection.mjs", import.meta.url))).href);
+  const execution = { cache_root: "/fixture/models", model_id: "fixture-model" }, revision = "fixture-revision";
+  const arm = { name: "time", host: true, lexical: "segmented-unicode61.v1", windowing: "recorded-message-windows.v1" };
+  const values = { model: execution.model_id }, identity = selection.recallExecutionIdentity(values, execution, revision, chainIdentity);
+  const oldKey = createHash("sha256").update(JSON.stringify([revision, identity, true, arm.windowing, arm.lexical])).digest("hex").slice(0, 16);
+  expect(selection.recallPreparationKey(revision, identity, execution, arm)).toBe(oldKey);
+  expect(selection.recallPreparationKey(revision, identity, execution, arm, undefined)).toBe(oldKey);
+  const allocated = selection.recallPreparationKey(revision, identity, execution, arm, { work: 131072 });
+  expect(allocated).not.toBe(oldKey);
+  expect(selection.recallPreparationKey(revision, identity, execution, arm, { work: 131073 })).not.toBe(allocated);
+  expect(selection.recallExecutionIdentity({ ...values, "source-lexical-work": "131072" }, execution, revision, chainIdentity)).toBe(identity);
+});
+
 it("keeps explicit Memory cache changes out of cached preparations and resumed harness rows", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-harness-selection-"));
   const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));

@@ -8,9 +8,10 @@ export function recallExecutionIdentity(values, execution, revision, chainIdenti
   return explicit ? chainIdentity({ revision, execution }) : undefined;
 }
 
-export function recallPreparationKey(revision, executionIdentity, execution, arm) {
+export function recallPreparationKey(revision, executionIdentity, execution, arm, lexicalPreparation) {
   return createHash("sha256").update(JSON.stringify([revision, executionIdentity ?? execution.model_id,
-    arm.host !== false, arm.windowing ?? null, arm.lexical ?? null, ...(arm.representation ? [arm.representation] : [])])).digest("hex").slice(0, 16);
+    arm.host !== false, arm.windowing ?? null, arm.lexical ?? null, ...(arm.representation ? [arm.representation] : []),
+    ...(lexicalPreparation === undefined ? [] : [{ lexicalPreparation }])])).digest("hex").slice(0, 16);
 }
 
 export function assertRecallCachedPreparation(config, revision, execution, arm) {

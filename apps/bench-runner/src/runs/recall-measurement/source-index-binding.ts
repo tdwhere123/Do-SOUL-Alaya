@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { z } from "zod";
-import { AlayaError, canonicalJson,
+import { AlayaError, canonicalJson, captureSourceIndexLexicalPreparationAllocation,
   sourceIndexConfigurationId, sourceIndexGenerationId, sourceIndexProfileId, sourceIndexGenerationCanServeQueries,
   SourceIndexProfileSchema,
-  type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
+  type SourceIndexLexicalPreparationAllocation, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { StorageDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../harness/daemon.js";
@@ -25,6 +25,7 @@ import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProg
 import type {
   SourceIndexProducerPassReceipt, SourceIndexProducerPassRemaining
 } from "../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
+import { runSourceIndexLexicalPreparation, type SourceIndexLexicalPreparationReport } from "./source-index-lexical-preparation.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -111,8 +112,10 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
 
 const SETUP_METER_KEYS = ["work", "nativeBytes", "modelInputs", "inputBytes",
   "maxCapturePages", "maxRootsPerPass"] as const;
-export type SemanticChainSourceSetupAllowance = Readonly<{ maxPasses: number; softElapsedMs?: number } & SourceIndexProducerPassRemaining>;
-type CapturedAllowance = { maxPasses: number; softElapsedMs?: number; leftover?: SourceIndexProducerPassRemaining };
+export type SemanticChainSourceSetupAllowance = Readonly<{ maxPasses: number; softElapsedMs?: number;
+  lexicalPreparation?: SourceIndexLexicalPreparationAllocation } & SourceIndexProducerPassRemaining>;
+type CapturedAllowance = { maxPasses: number; softElapsedMs?: number; leftover?: SourceIndexProducerPassRemaining;
+  lexicalPreparation?: SourceIndexLexicalPreparationAllocation };
 type SourceIndexPassRemainingBuilder = { [K in typeof SETUP_METER_KEYS[number]]?: number };
 
 type SourceIndexSetupReceipt = SourceIndexProducerPassReceipt | Readonly<{
@@ -128,6 +131,7 @@ type SourceIndexPreparationBase = {
   execution: z.infer<typeof CachedLocalSourceExecutionSchema>;
   memory_readiness?: { status: "ready" | "failed" | "not_requested"; dimensions: number | null };
   memory_profile?: MemoryEmbeddingProfile;
+  lexical_preparation?: SourceIndexLexicalPreparationReport;
   setup: SourceIndexSetupReceipt;
   setup_passes: number;
   setup_resources: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
@@ -186,6 +190,9 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   const expired = () => allowance.softElapsedMs !== undefined && performance.now() - started >= allowance.softElapsedMs;
   const config = SemanticChainConfigSchema.parse(value);
   const execution = CachedLocalSourceExecutionSchema.parse(executionValue);
+  if (allowance.lexicalPreparation !== undefined && execution.lexical === undefined) {
+    throw new AlayaError("VALIDATION", "Source lexical allocation requires an explicit lexical representation");
+  }
   if (config.source_index !== undefined) throw new AlayaError("CONFLICT", "Source setup requires an unbound input snapshot");
   assertChainSnapshot(config);
   const root = resolve(rootValue);
@@ -229,7 +236,7 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   if (owningSignal?.aborted) throw new AlayaError("CANCELLED", "Source setup was cancelled before publication");
   if (expired()) {
     const report = retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started,
-      result.report.memory_readiness, result.report.memory_profile).report;
+      result.report.memory_readiness, result.report.memory_profile, result.report.lexical_preparation).report;
     writeChainArtifact(join(root, "preparation.json"), report);
     return { config: null, report };
   }
@@ -240,7 +247,8 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
   assertChainSnapshot(prepared);
   refuseBenchWorkAfterCancel();
   // Publication is synchronous; a frozen success receipt is not rewritten if the clock expires here.
-  if (expired()) return retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started);
+  if (expired()) return retainedSoftDeadline(execution, setupRunFrom(result.report), allowance, performance.now() - started,
+    result.report.memory_readiness, result.report.memory_profile, result.report.lexical_preparation);
   writeChainJson(join(root, "chain-config.json"), prepared);
   return { config: prepared, report: result.report };
 }
@@ -271,8 +279,10 @@ async function prepareLiveSourceIndex(input: {
   const before = inspectSemanticChainSourceIndex(filename, config.workspace_id, config.budget);
   const run = await runBoundedSourceIndexPasses(live, allowance, filename, config.workspace_id, root, expired, execution.representation, execution.windowing, execution.artifact_digest);
   refuseBenchWorkAfterCancel();
+  let lexical: SourceIndexLexicalPreparationReport | undefined;
   const failure = (reason: string): SourceIndexPreparationFailure => ({ config: null, report: {
     contract: "semantic-chain-source-preparation-failure-v1", execution, reason,
+    ...(lexical === undefined ? {} : { lexical_preparation: lexical }),
     ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
     ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
     ...setupReport(run, allowance, performance.now() - started) } });
@@ -283,9 +293,10 @@ async function prepareLiveSourceIndex(input: {
   if (setup.status !== "settled" || binding.status !== "ready") return failure(setup.reason);
   if (run.stop_reason !== "settled") return failure(run.stop_reason);
   if (execution.lexical !== undefined) {
-    const lexicalFailure = await runLexicalPreparation(live, config.workspace_id, execution.lexical, allowance.maxPasses, expired);
+    lexical = await runSourceIndexLexicalPreparation({ live, workspace: config.workspace_id, representation: execution.lexical,
+      maxPasses: allowance.maxPasses, expired, root, allocation: allowance.lexicalPreparation });
     refuseBenchWorkAfterCancel();
-    if (lexicalFailure !== null) return failure(lexicalFailure);
+    if (lexical.stop_reason !== "ready") return failure(lexical.stop_reason);
   }
   const usable = (observed: ReturnType<typeof inspectSemanticChainSourceIndex>) =>
     observed.complete && observed.index !== null && binding.profile_id === observed.index.profile_id &&
@@ -313,6 +324,7 @@ async function prepareLiveSourceIndex(input: {
     // Persist the producer's resolved choice. Omission on archived bindings still
     // means their historical raw windows; new receipts never depend on a default.
     execution: { ...execution, windowing: binding.profile.windowing },
+    ...(lexical === undefined ? {} : { lexical_preparation: lexical }),
     ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
     ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
     ...setupReport(run, allowance, performance.now() - started), index_status: observed.status, index: observed.index,
@@ -328,29 +340,6 @@ async function prepareLiveSourceIndex(input: {
     refuseBenchWorkAfterCancel();
   }
   return { config: bindPreparation(config, report, join(root, "preparation.json")), report };
-}
-
-/** Model-free lexical generation; runs after vector setup so it binds the final source epoch. Null = active and ready. */
-async function runLexicalPreparation(live: BenchDaemonHandle, workspace: string,
-  representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation, maxPasses: number,
-  expired: () => boolean): Promise<string | null> {
-  const run = live.runtime.runSourceIndexLexicalPass;
-  if (run === undefined) throw new AlayaError("UNAVAILABLE", "Source lexical preparation is unwired");
-  let last: string | undefined;
-  for (let pass = 0; pass < maxPasses; pass++) {
-    if (expired()) return "setup_soft_deadline";
-    const result = await run(workspace, representation);
-    refuseBenchWorkAfterCancel();
-    if (result.status === "ready") return null;
-    // Pass bounds (roots/pages/work/deadline) leave a durable partial generation that the next pass resumes.
-    const continuable = result.status === "partial" && result.generation !== null &&
-      (result.reason === "incomplete" || result.reason === "read_budget" || result.reason === "deadline_exceeded");
-    if (!continuable) return `lexical_${result.status}:${result.reason ?? "none"}`;
-    const g = result.generation!, progress = `${g.completed_count}/${g.target_count}/${g.enumeration_complete}`;
-    if (progress === last) return "lexical_no_progress";
-    last = progress;
-  }
-  return "setup_pass_exhausted";
 }
 
 function bindPreparation(config: SemanticChainConfig,
@@ -383,11 +372,13 @@ function retainedSoftDeadline(
   allowance: CapturedAllowance,
   elapsed: number,
   memoryReadiness?: SourceIndexPreparationBase["memory_readiness"],
-  memoryProfile?: SourceIndexPreparationBase["memory_profile"]
+  memoryProfile?: SourceIndexPreparationBase["memory_profile"],
+  lexicalPreparation?: SourceIndexLexicalPreparationReport
 ): SourceIndexPreparationFailure {
   return { config: null, report: { contract: "semantic-chain-source-preparation-failure-v1", execution,
     ...(memoryReadiness === undefined ? {} : { memory_readiness: memoryReadiness }),
     ...(memoryProfile === undefined ? {} : { memory_profile: memoryProfile }),
+    ...(lexicalPreparation === undefined ? {} : { lexical_preparation: lexicalPreparation }),
     reason: "setup_soft_deadline", ...setupReport({ ...run, stop_reason: "setup_soft_deadline" }, allowance, elapsed) } };
 }
 
@@ -402,7 +393,7 @@ function parseSetupAllowance(value: SemanticChainSourceSetupAllowance | undefine
     throw new AlayaError("VALIDATION", "invalid Source setup allowance");
   }
   for (const key of Object.keys(value)) {
-    if (key !== "maxPasses" && key !== "softElapsedMs" && !(SETUP_METER_KEYS as readonly string[]).includes(key)) {
+    if (key !== "maxPasses" && key !== "softElapsedMs" && key !== "lexicalPreparation" && !(SETUP_METER_KEYS as readonly string[]).includes(key)) {
       throw new AlayaError("VALIDATION", "invalid Source setup allowance");
     }
   }
@@ -422,7 +413,10 @@ function parseSetupAllowance(value: SemanticChainSourceSetupAllowance | undefine
       !Number.isSafeInteger(softElapsedMs) || softElapsedMs < 0)) {
     throw new AlayaError("VALIDATION", "invalid Source setup soft elapsed allowance");
   }
-  return { maxPasses, ...(restricted ? { leftover } : {}), ...(softElapsedMs === undefined ? {} : { softElapsedMs }) };
+  const lexicalPreparation = Object.hasOwn(value, "lexicalPreparation")
+    ? captureSourceIndexLexicalPreparationAllocation(value.lexicalPreparation) : undefined;
+  return { maxPasses, ...(restricted ? { leftover } : {}), ...(softElapsedMs === undefined ? {} : { softElapsedMs }),
+    ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }) };
 }
 
 function setupMetersExhausted(leftover: SourceIndexProducerPassRemaining): boolean {

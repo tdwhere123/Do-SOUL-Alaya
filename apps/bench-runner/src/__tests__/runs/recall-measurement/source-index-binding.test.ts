@@ -111,7 +111,9 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
       producerPassRemaining.push(remaining);
       return producer.runPass(remaining, representation, windowing);
     }, runSourceIndexLexicalPass: (workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-      remaining?: SourceIndexProducerPassRemaining) => producer.runLexicalPass(workspaceId, representation, remaining) },
+      remaining?: SourceIndexProducerPassRemaining,
+      allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation) =>
+      producer.runLexicalPass(workspaceId, representation, remaining, allocation) },
       checkpointFieldProjection: checkpoint,
       shutdown };
     nativeShutdown.set(handle, shutdown);

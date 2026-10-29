@@ -57,8 +57,9 @@ export interface AlayaDaemonRuntime {
     windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   /** Explicit lexical-only preparation; independent of embedding configuration, no scheduled activation. */
   runSourceIndexLexicalPass?(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining):
-    Promise<import("@do-soul/alaya-protocol").SourceIndexLexicalPassResult>;
+    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
+    allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
+    Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
   // Runs only the requested workspace's BULK_ENRICH worker loop, leaving the

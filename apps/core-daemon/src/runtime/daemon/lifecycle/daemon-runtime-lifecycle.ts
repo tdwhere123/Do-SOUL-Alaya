@@ -68,8 +68,9 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
       windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing):
       Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
     runLexicalPass?(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-      remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining):
-      Promise<import("@do-soul/alaya-protocol").SourceIndexLexicalPassResult> }>;
+      remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
+      allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
+      Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt> }>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -103,8 +104,9 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
     windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runSourceIndexLexicalPass(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining):
-    Promise<import("@do-soul/alaya-protocol").SourceIndexLexicalPassResult>;
+    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
+    allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
+    Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   runGardenEmbeddingBackfillPass(
@@ -140,11 +142,11 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       }
       return await input.sourceIndexProducer.runPass(remaining, representation, windowing);
     },
-    runSourceIndexLexicalPass: async (workspaceId, representation, remaining) => {
+    runSourceIndexLexicalPass: async (workspaceId, representation, remaining, allocation) => {
       if (state.backgroundStarted || input.lifecycleState.drainState.isDraining || input.sourceIndexProducer?.runLexicalPass === undefined) {
         throw new AlayaError("UNAVAILABLE", "Source-only preparation requires an idle, unscheduled daemon producer");
       }
-      return await input.sourceIndexProducer.runLexicalPass(workspaceId, representation, remaining);
+      return await input.sourceIndexProducer.runLexicalPass(workspaceId, representation, remaining, allocation);
     },
     runGardenBackgroundPass: async () => {
       await awaitStartupBackgroundPassInFlight(state);

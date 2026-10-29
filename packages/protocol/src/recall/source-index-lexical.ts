@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../shared/alaya-error.js";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { FieldContractDigestSchema, type FieldContractSha256 } from "./field-contract/canonical-identity.js";
 import { canonicalJson } from "./selection/capture/canonical-json.js";
@@ -35,6 +36,20 @@ export type SourceIndexLexicalReclamationResult = Readonly<{
  * This is neither measured CPU nor model work. Native bytes retain their existing read meaning. */
 export type SourceIndexLexicalPreparationResult = Readonly<{ status: "ready" | "partial" | "unavailable" | "stale" | "superseded" | "unbound";
   reason: string | null; resources: SourceIndexResources; analysis_units: number }>;
+
+/** Explicit model-free preparation only; it never changes scheduled/vector pass caps. */
+export type SourceIndexLexicalPreparationAllocation = Readonly<{ work: number }>;
+export function captureSourceIndexLexicalPreparationAllocation(value: unknown): SourceIndexLexicalPreparationAllocation {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).length !== 1 || !Object.hasOwn(value, "work")) {
+    throw new AlayaError("VALIDATION", "invalid Source lexical preparation allocation");
+  }
+  const work = (value as { work: unknown }).work;
+  if (typeof work !== "number" || !Number.isSafeInteger(work) || work < 1) {
+    throw new AlayaError("VALIDATION", "invalid Source lexical preparation allocation");
+  }
+  return Object.freeze({ work });
+}
 
 export type SourceIndexLexicalPassBudget = SourceIndexBudget & Readonly<{
   capture_page: number; max_capture_pages: number; max_roots: number; max_body_bytes: number;
