@@ -75,6 +75,8 @@ export async function enqueuePostTurnExtractTask(
         runId,
         deliveredObjectIds,
         createdAt,
+        // Alaya observed the reported text on receipt; its event time stays unknown.
+        sourceObservedAt: createdAt,
         turnIndex,
         lastMessages,
         sourceCapture

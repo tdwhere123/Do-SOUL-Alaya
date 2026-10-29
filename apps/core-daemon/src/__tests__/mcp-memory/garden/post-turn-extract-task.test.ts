@@ -65,9 +65,9 @@ describe("post-turn extract Garden task", () => {
     expect(payload).toMatchObject({
       run_id: "run-1",
       turn_index: 7,
-      workspace_id: "workspace-1"
+      workspace_id: "workspace-1",
+      source_observed_at: "2026-05-07T00:10:00.000Z"
     });
-    expect(payload).not.toHaveProperty("source_observed_at");
     expect(payload).not.toHaveProperty("source_observation");
     expect(payload.turn_digest.context_manifest.delivered_object_ids).toEqual([
       "memory-a",
@@ -100,7 +100,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("does not promote either a public timestamp or delivery time to source observation", async () => {
+  it("observes reported text at receipt, never at a public timestamp or delivery time", async () => {
     const harness = await createHandlerHarness();
 
     const result = await reportUsage(harness.handler, {
@@ -110,7 +110,7 @@ describe("post-turn extract Garden task", () => {
 
     expect(result.ok).toBe(true);
     const payload = postTurnRows(harness.gardenTaskRepo)[0]!.payload as PostTurnPayload;
-    expect(payload).not.toHaveProperty("source_observed_at");
+    expect(payload.source_observed_at).toBe("2026-05-07T00:10:00.000Z");
     expect(payload).not.toHaveProperty("source_observation");
   });
 
