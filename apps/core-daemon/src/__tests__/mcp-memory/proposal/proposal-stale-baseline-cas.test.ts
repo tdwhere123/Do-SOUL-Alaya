@@ -17,6 +17,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createMcpMemoryProposalWorkflow } from "../../../mcp-memory/proposal/proposal-workflow.js";
+import { createDaemonMemoryObjectKeyWriter } from "../../../runtime/daemon/wiring/memory-object-key-writer.js";
 
 // Cross-proposal lost-update guard. The accept-and-apply transaction
 // CAS-checks the memory entry's updated_at against a baseline captured
@@ -34,6 +35,12 @@ afterEach(() => {
   }
   databases.clear();
 });
+
+// Reviewed memory updates materialize object keys, as in daemon wiring.
+function createProposalRepo(database: StorageDatabase): SqliteProposalRepo {
+  const objectKeyWriter = createDaemonMemoryObjectKeyWriter(database);
+  return new SqliteProposalRepo(database, (memory) => objectKeyWriter.materializeForMemory(memory));
+}
 
 function createDb(): StorageDatabase {
   const database = initDatabase({ filename: ":memory:" });
@@ -83,7 +90,7 @@ async function seedMemoryEntry(
 describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
   it("pins CAS to the proposal creation baseline, not the review-time read", async () => {
     const database = createDb();
-    const proposalRepo = new SqliteProposalRepo(database);
+    const proposalRepo = createProposalRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
     const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
     const proposalIds = [
@@ -167,7 +174,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
 
   it("refuses to apply when the memory's live updated_at moved past the captured baseline", async () => {
     const database = createDb();
-    const proposalRepo = new SqliteProposalRepo(database);
+    const proposalRepo = createProposalRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
     const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 
@@ -242,7 +249,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
 
   it("applies cleanly when baseline matches (regression coverage for the happy path)", async () => {
     const database = createDb();
-    const proposalRepo = new SqliteProposalRepo(database);
+    const proposalRepo = createProposalRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
     const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 

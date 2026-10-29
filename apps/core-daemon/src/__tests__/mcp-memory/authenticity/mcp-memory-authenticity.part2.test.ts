@@ -231,14 +231,17 @@ async function withEvidenceRepos<T>(
   }
 }
 
+// Background janitor demotes idle low-activity memories; seed them as fresh.
+const SEEDED_AT = new Date().toISOString();
+
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: ObjectLifecycleState.ACTIVE,
-    created_at: "2026-05-14T00:00:00.000Z",
-    updated_at: "2026-05-14T00:00:00.000Z",
+    created_at: SEEDED_AT,
+    updated_at: SEEDED_AT,
     created_by: "lane-f-authenticity",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,

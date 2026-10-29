@@ -222,14 +222,17 @@ async function withEvidenceRepos<T>(
   }
 }
 
+// Background janitor demotes idle low-activity memories; seed them as fresh.
+const SEEDED_AT = new Date().toISOString();
+
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: ObjectLifecycleState.ACTIVE,
-    created_at: "2026-05-14T00:00:00.000Z",
-    updated_at: "2026-05-14T00:00:00.000Z",
+    created_at: SEEDED_AT,
+    updated_at: SEEDED_AT,
     created_by: "lane-f-authenticity",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,
@@ -389,7 +392,9 @@ describe("MCP memory authenticity proof", () => {
         resolution: "confirm",
         delivery_id: recall.delivery_id,
         policy: "conflict_detection.v1",
-        reason: "Authenticity proof confirms the staged draft claim."
+        reason: "Authenticity proof confirms the staged draft claim.",
+        reviewer_identity: "user:lane-f-authenticity",
+        reviewer_token: "lane-f-authenticity-token"
       });
       expect(resolution).toMatchObject({
         target_object_id: DRAFT_CLAIM_ID,

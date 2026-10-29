@@ -160,7 +160,14 @@ export function createHarness(): SoulResolveWiringHarness {
       objectId: string,
       nextState: MemoryEntry["lifecycle_state"],
       _reason: string,
-      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap"
+      _causedBy: "user" | "system" | "review" | "deterministic_rule" | "auditor" | "bootstrap",
+      options?: {
+        readonly additionalEventInputs?: readonly Omit<
+          EventLogEntry,
+          "event_id" | "created_at" | "revision"
+        >[];
+        readonly additionalEventsSink?: EventLogEntry[];
+      }
     ): Promise<Readonly<MemoryEntry>> => {
       const current = memories.get(objectId);
       if (current === undefined) {
@@ -168,6 +175,9 @@ export function createHarness(): SoulResolveWiringHarness {
       }
       const updated: MemoryEntry = { ...current, lifecycle_state: nextState };
       memories.set(objectId, updated);
+      for (const eventInput of options?.additionalEventInputs ?? []) {
+        options?.additionalEventsSink?.push(publish(eventInput));
+      }
       return updated;
     },
     findById: async (id: string) => memories.get(id) ?? null,

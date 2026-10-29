@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { GardenRole, GardenTaskKind } from "@do-soul/alaya-protocol";
+import { GardenRole, GardenTaskKind, type SourceAdmissionPort } from "@do-soul/alaya-protocol";
 import { createInMemoryFieldStores, createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteGardenTaskRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createMessage } from "../../../../../packages/core/src/__tests__/conversation/conversation-service.test-support.js";
@@ -7,13 +7,22 @@ import { createConversationGardenCompileQueue } from "../../garden/conversation-
 import { enqueuePostTurnExtractTask } from "../../mcp-memory/garden-task/post-turn-extract-queue.js";
 import { createDeliveryRecord } from "../mcp-memory/garden/post-turn-extract-task-record-fixture.js";
 import { parsePostTurnExtractTaskPayload } from "../../garden/post-turn-extract/task-payload.js";
+import { cleanupPostTurnExtractHarnesses, createHandlerHarness } from "../mcp-memory/garden/post-turn-extract-task-fixture.js";
 
 const databases = new Set<StorageDatabase>();
 
 afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
+  cleanupPostTurnExtractHarnesses();
 });
+
+// Pending POST_TURN_EXTRACT work is visible only with an admitted source root.
+async function createAdmittedQueueHarness() {
+  let sourceAdmission!: SourceAdmissionPort;
+  const harness = await createHandlerHarness({ sourceAdmissionTransform: port => (sourceAdmission = port) });
+  return { gardenTaskRepo: harness.gardenTaskRepo, sourceAdmission };
+}
 
 function createRepo(): SqliteGardenTaskRepo {
   const database = initDatabase({ filename: ":memory:" });
@@ -44,9 +53,10 @@ describe("conversation garden compile queue", () => {
   });
 
   it("persists a POST_TURN_EXTRACT task and treats a second enqueue as duplicate", async () => {
-    const gardenTaskRepo = createRepo();
+    const { gardenTaskRepo, sourceAdmission } = await createAdmittedQueueHarness();
     const queue = createConversationGardenCompileQueue({
       gardenTaskRepo,
+      sourceAdmission,
       now: () => "2026-09-16T00:00:00.000Z"
     });
     const input = {
@@ -78,9 +88,9 @@ describe("conversation garden compile queue", () => {
   });
 
   it("does not collide with a report_context_usage turn_index 0 task", async () => {
-    const gardenTaskRepo = createRepo();
+    const { gardenTaskRepo, sourceAdmission } = await createAdmittedQueueHarness();
     await enqueuePostTurnExtractTask(
-      { deps: { gardenTaskRepo }, now: () => "2026-09-16T00:00:00.000Z" },
+      { deps: { gardenTaskRepo, sourceAdmission }, now: () => "2026-09-16T00:00:00.000Z" },
       {
         delivery_id: "delivery-1",
         usage_state: "used",
@@ -92,6 +102,7 @@ describe("conversation garden compile queue", () => {
     );
     const queue = createConversationGardenCompileQueue({
       gardenTaskRepo,
+      sourceAdmission,
       now: () => "2026-09-16T00:00:00.000Z"
     });
 

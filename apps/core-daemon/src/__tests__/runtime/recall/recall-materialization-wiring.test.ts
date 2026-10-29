@@ -45,7 +45,7 @@ it("prepares only eligible active generations and preserves original/hint failur
   try {
     // Unrelated runtime phases above are isolated; Source selection reads still cross actual SQLite.
     const wiring = { database: h.database, pathReadBind: "temporal", globalMemoryRepo: null,
-      configEnv: new Map(), warn: vi.fn(), eventPublisher: {}, relationAssertionRepo: {} } as unknown as CreateRecallMaterializationWiringInput;
+      configEnv: new Map(), warn: vi.fn(), eventPublisher: {}, eventLogRepo: {}, relationAssertionRepo: {} } as unknown as CreateRecallMaterializationWiringInput;
     const result = await createRecallMaterializationWiring(wiring);
     expect(createDaemonEmbeddingRuntime).toHaveBeenCalledTimes(1);
     expect(createRecallReadWorkerClient).toHaveBeenCalledTimes(1);

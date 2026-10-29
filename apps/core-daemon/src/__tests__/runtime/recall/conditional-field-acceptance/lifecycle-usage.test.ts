@@ -133,7 +133,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     const observe = (policies: readonly string[]) => observeConditionalField({ query,
       lease: { schema_version: 1, lease_id: "lease", query_id: query.query_id, snapshot_id: query.snapshot_id, status: "active" },
       cursor: startObserverCursor({ cursor_id: "adj", region_id: "adj", query_id: query.query_id, snapshot_id: query.snapshot_id }),
-      action: { schema_version: 1, region_id: "adj", action: "adjacency", work_limit: 7 }, page_limit: 1,
+      action: { schema_version: 1, region_id: "adj", action: "adjacency", work_limit: 8 }, page_limit: 1,
       workspace_id: WS, relation_subject: MEM.r, relation_kind: "config_direct", as_of: NOW,
       authorized_scopes: null,
       readers: createConditionalFieldObserverReaders(slice.database, policies) });
@@ -300,15 +300,22 @@ describe("conditional-field lifecycle and verified usage through actual consumer
           native_rows: 0, phases: { index: { budget_work: 8 } } });
         expect(visits + snapshotPin.mock.calls.length * SNAPSHOT_PIN_NATIVE_WORK).toBeLessThanOrEqual(work_units);
         snapshotPin.mockClear();
-        // The fitted empty progress page is retryable under the same allowance,
-        // not successful absence. Count each request independently.
-        const replay = await service.recall({ ...params, continuation: result.index!.continuation });
-        expect(replay.index!.completeness).toMatchObject({ observed_coverage: "unknown", logical_index: "open" });
-        expect(replay.index!.continuation).not.toBeNull();
-        expect(replay.index).toMatchObject({ query_id: result.index!.query_id,
+        // The fitted empty progress page is not successful absence. Its next seed
+        // observation cannot be funded by the same allowance, so continuing is
+        // refused without consuming the token; a larger allowance resumes it.
+        const continuation = result.index!.continuation;
+        const refused = await recallRefusal(service.recall({ ...params, continuation }));
+        expect(refused).toMatchObject({ code: "CONFLICT", details: {
+          outcome: "resource_exhausted", resource: "observation_work", phase: "seed" } });
+        expect(visits).toBe(0);
+        const resumed = await service.recall({ ...params, continuation,
+          budget: { ...params.budget, work_units: 4 * work_units } });
+        expect(resumed.index).toMatchObject({ query_id: result.index!.query_id,
           snapshot_id: result.index!.snapshot_id, interpretation_id: result.index!.interpretation_id,
           as_of: result.index!.as_of });
-        expect(replay.issued_delivery_id).toBeDefined();
+        expect(resumed.issued_delivery_id).toBeDefined();
+        visits = 0;
+        snapshotPin.mockClear();
       }
       // Native operation/row counters are not SQLite VM steps or acquisition work.
       expect(visits).toBe(0);
@@ -417,9 +424,16 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     expect(result.exitCode).toBe(0);
     const history = await new SqliteTrustStateRepo(reopened).listUsageByDeliveryIds([delivered.delivery_id]);
     expect(history[0]?.witness_reports).toEqual([report]);
-    const duplicate = await command.handler({ cwd: dir, env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
+    // An identical replay is idempotent; a divergent report for the same delivery conflicts.
+    const replay = await command.handler({ cwd: dir, env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
       stderr: new PassThrough(), isTTY: false, jsonRequested: true, daemon: { startupSteps: [] } }, args.data);
-    expect(duplicate.exitCode).not.toBe(0);
-    expect(await new SqliteTrustStateRepo(reopened).listUsageByDeliveryIds([delivered.delivery_id])).toHaveLength(1);
+    expect(replay.exitCode).toBe(0);
+    const divergentArgs = command.argsSchema.safeParse(["call", "soul.report_context_usage", JSON.stringify({
+      delivery_id: delivered.delivery_id, usage_state: "skipped" }), "--workspace", WS, "--run", RUN]);
+    if (!divergentArgs.success) throw new Error("CLI parse failed");
+    const divergent = await command.handler({ cwd: dir, env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
+      stderr: new PassThrough(), isTTY: false, jsonRequested: true, daemon: { startupSteps: [] } }, divergentArgs.data);
+    expect(divergent.exitCode).not.toBe(0);
+    expect(await new SqliteTrustStateRepo(reopened).listUsageByDeliveryIds([delivered.delivery_id])).toEqual(history);
   });
 });

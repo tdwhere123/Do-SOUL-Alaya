@@ -20,7 +20,7 @@ import { evictIssuedDeliveries, replayIssuedDelivery } from "../../../../../../p
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const db of databases) db.close(); databases.clear(); });
 
-it.each(["settled", "constrained"] as const)("keeps the %s empty tail page retry identity", async (kind) => {
+it("keeps the settled empty tail page retry identity", async () => {
   const { slice, input: base } = await fixture(true);
   const record = hashedRecord(WS, "needle only", "only");
   new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(record);
@@ -29,40 +29,34 @@ it.each(["settled", "constrained"] as const)("keeps the %s empty tail page retry
   const input = nominated(base, [record]);
   const first = runConditionalFieldRecallWithReceipt(input);
   expect(first.index.continuation).not.toBeNull();
-  const request = { ...input, continuation: first.index.continuation,
-    ...(kind === "constrained" ? { budget: { ...input.budget,
-      work_units: SNAPSHOT_PIN_NATIVE_WORK * 3 + 1, finalization_reserve: 0, min_envelope: 1 } } : {}) };
+  const request = { ...input, continuation: first.index.continuation };
   const page = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
   expect(page.index.entries).toHaveLength(0);
-  if (kind === "settled") expect(page.index.continuation).toBeNull();
-  else {
-    // The paid control fits, but the remaining work cannot frame a settled tail.
-    // A fitted progress response must preserve recovery, not claim termination.
-    expect(page.index.continuation).not.toBeNull();
-    expect(page.index.representation.page_budget).toBe(0);
-    expect(page.index.completeness).toMatchObject({ logical_index: "interrupted", transport: "interrupted" });
-    expect(page.index.explanations).toEqual([]);
-    expect(page.index.product_updates ?? []).toEqual([]);
-    expect(captureIndexPreviews(page.index, input.readers, WS).size).toBe(0);
-    expect(page.execution_receipt.actual?.phases.index.budget_work).toBe(4);
-  }
+  expect(page.index.continuation).toBeNull();
   expect(page.delivery_id).toBeDefined();
   const id = page.issue!({ index: page.index, previews: new Map(), metadata: {} });
-  if (kind === "constrained") {
-    expect(page.execution_receipt.actual?.native_visits).toBe(SNAPSHOT_PIN_NATIVE_WORK * 2);
-    expect(page.execution_receipt.actual?.native_rows).toBe(0);
-    expect(page.execution_receipt.actual?.charged_retained_bytes).toBe(0);
-  }
   const retry = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
   expect(retry.delivery_id).toBe(id);
   expect(retry.index).toEqual({ ...page.index, page_purpose: "retry" });
   expect(retry.issue!({ index: retry.index, previews: new Map(), metadata: {} })).toBe(id);
-  if (kind === "constrained") {
-    const recovered = runConditionalFieldRecallWithReceipt({ ...input, continuation: page.index.continuation });
-    expect(recovered.index.entries).toEqual([]);
-    expect(recovered.index.continuation).toBeNull();
-    expect(recovered.index.completeness.logical_index).not.toBe("invalidated");
-  }
+});
+
+it("refuses an unfunded empty tail without consuming its token", async () => {
+  const { slice, input: base } = await fixture(true);
+  const record = hashedRecord(WS, "needle only", "only");
+  new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(record);
+  const input = nominated(base, [record]);
+  const first = runConditionalFieldRecallWithReceipt(input);
+  expect(first.index.continuation).not.toBeNull();
+  // The paid control fits, but no retained work advances, so no progress page ships.
+  expect(() => runConditionalFieldRecallWithReceipt({ ...input, continuation: first.index.continuation,
+    budget: { ...input.budget, work_units: SNAPSHOT_PIN_NATIVE_WORK * 3 + 1, finalization_reserve: 0, min_envelope: 1 } },
+  { issue: "defer" })).toThrow(expect.objectContaining({
+    details: expect.objectContaining({ resource: "framing_work", reason: "framing_interrupted" }) }));
+  const recovered = runConditionalFieldRecallWithReceipt({ ...input, continuation: first.index.continuation });
+  expect(recovered.index.entries).toEqual([]);
+  expect(recovered.index.continuation).toBeNull();
+  expect(recovered.index.completeness.logical_index).not.toBe("invalidated");
 });
 
 it("refuses unfinished-page framing without consuming its token or declaring size impossibility", async () => {

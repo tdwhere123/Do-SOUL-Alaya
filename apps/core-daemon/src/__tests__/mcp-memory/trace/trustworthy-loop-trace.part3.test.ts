@@ -47,6 +47,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
+import { bindPostTurnTaskSource } from "../garden/post-turn-source-fixture.js";
 
 import {
   createMcpMemoryToolHandler,
@@ -265,7 +266,7 @@ async function createTrustworthyLoopHarness(
         workspace_id: "workspace-1",
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: createPostTurnExtractPayload(),
+        payload: bindPostTurnTaskSource(database, createPostTurnExtractPayload(), `post-turn:${taskId}`),
         created_at: "2026-05-11T00:00:00.000Z"
       });
     }

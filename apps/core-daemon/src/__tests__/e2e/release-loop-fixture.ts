@@ -286,14 +286,17 @@ export async function readOperationBundle(path: string): Promise<
   };
 }
 
+// Background janitor demotes idle low-activity memories; seed them as fresh.
+const SEEDED_AT = new Date().toISOString();
+
 export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
-    created_at: "2026-05-02T00:00:00.000Z",
-    updated_at: "2026-05-02T00:00:00.000Z",
+    created_at: SEEDED_AT,
+    updated_at: SEEDED_AT,
     created_by: "p5-release-loop",
     dimension: MemoryDimension.PREFERENCE,
     source_kind: SourceKind.USER,

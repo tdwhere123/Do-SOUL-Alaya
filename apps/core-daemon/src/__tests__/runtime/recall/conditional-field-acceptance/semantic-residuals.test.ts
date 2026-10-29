@@ -5,7 +5,7 @@ import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
 import { createDependencies } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { openBoundSlice, plantDeployment, readersFor, runRecall, observeProgram, indexFromObserved, stamp } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
-import { MEM, WS } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
+import { MEM, NOW, WS } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { defaultBudget, INTERPRETATION_CLOCK, YESTERDAY_INSTANT, SNAPSHOT_ID } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { compileConditionalFieldQuery } from "../../../../../../../packages/core/src/recall/conditional-field/query/compile-query.js";
 
@@ -19,10 +19,11 @@ async function planted() {
   await plantDeployment(slice);
   return slice;
 }
-function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverReaders = readersFor(slice)) {
+function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverReaders = readersFor(slice),
+  clock = INTERPRETATION_CLOCK) {
   const { dependencies } = createDependencies();
   const service = new RecallService({ ...dependencies,
-    now: () => INTERPRETATION_CLOCK, observerReaders: readers });
+    now: () => clock, observerReaders: readers });
   const handler = createRecallHandler({ deps: { recallService: {
     recall: (params: Parameters<RecallService["recall"]>[0]) => service.recall({
       ...capableRecallConsumerDeclaration(),
@@ -34,7 +35,7 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
   },
     trustStateRecorder: { recordDelivery: vi.fn(async (input) => ({ ...input, audit_event_id: "event1" })),
       recordUsage: vi.fn(async (input) => ({ ...input, audit_event_id: "event2" })), findDeliveryById: vi.fn(async () => null) },
-    memoryService: { findByIdScoped: async () => null } }, now: () => INTERPRETATION_CLOCK,
+    memoryService: { findByIdScoped: async () => null } }, now: () => clock,
     warn: () => undefined, generateId: () => "00000000-0000-4000-8000-000000000001" });
   return async (width = 800, continuation?: InformationIndex["continuation"]) => {
     const result = await handler({ query: "yesterday failed deployment", scope_class: null, dimension: null,
@@ -188,8 +189,10 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     expect(unavailable.completeness.observed_coverage).toBe("unknown");
     expect(unavailable.completeness.logical_index).toBe("open");
     await slice.relations.resolve({ assertionId: "assert-cause-live", workspaceId: WS, runId: null, causedBy: "test",
-      resolutionKind: "retracted", reason: "source correction", resolvedAt: INTERPRETATION_CLOCK });
-    const readRetracted = session(slice);
+      // A retraction cannot precede the admission it resolves.
+      resolutionKind: "retracted", reason: "source correction", resolvedAt: NOW });
+    // Read after the retraction; "yesterday" is unchanged later the same day.
+    const readRetracted = session(slice, readersFor(slice), NOW);
     let retracted = await readRetracted();
     const retractedEntries = [...retracted.entries];
     for (let attempt = 0; retracted.continuation !== null && attempt < 10; attempt += 1) {

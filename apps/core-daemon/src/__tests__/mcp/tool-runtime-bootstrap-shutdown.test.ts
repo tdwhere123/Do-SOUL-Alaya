@@ -66,9 +66,10 @@ describe("daemon tool runtime bootstrap shutdown", () => {
         expect(backlogTelemetryService).toMatchObject({ stop: expect.any(Function), start: expect.any(Function) });
 
         signalHandlers.get("SIGTERM")?.();
-        await Promise.resolve();
-
-        expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
+        // Source-index passes settle before the background manager stops.
+        await vi.waitFor(() => {
+          expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
+        });
         expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: 30_000 });
         expect(backlogTelemetryService!.stop).not.toHaveBeenCalled();
         expect(hoisted.mcpRuntimeClose).not.toHaveBeenCalled();
@@ -119,9 +120,10 @@ describe("daemon tool runtime bootstrap shutdown", () => {
         expect(backlogTelemetryService).toMatchObject({ stop: expect.any(Function), start: expect.any(Function) });
 
         signalHandlers.get("SIGTERM")?.();
-        await Promise.resolve();
-
-        expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
+        // Source-index passes settle before the background manager stops.
+        await vi.waitFor(() => {
+          expect(hoisted.backgroundManagerStop).toHaveBeenCalledTimes(1);
+        });
         expect(hoisted.backgroundManagerStop).toHaveBeenCalledWith({ timeoutMs: 30_000 });
         expect(backlogTelemetryService!.stop).not.toHaveBeenCalled();
 
