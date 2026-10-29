@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ActivationCandidateSchema,
   ForgetDisposition,
+  GARDEN_TASK_PAYLOAD_MAX_CHARS,
   GardenClaimTaskResponseSchema,
   GardenPendingTaskSnapshotSchema,
   GardenTaskDescriptorSchema,
@@ -229,7 +230,7 @@ describe("protocol boundary audit contracts", () => {
         task_id: "task-1",
         role: "host_worker",
         kind: "POST_TURN_EXTRACT",
-        payload: { turn_digest: { text: "x".repeat(20_000) } }
+        payload: { turn_digest: { text: "x".repeat(GARDEN_TASK_PAYLOAD_MAX_CHARS) } }
       }).success
     ).toBe(false);
     expect(

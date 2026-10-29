@@ -2,6 +2,7 @@ import { CanonicalizationAliasResolvedPayloadSchema, CanonicalizationAppliedPayl
   SoulSlotCreatedPayloadSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
 import type { SqliteConnection, StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 
 type PrivacyObjectKind = "memory_entry" | "memory_hq_observation" | "memory_hq_projection" | "synthesis_capsule" | "claim_form" | "slot" | "conflict_matrix_edge";
 
@@ -9,7 +10,7 @@ type PrivacyObjectKind = "memory_entry" | "memory_hq_observation" | "memory_hq_p
 function isPrivacyObjectAvailable(
   database: StorageDatabase, workspaceId: string, kind: PrivacyObjectKind, objectId: string
 ): boolean {
-  return database.connection.prepare(`SELECT 1 FROM privacy_current_quarantine
+  return cachedReadStatement(database, `SELECT 1 FROM privacy_current_quarantine
     WHERE workspace_id = ? AND object_kind = ? AND object_id = ? LIMIT 1`)
     .get(workspaceId, kind, objectId) === undefined;
 }
@@ -36,7 +37,7 @@ export function requirePrivacyRowsAvailable(
 export function requirePrivacyWorkspaceAvailable(
   database: StorageDatabase, workspaceId: string, kinds: readonly PrivacyObjectKind[]
 ): void {
-  if (database.connection.prepare(`SELECT 1 FROM privacy_current_quarantine
+  if (cachedReadStatement(database, `SELECT 1 FROM privacy_current_quarantine
     WHERE workspace_id = ? AND object_kind IN (SELECT value FROM json_each(?)) LIMIT 1`)
     .get(workspaceId, JSON.stringify(kinds)) !== undefined) {
     throw new StorageError("CONFLICT", "Results are incomplete because dependency provenance is unavailable.");
@@ -44,14 +45,14 @@ export function requirePrivacyWorkspaceAvailable(
 }
 
 export function requirePrivacyKindAvailable(database: StorageDatabase, kind: PrivacyObjectKind): void {
-  if (database.connection.prepare(`SELECT 1 FROM privacy_current_quarantine WHERE object_kind = ? LIMIT 1`)
+  if (cachedReadStatement(database, `SELECT 1 FROM privacy_current_quarantine WHERE object_kind = ? LIMIT 1`)
     .get(kind) !== undefined) {
     throw new StorageError("CONFLICT", "Results are incomplete because dependency provenance is unavailable.");
   }
 }
 
 export function requirePrivacyRunMemoriesAvailable(database: StorageDatabase, runId: string): void {
-  if (database.connection.prepare(`SELECT 1 FROM memory_entries m JOIN privacy_current_quarantine q
+  if (cachedReadStatement(database, `SELECT 1 FROM memory_entries m JOIN privacy_current_quarantine q
     ON q.workspace_id = m.workspace_id AND q.object_kind = 'memory_entry' AND q.object_id = m.object_id
     WHERE m.run_id = ? LIMIT 1`).get(runId) !== undefined) {
     throw new StorageError("CONFLICT", "Results are incomplete because dependency provenance is unavailable.");

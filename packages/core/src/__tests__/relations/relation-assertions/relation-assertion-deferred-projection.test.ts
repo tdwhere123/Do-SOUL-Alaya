@@ -247,7 +247,7 @@ function trackedProjectionRepo(repo: SqliteRelationAssertionRepo): {
       if (typeof value !== "function") return value;
       return (...args: unknown[]) => {
         if (property === "listAssertionsInCurrentTransaction") calls.listAssertions += 1;
-        if (property === "listCurrentResolutionsInCurrentTransaction") calls.listResolutions += 1;
+        if (property === "listResolutionHistoryInCurrentTransaction") calls.listResolutions += 1;
         if (property === "writeProjectionGenerationInCurrentTransaction") calls.writes += 1;
         return Reflect.apply(value, target, args);
       };

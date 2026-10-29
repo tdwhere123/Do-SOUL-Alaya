@@ -131,6 +131,7 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     const { database, repo } = await createRepo();
     const capsule = createSynthesisCapsule();
     await repo.create(capsule);
+    await repo.findByIds("workspace-1", [capsule.object_id]);
     let prepareCount = 0;
     const originalPrepare = database.connection.prepare.bind(database.connection);
     database.connection.prepare = ((sql: string) => {
@@ -138,7 +139,6 @@ describe("SqliteSynthesisCapsuleRepo", () => {
       return originalPrepare(sql);
     }) as typeof database.connection.prepare;
 
-    await repo.findByIds("workspace-1", [capsule.object_id]);
     await repo.findByIds("workspace-1", [capsule.object_id, "missing-id"]);
 
     expect(prepareCount).toBe(0);

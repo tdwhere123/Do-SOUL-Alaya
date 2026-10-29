@@ -117,6 +117,7 @@ describe("SqliteClaimFormRepo", () => {
     const { database, repo } = await createRepo();
     const claim = createClaimForm();
     await repo.create(claim);
+    await repo.findByIds("workspace-1", [claim.object_id]);
     let prepareCount = 0;
     const originalPrepare = database.connection.prepare.bind(database.connection);
     database.connection.prepare = ((sql: string) => {
@@ -124,7 +125,6 @@ describe("SqliteClaimFormRepo", () => {
       return originalPrepare(sql);
     }) as typeof database.connection.prepare;
 
-    await repo.findByIds("workspace-1", [claim.object_id]);
     await repo.findByIds("workspace-1", [claim.object_id, "missing-id"]);
 
     expect(prepareCount).toBe(0);
