@@ -52,6 +52,8 @@ export interface LocalOnnxSessionOptions {
 }
 
 export interface LocalOnnxPipelineOptions {
+  /** Fork-owned parent for private model copies; absent for direct loads. */
+  readonly snapshotParent?: string;
   readonly sessionOptions?: LocalOnnxSessionOptions;
 }
 
@@ -377,7 +379,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
       this.modelId,
       this.cacheDir,
       {
-        sessionOptions: resolveLocalOnnxSessionOptionsFromEnv(this.env)
+        sessionOptions: resolveLocalOnnxSessionOptionsFromEnv(this.env),
+        ...(this.env.ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT === undefined ? {} :
+          { snapshotParent: this.env.ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT })
       }
     ).catch((error) => {
       // Reset so a later call can retry instead of permanently caching a

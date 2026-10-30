@@ -38,14 +38,15 @@ describe("source semantic library measurement", () => {
     if (result.target.kind !== "source_evidence") throw new Error("expected a source fixture");
     const target = { ...result.target, span: { ...result.target.span!,
       retained_extent: "body" as const, content_start: 0, content_end: 4 } };
-    for (const [preview, withinBudget, end] of [["€", false, 3], ["[payload omitted]", false, 0],
-      ["€a", true, 4]] as const) {
-      const emitted = { ...result, target, content_preview: preview,
+    for (const [preview, withinBudget, available, end] of [["€", false, true, 3], ["[payload omitted]", false, false, 0],
+      ["€a", true, true, 4], ["€", false, undefined, 3], ["[payload omitted]", false, undefined, 0],
+      ["€a", true, undefined, 4]] as const) {
+      const emitted = { ...result, target, content_preview: preview, payload_available: available,
         budget_state: { ...result.budget_state, within_budget: withinBudget } };
       admitEmittedSourcePreview(target.span, emitted, undefined, target, "€a", false);
       expect(admittedSourcePreviewInterval(target, emitted)).toEqual({ start: 0, end });
     }
-    const invalid = { ...result, target, content_preview: "€aa" };
+    const invalid = { ...result, target, content_preview: "€aa", payload_available: true };
     expect(() => admitEmittedSourcePreview(target.span, invalid, undefined, target, "€a", false)).toThrow();
     expect(admittedSourcePreviewInterval(target, invalid)).toBeNull();
   });

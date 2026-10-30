@@ -1,5 +1,6 @@
 import { parentPort } from "node:worker_threads";
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "../open-sqlite-connection.js";
 import {
   applySqliteWritePragmas,
   applySqliteWriteQueueSessionPragmas,
@@ -118,7 +119,7 @@ function openConnection(
   filename: string,
   sessionPragmas: SqliteWriteQueueSessionPragmas | undefined
 ): SqliteConnection {
-  const connection = new BetterSqlite3(filename);
+  const connection = new BetterSqlite3(sqliteHostFilename(filename));
   applySqliteWritePragmas(connection, { busyTimeoutMs: DEFAULT_BUSY_TIMEOUT_MS });
   if (sessionPragmas !== undefined) {
     applySqliteWriteQueueSessionPragmas(connection, sessionPragmas);

@@ -18,13 +18,20 @@ export function temporalEstablishedMarker(filename: string): string {
 export function syncTemporalDirectory(directory: string): void {
   const descriptor = fs.openSync(directory, "r");
   try { fs.fsyncSync(descriptor); }
+  catch (error) {
+    // Node's Windows directory handles cannot be flushed. File contents are still
+    // synced, but directory-entry crash durability is only available on POSIX.
+    if (process.platform !== "win32" || !(error instanceof Error) ||
+        !("code" in error) || error.code !== "EPERM") throw error;
+  }
   finally { fs.closeSync(descriptor); }
 }
 
 /** Publish only complete, durable contents without replacing another owner's output. */
 export function publishNewTemporalFile(staging: string, destination: string): void {
   fs.chmodSync(staging, 0o600);
-  const descriptor = fs.openSync(staging, "r");
+  // Windows FlushFileBuffers requires write access; r+ does not truncate contents.
+  const descriptor = fs.openSync(staging, "r+");
   try { fs.fsyncSync(descriptor); }
   finally { fs.closeSync(descriptor); }
   fs.linkSync(staging, destination);
@@ -43,7 +50,7 @@ export function markTemporalDatabaseEstablished(filename: string): void {
     descriptor = fs.openSync(marker, "wx", 0o600);
   } catch (error) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-    const existing = fs.openSync(marker, "r");
+    const existing = fs.openSync(marker, "r+");
     try { fs.fsyncSync(existing); }
     finally { fs.closeSync(existing); }
     syncTemporalDirectory(path.dirname(marker));

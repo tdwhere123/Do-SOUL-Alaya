@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -10,11 +10,7 @@ import { executeProviderRequestLine, type ProviderRequestLine,
   type ProviderRequestPhysicalContext } from "../../../runs/provider-request/execution.js";
 
 const roots: string[] = [];
-const blocked: string[] = [];
 afterEach(() => {
-  for (const path of blocked.splice(0)) {
-    try { chmodSync(path, 0o755); } catch { /* restore before recursive cleanup */ }
-  }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -104,12 +100,17 @@ it.each([false, true])("settles reserved transport failure when the auxiliary di
 it("propagates authoritative raw persistence failure from a reserved transport failure", async () => {
   const { cacheRoot, line, ledger, extract, interpretDecoded, publishArtifact, dispatch } = openDispatch(false);
   const rawDir = join(cacheRoot, "provider-raw", line.key.slice(0, 2));
-  mkdirSync(rawDir, { recursive: true });
-  chmodSync(rawDir, 0o555);
-  blocked.push(rawDir);
-  await expect(dispatch()).rejects.toMatchObject({ code: expect.stringMatching(/^(?:EACCES|EPERM)$/u) });
-  expect(statSync(rawDir).isDirectory()).toBe(true);
-  chmodSync(rawDir, 0o755);
+  mkdirSync(join(cacheRoot, "provider-raw"), { recursive: true });
+  // Block the directory only after reservation, so replay can inspect absence.
+  // A regular file obstructs mkdir on every platform, unlike POSIX chmod bits.
+  extract.mockImplementation(async () => {
+    writeFileSync(rawDir, "authored persistence obstruction");
+    throw transportCause(false);
+  });
+  await expect(dispatch()).rejects.toMatchObject({ code: "EEXIST" });
+  expect(statSync(rawDir).isFile()).toBe(true);
+  rmSync(rawDir);
+  mkdirSync(rawDir);
   expect(listProviderRawAttempts(cacheRoot, line.key)).toEqual([]);
   expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toBeUndefined();
   expect(existsSync(providerRawAttemptPath(cacheRoot, line.key, 1))).toBe(false);

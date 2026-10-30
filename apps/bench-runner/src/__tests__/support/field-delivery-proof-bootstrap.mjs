@@ -3,6 +3,8 @@
 await import('./strict-provider-free-cli-bootstrap.mjs');
 import { writeFileSync } from 'node:fs';
 import fs from 'node:fs';
+// win32.basename recognizes both Windows and POSIX separators in authored paths.
+import { win32 } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 const { SourceIndexAcquisition, fieldContractSha256 } = await import('@do-soul/alaya-core');
 const { unavailableSourceQueryPreparation } = await import('@do-soul/alaya-protocol');
@@ -46,7 +48,7 @@ if (fault?.startsWith('composed-')) {
   if (fault === 'composed-capture') {
     const original = fs.writeFileSync;
     fs.writeFileSync = function(path, ...args) {
-      if (String(path).endsWith('/001.json')) throw new Error('authored composed capture publication failure');
+      if (win32.basename(String(path)) === '001.json') throw new Error('authored composed capture publication failure');
       return original.call(this, path, ...args);
     };
     syncBuiltinESMExports();
@@ -73,7 +75,7 @@ if (fault?.startsWith('composed-')) {
 } else if (fault === 'capture' || fault === 'capture-second') {
   const original = fs.writeFileSync;
   fs.writeFileSync = function(path, ...args) {
-    if (String(path).endsWith(fault === 'capture' ? '/001.json' : '/002.json')) throw new Error('authored capture publication failure');
+    if (win32.basename(String(path)) === (fault === 'capture' ? '001.json' : '002.json')) throw new Error('authored capture publication failure');
     return original.call(this, path, ...args);
   };
   syncBuiltinESMExports();

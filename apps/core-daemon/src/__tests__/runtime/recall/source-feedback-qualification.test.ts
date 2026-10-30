@@ -9,7 +9,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); expect(isolation.saf
 afterAll(() => { isolation.strict.restore(); isolation.safe.restore(); });
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -224,7 +224,7 @@ it("does not split a purely conjunctive Q into evidence branches to manufacture 
 }, 60_000);
 
 it("binds the real daemon constructor to its matching dist feedback entry and preserves missing/closed admission", async () => {
-  const directory = temporaryDirectory(), config = join(tmpdir(), `alaya-bench-config-${randomUUID()}`);
+  const directory = temporaryDirectory(), config = join(realpathSync(tmpdir()), `alaya-bench-config-${randomUUID()}`);
   roots.push(config); mkdirSync(config);
   const workspaceRoot = join(directory, "workspace"); mkdirSync(workspaceRoot);
   // Persist disabled config through its owner; startup never needs credential-derived defaults.

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
@@ -27,7 +27,7 @@ import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../../inde
 it("exposes predecessor-bound replacement through the wired Node capability and retains prior records", async () => {
   const directory = mkdtempSync(join(tmpdir(), "daemon-source-replacement-"));
   // The shared guard permits only this native fixture configuration namespace.
-  const config = join(tmpdir(), `alaya-bench-config-${randomUUID()}`);
+  const config = join(realpathSync(tmpdir()), `alaya-bench-config-${randomUUID()}`);
   mkdirSync(config);
   const dataDir = join(directory, "data"), workspaceRoot = join(directory, "workspace");
   mkdirSync(workspaceRoot);
@@ -74,7 +74,7 @@ it("exposes predecessor-bound replacement through the wired Node capability and 
 
 it("exposes deferred predecessor-bound replacement through the wired Node capability until checkpoint publishes the new frontier", async () => {
   const directory = mkdtempSync(join(tmpdir(), "daemon-source-replacement-deferred-"));
-  const config = join(tmpdir(), `alaya-bench-config-${randomUUID()}`);
+  const config = join(realpathSync(tmpdir()), `alaya-bench-config-${randomUUID()}`);
   mkdirSync(config);
   const dataDir = join(directory, "data"), workspaceRoot = join(directory, "workspace");
   mkdirSync(workspaceRoot);

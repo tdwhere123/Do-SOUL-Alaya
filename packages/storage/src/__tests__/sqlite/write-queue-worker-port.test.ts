@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
+import { openSqliteConnection } from "../../sqlite/open-sqlite-connection.js";
 import {
   createWorkerThreadSqliteWriteQueuePort,
   resolveSqliteWriteQueueWorkerUrl
@@ -40,6 +41,24 @@ describe("worker-thread SqliteWriteQueuePort", () => {
     );
     return { filename, db };
   }
+
+  it("writes through a deep canonical filename without shortening the queue identity", async () => {
+    const root = mkdtempSync(join(tmpdir(), "alaya-write-queue-long-"));
+    roots.push(root);
+    const directory = join(root, "a".repeat(90), "b".repeat(90), "c".repeat(90));
+    mkdirSync(directory, { recursive: true });
+    const filename = join(directory, "probe.db");
+    expect(filename.length).toBeGreaterThan(260);
+    const db = openSqliteConnection(filename);
+    try {
+      db.exec("CREATE TABLE probe (payload TEXT NOT NULL)");
+      const queue = createQueue();
+      await queue.enqueue({ jobId: "deep-write", kind: "ontology_write", filename,
+        payload: { statements: [{ sql: "INSERT INTO probe VALUES (?)", params: ["committed"] }] } });
+      expect(queue.blocksEviction(filename)).toBe(false);
+      expect(db.prepare("SELECT payload FROM probe").all()).toEqual([{ payload: "committed" }]);
+    } finally { db.close(); }
+  }, 60_000);
 
   it("serializes payload jobs EventLog-first and blocks eviction while pending", async () => {
     const queue = createQueue();

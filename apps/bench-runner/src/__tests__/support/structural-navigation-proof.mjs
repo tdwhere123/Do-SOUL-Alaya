@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
 const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
@@ -43,7 +43,7 @@ const run = async (args, expected = 0) => {
 };
 try {
   const { inspectSourceRecordsArtifact, createSourceRecordsSidecarWriter, sealSourceRecordsManifest,
-    sourceRecordsManifestPath, sourceRecordsSidecarPath } = await import(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js'));
+    sourceRecordsManifestPath, sourceRecordsSidecarPath } = await import(pathToFileURL(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js')).href);
   const { initDatabase, SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } = await import('@do-soul/alaya-storage');
   const { fieldContractSha256 } = await import('@do-soul/alaya-core');
   const { sourceIndexTarget } = await import('@do-soul/alaya-protocol');
@@ -171,7 +171,7 @@ try {
   for (const mode of ['throw', 'null', 'empty', 'limited', 'stale', 'unauthorized', 'misbound']) {
     const name = `seed-${mode}`, fault = join(root, `${name}.mjs`), trace = join(root, `${name}-trace.json`);
     writeFileSync(fault, `await import(${JSON.stringify(preload)});
-      const { SqliteFieldSourceRecordRepo } = await import(${JSON.stringify(join(tree, 'packages/storage/dist/index.js'))});
+      const { SqliteFieldSourceRecordRepo } = await import(${JSON.stringify(pathToFileURL(join(tree, 'packages/storage/dist/index.js')).href)});
       const { writeFileSync } = await import('node:fs');
       const original = SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
       SqliteFieldSourceRecordRepo.prototype.findByIdBounded = function (...args) {
@@ -187,7 +187,7 @@ try {
         if (mode === 'unauthorized') return { ...read, record: { ...read.record, scope_class: 'private' } };
         return { ...read, record: { ...read.record, speaker: read.record.speaker === 'user' ? 'assistant' : 'user' } };
       };`);
-    await navigate(name, 2, fault, 'structural');
+    await navigate(name, 2, pathToFileURL(fault).href, 'structural');
     const receipt = captures.at(-1).receipt, meter = receipt.structural_reads[0].ledger.accounting;
     assert.equal(meter.unmetered_reads, ['throw', 'null'].includes(mode) ? 1 : 0);
     assert.equal(meter.status, ['throw', 'null'].includes(mode) ? 'partial' : 'complete');
@@ -261,7 +261,7 @@ try {
   ]) {
     const fault = join(root, `repair-${name}.mjs`);
     writeFileSync(fault, `await import(${JSON.stringify(preload)});
-      const { SqliteSourceIndexRepository } = await import(${JSON.stringify(join(tree, 'packages/storage/dist/index.js'))});
+      const { SqliteSourceIndexRepository } = await import(${JSON.stringify(pathToFileURL(join(tree, 'packages/storage/dist/index.js')).href)});
       const original = SqliteSourceIndexRepository.prototype.readLexicalCandidates;
       SqliteSourceIndexRepository.prototype.readLexicalCandidates = function (...args) {
         const result = original.apply(this, args);
@@ -269,7 +269,7 @@ try {
         if (${JSON.stringify(mode)} === 'throw') throw new Error('authored acquisition meter lost');
         return { ...result, completion: 'partial', reason: 'authored incomplete native capture' };
       };`);
-    repairSelected[name] = await repairNavigate(name, configName, fault);
+    repairSelected[name] = await repairNavigate(name, configName, pathToFileURL(fault).href);
   }
   for (const [name, configName, mode] of [
     ['legacyThrow', 'noStructure', 'throw'], ['legacyNull', 'noStructure', 'null'], ['noMetadataThrow', 'noMetadata', 'throw'],
@@ -282,12 +282,12 @@ try {
   ]) {
     const fault = join(root, `repair-${name}.mjs`), trace = join(root, `repair-${name}-trace.json`);
     writeFileSync(fault, `await import(${JSON.stringify(preload)});
-      const storage = await import(${JSON.stringify(join(tree, 'packages/storage/dist/index.js'))});
-      const fs = await import('node:fs'); const { syncBuiltinESMExports } = await import('node:module');
+      const storage = await import(${JSON.stringify(pathToFileURL(join(tree, 'packages/storage/dist/index.js')).href)});
+      const fs = await import('node:fs'); const { win32 } = await import('node:path'); const { syncBuiltinESMExports } = await import('node:module');
       const write = fs.default.writeFileSync, read = storage.SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
       const mode = ${JSON.stringify(mode)}, trace = ${JSON.stringify(trace)}; let deliveries = 0;
       if (mode === 'capture') { fs.default.writeFileSync = function (path, ...args) {
-        if (String(path).endsWith('/001.json')) throw new Error('authored capture write failure'); return write(path, ...args);
+        if (win32.basename(String(path)) === '001.json') throw new Error('authored capture write failure'); return write(path, ...args);
       }; syncBuiltinESMExports(); }
       storage.SqliteFieldSourceRecordRepo.prototype.findByIdBounded = function (...args) {
         const result = read.apply(this, args); if (args[2] !== 4096) return result;
@@ -300,7 +300,7 @@ try {
         if (mode === 'denied') return { ...result, record: { ...result.record, scope_class: 'private' } };
         return { ...result, record: { ...result.record, speaker: result.record.speaker === 'user' ? 'assistant' : 'user' } };
       };`);
-    repairSelected[name] = await repairNavigate(name, configName, fault);
+    repairSelected[name] = await repairNavigate(name, configName, pathToFileURL(fault).href);
     repairSelected[name].hidden_meter = json(trace);
   }
   // All new selections, stopped attempts and inputs are now frozen, before labels.

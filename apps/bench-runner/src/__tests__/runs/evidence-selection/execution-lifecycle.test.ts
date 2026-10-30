@@ -83,6 +83,10 @@ it("captures authorized config and workset before native readiness yields withou
 it("cancels readiness at the phase deadline and refuses reservation even if readiness returns late", async () => {
   let requests = 0, cancelled = false;
   const current = await fixture((_req, res) => { requests++; reply(res); });
+  const started = performance.now();
+  // Keep synchronous fixture/ledger setup from consuming this readiness-only
+  // deadline on a loaded runner. AbortSignal.timeout still uses the real timer.
+  const clock = vi.spyOn(performance, "now").mockReturnValue(started);
   try {
     const native = createSemanticProviderHttpExtractor(current.config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
     const extractor = { ...native, assertTransportReady: async (signal?: AbortSignal, timeoutMs?: number) => {
@@ -96,7 +100,7 @@ it("cancels readiness at the phase deadline and refuses reservation even if read
     expect(cancelled).toBe(true);
     expect(requests).toBe(0);
     expect(openEvidenceSelectionAttemptLedger(current).snapshot()).toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [] });
-  } finally { await current.close(); }
+  } finally { clock.mockRestore(); await current.close(); }
 });
 
 it("retains independent legacy readiness and request timeouts when no phase deadline is supplied", async () => {
@@ -114,6 +118,10 @@ it("retains independent legacy readiness and request timeouts when no phase dead
 
 it("clips the last native HTTP request to the shared phase and observably cancels its socket without later dispatch", async () => {
   let requests = 0, cancelled = false;
+  const started = Math.floor(performance.now()), phaseBudgetMs = 60_000;
+  let now = started, nativeTimeoutFired = false;
+  const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+  const phaseTimers: { milliseconds: number; controller: AbortController }[] = [];
   let observeClose!: () => void;
   const closed = new Promise<void>(resolve => { observeClose = resolve; });
   const timers: NodeJS.Timeout[] = [];
@@ -124,15 +132,45 @@ it("clips the last native HTTP request to the shared phase and observably cancel
     res.writeHead(200, { "content-type": "application/json" });
     res.write("{");
     res.on("close", () => { cancelled = !res.writableEnded; observeClose(); });
+    // Arm the real native timer only after the second physical response exists.
+    // The logical clock models expiry independently of fixture/CI scheduling speed.
+    const timeout = nativeTimeout(0);
+    timeout.addEventListener("abort", () => {
+      nativeTimeoutFired = true;
+      now = started + phaseBudgetMs;
+      phaseTimers[1]!.controller.abort(timeout.reason);
+    }, { once: true });
     // Bounds the deliberately broken pre-repair case too; this is never an acceptance timeout.
     timers.push(setTimeout(() => res.end("}"), 1500));
   }, 3);
-  const started = performance.now();
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  // Keep phase timers dormant through setup/readiness/first success, then bridge
+  // the second timer's native TimeoutError into the actual request abort signal.
+  // The gateway still has its independent real request watchdog; it is not the
+  // cancellation mechanism under test and must not race fixture initialization.
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(milliseconds => {
+    const controller = new AbortController();
+    phaseTimers.push({ milliseconds, controller });
+    return controller.signal;
+  });
   try {
-    const result = await executeEvidenceSelectionFill({ ...current, phaseDeadlineMs: started + 400 });
+    const native = createSemanticProviderHttpExtractor(current.config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
+    const assertTransportReady = vi.fn(native.assertTransportReady!);
+    const extract = vi.fn(async (input: Parameters<typeof native.extract>[0]) => {
+      const result = await native.extract(input);
+      now = started + phaseBudgetMs / 2;
+      return result;
+    });
+    const result = await executeEvidenceSelectionFill({ ...current,
+      extractor: { assertTransportReady, extract }, phaseDeadlineMs: started + phaseBudgetMs });
     await Promise.race([closed, delay(1800).then(() => { throw new Error("HTTP socket was not cancelled"); })]);
     expect(cancelled).toBe(true);
-    expect(performance.now() - started).toBeLessThan(1200);
+    expect(nativeTimeoutFired).toBe(true);
+    expect(phaseTimers.map(timer => timer.milliseconds)).toEqual([phaseBudgetMs, phaseBudgetMs / 2]);
+    expect(assertTransportReady.mock.calls.map(call => call[1])).toEqual([phaseBudgetMs, phaseBudgetMs / 2]);
+    expect(extract.mock.calls.map(([input]) => input.timeoutMs)).toEqual([phaseBudgetMs, phaseBudgetMs / 2]);
+    expect(extract.mock.calls[1]![0].abortSignal?.aborted).toBe(true);
+    expect(extract.mock.calls[1]![0].abortSignal?.reason).toMatchObject({ name: "TimeoutError" });
     expect(requests).toBe(2);
     expect(result).toMatchObject({ attempts: 2, interpreted: 1, unattempted: 1 });
     const ledger = openEvidenceSelectionAttemptLedger(current).snapshot();
@@ -143,5 +181,5 @@ it("clips the last native HTTP request to the shared phase and observably cancel
     expect(rows.map(row => row.status)).toEqual(["interpreted", "transport_failure", "unattempted"]);
     expect(rows[1]!.shard?.usage).toBeUndefined();
     expect(readProviderRawAttempt(current.cacheRoot, rows[2]!.line.key, 3)).toBeUndefined();
-  } finally { timers.forEach(clearTimeout); await current.close(); }
+  } finally { timeout.mockRestore(); clock.mockRestore(); timers.forEach(clearTimeout); await current.close(); }
 });

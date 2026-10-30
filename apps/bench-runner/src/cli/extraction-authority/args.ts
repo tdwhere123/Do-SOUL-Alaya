@@ -1,3 +1,6 @@
+import type { ParsedFlags } from "../cli-options.js";
+import { parseFlagsWithoutCommandOptions } from "../options/command-flags.js";
+
 export interface AuthorizeExtractionArgs {
   readonly action: "probe" | "fill" | "sample";
   readonly outputPath: string;
@@ -147,3 +150,14 @@ import {
   EXTRACTION_OUTPUT_TOKEN_FIELDS,
   type ExtractionOutputTokenField
 } from "../../runs/extraction/authority/receipt-limits.js";
+
+/** The command owns these flags; unrelated options still pass through the strict common parser. */
+export function parseAuthorizeExtractionFlags(args: readonly string[]): ParsedFlags {
+  return parseFlagsWithoutCommandOptions(args, [
+    "--extraction-action", "--extraction-receipt-out", "--extraction-output-token-cap",
+    "--extraction-output-token-field", "--extraction-input-price-usd-per-million",
+    "--extraction-output-price-usd-per-million", "--extraction-max-input-tokens",
+    "--extraction-disk-floor-bytes", "--extraction-probe-key", "--extraction-sample-keys",
+    "--extraction-source-preflight"
+  ], ["--repair-invalid-shards"]);
+}

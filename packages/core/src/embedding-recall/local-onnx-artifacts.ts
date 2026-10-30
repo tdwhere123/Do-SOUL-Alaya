@@ -106,11 +106,11 @@ export interface VerifiedLocalOnnxArtifacts {
 }
 
 /** Per-loaded-session private copy. Never hash a mutable cache then load it later. */
-export async function snapshotLocalOnnxArtifacts(cacheRoot: string, modelId: string): Promise<VerifiedLocalOnnxArtifacts> {
+export async function snapshotLocalOnnxArtifacts(cacheRoot: string, modelId: string, snapshotParent = tmpdir()): Promise<VerifiedLocalOnnxArtifacts> {
   const root = await artifactRoot(cacheRoot, modelId);
   // The fork host owns this directory until the child has actually exited. An
   // interrupted copy/load cannot execute this module's normal finally cleanup.
-  const privateRoot = await mkdtemp(join(process.env.ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT ?? tmpdir(), "alaya-onnx-"));
+  const privateRoot = await mkdtemp(join(snapshotParent, "alaya-onnx-"));
   const stage = join(privateRoot, "staging");
   try {
     await mkdir(stage, { mode: 0o700 });

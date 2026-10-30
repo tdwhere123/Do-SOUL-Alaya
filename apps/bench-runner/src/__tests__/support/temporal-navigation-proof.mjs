@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
 const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
@@ -32,7 +32,7 @@ const run = async (args, expected = 0) => {
 };
 try {
   const { inspectSourceRecordsArtifact, createSourceRecordsSidecarWriter, sealSourceRecordsManifest,
-    sourceRecordsManifestPath, sourceRecordsSidecarPath } = await import(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js'));
+    sourceRecordsManifestPath, sourceRecordsSidecarPath } = await import(pathToFileURL(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js')).href);
   const { initDatabase, SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } = await import('@do-soul/alaya-storage');
   const { fieldContractSha256 } = await import('@do-soul/alaya-core');
   const { sourceIndexTarget } = await import('@do-soul/alaya-protocol');
@@ -176,7 +176,7 @@ try {
     write(join(root, `${name}.json`), temporal);
     // Hide the second real SQLite read's meter at the repository boundary.
     writeFileSync(fault, `await import(${JSON.stringify(preload)});
-      const { SqliteFieldSourceRecordRepo } = await import(${JSON.stringify(join(tree, 'packages/storage/dist/index.js'))});
+      const { SqliteFieldSourceRecordRepo } = await import(${JSON.stringify(pathToFileURL(join(tree, 'packages/storage/dist/index.js')).href)});
       const { writeFileSync } = await import('node:fs');
       const original = SqliteFieldSourceRecordRepo.prototype.findByIdBounded, reads = [];
       SqliteFieldSourceRecordRepo.prototype.findByIdBounded = function (...args) {
@@ -188,7 +188,7 @@ try {
         return read;
       };`);
     const out = join(root, name);
-    const result = await run(['--import', fault, cli, '--config', join(root, `${name}.json`), '--out', out], 2);
+    const result = await run(['--import', pathToFileURL(fault).href, cli, '--config', join(root, `${name}.json`), '--out', out], 2);
     const receipt = JSON.parse(result.stdout), witness = json(trace), scan = receipt.observation_scans[0];
     assert.equal(witness.length, 2); assert.equal(receipt.status, 'stopped'); assert.deepEqual(receipt.rows, []);
     assert.equal(scan.status, 'failed'); assert.equal(scan.failure, receipt.failure); assert.equal(scan.admitted_sources, 1);

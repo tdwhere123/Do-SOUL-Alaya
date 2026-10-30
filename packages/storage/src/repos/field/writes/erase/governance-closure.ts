@@ -1,4 +1,5 @@
 import { StorageError } from "../../../../shared/errors.js";
+import { parseRows, readRecord, readStringField, readNullableStringField, type RowParser } from "../../../shared/parse-row.js";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import type { FieldEraseBarrierRow } from "../../ports.js";
 import { isClaimAvailable } from "../../privacy-availability.js";
@@ -13,6 +14,35 @@ type SlotRow = Readonly<{
   winner_kind: string | null; winner_scope: string | null; claim_kind: string; scope_class: string;
 }>;
 
+const auditParser: RowParser<AuditRow> = {
+  parse(value) {
+    const row = readRecord(value, "privacy erase audit");
+    return { event_id: readStringField(row, "event_id"), entity_id: readStringField(row, "entity_id"),
+      event_type: readStringField(row, "event_type"), payload_json: readStringField(row, "payload_json") };
+  }
+};
+const slotParser: RowParser<SlotRow> = {
+  parse(value) {
+    const row = readRecord(value, "privacy erase slot");
+    return {
+      object_id: readStringField(row, "object_id"),
+      claim_kind: readStringField(row, "claim_kind"), scope_class: readStringField(row, "scope_class"),
+      winner_claim_id: readNullableStringField(row, "winner_claim_id"),
+      initial_winner_id: readNullableStringField(row, "initial_winner_id"),
+      subject_claim_id: readNullableStringField(row, "subject_claim_id"),
+      subject_lifecycle: readNullableStringField(row, "subject_lifecycle"),
+      winner_subject: readNullableStringField(row, "winner_subject"),
+      winner_lifecycle: readNullableStringField(row, "winner_lifecycle"),
+      winner_status: readNullableStringField(row, "winner_status"),
+      winner_kind: readNullableStringField(row, "winner_kind"),
+      winner_scope: readNullableStringField(row, "winner_scope")
+    };
+  }
+};
+const claimIdParser: RowParser<string> = {
+  parse(value) { return readStringField(readRecord(value, "privacy erase claim"), "object_id"); }
+};
+
 /** Called in the erase transaction before its source evidence and derived objects are scrubbed. */
 export function scrubGovernancePrivacyClosure(
   database: StorageDatabase, barrier: FieldEraseBarrierRow, evidenceIds: readonly string[],
@@ -22,7 +52,7 @@ export function scrubGovernancePrivacyClosure(
   if (ids.length === 0) return;
   const connection = database.connection;
   const idList = JSON.stringify(ids);
-  const audits = connection.prepare(`
+  const audits = parseRows(connection.prepare(`
     SELECT event_id, entity_id, event_type, payload_json FROM event_log
     WHERE workspace_id = ? AND (
       (entity_type = 'claim_form' AND entity_id IN (SELECT value FROM json_each(?))
@@ -30,7 +60,7 @@ export function scrubGovernancePrivacyClosure(
       OR (entity_type = 'slot' AND event_type = 'soul.slot.created'
         AND json_extract(payload_json, '$.winner_claim_id') IN (SELECT value FROM json_each(?)))
     ) ORDER BY event_id
-  `).all(barrier.workspace_id, idList, idList) as AuditRow[];
+  `).all(barrier.workspace_id, idList, idList), auditParser, "privacy erase audits");
   if (audits.length > 0 && redact === undefined) {
     throw new StorageError("VALIDATION_FAILED", "Source erasure audit redaction owner is unavailable");
   }
@@ -72,12 +102,12 @@ function findDependentClaims(database: StorageDatabase, workspaceId: string, evi
       SELECT claim.object_id FROM claim_forms claim JOIN json_each(claim.source_object_refs) ref
         JOIN affected parent ON parent.object_id = ref.value WHERE claim.workspace_id = ?
     ) SELECT object_id FROM affected ORDER BY object_id
-  `).all(workspaceId, evidenceSeed, sourceSeed, workspaceId) as { object_id: string }[];
-  return rows.map(row => row.object_id);
+  `).all(workspaceId, evidenceSeed, sourceSeed, workspaceId);
+  return [...parseRows(rows, claimIdParser, "privacy erase claims")];
 }
 
-function findAffectedSlots(database: StorageDatabase, workspaceId: string, claims: string): SlotRow[] {
-  return database.connection.prepare(`
+function findAffectedSlots(database: StorageDatabase, workspaceId: string, claims: string): readonly SlotRow[] {
+  return parseRows(database.connection.prepare(`
     SELECT slot.object_id, slot.winner_claim_id, slot.subject_claim_id, slot.claim_kind, slot.scope_class,
       json_extract(created.payload_json, '$.winner_claim_id') AS initial_winner_id,
       winner.governance_subject AS winner_subject, winner.lifecycle_state AS winner_lifecycle,
@@ -91,10 +121,10 @@ function findAffectedSlots(database: StorageDatabase, workspaceId: string, claim
       OR slot.subject_claim_id IN (SELECT value FROM json_each(?))
       OR json_extract(created.payload_json, '$.winner_claim_id') IN (SELECT value FROM json_each(?)))
     ORDER BY slot.object_id
-  `).all(workspaceId, claims, claims, claims) as SlotRow[];
+  `).all(workspaceId, claims, claims, claims), slotParser, "privacy erase slots");
 }
 
-function repairSlots(database: StorageDatabase, barrier: FieldEraseBarrierRow, slots: SlotRow[], claims: Set<string>): void {
+function repairSlots(database: StorageDatabase, barrier: FieldEraseBarrierRow, slots: readonly SlotRow[], claims: Set<string>): void {
   const remove = database.connection.prepare("DELETE FROM slots WHERE workspace_id = ? AND object_id = ?");
   const clear = database.connection.prepare(`UPDATE slots SET winner_claim_id = NULL, incumbent_since = NULL,
     updated_at = ? WHERE workspace_id = ? AND object_id = ?`);

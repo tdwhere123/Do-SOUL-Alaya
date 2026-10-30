@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 const tree = fileURLToPath(new URL('../../../../../', import.meta.url));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -16,7 +16,7 @@ const preparation = join(tree, 'apps/bench-runner/dist/runs/snapshot/source-reco
 const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 if (process.argv[2] === 'prepare') {
   const guard = await import('./source-import-boundary.mjs');
-  const { prepareSourceRecordsSnapshot } = await import(preparation);
+  const { prepareSourceRecordsSnapshot } = await import(pathToFileURL(preparation).href);
   const manifest = await prepareSourceRecordsSnapshot(json(process.argv[3]));
   assert.equal(guard.receipt().operations.some(row => row.blocked), false);
   process.stdout.write(JSON.stringify(manifest));
@@ -41,7 +41,7 @@ if (process.argv[2] === 'prepare') {
   };
   try {
     const { inspectSourceRecordsArtifact, createSourceRecordsSidecarWriter, sealSourceRecordsManifest,
-      sourceRecordsSidecarPath, sourceRecordsManifestPath } = await import(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js'));
+      sourceRecordsSidecarPath, sourceRecordsManifestPath } = await import(pathToFileURL(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js')).href);
     const { initDatabase, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo } = await import('@do-soul/alaya-storage');
     const { fieldContractSha256 } = await import('@do-soul/alaya-core');
     const { sourceIndexTarget } = await import('@do-soul/alaya-protocol');

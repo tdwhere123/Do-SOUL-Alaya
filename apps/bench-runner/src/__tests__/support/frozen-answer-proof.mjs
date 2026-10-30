@@ -19,7 +19,7 @@ const { executeProviderChatCompletion, ProviderChatCompletionError, providerExec
 const { mapGardenHttpAttemptFailure, toBenchTransportFailureAttempt } = await import('../../../dist/runs/compile-seed/http/garden-http-failure-attempt.js');
 const { wrapGardenHttpTransportError } = await import('../../../dist/runs/compile-seed/http/garden-http-terminal-error.js');
 const { providerRawAttemptPath } = await import('../../../dist/runs/extraction/fill/provider-raw-attempt.js');
-const root = fs.mkdtempSync(join(tmpdir(), 'authored-frozen-answer-'));
+const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'authored-frozen-answer-')));
 const checks = [], received = [];
 let response = 'success', ready = () => {}, onRequest = () => {};
 const server = createServer(async (req, res) => {

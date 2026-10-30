@@ -69,7 +69,7 @@ export async function loadVerifiedLocalOnnxExtractor(modelId: string, cacheDir: 
   if (transformers.env.version !== "4.3.1" || typeof transformers.mean_pooling !== "function") {
     throw new CoreError("CONFLICT", "Verified local Source runtime requires maintained Transformers 4.3.1", { subCode: "PORT_UNAVAILABLE" });
   }
-  const artifacts = await snapshotLocalOnnxArtifacts(cacheDir, modelId);
+  const artifacts = await snapshotLocalOnnxArtifacts(cacheDir, modelId, options.snapshotParent);
   let pipeline: LoadedPipeline | undefined;
   try {
     pipeline = await withLocalTransformersOfflineLoad(transformers.env, cacheDir, () => transformers.pipeline(

@@ -3,7 +3,7 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
@@ -29,7 +29,7 @@ afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force
 
 /** A real sealed SQLite generation and deterministic retained receipts; no model or provider is used. */
 function replayFixture() {
-  const root = mkdtempSync(join(tmpdir(), "memory-profile-replay-")); roots.push(root);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "memory-profile-replay-"))); roots.push(root);
   const snapshot = join(root, "snapshot.sqlite"), environment = fixture(snapshot);
   publishSource(environment, "Blue stone.");
   buildReady(environment, configuration({ provider_kind: "local_onnx", model_id: "fixture-source" }));

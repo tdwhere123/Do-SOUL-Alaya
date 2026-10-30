@@ -60,6 +60,10 @@ export async function syncDirectory(directoryPath: string): Promise<void> {
   const handle = await open(directoryPath, fsConstants.O_RDONLY);
   try {
     await handle.sync();
+  } catch (error) {
+    // Windows cannot flush Node directory handles. File writes are still synced
+    // before rename; POSIX additionally guarantees directory-entry durability.
+    if (process.platform !== "win32" || !isNodeErrorWithCode(error, "EPERM")) throw error;
   } finally {
     await handle.close();
   }

@@ -34,6 +34,9 @@ docs/bench-history/datasets/*
 !docs/bench-history/datasets/longmemeval_s.meta.json
 !docs/bench-history/datasets/locomo10.meta.json
 !docs/bench-history/datasets/longmemeval_s.stratified-100.v1.json
+!docs/bench-history/datasets/longmemeval_s.heldout-100.v1.json
+!docs/bench-history/datasets/longmemeval_s.dev2-288.v1.json
+!docs/bench-history/datasets/longmemeval_s.confirmation-selection.v1.md
 *.db
 *.db-journal
 *.db-wal

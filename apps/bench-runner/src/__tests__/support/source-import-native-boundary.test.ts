@@ -47,3 +47,27 @@ it("rejects an external copy of an installed addon before native loading", () =>
     expect(result.stderr).not.toContain('"operation":"native-addon.load.allowed"');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+it("loads the nested preparation entry through a file URL before reading its input", () => {
+  const root = mkdtempSync(join(tmpdir(), "session-import # -"));
+  try {
+    const result = run(`import assert from 'node:assert/strict';
+      import { registerHooks } from 'node:module';
+      const expected = ${JSON.stringify(new URL("../../../dist/runs/snapshot/source-records/prepare.js", import.meta.url).href)};
+      let preparationLoaded = false;
+      registerHooks({ resolve(specifier, context, nextResolve) {
+        if (specifier.endsWith('/source-records/prepare.js') || specifier.endsWith(${JSON.stringify("\\source-records\\prepare.js")})) {
+          assert.equal(specifier, expected);
+          preparationLoaded = true;
+        }
+        return nextResolve(specifier, context);
+      } });
+      process.argv[2] = 'prepare';
+      process.argv[3] = ${JSON.stringify(join(root, "missing-input.json"))};
+      await assert.rejects(import(${JSON.stringify(new URL("./session-observation-proof.mjs", import.meta.url).href)}), { code: 'ENOENT' });
+      assert.equal(preparationLoaded, true);
+      console.log('PREPARATION_FILE_URL_LOADED');`);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("PREPARATION_FILE_URL_LOADED");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -186,14 +186,34 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   writeFileSync(join(resume, "rows.jsonl"), `${JSON.stringify({ question_id: "project", arm: "plain", status: "complete" })}\n`);
   writeFileSync(arms, JSON.stringify([{ name: "plain" }]));
   const harness = fileURLToPath(new URL("../../../../scripts/recall-harness.mjs", import.meta.url));
-  const error = await promisify(execFile)(process.execPath, [harness, "--out", resume, "--arms", arms, "--capture-pool",
-    "--dataset", join(fixture.root, "data/longmemeval_s.json"), "--cache", join(fixture.root, "cache")])
+  // The CLI's official pin must reject synthetic data. Only these guard tests
+  // bind the real loader to the fixture's own checksum, without changing production.
+  const hook = join(fixture.root, "dataset-hook.mjs");
+  const fetchPath = fileURLToPath(new URL("../../../../dist/datasets/longmemeval/ingestion/fetch.js", import.meta.url));
+  const fetchUrl = pathToFileURL(fetchPath).href;
+  const wrapper = `import { loadSelectedQuestionMetadata as actual } from ${JSON.stringify(fetchUrl)};
+    export * from ${JSON.stringify(fetchUrl)};
+    export async function loadSelectedQuestionMetadata(variant, options) {
+      return actual(variant, { ...options, pinnedMetaRoot: ${JSON.stringify(join(fixture.root, "meta"))} });
+    }`;
+  writeFileSync(hook, `import { registerHooks } from 'node:module';
+    registerHooks({ resolve(specifier, context, next) {
+      if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(pathToFileURL(fetchPath).href)})
+        return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
+      return next(specifier, context);
+    } });`);
+  const resumeArgs = [harness, "--out", resume, "--arms", arms, "--capture-pool", "--ids", "project",
+    "--dataset", join(fixture.root, "data/longmemeval_s.json"), "--cache", join(fixture.root, "cache")];
+  const unpinned = await promisify(execFile)(process.execPath, resumeArgs)
+    .then(() => { throw new Error("synthetic data must not satisfy the official pin"); }, (cause: Error & { stderr: string }) => cause);
+  expect(unpinned.stderr).toContain("dataset checksum mismatch");
+  const error = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, ...resumeArgs])
     .then(() => { throw new Error("plain rows must not satisfy a capture request"); }, (cause: Error & { stderr: string }) => cause);
   expect(error.stderr).toContain("existing rows use a different pool-capture mode");
   const unresolved = join(fixture.root, "unresolved"), oldRoot = join(unresolved, "runs/project/plain");
   mkdirSync(oldRoot, { recursive: true });
   writeFileSync(join(oldRoot, "reservation"), "preserve");
-  await promisify(execFile)(process.execPath, [harness, "--out", unresolved, "--arms", arms, "--capture-pool", "--ids", "project",
+  await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, "--out", unresolved, "--arms", arms, "--capture-pool", "--ids", "project",
     "--dataset", join(fixture.root, "data/longmemeval_s.json"), "--cache", join(fixture.root, "cache")]);
   expect(readFileSync(join(oldRoot, "reservation"), "utf8")).toBe("preserve");
   expect(JSON.parse(readFileSync(join(unresolved, "rows.jsonl"), "utf8")).error).toContain("prior first exposure may be unresolved");

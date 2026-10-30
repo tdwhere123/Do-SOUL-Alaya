@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../../sqlite/db.js";
+import { closeCachedDatabase, initDatabase, StorageDatabase } from "../../sqlite/db.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
 describe("StorageDatabase close optimize seam", () => {
@@ -44,6 +45,32 @@ describe("StorageDatabase close optimize seam", () => {
     const before = sha256File(filename);
     database.close({ optimize: false });
     expect(sha256File(filename)).toBe(before);
+  });
+
+  it("closing an independent connection preserves the cached owner until its own close", () => {
+    const filename = tempDbPath();
+    const owner = initDatabase({ filename });
+    const independent = new StorageDatabase(filename, new BetterSqlite3(filename));
+    const opened = [owner, independent];
+    try {
+      independent.close();
+      expect(independent.isClosed()).toBe(true);
+      expect(owner.isClosed()).toBe(false);
+      const cached = initDatabase({ filename });
+      opened.push(cached);
+      expect(cached).toBe(owner);
+      owner.close();
+      const replacement = initDatabase({ filename });
+      opened.push(replacement);
+      expect(replacement).not.toBe(owner);
+      expect(replacement.connection.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
+      closeCachedDatabase(filename);
+      expect(replacement.isClosed()).toBe(true);
+      // Windows rejects this if an independent or replacement connection leaked.
+      fs.unlinkSync(filename);
+    } finally {
+      for (const database of opened) database.close();
+    }
   });
 
   function tempDbPath(): string {

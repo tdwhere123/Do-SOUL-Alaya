@@ -12,7 +12,7 @@ export interface BenchDaemonConfigDirectoryLease {
 }
 
 export function planBenchDaemonConfigDirectory(root?: string): string {
-  const directory = root === undefined ? tmpdir() : resolveBenchDaemonConfigRoot(root);
+  const directory = root === undefined ? realpathSync(tmpdir()) : resolveBenchDaemonConfigRoot(root);
   return join(directory, `alaya-bench-config-${randomUUID()}`);
 }
 

@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
@@ -34,7 +35,7 @@ export function captureFrozenSourceIndexQualifications(input: Readonly<{
   daemon: BenchDaemonHandle; onPage: (page: FrozenSourceIndexQualificationPage) => void;
 }>): FrozenSourceIndexQualifications {
   const owned = readSemanticChainDaemonRestoration(input.daemon);
-  const connection = new BetterSqlite3(owned.databasePath, { readonly: true, fileMustExist: true });
+  const connection = new BetterSqlite3(sqliteHostFilename(owned.databasePath), { readonly: true, fileMustExist: true });
   try {
     connection.pragma("query_only = ON");
     return captureQualificationRows({ database: new StorageDatabase(owned.databasePath, connection), workspaceId: owned.workspaceId,
