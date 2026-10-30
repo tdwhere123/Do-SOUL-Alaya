@@ -5,7 +5,7 @@ const boundary = await vi.hoisted(async () => {
 });
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { extractSourceStatementSession, planSourceStatementSession, receiveSourceStatements } from "../../../../../../packages/soul/src/garden/ingestion/source-statements.js";
+import { assertSourceStatementSessionReceipt, extractSourceStatementSession, planSourceStatementSession, receiveSourceStatements } from "../../../../../../packages/soul/src/garden/ingestion/source-statements.js";
 import { SOURCE_STATEMENT_LIMITS, type SourceStatementMessage, type SourceStatementRequest } from "@do-soul/alaya-protocol";
 
 afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
@@ -51,6 +51,48 @@ describe("ordered source statement session", () => {
     expect(duplicated.messages[0]).toMatchObject({ status: "failed", statements: [], rejections: [{ reason: "duplicate_message" }] });
     expect(duplicated.messages[1]).toMatchObject({ status: "complete", statements: [] });
     expect(receiveSourceStatements(request(), '{"messages":[').messages.every(row => row.status === "failed")).toBe(true);
+  });
+
+  it("keeps transport-skipped targets distinct from empty and still processes selected siblings", async () => {
+    const input = Array.from({ length: 65 }, (_, index) => message(`m${index}`));
+    const receipt = await extractSourceStatementSession({ session_id: "session", messages: input, request_ceiling: 2,
+      transport: async ({ userPrompt }) => {
+        const request = JSON.parse(userPrompt) as SourceStatementRequest;
+        return request.chunk_index === 0 ? { rawJson: "not a response", skipped: true }
+          : { rawJson: JSON.stringify({ messages: request.messages.map(row => ({ message_id: row.message_id, statements: [] })) }) };
+      } });
+    expect(receipt.status).toBe("partial");
+    expect(receipt.messages.slice(0, 64).every(row => row.status === "failed" && row.rejections[0]?.reason === "not_dispatched")).toBe(true);
+    expect(receipt.messages[64]).toMatchObject({ status: "complete", statements: [], rejections: [] });
+    expect(receipt.chunks.map(row => row.status)).toEqual(["failed", "complete"]);
+  });
+
+  it("preserves a valid-empty host message without losing its nonempty sibling", () => {
+    const planned = request([message("empty", ""), message("next")]);
+    expect(planned.messages.map(row => row.text)).toEqual(["", "I visited Berlin."]);
+    const received = receiveSourceStatements(planned, JSON.stringify({ messages: [
+      { message_id: "empty", statements: [] },
+      { message_id: "next", statements: [{ text: "The user visited Berlin.", relation: "travel" }] }
+    ] }));
+    expect(received.messages.map(row => [row.status, row.statements.length])).toEqual([["complete", 0], ["complete", 1]]);
+    expect(received.rejections).toEqual([]);
+  });
+
+  it("verifies current receipts against exact session requests and recorded responses without readmission", async () => {
+    const messages = [message("empty", ""), message("next")];
+    const planned = request(messages), rawJson = JSON.stringify({ messages: [
+      { message_id: "empty", statements: [{ text: "Invented content", relation: "unsupported" }] },
+      { message_id: "next", statements: [{ text: "The user visited Berlin.", relation: "travel" }] }
+    ] });
+    const receipt = await extractSourceStatementSession({ session_id: "session", messages, request_ceiling: 1,
+      transport: async () => ({ rawJson }) });
+    expect(receipt.messages.map(row => [row.status, row.statements.length])).toEqual([["partial", 0], ["complete", 1]]);
+    expect(receipt.messages[0]!.rejections[0]!.reason).toBe("empty_source");
+    const input = { session_id: "session", messages, receipt, responses: [{ request: planned, rawJson }] };
+    expect(() => assertSourceStatementSessionReceipt(input)).not.toThrow();
+    expect(() => assertSourceStatementSessionReceipt({ ...input, responses: [] })).toThrow("full session request");
+    expect(() => assertSourceStatementSessionReceipt({ ...input, receipt: { ...receipt, status: "complete" } })).toThrow("differs");
+    expect(() => assertSourceStatementSessionReceipt({ ...input, responses: [...input.responses, ...input.responses] })).toThrow("duplicate");
   });
 
   it("chunks ordered messages only when their complete preceding context fits", () => {

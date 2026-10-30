@@ -18,7 +18,8 @@ export type SourceStatement = z.infer<typeof SourceStatementSchema>;
 /** Host facts. An unknown recorded time is not the ingestion clock. */
 export const SourceStatementMessageSchema = z.object({
   message_id: BoundedIdSchema, role: z.string().min(1).max(256), recorded_at: IsoDatetimeStringSchema.nullable(),
-  text: Text(4 * 1024 * 1024)
+  // An empty host message is observed input, unlike an empty generated statement.
+  text: z.string().max(4 * 1024 * 1024).refine(value => !/[\uD800-\uDFFF]/u.test(value), "Unicode scalar text required")
 }).strict().readonly();
 export type SourceStatementMessage = z.infer<typeof SourceStatementMessageSchema>;
 export const SourceStatementRequestSchema = z.object({
@@ -42,7 +43,7 @@ export const SourceStatementResponseMessageSchema = z.object({
 export type SourceStatementRejection = Readonly<{ message_id: string | null; statement_index: number | null;
   reason: "invalid_statement" | "unknown_message" | "duplicate_message" | "missing_message" |
     "invalid_message" | "malformed_response" | "transport_failure" | "message_capacity" | "context_capacity" | "request_budget" |
-    "cancelled" | "not_dispatched" }>;
+    "cancelled" | "not_dispatched" | "empty_source" }>;
 export type SourceStatementMessageResult = Readonly<{
   message: SourceStatementMessage; status: "complete" | "partial" | "failed";
   statements: readonly SourceStatement[]; rejections: readonly SourceStatementRejection[];
@@ -58,8 +59,9 @@ export type SourceStatementReceipt = Readonly<{
 export const LocatedSourceStatementSchema = z.object({
   contract: z.literal(SOURCE_STATEMENTS_CONTRACT), session_id: BoundedIdSchema,
   artifact_key: BoundedIdSchema, source_root_id: BoundedIdSchema, source_corpus_digest: Sha256HexSchema,
-  message: SourceStatementMessageSchema.refine(message => new TextEncoder().encode(message.text).length <= SOURCE_STATEMENT_LIMITS.targetBytes,
-    "statement message exceeds target capacity"),
+  message: SourceStatementMessageSchema.refine(message => message.text.trim().length > 0 &&
+    new TextEncoder().encode(message.text).length <= SOURCE_STATEMENT_LIMITS.targetBytes,
+    "statement requires a nonempty message within target capacity"),
   source_span: z.tuple([z.number().int().nonnegative(), z.number().int().positive()]).readonly(),
   statement: SourceStatementSchema
 }).strict().superRefine((value, ctx) => {
