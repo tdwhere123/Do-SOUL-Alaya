@@ -53,6 +53,13 @@ vector profiles are unchanged. Protocol 26.0.0 makes `segmented-unicode61.v1`
 (`SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`) the representation the daemon prepares
 for every workspace without an explicit selection (invariant §25 major: ordinary
 lexical candidates change once it publishes; until then the raw reader serves).
+Protocol 31.0.0 adds message-bound `source-statements-v1` artifacts shared by
+memory publication and lexical/vector SourceIndex navigation. Ordinary results are
+`ordinary-native-field.v8`; raw source and display identities do not become statement
+identities. Post-turn host workers return request-bound `source_statement_responses`.
+Explicit agent candidate signals and `soul.interpretation` H/Q/C remain supported.
+This is an invariant §25 major; restart queries and prepare new index generations.
+
 Protocol 30.0.0 changes the default for unselected workspaces to
 `segmented-unicode61.v2`, with bounded resumable segmentation. Existing v1
 selections remain pinned and the raw representation remains available. See the
@@ -100,7 +107,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `30.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `31.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

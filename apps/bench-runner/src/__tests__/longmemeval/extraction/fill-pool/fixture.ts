@@ -39,8 +39,13 @@ export function extractionTurns(count: number) {
   }));
 }
 
-export function retryResult(rateLimitRetries: number) {
-  return providerBackedExtractionResult('{"interpretations":[]}', {
+export function emptyStatementResponse(userPrompt: string): string {
+  const request = JSON.parse(userPrompt) as { messages: readonly { message_id: string }[] };
+  return JSON.stringify({ messages: request.messages.map(message => ({ message_id: message.message_id, statements: [] })) });
+}
+
+export function retryResult(rateLimitRetries: number, input: { readonly userPrompt: string }) {
+  return providerBackedExtractionResult(emptyStatementResponse(input.userPrompt), {
     extractorMeta: {
       recoveryKind: "none" as const,
       retryCount: rateLimitRetries,
@@ -63,7 +68,8 @@ export function cachingExtractor(
       model: "test-model",
       modelFamily: "test-model",
       providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-      requestProfile: "provider-default-v1"
+      requestProfile: "provider-default-v1",
+      sourcePacking: "session-statements"
     },
     cacheRoot,
     stats,

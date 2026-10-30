@@ -108,6 +108,7 @@ export interface LongMemEvalSnapshotExtractionShard {
 }
 
 export interface LongMemEvalSnapshotSeedRound {
+  readonly statementSession?: import("../compile-seed/compile-seed-types.js").StatementSessionSeedReceipt;
   readonly sessionIndex: number;
   readonly roundIndex: number;
   readonly sessionId: string;

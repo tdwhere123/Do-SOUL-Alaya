@@ -4,6 +4,7 @@ import { BoundedCapsuleSourceReader } from "../capsules/reads/bounded-capsule-so
 import { encodeCapsuleCursor, parseCapsuleCursor } from "../capsules/evidence-capsule-repo.js";
 import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { capsuleReadCost, capsuleTargetFromRead } from "./capsule-source.js";
+import { readStatementIndexTarget } from "./statement-artifact.js";
 import { requireSourceIndexGeneration, sourceIndexBuildGuard } from "./generation-state.js";
 import { guardSourceIndexTarget, sourceReadCost, sourceTargetFromRead } from "./native-source.js";
 
@@ -31,7 +32,7 @@ export function persistSourceIndexLexical(database: StorageDatabase, source: Sou
   database.connection.prepare(`INSERT INTO source_index_text(workspace_id,root_key,content_digest,body_bytes,body)
     VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
     body_bytes=excluded.body_bytes,body=excluded.body`).run(source.target.workspace_id, source.root_key,
-    source.target.content_digest, source.body_bytes, body);
+    source.auxiliary?.key_digest ?? source.target.content_digest, source.body_bytes, body);
   return true;
 }
 
@@ -82,7 +83,10 @@ export function enumerateSourceIndexTargets(database: StorageDatabase, records: 
       if (read === undefined) { resources.work++; complete = true; break; }
       const cost = capsuleReadCost(read); resources.work += cost.work; resources.native_bytes += cost.native_bytes;
       if (typeof read.created_at !== "string" || typeof read.object_id !== "string") { reason = "native_source_unknown"; break; }
-      source = read.linked === 1 ? null : capsuleTargetFromRead(read);
+      const artifact = readStatementIndexTarget(database, input.workspaceId, read.object_id, remaining());
+      resources.work += artifact.resources.work; resources.native_bytes += artifact.resources.native_bytes;
+      if (artifact.status === "partial") { reason = "native_source_unknown"; break; }
+      source = artifact.status === "ready" ? artifact.source : artifact.status === "stale" || read.linked === 1 ? null : capsuleTargetFromRead(read);
       if (read.linked !== 1 && source === null) { reason = "native_source_unknown"; break; }
       nextCapsule = encodeCapsuleCursor({ afterCreatedAt: read.created_at, afterObjectId: read.object_id });
     }

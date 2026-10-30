@@ -206,6 +206,7 @@ export async function runCurrentEnrichmentPreflight(options: {
         dataset_sha256: loaded?.sha256 ?? null
       }),
       requests: Object.freeze(workset.requests.map((item) => {
+        if ("messages" in item.request) throw new TypeError("historical assertion enrichment cannot consume statement requests");
         return Object.freeze({
           key: item.line.key,
           source_corpus_identity: item.request.source_corpus_identity,

@@ -140,7 +140,7 @@ export function mutateFirstRawShard(cacheRoot: string): void {
   writeFileSync(path, JSON.stringify({ ...shard, raw_json: `${shard.raw_json} ` }), "utf8");
 }
 
-export function batchedFact(): string {
+export function multiDetailMessage(): string {
   return Array.from(
     { length: 9 },
     (_, index) => `I recorded durable detail number ${index + 1}.`
@@ -157,8 +157,8 @@ export function singleSessionBatchedQuestion(id: string): LongMemEvalQuestion {
     haystack_session_ids: [`s-${id}`],
     haystack_dates: ["2025-12-01"],
     haystack_sessions: [[
-      { role: "user", content: batchedFact(), has_answer: true },
-      { role: "assistant", content: "Acknowledged." }
+      { role: "user", content: "a".repeat(15_000), has_answer: true },
+      { role: "assistant", content: "b".repeat(20_000) }
     ]],
     answer_session_ids: [`s-${id}`]
   };

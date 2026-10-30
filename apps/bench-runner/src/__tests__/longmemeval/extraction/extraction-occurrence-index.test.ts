@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   buildExtractionOccurrenceIndex,
   hashExtractionOccurrenceIndex
@@ -9,11 +10,12 @@ import { inspectTurnContentKeySpace } from
   "../../../runs/extraction/turn-contents.js";
 
 const model = "gpt-5.4-mini";
-const prompt = "Extraction cache parser formation prompt";
+const prompt = OFFICIAL_API_SYSTEM_PROMPT;
 
 describe("extraction occurrence index", () => {
-  it("keeps repeated raw content as separate source-time occurrences", () => {
+  it("retains historical round keys and coordinates while source-date changes remain visible in the occurrence digest", () => {
     const occurrences = buildExtractionOccurrenceIndex({
+      sourcePacking: "reference-eight",
       questions: [question("q-1", ["2025-01-01T00:00:00.000Z", "2025-02-01T00:00:00.000Z"])],
       model,
       requestProfile: "provider-default-v1",
@@ -22,6 +24,16 @@ describe("extraction occurrence index", () => {
 
     expect(occurrences).toHaveLength(2);
     expect(occurrences[0]?.cacheKeys).toEqual(occurrences[1]?.cacheKeys);
+    const changed = question("q-1", ["2025-01-01T00:00:00.000Z", "2025-02-01T00:00:00.000Z"]);
+    changed.haystack_dates[0] = "2025-02-01T00:00:00.000Z";
+    const changedOccurrences = buildExtractionOccurrenceIndex({ questions: [changed], model,
+      requestProfile: "provider-default-v1", systemPrompt: prompt, sourcePacking: "reference-eight" });
+    expect(changedOccurrences[0]?.id).toBe(occurrences[0]?.id);
+    expect(changedOccurrences[0]?.turnMessages.map(message => message.message_id))
+      .toEqual(occurrences[0]?.turnMessages.map(message => message.message_id));
+    expect(changedOccurrences[0]?.cacheKeys).toEqual(occurrences[0]?.cacheKeys);
+    expect(hashExtractionOccurrenceIndex(changedOccurrences)).not.toBe(hashExtractionOccurrenceIndex(occurrences));
+    expect(changedOccurrences[1]?.cacheKeys).toEqual(occurrences[1]?.cacheKeys);
     expect(occurrences.map((occurrence) => occurrence.sourceObservedAt)).toEqual([
       "2025-01-01T00:00:00.000Z",
       "2025-02-01T00:00:00.000Z"
@@ -38,6 +50,7 @@ describe("extraction occurrence index", () => {
 
   it("has a stable digest independent of question input order", () => {
     const input = {
+      sourcePacking: "reference-eight" as const,
       model,
       requestProfile: "provider-default-v1" as const,
       systemPrompt: prompt
@@ -57,6 +70,7 @@ describe("extraction occurrence index", () => {
 
   it("binds cache and occurrence identity to the versioned trusted role corpus", () => {
     const [occurrence] = buildExtractionOccurrenceIndex({
+      sourcePacking: "reference-eight",
       questions: [question("q-1", ["2025-01-01T00:00:00.000Z"])],
       model,
       requestProfile: "provider-default-v1",
@@ -101,6 +115,7 @@ describe("extraction occurrence index", () => {
 
   it("refuses an occurrence with no valid source time", () => {
     expect(() => buildExtractionOccurrenceIndex({
+      sourcePacking: "reference-eight",
       questions: [question("q-1", ["not-a-time"])],
       model,
       requestProfile: "provider-default-v1",

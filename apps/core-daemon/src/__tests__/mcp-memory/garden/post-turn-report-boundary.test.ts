@@ -26,7 +26,8 @@ it("lists and claims a valid digest larger than the generic JSON payload limit",
     toolName: "garden.claim_task", arguments: { task_id: taskId }, context: defaultContext()
   });
   expect(claimed).toMatchObject({ ok: true, output: { status: "claimed", payload: {
-    turn_digest: { last_messages: messages }
+    source_statements: { raw_fallback_message_ids: [], requests: [{ chunk_index: 0,
+      messages: messages.map(message => ({ role: message.role, text: message.content_excerpt, recorded_at: null })) }] }
   } } });
   expect(harness.gardenTaskRepo.findById(taskId)?.status).toBe("claimed");
 });

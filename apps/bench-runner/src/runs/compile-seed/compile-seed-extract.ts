@@ -1,15 +1,14 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import type { GardenCompileContext, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { OfficialApiGardenCompileIncompleteError, type GardenCompileContext, type OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { SourceStatementSignalSchema, type ConversationMessage, type SourceStatementContextSource } from "@do-soul/alaya-protocol";
+import { compileSessionSeedSignals, type CompiledStatementSession } from "./compile-seed-session-statements.js";
 import type { BenchSignalSeedInput } from "../../harness/daemon.js";
-import { rotatingSeedObjectKind } from "../../harness/seeding/seed-rotation.js";
 import type {
   BenchRetryClassification,
   CompileSeedExtractionStats
 } from "./compile-seed-types.js";
-import type { SourceAssertionSupplementRuntime } from
-  "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
 const COMPILE_SEED_ERROR_CAUSE_MAX_CHARS = 512;
@@ -18,7 +17,9 @@ type SeedInputDraft = Omit<BenchSignalSeedInput, "evidenceRef">;
 
 type ExtractSeedInputsInput = {
   readonly provider: OfficialApiGardenProvider | null;
-  readonly semanticSupplement?: SourceAssertionSupplementRuntime | null;
+  readonly statementSessions: Map<string, Promise<CompiledStatementSession>>;
+  readonly sourceSession: readonly ConversationMessage[];
+  readonly sourceContexts: ReadonlyMap<string, readonly SourceStatementContextSource[]>;
   readonly stats: CompileSeedExtractionStats;
   readonly turnContent: string;
   readonly seedIndex: number;
@@ -35,7 +36,7 @@ export async function extractSeedInputs(
   input: ExtractSeedInputsInput
 ): Promise<readonly SeedInputDraft[]> {
   const provider = input.provider;
-  if (provider === null) {
+  if (provider === null || input.sourceSession.length === 0) {
     return buildNoCredentialsFallback(input);
   }
 
@@ -46,13 +47,9 @@ export async function extractSeedInputs(
 }
 
 function buildNoCredentialsFallback(input: ExtractSeedInputsInput): readonly SeedInputDraft[] {
-  // invariant: no provider => deterministic no-LLM fallback. A manifest-backed
-  // cache-only run supplies a provider even without credentials; cache misses
-  // fail closed and never reuse this degraded path.
+  // The admitted raw source remains searchable; unavailable extraction mints no preference or memory.
   input.stats.offlineFallbacks += 1;
-  return finishSeedDrafts(input, [
-    buildFullTurnSeedDraft(input, "no_credentials_fallback")
-  ]);
+  return [];
 }
 
 async function compileOfficialSeedSignals(
@@ -60,12 +57,8 @@ async function compileOfficialSeedSignals(
   provider: OfficialApiGardenProvider
 ): Promise<OfficialCompileSignals> {
   try {
-    const primary = await provider.compile(input.turnContent, input.context);
-    const supplement = input.semanticSupplement;
-    if (supplement === undefined || supplement === null) return primary;
-    const supplemental = await supplement.compile(input.turnContent, input.context);
-    supplement.mergeTurnStats(input.stats);
-    return Object.freeze([...primary, ...supplemental]);
+    return await compileSessionSeedSignals({ provider, sessions: input.statementSessions,
+      sourceSession: input.sourceSession, sourceContexts: input.sourceContexts, context: input.context, stats: input.stats });
   } catch (error) {
     recordExtractionFailureSource(input.stats);
     await dumpSeedExtractionFailureDiagnostic({
@@ -76,6 +69,7 @@ async function compileOfficialSeedSignals(
       error,
       context: input.context
     });
+    if (error instanceof OfficialApiGardenCompileIncompleteError) return error.signals;
     throw error;
   }
 }
@@ -103,58 +97,24 @@ function buildOfficialSeedDrafts(
 ): readonly SeedInputDraft[] {
   const drafts: SeedInputDraft[] = [];
   for (const signal of signals) {
-    if (signal.interpretation_contract !== undefined) {
+    if (signal.interpretation_contract === "source-statements-v1") {
+      const available = SourceStatementSignalSchema.parse(signal);
       drafts.push({
-        signalKind: signal.signal_kind,
-        distilledFact: signal.raw_payload.source_interpretation.assertion_binding.text,
+        signalKind: available.signal_kind,
+        distilledFact: available.raw_payload.source_statement.statement.text,
         turnContent: input.turnContent,
         turnMessages: input.context.turn_messages,
         turnSeedIndex: input.seedIndex,
-        productionSignalId: signal.signal_id,
-        productionRawPayload: signal.raw_payload,
+        productionSignalId: available.signal_id,
+        productionRawPayload: available.raw_payload,
+        productionSignal: available,
         extractionProvider: "official_api_compile"
       });
       continue;
     }
-    // Live ordinary compile emits interpretation_contract signals only.
-    // matched_text drafts are not produced by OfficialApiGardenProvider.compile.
-    const distilled =
-      readRawString(signal.raw_payload, "distilled_fact") ??
-      readRawString(signal.raw_payload, "matched_text");
-    if (distilled === null) {
-      continue;
-    }
-    const matchedText = readRawString(signal.raw_payload, "matched_text");
-    drafts.push({
-      signalKind: signal.signal_kind,
-      objectKind: signal.object_kind,
-      confidence: signal.confidence,
-      distilledFact: distilled,
-      turnContent: input.turnContent,
-      turnMessages: input.context.turn_messages,
-      turnSeedIndex: input.seedIndex,
-      ...(matchedText === null ? {} : { matchedText }),
-      productionSignalId: signal.signal_id,
-      productionRawPayload: stripSchemaGrounding(signal.raw_payload, signal.object_kind),
-      extractionProvider: "official_api_compile"
-    });
+    throw new TypeError("passive compile returned a non-statement signal");
   }
   return drafts;
-}
-
-function buildFullTurnSeedDraft(
-  input: ExtractSeedInputsInput,
-  extractionProvider: SeedInputDraft["extractionProvider"]
-): SeedInputDraft {
-  return {
-    signalKind: "potential_preference",
-    objectKind: rotatingSeedObjectKind(input.seedIndex),
-    confidence: 0.9,
-    distilledFact: input.turnContent,
-    turnContent: input.turnContent,
-    turnSeedIndex: input.seedIndex,
-    extractionProvider
-  };
 }
 
 function finishSeedDrafts(

@@ -1,4 +1,4 @@
-import type { SourceInterpretationSignal } from "@do-soul/alaya-protocol";
+import type { SourceStatementSignal } from "@do-soul/alaya-protocol";
 import type {
   MaterializationContext,
   MaterializationCreatedObject,
@@ -29,7 +29,7 @@ export function sourceObservationTarget(portWired: boolean): MaterializationTarg
 
 export async function materializeSourceObservation(
   dependencies: MaterializationRouterDeps,
-  signal: SourceInterpretationSignal,
+  signal: SourceStatementSignal,
   context: MaterializationContext
 ): Promise<MaterializationResult> {
   const target = sourceObservationTarget(dependencies.sourceObservationPublicationPort !== undefined);
@@ -49,7 +49,7 @@ export async function materializeSourceObservation(
       signal_id: signal.signal_id,
       target_kind: "evidence_only",
       route_target: "memory_entry_only",
-      routing_reason: `${target.routing_reason} (${published.bound.outcome})`,
+      routing_reason: target.routing_reason,
       created_objects: [
         { object_kind: published.evidence.object_kind, object_id: published.evidence.object_id },
         { object_kind: published.memory.object_kind, object_id: published.memory.object_id }

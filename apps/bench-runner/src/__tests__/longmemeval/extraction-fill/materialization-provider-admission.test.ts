@@ -7,7 +7,7 @@ import { createCachingSignalExtractor } from "../../../runs/compile-seed.js";
 import { inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 import { fixtureAttemptAuthority, providerBackedResponseResult, writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
-import { extractionConfig, MODEL, REQUEST_PROFILE, SYSTEM_PROMPT, sourceCorpusWithAssertions, userPromptWithAssertions } from "../extraction/cache/cache-live-delegate/fixture.js";
+import { EMPTY_RESPONSE, extractionConfig, MODEL, REQUEST_PROFILE, SYSTEM_PROMPT, sourceCorpusWithAssertions, userPromptWithAssertions } from "../extraction/cache/cache-live-delegate/fixture.js";
 import { inspectExtractionCacheInventory, hashExtractionCacheInventory } from "../../../runs/extraction/cache-audit/inventory.js";
 import { decideExtractionCacheCompatibility } from "../../../runs/extraction/cache-audit/compatibility.js";
 import { buildExtractionCacheAuditReceipt } from "../../../runs/extraction/cache-audit/receipt.js";
@@ -16,7 +16,7 @@ import { materializeAuditedExtractionCacheTarget } from "../../../runs/extractio
 import { computeExtractionKeySetSha256 } from "../../../runs/extraction/content-closure.js";
 
 const sha = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-const rawJson = '{"interpretations":[]}';
+const rawJson = EMPTY_RESPONSE;
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "materialization-provider-admission-"));
   const cacheRoot = join(root, "source");
@@ -45,7 +45,7 @@ it("refuses a provider-backed shard before materialization commit without root-l
     const inventory = inspectExtractionCacheInventory({ cacheRoot: f.cacheRoot,
       cacheKeys: keys, model: MODEL, requestProfile: REQUEST_PROFILE });
     expect(inventory.counts).toMatchObject({ expected: 2, hit: 1, missing: 1, invalid: 0 });
-    const identity = { raw: { sourcePacking: "reference-eight" as const,
+    const identity = { raw: { sourcePacking: "session-statements" as const,
       datasetRevision: f.manifest.dataset_revision, model: MODEL, requestProfile: REQUEST_PROFILE,
       providerUrl: f.config.providerUrl, systemPromptSha256: f.manifest.system_prompt_sha256,
       cacheKeyAlgorithm: f.manifest.cache_key_algo, rawClosureSha256: "b".repeat(64) },
@@ -65,7 +65,7 @@ it("refuses a provider-backed shard before materialization commit without root-l
       dataset: { variant: "longmemeval_s", revisionSha256: f.manifest.dataset_revision,
         windowOffset: 0, windowLimit: 100 },
       extraction: { model: MODEL, modelFamily: f.manifest.model_family, requestProfile: REQUEST_PROFILE,
-        sourcePacking: "reference-eight", providerUrl: f.config.providerUrl,
+        sourcePacking: "session-statements", providerUrl: f.config.providerUrl,
         systemPromptSha256: f.manifest.system_prompt_sha256, cacheKeyAlgorithm: f.manifest.cache_key_algo,
         manifestSha256: null, rawContentClosureSha256: null },
       inventory: { expectedTurns: 2, validTurns: 0, missingTurns: 2, invalidTurns: 0, orphanTurns: 0 } };

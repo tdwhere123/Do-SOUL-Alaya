@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   GardenRole,
-  SOURCE_INTERPRETATION_CONTRACT
+  SOURCE_STATEMENTS_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   DynamicsService,
@@ -57,7 +57,7 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
     globalThis.fetch = previousFetch;
   });
 
-  it("publishes one authored current-contract interpretation and reopens SQLite", async () => {
+  it("publishes one authored current-contract statement and reopens SQLite", async () => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-enrichment-publication-"));
     const filename = join(directory, "memory.sqlite");
     let database = initDatabase({ filename });
@@ -146,16 +146,9 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
         extractor: {
           extract: async ({ userPrompt }) => ({
             rawJson: JSON.stringify({
-              interpretations: JSON.parse(userPrompt).source_assertions.map((assertion: { assertion_id: number; text: string }) => ({
-                assertion_id: assertion.assertion_id,
-                relations: assertion.text.includes(ASSERTION) ? [{
-                  predicate: { text: "uses" },
-                  arguments: [
-                    { role: "agent", phrase: { text: "Alice" } },
-                    { role: "object", phrase: { text: "tools" } }
-                  ],
-                  qualifiers: []
-                }] : []
+              messages: JSON.parse(userPrompt).messages.map((message: { message_id: string; text: string }) => ({
+                message_id: message.message_id,
+                statements: message.text.includes(ASSERTION) ? [{ text: ASSERTION, relation: "tool usage" }] : []
               }))
             })
           })
@@ -201,12 +194,12 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
       const memories = database.connection.prepare("SELECT object_id FROM memory_entries").all() as { object_id: string }[];
       expect(memories).toHaveLength(1);
       const signals = await signalService.listByRun("run-1");
-      const observation = signals.find((signal) => signal.interpretation_contract === SOURCE_INTERPRETATION_CONTRACT);
+      const observation = signals.find((signal) => signal.interpretation_contract === SOURCE_STATEMENTS_CONTRACT);
       expect(observation).toMatchObject({
         source: "garden_compile",
         object_kind: null,
         confidence: null,
-        interpretation_contract: SOURCE_INTERPRETATION_CONTRACT
+        interpretation_contract: SOURCE_STATEMENTS_CONTRACT
       });
       const published = await memoryService.findById(memories[0]!.object_id);
       expect(published).toMatchObject({

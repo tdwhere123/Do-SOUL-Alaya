@@ -1,7 +1,5 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
-import { sourceHintSketch, takeSourceHintPage } from "./source-hint-observe.js";
-import type { ProposalMatchReason } from "./source-proposal-match.js";
 import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -25,9 +23,7 @@ export function sourceFamilySettled(committed: string | null | undefined): boole
 
 export function sourceSeedCursorAdvanced(before: string | null, after: string | null): boolean {
   const prior = parseSeedCursor(before), next = parseSeedCursor(after);
-  return prior.source !== next.source || prior.memory !== next.memory || prior.hint !== next.hint
-    || prior.sourcesDone !== next.sourcesDone || prior.hintsDone !== next.hintsDone
-    || (prior.hintsUnavailable === true) !== (next.hintsUnavailable === true);
+  return prior.source !== next.source || prior.memory !== next.memory || prior.sourcesDone !== next.sourcesDone;
 }
 
 export function observeSourceAwareSeed(
@@ -49,12 +45,7 @@ export function observeSourceAwareSeed(
   let resourceLimited = false;
   let sourceCommitted = cursor.source;
   let memoryCommitted = cursor.memory;
-  let hintCommitted = cursor.hint;
-  const sketch = sourceHintSketch(input);
-  let hintsUnavailable = cursor.hintsUnavailable === true;
-  let hintsDone = !hintsUnavailable && (sketch === undefined || cursor.hintsDone || cursor.sourcesDone);
   const available = [
-    ...(!hintsDone && !hintsUnavailable ? ["hint"] : []),
     ...(!cursor.sourcesDone ? ["source"] : []),
     ...(wantMemory && input.seed_query !== undefined && input.readers.lexical !== undefined ? ["memory"] : [])
   ];
@@ -63,32 +54,8 @@ export function observeSourceAwareSeed(
   const limit = pageLimit(input);
   const share = { memoryWork: lane === "memory" ? input.action.work_limit : 0,
     memoryLimit: lane === "memory" ? limit : 0 };
-  const lanes = { hintWork: lane === "hint" ? input.action.work_limit : 0,
-    hintLimit: lane === "hint" ? limit : 0,
-    sourceWork: lane === "source" ? input.action.work_limit : 0,
-    sourceLimit: lane === "source" ? limit : 0 };
-  let exhaustiveWork = lanes.sourceWork;
-  let exhaustiveLimit = lanes.sourceLimit;
-  let pagedHints = false;
-  const lookupReasons: ProposalMatchReason[] = [];
-  if (sketch !== undefined && !hintsDone && lanes.hintWork > 0) {
-    pagedHints = true;
-    const hinted = takeSourceHintPage(input, sketch, lanes.hintLimit, lanes.hintWork, hintCommitted);
-    observations.push(...hinted.observations);
-    sourceRows.push(...hinted.rows);
-    lookupReasons.push(...hinted.reasons);
-    workUnits += hinted.workUnits;
-    bytes += hinted.bytes;
-    truncated = hinted.truncated;
-    hintCommitted = hinted.hintCommitted;
-    hintsUnavailable = hinted.hydrationUnavailable;
-    hintsDone = hinted.hintsDone && !hintsUnavailable;
-    if (hinted.resourceLimited) resourceLimited = true;
-    if (hintsDone || hintsUnavailable) {
-      exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
-      exhaustiveLimit += Math.max(0, lanes.hintLimit - hinted.observations.length);
-    }
-  }
+  const exhaustiveWork = lane === "source" ? input.action.work_limit : 0;
+  const exhaustiveLimit = lane === "source" ? limit : 0;
   let pagedSources = false;
   if (!cursor.sourcesDone && exhaustiveLimit > 0 && exhaustiveWork > 0) {
     const sourced = takeSourcePage(
@@ -125,7 +92,7 @@ export function observeSourceAwareSeed(
       if (taken.resourceLimited) resourceLimited = true;
     }
   }
-  if (!cursor.sourcesDone && !pagedSources && memoryIdle && !pagedHints) {
+  if (!cursor.sourcesDone && !pagedSources && memoryIdle) {
     const sourced = takeSourcePage(
       input, sourceRoots, pageLimit(input), Math.max(0, input.action.work_limit - workUnits), sourceCommitted, cursor.source
     );
@@ -166,22 +133,22 @@ export function observeSourceAwareSeed(
   const sourcesDone = cursor.sourcesDone || (pagedSources && !sourcesTruncated);
   if (wantMemory && !pagedMemory) truncated = true;
   return finishSourceSeed(input, {
-    source: sourceCommitted, memory: memoryCommitted, sourcesDone, hint: hintCommitted,
-    hintsDone, hintsUnavailable, persistHint: sketch !== undefined || wantMemory || input.query.view.enumeration_policy === "native_query", laneTurn: laneTurn + 1
-  }, { observations, sourceRows, lookupReasons, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited });
+    source: sourceCommitted, memory: memoryCommitted, sourcesDone,
+    persist: wantMemory || input.query.view.enumeration_policy === "native_query", laneTurn: laneTurn + 1
+  }, { observations, sourceRows, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited });
 }
 
-/** Commit lane progress and report required source work separately from optional hint failure. */
+/** Native source and memory lanes retain independent progress and availability. */
 function finishSourceSeed(
   input: ObserveConditionalFieldInput,
   progress: Parameters<typeof encodeSeedCursor>[0],
   collected: Readonly<{
     observations: readonly TypedObservation[]; sourceRows: readonly SourceRootObserverRow[];
-    lookupReasons: readonly ProposalMatchReason[]; workUnits: number; bytes: number;
+    workUnits: number; bytes: number;
     truncated: boolean; hydrationUnavailable: boolean; resourceLimited: boolean;
   }>
 ): ObserverActionResult {
-  const { observations, sourceRows, lookupReasons, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited } = collected;
+  const { observations, sourceRows, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited } = collected;
   const committed = encodeSeedCursor(progress);
   const cursorOut = committed === null
     ? input.cursor
@@ -200,18 +167,7 @@ function finishSourceSeed(
         : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
   });
-  // Hint failure abandons optional lookup explanations, not exhaustive membership.
-  // Persist it independently so later source pages do not erase the failed attempt.
-  const page = !progress.hintsUnavailable ? finished.page : {
-    ...finished.page,
-    open_regions: [...finished.page.open_regions, {
-      schema_version: 1 as const, region_id: `${input.action.region_id}:source_hint`,
-      kind: "discovery" as const, status: "unavailable" as const,
-      coverage_role: "optional_accelerator" as const, semantic_effects: ["explanation" as const]
-    }]
-  };
-  return { ...finished, page, source_roots: sourceRows,
-  ...(lookupReasons.length === 0 ? {} : { lookup_reasons: lookupReasons }) };
+  return { ...finished, source_roots: sourceRows };
 }
 
 function takeSourcePage(
@@ -357,95 +313,32 @@ function takeLexicalPage(
   }
 }
 
-function parseSeedCursor(committed: string | null): Readonly<{
-  readonly hintsUnavailable?: boolean;
-  readonly laneTurn?: number;
-  readonly source: string | null;
-  readonly memory: string | null;
-  readonly sourcesDone: boolean;
-  readonly hint: string | null;
-  readonly hintsDone: boolean;
-}> {
-  if (committed === null || committed === "") {
-    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: false };
-  }
+type SeedCursor = Readonly<{ laneTurn?: number; source: string | null; memory: string | null; sourcesDone: boolean }>;
+function parseSeedCursor(committed: string | null): SeedCursor {
+  if (committed === null || committed === "") return { source: null, memory: null, sourcesDone: false };
   if (committed.startsWith("s:")) return parseBundledSeedCursor(committed.slice(2));
-  // `f:` is dual-family source progress; treating it as a memory id would skip remaining roots.
-  if (
-    committed.startsWith("r:")
-    || committed.startsWith("c:")
-    || committed.startsWith("o:")
-    || committed.startsWith("f:")
-  ) {
-    return { source: committed, memory: null, sourcesDone: false, hint: null, hintsDone: false };
+  // Family cursors are source progress, never memory identifiers.
+  if (["r:", "c:", "o:", "f:"].some(prefix => committed.startsWith(prefix))) {
+    return { source: committed, memory: null, sourcesDone: false };
   }
-  if (committed.startsWith("m:")) {
-    const memory = committed.slice(2);
-    return { source: null, memory: memory === "" ? null : memory, sourcesDone: true, hint: null, hintsDone: true };
-  }
-  return { source: null, memory: committed, sourcesDone: true, hint: null, hintsDone: true };
+  const memory = committed.startsWith("m:") ? committed.slice(2) : committed;
+  return { source: null, memory: memory === "" ? null : memory, sourcesDone: true };
 }
-
-function parseBundledSeedCursor(payload: string): Readonly<{
-  readonly hintsUnavailable?: boolean;
-  readonly laneTurn?: number;
-  readonly source: string | null;
-  readonly memory: string | null;
-  readonly sourcesDone: boolean;
-  readonly hint: string | null;
-  readonly hintsDone: boolean;
-}> {
+function parseBundledSeedCursor(payload: string): SeedCursor {
   try {
     const parsed: unknown = JSON.parse(payload);
-    if (parsed === null || typeof parsed !== "object") {
-      return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
-    }
+    if (parsed === null || typeof parsed !== "object") throw new TypeError("invalid seed cursor");
     const record = parsed as Record<string, unknown>;
-    return {
-      laneTurn: Number.isSafeInteger(record.laneTurn) && (record.laneTurn as number) >= 0 ? record.laneTurn as number : 0,
+    return { laneTurn: Number.isSafeInteger(record.laneTurn) && (record.laneTurn as number) >= 0 ? record.laneTurn as number : 0,
       source: typeof record.source === "string" && record.source.length > 0 ? record.source : null,
       memory: typeof record.memory === "string" && record.memory.length > 0 ? record.memory : null,
-      sourcesDone: record.sourcesDone === true,
-      hint: typeof record.hint === "string" && record.hint.length > 0 ? record.hint : null,
-      hintsDone: record.hintsDone === true,
-      hintsUnavailable: record.hintsUnavailable === true
-    };
-  } catch {
-    return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
-  }
+      sourcesDone: record.sourcesDone === true };
+  } catch { return { source: null, memory: null, sourcesDone: false }; }
 }
-
-function encodeSeedCursor(input: Readonly<{
-  readonly hintsUnavailable: boolean;
-  readonly laneTurn: number;
-  readonly source: string | null;
-  readonly memory: string | null;
-  readonly sourcesDone: boolean;
-  readonly hint: string | null;
-  readonly hintsDone: boolean;
-  readonly persistHint: boolean;
-}>): string | null {
-  if (input.persistHint) {
-    return `s:${JSON.stringify({
-      laneTurn: input.laneTurn,
-      source: input.source,
-      memory: input.memory,
-      sourcesDone: input.sourcesDone,
-      hint: input.hint,
-      hintsDone: input.hintsDone,
-      ...(input.hintsUnavailable ? { hintsUnavailable: true } : {})
-    })}`;
-  }
-  if (!input.sourcesDone && (input.memory === null || input.memory === "")) {
-    return input.source;
-  }
-  if (input.sourcesDone) {
-    if (input.memory !== null && input.memory !== "") return `m:${input.memory}`;
-    return "m:";
-  }
-  return `s:${JSON.stringify({
-    source: input.source,
-    memory: input.memory,
-    sourcesDone: false
-  })}`;
+function encodeSeedCursor(input: SeedCursor & Readonly<{ persist: boolean }>): string | null {
+  if (input.persist) return `s:${JSON.stringify({ laneTurn: input.laneTurn, source: input.source,
+    memory: input.memory, sourcesDone: input.sourcesDone })}`;
+  if (!input.sourcesDone && (input.memory === null || input.memory === "")) return input.source;
+  if (input.sourcesDone) return `m:${input.memory ?? ""}`;
+  return `s:${JSON.stringify({ source: input.source, memory: input.memory, sourcesDone: false })}`;
 }

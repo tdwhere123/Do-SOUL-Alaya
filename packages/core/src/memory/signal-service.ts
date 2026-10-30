@@ -1,6 +1,6 @@
 import {
   diagnosticWarn,
-  CandidateMemorySignalSchema,
+  CandidateMemorySignalSchema, UnavailableSourceStatementSignalSchema,
   SignalEventType,
   SignalState,
   SoulSignalMaterializedPayloadSchema,
@@ -105,6 +105,9 @@ export class SignalService {
 
   public async receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
+    if (UnavailableSourceStatementSignalSchema.safeParse(parsedSignal).success) {
+      throw new CoreError("CONFLICT", "Erased statement signals are read-only historical identities.");
+    }
     const existingSignal = await this.dependencies.signalRepo.getById(parsedSignal.signal_id);
     if (existingSignal !== null) {
       const persistedSignal = CandidateMemorySignalSchema.parse(existingSignal);
@@ -164,6 +167,9 @@ export class SignalService {
     patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }
   ): Promise<SignalServiceReceiveResult> {
     const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
+    if (UnavailableSourceStatementSignalSchema.safeParse(persistedSignal).success) {
+      throw new CoreError("CONFLICT", "Erased statement signals cannot be redriven.");
+    }
     const context = persistedSignal === null
       ? null
       : await this.resolveStoredEmissionContext(CandidateMemorySignalSchema.parse(persistedSignal));

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
-  buildOfficialApiSourceCorpus,
   OFFICIAL_API_SYSTEM_PROMPT,
+  SOURCE_STATEMENTS_PROMPT,
   stringifyOfficialApiExtractionRequest,
   transportPackIdentity
 } from "@do-soul/alaya-soul";
@@ -38,6 +38,7 @@ import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   TEST_CACHED_PROVIDER_COMPLETION_METADATA,
+  fixtureAttemptAuthority,
   testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
@@ -46,7 +47,33 @@ import { inspectExtractionCacheInventory } from "../../../runs/extraction/cache-
 import { inspectBoundedMaterializationInventory } from
   "../../../runs/extraction/cache-audit/materialization/preflight-inventory.js";
 
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
+import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
+
 const roots: string[] = [];
+const messages = [{ message_id: "m0", role: "user", content: "I moved to Berlin." }] as const;
+const request = sourceStatementRequests(messages)[0]!;
+const EMPTY_STATEMENT_RESPONSE = JSON.stringify({ messages: [{ message_id: "m0", statements: [] }] });
+const config = { model: "test-model", modelFamily: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+  requestProfile: "provider-default-v1" as const, sourcePacking: "session-statements" as const, apiKey: "fixture" };
+
+function completedEmptyFixture(cacheRoot: string, lineageDigest: string, maximumAttempts: number,
+  stats?: ReturnType<typeof newFillStats>) {
+  writeExtractionCacheTestManifest({ cacheRoot, model: config.model, systemPrompt: SOURCE_STATEMENTS_PROMPT });
+  const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+    cacheIdentity: { model: config.model, requestProfile: config.requestProfile },
+    startingMissing: 1, maximumAttempts, successfulShardCeiling: 1 });
+  const extractor = createCachingSignalExtractor({ cacheRoot, config, stats,
+    delegate: createGardenHttpExtractor(config, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ choices: [{ message: {
+        content: EMPTY_STATEMENT_RESPONSE }, finish_reason: "stop" }] }))
+    }),
+    onTransportAttempt: ledger.reserveAttemptOrdinal, providerAttemptLineageDigest: lineageDigest,
+    onLiveExtractionOutcome: ledger.recordTransportOutcome,
+    onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+    onLiveExtractionFailed: ledger.abandonPendingShard });
+  return { ledger, extractor };
+}
 
 function inspectMaterialization(cacheRoot: string, cacheKey: string) {
   const input = { cacheRoot, cacheKeys: [cacheKey], model: "test-model", requestProfile: "provider-default-v1" as const };
@@ -134,42 +161,9 @@ describe("extraction empty envelope classification", () => {
   it("counts witnessed request abstention without satisfying a semantic capability", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-class-"));
     roots.push(cacheRoot);
-    writeExtractionCacheTestManifest({
-      cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const request = buildOfficialApiExtractionRequests(
-      "I moved to Berlin.",
-      [{ role: "user", content: "I moved to Berlin." }]
-    )[0]!;
     const stats = newFillStats();
-    const lineageDigest = "b".repeat(64);
-    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
-      cacheIdentity: { model: "test-model", requestProfile: "provider-default-v1" },
-      startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
-    const extractor = createCachingSignalExtractor({
-      delegate: createGardenHttpExtractor({ model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture" },
-      { fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ choices: [{ message: {
-        content: EMPTY_INTERPRETATIONS_ENVELOPE }, finish_reason: "stop" }] })) }),
-      config: {
-        model: "test-model",
-        modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      stats,
-      onTransportAttempt: ledger.reserveAttemptOrdinal,
-      providerAttemptLineageDigest: lineageDigest,
-      onLiveExtractionOutcome: ledger.recordTransportOutcome,
-      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
-      onLiveExtractionFailed: ledger.abandonPendingShard
-    });
-    await extractor.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request),
-      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
-    });
+    const { extractor } = completedEmptyFixture(cacheRoot, "b".repeat(64), 1, stats);
+    await extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt });
     const cacheKey = stats.lastCacheKey!;
     expect(() => inspectMaterialization(cacheRoot, cacheKey))
       .toThrow(/requires root-local admission evidence/u);
@@ -185,11 +179,8 @@ describe("extraction empty envelope classification", () => {
       cacheRoot,
       model: "test-model",
       requestProfile: "provider-default-v1",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      extractionTurns: [{
-        turnContent: "I moved to Berlin.",
-        turnMessages: [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
-      }]
+      systemPrompt: SOURCE_STATEMENTS_PROMPT, sourcePacking: "session-statements",
+      extractionTurns: [{ turnContent: "I moved to Berlin.", turnMessages: messages }]
     });
     expect(completion.coverage).toBe(1);
     expect(completion.validTurns).toBe(1);
@@ -197,10 +188,9 @@ describe("extraction empty envelope classification", () => {
       cacheRoot, cacheKey, "test-model", "provider-default-v1"
     ).status).toBe("hit");
     const delegate = { extract: vi.fn(async () => { throw new Error("cache reopen must not dispatch"); }) };
-    const reopened = createCachingSignalExtractor({ delegate, cacheRoot, allowLiveExtraction: false,
-      config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
-    expect(await reopened.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request) })).toMatchObject({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE });
+    const reopened = createCachingSignalExtractor({ delegate, cacheRoot, allowLiveExtraction: false, config });
+    expect(await reopened.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
+      userPrompt: request.userPrompt })).toMatchObject({ rawJson: EMPTY_STATEMENT_RESPONSE });
     expect(delegate.extract).not.toHaveBeenCalled();
     const task = semanticTask("I moved to Berlin.");
     const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
@@ -236,44 +226,8 @@ describe("extraction empty envelope classification", () => {
   it("settles a witnessed provider-empty request without reserving another attempt", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-pending-"));
     roots.push(cacheRoot);
-    writeExtractionCacheTestManifest({
-      cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const request = buildOfficialApiExtractionRequests(
-      "I moved to Berlin.",
-      [{ role: "user", content: "I moved to Berlin." }]
-    )[0]!;
-    const ledger = openExtractionAttemptLedger({
-      cacheRoot,
-      lineageDigest: "a".repeat(64),
-      cacheIdentity: { model: "test-model", requestProfile: "provider-default-v1" },
-      startingMissing: 1,
-      maximumAttempts: 2,
-      successfulShardCeiling: 1
-    });
-    const extractor = createCachingSignalExtractor({
-      delegate: createGardenHttpExtractor({ model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture" },
-      { fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ choices: [{ message: {
-        content: EMPTY_INTERPRETATIONS_ENVELOPE }, finish_reason: "stop" }] })) }),
-      config: {
-        model: "test-model",
-        modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      onTransportAttempt: ledger.reserveAttemptOrdinal,
-      providerAttemptLineageDigest: "a".repeat(64),
-      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
-      onLiveExtractionFailed: ledger.abandonPendingShard,
-      onLiveExtractionOutcome: ledger.recordTransportOutcome
-    });
-    await extractor.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request),
-      sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
-    });
+    const { extractor, ledger } = completedEmptyFixture(cacheRoot, "a".repeat(64), 2);
+    await extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt });
     expect(ledger.snapshot()).toMatchObject({
       attempts: 1,
       successfulShards: 1,
@@ -300,7 +254,8 @@ describe("extraction empty envelope classification", () => {
       const delegate = { extract: vi.fn(async () => { throw new Error("must not dispatch"); }) };
       const extractor = createCachingSignalExtractor({ delegate, cacheRoot,
         config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" } });
-      await expect(extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, userPrompt })).rejects.toThrow("quarantined");
+      await expect(extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt }))
+        .rejects.toThrow("cache extractor received a non-canonical official API extraction request");
       expect(delegate.extract).not.toHaveBeenCalled();
       expect(await readFile(cacheFilePath(cacheRoot, key), "utf8")).toBe(before);
     });
@@ -308,14 +263,16 @@ describe("extraction empty envelope classification", () => {
   it("refuses an unwitnessed live empty response before cache publication", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "unwitnessed-empty-"));
     roots.push(cacheRoot);
-    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
-    const request = buildOfficialApiExtractionRequests("I moved to Berlin.", [])[0]!;
-    const userPrompt = stringifyOfficialApiExtractionRequest(request);
-    const key = computeCacheKey("test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
-    const extractor = createCachingSignalExtractor({ cacheRoot,
-      config: { model: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1" },
-      delegate: { extract: async () => ({ rawJson: EMPTY_SIGNALS_ENVELOPE }) } });
-    await expect(extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, userPrompt })).rejects.toThrow();
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: SOURCE_STATEMENTS_PROMPT });
+    const key = computeCacheKey("test-model", "provider-default-v1", SOURCE_STATEMENTS_PROMPT, request.userPrompt);
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async input => {
+      await input.onTransportAttempt?.();
+      return { rawJson: EMPTY_STATEMENT_RESPONSE };
+    });
+    const extractor = createCachingSignalExtractor({ cacheRoot, config, delegate: { extract },
+      ...fixtureAttemptAuthority({ cacheRoot, model: config.model, requestProfile: config.requestProfile }) });
+    await expect(extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt })).rejects.toThrow();
+    expect(extract).toHaveBeenCalledTimes(1);
     await expect(stat(cacheFilePath(cacheRoot, key))).rejects.toMatchObject({ code: "ENOENT" });
     expect(inspectCachedRawExtraction(cacheRoot, key, "test-model", "provider-default-v1").status).toBe("missing");
   });
@@ -349,30 +306,13 @@ describe("extraction empty envelope classification", () => {
   it("marks out-of-allowlist keys as plan-skipped without counting cache hits", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-skip-"));
     roots.push(cacheRoot);
-    writeExtractionCacheTestManifest({
-      cacheRoot, model: "test-model", systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const request = buildOfficialApiExtractionRequests(
-      "I moved to Berlin.",
-      [{ role: "user", content: "I moved to Berlin." }]
-    )[0]!;
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: SOURCE_STATEMENTS_PROMPT });
     const stats = newFillStats();
-    const extractor = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[{"x":1}]}' }) },
-      config: {
-        model: "test-model",
-        modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      stats,
-      executionCacheKeys: new Set()
-    });
-    const result = await extractor.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(request)
-    });
+    const extract = vi.fn(async () => { throw new Error("skipped request must not dispatch"); });
+    const extractor = createCachingSignalExtractor({ delegate: { extract }, config, cacheRoot, stats,
+      executionCacheKeys: new Set() });
+    const result = await extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt });
+    expect(extract).not.toHaveBeenCalled();
     expect(result.extractionSkip).toBe("plan_skipped");
     expect(isPlanSkippedExtraction(result)).toBe(true);
     expect(result.rawJson).toBe(PLAN_SKIPPED_EXTRACTION_ENVELOPE);

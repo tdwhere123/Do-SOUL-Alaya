@@ -1,7 +1,7 @@
+import { assertCurrentConversationGeneration } from "./request-artifact.js";
 import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import process from "node:process";
 import { executeExtractionBatchFill } from "./fill/batch-fill.js";
-import { executeOpenSemanticsInteractiveFill } from "./fill/source-semantic-interactive-fill.js";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -170,6 +170,8 @@ async function runExtractionFillBody(
   options: ExtractionFillOptions,
   durableFailpoint: CatalogRefillResumeFailpoint | undefined
 ): Promise<ExtractionFillResult> {
+  const fill = freezeExtractionFillOptions(options);
+  assertCurrentConversationGeneration(fill, fill.batch?.operation);
   if (options.sourceInterpretationProfile !== undefined && (options.batch === undefined ||
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
     throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
@@ -178,8 +180,16 @@ async function runExtractionFillBody(
       options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
     throw new AlayaError("VALIDATION", "open semantics fill cannot mix lazy_field, expansion, or an injected extractor");
   }
-  const fill = freezeExtractionFillOptions(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
+  const entryManifest = readExtractionCacheManifestIdentity(cacheRoot);
+  if (fill.ingestionMode === "lazy_field" || fill.semanticArtifactRoot !== undefined || fill.semanticTransport !== undefined) {
+    throw new AlayaError("UNAVAILABLE", "passive semantic overlays are retired; retained artifacts are inspection-only");
+  }
+  const retainedManifest = entryManifest?.manifest;
+  if (retainedManifest !== undefined) assertCurrentConversationGeneration({
+    sourcePacking: retainedManifest.schema_version === 4 ? retainedManifest.source_packing : "reference-eight",
+    sourceInterpretationProfile: retainedManifest.source_interpretation_profile,
+    openSemantics: retainedManifest.source_semantic_generation }, fill.batch?.operation);
   assertLazyFieldIsolation(fill, cacheRoot);
   const authority = fill.authorityReceiptPath === undefined
     ? undefined
@@ -190,7 +200,7 @@ async function runExtractionFillBody(
     fill.initialConcurrency,
     authority?.receipt.action === "probe" ? 1 : concurrency
   );
-  const initialIdentity = readExtractionCacheManifestIdentity(cacheRoot);
+  const initialIdentity = entryManifest;
   const directSpend = authority?.receipt.direct_spend;
   const boundedRepair = isBoundedExistingCacheRepair(fill, authority?.receipt);
   const expansion = directSpend === undefined && !boundedRepair
@@ -215,13 +225,7 @@ async function runExtractionFillBody(
       "extraction cache manifest changed during authority preparation"
     );
   }
-  const leaseRoot = fill.ingestionMode === "lazy_field"
-    ? fill.semanticArtifactRoot
-    : cacheRoot;
-  if (leaseRoot === undefined) {
-    throw new ExtractionCacheInvariantError("lazy_field requires a semantic artifact root");
-  }
-  const lease = acquireExtractionCacheWriteLease(leaseRoot);
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
   return withExtractionCacheWriteLease(
     lease,
     () => runLockedExtractionFill(
@@ -303,13 +307,6 @@ async function runLockedExtractionFill(
   if (options.batch !== undefined) {
     return executeExtractionBatchFill({ options, prepared, cacheRoot, writeLease,
       authority: executionAuthority });
-  }
-  if (options.openSemantics !== undefined) {
-    return executeOpenSemanticsInteractiveFill({
-      options, prepared, cacheRoot, writeLease,
-      authority: executionAuthority,
-      concurrency: authority?.receipt.action === "probe" ? 1 : concurrency
-    });
   }
   const stats = newFillStats();
   const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({

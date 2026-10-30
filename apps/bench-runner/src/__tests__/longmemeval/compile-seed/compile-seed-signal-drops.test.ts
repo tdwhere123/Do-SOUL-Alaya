@@ -1,312 +1,103 @@
-import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
-import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
-// @ts-nocheck
-import { inspectExtractionRawJson } from "../../../runs/extraction/content-closure.js";
-import { existsSync, readFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const boundary = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+import { readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createHash } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  buildOfficialApiExtractionRequest,
-  OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
-import {
-  computeNextTurnSeedRefs,
-  createCachingSignalExtractor,
-  createCompileSeedRunner,
-  createGardenHttpExtractor,
-  resolveCompileSeedExtractionConfig,
-  toSeedExtractionPathKpi,
-  type BenchSignalExtractor,
-  type CompileSeedDaemon,
-  type CompileSeedExtractionConfig,
-  type CompileSeedExtractionStats
-} from "../../../runs/compile-seed.js";
-import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
+import { dirname, join } from "node:path";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { createCachingSignalExtractor, createCompileSeedRunner, toSeedExtractionPathKpi } from "../../../runs/compile-seed.js";
+import { sourceStatementRequests, sourceStatementSession } from "../../../runs/extraction/source-statement-request.js";
+import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
-import {
-  buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG,
-  OFFLINE_CONFIG,
-  makeSeed,
-  admitCompileSeedTurnCache,
-  interpretationsEnvelope,
-  withOpenSemanticFactorGraph
-} from "./compile-seed-fixture.js";
-import {
-  TEST_EXTRACTION_PROVIDER_URL,
-  fixtureAttemptAuthority,
-  providerBackedResponseResult,
-  writeExtractionCacheTestManifest
-} from "../extraction/extraction-cache-test-fixture.js";
+import { admitStatementSessionCache, buildCompileSeedDaemon, CREDENTIALLED_CONFIG, makeSeed } from "./compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
-import { computeSourceTurnCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 
-describe("compile() signal-drop count is observable", () => {
-  let cacheRoot: string;
+const config = { ...CREDENTIALLED_CONFIG, sourcePacking: "session-statements" as const };
+const messages = [{ message_id: "recorded-user", role: "user" as const, content: "Intro span. Middle span. Closing span." }];
+const turn = { turnContent: messages[0]!.content, turnMessages: messages, evidenceRefBase: "raw-turn", seedIndex: 0,
+  workspaceId: "workspace-1", runId: "run-1" };
+const statement = (text: string) => ({ text, relation: "recorded statement" });
+let cacheRoot: string;
+beforeEach(async () => {
+  cacheRoot = await mkdtemp(join(tmpdir(), "statement-drops-"));
+  writeExtractionCacheTestManifest({ cacheRoot, model: config.model, providerUrl: config.providerUrl, systemPrompt: SOURCE_STATEMENTS_PROMPT });
+});
+afterEach(async () => { await rm(cacheRoot, { recursive: true, force: true }); });
+afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
+async function admit(statements: readonly unknown[]) {
+  const rawJson = JSON.stringify({ messages: [{ message_id: messages[0]!.message_id, statements }] });
+  await admitStatementSessionCache({ cacheRoot, config, messages, rawJson: () => rawJson });
+  return rawJson;
+}
 
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-drops-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
+describe("statement drop accounting", () => {
+  it("preserves healthy siblings and reports rejected statements without fabricating fallback", async () => {
+    await admit([statement("Intro span."), { text: null, relation: "invalid" }]);
+    const publish = vi.fn((_input: BenchSignalSeedInput) => makeSeed("healthy")), daemon = buildCompileSeedDaemon(publish);
+    const runner = createCompileSeedRunner({ config, cacheRoot });
+    const result = await runner.seedTurn({ ...turn, daemon });
+    expect(result.seeds).toHaveLength(1); expect(publish).toHaveBeenCalledOnce();
+    expect(publish.mock.calls[0]![0]).toMatchObject({ distilledFact: "Intro span.", productionSignal: {
+      interpretation_contract: "source-statements-v1" } });
+    expect(runner.stats).toMatchObject({ factsProduced: 1, parseDropped: 1, signalsDropped: 1, compileOverflowDropped: 0 });
   });
 
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
+  it("keeps independently reason-coded publication drops and healthy batch siblings in its KPI", async () => {
+    await admit([statement("Intro span."), statement("Middle span."), statement("Closing span.")]);
+    const daemon = buildCompileSeedDaemon(() => makeSeed("unused"));
+    const publish = vi.spyOn(daemon, "proposeMemoriesFromCompileSignals").mockResolvedValue({ createdEvidence: true,
+      seeds: [makeSeed("healthy")], dropped: [{ reason: "candidate_absent", detail: "no memory result" },
+        { reason: "materialization_drop", detail: "publication unavailable" }] });
+    const runner = createCompileSeedRunner({ config, cacheRoot });
+    expect((await runner.seedTurn({ ...turn, daemon })).seeds).toHaveLength(1);
+    expect(publish.mock.calls[0]![0]).toHaveLength(3);
+    expect(runner.stats).toMatchObject({ parseDropped: 0, compileOverflowDropped: 0, signalsDropped: 2,
+      signalsDroppedByReason: { candidate_absent: 1, materialization_drop: 1 } });
+    expect(toSeedExtractionPathKpi(runner.stats)).toMatchObject({ signals_dropped: 2,
+      signals_dropped_by_reason: { candidate_absent: 1, materialization_drop: 1 } });
   });
 
-  it("keeps malformed-sibling salvage diagnostic without completing or caching the response", async () => {
-    const raw = JSON.stringify({ interpretations: [
-      ...JSON.parse(interpretationsEnvelope([{ matched: "I have a dog." }])).interpretations,
-      { assertion_id: 1, relations: [{ predicate: null }] }
-    ] });
-    expect(inspectExtractionRawJson(raw)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
-    await expect(admitCompileSeedTurnCache({ cacheRoot, turnContent: "I have a dog.",
-      rawJson: raw })).rejects.toThrow("official API completed result contains rejected interpretation entries");
-    const key = computeSourceTurnCacheKey(CREDENTIALLED_CONFIG.model,
-      CREDENTIALLED_CONFIG.requestProfile, OFFICIAL_API_SYSTEM_PROMPT,
-      { turnContent: "I have a dog." });
-    expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
+  it("propagates a materialized but unscored memory rather than disguising it as a dropped candidate", async () => {
+    await admit([statement("Intro span.")]);
+    const daemon = buildCompileSeedDaemon(() => makeSeed("unused"));
+    vi.spyOn(daemon, "proposeMemoriesFromCompileSignals").mockRejectedValue(createUnscoredMaterializedSeedError({
+      memoryId: "already-created", evidenceRef: turn.evidenceRefBase, cause: new Error("review tail failed") }));
+    const runner = createCompileSeedRunner({ config, cacheRoot });
+    await expect(runner.seedTurn({ ...turn, daemon })).rejects.toThrow(/recallable unscored seed memory/u);
+    expect(runner.stats).toMatchObject({ signalsDropped: 0, signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 } });
   });
 
-  it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
-    // Each failed signal is attributed by reason without suppressing healthy
-    // siblings from the same turn.
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => ({
-        memoryId: "memory-fallback",
-        signalId: "signal-fallback",
-        proposalId: "proposal-fallback",
-        evidenceId: "evidence-fallback",
-        truncated: false,
-        charsClipped: 0
-      }),
-      // The daemon returns one seeded signal plus two independent reason-coded drops.
-      proposeMemoriesFromCompileSignals: async () => ({
-        createdEvidence: true,
-        seeds: [
-          {
-            memoryId: "memory-1",
-            signalId: "signal-1",
-            proposalId: "proposal-1",
-            evidenceId: "evidence-1",
-            truncated: false,
-            charsClipped: 0
-          }
-        ],
-        dropped: [
-          { reason: "candidate_absent", detail: "triage=accepted routing=evidence archival" },
-          { reason: "materialization_drop", detail: "boom" }
-        ]
-      }),
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    await admitCompileSeedTurnCache({ cacheRoot,
-      turnContent: "Intro span. Middle span. Closing span.",
-      rawJson: interpretationsEnvelope([
-        { matched: "Intro span" },
-        { matched: "Middle span", assertionId: 2 },
-        { matched: "Closing span", assertionId: 3 }
-      ]) });
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent: "Intro span. Middle span. Closing span.",
-      evidenceRefBase: "q1-s0-t0",
-      seedIndex: 0,
-      workspaceId: "ws-test",
-      runId: "run-test"
-    });
-
-    // The one healthy fact seeded — the two failures did NOT drop it.
-    expect(result.seeds).toHaveLength(1);
-    expect(result.seeds[0]?.memoryId).toBe("memory-1");
-    // Both materialization-seam drops are counted, attributed by reason.
-    expect(runner.stats.signalsDropped).toBe(2);
-    expect(runner.stats.signalsDroppedByReason).toEqual({
-      candidate_absent: 1,
-      materialization_drop: 1
-    });
-    // No extraction-stage drops on this clean envelope.
-    expect(runner.stats.parseDropped).toBe(0);
-    expect(runner.stats.compileOverflowDropped).toBe(0);
-
-    // The per-reason ledger surfaces in the persisted KPI.
-    const kpi = toSeedExtractionPathKpi(runner.stats);
-    expect(kpi.signals_dropped_by_reason).toEqual({
-      candidate_absent: 1,
-      materialization_drop: 1
-    });
-    expect(kpi.signals_dropped).toBe(2);
-  });
-
-  it("fails closed when a compile seed memory materializes but accept fails", async () => {
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("fallback path should not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        throw createUnscoredMaterializedSeedError({
-          memoryId: "memory-created-before-accept-failed",
-          evidenceRef: "q1-s0-t0",
-          cause: new Error("review tail failed")
-        });
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    await admitCompileSeedTurnCache({ cacheRoot, turnContent: "Intro span.",
-      rawJson: interpretationsEnvelope([{ matched: "Intro span" }]) });
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    await expect(
-      runner.seedTurn({
-        daemon,
-        turnContent: "Intro span.",
-        evidenceRefBase: "q1-s0-t0",
-        seedIndex: 0,
-        workspaceId: "ws-test",
-        runId: "run-test"
-      })
-    ).rejects.toThrow(/recallable unscored seed memory/);
-
-    expect(runner.stats.signalsDropped).toBe(0);
-    expect(runner.stats.signalsDroppedByReason).toEqual({
-      candidate_absent: 0,
-      materialization_drop: 0
-    });
-  });
-
-  it("fails closed in no-credentials fallback when a seed memory materializes but accept fails", async () => {
-    await rm(join(cacheRoot, "manifest.json"), { force: true });
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw createUnscoredMaterializedSeedError({
-          memoryId: "fallback-memory-created-before-accept-failed",
-          evidenceRef: "q1-s0-t0",
-          cause: new Error("fallback review tail failed")
-        });
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        throw new Error("credentialled compile path should not run");
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({
-      config: OFFLINE_CONFIG,
-      cacheRoot
-    });
-
-    await expect(
-      runner.seedTurn({
-        daemon,
-        turnContent: "Intro span.",
-        evidenceRefBase: "q1-s0-t0",
-        seedIndex: 0,
-        workspaceId: "ws-test",
-        runId: "run-test"
-      })
-    ).rejects.toThrow(/recallable unscored seed memory/);
-
-    expect(runner.stats.signalsDropped).toBe(0);
-    expect(runner.stats.signalsDroppedByReason).toEqual({
-      candidate_absent: 0,
-      materialization_drop: 0
-    });
+  it("reuses the captured session after a pre-memory publication failure without another extraction or raw admission", async () => {
+    await admit([statement("Intro span.")]);
+    const daemon = buildCompileSeedDaemon(() => makeSeed("healthy"));
+    const imported = vi.spyOn(daemon, "importSourceRecord");
+    const publish = vi.spyOn(daemon, "proposeMemoriesFromCompileSignals");
+    publish.mockRejectedValueOnce(new Error("publication unavailable before memory creation"));
+    const runner = createCompileSeedRunner({ config, cacheRoot });
+    expect((await runner.seedTurn({ ...turn, daemon })).seeds).toEqual([]);
+    expect(runner.stats).toMatchObject({ signalsDropped: 1, signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 1 } });
+    expect((await runner.seedTurn({ ...turn, daemon })).seeds).toHaveLength(1);
+    expect(imported).toHaveBeenCalledOnce(); expect(publish).toHaveBeenCalledTimes(2);
+    expect(runner.stats).toMatchObject({ cacheHits: 1, llmCalls: 0, lastStatementSession: { firstUse: false } });
   });
 });
 
-describe("extraction cache write is atomic", () => {
-  let cacheRoot: string;
-
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-atomic-"));
-  });
-
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-  });
-
-  it("never leaves a partially-written shard on the final path", async () => {
-    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    // A delegate whose response is large enough that a torn write would be
-    // visibly partial. The write-tmp-then-rename discipline means the final
-    // shard is always whole, parseable JSON with the complete raw_json.
-    const bigRawJson = JSON.stringify({ interpretations: [{ assertion_id: 1,
-      relations: Array.from({ length: 32 }, () => ({
-        predicate: { text: "persists" },
-        arguments: [{ role: "agent", phrase: { text: "Atomic turn" } }], qualifiers: []
-      })) }] });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => providerBackedResponseResult(input, bigRawJson, {
-        responseMetadata: {
-          finishReason: "stop",
-          maxOutputTokens: 2048,
-          completionContractVersion: 1 as const,
-          completionWitness: "message" as const
-        },
-        usage: { inputTokens: 17, outputTokens: 23, totalTokens: 40 }
-      }))
-    };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
-        requestProfile: "provider-default-v1" })
-    });
-    const userPrompt = stringifyOfficialApiExtractionRequest(
-      buildOfficialApiExtractionRequest("Atomic turn persists a complete shard.", [])
-    );
-    await extractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("Atomic turn persists a complete shard.", []) });
-
-    const cacheKey = computeCacheKey("test-model", "provider-default-v1", "sys", userPrompt);
-    const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
-    const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
-      raw_json: string;
-      response_metadata: unknown;
-    };
-    expect(onDisk.raw_json).toBe(bigRawJson);
-    expect(onDisk.response_metadata).toEqual({
-      finish_reason: "stop",
-      max_output_tokens: 2048,
-      completion_contract_version: 1,
-      completion_witness: "message",
-      usage: { input_tokens: 17, output_tokens: 23, total_tokens: 40 }
-    });
-
-    // The fixture is reused on a second extractor with zero LLM calls — only
-    // possible if the shard landed whole.
-    const reread = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot
-    });
-    const second = await reread.extract({
-      systemPrompt: "sys",
-      userPrompt,
-      sourceCorpus: buildOfficialApiSourceCorpus("Atomic turn persists a complete shard.", [])
-    });
-    expect(second.rawJson).toBe(bigRawJson);
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
-  });
+it("writes a complete statement shard and reuses those exact bytes without a second provider call", async () => {
+  const rawJson = await admit(Array.from({ length: 32 }, (_, index) => statement(`Recorded statement ${index}.`)));
+  const [request] = sourceStatementRequests(messages);
+  const key = computeCacheKey(config.model, config.requestProfile, SOURCE_STATEMENTS_PROMPT, request!.userPrompt);
+  const path = cacheFilePath(cacheRoot, key);
+  const shard = JSON.parse(readFileSync(path, "utf8"));
+  expect(shard.raw_json).toBe(rawJson); expect(shard.response_metadata.finish_reason).toBe("stop");
+  expect(readdirSync(dirname(path)).filter(name => name.endsWith(".tmp"))).toEqual([]);
+  const delegate = { extract: vi.fn(async () => { throw new Error("cached shard must not dispatch"); }) };
+  const reread = createCachingSignalExtractor({ cacheRoot, config, delegate });
+  expect(await reread.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request!.userPrompt,
+    sourceCorpus: sourceStatementSession(messages).rendered.content })).toMatchObject({ rawJson });
+  expect(delegate.extract).not.toHaveBeenCalled();
 });

@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 async function setup(options: { unknown?: boolean; usageMissing?: boolean; maxUsd?: number;
-  foreignQuote?: boolean; expensiveUsage?: boolean } = {}) {
+  foreignMessage?: boolean; expensiveUsage?: boolean } = {}) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-2.5-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-2.5-nonthinking-v1");
@@ -75,9 +75,9 @@ async function setup(options: { unknown?: boolean; usageMissing?: boolean; maxUs
         const item = JSON.parse(line);
         return JSON.stringify({ key: item.key, response: {
           candidates: [{ finishReason: "STOP", content: { parts: [{
-            text: options.foreignQuote ? buildGroundedInterpretationResponse(JSON.stringify({
-              source_assertions: [{ assertion_id: 1, text: "I completed a different task." }]
-            })) : buildGroundedInterpretationResponse(item.request.contents[0].parts[0].text)
+            text: options.foreignMessage ? JSON.stringify({ messages: [{ message_id: "foreign-message",
+              statements: [{ text: "I completed a different task.", relation: "recorded event" }] }]
+            }) : buildGroundedInterpretationResponse(item.request.contents[0].parts[0].text)
           }] } }], ...(options.usageMissing ? {} : {
             usageMetadata: { promptTokenCount: options.expensiveUsage ? 1_000_000 : 10,
               candidatesTokenCount: 20, totalTokenCount: options.expensiveUsage ? 1_000_020 : 30 }
@@ -185,7 +185,7 @@ it.skipIf(process.platform === "win32")(
   }, 45_000
 );
 
-it.each([{ unknown: true }, { usageMissing: true }, { foreignQuote: true }, { maxUsd: 0 }])(
+it.each([{ unknown: true }, { usageMissing: true }, { foreignMessage: true }, { maxUsd: 0 }])(
   "stops durably without opening a retry window for %j", async (options) => {
     const fixture = await setup(options);
     const first = launch(fixture.manifestPath);
@@ -231,12 +231,14 @@ it("keeps a stopped campaign idle until an operator reset", async () => {
 }, 30_000);
 
 it.each(["quarantined", "cancelled"] as const)("does not turn a %s ordinary canary into a fresh campaign retry", async (kind) => {
-  const fixture = await setup({ foreignQuote: true });
+  const fixture = await setup({ foreignMessage: true });
   const operations = kind === "cancelled" ? ["prepare", "cancel"] as const : ["prepare", "submit", "resume"] as const;
   for (const operation of operations) {
-    await runExtractionFill({ variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    const result = await runExtractionFill({ variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
       offset: 0, limit: 1, authorityReceiptPath: fixture.authorityReceiptPath,
       batch: { operation, window: "canary", requestLimit: 1, limits: fixture.limits } });
+    if (operation === "resume") expect(Object.values(result.batchState!.jobs[0]!.outcomes))
+      .toEqual([expect.objectContaining({ status: "quarantined" })]);
   }
   const expectedCreates = kind === "cancelled" ? 0 : 1;
   expect(fixture.provider.creates).toBe(expectedCreates);

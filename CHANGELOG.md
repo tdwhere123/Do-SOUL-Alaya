@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 30.0.0, engine gateway 2.0.0
+## Unreleased — protocol 31.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,23 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 31.0.0 introduces the `source-statements-v1` passive conversation contract:
+ordered host messages produce only self-contained `text` and general `relation` keys.
+Per-statement admission retains valid siblings; failed/unavailable messages retain raw
+source access. Publication binds the captured source revision and host message extent,
+persists provenance evidence before optional memory formation, and supplies the same
+artifact to lexical and selected-space vector SourceIndex preparation. Key-set changes
+invalidate prepared generations. Derived capsules do not become independent source roots.
+
+This is an invariant §25 major: `POST_TURN_EXTRACT` completion requires request-bound
+`source_statement_responses` instead of passive candidate signals, and ordinary native
+navigation is identified by `ordinary-native-field.v8`. Explicit agent-authored candidate
+signals and `soul.interpretation` H/Q/C remain supported. Existing raw-message/round display
+semantics are unchanged; there is no unconditional speaker rewrite. Upgrade clients and
+daemon together, restart queries, and prepare new key generations. Historical records
+retain their original identities and erase dependencies, not permission to regenerate
+or readmit failed outputs. Keep a pre-037 database for older-binary rollback.
 
 Protocol 30.0.0 changes the ordinary Recall ranking/default behavior under invariant §25
 and adds optional reviewer identity and token fields to `soul.resolve`.

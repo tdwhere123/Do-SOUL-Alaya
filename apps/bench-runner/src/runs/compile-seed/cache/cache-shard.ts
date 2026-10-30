@@ -1,4 +1,7 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceStatementRequestSchema, type SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { inspectStatementResponse } from "../../extraction/source-statement-request.js";
+import { computeCacheKey } from "./cache-key.js";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
 import { inspectCachedSourceSemantic, type CachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
@@ -45,6 +48,7 @@ import { transportResponseDigest } from
 import type { GeminiBatchInvocation } from "../../extraction/fill/batch/contract.js";
 import { readRetainedBatchLine } from "../../extraction/fill/batch/retained-line.js";
 import { readRetainedBatchAuthority } from "../../extraction/fill/batch/retained-authority.js";
+import { readExtractionCacheManifestIdentity, extractionAdmissionGenerationSha256 } from "../../extraction/cache/extraction-cache-manifest.js";
 import { buildExtractionTransportProvenance } from "../../extraction/transport-route.js";
 import { inspectRetainedInteractiveResponses,
   type CachedProviderResponseWitness } from "./provider-response-witness.js";
@@ -65,6 +69,8 @@ export type CachedExtractionAdmissionIdentity = NonNullable<
   import("@do-soul/alaya-protocol").PublishedSourceInterpretationPacket["provenance"]["cache_admission"]>;
 
 export interface CachedExtractionEntry {
+  readonly source_statement?: Readonly<{ request: SourceStatementRequest;
+    receipt: ReturnType<typeof inspectStatementResponse>["receipt"] }>;
   readonly source_packet?: CachedSourcePacket;
   readonly source_semantic?: CachedSourceSemantic;
   readonly model: string;
@@ -218,6 +224,14 @@ function inspectRawExtraction(
   }
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
+    if (cached.entry.source_statement !== undefined) {
+      const manifest = readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
+      const identity = cached.entry.admission_identity;
+      if (manifest === undefined || identity?.generation_sha256 !== extractionAdmissionGenerationSha256(manifest) ||
+          identity.request_key !== cacheKey || identity.raw_json_sha256 !== rawJsonSha256) {
+        throw new AlayaError("CONFLICT", "statement cache admission generation binding mismatch");
+      }
+    }
     const attempt = cached.entry.provider_attempt;
     if (attempt !== undefined && (!Number.isSafeInteger(attempt.attempt_ordinal) ||
         attempt.attempt_ordinal < 1 || !/^[a-f0-9]{64}$/u.test(attempt.authority_lineage_digest) ||
@@ -256,7 +270,7 @@ function inspectRawExtraction(
         cacheKey, model, requestProfile, attempt.attempt_ordinal, rawJsonSha256);
       if (quarantine !== undefined) return quarantine;
     }
-    const envelope = inspectExtractionRawEnvelope(cached.entry.raw_json);
+    const envelope = inspectExtractionRawEnvelope(cached.entry.raw_json, statementClassificationContext(cached.entry));
     const classification = resolveStoredEmptyClassification(
       envelope.rawSignalCount,
       cached.entry.transport_provenance !== undefined,
@@ -330,7 +344,7 @@ function inspectInteractiveResponseWitness(
       requestIdentity: entry.request_identity, responses: entry.provider_responses,
       responseMetadata: entry.response_metadata });
   } catch (error) {
-    const envelope = inspectExtractionRawEnvelope(entry.raw_json);
+    const envelope = inspectExtractionRawEnvelope(entry.raw_json, statementClassificationContext(entry));
     return { status: "quarantined",
       reason: error instanceof Error ? error.message : String(error),
       rawJson: entry.raw_json, rawJsonSha256,
@@ -364,7 +378,13 @@ export function readCachedEntry(
   }
   const identityError = inspectCachedIdentity(parsed, cacheKey, model, requestProfile);
   if (identityError !== null) return { status: "invalid", reason: identityError };
-  return { status: "hit", entry: parsed as CachedExtractionEntry };
+  const entry = parsed as CachedExtractionEntry;
+  const statementError = inspectStatementCacheReceipt(entry);
+  // A known request with invalid response bytes remains unavailable, but its exact
+  // digest must reach the bounded repair owner. Identity failures above cannot.
+  if (statementError !== null) return { status: "invalid", reason: statementError,
+    rawJsonSha256: computeExtractionRawJsonSha256(entry.raw_json) };
+  return { status: "hit", entry };
 }
 
 export function writeCachedExtraction(
@@ -373,7 +393,7 @@ export function writeCachedExtraction(
   entry: CachedExtractionEntry
 ): void {
   const bytes = Buffer.from(`${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  if ((entry.source_packet !== undefined || entry.source_semantic !== undefined) && bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) {
+  if (bytes.length > MAX_EXTRACTION_CACHE_SHARD_BYTES) {
     throw new AlayaError("VALIDATION", "typed packet shard exceeds reader byte bound");
   }
   const filePath = cacheFilePath(cacheRoot, cacheKey);
@@ -388,7 +408,7 @@ export function writeCachedExtraction(
 
 export function inspectCachedExtractionContent(
   entry: Pick<CachedExtractionEntry, "raw_json" | "response_metadata" |
-    "transport_provenance" | "empty_classification" | "request_completion" | "source_packet" | "source_semantic">
+    "transport_provenance" | "empty_classification" | "request_completion" | "source_packet" | "source_semantic" | "source_statement">
 ): Exclude<CachedExtractionInspection, { status: "retired" }> {
   if (entry.source_packet !== undefined || entry.source_semantic !== undefined) {
     return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
@@ -398,7 +418,7 @@ export function inspectCachedExtractionContent(
   const providerBacked = entry.transport_provenance !== undefined;
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
-    const envelope = inspectExtractionRawJson(rawJson);
+    const envelope = inspectExtractionRawJson(rawJson, statementClassificationContext(entry));
     const classification = resolveStoredEmptyClassification(
       envelope.rawSignalCount,
       providerBacked,
@@ -424,6 +444,13 @@ export function inspectCachedExtractionContent(
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cached extraction: ${reason}`, rawJsonSha256 };
   }
+}
+
+function statementClassificationContext(entry: Pick<CachedExtractionEntry, "source_statement" | "request_completion">) {
+  const statement = entry.source_statement;
+  return statement === undefined ? undefined : { sourceAssertionCount: statement.request.messages.length,
+    sourceStatementRequest: statement.request, planMembership: "in_plan" as const,
+    requestCompletion: entry.request_completion?.status };
 }
 
 function resolveStoredEmptyClassification(
@@ -462,6 +489,20 @@ function inspectCachedIdentity(
   requestProfile: CompileSeedExtractionConfig["requestProfile"]
 ): string | null {
   if (typeof parsed.raw_json !== "string") return "raw_json must be a string";
+  if (parsed.source_statement !== undefined) {
+    try {
+      const request = SourceStatementRequestSchema.parse(parsed.source_statement.request);
+      const expectedKey = computeCacheKey(model, requestProfile, SOURCE_STATEMENTS_PROMPT, JSON.stringify(request));
+      if (expectedKey !== cacheKey) return "statement request key differs";
+    } catch { return "invalid statement cache descriptor"; }
+  } else {
+    try {
+      const envelope = JSON.parse(parsed.raw_json);
+      if ("messages" in envelope && !Array.isArray(envelope.interpretations) && !Array.isArray(envelope.signals)) {
+        return "statement response lacks request-bound receipt";
+      }
+    } catch { /* Raw parser reports malformed bytes. */ }
+  }
   if (parsed.model !== model) return `model ${String(parsed.model)} != ${model}`;
   if (parsed.request_profile !== requestProfile) {
     return `request_profile ${String(parsed.request_profile)} != ${requestProfile}`;
@@ -475,6 +516,18 @@ function inspectCachedIdentity(
     return "admission_identity is invalid";
   }
   return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
+}
+
+function inspectStatementCacheReceipt(entry: CachedExtractionEntry): string | null {
+  if (entry.source_statement === undefined) return null;
+  try {
+    const inspected = inspectStatementResponse(entry.source_statement.request, entry.raw_json);
+    if (canonicalJson(inspected.receipt) !== canonicalJson(entry.source_statement.receipt) ||
+        inspected.status === "unclassified_empty" || inspected.status !== entry.empty_classification) {
+      return "statement receipt or completion binding differs";
+    }
+    return null;
+  } catch { return "invalid statement cache receipt"; }
 }
 
 function isCachedExtractionAdmissionIdentity(

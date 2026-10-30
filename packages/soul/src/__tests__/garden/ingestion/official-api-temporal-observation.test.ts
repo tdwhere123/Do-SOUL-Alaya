@@ -6,8 +6,6 @@ import {
 import {
   createContext as createBaseContext,
   createExtractor,
-  interpretationEnvelope,
-  interpretationRelation,
   withOpenSemanticFactorGraph
 } from "./compute-provider-fixtures.js";
 
@@ -83,25 +81,18 @@ describe("official Garden temporal observation contract", () => {
     const source = "I have worked at Acme since March 2024.";
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(interpretationEnvelope([
-        interpretationRelation("worked", [
-          { role: "agent", text: "I" }
-        ], [
-          { role: "event_time", text: "March 2024" }
-        ])
-      ])),
+      extractor: createExtractor(JSON.stringify({ messages: [{ message_id: "user-1", statements: [{ text: source, relation: "employment" }] }] })),
       generateSignalId: () => "signal-source-time"
     });
     const [signal] = await provider.compile(source, {
       ...createContext(),
+      source_root_id: "root-source-time",
       turn_messages: [{ role: "user", content: source, message_id: "user-1" }]
     });
-    expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
+    expect(signal?.interpretation_contract).toBe("source-statements-v1");
     expect(signal?.object_kind).toBeNull();
     expect(signal?.confidence).toBeNull();
     expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
-    if (signal?.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
-    expect(signal.raw_payload.source_interpretation.candidates[0]?.qualifiers[0]?.phrase.text)
-      .toBe("March 2024");
+    expect(signal?.raw_payload).toMatchObject({ source_statement: { statement: { text: source, relation: "employment" } } });
   });
 });

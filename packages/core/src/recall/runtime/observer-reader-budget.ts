@@ -10,20 +10,6 @@ export function meterReaders(
   const source = readers.source;
   return {
     ...readers,
-    ...(readers.boundInterpretations === undefined ? {} : {
-      boundInterpretations: (args: Parameters<NonNullable<ObserverReaders["boundInterpretations"]>>[0]) => {
-        const page = readers.boundInterpretations!({ ...args, nativeByteLimit: memory.remaining });
-        memory.remaining = Math.max(0, memory.remaining - page.bytesRead - (page.nativeBytes ?? 0));
-        return page;
-      }
-    }),
-    ...(readers.sourceTextHints === undefined ? {} : {
-      sourceTextHints: (args: Parameters<NonNullable<ObserverReaders["sourceTextHints"]>>[0]) => {
-        const page = readers.sourceTextHints!({ ...args, nativeByteLimit: memory.remaining });
-        memory.remaining = Math.max(0, memory.remaining - page.bytesRead - (page.nativeBytes ?? 0));
-        return page;
-      }
-    }),
     ...(readers.sourceRoot === undefined ? {} : {
       sourceRoot: (args: Parameters<NonNullable<ObserverReaders["sourceRoot"]>>[0]) => {
         const page = readers.sourceRoot!({ ...args, nativeByteLimit: memory.remaining });

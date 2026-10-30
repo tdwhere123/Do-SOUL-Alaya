@@ -1,9 +1,18 @@
 import { createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
-import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-protocol";
+import { renderOfficialApiSourceCorpus, type SourceStatement } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { parsePostTurnExtractTaskPayload } from "../../../garden/post-turn-extract/task-payload.js";
+import { sourceStatementTaskRequests } from "../../../garden/post-turn-extract/source-statement-task.js";
+
+/** Recorded transport output echoes host IDs only; the receiver still owns admission. */
+export function recordedPostTurnResponses(taskId: string, payload: unknown, statements: readonly SourceStatement[]) {
+  const planned = sourceStatementTaskRequests(parsePostTurnExtractTaskPayload(payload), taskId);
+  return planned.requests.map((request, chunk) => ({ chunk_index: request.chunk_index,
+    raw_json: JSON.stringify({ messages: request.messages.map((message, index) => ({ message_id: message.message_id,
+      statements: chunk === 0 && index === 0 ? statements : [] })) }) }));
+}
 
 /** Happy-path queue fixtures retain actual source receipts, as the production producer does. */
 export function bindPostTurnTaskSource<T>(database: StorageDatabase, payload: T, sourceId: string): T {

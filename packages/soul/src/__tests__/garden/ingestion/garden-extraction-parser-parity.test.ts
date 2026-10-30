@@ -3,18 +3,17 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider,
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
-import type { SignalExtractor } from "../../../garden/extraction/pi-mono-extractor.js";
+import { receiveOfficialApiSourceInterpretations } from "../../../garden/ingestion/official-api/source-interpretation-receive.js";
+import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import { buildOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
 
 const fixturesDir = fileURLToPath(new URL("../../fixtures/garden-extraction-golden/", import.meta.url));
 const fixturesUrl = new URL("../../fixtures/garden-extraction-golden/", import.meta.url);
 
-describe("garden-extraction-parser-parity", () => {
-  it("skips historical signals-shaped goldens that are not live interpretation fixtures", async () => {
+describe("retained extraction parser parity", () => {
+  it("preserves original signal-shaped fixture meaning", async () => {
     const historical = (await loadFixtures()).filter((fixture) => fixture.kind === "historical_signals");
     expect(historical.length).toBeGreaterThan(0);
     for (const fixture of historical) {
@@ -25,39 +24,19 @@ describe("garden-extraction-parser-parity", () => {
     }
   });
 
-  it("emits the expected located interpretation count and assertion text", async () => {
+  it("inspects retained interpretation count and assertion text without publication", async () => {
     const live = (await loadFixtures()).filter((fixture) => fixture.kind === "interpretation");
     expect(live.some((fixture) => fixture.expectedCount > 0)).toBe(true);
     for (const fixture of live) {
       const source = fixture.turn.trim();
       const context = createContext(fixture.turn);
-      const extractor: SignalExtractor = {
-        extract: async (input) => {
-          expect(input.systemPrompt).toBe(OFFICIAL_API_SYSTEM_PROMPT);
-          expect(JSON.parse(input.userPrompt)).toEqual(
-            buildOfficialApiExtractionRequest(fixture.turn, context.turn_messages)
-          );
-          return { rawJson: fixture.responseJson };
-        }
-      };
-      const provider = new OfficialApiGardenProvider({
-        apiKey: "sk-test",
-        extractor,
-        now: () => "2026-05-11T06:00:00.000Z",
-        generateSignalId: () => "signal-fixture"
-      });
-
-      const actual = await provider.compile(fixture.turn, context);
-      expect(actual, fixture.name).toHaveLength(fixture.expectedCount);
-      for (const signal of actual) {
-        if (signal.interpretation_contract !== "source-interpretation-v1") throw new Error("expected interpretation signal");
-        expect(signal.signal_kind).toBe("potential_semantic_observation");
-        expect(signal.object_kind).toBeNull();
-        expect(signal.confidence).toBeNull();
-        expect(signal.interpretation_contract).toBe("source-interpretation-v1");
-        expect(signal.raw_payload.source_interpretation.outcome).toBe("candidates");
-        expect(signal.raw_payload.source_interpretation.assertion_binding.text).toContain(source);
-      }
+      const received = receiveOfficialApiSourceInterpretations(fixture.responseJson,
+        buildOfficialApiExtractionRequest(fixture.turn, context.turn_messages), {
+          sourceCorpus: buildOfficialApiSourceCorpus(fixture.turn, context.turn_messages), artifactKey: "artifact-1"
+        });
+      const candidates = received.located.filter(member => member.outcome === "candidates");
+      expect(candidates, fixture.name).toHaveLength(fixture.expectedCount);
+      for (const member of candidates) expect(member.assertion_binding.text).toContain(source);
     }
   });
 });

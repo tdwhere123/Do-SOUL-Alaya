@@ -265,7 +265,7 @@ async function emitPostTurnExtractSignals(
     runId: payload.run_id,
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
-    turnMessages: buildPostTurnConversationMessages(payload),
+    turnMessages: buildPostTurnConversationMessages(payload, row.id),
     sourceObservation,
     signalReceiver: input.signalReceiver,
     failedSignalIds,
@@ -419,8 +419,9 @@ async function compilePostTurnExtractTask(
     workspace_id: payload.workspace_id,
     run_id: payload.run_id,
     surface_id: null,
-    turn_messages: buildPostTurnConversationMessages(payload),
+    turn_messages: buildPostTurnConversationMessages(payload, taskId),
     artifact_key: `post-turn:${taskId}`,
+    source_root_id: payload.admitted_source_root_id,
     ...(sourceObservation === null ? {} : {
       source_observed_at: sourceObservation.observed_at,
       source_observation: sourceObservation

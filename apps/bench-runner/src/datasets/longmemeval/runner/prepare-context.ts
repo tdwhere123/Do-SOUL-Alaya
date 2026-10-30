@@ -33,8 +33,6 @@ import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
 } from "../../../runs/selection/contract.js";
-import { resolveSourceAssertionSupplementOptions } from
-  "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 import { createCurrentPostFillCacheAuthorityProof } from
   "../../../runs/snapshot/current/current-substrate-authority.js";
 import { readExtractionCacheManifest } from
@@ -251,9 +249,6 @@ function createLongMemEvalSeedRunner(
         sourcePacking
       })
     : undefined;
-  const sourceAssertionSupplement = resolveSourceAssertionSupplementOptions(
-    process.env
-  );
   return createCompileSeedRunner({
     sourcePacking,
     requiredTurnContents: requiredTurns.distinctTurnContents,
@@ -262,10 +257,7 @@ function createLongMemEvalSeedRunner(
     cacheRoot: extractionCacheRoot,
     ...(extractionCachePreflightProof === undefined ? {} : {
       extractionCachePreflightProof
-    }),
-    ...(sourceAssertionSupplement === undefined
-      ? {}
-      : { sourceAssertionSupplement })
+    })
   });
 }
 

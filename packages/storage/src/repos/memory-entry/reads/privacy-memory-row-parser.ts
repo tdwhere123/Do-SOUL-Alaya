@@ -1,3 +1,4 @@
+import { requireCurrentStatementMemory } from "../../source-index/statement-dependencies.js";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { requirePrivacyObjectAvailable } from "../../field/privacy-availability.js";
@@ -8,6 +9,7 @@ export function createPrivacyMemoryRowParser(database: StorageDatabase): RowPars
   return { parse(value) {
     const row = MemoryEntryRowParser.parse(value);
     requirePrivacyObjectAvailable(database, row.workspace_id, "memory_entry", row.object_id);
+    if (row.lifecycle_state !== "tombstone") requireCurrentStatementMemory(database, row.workspace_id, row.object_id);
     return row;
   } };
 }

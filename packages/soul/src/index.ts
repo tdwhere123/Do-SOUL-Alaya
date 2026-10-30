@@ -1,3 +1,7 @@
+export { sourceStatementSessionInput, emitSourceStatementSignals } from "./garden/ingestion/source-statement-signals.js";
+export { SOURCE_STATEMENTS_PROMPT, planSourceStatementSession, receiveSourceStatements,
+  extractSourceStatementSession, assertSourceStatementSessionReceipt, type SourceStatementTransport, type SourceStatementSessionEvent
+} from "./garden/ingestion/source-statements.js";
 export { selectObservedTemporalProjection } from "./garden/extraction/temporal/observed-projection.js";
 export {
   catalogEligibilityOfAssertionCount,
@@ -26,10 +30,6 @@ export {
   type OfficialApiInterpretationEntryRejection,
   type OfficialApiInterpretationReceiveReceipt
 } from "./garden/ingestion/official-api/source-interpretation-receive.js";
-export {
-  buildSourceInterpretationSignal,
-  emitLocatedInterpretationSignals
-} from "./garden/ingestion/official-api/source-interpretation-signal.js";
 export {
   DEFAULT_SOUL_GRAPH_DEPTH,
   DEFAULT_SOUL_GRAPH_LIMIT,
@@ -73,7 +73,7 @@ export {
   LIBRARIAN_CONSTANTS,
   Librarian,
   InMemoryHandoffGapHandler,
-  LocalHeuristics,
+  UnavailableGardenProvider,
   MaterializationRouter,
   buildEvidenceInput,
   GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,

@@ -7,6 +7,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import { CoreError, type FieldAtomicOutcome, type FieldFormationStores } from "@do-soul/alaya-core";
 import {
+  putSourceStatementArtifact, putSourceStatementMemoryBinding,
   factorFromRow,
   incidenceFromRow,
   jobFromRow,
@@ -44,6 +45,9 @@ export function createSqliteFieldFormationStores(input: Readonly<{
         content_bytes: row.source_body
       });
     },
+    putSourceStatementArtifact: artifact => putSourceStatementArtifact(input.database, artifact),
+    putSourceStatementMemoryBinding: (workspaceId, memoryId, evidenceId) =>
+      putSourceStatementMemoryBinding(input.database, workspaceId, memoryId, evidenceId),
     putRecord: (record, contentBytes) =>
       sourceRecordFromRow(repos.records.insert(recordToRow(record, contentBytes))),
     getHostInventory: (workspaceId, recordId) => repos.records.getHostInventory(workspaceId, recordId),

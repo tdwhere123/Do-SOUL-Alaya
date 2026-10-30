@@ -1,8 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
-import { collectOfficialApiExtractionCoverage } from "@do-soul/alaya-soul";
+import { collectOfficialApiExtractionCoverage, SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { computeExtractionTurnCacheKeys } from "../../compile-seed/compile-seed-cache.js";
 import {
-  buildLongMemEvalRoundMessages,
+  buildLongMemEvalRoundMessages, buildLongMemEvalSessionMessages,
   pairSessionIntoRounds,
   type LongMemEvalQuestion
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
@@ -10,6 +10,7 @@ import type {
   LongMemEvalSnapshotQuestion,
   LongMemEvalSnapshotSeedRound
 } from "../materialize.js";
+import { assertStatementRound } from "./statement-session-proof.js";
 import { assertSeedLedgerMaterializationProof } from "./seed-ledger-materialization-proof.js";
 import { assertDirectSourceEvidenceClosure } from "./direct-source-evidence-proof.js";
 import type { SourceAssertionSupplementBinding } from
@@ -52,7 +53,7 @@ export function assertQuestionLedger(
     if (canonical === undefined) throw new Error("snapshot canonical seed round order mismatch");
     assertRoundIdentity(
       round, canonical, extraction, source, semanticEntries, semanticBinding,
-      systemPrompt
+      systemPrompt, totals
     );
     assertRoundConservation(round);
     addClosureEntry(closure, round, extraction);
@@ -86,9 +87,22 @@ function assertRoundIdentity(
   source: LongMemEvalQuestion,
   semanticEntries: SemanticSupplementEntries,
   semanticBinding: SourceAssertionSupplementBinding | undefined,
-  systemPrompt: string
+  systemPrompt: string,
+  totals: LedgerTotals
 ): void {
   const content = expected.round.content.trim();
+  if (systemPrompt === SOURCE_STATEMENTS_PROMPT) {
+    if (actual.sessionIndex !== expected.sessionIndex || actual.roundIndex !== expected.roundIndex ||
+        actual.sessionId !== expected.sessionId || actual.hasAnswer !== expected.round.hasAnswer || actual.contentSha256 !== sha256(content)) {
+      throw new Error("snapshot canonical raw round identity mismatch");
+    }
+    const sessionMessages = buildLongMemEvalSessionMessages(source.haystack_sessions[expected.sessionIndex]!, source.haystack_dates[expected.sessionIndex]);
+    assertStatementRound({ round: actual, sessionMessages,
+      roundMessages: expected.round.messageIndices.map(index => sessionMessages[index]!), extraction,
+      seen: totals.statementSessions });
+    return;
+  }
+  if (actual.statementSession !== undefined) throw new Error("historical round cannot acquire a statement receipt");
   const turnMessages = buildLongMemEvalRoundMessages(
     source.haystack_sessions[expected.sessionIndex]!,
     expected.round,

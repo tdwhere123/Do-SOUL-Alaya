@@ -1,4 +1,6 @@
-import { extractSessions, type LocomoQa, type LocomoSample, type LocomoTurn } from "./dataset.js";
+import { IsoDatetimeStringSchema, type ConversationMessage } from "@do-soul/alaya-protocol";
+import { sourceStatementSession } from "../../runs/extraction/source-statement-request.js";
+import { extractSessions, type LocomoQa, type LocomoSample, type LocomoTurn, type LocomoSession } from "./dataset.js";
 import type { LocomoRunOptions } from "./runner-types.js";
 
 // invariant: sample_size counts the retrieval denominator across the full
@@ -38,21 +40,24 @@ export function buildLocomoSeedContent(turn: LocomoTurn): string {
     .join(" ");
 }
 
-export function collectDistinctLocomoTurnContents(
-  conversations: readonly LocomoSample[]
-): readonly string[] {
-  const turns = new Set<string>();
-  for (const conversation of conversations) {
-    for (const session of extractSessions(conversation.conversation)) {
-      for (const turn of session.turns) {
-        const content = buildLocomoSeedContent(turn).trim();
-        if (content.length > 0) {
-          turns.add(content);
-        }
-      }
-    }
+/** Both named participants are humans; their original speaker names stay in source text.
+ * Non-ISO session dates remain sidecar provenance, not invented timestamp precision.
+ */
+export function buildLocomoSessionMessages(session: LocomoSession): readonly ConversationMessage[] {
+  const recorded = IsoDatetimeStringSchema.safeParse(session.date_time);
+  return session.turns.map(turn => ({ message_id: turn.dia_id, role: "user", content: buildLocomoSeedContent(turn),
+    ...(recorded.success ? { created_at: recorded.data } : {}) }));
+}
+
+export function collectLocomoExtractionSessions(conversations: readonly LocomoSample[]) {
+  const sessions = new Map<string, { turnContent: string; turnMessages: readonly ConversationMessage[] }>();
+  for (const conversation of conversations) for (const session of extractSessions(conversation.conversation)) {
+    const turnMessages = buildLocomoSessionMessages(session);
+    if (turnMessages.length === 0) continue;
+    sessions.set(sourceStatementSession(turnMessages).sessionId, {
+      turnContent: session.turns.map(buildLocomoSeedContent).join("\n"), turnMessages });
   }
-  return [...turns];
+  return [...sessions.values()];
 }
 
 export function hasLocomoRetrievalEvidence(qa: LocomoQa): boolean {

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { isCacheOnlySeedExtractionPath, type SeedExtractionPath } from
   "@do-soul/alaya-eval";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt } from "../../extraction/request-artifact.js";
 import { resolveCompileSeedExtractionConfig } from
   "../../compile-seed/compile-seed-config.js";
 import { preflightExtractionCache } from "../../compile-seed/compile-seed-preflight.js";
@@ -134,7 +134,7 @@ export function assertCurrentPostFillCacheAuthorityProof(
     cacheRoot,
     manifestIdentity: identity,
     config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: extractionArtifactPrompt(undefined, undefined, config.sourcePacking),
     requiredTurnContents: input.requiredTurnContents,
     requiredExtractionTurns: input.requiredExtractionTurns,
     requiredQuestionWindow: input.requiredQuestionWindow
@@ -178,7 +178,7 @@ function inspectCurrentPostFillCacheAuthority(
     cacheRoot: input.cacheRoot,
     manifestIdentity: identity,
     config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: extractionArtifactPrompt(undefined, undefined, config.sourcePacking),
     requiredTurnContents: input.requiredTurnContents,
     requiredQuestionWindow: input.requiredQuestionWindow,
     liveExtractionPossible: false,
@@ -202,7 +202,7 @@ function assertIncompletePostFillCache(
   preflightExtractionCache({
     cacheRoot: input.cacheRoot,
     config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: extractionArtifactPrompt(undefined, undefined, config.sourcePacking),
     allowLiveExtraction: false,
     liveExtractionPossible: config.apiKey !== null,
     manifest,

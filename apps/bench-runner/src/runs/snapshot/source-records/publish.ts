@@ -2,21 +2,19 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
-  createSourceSemanticInterpretationPublication, deriveAddressableSpanViews, EvidenceService,
+  deriveAddressableSpanViews,
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
-import { sourceSemanticBaseRequestDigest, sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
-  type SourceSemanticHostPreparation, type SourceSemanticRequest } from "@do-soul/alaya-soul";
-import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
+import { SourceSemanticUnsupportedSourceSchema,
+  type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
+import { AlayaError, IsoDatetimeStringSchema, canonicalJson,
   sourceSemanticInterpretationIdentity,
   SourceRecordIdentitySchema, SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
 import {
-  closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
+  closeCachedDatabase, initDatabase, sourceRecordFromRow,
   SqliteFieldSourceRecordRepo
 } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
-import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
-import { publishAdmittedSourceSemanticInterpretation } from "../../extraction/cache/source-semantic-runtime-publish.js";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { hashRegularFileNoFollow } from "../bound-file.js";
 import { currentBenchScope, trackBenchBody, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../../harness/daemon-task.js";
@@ -180,6 +178,7 @@ export function readNativeSourcePublicationReport(snapshotPathInput: string, ori
 
 type UnboundSourceInterpretationArtifact = Readonly<{ population: string; generation_key: string; status: "invalid" | "unbound" }>;
 
+/** Captures raw sources only. Historical passive artifacts cannot be republished through this owner. */
 export async function publishSourceSemanticSnapshot(input: Readonly<{
   snapshotPath: string;
   dataDirRoot: string;
@@ -192,6 +191,10 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   sourceLimits?: Readonly<{ maxSources: number; maxContentBytes: number }>;
   importEffects?: SourceRecordsImportEffects;
 }>): Promise<SourcePublicationReport> {
+  if (input.populations.some(population => (population.cacheRoots?.length ?? 0) > 0 ||
+      (population.publicationAssociations?.length ?? 0) > 0) || (input.descriptorExportSourceIds?.length ?? 0) > 0) {
+    throw new AlayaError("UNAVAILABLE", "passive source interpretation publication is retired; retained snapshots are read-only");
+  }
   const importEffects = resolveSourceRecordsImportEffects(input.importEffects);
   const scope = currentBenchScope();
   const publishSnapshot = async (): Promise<SourcePublicationReport> => {
@@ -211,14 +214,7 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
         nativePopulation.nativeSnapshotPath === undefined)) {
       throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
     }
-    const { preparations, requests } = prepareCensusSources(census, input.populations);
-    const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
-    if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
-        [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
-      throw new AlayaError("VALIDATION", "publication descriptor export must select at most ten current sources");
-    }
-    // Validate and inspect associations before creating any database or source record.
-    const retained = indexRetainedSemantics(census, input.populations, preparations, requests);
+    const preparations = prepareCensusSources(census, input.populations);
     return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
       bindIsolatedSnapshot(dataDirRoot, snapshotPath);
       const dispositions = nativePopulation === undefined
@@ -228,12 +224,9 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
         : copyAdmittedNativeSources(nativePopulation.nativeSnapshotPath!, snapshotPath, census[0]!, preparations,
           workspaceId, runId);
       refuseBenchWorkAfterCancel();
-      await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId,
-        descriptorExport);
-      refuseBenchWorkAfterCancel();
       checkpointSnapshot(snapshotPath);
       const report = sealReport({
-        recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: retained.unbound
+        recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: []
       });
       atomicWriteJson(`${snapshotPath}.publication.json`, report);
       return report;
@@ -258,7 +251,6 @@ function assertPublicationCensus(census: readonly SourceCensus[], limits: Readon
 
 function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]) {
   const preparations = new Map<string, HostPreparation>();
-  const requests = new Map<string, SourceSemanticRequest>();
   for (const population of census) {
     const config = populations.find(row => row.name === population.population)?.openSemantics;
     const generation = config ?? EXTRACTION_OPEN_SEMANTICS_GENERATION;
@@ -267,10 +259,9 @@ function prepareCensusSources(census: readonly SourceCensus[], populations: read
         source.attribution_context, source.source_role);
       if (prepared === undefined) throw new AlayaError("CONFLICT", "complete source publication has no host preparation");
       preparations.set(source.source_id, prepared.status === "ready" ? { status: "ready" } : prepared.disposition);
-      if (prepared.status === "ready") requests.set(source.source_id, prepared.semantic);
     }
   }
-  return { preparations, requests };
+  return preparations;
 }
 
 async function loadCensus(populations: readonly SourcePublicationPopulation[]): Promise<readonly SourceCensus[]> {
@@ -395,177 +386,6 @@ async function admitOneSource(
   }
 }
 
-async function publishRetainedSemantics(
-  snapshotPath: string, census: readonly SourceCensus[],
-  joined: ReadonlyMap<string, RetainedSemantics>,
-  dispositions: SourcePublicationDisposition[],
-  workspaceId: string, runId: string, descriptorExport: ReadonlySet<string>
-): Promise<void> {
-  refuseBenchWorkAfterCancel();
-  const database = initDatabase({ filename: snapshotPath });
-  try {
-    const publication = createSourceSemanticInterpretationPublication({
-      stores: sourceLookupStores(database),
-      evidenceService: new EvidenceService({
-        eventLogRepo: new SqliteEventLogRepo(database),
-        evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
-        runtimeNotifier: { notifyEntry: async () => undefined }
-      }),
-      sha256: fieldContractSha256
-    });
-    for (const [index, source] of census.flatMap((row) => row.records).entries()) {
-      const current = dispositions[index]!;
-      if (current.admission !== "admitted" || current.host_preparation.status === "unsupported_source") continue;
-      dispositions[index] = await publishOneSource(
-        publication, joined.get(source.source_id), source, current, workspaceId, runId,
-        descriptorExport.has(source.source_id)
-      );
-      refuseBenchWorkAfterCancel();
-    }
-  } finally {
-    closeCachedDatabase(snapshotPath);
-  }
-}
-
-async function publishOneSource(
-  publication: ReturnType<typeof createSourceSemanticInterpretationPublication>,
-  retained: RetainedSemantics | undefined,
-  source: SourceCensusRecord,
-  current: SourcePublicationDisposition,
-  workspaceId: string, runId: string, exportDescriptor: boolean
-): Promise<SourcePublicationDisposition> {
-  if (retained === undefined) return current;
-  if (retained.status !== "hit") {
-    return { ...current, source_interpretation: retained.status, ...(retained.key === undefined ? {} : { source_interpretation_generation_key: retained.key }) };
-  }
-  const native = retained.native;
-  const source_interpretation = classifyRetainedInterpretation(native.admitted.outcome.status);
-  const generation = { source_interpretation, source_interpretation_generation_key: retained.key,
-    source_interpretation_binding: { kind: "host_publication_association" as const, request_digest: native.requestDigest } };
-  if (source_interpretation !== "interpreted") return { ...current, ...generation };
-  const request = native.admitted.request;
-  const locations = request.source_request.assertion_locations;
-  const interpretation = native.admitted.interpretation;
-  const draft = native.admitted.draft;
-  if (interpretation === undefined && draft === undefined) {
-    return { ...current, ...generation, publication: "failed", publication_error: "interpreted source interpretation has no draft or normalized interpretation" };
-  }
-  if (locations === undefined) {
-    return { ...current, ...generation, publication: "failed", publication_error: "current source request has no host-owned assertion locations" };
-  }
-  if (request.source_request.attribution_context === undefined) {
-    return { ...current, ...generation, publication: "failed",
-      publication_error: "retained source request has no captured attribution binding" };
-  }
-  try {
-    const published = await publishAdmittedSourceSemanticInterpretation({
-      publication, workspaceId, runId, artifactKey: source.source_id, source: source.content_bytes,
-      catalog: sourceSemanticRequestCatalog(request), producer_id: request.source_request.producer_capability.producer_id,
-      producer_version: request.source_request.producer_capability.producer_version,
-      contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
-      ...(interpretation === undefined ? { draft } : { interpretation: SourceSemanticInterpretationSchema.parse(interpretation) }),
-      assertion_locations: locations,
-      attribution_context: request.source_request.attribution_context
-    });
-    return {
-      ...current, ...generation, publication: "published",
-      interpretation_id: published.bound.interpretation_id, evidence_object_id: published.evidence.object_id,
-      ...(exportDescriptor ? { correspondence_descriptor: {
-        source_interpretation_id: published.bound.interpretation_id,
-        interpretation: published.bound.interpretation } } : {})
-    };
-  } catch (error) {
-    refuseBenchWorkAfterCancel();
-    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
-    return {
-      ...current, ...generation, publication: "failed",
-      publication_error: error instanceof Error ? error.message.slice(0, 300) : String(error)
-    };
-  }
-}
-
-type Inspected = Extract<ReturnType<typeof inspectCachedSourceSemantic>, { status: "hit" }>;
-type RetainedSemantics =
-  | Readonly<{ status: "invalid" | "conflict"; key?: string }>
-  | Readonly<{ status: "hit"; key: string; native: Inspected }>;
-
-function indexRetainedSemantics(
-  census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[],
-  preparations: ReadonlyMap<string, HostPreparation>, requests: ReadonlyMap<string, SourceSemanticRequest>
-): { joined: Map<string, RetainedSemantics>; unbound: UnboundSourceInterpretationArtifact[] } {
-  const joined = new Map<string, RetainedSemantics>();
-  const unbound: UnboundSourceInterpretationArtifact[] = [];
-  for (const population of populations) {
-    const sources = new Map(census.find((row) => row.population === population.name)!.records.map((source) => [source.source_id, source]));
-    const bindings = population.publicationAssociations ?? [];
-    const cacheRoots = population.cacheRoots ?? [];
-    if (new Set(cacheRoots.map((root) => resolve(root))).size !== cacheRoots.length) {
-      throw new AlayaError("VALIDATION", "retained source interpretation cache roots repeat a generation directory");
-    }
-    if (bindings.some((binding) => "generation_key" in binding) && cacheRoots.length === 0) {
-      throw new AlayaError("CONFLICT", "retained source interpretation association requires a cache root");
-    }
-    const boundSources = new Set<string>();
-    for (const binding of bindings) {
-      const source = sources.get(binding.source_id);
-      if (source === undefined || source.source_version !== binding.source_version) {
-        throw new AlayaError("CONFLICT", "retained source-interpretation binding does not match the frozen source census");
-      }
-      if (boundSources.has(binding.source_id)) throw new AlayaError("CONFLICT", "retained source interpretation association repeats a source");
-      boundSources.add(binding.source_id);
-      const preparation = preparations.get(binding.source_id)!;
-      if ("generation_key" in binding) {
-        if (preparation.status !== "ready" || !/^[a-f0-9]{64}$/u.test(binding.generation_key) ||
-            !/^[a-f0-9]{64}$/u.test(binding.request_digest)) {
-          throw new AlayaError("CONFLICT", "retained source-interpretation binding has no legal ready request");
-        }
-      } else if (preparation.status !== "unsupported_source" || canonicalJson(binding) !== canonicalJson({
-        source_id: source.source_id, source_version: source.source_version,
-        content_digest: source.content_digest, corpus_digest: source.corpus_digest,
-        ...preparation, provider_attempts: 0
-      })) {
-        throw new AlayaError("CONFLICT", "retained unsupported source disposition differs from current census or contract");
-      }
-    }
-    const seenKeys = new Set<string>();
-    for (const cacheRoot of cacheRoots) {
-      for (const key of listRetainedSourceSemanticKeys(cacheRoot)) {
-        if (seenKeys.has(key)) throw new AlayaError("CONFLICT", "retained source interpretation generation key occurs in multiple cache roots");
-        seenKeys.add(key);
-        const native = inspectCachedSourceSemantic(cacheRoot, key, population.model, population.requestProfile);
-        const matched = bindings.filter((binding): binding is Extract<SourcePublicationAssociation, { generation_key: string }> =>
-          "generation_key" in binding && binding.generation_key === key);
-        if (matched.length === 0) {
-          unbound.push({ population: population.name, generation_key: key, status: native.status === "hit" ? "unbound" : "invalid" });
-        }
-        for (const binding of matched) {
-          const source = sources.get(binding.source_id)!;
-          if (native.status === "hit" && (population.openSemantics !== undefined ||
-              native.admitted.request.source_request.generation_task !== undefined) &&
-              sourceSemanticBaseRequestDigest(native.admitted.request) !==
-                sourceSemanticBaseRequestDigest(requests.get(source.source_id)!)) {
-            throw new AlayaError("CONFLICT", "retained source interpretation differs from declared generation");
-          }
-          const valid = native.status === "hit" &&
-            sourceSemanticRequestCatalog(native.admitted.request).source_digest === source.corpus_digest &&
-            native.requestDigest === binding.request_digest;
-          const existing = joined.get(source.source_id);
-          if (existing !== undefined && (existing.status !== "hit" || existing.key !== key)) {
-            joined.set(source.source_id, { status: "conflict", key });
-          } else {
-            joined.set(source.source_id, valid && native.status === "hit" ? { status: "hit", key, native } : { status: "invalid", key });
-          }
-        }
-      }
-    }
-    for (const binding of bindings) {
-      if (!("generation_key" in binding)) continue;
-      if (!joined.has(binding.source_id)) joined.set(binding.source_id, { status: "invalid", key: binding.generation_key });
-    }
-  }
-  return { joined, unbound };
-}
-
 export function listRetainedSourceSemanticKeys(cacheRoot: string): readonly string[] {
   const keys: string[] = [];
   if (!existsSync(cacheRoot)) return keys;
@@ -633,13 +453,6 @@ function sealReport(input: Readonly<{
       input.dispositions.every((row) => row.source_interpretation !== "invalid" && row.source_interpretation !== "conflict" &&
         row.source_interpretation !== "copied_uninspected")
   };
-}
-
-function classifyRetainedInterpretation(status: string): SourcePublicationDisposition["source_interpretation"] {
-  if (status === "interpreted" || status === "abstained" || status === "no_executable_proposition" || status === "no_eligible_source") {
-    return status;
-  }
-  return "invalid";
 }
 
 function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisposition,

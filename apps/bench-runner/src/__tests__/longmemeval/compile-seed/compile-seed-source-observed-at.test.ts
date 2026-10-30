@@ -1,76 +1,65 @@
+import { afterAll, expect, it, vi } from "vitest";
+const boundary = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary({ ownedTemporaryFixtures: true });
+});
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
-import { initDatabase } from "@do-soul/alaya-storage";
-import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequest,
-  buildOfficialApiSourceCorpus, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { initDatabase, SqliteSignalRepo } from "@do-soul/alaya-storage";
+import type { SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { startBenchDaemon } from "../../../harness/daemon.js";
-import { createCachingSignalExtractor, createCompileSeedRunner } from "../../../runs/compile-seed.js";
-import { CREDENTIALLED_CONFIG } from "./compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest, fixtureAttemptAuthority,
-  providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
+import { admitStatementSessionCache, CREDENTIALLED_CONFIG } from "./compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
-it("reuses raw interpretations while deriving inclusive memory dates from each retained source clock", async () => {
-  const root = await mkdtemp(join(tmpdir(), "compile-seed-observed-"));
+afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
+
+it("retains exact or unknown message clocks without inventing an inclusive event interval from relative statement text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "statement-recorded-time-"));
   let daemon: Awaited<ReturnType<typeof startBenchDaemon>> | undefined;
-  let db: ReturnType<typeof initDatabase> | undefined;
-  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
-  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
+  let database: ReturnType<typeof initDatabase> | undefined;
   try {
-    const cacheRoot = join(root, "cache");
-    writeExtractionCacheTestManifest({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
-    const rawJson = JSON.stringify({ interpretations: [{
-      assertion_id: 1, relations: [{ predicate: { text: "completed" },
-        arguments: [{ role: "object", phrase: { text: "the review" } }],
-        qualifiers: [{ role: "time", phrase: { text: "today" } }] }]
-    }] });
-    const extract = vi.fn(async (input) => providerBackedResponseResult(input, rawJson));
+    const cacheRoot = join(root, "cache"), config = { ...CREDENTIALLED_CONFIG, sourcePacking: "session-statements" as const };
+    writeExtractionCacheTestManifest({ cacheRoot, model: config.model,
+      providerUrl: config.providerUrl, systemPrompt: SOURCE_STATEMENTS_PROMPT });
     const source = "I completed the review today.";
-    const messages = [{ role: "user" as const, content: source }];
-    await createCachingSignalExtractor({
-      delegate: { extract }, config: CREDENTIALLED_CONFIG, cacheRoot,
-      ...fixtureAttemptAuthority({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
-        requestProfile: CREDENTIALLED_CONFIG.requestProfile })
-    }).extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(source, messages)),
-      sourceCorpus: buildOfficialApiSourceCorpus(source, messages) });
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot,
-      extractorFactory: () => ({ extract }), skipPreflight: true });
-    daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"), workspaceId: "observed-source", runId: "observed-source-run" });
-    const memoryIds: string[] = [];
-    for (const [index, sourceObservedAt] of ["2024-06-15T14:30:00.000Z", "2024-06-16T14:30:00.000Z"].entries()) {
-      const result = await runner.seedTurn({ daemon, turnContent: "I completed the review today.",
-        turnMessages: [{ message_id: `trusted-user-${index}`, role: "user", content: "I completed the review today." }],
-        evidenceRefBase: `q-s-r-${index}`, seedIndex: index, workspaceId: daemon.workspaceId,
-        runId: daemon.runId, sourceObservedAt });
+    const times = ["2024-06-15T14:30:00.000Z", "2024-06-16T14:30:00.000Z", null];
+    const messages = times.map((createdAt, index) => ({ message_id: `recorded-user-${index}`,
+      role: "user" as const, content: source, ...(createdAt === null ? {} : { created_at: createdAt }) }));
+    const rawJson = vi.fn((request: SourceStatementRequest) => {
+      expect(request.messages.map((message: { recorded_at: string | null }) => message.recorded_at)).toEqual(times);
+      return JSON.stringify({ messages: request.messages.map((message: { message_id: string }) => ({
+        message_id: message.message_id, statements: [{ text: source, relation: "recorded event" }] })) });
+    });
+    await admitStatementSessionCache({ cacheRoot, config, messages, rawJson });
+    const delegate = vi.fn(async () => { throw new Error("admitted session must not redispatch"); });
+    const runner = createCompileSeedRunner({ config, cacheRoot, extractorFactory: () => ({ extract: delegate }) });
+    daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"), workspaceId: "recorded-source", runId: "recorded-source-run" });
+    const rounds = messages.map((message, seedIndex) => ({ seedIndex, turnContent: source, turnMessages: [message] }));
+    const seeds = [];
+    for (const round of rounds) {
+      const result = await runner.seedTurn({ daemon, ...round, sourceSession: messages, sourceSessionRounds: rounds,
+        evidenceRefBase: `raw-round-${round.seedIndex}`, workspaceId: daemon.workspaceId, runId: daemon.runId });
       expect(result.seeds).toHaveLength(1);
-      const memoryId = result.seeds[0]!.memoryId;
-      if (memoryId === undefined) throw new Error("expected memory publication");
-      memoryIds.push(memoryId);
+      seeds.push(result.seeds[0]!);
     }
-    expect(extract).toHaveBeenCalledTimes(1);
-    expect(runner.stats.cacheHits).toBe(2);
-    db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-    const rows = memoryIds.map((id) => db!.connection.prepare(
-      "SELECT content, event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?"
-    ).get(id));
-    expect(rows).toEqual([15, 16].map((day) => ({
-      content: "User: I completed the review today.",
-      event_time_start: `2024-06-${day}T00:00:00.000Z`,
-      event_time_end: `2024-06-${day}T23:59:59.999Z`,
-      time_precision: "day", time_source: "relative_resolved"
-    })));
-    const unknown = await runner.seedTurn({ daemon, turnContent: "I completed the review today.",
-      evidenceRefBase: "q-s-r-unknown", seedIndex: 2, workspaceId: daemon.workspaceId, runId: daemon.runId });
-    expect(unknown.seeds).toHaveLength(1);
-    expect(db.connection.prepare("SELECT event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?")
-      .get(unknown.seeds[0]!.memoryId)).toEqual({ event_time_start: null, event_time_end: null,
-        time_precision: null, time_source: null });
-    expect(extract).toHaveBeenCalledTimes(1);
+    expect(rawJson).toHaveBeenCalledOnce(); expect(delegate).not.toHaveBeenCalled();
+    expect(runner.stats).toMatchObject({ cacheHits: 1, llmCalls: 0, factsProduced: 3 });
+    database = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+    const signals = new SqliteSignalRepo(database);
+    for (const [index, seed] of seeds.entries()) {
+      expect(seed.kind).toBe("memory_entry");
+      expect(await signals.getById(seed.signalId)).toMatchObject({ raw_payload: { source_statement: {
+        message: { recorded_at: times[index], text: source }, statement: { text: source, relation: "recorded event" } } } });
+      expect(database.connection.prepare("SELECT content, event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?")
+        .get(seed.memoryId)).toEqual({ content: source, event_time_start: null, event_time_end: null,
+          time_precision: null, time_source: null });
+    }
+    expect(database.connection.prepare("SELECT count(*) AS count FROM source_records").get()).toEqual({ count: 3 });
   } finally {
     try { await daemon?.shutdown(); }
-    finally { db?.close(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+    finally { database?.close(); await rm(root, { recursive: true, force: true }); }
   }
-});
+}, 60_000);

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiSourcePacketRequest, receiveOfficialApiSourcePacket } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT, parseOfficialApiSourcePacketRequest, receiveOfficialApiSourcePacket } from "@do-soul/alaya-soul";
 import { prepareSourceRequestWorkset } from "../../../runs/extraction/fill/source-request-workset.js";
 import { computeExtractionTurnCacheKeys } from "../../../runs/compile-seed/cache/cache-key.js";
 import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
@@ -14,11 +14,12 @@ import {
 } from "../../../runs/extraction/turn-contents.js";
 import type { PreparedExtractionFill } from "../../../runs/extraction/fill/fill-preparation.js";
 import { buildExtractionFillQuestion, groundedExtractor } from "./fixture.js";
+import { describeLongMemEvalSessionTime } from "../../../datasets/longmemeval/ingestion/source-time.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 
 const config = {
   model: "gemini-2.5-flash-lite", requestProfile: "provider-default-v1" as const,
-  providerUrl: "https://fixture.invalid/v1", apiKey: null
+  providerUrl: "https://fixture.invalid/v1", apiKey: null, sourcePacking: "session-statements" as const
 };
 
 function turn(text: string, id = "message-1"): LongMemEvalExtractionTurn {
@@ -35,7 +36,7 @@ describe("fresh Batch source workset", () => {
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), "batch-workset-")); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it("retains distinct question rounds, conditionals and assistant context before open semantic request planning", () => {
+  it("reconstructs retained semantic request identities without executing or admitting them", () => {
     const questions = [buildExtractionFillQuestion("questions", "Where is the atlas?", "When will Talia leave?")];
     const inspected = inspectTurnContentKeySpace(questions, undefined, true);
     expect(inspected.distinctExtractionTurns).toHaveLength(2);
@@ -43,11 +44,14 @@ describe("fresh Batch source workset", () => {
     const source = turn("If Talia calls, Niko will leave. Talia placed an atlas on the desk. She then opened it.");
     const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([...inspected.distinctExtractionTurns, source]),
-      config: { ...config, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION }
+      config: { ...config, sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION }
     } });
     expect(plan.lines).toHaveLength(3);
     expect(plan.deterministicEmptyRequests).toEqual([]);
-    const texts = plan.requests.flatMap((item) => item.request.source_assertions.map((row) => row.text));
+    const texts = plan.requests.flatMap((item) => {
+      if ("messages" in item.request) throw new Error("expected retained semantic request");
+      return item.request.source_assertions.map(row => row.text);
+    });
     expect(texts).toEqual(expect.arrayContaining([
       "User: Where is the atlas?", "User: When will Talia leave?", "Assistant: Acknowledged.",
       "User: If Talia calls, Niko will leave.", "She then opened it."
@@ -83,20 +87,38 @@ describe("fresh Batch source workset", () => {
       excess, "complete-source", undefined, EXTRACTION_OPEN_SEMANTICS_GENERATION)).toEqual([]);
   });
 
-  it("shares duplicate request work while retaining distinct original message occurrences", () => {
+  it("keeps equal-text requests distinct when their captured host identities differ", () => {
     const first = turn("I moved to Berlin in March.", "one");
     const second = turn(first.turnContent, "two");
     const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
-      ...prepared([first]), occurrenceExtractionTurns: [first, second]
+      ...prepared([first, second]), occurrenceExtractionTurns: [first, second]
     } });
-    expect(plan.lines).toHaveLength(1);
+    expect(plan.lines).toHaveLength(2);
     expect(plan.units).toHaveLength(2);
-    expect(new Set(plan.units.map((unit) => "semanticKey" in unit ? unit.semanticKey : undefined)).size).toBe(1);
-    expect(new Set(plan.lines[0]!.unitKeys).size).toBe(2);
-    expect(plan.units.every((unit) => "datasetRevision" in unit.binding && unit.binding.datasetRevision === "synthetic-revision")).toBe(true);
-    expect(plan.lines[0]!.key).toBe(computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, first
+    expect(new Set(plan.units.map(unit => unit.binding.occurrenceIdentity)).size).toBe(2);
+    expect(plan.lines.every(line => line.unitKeys.length === 1)).toBe(true);
+    const revised = prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
+      ...prepared([first, second]), datasetRevision: "changed-revision" } });
+    expect(revised.lines.map(line => line.key)).toEqual(plan.lines.map(line => line.key));
+    const identities = new Set(plan.units.map(unit => unit.binding.occurrenceIdentity));
+    expect(revised.units.every(unit => !identities.has(unit.binding.occurrenceIdentity))).toBe(true);
+    expect(plan.lines.map(line => line.key)).toContain(computeExtractionTurnCacheKeys(
+      config.model, config.requestProfile, SOURCE_STATEMENTS_PROMPT, first, config.sourcePacking
     )[0]);
+  });
+
+  it("does not reuse a coverage memo entry across changed or absent recorded source dates", () => {
+    const base = turn("The recorded content is unchanged.", "same-host");
+    const sources = [undefined, "2025-12-01", "2025-12-02"].map(date => ({ ...base,
+      turnMessages: [{ ...base.turnMessages[0]!, ...(date === undefined ? {} : { source_time: describeLongMemEvalSessionTime(date)! }) }]
+    }));
+    const plan = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(sources) });
+    expect(plan.lines).toHaveLength(3);
+    expect(new Set(plan.lines.map(line => line.key)).size).toBe(3);
+    expect(plan.requests.map(item => {
+      if (!("messages" in item.request)) throw new Error("expected session statement request");
+      return item.request.messages[0]!.recorded_time?.raw ?? null;
+    })).toEqual(expect.arrayContaining([null, "2025-12-01", "2025-12-02"]));
   });
 
   it("keeps canonical lines and source identities stable under source order and route changes", () => {
@@ -151,11 +173,14 @@ describe("fresh Batch source workset", () => {
       executionCacheKeys: new Set(["foreign"]) })).toThrow("outside the selected source window");
   });
 
-  it("keeps zero-assertion requests local and refuses an incomplete occurrence inventory", () => {
+  it("preserves empty host messages without fabricating deterministic-empty shards and refuses incomplete inventory", () => {
     const empty = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared([turn("")]) });
-    expect(empty.lines).toEqual([]);
-    expect(empty.deterministicEmptyRequests).toHaveLength(1);
-    expect(empty.units).toEqual([]);
+    expect(empty.lines).toHaveLength(1);
+    expect(empty.deterministicEmptyRequests).toEqual([]);
+    expect(empty.units).toHaveLength(1);
+    const unbound = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared([{ turnContent: "", turnMessages: [] }]) });
+    expect(unbound.lines).toEqual([]);
+    expect(unbound.deterministicEmptyRequests).toEqual([]);
     expect(() => prepareSourceRequestWorkset({ cacheRoot: root, prepared: {
       ...prepared([turn("I moved to Berlin in March.")]), occurrenceExtractionTurns: []
     } })).toThrow("does not cover");
@@ -165,7 +190,7 @@ describe("fresh Batch source workset", () => {
     const questions = ["first", "second"].map((id) => buildExtractionFillQuestion(
       id, "I moved to Berlin in March.", "My favorite hobby is cycling."
     ));
-    const inspected = inspectTurnContentKeySpace(questions);
+    const inspected = inspectTurnContentKeySpace(questions, config.sourcePacking);
     expect(inspected.turnOccurrences).toBe(4);
     expect(inspected.distinctExtractionTurns).toHaveLength(2);
     expect(inspected.occurrenceExtractionTurns).toHaveLength(4);
@@ -186,14 +211,16 @@ describe("fresh Batch source workset", () => {
       { message_id: "u1", role: "user" as const, content: "I completed alpha." },
       { message_id: "a1", role: "assistant" as const, content: "Acknowledged." }
     ] };
-    const input = { ...prepared([source]), config: { ...config, sourceInterpretationProfile } };
+    const input = { ...prepared([source]), config: { ...config, sourcePacking: "reference-eight" as const, sourceInterpretationProfile } };
     const workset = prepareSourceRequestWorkset({ cacheRoot: root, prepared: input });
     const item = workset.requests[0]!, request = parseOfficialApiSourcePacketRequest(JSON.parse(item.line.userPrompt));
     expect(item.line.key).toMatch(/^[a-f0-9]{64}$/u);
     expect(item.line.key).toBe(computeExtractionTurnCacheKeys(config.model, config.requestProfile, item.line.systemPrompt,
       source, undefined, sourceInterpretationProfile)[0]);
+    const unit = item.units[0]!;
+    if (!("sourceCorpus" in unit)) throw new Error("expected retained packet unit");
     expect(receiveOfficialApiSourcePacket('{"contract":"source-interpretation-response-v2","packet":null}', request,
-      { sourceCorpus: item.units[0]!.sourceCorpus, artifactKey: "unbound", producerId: "control" }).status).toBe("empty");
+      { sourceCorpus: unit.sourceCorpus, artifactKey: "unbound", producerId: "control" }).status).toBe("empty");
     expect(() => receiveOfficialApiSourcePacket('{"contract":"source-interpretation-response-v2","packet":null}', request,
       { sourceCorpus: source.turnContent, artifactKey: "unbound", producerId: "control" })).toThrow(/generation/u);
     const changed = prepareSourceRequestWorkset({ cacheRoot: root, prepared: { ...input, config: { ...input.config,

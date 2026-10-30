@@ -253,7 +253,7 @@ export function guardSourceFactDependency(
     ? undefined : env.get(guard.variable);
   if (guard.kind === "query_predicate") {
     const predicate = classifyQueryPredicate(guard.predicate_name);
-    return predicate.kind === "frozen" || predicate.kind === "proposal_lookup"
+    return predicate.kind === "frozen"
       ? objectForFilters(guard, env, endpoints) : undefined;
   }
   return undefined;

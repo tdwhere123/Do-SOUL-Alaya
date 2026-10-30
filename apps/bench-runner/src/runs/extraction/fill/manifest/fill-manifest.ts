@@ -57,7 +57,7 @@ export function buildFillManifest(input: {
     model_family: input.config.modelFamily ?? input.config.model,
     request_profile: input.config.requestProfile,
     provider_url: input.config.providerUrl,
-    system_prompt_sha256: computeSystemPromptSha256(extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics)),
+    system_prompt_sha256: computeSystemPromptSha256(extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics, input.config.sourcePacking)),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: input.variant.replace(/_/u, "-"),
     dataset_revision: input.datasetRevision,

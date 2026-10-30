@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenRole, GardenTaskKind, GardenTier } from "@do-soul/alaya-protocol";
 import { buildGardenTaskEvidenceFallbackSignalId, buildGardenTaskSignalId } from "../../../garden/support/task-signal-id.js";
-import { readRetainedPostTurnSource } from "./post-turn-source-fixture.js";
+import { readRetainedPostTurnSource, recordedPostTurnResponses } from "./post-turn-source-fixture.js";
 import {
   cleanupGardenMcpHarnesses,
   createGardenMcpHarness
@@ -40,7 +40,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await completeTask(harness, taskId, [candidateSignal()]);
+    await completeTask(harness, taskId, [candidateStatement()]);
 
     await expect(harness.signalRepo.getById(buildGardenTaskSignalId(taskId, 0))).resolves.toBeTruthy();
     await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
@@ -77,8 +77,8 @@ describe("external post-turn evidence finalization", () => {
 
     await expect(completeTask(harness, taskId, [])).rejects.toThrow("MCP memory tool call failed.");
     await claimTask(harness, taskId);
-    await expect(completeTask(harness, taskId, [candidateSignal()])).rejects.toThrow(
-      "candidate_signals changed after a previous partial completion attempt"
+    await expect(completeTask(harness, taskId, [candidateStatement()])).rejects.toThrow(
+      "source_statement_responses changed after a previous partial completion attempt"
     );
   });
 
@@ -109,7 +109,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [candidateSignal()])).rejects.toThrow(
+    await expect(completeTask(harness, taskId, [candidateStatement()])).rejects.toThrow(
       "completion claim changed before candidate signal emission"
     );
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
@@ -183,24 +183,17 @@ async function claimTask(
 async function completeTask(
   harness: Awaited<ReturnType<typeof createGardenMcpHarness>>,
   taskId: string,
-  candidateSignals: readonly ReturnType<typeof candidateSignal>[],
+  statements: readonly ReturnType<typeof candidateStatement>[],
   status: "completed" | "failed" = "completed"
 ): Promise<unknown> {
   return await harness.callTool("garden.complete_task", {
     task_id: taskId,
     status,
-    result_envelope: { candidate_signals: candidateSignals }
+    result_envelope: { source_statement_responses: recordedPostTurnResponses(taskId,
+      harness.gardenTaskRepo.findById(taskId)!.payload, statements) }
   });
 }
 
-function candidateSignal() {
-  return {
-    signal_kind: "potential_claim" as const,
-    object_kind: "memory_entry" as const,
-    scope_hint: "project" as const,
-    domain_tags: ["evidence"],
-    confidence: 0.8,
-    evidence_refs: [],
-    raw_payload: { observation: "Extraction produced a deferred memory candidate." }
-  };
+function candidateStatement() {
+  return { text: "Extraction produced a deferred memory candidate.", relation: "recorded observation" };
 }

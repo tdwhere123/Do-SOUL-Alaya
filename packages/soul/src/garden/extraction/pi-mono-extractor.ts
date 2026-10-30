@@ -12,13 +12,17 @@ export interface SignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
+    /** A request-bound receiver owns parsing; transport must not repair or salvage its bytes. */
+    readonly rawResponse?: boolean;
+    readonly retryMode?: "default" | "disabled";
     /** Trusted source corpus for live interpretation classify/validate. */
     readonly sourceCorpus?: string;
     /** Lets a caller reject semantically unusable JSON at the consumer boundary. */
     readonly validateRawJson?: (rawJson: string) => void;
     /** Caller-owned correction when its response schema is not a signals envelope. */
     readonly responseSchemaRetryInstruction?: string;
-  }): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }>;
+  }): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta;
+    readonly usage?: Readonly<{ inputTokens: number; outputTokens: number }> }>;
 }
 
 // invariant: per-extract-call observability surface for the diagnostic dump
@@ -75,11 +79,14 @@ export interface PiMonoStreamOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly maxRetries?: number;
+  /** Explicit policy for an injected provider transport; SDK-owned retries remain disabled. */
+  readonly providerRetryMode?: "default" | "disabled";
   readonly temperature?: number;
   readonly onPayload?: (payload: unknown, model: PiMonoModel) => unknown;
 }
 
 export interface PiMonoAssistantMessage {
+  readonly usage?: Readonly<{ inputTokens: number; outputTokens: number }>;
   readonly content: readonly { readonly type: string; readonly text?: string }[];
   /** Transport-neutral execution receipt supplied by the injected completion port. */
   readonly executionMeta?: {
@@ -96,7 +103,6 @@ export type PiMonoComplete = (
 
 export type PiMonoGetModel = (provider: "openai", modelId: string) => PiMonoModel | undefined;
 
-const DEFAULT_MAX_RETRIES = 0;
 export function createPiMonoExtractor(deps: PiMonoExtractorDependencies): SignalExtractor {
   const runtime = createExtractorRuntime(deps);
   return {
@@ -136,13 +142,15 @@ function createExtractorRuntime(
 async function runExtraction(
   runtime: ExtractorRuntime,
   input: ExtractInput
-): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }> {
+): ReturnType<SignalExtractor["extract"]> {
   const message = await requestCompletion(runtime, input);
   try {
-    const recovered = recoverAttemptJson(message);
+    const recovered = input.rawResponse === true
+      ? { rawJson: readTextContent(message), recoveryKind: "none" as const } : recoverAttemptJson(message);
     input.validateRawJson?.(recovered.rawJson);
     return {
       rawJson: recovered.rawJson,
+      ...(message.usage === undefined ? {} : { usage: message.usage }),
       extractorMeta: {
         recoveryKind: recovered.recoveryKind,
         retryCount: message.executionMeta?.retryCount ?? 0,
@@ -165,7 +173,8 @@ async function requestCompletion(
       apiKey: runtime.apiKey,
       signal: input.abortSignal,
       timeoutMs: input.timeoutMs,
-      maxRetries: DEFAULT_MAX_RETRIES,
+      maxRetries: 0,
+      ...(input.retryMode === undefined ? {} : { providerRetryMode: input.retryMode }),
       temperature: 0,
       onPayload: requestJsonPayload
     });

@@ -284,7 +284,7 @@ export {
   type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus
 } from "./ingestion/schema-grounding.js";
-export { LocalHeuristics } from "./triage/local-heuristics.js";
+export { UnavailableGardenProvider } from "./ingestion/unavailable-garden-provider.js";
 export {
   evaluateBacklogPressure,
   type BacklogPressureThresholds,

@@ -18,12 +18,12 @@ import type { GeminiBatchInvocation, GeminiBatchPlan } from
   "../../../runs/extraction/fill/batch/contract.js";
 import * as batchStore from "../../../runs/extraction/fill/batch/store.js";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
+  SOURCE_STATEMENTS_PROMPT,
   buildOfficialApiExtractionRequest,
-  buildOfficialApiSourceCorpus,
   buildSourceSemanticRequest, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
   stringifyOfficialApiExtractionRequest, sourceSemanticResponseJsonSchema
 } from "@do-soul/alaya-soul";
+import { sourceStatementRequests, inspectStatementResponse } from "../../../runs/extraction/source-statement-request.js";
 import { prepareSourceSemanticRequestLine } from "../../../runs/extraction/request-artifact.js";
 import { receiveSourceSemanticBatchLine } from "../../../runs/extraction/fill/batch/source-semantic-interpretation.js";
 import { tableCompletedResponse, inlineCompletedResponse } from "./source-semantic-table-response.test-support.js";
@@ -344,26 +344,24 @@ describe("durable Gemini Batch HTTP extraction", () => {
     expect(importer).toHaveBeenCalledTimes(2);
   });
 
-  it("reopens malformed JSON rejections from batch state after importExtractionResponse", async () => {
-    const source = "Alice uses tools.";
-    const request = buildOfficialApiExtractionRequest(source, []);
-    const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
-    const userPrompt = stringifyOfficialApiExtractionRequest(request);
-    const model = "test-model";
-    const requestProfile = "provider-default-v1" as const;
-    const cacheKey = computeCacheKey(model, requestProfile, OFFICIAL_API_SYSTEM_PROMPT, userPrompt);
+  it("retains malformed statement responses and quarantine across Batch status", async () => {
+    const sourceCorpus = "Alice uses tools.";
+    const request = sourceStatementRequests([{ message_id: "m0", role: "user", content: sourceCorpus }])[0]!;
+    const { userPrompt } = request;
+    const { model, requestProfile } = plan();
+    const cacheKey = computeCacheKey(model, requestProfile, SOURCE_STATEMENTS_PROMPT, userPrompt);
     const sourcePlan: GeminiBatchPlan = {
       ...plan(),
       lines: [{
         key: cacheKey,
         unitKeys: ["unit-a"],
         requestSha256: batchDigest(userPrompt),
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        systemPrompt: SOURCE_STATEMENTS_PROMPT,
         userPrompt
       }]
     };
     writeExtractionCacheTestManifest({
-      cacheRoot: root, model, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, requestProfile
+      cacheRoot: root, model, systemPrompt: SOURCE_STATEMENTS_PROMPT, requestProfile
     });
     await run("prepare", { plan: sourcePlan });
     await run("submit", { plan: sourcePlan });
@@ -384,7 +382,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
         try {
           importExtractionResponse({
             config: {
-              model, modelFamily: model, providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile
+              model, modelFamily: model, providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile, sourcePacking: "session-statements"
             },
             cacheRoot: root,
             writeLease: lease,
@@ -407,11 +405,15 @@ describe("durable Gemini Batch HTTP extraction", () => {
       }
     }));
     expect(imported.jobs[0]?.outcomes[cacheKey]).toMatchObject({
-      status: "quarantined",
-      rejections: [{ reason: "malformed_response" }]
+      status: "quarantined", reason: "provider response failed request-bound admission", rejections: []
     });
     const reopened = await run("status", { plan: sourcePlan });
-    expect(reopened.jobs[0]?.outcomes[cacheKey]?.rejections?.[0]?.reason).toBe("malformed_response");
+    expect(reopened.jobs[0]?.outcomes[cacheKey]).toEqual(imported.jobs[0]?.outcomes[cacheKey]);
+    const retained = batchStore.readRetainedBatchRun(root, sourcePlan.identity).outputs.get(reopened.jobs[0]!.id)!;
+    expect(retained).toBe(output);
+    const decoded = decodeGeminiGenerateContent(JSON.parse(retained.trim()).response);
+    expect(inspectStatementResponse(request.source, decoded.rawJson)).toMatchObject({ status: "unclassified_empty",
+      receipt: { messages: [{ status: "failed", rejections: [{ message_id: "m0", reason: "malformed_response" }] }] } });
   });
 
   it("does not certify a missing or truncated line and retains unknown cost", async () => {

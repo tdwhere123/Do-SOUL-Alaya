@@ -15,7 +15,6 @@ import {
   SqliteSourceIndexRepository,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import type { OfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
@@ -31,7 +30,6 @@ import {
   canaryDistractorRelation,
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
-import { bindNativeControl } from "./source-discovery-native-control.js";
 import {
   insertBoundGist,
   LIVE_ORDINARY_ENUMERATION,
@@ -39,14 +37,6 @@ import {
   tapRecallReceipts,
   type ResultView
 } from "./source-discovery-public-consumption.js";
-import {
-  bindReceivedSourceInterpretationPayload,
-  publishBoundPublicSources,
-  requireCompletePublicBind,
-  type BoundPublicProvenance,
-  type BoundPublicReceive,
-  type BoundPublicSource
-} from "./source-discovery-admitted-public-publication.js";
 
 export type PlantedIntended = Readonly<{
   readonly database: StorageDatabase;
@@ -79,12 +69,7 @@ export type PlantedSources = Readonly<{
   readonly filename: string;
   readonly sourceId: string;
   readonly distractorId: string;
-  readonly source: BoundPublicSource;
-}>;
-
-export type PlantedBound = PlantedSources & Readonly<{
-  readonly bind: Extract<BoundPublicReceive, { readonly status: "complete" }>;
-  readonly gistObjectIds: readonly string[];
+  readonly source: Readonly<{ body: string; rootId: string; digest: string; evidenceObjectId: string | null }>;
 }>;
 
 type PlantedHandler<T> = (
@@ -193,36 +178,6 @@ export async function withPlantedSourceWorker<T extends object>(
   }
 }
 
-export async function withBoundPublicWorker(
-  input: Readonly<{
-    readonly sourceBody: string;
-    readonly distractorBody: string;
-    readonly rawJson: string;
-    readonly request: OfficialApiExtractionRequest;
-    readonly provenance?: Extract<BoundPublicProvenance, "payload" | "native-admitted-control">;
-  }>,
-  run: PlantedHandler<PlantedBound>
-): Promise<void> {
-  await withPlantedSourceWorker(input.sourceBody, input.distractorBody, (planted) => {
-    const receive = input.provenance === "native-admitted-control" ? bindNativeControl : bindReceivedSourceInterpretationPayload;
-    const bind = requireCompletePublicBind(receive({
-      rawJson: input.rawJson,
-      sourceCorpus: input.sourceBody,
-      artifactKey: `bound-${planted.sourceId}`,
-      request: input.request
-    }));
-    const published = publishBoundPublicSources({
-      database: planted.database,
-      source: planted.source,
-      workspaceId: WS,
-      runId: RUN,
-      now: NOW,
-      bind
-    });
-    return { bind, gistObjectIds: published.gist_object_ids };
-  }, run);
-}
-
 export async function withOmittedPairWorker(
   canary: CanaryCase,
   firstBody: string,
@@ -266,7 +221,7 @@ export async function withPublicOrderedPairWorker(
         await awaitWorkerAfterMainSqliteClose(client);
         const probeAt = receipts.length;
         const firstPage = await handler(
-          publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
+          publicSearchRequest(canary, "source_text", "source_only", LIVE_ORDINARY_ENUMERATION),
           { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" }
         );
         // Standalone interpretation capsules are legal public members too;

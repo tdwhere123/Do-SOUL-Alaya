@@ -1,15 +1,13 @@
+import { assertCurrentConversationGeneration } from "../request-artifact.js";
 import { retainBatchAuthority } from "./batch/retained-authority.js";
 import { readCurrentExtractionAuthorityRevision } from "../authority/inspection.js";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
-import { SourcePacketAdmissionError, writeDeterministicSourcePacketArtifact, importSourcePacketArtifact } from "../cache/source-packet-artifact.js";
-import { SourceSemanticAdmissionError, writeDeterministicSourceSemanticArtifact, importSourceSemanticArtifact } from "../cache/source-semantic-artifact.js";
 import { inspectUnadmittedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
 import { assertSampleExecutionOptions, assertSampleKeys } from "../authority/sample-scope.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import {
-  createCachingSignalExtractor,
   importExtractionResponse,
   ExtractionResponseAdmissionError
 } from "../../compile-seed/compile-seed-cache.js";
@@ -48,6 +46,7 @@ interface BatchFillInput {
 export async function executeExtractionBatchFill(input: BatchFillInput): Promise<ExtractionFillResult> {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const batch = input.options.batch!;
+  assertCurrentConversationGeneration(input.prepared.config, batch.operation);
   if (input.options.ingestionMode === "lazy_field" || input.prepared.expansion !== undefined ||
       input.options.extractorFactory !== undefined || input.options.questionBatchLimit !== undefined) {
     throw new Error("Batch requires a full, isolated precomputed extraction window");
@@ -102,6 +101,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
       authority: authority.receipt.observation.revision, observer: readCurrentExtractionAuthorityRevision()
     } } : {}),
     reserveSubmission: async (lines) => {
+      assertCurrentConversationGeneration(input.prepared.config);
       if (authority.receipt.sample_scope !== undefined) {
         if (authority.reserveSampleBatch === undefined) throw new Error("sample reservation authority is missing");
         return authority.reserveSampleBatch(lines.map((line) => line.key), input.options.signal);
@@ -123,7 +123,6 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     },
     importLine: (result) => importBatchLine(input, workset, result, plan)
   });
-  if (batch.operation === "import" || batch.operation === "resume") await importEmptyRequests(input, workset);
   input.writeLease.assertOwned();
   const completion = inspectFillWindow(input.cacheRoot, input.prepared.config, input.prepared.distinctExtractionTurns);
   let status: "complete" | "in_progress" = "complete";
@@ -236,17 +235,12 @@ function bindBatchPlan(input: BatchFillInput, workset: SourceRequestWorkset,
 
 async function importBatchLine(input: BatchFillInput, workset: SourceRequestWorkset,
   result: Parameters<GeminiBatchInvocation["importLine"]>[0], plan: GeminiBatchPlan): ReturnType<GeminiBatchInvocation["importLine"]> {
+  assertCurrentConversationGeneration(input.prepared.config);
   const authority = input.authority!;
-  const sourceCorpus = workset.requests.find((request) => request.line.key === result.line.key)?.units[0]?.sourceCorpus;
+  const sourceCorpus = workset.requests.find((request) => request.line.key === result.line.key)?.sourceCorpus;
   if (sourceCorpus === undefined) throw new Error("Batch import lost its bound source corpus");
   try {
-    if (input.prepared.config.openSemantics !== undefined) {
-      importSourceSemanticArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, sourceCorpus, plan, authority: authority.receipt, result });
-    } else if (input.prepared.config.sourceInterpretationProfile !== undefined) {
-      importSourcePacketArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, sourceCorpus, plan, authority: authority.receipt, result });
-    } else importExtractionResponse({ config: input.prepared.config, cacheRoot: input.cacheRoot,
+    importExtractionResponse({ config: input.prepared.config, cacheRoot: input.cacheRoot,
     writeLease: input.writeLease, systemPrompt: result.line.systemPrompt,
     userPrompt: result.line.userPrompt, expectedCacheKey: result.line.key, sourceCorpus,
     result: { rawJson: result.rawJson,
@@ -258,13 +252,12 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
     } }), retainedBatch: { planIdentity: plan.identity,
       authorityReceiptDigest: authority.receipt.receipt_digest, result } });
   } catch (cause) {
-    if (cause instanceof ExtractionResponseAdmissionError || cause instanceof SourcePacketAdmissionError ||
-        cause instanceof SourceSemanticAdmissionError) {
+    if (cause instanceof ExtractionResponseAdmissionError) {
       authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
       return {
         status: "quarantined" as const,
         reason: cause.message,
-        ...(cause instanceof ExtractionResponseAdmissionError ? { rejections: cause.rejections } : {})
+        rejections: cause.rejections
       };
     }
     throw cause;
@@ -276,32 +269,6 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
     return { status: "quarantined" as const, reason: inspected.reason ?? inspected.status };
   }
   authority.commitSuccessfulShard(result.line.key);
-}
-
-async function importEmptyRequests(input: BatchFillInput, workset: SourceRequestWorkset): Promise<void> {
-  if (input.prepared.config.openSemantics !== undefined) {
-    for (const { line, sourceCorpus } of workset.deterministicEmptyRequests) {
-      writeDeterministicSourceSemanticArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, line, sourceCorpus });
-      input.authority!.commitDeterministicShard(line.key);
-    }
-    return;
-  }
-  if (input.prepared.config.sourceInterpretationProfile !== undefined) {
-    for (const { line, sourceCorpus } of workset.deterministicEmptyRequests) {
-      writeDeterministicSourcePacketArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, line, sourceCorpus });
-      input.authority!.commitDeterministicShard(line.key);
-    }
-    return;
-  }
-  const extractor = createCachingSignalExtractor({ config: input.prepared.config,
-    cacheRoot: input.cacheRoot, writeLease: input.writeLease,
-    onDeterministicExtractionSucceeded: input.authority!.commitDeterministicShard,
-    delegate: { extract: async () => { throw new Error("deterministic empty work cannot dispatch"); } } });
-  for (const { line } of workset.deterministicEmptyRequests) {
-    await extractor.extract({ systemPrompt: line.systemPrompt, userPrompt: line.userPrompt });
-  }
 }
 
 function batchLineFailureIdentity(outcome: "provider_error" | "invalid" | "missing"): {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGardenTurnEvidenceFallback,
-  LocalHeuristics,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
@@ -340,17 +339,6 @@ describe("MaterializationRouter routing and grounding", () => {
     await router.materializeSignal(signal);
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
-  });
-
-  it("keeps source-verifiable local heuristic signals compatible with durable routing", async () => {
-    const [signal] = await new LocalHeuristics().compile(
-      "I always use TypeScript strict mode.",
-      { workspace_id: "workspace-1", run_id: "run-1", surface_id: null, turn_messages: [] }
-    );
-    expect(signal).toBeDefined();
-    expect(new MaterializationRouter(createDeps()).route(signal!)).toMatchObject({
-      route_target: "memory_and_claim_draft"
-    });
   });
 
 

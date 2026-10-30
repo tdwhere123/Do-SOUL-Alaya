@@ -257,7 +257,7 @@ export function inspectFillWindow(
     sourcePacking: config.sourcePacking,
     sourceInterpretationProfile: config.sourceInterpretationProfile,
     openSemantics: config.openSemantics,
-    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking),
     ...(expectedRequestKeys === undefined ? { extractionTurns } : { expectedRequestKeys })
   });
 }
@@ -317,12 +317,12 @@ function preflightAndPinExtractionIdentity(input: {
   if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(input.cacheRoot);
   if (extractionTypedArtifactMode(input.config) !== undefined) {
     if (currentIdentity !== undefined) assertExtractionCacheIdentity({ config: input.config, manifest: currentIdentity.manifest,
-      systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics), validateProvider: true });
+      systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics, input.config.sourcePacking), validateProvider: true });
   } else preflightExtractionCache({
     cacheRoot: input.cacheRoot,
     manifest: currentIdentity?.manifest,
     config: input.config,
-    systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics),
+    systemPrompt: extractionArtifactPrompt(input.config.sourceInterpretationProfile, input.config.openSemantics, input.config.sourcePacking),
     requiredTurnContents: input.distinctTurns,
     requiredExtractionTurns: input.distinctExtractionTurns,
     requiredQuestionWindow: {

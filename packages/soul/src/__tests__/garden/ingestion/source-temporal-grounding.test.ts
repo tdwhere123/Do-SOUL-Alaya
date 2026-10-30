@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { inspectObservedTemporalProjection } from "../../../garden/extraction/temporal/observed-projection.js";
 import { parseOfficialApiTemporalProjection } from "../../../garden/extraction/temporal/projection-draft.js";
 import { resolveTemporalProjection } from "../../../garden/extraction/time-concern-projection.js";
-import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
-import { LocalHeuristics } from "../../../garden/triage/local-heuristics.js";
-import { buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
-import { createContext, createExtractor } from "./compute-provider-fixtures.js";
 import { resolveSourceTemporalCandidates } from "../../../garden/extraction/temporal/source-time.js";
 
 const year = {
@@ -34,12 +30,6 @@ describe("relative calendar modifier qualification", () => {
     expect(inspectObservedTemporalProjection(source, undefined, anchor).projection).toBeUndefined();
     expect(inspectObservedTemporalProjection(source, today, anchor)).toMatchObject({ audit: { status: "rejected" } });
     expect(inspectObservedTemporalProjection(source, today, anchor).projection).toBeUndefined();
-    const local = await new LocalHeuristics().compile(source, { ...createContext(),
-      source_observed_at: anchor, turn_messages: [], allow_legacy_single_user_source: true });
-    for (const signal of local) {
-      expect(signal.raw_payload.temporal_projection).toBeUndefined();
-      expect(buildMemoryInput(signal, ["source"]).event_time_start).toBeUndefined();
-    }
   });
 
   it.each(["I shipped today's build yesterday.", "I shipped today’s build yesterday.", "我昨天发布今天的版本。"])(
@@ -97,13 +87,6 @@ describe("temporal evidence inventory", () => {
       projection: laterValidity, audit: { status: "formed", reason: "valid_time_source_verified" }
     });
     expect(inspectObservedTemporalProjection(source, year, undefined).projection).toEqual(year);
-    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
-    const local = (await new LocalHeuristics().compile(source, context))
-      .filter((signal) => signal.raw_payload.time_concern !== undefined);
-    expect(local).toHaveLength(2);
-    expect(local[0]!.raw_payload.temporal_projection).toEqual({ ...year, projection_schema_version: "1" });
-    expect(local[1]!.raw_payload.temporal_projection).toBeUndefined();
-    expect(buildMemoryInput(local[1]!, ["source"]).event_time_start).toBeUndefined();
   });
 
   it.each([
@@ -145,14 +128,6 @@ describe("temporal evidence inventory", () => {
       expect(result.audit.status).toBe("rejected");
       expect(result.projection).toBeUndefined();
     }
-    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
-    const local = (await new LocalHeuristics().compile(source, context))
-      .filter((signal) => signal.raw_payload.time_concern !== undefined);
-    expect(local.length).toBeGreaterThan(0);
-    for (const signal of local) {
-      expect(signal.raw_payload.temporal_projection).toBeUndefined();
-      expect(buildMemoryInput(signal, ["source"]).event_time_start).toBeUndefined();
-    }
   });
 
   it("preserves a governing role across whitespace allowed by date discovery", async () => {
@@ -161,10 +136,6 @@ describe("temporal evidence inventory", () => {
       projection: laterValidity, audit: { status: "formed", reason: "source_valid_time_derived" }
     });
     expect(inspectObservedTemporalProjection(source, laterYear, undefined).audit.status).toBe("rejected");
-    const local = (await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
-      allow_legacy_single_user_source: true })).filter((signal) => signal.raw_payload.time_concern !== undefined);
-    expect(local).toHaveLength(1);
-    expect(local[0]!.raw_payload.temporal_projection).toBeUndefined();
   });
 
   it("keeps isolated invalid tokens, descriptive adjectives and separate clauses independent", () => {
@@ -190,9 +161,6 @@ describe("temporal evidence inventory", () => {
       .toMatchObject({ valid_from: year.event_time_start, valid_to: laterYear.event_time_end, time_precision: "range" });
     for (const source of ["I released the product on Christmas.", "I released the product in an unknown year."]) {
       expect(resolveSourceTemporalCandidates(source, undefined)).toEqual([]);
-      const local = await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
-        allow_legacy_single_user_source: true });
-      expect(local.filter((signal) => signal.raw_payload.time_concern !== undefined)).toEqual([]);
     }
   });
 
@@ -202,10 +170,6 @@ describe("temporal evidence inventory", () => {
   ])("retains an occurrence year without turning a purpose or object to into a range: %s", async (source) => {
     expect(inspectObservedTemporalProjection(source, undefined, undefined).projection).toEqual(year);
     expect(inspectObservedTemporalProjection(source, year, undefined).audit.status).toBe("formed");
-    const local = (await new LocalHeuristics().compile(source, { ...createContext(), turn_messages: [],
-      allow_legacy_single_user_source: true })).filter((signal) => signal.raw_payload.time_concern !== undefined);
-    expect(local).toHaveLength(1);
-    expect(local[0]!.raw_payload.temporal_projection).toEqual({ ...year, projection_schema_version: "1" });
   });
 
 });
@@ -345,56 +309,10 @@ describe("source calendar windows and temporal roles", () => {
       .toMatchObject({ event_time_start: year.event_time_start, event_time_end: "2016-01-03T23:59:59.999Z", time_precision: "range" });
   });
 
-  it("uses one complete local range candidate while preserving role-ineligible and unresolved terms", async () => {
-    const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
-    for (const [source, count, projected] of [
-      ["I worked from 2016 to 2017.", 1, true],
-      ["I worked in 2016.", 1, true],
-      ["I have a permit valid from 2016 to 2017.", 1, false],
-      ["I worked in 2016 or 2017.", 1, false]
-    ] as const) {
-      const signals = (await new LocalHeuristics().compile(source, context))
-        .filter((signal) => signal.raw_payload.time_concern !== undefined);
-      expect(signals).toHaveLength(count);
-      for (const signal of signals) {
-        expect(signal.raw_payload.temporal_projection !== undefined).toBe(projected);
-        const memoryInput = buildMemoryInput(signal, ["source-evidence"]);
-        expect(memoryInput.event_time_start ?? null).toBe(projected ? year.event_time_start : null);
-        if (source === "I worked from 2016 to 2017.") {
-          expect(signal.raw_payload.temporal_projection).toMatchObject({
-            event_time_start: year.event_time_start, event_time_end: "2017-12-31T23:59:59.999Z"
-          });
-          expect(memoryInput.event_time_end).toBe("2017-12-31T23:59:59.999Z");
-        }
-      }
-    }
-  });
-
   it("anchors relative years to the supplied fixed offset across the UTC year boundary", () => {
     expect(inspectObservedTemporalProjection("I worked last year.", undefined, "2024-01-01T00:30:00+14:00").projection)
       .toMatchObject({ event_time_start: "2022-12-31T10:00:00.000Z", event_time_end: "2023-12-31T09:59:59.999Z" });
     expect(inspectObservedTemporalProjection("I worked last year.", undefined, undefined).projection).toBeUndefined();
   });
 
-  it("uses the source role owner in both official and local extraction", async () => {
-    for (const source of ["I released the product in 2016.", "I worked before 2016.", "This policy is valid from May 2023."]) {
-      const context = { ...createContext(), turn_messages: [], allow_legacy_single_user_source: true };
-      const [signal] = await new OfficialApiGardenProvider({ apiKey: "test", extractor: createExtractor(JSON.stringify({
-        interpretations: [{ assertion_id: 1, relations: [{ predicate: { text: source.includes("released") ? "released" : source.includes("worked") ? "worked" : "valid" }, arguments: [], qualifiers: [] }] }]
-      })) }).compile(source, context);
-      expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
-      expect(signal?.raw_payload).not.toHaveProperty("temporal_projection");
-      const local = await new LocalHeuristics().compile(source, context);
-      const temporal = local.filter((candidate) => candidate.raw_payload.time_concern !== undefined);
-      expect(temporal).toHaveLength(1);
-      for (const candidate of temporal) {
-        if (source === "I released the product in 2016.") {
-          expect(candidate.raw_payload.temporal_projection).toMatchObject({ event_time_start: year.event_time_start, event_time_end: year.event_time_end });
-        } else {
-          expect(candidate.raw_payload.temporal_projection).toBeUndefined();
-          expect(candidate.raw_payload.time_concern).not.toHaveProperty("event_time_start");
-        }
-      }
-    }
-  });
 });

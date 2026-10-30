@@ -1,4 +1,4 @@
-import type { CandidateMemorySignal, LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
+import { SourceStatementSignalSchema, type CandidateMemorySignal, type LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { validateSchemaGroundingForSignal } from "../../ingestion/schema-grounding.js";
 import {
   requiresGardenSourceGrounding,
@@ -139,6 +139,9 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
+    if (signal.interpretation_contract === "source-interpretation-v1") {
+      return { kind: "deferred", route_target: "deferred", routing_reason: "historical extraction is not executable" };
+    }
     if (signal.interpretation_contract !== undefined) {
       return sourceObservationTarget(this.dependencies.sourceObservationPublicationPort !== undefined);
     }
@@ -218,8 +221,15 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     target: MaterializationTarget,
     context: MaterializationContext = EMPTY_MATERIALIZATION_CONTEXT
   ): Promise<MaterializationResult> {
+    if (signal.interpretation_contract === "source-interpretation-v1") {
+      return this.materializeDeferred(signal, this.route(signal), context);
+    }
     if (signal.interpretation_contract !== undefined) {
-      return await materializeSourceObservation(this.dependencies, signal, context);
+      const available = SourceStatementSignalSchema.safeParse(signal);
+      if (!available.success) return materializationFailure({ signal_id: signal.signal_id,
+        target_kind: target.kind, route_target: target.route_target, routing_reason: "source statement is unavailable",
+        created_objects: [] }, new Error("Erased source statement content cannot be materialized."));
+      return await materializeSourceObservation(this.dependencies, available.data, context);
     }
     if (target.route_target === "memory_entry_only") {
       return await this.materializeMemoryEntryOnly(signal, target, context);

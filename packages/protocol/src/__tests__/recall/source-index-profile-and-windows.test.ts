@@ -214,7 +214,7 @@ describe("source index profile and configuration identity", () => {
     };
     const generationId = sourceIndexGenerationId(selection, 9, sha256);
     expect(generationId).toBe(digest([
-      "source-index-generation.v2", 2, selection.workspace_id, selection.selection_revision, selection.config_id, 9
+      "source-index-generation.v2", 3, selection.workspace_id, selection.selection_revision, selection.config_id, 9
     ]));
     const reordered: SourceIndexSelection = {
       configuration: CONFIG,
@@ -399,7 +399,7 @@ describe("source index preparation refusals and source identity", () => {
     const source = indexedSource(body);
     expect(() => prepareSourceIndexLexical({
       source: indexedSource(body, { bodyBytes: utf8(body).length + 1 }), body
-    }, sha256)).toThrowError(validation(/complete exact source bytes/u));
+    }, sha256)).toThrowError(validation(/complete exact key bytes/u));
     expect(() => prepareSourceIndexLexical({
       source: sourceIndexTarget(sourceRecallTarget({
         workspace_id: "workspace-a",
@@ -410,16 +410,16 @@ describe("source index preparation refusals and source identity", () => {
         evidence_object_id: null
       }), "logical-source", utf8(body).length),
       body
-    }, sha256)).toThrowError(validation(/complete exact source bytes/u));
+    }, sha256)).toThrowError(validation(/complete exact key bytes/u));
     expect(() => prepareSourceIndexLexical({
       source: SourceIndexTargetSchema.parse({ ...source, root_key: sourceGoldRootIdentity(evidenceTarget(body, "workspace-b")) }),
       body
-    }, sha256)).toThrowError(validation(/complete exact source bytes/u));
+    }, sha256)).toThrowError(validation(/complete exact key bytes/u));
 
     for (const unpaired of ["\uD800", "\uDFFF", "ok\uDEAD"] as const) {
       expect(() => prepareSourceIndexLexical({
         source: indexedSource(unpaired), body: unpaired
-      }, sha256)).toThrowError(validation(/complete exact source bytes/u));
+      }, sha256)).toThrowError(validation(/complete exact key bytes/u));
     }
     expect(prepareSourceIndexLexical({ source: indexedSource("😀"), body: "😀" }, sha256).body).toBe("😀");
   });

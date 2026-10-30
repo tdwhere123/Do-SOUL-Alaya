@@ -49,7 +49,10 @@ describe("SqliteMemoryEntryRepo connection lifecycle", () => {
     await repo.findByEvidenceRefs("workspace-1", ["evidence-a"]);
     await repo.findByEvidenceRefs("workspace-1", ["evidence-a", "evidence-b"]);
 
-    expect(prepareCount).toBe(3);
+    // Three bulk shapes and one cached dependency-availability statement, independent of cardinality.
+    expect(prepareCount).toBe(4);
+    await repo.findByIds("workspace-1", [first.object_id, second.object_id]);
+    expect(prepareCount).toBe(4);
   });
 
   it("reprepares findByIds after reopen", async () => {

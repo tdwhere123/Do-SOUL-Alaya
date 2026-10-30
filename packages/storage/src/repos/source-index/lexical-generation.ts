@@ -45,7 +45,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
       }
       const match = `FROM source_index_lexical_targets t JOIN source_index_roots r ON r.workspace_id=t.workspace_id AND r.root_key=t.root_key
         JOIN source_index_lexical_projections p ON p.workspace_id=t.workspace_id AND p.root_key=t.root_key AND p.generation_id=?
-          AND p.content_digest=json_extract(r.target_json,'$.target.content_digest') AND p.body_bytes=json_extract(r.target_json,'$.body_bytes')
+          AND p.content_digest=COALESCE(json_extract(r.target_json,'$.auxiliary.key_digest'),json_extract(r.target_json,'$.target.content_digest')) AND p.body_bytes=json_extract(r.target_json,'$.body_bytes')
         WHERE t.workspace_id=? AND t.generation_id=? AND t.complete=0 AND NOT EXISTS (SELECT 1 FROM source_index_lexical_projections n
           WHERE n.workspace_id=t.workspace_id AND n.generation_id=t.generation_id AND n.root_key=t.root_key)`;
       const candidates = this.database.connection.prepare(`SELECT t.root_key AS root_key,octet_length(p.projection) AS bytes ${match}
@@ -254,7 +254,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
         (workspace_id,generation_id,root_key,content_digest,body_bytes,projection) VALUES(?,?,?,?,?,?)
         ON CONFLICT(workspace_id,generation_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
         body_bytes=excluded.body_bytes,projection=excluded.projection`).run(workspaceId, generationId, exact.source.root_key,
-          exact.source.target.content_digest, exact.source.body_bytes, projection);
+          exact.source.auxiliary?.key_digest ?? exact.source.target.content_digest, exact.source.body_bytes, projection);
       this.database.connection.prepare(`UPDATE source_index_lexical_targets SET complete=1
         WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(workspaceId, generationId, exact.source.root_key);
       return { status: "accepted", resources, analysis_units: analysis };

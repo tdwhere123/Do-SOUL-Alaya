@@ -21,6 +21,7 @@ export function scrubDerivedPrivacyClosure(
   sourceIds: readonly string[],
   redact: EraseAuditRedactor | undefined
 ): void {
+  scrubStatementSignals(database, barrier);
   const memoryIds = findLinkedMemoryIds(database, barrier.workspace_id, evidenceIds);
   const synthesisIds = findLinkedSynthesisIds(
     database,
@@ -33,6 +34,19 @@ export function scrubDerivedPrivacyClosure(
   scrubEvidenceLinkedHq(database, barrier, evidenceIds);
   scrubSynthesisCapsules(database, barrier, synthesisIds);
   scrubMemoryEntries(database, barrier, memoryIds);
+}
+
+/** Preserve the emitted identity and erase receipt, never the copied source or rewrite. */
+function scrubStatementSignals(database: StorageDatabase, barrier: FieldEraseBarrierRow): void {
+  database.connection.prepare(`UPDATE signals SET domain_tags_json='[]', raw_payload_json=json_object(
+    'source_statement_unavailable',json_object('reason','source_erased',
+      'source_root_id',json_extract(raw_payload_json,'$.source_statement.source_root_id'),
+      'erased_dependency_id',(SELECT erased_dependency_id FROM erased_source_statement_signals dependency
+        WHERE dependency.signal_id=signals.signal_id ORDER BY barrier_id LIMIT 1),
+      'erase_barrier_id',(SELECT barrier_id FROM erased_source_statement_signals dependency
+        WHERE dependency.signal_id=signals.signal_id ORDER BY barrier_id LIMIT 1)))
+    WHERE workspace_id=? AND signal_id IN (SELECT signal_id FROM erased_source_statement_signals WHERE workspace_id=?)`)
+    .run(barrier.workspace_id, barrier.workspace_id);
 }
 
 function scrubEvidenceLinkedHq(

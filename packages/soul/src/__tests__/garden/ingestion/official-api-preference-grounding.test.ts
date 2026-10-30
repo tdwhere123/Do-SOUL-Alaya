@@ -6,8 +6,6 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 import {
   createExtractor,
-  interpretationEnvelope,
-  interpretationRelation,
   withOpenSemanticFactorGraph
 } from "./compute-provider-fixtures.js";
 
@@ -17,6 +15,7 @@ const CONTEXT: GardenCompileContext = {
   run_id: "run-preference",
   surface_id: null,
   artifact_key: "artifact-preference",
+  source_root_id: "root-preference",
   source_observation: {
     observed_at: "2026-04-23T09:00:00.000Z",
     authority: "trusted_host_event",
@@ -29,16 +28,14 @@ describe("official API preference profile grounding", () => {
   it("ordinary compile does not use a model preference profile to select memory-plus-claim", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(interpretationEnvelope([
-        interpretationRelation("prefer", [
-          { role: "agent", text: "I" },
-          { role: "theme", text: "dark mode" }
-        ])
-      ])),
+      extractor: createExtractor(JSON.stringify({ messages: [{ message_id: "u1", statements: [{
+        text: "The user prefers dark mode.", relation: "theme preference",
+        preference_profile: { preference_object: "light mode" }, confidence: 0.99, object_kind: "preference"
+      }] }] })),
       generateSignalId: () => "signal-preference"
     });
     const [signal] = await provider.compile(SOURCE, CONTEXT);
-    expect(signal?.interpretation_contract).toBe("source-interpretation-v1");
+    expect(signal?.interpretation_contract).toBe("source-statements-v1");
     expect(signal?.object_kind).toBeNull();
     expect(signal?.confidence).toBeNull();
     expect(signal?.raw_payload).not.toHaveProperty("preference_profile");

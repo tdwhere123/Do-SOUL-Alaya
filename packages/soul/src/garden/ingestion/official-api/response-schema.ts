@@ -1,11 +1,19 @@
 import { z } from "zod";
-import { SourceInterpretationResponseSchema } from "@do-soul/alaya-protocol";
+import { SourceInterpretationResponseSchema, SourceStatementRequestSchema, SourceStatementSchema,
+  SourceStatementResponseMessageSchema, SOURCE_STATEMENT_LIMITS } from "@do-soul/alaya-protocol";
 import { parseOfficialApiExtractionRequest } from "./extraction-request.js";
 import { parseOfficialApiSourcePacketRequest } from "./source-packet-request.js";
 import { officialApiSourcePacketResponseSchema } from "./source-packet-schema.js";
 import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "./source-semantic-request.js";
 
 const semanticSchemaPreimages = new Map<string, string>();
+const statementResponseSchema = z.toJSONSchema(z.object({ messages: z.array(
+  SourceStatementResponseMessageSchema.extend({ statements: z.array(SourceStatementSchema).max(SOURCE_STATEMENT_LIMITS.perMessage) })
+).max(SOURCE_STATEMENT_LIMITS.requestMessages) }).strict(), { io: "input" });
+const statementResponsePreimage = JSON.stringify(statementResponseSchema);
+function isStatementRequest(userPrompt: string): boolean {
+  try { return SourceStatementRequestSchema.safeParse(JSON.parse(userPrompt)).success; } catch { return false; }
+}
 
 // This constrains generation, not admission: historical raw still uses its
 // recorded signals envelope and parser. Live ordinary extraction asks for
@@ -38,6 +46,7 @@ export function officialApiExtractionResponseSchemaPreimage(userPrompt: string):
 }
 
 function responseSchemaPreimage(userPrompt: string): string {
+  if (isStatementRequest(userPrompt)) return statementResponsePreimage;
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return JSON.stringify(packetSchema);
   const semanticRequest = sourceSemanticRequest(userPrompt);
@@ -58,6 +67,7 @@ function responseSchemaPreimage(userPrompt: string): string {
 
 /** Query/protocol probes have different envelopes and must not inherit this schema. */
 export function officialApiExtractionResponseSchema(userPrompt: string): object | undefined {
+  if (isStatementRequest(userPrompt)) return structuredClone(statementResponseSchema);
   const packetSchema = sourcePacketSchema(userPrompt);
   if (packetSchema !== undefined) return packetSchema;
   const semanticRequest = sourceSemanticRequest(userPrompt);

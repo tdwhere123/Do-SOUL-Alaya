@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  OfficialApiGardenProvider,
   parseOfficialApiSignals,
   type GardenCompileContext
 } from "../../../garden/ingestion/compute-provider.js";
@@ -8,11 +7,12 @@ import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/s
 import { resolveGardenSignalGrounding } from "../../../garden/triage/grounding/signal-source-grounding.js";
 import { buildOfficialApiSourceAssertions, buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 import {
+  buildOfficialApiExtractionRequest,
   collectOfficialApiExtractionCoverage,
   planOfficialApiExtractionWindow
 } from "../../../garden/ingestion/official-api/extraction-request.js";
 import { createSignal } from "../materialization/materialization-router-fixture.js";
-import { createContext, withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const EMPTY_CONTEXT: GardenCompileContext = {
   workspace_id: "workspace-locator",
@@ -216,25 +216,11 @@ describe("official API assertion catalog locator", () => {
     });
   });
 
-  it("builds a bounded deterministic User-only catalog and prefers v2 in the prompt", async () => {
-    const extract = vi.fn(async (_input: { readonly userPrompt: string }) =>
-      ({ rawJson: JSON.stringify({ interpretations: [] }) }));
-    const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor: { extract } });
-    const admitted = createContext();
-    await provider.compile("I moved to Berlin.", {
-      ...EMPTY_CONTEXT,
-      artifact_key: admitted.artifact_key,
-      source_observation: admitted.source_observation,
-      turn_messages: [
-        { message_id: "u1", role: "user", content: "I use TypeScript, but I avoid any." },
-        { message_id: "a1", role: "assistant", content: "You should use JavaScript." }
-      ]
-    });
-
-    const prompt = JSON.parse(extract.mock.calls[0]![0].userPrompt) as {
-      schema_version: number;
-      source_assertions: readonly Record<string, unknown>[];
-    };
+  it("reconstructs the historical deterministic User-only v2 catalog without dispatch", () => {
+    const prompt = buildOfficialApiExtractionRequest("I moved to Berlin.", [
+      { role: "user", content: "I use TypeScript, but I avoid any." },
+      { role: "assistant", content: "You should use JavaScript." }
+    ]);
     expect(prompt.schema_version).toBe(2);
     expect(prompt.source_assertions).toEqual([
       { assertion_id: 1, text: "User: I use TypeScript, but I avoid any." },
@@ -243,7 +229,7 @@ describe("official API assertion catalog locator", () => {
     ]);
   });
 
-  it("leaves a tail fact in residual instead of silently sampling it into the first window", async () => {
+  it("reconstructs historical tail coverage without dispatch or sampling into the first window", () => {
     const fillers = Array.from(
       { length: 80 },
       (_, index) => `I recorded ordinary placeholder detail number ${index}.`
@@ -256,35 +242,14 @@ describe("official API assertion catalog locator", () => {
     expect(first.catalog.window.some((assertion) => assertion.text.includes(tailFact))).toBe(false);
     expect(first.catalog.residual.length).toBeGreaterThan(0);
 
-    const batches: number[][] = [];
-    const extract = vi.fn(async ({ userPrompt }) => {
-      const prompt = JSON.parse(userPrompt) as {
-        source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
-      };
-      expect(prompt.source_assertions.length).toBeLessThanOrEqual(8);
-      batches.push(prompt.source_assertions.map(({ assertion_id }) => assertion_id));
-      return { rawJson: '{"interpretations":[]}' };
-    });
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor: { extract },
-      generateSignalId: () => "signal-tail-catalog"
-    });
-    const admitted = createContext();
-    const context = {
-      ...contextForUser(source),
-      artifact_key: admitted.artifact_key,
-      source_observation: admitted.source_observation
-    };
-    expect(await provider.compile(source, context)).toEqual([]);
-    const coverage = collectOfficialApiExtractionCoverage(source, context.turn_messages);
+    const coverage = collectOfficialApiExtractionCoverage(source, contextForUser(source).turn_messages);
+    for (const request of coverage.requests) expect(request.source_assertions.length).toBeLessThanOrEqual(8);
+    const ids = coverage.requests.flatMap(request => request.source_assertions.map(member => member.assertion_id));
     expect(coverage.catalog.coverage).toBe("source_range_complete");
     expect(coverage.catalog.residual).toHaveLength(0);
     expect(coverage.catalog.window.some((assertion) => assertion.text.includes(tailFact))).toBe(true);
-    expect(batches.flat()).toEqual(
-      coverage.requests.flatMap((request) => request.source_assertions.map(({ assertion_id }) => assertion_id))
-    );
-    expect(batches.flat().length).toBeGreaterThan(64);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThan(64);
   });
 
   it("does not admit an out-of-range assertion_id", async () => {

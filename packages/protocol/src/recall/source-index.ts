@@ -5,6 +5,7 @@ import { SourceEvidenceTargetSchema, sourceGoldRootIdentity, type SourceEvidence
 import { canonicalJson } from "./selection/capture/canonical-json.js";
 import { FieldContractDigestSchema, hashContentDigest, type FieldContractSha256 } from "./field-contract/canonical-identity.js";
 
+import { SOURCE_STATEMENTS_CONTRACT, type SourceStatementArtifact } from "../garden/source-statements.js";
 import { messageWindowIntervals, SourceIndexMessageStructureSchema, type SourceIndexMessageStructure } from "./source-index-message-windows.js";
 export type { SourceIndexMessageStructure } from "./source-index-message-windows.js";
 
@@ -15,7 +16,7 @@ export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const SOURCE_INDEX_MAX_WINDOWS = 4096;
 export const SOURCE_INDEX_MAX_PAGE_ROWS = 128;
 /** Expanded retained-root enumeration; historical record-only generations cannot serve it. */
-export const SOURCE_INDEX_PREPARATION_REVISION = 2;
+export const SOURCE_INDEX_PREPARATION_REVISION = 3;
 
 /** Explicit role; never inferred from an input id or text prefix. */
 export const SourceEmbeddingRoleSchema = z.enum(["query", "passage"]);
@@ -44,10 +45,18 @@ export const SourceIndexConfigurationSchema = z.object({
 }).strict().readonly();
 export type SourceIndexProfile = z.infer<typeof SourceIndexProfileSchema>;
 export type SourceIndexConfiguration = z.infer<typeof SourceIndexConfigurationSchema>;
+/** Rewritten key coordinates never claim raw source byte coordinates. */
+export const SourceIndexAuxiliaryKeySchema = z.object({
+  contract: z.literal(SOURCE_STATEMENTS_CONTRACT), artifact_id: z.string().min(1).max(256),
+  artifact_digest: FieldContractDigestSchema, key_digest: FieldContractDigestSchema,
+  source_span: z.tuple([z.number().int().nonnegative(), z.number().int().positive()]).readonly()
+}).strict().readonly();
+export type SourceIndexAuxiliaryKey = z.infer<typeof SourceIndexAuxiliaryKeySchema>;
 export const SourceIndexTargetSchema = z.object({
   root_key: z.string().min(1).max(2048), source_id: z.string().min(1).max(256).nullable(),
   target: SourceEvidenceTargetSchema.refine(target => target.span === undefined),
-  body_bytes: z.number().int().min(0)
+  body_bytes: z.number().int().min(0),
+  auxiliary: SourceIndexAuxiliaryKeySchema.optional()
 }).strict().refine(source => (source.target.root_kind === "evidence_capsule") === (source.source_id === null),
   "only capsule roots have no source id").readonly();
 export type SourceIndexTarget = z.infer<typeof SourceIndexTargetSchema>;
@@ -184,10 +193,34 @@ export function sourceIndexGenerationId(selection: SourceIndexSelection, epoch: 
   const captured = structuredClone(selection);
   return digest(["source-index-generation.v2", SOURCE_INDEX_PREPARATION_REVISION, captured.workspace_id, captured.selection_revision, captured.config_id, epoch], sha256);
 }
-export function sourceIndexTarget(target: SourceEvidenceTarget, sourceId: string | null, bodyBytes: number): SourceIndexTarget {
-  const captured = structuredClone({ target, sourceId, bodyBytes });
+export function sourceIndexRootKey(target: SourceEvidenceTarget, auxiliary?: SourceIndexAuxiliaryKey): string {
+  const root = sourceGoldRootIdentity(target);
+  return auxiliary === undefined ? root : `${root}:statement:${auxiliary.artifact_id}:${auxiliary.artifact_digest}`;
+}
+/** Storage key identity and the native evidence-root identity are deliberately different. */
+export function sourceIndexNativeRootKey(source: SourceIndexTarget): string {
+  return source.auxiliary === undefined ? source.root_key : sourceGoldRootIdentity(source.target);
+}
+export function sourceIndexNavigationLocation(source: SourceIndexTarget, window: { start_byte: number; end_byte: number }): { start_byte: number; end_byte: number };
+export function sourceIndexNavigationLocation(source: SourceIndexTarget, window?: { start_byte: number; end_byte: number }): { start_byte: number; end_byte: number } | undefined;
+export function sourceIndexNavigationLocation(source: SourceIndexTarget, window?: { start_byte: number; end_byte: number }) {
+  const span = source.auxiliary?.source_span;
+  return span === undefined ? window === undefined ? undefined : { start_byte: window.start_byte, end_byte: window.end_byte }
+    : { start_byte: span[0], end_byte: span[1] };
+}
+export function sourceIndexTarget(target: SourceEvidenceTarget, sourceId: string | null, bodyBytes: number,
+  auxiliary?: SourceIndexAuxiliaryKey): SourceIndexTarget {
+  const captured = structuredClone({ target, sourceId, bodyBytes, auxiliary });
   return SourceIndexTargetSchema.parse({ target: captured.target, source_id: captured.sourceId,
-    body_bytes: captured.bodyBytes, root_key: sourceGoldRootIdentity(captured.target) });
+    body_bytes: captured.bodyBytes, root_key: sourceIndexRootKey(captured.target, captured.auxiliary),
+    ...(captured.auxiliary === undefined ? {} : { auxiliary: captured.auxiliary }) });
+}
+export function sourceIndexStatementTarget(artifact: SourceStatementArtifact, sourceId: string): SourceIndexTarget {
+  const { span: _span, ...target } = artifact.bound.source_target;
+  return sourceIndexTarget(target, sourceId, new TextEncoder().encode(artifact.key_text).length, {
+    contract: SOURCE_STATEMENTS_CONTRACT, artifact_id: artifact.artifact_id,
+    artifact_digest: artifact.artifact_digest, key_digest: artifact.key_digest, source_span: artifact.bound.source_span
+  });
 }
 
 export class SourceIndexCapacityExceeded extends AlayaError {
@@ -202,8 +235,8 @@ export function prepareSourceIndexLexical(input: { source: SourceIndexTarget; bo
   if (typeof body !== "string") throw new AlayaError("VALIDATION", "source index body must be text");
   const bytes = new TextEncoder().encode(body);
   if (bytes.length > SOURCE_INDEX_MAX_BODY_BYTES || bytes.length !== source.body_bytes ||
-      /[\uD800-\uDFFF]/u.test(body) || hashContentDigest(body, sha256) !== source.target.content_digest ||
-      source.root_key !== sourceGoldRootIdentity(source.target)) throw new AlayaError("VALIDATION", "source index requires complete exact source bytes");
+      /[\uD800-\uDFFF]/u.test(body) || hashContentDigest(body, sha256) !== (source.auxiliary?.key_digest ?? source.target.content_digest) ||
+      source.root_key !== sourceIndexRootKey(source.target, source.auxiliary)) throw new AlayaError("VALIDATION", "source index requires complete exact key bytes");
   return { source, body, bytes };
 }
 
@@ -215,7 +248,7 @@ export function prepareSourceIndexDocument(input: { source: SourceIndexTarget; b
   const { source, body, bytes } = prepareSourceIndexLexical(captured, sha256);
   const profile = SourceIndexProfileSchema.parse(captured.profile);
   const profileId = sourceIndexProfileId(profile, sha256);
-  const structure = profile.windowing === "recorded-message-windows.v1"
+  const structure = source.auxiliary === undefined && profile.windowing === "recorded-message-windows.v1"
     ? SourceIndexMessageStructureSchema.parse(captured.message_structure) : undefined;
   const intervals = structure === undefined ? rawWindowIntervals(bytes, profile.window_bytes)
     : messageWindowIntervals(bytes, profile.window_bytes, structure, SOURCE_INDEX_MAX_WINDOWS);

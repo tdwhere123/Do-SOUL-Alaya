@@ -9,7 +9,7 @@ import type { SqliteHealthJournalRepo, SqliteWorkspaceRepo } from "@do-soul/alay
 import {
   OFFICIAL_API_GARDEN_MODEL,
   type ComputeRoutingCandidate,
-  type LocalHeuristics
+  type UnavailableGardenProvider
 } from "@do-soul/alaya-soul";
 import { resolveSecretRef, type ResolveSecretError } from "../../secrets/index.js";
 import type { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
@@ -65,7 +65,7 @@ export function resolveGardenSecretRefValue(secretRef: string): string {
 export function buildGardenComputeRoutingProviders(input: {
   readonly config: RuntimeGardenComputeConfig;
   readonly officialGardenProvider: GardenComputeProviderResolver;
-  readonly localHeuristicsProvider: LocalHeuristics;
+  readonly localHeuristicsProvider: UnavailableGardenProvider;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): readonly ComputeRoutingCandidate[] {
   return [

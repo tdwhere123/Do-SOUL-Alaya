@@ -35,6 +35,8 @@ import type { GardenTaskHandlerDependencies, GardenTaskToolCallContext } from ".
 import { normalizeCandidateSignalGraphRefs } from "../tool/tool-handler-support.js";
 import { gardenTaskSourceAvailable, quarantineUnavailablePostTurnTasks } from "../../garden/post-turn-extract/source-provenance.js";
 
+import { receiveSourceStatementTask, sourceStatementTaskCompletionEnvelope } from "../../garden/post-turn-extract/source-statement-task.js";
+
 const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 
 interface GardenTaskCompletionParams {
@@ -149,6 +151,14 @@ function validateTaskResultEnvelope(
 
   const edgeVerdict = request.result_envelope?.edge_verdict;
   const candidateSignalsCount = request.result_envelope?.candidate_signals?.length ?? 0;
+  const statementResponses = request.result_envelope?.source_statement_responses;
+  if (row.kind === GardenTaskKind.POST_TURN_EXTRACT) {
+    if (candidateSignalsCount > 0 || (request.status === "completed" && statementResponses === undefined)) {
+      throw new GardenTaskValidationError("POST_TURN_EXTRACT requires source_statement_responses, not passive candidate_signals.");
+    }
+  } else if (statementResponses !== undefined) {
+    throw new GardenTaskValidationError("source_statement_responses are only valid for POST_TURN_EXTRACT.");
+  }
   if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
     if (candidateSignalsCount > 0) {
       throw new GardenTaskValidationError(
@@ -179,9 +189,9 @@ async function completeCandidateSignalTask(
   const repo = requireGardenTaskRepo(params.deps);
   const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
   const preservesPostTurnEvidence = row.kind === GardenTaskKind.POST_TURN_EXTRACT;
-  const completionEnvelopeJson = contentOnlySignals.length > 0 || preservesPostTurnEvidence
-    ? buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals)
-    : null;
+  const completionEnvelopeJson = preservesPostTurnEvidence
+    ? sourceStatementTaskCompletionEnvelope(row.id, request.result_envelope?.source_statement_responses ?? [])
+    : contentOnlySignals.length > 0 ? buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals) : null;
   assertCandidateSignalRetryCompatible(row, completionEnvelopeJson);
 
   const completionClaimedBy = completionEnvelopeJson === null
@@ -190,9 +200,9 @@ async function completeCandidateSignalTask(
   throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
-  let failedCount: number;
+  let completion: Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>;
   try {
-    failedCount = await commitCandidateSignalCompletion(
+    completion = await commitCandidateSignalCompletion(
       params, request, context, row, resolvedRunId, contentOnlySignals, completionClaimedBy
     );
   } catch (error) {
@@ -201,8 +211,8 @@ async function completeCandidateSignalTask(
     throw error;
   }
 
-  return { task_id: row.id, status: request.status, events_appended: 1,
-    ...(failedCount === 0 ? {} : { failed_candidate_signals_count: failedCount }) };
+  return { task_id: row.id, status: completion.status, events_appended: 1,
+    ...(completion.failedCount === 0 ? {} : { failed_candidate_signals_count: completion.failedCount }) };
 }
 
 async function commitCandidateSignalCompletion(
@@ -215,32 +225,36 @@ async function commitCandidateSignalCompletion(
     NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
   >,
   completionClaimedBy: string
-): Promise<number> {
+): Promise<Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>> {
   const postTurnPayload = row.kind === GardenTaskKind.POST_TURN_EXTRACT
     ? readExternalPostTurnPayload(row, context, resolvedRunId)
     : null;
-  const candidateSignals = buildCandidateSignals(
-    params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId,
-    postTurnPayload === null ? resolveGardenTaskSourceObservation(row) : null
+  const statements = postTurnPayload === null ? null : await receiveSourceStatementTask({
+    taskId: row.id, payload: postTurnPayload, responses: request.result_envelope?.source_statement_responses ?? [], now: params.now
+  });
+  const candidateSignals = statements?.signals ?? buildCandidateSignals(
+    params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId, resolveGardenTaskSourceObservation(row)
   );
+  const status = statements?.incomplete === true ? "failed" : request.status;
+  const lastError = statements?.incomplete === true ? "Source statement extraction is incomplete; valid siblings and raw source were retained." : request.last_error_text;
   throwIfAborted(context.abortSignal);
   const failedSignalIds = new Set<string>();
   const emittedSignalIds = await emitTaskCandidateSignals(
-    params, request, row, postTurnPayload, candidateSignals, completionClaimedBy, failedSignalIds
+    params, row, postTurnPayload, candidateSignals, completionClaimedBy, failedSignalIds
   );
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {
-      status: request.status,
+      status,
       completed_at: params.now(),
-      ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+      ...(lastError === undefined ? {} : { last_error_text: lastError })
     },
-    [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now(), failedSignalIds.size)],
+    [buildCompletedTaskEvent(row, context, resolvedRunId, status, emittedSignalIds, params.now(), failedSignalIds.size)],
     completionClaimedBy,
     context.workspaceId
   );
-  return failedSignalIds.size;
+  return { failedCount: failedSignalIds.size, status };
 }
 
 function assertCandidateSignalRetryCompatible(
@@ -251,8 +265,9 @@ function assertCandidateSignalRetryCompatible(
       row.completion_envelope_json === completionEnvelopeJson) {
     return;
   }
-  throw new GardenTaskValidationError(
-    `Garden task candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope: ${row.id}`
+  throw new GardenTaskValidationError(row.kind === GardenTaskKind.POST_TURN_EXTRACT
+    ? `Garden task source_statement_responses changed after a previous partial completion attempt; retry with the original source statement response envelope: ${row.id}`
+    : `Garden task candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope: ${row.id}`
   );
 }
 

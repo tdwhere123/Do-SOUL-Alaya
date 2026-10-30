@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   capableRecallConsumerDeclaration,
-  compileQuerySourceSketch,
   RecallService
 } from "@do-soul/alaya-core";
 import {
@@ -14,8 +13,7 @@ import {
   ScopeClass,
   SoulMemorySearchRequestSchema,
   sourceEvidenceRootTarget,
-  SoulMemorySearchResponseSchema,
-  type SoulMemorySearchRequest
+  SoulMemorySearchResponseSchema
 } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase,
@@ -33,8 +31,7 @@ import { SOURCE_DISCOVERY_CANARY } from "../../../../../../packages/core/src/__t
 import {
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
-  defaultBudget,
-  defaultView
+  defaultBudget
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { prepareRetainedSourceLexicalIndex } from "../../../../../bench-runner/src/__tests__/harness/recall/source-records-worker-fixture.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
@@ -59,13 +56,6 @@ describe("source discovery consumer surfaces", () => {
     const filler = `${canary.intended} filler ${"y".repeat(3000)}`;
     new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert({ ...hashedRecord(WS, filler, "filler"), scope_class: ScopeClass.PROJECT });
     prepareRetainedSourceLexicalIndex(slice.database, WS);
-    const proposal = compileQuerySourceSketch({
-      snapshot_id: SNAPSHOT_ID,
-      budget: defaultBudget(),
-      interpretation_clock: INTERPRETATION_CLOCK,
-      view: { ...defaultView(), result_kind_view: "source_only" },
-      sketch: { original_query: canary.original_query, relation: canary.sketch }
-    }).interpretation_proposal;
     const client = createRecallReadWorkerClient({
       databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
     })!;
@@ -91,8 +81,7 @@ describe("source discovery consumer surfaces", () => {
         result_kind_view: "source_only",
         scope_class: null,
         dimension: null,
-        domain_tags: null,
-        interpretation_proposal: proposal
+        domain_tags: null
       });
       const context = { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" };
       const first = await handler(request, context);
@@ -153,14 +142,7 @@ describe("source discovery consumer surfaces", () => {
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
     prepareRetainedSourceLexicalIndex(slice.database, WS);
-    const proposal = compileQuerySourceSketch({
-      snapshot_id: SNAPSHOT_ID,
-      budget: defaultBudget(),
-      interpretation_clock: INTERPRETATION_CLOCK,
-      view: { ...defaultView(), result_kind_view: "source_only" },
-      sketch: { original_query: canary.original_query, relation: canary.sketch }
-    }).interpretation_proposal;
-    const result = await recallNativeSourcesThroughCli(slice.database, canary.original_query, proposal);
+    const result = await recallNativeSourcesThroughCli(slice.database, canary.original_query);
     const row = result.results.find((result) => result.target?.kind === "source_evidence"
       && result.target.root_id === record.record_id);
     expect(row?.content_preview).toBe(canary.intended);
@@ -188,13 +170,6 @@ describe("source discovery consumer surfaces", () => {
     const first = createRecallReadWorkerClient({
       databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
     })!;
-    const proposal = compileQuerySourceSketch({
-      snapshot_id: SNAPSHOT_ID,
-      budget: defaultBudget(),
-      interpretation_clock: INTERPRETATION_CLOCK,
-      view: { ...defaultView(), result_kind_view: "source_only" },
-      sketch: { original_query: canary.original_query, relation: canary.sketch }
-    }).interpretation_proposal;
     const request = {
       workspace_id: WS,
       query_text: canary.original_query,
@@ -205,7 +180,6 @@ describe("source discovery consumer surfaces", () => {
       expires_at: "2099-01-01T00:00:00Z",
       result_kind_view: view,
       authorized_scopes: null,
-      interpretation_proposal: proposal,
       protocol_version: 1 as const,
       supports_source_evidence: true as const,
       supported_result_kinds: ["memory_entry", "source_evidence"] as const
@@ -262,8 +236,7 @@ describe("source discovery consumer surfaces", () => {
 
 async function recallNativeSourcesThroughCli(
   database: StorageDatabase,
-  query: string,
-  interpretationProposal: SoulMemorySearchRequest["interpretation_proposal"]
+  query: string
 ) {
   const service = new RecallService({
     ...createDependencies().dependencies,
@@ -277,8 +250,7 @@ async function recallNativeSourcesThroughCli(
   });
   const parsed = command.argsSchema.safeParse(["call", "soul.recall", JSON.stringify({
     ...capableRecallConsumerDeclaration(), query, max_results: 8,
-    result_kind_view: "source_only", scope_class: null, dimension: null, domain_tags: null,
-    interpretation_proposal: interpretationProposal
+    result_kind_view: "source_only", scope_class: null, dimension: null, domain_tags: null
   }), "--workspace", WS]);
   if (!parsed.success) throw new Error("CLI args parse failed");
   const result = await command.handler({

@@ -1,4 +1,4 @@
-import { sourceGoldRootIdentity, type RecallNavigationWitness, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceIndexNavigationLocation, type RecallNavigationWitness, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { NativeSourceNomination, ObserverReaders, SourceRootObserverPage } from "../conditional-field/observers/observe-ports.js";
 import { CoreError } from "../../shared/errors.js";
 
@@ -12,20 +12,20 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
     const digest = captured!.navigation_digests?.[occurrence.view]
       ?? (occurrence.view === "original" ? captured!.result?.navigation_digest : undefined);
     if (digest == null) throw new CoreError("OBLIGATION_VIOLATION", "Native nomination lacks its captured query digest");
-    const key = occurrence.source.root_key, ordinal = positions[route.kind]++;
+    const key = sourceIndexNativeRootKey(occurrence.source), ordinal = positions[route.kind]++;
     meter.charge(1, 0, "native observation witness lookup");
     // Keep actual route ordinals, but allocate only the first-admission witness
     // this reader uses. The complete occurrence stream remains with its producer.
     if (witnesses.has(key)) continue;
+    const location = sourceIndexNavigationLocation(occurrence.source,
+      route.kind === "vector" && route.window?.status === "available" ? route.window.window : undefined);
     const navigation: RecallNavigationWitness = {
       contract: "native-query-navigation.v1",
       query_digest: digest,
       view: occurrence.view,
       operator: route.kind === "lexical" ? "source_lexical" : "source_vector",
       ordinal, native_rank: route.native_rank, reference: occurrence.reference,
-      ...(route.kind !== "vector" || route.window?.status !== "available" ? {} : {
-        location: { start_byte: route.window.window.start_byte, end_byte: route.window.window.end_byte }
-      })
+      ...(location === undefined ? {} : { location })
     };
     meter.retain(navigation, "native observation navigation");
     meter.charge(1, 40, "native observation witness reference");
@@ -41,9 +41,9 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
   // independently supported memory lane must keep running instead of being closed
   // by a source-root reader that can only report unavailability.
   if (captured === null) {
-    return { ...readers, boundInterpretations: undefined, sourceTextHints: undefined, sourceRoots: undefined };
+    return { ...readers, sourceRoots: undefined };
   }
-  return { ...readers, boundInterpretations: undefined, sourceTextHints: undefined,
+  return { ...readers,
     sourceRoots: input => {
       const empty: SourceRootObserverPage = { rows: [], nativeVisits: 0, nativeBytes: 0,
         rowsRead: 0, bytesRead: 0, truncated: false, committedThrough: input.afterCursor };
@@ -52,7 +52,7 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
       if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("Invalid frozen source nomination cursor");
       const target = roots === undefined ? nominations?.[offset]?.source.target : roots[offset];
       if (target === undefined) return empty;
-      const key = roots === undefined ? nominations![offset]!.source.root_key : sourceGoldRootIdentity(target);
+      const key = roots === undefined ? sourceIndexNativeRootKey(nominations![offset]!.source) : sourceGoldRootIdentity(target);
       const navigation = witnesses.get(key);
       if (navigation === undefined && captured.admitted_roots === undefined) {
         throw new CoreError("OBLIGATION_VIOLATION", "Native nomination lacks its retained witness");

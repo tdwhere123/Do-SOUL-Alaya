@@ -198,6 +198,27 @@ missing ordinary worker authorization key fails closed. Do not substitute a
 workspace default. Source-semantic attached-agent handles have their own
 explicit principal and lifetime admission, not a reusable ordinary worker key.
 
+## Minimal statement navigation
+
+Protocol 31.0.0 (`ordinary-native-field.v8`, invariant §25 major) admits
+`source-statements-v1` artifacts as auxiliary keys of an existing source message.
+The ordered session producer emits only `{text, relation}`; the host supplies message
+identity, role, recorded time and byte extent. Core verifies the captured source root,
+currentness, scope and occurrence inventory at publication and inside writes. It
+persists provenance evidence before optional generic observation memory; retry never
+deletes evidence to compensate for a later memory failure. Explicit agent-authored
+signals and `soul.interpretation` H/Q/C remain separate supported APIs.
+
+The same admitted artifact supplies lexical and selected-space vector key text.
+Artifact/key digests are not raw-body digests or independent source roots. SQLite
+invalidates generation eligibility when the key set changes, and readers check raw
+source currentness plus artifact availability. Archive/erase withdraws keys. Missing,
+failed or empty statement extraction leaves raw source keys available. Statement
+hits retain their raw host message coordinates and existing raw display semantics;
+no assistant relocation or new display selector is implied. Historical extraction
+records retain their own interpretation and erase dependencies, not new admission
+under the minimal contract.
+
 ## Question-time preference
 
 Protocol 28.0.0 admits `interpretation_proposal.question_time` from the narrow

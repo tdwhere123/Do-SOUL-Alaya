@@ -2,11 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  OFFICIAL_API_SYSTEM_PROMPT,
-  buildOfficialApiExtractionRequests,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
 import {
   computeCacheKey,
   createCachingSignalExtractor
@@ -19,7 +16,8 @@ const config = {
   model: "gpt-5.4-mini",
   modelFamily: "gpt-5.4-mini" as const,
   providerUrl: "https://provider.invalid/v1",
-  requestProfile: "provider-default-v1" as const
+  requestProfile: "provider-default-v1" as const,
+  sourcePacking: "session-statements" as const
 };
 
 afterEach(() => {
@@ -29,18 +27,16 @@ afterEach(() => {
 describe("continuation sparse cache execution", () => {
   it("does not read or delegate a sibling shard outside the missing-key scope", async () => {
     const cacheRoot = temporaryRoot();
-    const requests = buildOfficialApiExtractionRequests(
-      Array.from({ length: 9 }, (_, index) =>
-        `I recorded durable detail number ${index + 1}.`
-      ).join(" "),
-      []
-    );
+    const requests = sourceStatementRequests([
+      { message_id: "first", role: "user", content: "a".repeat(15_000) },
+      { message_id: "second", role: "user", content: "b".repeat(20_000) }
+    ]);
     expect(requests).toHaveLength(2);
     const keys = requests.map((request) => computeCacheKey(
       config.model,
       config.requestProfile,
-      OFFICIAL_API_SYSTEM_PROMPT,
-      stringifyOfficialApiExtractionRequest(request)
+      SOURCE_STATEMENTS_PROMPT,
+      request.userPrompt
     ));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
     const extractor = createCachingSignalExtractor({
@@ -52,8 +48,8 @@ describe("continuation sparse cache execution", () => {
     });
 
     await expect(extractor.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(requests[0]!)
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
+      userPrompt: requests[0]!.userPrompt
     })).resolves.toEqual({
       rawJson: '{"extraction_skip":"plan_skipped"}',
       extractionSkip: "plan_skipped"
@@ -61,8 +57,8 @@ describe("continuation sparse cache execution", () => {
     expect(delegate).not.toHaveBeenCalled();
 
     await expect(extractor.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: stringifyOfficialApiExtractionRequest(requests[1]!)
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
+      userPrompt: requests[1]!.userPrompt
     })).rejects.toThrow(/cache-only.*missing/u);
   });
 });

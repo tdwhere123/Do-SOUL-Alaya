@@ -18,7 +18,7 @@ import {
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
 import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
-  admitPostTurnSourceRoot
+  admitPostTurnSourceRoot, postTurnHostMessageId
 } from "../../garden/post-turn-extract/admitted-source-root.js";
 import type {
   RecallUsageHandlerDependencies,
@@ -141,12 +141,14 @@ export async function enqueueConversationGardenCompileTask(
     Object.freeze({
       role: input.userMessage.role,
       content_excerpt: input.userMessage.content,
-      message_id: input.userMessage.message_id
+      message_id: input.userMessage.message_id,
+      ...(input.userMessage.created_at === undefined ? {} : { recorded_at: input.userMessage.created_at })
     }),
     Object.freeze({
       role: input.assistantMessage.role,
       content_excerpt: input.assistantMessage.content,
-      message_id: input.assistantMessage.message_id
+      message_id: input.assistantMessage.message_id,
+      ...(input.assistantMessage.created_at === undefined ? {} : { recorded_at: input.assistantMessage.created_at })
     })
   ]);
   const sourceCapture = await persistAdmittedTurnRoot(params.sourceAdmission, {
@@ -238,7 +240,7 @@ async function persistAdmittedTurnRoot(
     const raw = admitPostTurnSourceRoot({
       admission,
       workspaceId: input.workspaceId,
-      sourceId: `post-turn:${input.taskId}:message:${index}`,
+      sourceId: postTurnHostMessageId(input.taskId, index),
       content: message.content_excerpt,
       recordedAt: input.createdAt,
       eventTime: message.event_time ?? null,
@@ -280,7 +282,7 @@ async function persistAdmittedTurnRoot(
 
 function reportedOccurrence(taskId: string, index: number, role: string, utf8_span: readonly [number, number],
   fidelity: HostOccurrence["fidelity"]): HostOccurrence {
-  return { occurrence_id: `post-turn:${taskId}:message:${index}`, utf8_span, role, channel: null,
+  return { occurrence_id: postTurnHostMessageId(taskId, index), utf8_span, role, channel: null,
     author_ref: null, container_ref: null, upstream_message_ref: null, upstream_position: null,
     completeness: "excerpt", fidelity };
 }

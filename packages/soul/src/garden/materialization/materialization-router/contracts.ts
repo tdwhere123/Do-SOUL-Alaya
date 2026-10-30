@@ -1,5 +1,5 @@
 import {
-  type BoundSourceInterpretation,
+  type BoundSourceStatement,
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
@@ -13,7 +13,7 @@ import {
   type QueryAvailability,
   type RelationValidity,
   type SourceGroundingDeferReason,
-  type SourceInterpretationSignal,
+  type SourceStatementSignal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { type HandoffGapHandler } from "../../maintenance/handoff-gap-handler.js";
@@ -217,13 +217,13 @@ export interface PathRelationProposalPort {
 
 export interface SourceObservationPublicationPort {
   publish(input: {
-    readonly signal: SourceInterpretationSignal;
+    readonly signal: SourceStatementSignal;
     readonly context: MaterializationContext;
   }): Promise<SourceObservationPublicationResult>;
 }
 
 export type SourceObservationPublicationResult = Readonly<{
-  readonly bound: BoundSourceInterpretation;
+  readonly bound: BoundSourceStatement;
   readonly evidence: MaterializationCreatedObject;
   readonly memory: MemoryMaterializationCreatedObject;
 }>;

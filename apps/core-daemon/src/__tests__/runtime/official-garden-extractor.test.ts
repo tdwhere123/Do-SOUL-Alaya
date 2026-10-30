@@ -38,7 +38,7 @@ describe("resolveVendorModelAlias", () => {
 });
 
 describe("createOfficialGardenExtractor", () => {
-  it("sends the remapped vendor id and table profile to the provider", async () => {
+  it.each(["default", "disabled"] as const)("preserves vendor mapping while honoring explicit %s provider retries", async retryMode => {
     executeMock.mockResolvedValue({
       result: { text: '{"signals":[]}', finishReason: "stop", httpStatus: 200 },
       retryCount: 0,
@@ -53,14 +53,15 @@ describe("createOfficialGardenExtractor", () => {
 
     await extractor.extract({
       systemPrompt: "sys",
-      userPrompt: "{}"
+      userPrompt: "{}",
+      retryMode
     });
 
     expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({
       model: "mimo-v2.5",
       profile: "mimo-v2.5-nonthinking-v1",
       timeoutMs: DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
-    }), expect.objectContaining({ maxRetries: 3 }));
+    }), expect.objectContaining({ maxRetries: retryMode === "disabled" ? 0 : 3 }));
   });
 
   it("does not attach a request profile for an unknown model", async () => {

@@ -11,6 +11,8 @@ import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { stableStringify } from "@do-soul/alaya-core";
 import { buildGardenTaskSignalId } from "../../garden/support/task-signal-id.js";
 import { McpToolError } from "../tool/mcp-tool-error.js";
+import { parsePostTurnExtractTaskPayload } from "../../garden/post-turn-extract/task-payload.js";
+import { sourceStatementTaskRequests } from "../../garden/post-turn-extract/source-statement-task.js";
 
 export type WarnPort = (message: string, meta: Record<string, unknown>) => void;
 export type GardenCompletionCandidateSignal = NonNullable<
@@ -114,7 +116,7 @@ function publicGardenTaskPayload(row: GardenTaskRow): unknown {
       run_id: row.payload.run_id,
       turn_index: row.payload.turn_index,
       workspace_id: row.payload.workspace_id,
-      turn_digest: row.payload.turn_digest
+      source_statements: sourceStatementTaskRequests(parsePostTurnExtractTaskPayload(row.payload), row.id)
     };
   }
   if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {

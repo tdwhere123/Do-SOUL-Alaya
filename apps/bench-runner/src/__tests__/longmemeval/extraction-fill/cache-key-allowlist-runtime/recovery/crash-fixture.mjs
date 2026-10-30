@@ -41,11 +41,11 @@ async function extract(request) {
           fingerprint: "f".repeat(64), attempt: 1 }] }
     });
   }
-  const { source_assertions: assertions } = JSON.parse(request.userPrompt);
-  if (assertions.length === 0) throw new Error("expected a source assertion");
-  const rawJson = JSON.stringify({ interpretations: assertions.map(assertion => ({
-    assertion_id: assertion.assertion_id,
-    relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }]
+  const { messages } = JSON.parse(request.userPrompt);
+  if (messages.length === 0) throw new Error("expected captured session messages");
+  const rawJson = JSON.stringify({ messages: messages.map(message => ({
+    message_id: message.message_id,
+    statements: message.role === "user" ? [{ text: message.text, relation: "recorded detail" }] : []
   })) });
   const response = Response.json({ choices: [{ message: { content: rawJson }, finish_reason: "stop" }] });
   const bytes = Buffer.from(await response.arrayBuffer());

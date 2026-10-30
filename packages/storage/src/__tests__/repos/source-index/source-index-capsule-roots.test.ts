@@ -44,7 +44,7 @@ describe("native retained capsule SourceIndex roots", () => {
     const env = setup(); const root = await capsule(env, excerpt);
     expect(lexical(env).candidates).toEqual([]);
     const { generation, documents } = buildReady(env);
-    expect(generation).toMatchObject({ preparation_revision: 2, records_complete: true, enumeration_complete: true });
+    expect(generation).toMatchObject({ preparation_revision: 3, records_complete: true, enumeration_complete: true });
     const source = documents[0]!.source;
     expect(source).toMatchObject({ source_id: null, target: { root_kind: "evidence_capsule", root_id: root.object_id,
       source_version: CLOCK, evidence_object_id: root.object_id } });
@@ -189,7 +189,7 @@ describe("native retained capsule SourceIndex roots", () => {
     try { env.index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET); } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(SourceIndexOperationError);
     if (!(failure instanceof SourceIndexOperationError)) throw new Error("expected metered failure");
-    expect(failure.resources.work).toBe(12); // empty record seek, capsule candidate, and guarded candidate/barrier attempt
+    expect(failure.resources.work).toBe(13); // empty record seek, capsule/statement lookup, and guarded candidate/barrier attempt
     expect(failure.resources.native_bytes).toBeGreaterThan(0);
     expect(env.index.generation(WORKSPACE, generation.generation_id)).toMatchObject({ records_complete: false,
       after_capsule_cursor: null, enumeration_complete: false, target_count: 0 });

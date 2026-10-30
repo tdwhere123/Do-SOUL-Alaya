@@ -1,4 +1,4 @@
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { extractionArtifactPrompt } from "../../request-artifact.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
 import {
@@ -259,7 +259,7 @@ function indexTurns(
 ): ReadonlyMap<string, LongMemEvalExtractionTurn> {
   return new Map(turns.flatMap((turn) =>
     computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn, config.sourcePacking
+      config.model, config.requestProfile, extractionArtifactPrompt(undefined, undefined, config.sourcePacking), turn, config.sourcePacking
     ).map((cacheKey) => [cacheKey, turn] as const)
   ));
 }

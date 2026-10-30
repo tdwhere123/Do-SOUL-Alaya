@@ -3,7 +3,7 @@ import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-s
 import type { ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 import { createHash } from "node:crypto";
 import { geminiGenerationSchemaCacheMaterial } from "../../extraction/fill/batch/generation-schema.js";
-import { officialApiExtractionResponseSchemaPreimage, sourceSemanticGenerationPresentation } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, officialApiExtractionResponseSchemaPreimage, sourceSemanticGenerationPresentation } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
   "../../extraction/cache/cache-invariant-error.js";
 import type { LongMemEvalExtractionTurn } from
@@ -101,7 +101,9 @@ export function computeSourceTurnCacheKeys(
   sourceInterpretationProfile?: SourceInterpretationProfile,
   openSemantics?: ExtractionOpenSemanticsGeneration
 ): readonly string[] {
-  return Object.freeze(extractionArtifactRequests(input, sourcePacking, sourceInterpretationProfile, openSemantics)
+  // Historical keys retain their exact request meaning; the live cache execution port rejects those requests.
+  return Object.freeze(extractionArtifactRequests(input, sourcePacking, sourceInterpretationProfile, openSemantics,
+    systemPrompt === OFFICIAL_API_SYSTEM_PROMPT)
     .map(({ userPrompt }) => computeCacheKey(model, requestProfile, systemPrompt, userPrompt)));
 }
 

@@ -190,7 +190,9 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         AND json_extract(gist, '$.source_target.root_id') = ? ELSE 0 END
     `).all(workspaceId, ...SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS, workspaceId, recordId) as { object_id: string; gist: string }[];
     const invalidated = this.discoverInvalidatedEvidenceIds(workspaceId, recordId);
-    return [...new Set([...aliases, ...invalidated, ...derived.filter((row) =>
+    const statements = this.database.connection.prepare(`SELECT artifact_id AS evidence_id FROM source_statement_dependencies
+      WHERE workspace_id=? AND record_id=?`).all(workspaceId, recordId) as { evidence_id: string }[];
+    return [...new Set([...aliases, ...invalidated, ...statements.map(row => row.evidence_id), ...derived.filter((row) =>
       sourceInterpretationDependsOnRecord(row.gist, workspaceId, recordId)).map((row) => row.object_id)])].sort();
   }
 

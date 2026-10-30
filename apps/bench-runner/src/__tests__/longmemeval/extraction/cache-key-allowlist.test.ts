@@ -2,7 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { admitStatementSessionCache } from "../compile-seed/compile-seed-fixture.js";
+import { TEST_EXTRACTION_PROVIDER_URL, writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
+import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
 import {
   computeExtractionTurnCacheKey
 } from "../../../runs/compile-seed/compile-seed-cache.js";
@@ -19,7 +22,8 @@ import type { LongMemEvalExtractionTurn } from
 const roots: string[] = [];
 const config = {
   model: "gpt-5.4-mini",
-  requestProfile: "provider-default-v1" as const
+  requestProfile: "provider-default-v1" as const,
+  sourcePacking: "session-statements" as const
 };
 const first = turn("alpha", "first");
 const second = turn("beta", "second");
@@ -113,18 +117,11 @@ describe("extraction cache-key allowlist continuation", () => {
     })).toBeUndefined();
   });
 
-  it("derives a sparse continuation scope from settled ledger successes", () => {
+  it("derives a sparse continuation scope from settled ledger successes", async () => {
     const cacheRoot = temporaryRoot();
     const firstKey = cacheKey(first);
     const secondKey = cacheKey(second);
-    writeCachedExtraction(cacheRoot, firstKey, {
-      model: config.model,
-      request_profile: config.requestProfile,
-      cache_key: firstKey,
-      raw_json: '{"interpretations":[]}',
-      empty_classification: "deterministic_empty",
-      extracted_at: "2026-08-09T00:00:00.000Z"
-    });
+    await admitFirst(cacheRoot);
 
     const selected = resolveContinuationMissingTurns({
       cacheRoot,
@@ -141,18 +138,10 @@ describe("extraction cache-key allowlist continuation", () => {
     });
   });
 
-  it("keeps audited predecessor hits outside the continuation ledger", () => {
+  it("keeps audited predecessor hits outside the continuation ledger", async () => {
     const cacheRoot = temporaryRoot();
-    const firstKey = cacheKey(first);
     const secondKey = cacheKey(second);
-    writeCachedExtraction(cacheRoot, firstKey, {
-      model: config.model,
-      request_profile: config.requestProfile,
-      cache_key: firstKey,
-      raw_json: '{"interpretations":[]}',
-      empty_classification: "deterministic_empty",
-      extracted_at: "2026-08-09T00:00:00.000Z"
-    });
+    await admitFirst(cacheRoot);
 
     const selected = resolveContinuationMissingTurns({
       cacheRoot,
@@ -169,19 +158,12 @@ describe("extraction cache-key allowlist continuation", () => {
     });
   });
 
-  it("preserves canonical turn order across a continuation", () => {
+  it("preserves canonical turn order across a continuation", async () => {
     const cacheRoot = temporaryRoot();
     const firstKey = cacheKey(first);
     const secondKey = cacheKey(second);
     const thirdKey = cacheKey(third);
-    writeCachedExtraction(cacheRoot, firstKey, {
-      model: config.model,
-      request_profile: config.requestProfile,
-      cache_key: firstKey,
-      raw_json: '{"interpretations":[]}',
-      empty_classification: "deterministic_empty",
-      extracted_at: "2026-08-09T00:00:00.000Z"
-    });
+    await admitFirst(cacheRoot);
 
     const selected = resolveContinuationMissingTurns({
       cacheRoot,
@@ -263,16 +245,13 @@ describe("extraction cache-key allowlist production window", () => {
 
   it.each(["hit", "invalid"] as const)(
     "rejects a production key whose current shard status is %s",
-    (status) => {
+    async (status) => {
       const cacheRoot = temporaryRoot();
       const key = cacheKey(first);
-      writeCachedExtraction(cacheRoot, key, {
-        model: config.model,
-        request_profile: config.requestProfile,
-        cache_key: key,
-        raw_json: status === "hit" ? '{"interpretations":[]}' : "not-json",
-        ...(status === "hit" ? { empty_classification: "deterministic_empty" as const } : {}),
-        extracted_at: "2026-07-22T00:00:00.000Z"
+      if (status === "hit") await admitFirst(cacheRoot);
+      else writeCachedExtraction(cacheRoot, key, {
+        model: config.model, request_profile: config.requestProfile, cache_key: key,
+        raw_json: "not-json", extracted_at: "2026-07-22T00:00:00.000Z"
       });
 
       expect(() => resolveCacheKeyAllowlistedTurns({
@@ -322,8 +301,9 @@ function cacheKey(value: LongMemEvalExtractionTurn): string {
   return computeExtractionTurnCacheKey(
     config.model,
     config.requestProfile,
-    OFFICIAL_API_SYSTEM_PROMPT,
-    value
+    SOURCE_STATEMENTS_PROMPT,
+    value,
+    config.sourcePacking
   );
 }
 
@@ -336,6 +316,14 @@ function turn(turnContent: string, messageId: string): LongMemEvalExtractionTurn
       content: turnContent
     }])
   });
+}
+
+async function admitFirst(cacheRoot: string): Promise<void> {
+  const extraction = { ...config, providerUrl: TEST_EXTRACTION_PROVIDER_URL, apiKey: "fixture-key" };
+  writeExtractionCacheTestManifest({ cacheRoot, model: config.model, providerUrl: extraction.providerUrl,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT });
+  await admitStatementSessionCache({ cacheRoot, config: extraction, messages: first.turnMessages,
+    rawJson: request => buildGroundedInterpretationResponse(JSON.stringify(request)) });
 }
 
 function temporaryRoot(): string {

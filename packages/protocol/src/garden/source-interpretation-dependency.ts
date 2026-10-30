@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SOURCE_STATEMENTS_CONTRACT, SourceStatementContextSourceSchema } from "./source-statements.js";
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { SOURCE_INTERPRETATION_CONTRACT } from "./source-interpretation.js";
 import { PublishedSourceInterpretationPacketSchema } from "./source-interpretation-packet.js";
@@ -7,6 +8,7 @@ import { SOURCE_SEMANTIC_PUBLISHED_CONTRACT } from "./source-semantic-interpreta
 
 export const SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS = [
   SOURCE_INTERPRETATION_CONTRACT,
+  SOURCE_STATEMENTS_CONTRACT,
   PublishedSourceInterpretationPacketSchema.unwrap().shape.contract.value,
   SOURCE_SEMANTIC_PACKET_CONTRACT,
   "published-source-interpretation-v4",
@@ -23,5 +25,8 @@ export function sourceInterpretationDependsOnRecord(gist: string, workspaceId: s
   const parsed = DependencySchema.safeParse(value);
   if (!parsed.success) return false;
   const target = parsed.data.source_target;
-  return target.workspace_id === workspaceId && target.root_kind === "source_record" && target.root_id === recordId;
+  if (target.workspace_id === workspaceId && target.root_kind === "source_record" && target.root_id === recordId) return true;
+  if (parsed.data.contract !== SOURCE_STATEMENTS_CONTRACT) return false;
+  const context = z.array(SourceStatementContextSourceSchema).safeParse(parsed.data.source_context);
+  return context.success && context.data.some(source => source.workspace_id === workspaceId && source.root_id === recordId);
 }

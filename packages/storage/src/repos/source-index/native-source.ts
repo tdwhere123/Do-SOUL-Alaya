@@ -1,5 +1,5 @@
 import {
-  SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexOperationError, sourceIndexTarget,
+  SOURCE_INDEX_MAX_BODY_BYTES, SOURCE_INDEX_MAX_PAGE_ROWS, SourceIndexOperationError, sourceIndexTarget, sourceIndexRootKey, canonicalJson,
   type SourceIndexBudget, type SourceIndexReadResult, type SourceIndexResources, type SourceIndexTarget,
   type SourceIndexMessageStructure
 } from "@do-soul/alaya-protocol";
@@ -10,6 +10,7 @@ import { SqliteFieldSourceRecordRepo, type BoundedSourceRecordRead } from "../fi
 import { RETAINED_SOURCE_READ_RESERVATION } from "../field/retained-source-chunks.js";
 
 import { guardCapsuleIndexTarget, readCapsuleIndexChunk } from "./capsule-source.js";
+import { readStatementIndexTarget, readStatementIndexChunk } from "./statement-artifact.js";
 
 const SOURCE_READ_WORK = 5;
 export const SOURCE_INDEX_STANDALONE_BUDGET: SourceIndexBudget = { work: 1000, native_bytes: 131072 };
@@ -45,18 +46,28 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
     if (budget.work < SOURCE_READ_WORK || budget.native_bytes < RETAINED_SOURCE_READ_RESERVATION) {
       return { status: "partial" as const, reason: "read_budget" as const, resources };
     }
+    if (source.auxiliary !== undefined) {
+      const artifact = readStatementIndexTarget(database, source.target.workspace_id, source.auxiliary.artifact_id, budget);
+      Object.assign(resources, artifact.resources);
+      if (artifact.status === "partial") return { status: "partial" as const, reason: "read_budget" as const, resources };
+      if (artifact.status === "absent" || artifact.status === "stale" || canonicalJson(artifact.source) !== canonicalJson(source)) {
+        return { status: "stale" as const, reason: "statement_changed", resources };
+      }
+    }
     if (source.target.root_kind === "evidence_capsule") return guardCapsuleIndexTarget(database, source, budget);
     if (source.source_id === null) return { status: "stale" as const, reason: "source_identity", resources };
     const read = records.findCurrentBounded(source.target.workspace_id, source.source_id, 4, 0,
-      { workLimit: budget.work, nativeByteLimit: budget.native_bytes });
-    Object.assign(resources, read === null ? { work: 1, native_bytes: 0 } : sourceReadCost(read));
+      { workLimit: budget.work - resources.work, nativeByteLimit: budget.native_bytes - resources.native_bytes });
+    const cost = read === null ? { work: 1, native_bytes: 0 } : sourceReadCost(read);
+    resources.work += cost.work; resources.native_bytes += cost.native_bytes;
     if (read === null) return { status: "stale" as const, reason: "missing_source", resources };
     if (read.resourceLimited) return { status: "partial" as const, reason: "read_budget" as const, resources };
     if (read.record === null) return { status: "partial" as const, reason: "native_source_unavailable" as const, resources };
     const current = sourceTargetFromRead(read);
     if (current === null) return { status: read.bodyBytes > 0 ? "partial" as const : "stale" as const,
       reason: "native_source_unavailable" as const, resources };
-    if (current.root_key !== source.root_key || current.body_bytes !== source.body_bytes) {
+    if (sourceIndexRootKey(current.target, source.auxiliary) !== source.root_key ||
+        (source.auxiliary === undefined ? current.body_bytes !== source.body_bytes : source.auxiliary.source_span[1] > current.body_bytes)) {
       return { status: "stale" as const, reason: "source_changed", resources };
     }
     const dependencies = read.record.source_representation;
@@ -83,7 +94,7 @@ export function readSourceIndexMessageStructure(records: SqliteFieldSourceRecord
   budget: SourceIndexBudget): { status: "ready"; structure: SourceIndexMessageStructure; resources: SourceIndexResources } |
     { status: "partial"; reason: string; resources: SourceIndexResources } {
   assertIndexBudget(budget);
-  if (source.target.root_kind === "evidence_capsule") return { status: "ready", structure: { status: "not_applicable" },
+  if (source.auxiliary !== undefined || source.target.root_kind === "evidence_capsule") return { status: "ready", structure: { status: "not_applicable" },
     resources: { work: 0, native_bytes: 0 } };
   const read = records.readHostInventory({ workspaceId: source.target.workspace_id, recordId: source.target.root_id,
     sourceVersion: source.target.source_version, contentDigest: source.target.content_digest, authorizedScopes: null,
@@ -111,6 +122,15 @@ export function readSourceIndexDocument(database: StorageDatabase, records: Sqli
     Object.assign(resources, guard.resources);
     if (guard.status !== "ready") return { status: guard.status, reason: guard.reason, resources };
     if (source.body_bytes > maxBytes) return { status: "partial", reason: "body_capacity", resources };
+    if (source.auxiliary !== undefined) {
+      if (budget.work - resources.work < 1 || budget.native_bytes - resources.native_bytes < source.body_bytes) {
+        return { status: "partial", reason: "read_budget", resources };
+      }
+      const artifact = readStatementIndexChunk(database, source, source.body_bytes, 0);
+      resources.work += artifact.resources.work; resources.native_bytes += artifact.resources.native_bytes;
+      return artifact.row === null ? { status: "stale", reason: "statement_changed", resources }
+        : { status: "ready", source, body: artifact.row.content, resources };
+    }
     const parts: string[] = [];
     let offset = 0;
     while (offset < source.body_bytes) {

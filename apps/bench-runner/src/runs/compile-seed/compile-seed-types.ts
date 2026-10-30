@@ -1,5 +1,19 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import type { ConversationMessage } from "@do-soul/alaya-protocol";
+import type { ConversationMessage, SourceStatementReceipt, SourceStatementRequest } from "@do-soul/alaya-protocol";
+
+export interface StatementSessionSeedResponse {
+  readonly request: SourceStatementRequest;
+  readonly rawJson: string;
+  readonly usage?: Readonly<{ input_tokens: number; output_tokens: number }>;
+}
+
+export interface StatementSessionSeedReceipt {
+  readonly receipt: SourceStatementReceipt;
+  /** Once per session; later rounds refer to the same immutable session receipt. */
+  readonly responses?: readonly StatementSessionSeedResponse[];
+  readonly firstUse: boolean;
+  readonly unassignedRawStatements: number;
+}
 import type { ExtractionOutputTokenField } from "../extraction/authority/receipt-limits.js";
 import type {
   ProviderRetryClassification,
@@ -344,6 +358,8 @@ export interface CompileSeedExtractionStats {
    * Single-threaded seed loop, so no cross-turn race.
    */
   lastTurnRawSignalCount: number;
+  lastStatementSession?: StatementSessionSeedReceipt;
+  lastStatementResponses?: StatementSessionSeedResponse[];
   /**
    * Drafts parseOfficialApiSignals recovered from the MOST RECENT
    * extraction's raw JSON (post entry-drop / 64-cap). Set alongside
@@ -417,7 +433,7 @@ export interface SeedExtractionPathKpi {
 
 /** Minimal daemon surface the compile seed path needs — test-stubbable. */
 export interface CompileSeedDaemon {
-  importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">): Promise<unknown>;
+  importSourceRecord: import("../../harness/daemon/daemon-types.js").BenchDaemonHandle["importSourceRecord"];
   /**
    * Seeds the production-extracted signals of ONE round through the daemon's
    * in-process signalService.receiveSignal — the same seam production
@@ -469,6 +485,11 @@ export interface CompileSeedTurnInput {
   readonly daemon: CompileSeedDaemon;
   readonly turnContent: string;
   readonly turnMessages?: readonly ConversationMessage[];
+  /** Entire actually observed session; raw storage remains message/round-bound. */
+  readonly sourceSession?: readonly ConversationMessage[];
+  /** Existing raw storage coordinates, captured before publishing any session statement. */
+  readonly sourceSessionRounds?: readonly Readonly<{ seedIndex: number; turnContent: string;
+    turnMessages: readonly ConversationMessage[] }>[];
   readonly evidenceRefBase: string;
   readonly seedIndex: number;
   readonly workspaceId: string;

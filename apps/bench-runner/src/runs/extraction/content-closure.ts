@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
-import { SourceInterpretationResponseEnvelopeSchema, SourceInterpretationRelationSchema } from "@do-soul/alaya-protocol";
+import { SourceInterpretationResponseEnvelopeSchema, SourceInterpretationRelationSchema,
+  SourceStatementResponseEnvelopeSchema, SourceStatementResponseMessageSchema, SourceStatementSchema,
+  SOURCE_STATEMENT_LIMITS, type SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { inspectStatementResponse } from "./source-statement-request.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import {
@@ -30,6 +33,7 @@ export type ExtractionRawEnvelopeInspection = Readonly<{
 
 export type ExtractionEnvelopeClassificationContext = Readonly<{
   readonly sourceAssertionCount: number;
+  readonly sourceStatementRequest?: SourceStatementRequest;
   readonly planMembership: "in_plan" | "skipped";
   readonly requestCompletion?: ExtractionRequestCompletion;
 }>;
@@ -65,7 +69,8 @@ export function inspectExtractionRawJson(
   classificationContext?: ExtractionEnvelopeClassificationContext
 ): ExtractionRawJsonInspection {
   const envelope = inspectExtractionRawEnvelope(rawJson, classificationContext);
-  return { ...envelope, parsedDraftCount: countParsedDrafts(rawJson) };
+  return { ...envelope, parsedDraftCount: classificationContext?.sourceStatementRequest === undefined
+    ? countParsedDrafts(rawJson) : inspectStatementResponse(classificationContext.sourceStatementRequest, rawJson).admitted };
 }
 
 export function inspectExtractionRawEnvelope(
@@ -78,7 +83,8 @@ export function inspectExtractionRawEnvelope(
   } catch (cause) {
     throw new Error("extraction raw_json is not strict JSON", { cause });
   }
-  const rawSignalCount = countRawEnvelopeSignals(parsed);
+  const rawSignalCount = classificationContext?.sourceStatementRequest === undefined
+    ? countRawEnvelopeSignals(parsed) : countRawStatements(parsed);
   if (rawSignalCount === null) {
     if (isPlanSkippedRawEnvelope(parsed)) {
       return classifiedEnvelope(rawJson, 0, {
@@ -230,11 +236,26 @@ function countRawEnvelopeSignals(parsed: unknown): number | null {
   const interpretations = (parsed as { readonly interpretations?: unknown }).interpretations;
   if (Array.isArray(interpretations)) return interpretations.length;
   const signals = (parsed as { readonly signals?: unknown }).signals;
-  return Array.isArray(signals) ? signals.length : null;
+  if (Array.isArray(signals)) return signals.length;
+  return "messages" in parsed ? countRawStatements(parsed) : null;
+}
+
+function countRawStatements(parsed: unknown): number {
+  return SourceStatementResponseEnvelopeSchema.parse(parsed).messages.reduce<number>((sum, row) => {
+    const statements = typeof row === "object" && row !== null && "statements" in row ? row.statements : undefined;
+    return sum + (Array.isArray(statements) ? statements.length : 0);
+  }, 0);
 }
 
 function countParsedDrafts(rawJson: string): number {
-  const parsed = JSON.parse(rawJson) as { readonly interpretations?: unknown; readonly signals?: unknown };
+  const parsed = JSON.parse(rawJson) as { readonly interpretations?: unknown; readonly signals?: unknown; readonly messages?: unknown };
+  if (Array.isArray(parsed.messages) && !Array.isArray(parsed.interpretations) && !Array.isArray(parsed.signals)) {
+    return SourceStatementResponseEnvelopeSchema.parse(parsed).messages.reduce<number>((sum, row) => {
+      const message = SourceStatementResponseMessageSchema.safeParse(row);
+      return sum + (message.success ? message.data.statements.slice(0, SOURCE_STATEMENT_LIMITS.perMessage)
+        .filter(statement => SourceStatementSchema.safeParse(statement).success).length : 0);
+    }, 0);
+  }
   if (Array.isArray(parsed.interpretations)) {
     const envelope = SourceInterpretationResponseEnvelopeSchema.parse(parsed);
     return envelope.interpretations.filter((entry) => entry.relations.some((relation) =>

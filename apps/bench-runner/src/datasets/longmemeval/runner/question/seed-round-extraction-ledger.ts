@@ -6,7 +6,7 @@ export function buildRoundExtractionLedger(
 ): Pick<LongMemEvalSnapshotSeedRound,
   "extractionSource" | "cacheKey" | "rawJsonSha256" |
   "rawSignalCount" | "draftCount" | "extractionShards" |
-  "semanticSupplementShards"> {
+  "semanticSupplementShards" | "statementSession"> {
   const official = stats.lastExtractionSource !== null;
   const shards = stats.lastExtractionShards?.map((shard) => ({
     cacheKey: shard.cacheKey,
@@ -16,6 +16,7 @@ export function buildRoundExtractionLedger(
   }));
   const single = shards?.length === 1 ? shards[0] : undefined;
   return {
+    ...(stats.lastStatementSession === undefined ? {} : { statementSession: structuredClone(stats.lastStatementSession) }),
     extractionSource: stats.lastExtractionSource ?? "fallback",
     cacheKey: official ? single?.cacheKey ?? legacyCacheKey(stats, shards) : null,
     rawJsonSha256: official ? single?.rawJsonSha256 ?? legacyRawDigest(stats, shards) : null,

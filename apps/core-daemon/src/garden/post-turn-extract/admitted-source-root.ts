@@ -9,6 +9,10 @@ import type {
   SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
 
+export function postTurnHostMessageId(taskId: string, index: number): string {
+  return `post-turn:${taskId}:message:${index}`;
+}
+
 export function joinAdmittedTurnExcerpts(
   messages: readonly Readonly<{
     readonly role: string;

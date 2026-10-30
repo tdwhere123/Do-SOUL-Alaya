@@ -4,7 +4,8 @@ export { SOURCE_STATEMENTS_CONTRACT, SOURCE_STATEMENT_LIMITS, SourceStatementSch
   sourceStatementKey, type SourceStatement, type SourceStatementMessage, type SourceStatementRequest,
   type SourceStatementRejection, type SourceStatementMessageResult, type SourceStatementReceipt,
   type LocatedSourceStatement, type BoundSourceStatement, SourceStatementArtifactSchema,
-  type SourceStatementArtifact, sourceStatementArtifact } from "./garden/source-statements.js";
+  type SourceStatementArtifact, sourceStatementArtifact, SourceStatementContextSourceSchema,
+  type SourceStatementContextSource } from "./garden/source-statements.js";
 /**
  * @packageDocumentation
  * `@do-soul/alaya-protocol` is the zod-only schema leaf of Do-SOUL Alaya: the

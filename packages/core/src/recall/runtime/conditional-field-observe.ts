@@ -118,8 +118,7 @@ export function observeField(
         if (error.constraints?.work !== undefined) {
           interruptAtomicWork({ state: initial, input }, "native_source_setup", bridge.spentWork + error.constraints.work.required);
         }
-        input = { ...input, readers: { ...input.readers, sourceRoots: undefined, sourceTextHints: undefined,
-          boundInterpretations: undefined } };
+        input = { ...input, readers: { ...input.readers, sourceRoots: undefined } };
         initial = { ...initial, last_observer_status: "interrupted",
           memory_exhausted: initial.memory_exhausted || error.constraints?.memory !== undefined };
       } finally {

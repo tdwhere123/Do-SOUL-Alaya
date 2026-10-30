@@ -3,6 +3,7 @@ import { AlayaError } from "../shared/alaya-error.js";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { FieldContractDigestSchema, type FieldContractSha256 } from "./field-contract/canonical-identity.js";
 import { canonicalJson } from "./selection/capture/canonical-json.js";
+import { SOURCE_INDEX_PREPARATION_REVISION } from "./source-index.js";
 import type { SourceIndexBudget, SourceIndexGeneration, SourceIndexGuardedWriteResult, SourceIndexReadResult,
   SourceIndexResources, SourceIndexTarget, SourceIndexWriteResult } from "./source-index.js";
 
@@ -90,6 +91,6 @@ export interface SourceIndexLexicalRepository {
 }
 export function sourceIndexLexicalGenerationId(selection: SourceIndexLexicalSelection, sourceEpoch: number,
   sha256: FieldContractSha256): string {
-  return `sha256:${sha256(canonicalJson(["source-index-lexical-generation.v1",
+  return `sha256:${sha256(canonicalJson(["source-index-lexical-generation.v2", SOURCE_INDEX_PREPARATION_REVISION,
     SourceIndexLexicalSelectionSchema.parse(selection), sourceEpoch]))}`;
 }

@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { expect, it, vi } from "vitest";
 import {
   type BenchSignalExtractor
@@ -11,6 +11,7 @@ import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
   runExtractionPool
 } from "../../../runs/extraction/fill/fill-pool.js";
+import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
@@ -19,6 +20,7 @@ import {
 import { authorizedHttpExtractor } from "../extraction-fill/authority-runtime/fixture.js";
 import {
   cachingExtractor,
+  emptyStatementResponse,
   deferred,
   extractionTurns,
   flushMicrotasks,
@@ -27,9 +29,9 @@ import {
   waitFor
 } from "./fill-pool/fixture.js";
 
-it("uses the compact production extraction request", async () => {
-  const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-    rawJson: '{"interpretations":[]}'
+it("preserves captured roles and unknown time in the session request", async () => {
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async input => ({
+    rawJson: emptyStatementResponse(input.userPrompt)
   }));
 
   await runExtractionPool({
@@ -47,36 +49,30 @@ it("uses the compact production extraction request", async () => {
     log: () => undefined
   });
 
-  const request = JSON.parse(extract.mock.calls[0]![0].userPrompt) as {
-    readonly schema_version?: number;
-    readonly source_locator_contract_version?: number;
-    readonly source_assertions?: readonly { readonly text: string }[];
-  };
-  expect(request.schema_version).toBe(2);
-  expect(request.source_locator_contract_version).toBe(4);
-  expect(request.source_assertions).toEqual([
-    { assertion_id: 1, text: "User: I moved to Berlin." }
-  ]);
-  expect(JSON.stringify(request)).not.toContain("Assistant");
+  expect(extract).toHaveBeenCalledOnce();
+  expect(extract.mock.calls[0]![0]).toMatchObject({ systemPrompt: SOURCE_STATEMENTS_PROMPT, retryMode: "disabled" });
+  expect(JSON.parse(extract.mock.calls[0]![0].userPrompt)).toMatchObject({
+    contract: "source-statements-v1", context: [], messages: [
+      { message_id: "q1-m0", role: "user", recorded_at: null, text: "I moved to Berlin." },
+      { message_id: "q1-m1", role: "assistant", recorded_at: null, text: "That sounds exciting." }
+    ]
+  });
 });
 
-it("extracts every source assertion through bounded request batches", async () => {
-  const requests: number[][] = [];
-  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-    const request = JSON.parse(input.userPrompt) as {
-      readonly source_assertions: readonly { readonly assertion_id: number }[];
-    };
-    requests.push(request.source_assertions.map(({ assertion_id }) => assertion_id));
-    return { rawJson: '{"interpretations":[]}' };
+it("keeps complete preceding context in bounded session requests", async () => {
+  const requests: { targets: string[]; context: string[] }[] = [];
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async input => {
+    const request = JSON.parse(input.userPrompt);
+    requests.push({ targets: request.messages.map(message => message.message_id),
+      context: request.context.map(message => message.message_id) });
+    return { rawJson: emptyStatementResponse(input.userPrompt) };
   });
-  const source = Array.from(
-    { length: 9 },
-    (_, index) => `I recorded durable detail number ${index + 1}.`
-  ).join(" ");
+  const messages = [{ message_id: "first", role: "user", content: "a".repeat(15_000) },
+    { message_id: "second", role: "assistant", content: "b".repeat(20_000) }];
 
   await runExtractionPool({
     extractor: { extract },
-    turns: [{ turnContent: source, turnMessages: [] }],
+    turns: [{ turnContent: messages.map(message => message.content).join("\n"), turnMessages: messages }],
     concurrency: 1,
     requestedTurns: 1,
     stats: newFillStats(),
@@ -84,8 +80,8 @@ it("extracts every source assertion through bounded request batches", async () =
   });
 
   expect(requests).toEqual([
-    [1, 2, 3, 4, 5, 6, 7, 8],
-    [9]
+    { targets: ["first"], context: [] },
+    { targets: ["second"], context: ["first"] }
   ]);
 });
 
@@ -97,13 +93,13 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
   const extractor: BenchSignalExtractor = {
     extract: vi.fn(async (input) => {
       const turn = JSON.parse(input.userPrompt) as {
-        readonly source_assertions: readonly { readonly text: string }[];
+        readonly messages: readonly { readonly text: string }[];
       };
-      if (turn.source_assertions.some(({ text }) => text.includes("clean"))) {
+      if (turn.messages.some(({ text }) => text.includes("clean"))) {
         cleanStarted.resolve();
         await releaseClean.promise;
         return {
-          rawJson: '{"interpretations":[]}',
+          rawJson: emptyStatementResponse(input.userPrompt),
           extractorMeta: {
             recoveryKind: "none",
             retryCount: 0,
@@ -115,7 +111,7 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
       stats.rateLimitRetries = 1;
       limitedCompleted.resolve();
       return {
-        rawJson: '{"interpretations":[]}',
+        rawJson: emptyStatementResponse(input.userPrompt),
         extractorMeta: {
           recoveryKind: "none",
           retryCount: 1,
@@ -159,12 +155,9 @@ it("backs a four-worker fill below its authority maximum after a 429", async () 
   const logs: string[] = [];
   await runExtractionPool({
     extractor: {
-      extract: vi.fn(async () => retryResult(calls++ === 0 ? 1 : 0))
+      extract: vi.fn(async input => retryResult(calls++ === 0 ? 1 : 0, input))
     },
-    turns: Array.from({ length: 4 }, (_, index) => ({
-      turnContent: `I saved durable detail ${index}.`,
-      turnMessages: []
-    })),
+    turns: extractionTurns(4),
     concurrency: 4,
     requestedTurns: 4,
     stats: newFillStats(),
@@ -226,7 +219,7 @@ it.each([
   expect(logs.some((message) => message.includes("provider-pressure backoff"))).toBe(false);
 });
 
-it("reports recovered 429 pressure when accepting a completed empty result", async () => {
+it("accepts a completed empty statement result without retry or pressure",  async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-empty-recheck-"));
   const stats = newFillStats();
   try {
@@ -235,10 +228,10 @@ it("reports recovered 429 pressure when accepting a completed empty result", asy
       model: "test-model",
       providerUrl: TEST_EXTRACTION_PROVIDER_URL,
       requestProfile: "provider-default-v1",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+      systemPrompt: SOURCE_STATEMENTS_PROMPT
     });
     const delegate = authorizedHttpExtractor({
-      response: () => '{"interpretations":[]}', rateLimitRetries: 1
+      response: emptyStatementResponse
     }).factory({ model: "test-model", modelFamily: "test-model",
       providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture-key" });
     await runExtractionPool({
@@ -251,17 +244,16 @@ it("reports recovered 429 pressure when accepting a completed empty result", asy
     });
 
     expect(delegate.extract).toHaveBeenCalledTimes(1);
-    expect(stats).toMatchObject({
-      rateLimitRetries: 1,
-      adaptiveConcurrencyBackoffs: 1,
-      adaptiveConcurrencyBackoffMs: 250
+    expect(delegate.extract.mock.calls[0]![0].retryMode).toBe("disabled");
+    expect(stats).toMatchObject({ llmCalls: 1,
+      rateLimitRetries: 0, adaptiveConcurrencyBackoffs: 0, adaptiveConcurrencyBackoffMs: 0
     });
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
   }
 });
 
-it("reports a recovered 429 from the accepted response to adaptive concurrency", async () => {
+it("refuses a physical 429 without redispatching the session request",  async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-recovered-rate-limit-"));
   const stats = newFillStats();
   try {
@@ -270,7 +262,7 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
       model: "test-model",
       providerUrl: TEST_EXTRACTION_PROVIDER_URL,
       requestProfile: "provider-default-v1",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+      systemPrompt: SOURCE_STATEMENTS_PROMPT
     });
     const delegate = authorizedHttpExtractor({ rateLimitRetries: 1 }).factory({
       model: "test-model", modelFamily: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL,
@@ -278,7 +270,7 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
     });
     const extractor = cachingExtractor(cacheRoot, delegate, stats);
 
-    await runExtractionPool({
+    await expect(runExtractionPool({
       extractor,
       turns: [{
         turnContent: "User: I completed the review today.",
@@ -292,14 +284,15 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
       requestedTurns: 1,
       stats,
       log: () => undefined
-    });
+    })).rejects.toThrow("terminal task failure");
 
     expect(delegate.extract).toHaveBeenCalledOnce();
-    expect(stats).toMatchObject({
-      rateLimitRetries: 1,
-      adaptiveConcurrencyBackoffs: 1,
-      adaptiveConcurrencyBackoffMs: 250
-    });
+    expect(delegate.extract.mock.calls[0]![0].retryMode).toBe("disabled");
+    // The legacy pressure counter includes the terminal 429; physical attempts are ledger-owned.
+    expect(stats).toMatchObject({ llmCalls: 0, rateLimitRetries: 1 });
+    expect(listExtractionAttemptLedgerRecords(cacheRoot)).toEqual([
+      expect.objectContaining({ attempts: 1, successful_shards: [] })
+    ]);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
   }
@@ -310,11 +303,11 @@ it("starts at the explicit initial concurrency before recovering toward the maxi
   const secondWave = deferred<void>();
   let started = 0;
   const extractor: BenchSignalExtractor = {
-    extract: vi.fn(async () => {
+    extract: vi.fn(async input => {
       started += 1;
       if (started <= 8) await firstWave.promise;
       else if (started <= 17) await secondWave.promise;
-      return { rawJson: '{"interpretations":[]}' };
+      return { rawJson: emptyStatementResponse(input.userPrompt) };
     })
   };
   const turns = Array.from({ length: 32 }, (_, index) => ({
@@ -348,14 +341,14 @@ it("backs the 100Q extraction pool below its initial concurrency after a 429", a
     const secondWave = deferred<void>();
     let started = 0;
     const extractor: BenchSignalExtractor = {
-      extract: vi.fn(async () => {
+      extract: vi.fn(async input => {
         started += 1;
         if (started <= 8) {
           await firstWave.promise;
-          return retryResult(1);
+          return retryResult(1, input);
         }
         if (started <= 16) await secondWave.promise;
-        return retryResult(0);
+        return retryResult(0, input);
       })
     };
     const turns = extractionTurns(16);

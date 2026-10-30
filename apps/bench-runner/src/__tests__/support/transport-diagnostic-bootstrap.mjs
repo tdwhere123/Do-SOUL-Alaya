@@ -5,11 +5,10 @@ import dns from "node:dns";
 import dnsPromises from "node:dns/promises";
 import net from "node:net";
 import { syncBuiltinESMExports } from "node:module";
-import { types } from "node:util";
 
 const isolation = installProviderFreeBoundary();
 const mode = process.env.ALAYA_TEST_DIAGNOSTIC_MODE ?? "transport";
-if (!["transport", "policy", "formatter-failure"].includes(mode)) throw new Error("unknown fixture mode");
+if (!["transport", "policy"].includes(mode)) throw new Error("unknown fixture mode");
 const expectedAttempts = mode === "policy" ? 0 : 1;
 let denied = false;
 const refuse = () => { denied = true; throw new Error("Provider-free test refused external network"); };
@@ -39,9 +38,6 @@ globalThis.fetch = (input, init) => {
 process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL = "true";
 process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:E0_TEST_GARDEN_KEY";
 process.env.E0_TEST_GARDEN_KEY = "test-key";
-if (mode === "formatter-failure") {
-  types.isProxy = () => { throw new Error("fixture formatter unavailable"); };
-}
 process.on("exit", () => {
   if (denied || isolation.violations.length > 0 || attempts !== expectedAttempts) {
     process.stderr.write(`Provider-free guard failed: denied=${denied}, attempts=${attempts}\n`);

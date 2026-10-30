@@ -1,4 +1,4 @@
-import type { CandidateMemorySignal, GardenCompleteTaskRequest } from "@do-soul/alaya-protocol";
+import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { finalizePostTurnEvidence } from "../../garden/post-turn-extract/evidence-finalizer.js";
 import { signalMaterializationFailed } from "../../garden/post-turn-extract/signal-receiver.js";
@@ -24,7 +24,6 @@ interface CandidateSignalEmissionParams {
 
 export async function emitTaskCandidateSignals(
   params: CandidateSignalEmissionParams,
-  request: GardenCompleteTaskRequest,
   row: GardenTaskRow,
   postTurnPayload: PostTurnExtractTaskPayload | null,
   candidateSignals: readonly CandidateMemorySignal[],
@@ -36,7 +35,7 @@ export async function emitTaskCandidateSignals(
       params,
       row,
       postTurnPayload,
-      request.status === "completed" ? candidateSignals : [],
+      candidateSignals,
       completionClaimedBy,
       failedSignalIds
     );
@@ -84,7 +83,7 @@ async function finalizeExternalPostTurnEvidence(
     runId: payload.run_id,
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
-    turnMessages: buildPostTurnConversationMessages(payload),
+    turnMessages: buildPostTurnConversationMessages(payload, row.id),
     sourceObservation: null,
     candidates,
     signalReceiver: receiver,

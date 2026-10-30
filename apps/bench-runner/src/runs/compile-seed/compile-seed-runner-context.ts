@@ -2,7 +2,7 @@ import { mkdirSync, statSync } from "node:fs";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { resolve } from "node:path";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
+  SOURCE_STATEMENTS_PROMPT,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import { readExtractionCacheManifestIdentity } from
@@ -31,12 +31,12 @@ import type {
   ExtractionCachePreflightProof,
   RawShardInspectionDiagnostics
 } from "./compile-seed-types.js";
-import {
-  createSourceAssertionSupplementRuntime,
-  type SourceAssertionSupplementRuntime
-} from "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+
 import { assertExtractionCachePreflightProofReuse } from
   "./preflight/cache-preflight-proof.js";
+
+import type { CapturedStatementSourceSession } from "./compile-seed-source-session.js";
+import type { CompiledStatementSession } from "./compile-seed-session-statements.js";
 
 const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
   "data/diagnostics/seed-extraction-failures";
@@ -45,7 +45,8 @@ export interface CompileSeedRunnerContext {
   readonly config: ReturnType<typeof resolveCompileSeedExtractionConfig>;
   readonly stats: CompileSeedExtractionStats;
   readonly provider: OfficialApiGardenProvider | null;
-  readonly semanticSupplement: SourceAssertionSupplementRuntime | null;
+  readonly statementSessions: Map<string, Promise<CompiledStatementSession>>;
+  readonly statementSourceSessions: Map<string, Promise<CapturedStatementSourceSession>>;
   readonly diagnosticDir: string | null;
   readonly extractionCachePreflightProof?: ExtractionCachePreflightProof;
 }
@@ -53,6 +54,11 @@ export interface CompileSeedRunnerContext {
 export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
+  if (options?.sourceAssertionSupplement !== undefined ||
+      process.env.ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT?.trim() ||
+      process.env.ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_CACHE_ROOT?.trim()) {
+    throw new TypeError("supplemental passive extraction is retired");
+  }
   const cacheRoot = resolveEffectiveExtractionCacheRoot(options?.cacheRoot);
   if ((options?.cacheRoot?.trim().length ?? 0) > 0 ||
       (process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT?.trim().length ?? 0) > 0) {
@@ -77,19 +83,12 @@ export function createCompileSeedRunnerContext(
   );
   const diagnosticDir = resolveCompileSeedDiagnosticDir(options);
   ensureDiagnosticDir(diagnosticDir);
-  const semanticSupplement = options?.sourceAssertionSupplement === undefined
-    ? null
-    : createSourceAssertionSupplementRuntime({
-        ...options.sourceAssertionSupplement,
-        primaryCacheRoot: cacheRoot,
-        config,
-        rawShardInspector
-      });
+
   return {
     config,
     stats,
+    statementSessions: new Map(), statementSourceSessions: new Map(),
     diagnosticDir,
-    semanticSupplement,
     ...(extractionCachePreflightProof === undefined ? {} : {
       extractionCachePreflightProof
     }),
@@ -137,7 +136,7 @@ function runExtractionCachePreflight(
       cacheRoot,
       manifestIdentity,
       config,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       requiredTurnContents: options.requiredTurnContents,
       requiredQuestionWindow: options.requiredQuestionWindow,
       ...(options.requiredExtractionTurns === undefined ? {} : {
@@ -150,7 +149,7 @@ function runExtractionCachePreflight(
   preflightExtractionCache({
     cacheRoot,
     config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT,
     liveExtractionPossible: credentialled,
     requireManifest: resolveBenchRequireExtractionCacheManifest(),
     ...(minimumCoverage === undefined ? {} : { minimumCoverage }),

@@ -1,4 +1,5 @@
 import type { StorageTier } from "@do-soul/alaya-protocol";
+import { ACTIVE_MEMORY_ENTRIES_FILTER_SQL } from "../../statements/recall/active-memory-filter-sql.js";
 import { StorageError } from "../../../../shared/errors.js";
 import { buildAnchorScopedFtsMatch } from "../../../shared/fts-lane-routing.js";
 import {
@@ -71,8 +72,7 @@ function searchAnchorFtsLaneWithinTier(
     JOIN memory_entries ON memory_entries.object_id = ${table}.object_id
     WHERE ${table}.workspace_id = ? AND ${table} MATCH ?
       AND memory_entries.storage_tier = ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+      ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
     ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, ${table}.object_id ASC
     LIMIT ?
   `).all(workspaceId, matchExpression, tier, limit) as readonly FtsKeywordSearchRow[];

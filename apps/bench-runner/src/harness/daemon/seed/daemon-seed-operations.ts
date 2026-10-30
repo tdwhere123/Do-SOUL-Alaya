@@ -1,17 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  CandidateMemorySignalSchema,
   ScopeClass,
-  SignalSource,
-  SourceLocatedInterpretationSchema,
-  type CandidateMemorySignal,
+  SourceStatementSignalSchema,
   type SoulEmitCandidateSignalResponse,
   type SoulProposeMemoryUpdateResponse
 } from "@do-soul/alaya-protocol";
-import {
-  buildSourceInterpretationSignal,
-  normalizeSchemaGroundedSignal
-} from "@do-soul/alaya-soul";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -34,14 +27,7 @@ import type {
 } from "../daemon-types.js";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
 import type { SeedObjectKind } from "../../seeding/seed-rotation.js";
-import {
-  isRawPayloadBoundError,
-  projectCompileRawPayload
-} from "../../seeding/compile-raw-payload.js";
 import { attachCompileSourceGrounding } from "../../seeding/source-grounding.js";
-import {
-  buildBenchSourceEvidenceFallback
-} from "./daemon-source-evidence-fallback.js";
 import { persistBenchAnswerHq } from "./daemon-seed-answer-hq.js";
 
 export {
@@ -256,50 +242,6 @@ type CompileSeedResult =
       readonly createdEvidence: boolean;
     };
 
-function buildCompileSignal(
-  input: CreateBenchSeedOpsInput,
-  signalInput: BenchSignalSeedInput,
-  signalId: string,
-  rawPayload: Record<string, unknown>
-): CandidateMemorySignal {
-  const observedAt = signalInput.sourceObservedAt ?? new Date().toISOString();
-  const sourceObservation = signalInput.sourceObservedAt === undefined
-    ? {}
-    : {
-        source_observation: {
-          observed_at: signalInput.sourceObservedAt,
-          authority: "trusted_host_event" as const,
-          source_event_id: signalInput.evidenceRef
-        }
-      };
-  const candidate = {
-    signal_id: signalId,
-    workspace_id: input.activeContext.workspaceId,
-    run_id: input.activeContext.runId,
-    surface_id: signalInput.surfaceId ?? null,
-    source: SignalSource.GARDEN_COMPILE,
-    signal_kind: signalInput.signalKind,
-    object_kind: signalInput.objectKind,
-    scope_hint: ScopeClass.PROJECT,
-    domain_tags: ["bench-seed"],
-    confidence: signalInput.confidence,
-    evidence_refs: [signalInput.evidenceRef],
-    ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
-    raw_payload: rawPayload,
-    ...sourceObservation,
-    created_at: observedAt
-  };
-  try {
-    return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse(candidate));
-  } catch (error) {
-    if (!isRawPayloadBoundError(error)) throw error;
-    return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
-      ...candidate,
-      raw_payload: projectCompileRawPayload(rawPayload)
-    }));
-  }
-}
-
 function droppedCompileSignal(
   signalId: string,
   triageResult: string,
@@ -325,44 +267,21 @@ async function seedOneCompileSignal(
   input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput
 ): Promise<CompileSeedResult> {
+  if (signalInput.productionSignal === undefined || signalInput.evidenceFallbackReason !== undefined) {
+    throw new TypeError("passive compile requires a bound source statement signal; synthetic fallback publication is retired");
+  }
   const clip = clipSeedContent(signalInput.turnContent);
-  const safeDistilledFact = clippedDistilledFact(signalInput.distilledFact);
-  const fallback = signalInput.evidenceFallbackReason !== undefined
-    ? buildBenchSourceEvidenceFallback(input, signalInput)
-    : null;
   const signalId = `bench_signal_${randomUUID().replace(/-/gu, "")}`;
-  const signal = fallback?.signal ?? (
-    signalInput.productionRawPayload?.source_interpretation === undefined
-      ? buildCompileSignal(
-        input,
-        signalInput,
-        signalId,
-        buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
-      )
-      : buildSourceInterpretationSignal({
-        located: SourceLocatedInterpretationSchema.parse(
-          signalInput.productionRawPayload.source_interpretation
-        ),
-        workspaceId: input.activeContext.workspaceId,
-        runId: input.activeContext.runId,
-        surfaceId: signalInput.surfaceId ?? null,
-        signalId,
-        createdAt: signalInput.sourceObservedAt ?? new Date().toISOString(),
-        sourceObservation: {
-          observed_at: signalInput.sourceObservedAt ?? new Date().toISOString(),
-          authority: "trusted_host_event",
-          source_event_id: signalInput.evidenceRef
-        },
-        scopeHint: ScopeClass.PROJECT
-      })
-  );
+  const signal = SourceStatementSignalSchema.parse({ ...signalInput.productionSignal,
+    workspace_id: input.activeContext.workspaceId, run_id: input.activeContext.runId,
+    surface_id: signalInput.surfaceId ?? null, signal_id: signalId
+  });
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal
   )) as BenchSignalReceiveResult;
   return resolveReceivedCompileSignal(
     input,
     signalInput,
-    fallback,
     clip,
     received
   );
@@ -371,7 +290,6 @@ async function seedOneCompileSignal(
 async function resolveReceivedCompileSignal(
   input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
-  fallback: ReturnType<typeof buildBenchSourceEvidenceFallback> | null,
   clip: ReturnType<typeof clipSeedContent>,
   received: BenchSignalReceiveResult
 ): Promise<CompileSeedResult> {
@@ -382,19 +300,6 @@ async function resolveReceivedCompileSignal(
     (obj) => obj.object_kind === "evidence_capsule"
   );
   if (memoryObject === undefined) {
-    if (fallback !== null && evidenceObject !== undefined) {
-      return {
-        kind: "seeded",
-        createdEvidence: true,
-        result: {
-          kind: "evidence_capsule",
-          evidenceId: evidenceObject.object_id,
-          signalId: received.signal.signal_id,
-          truncated: fallback.truncated,
-          charsClipped: fallback.charsClipped
-        }
-      };
-    }
     return droppedCompileSignal(
       received.signal.signal_id,
       received.triage_result,

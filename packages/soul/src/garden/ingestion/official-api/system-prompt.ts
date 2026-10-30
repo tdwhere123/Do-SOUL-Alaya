@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SOURCE_STATEMENTS_PROMPT } from "../source-statements.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,6 +99,7 @@ export function resolveOfficialApiSystemPrompt(
 
 function createPromptRegistry(): ReadonlyMap<string, string> {
   return new Map([
+    [sha256(SOURCE_STATEMENTS_PROMPT), SOURCE_STATEMENTS_PROMPT],
     [sha256(OFFICIAL_API_SYSTEM_PROMPT), OFFICIAL_API_SYSTEM_PROMPT],
     [
       sha256(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT),

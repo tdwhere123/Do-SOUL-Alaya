@@ -7,11 +7,8 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildOfficialApiExtractionRequest,
-  OFFICIAL_API_SYSTEM_PROMPT,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
@@ -24,7 +21,7 @@ import {
   preflightExtractionCache,
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { cacheFilePath, computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,
@@ -48,9 +45,7 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 });
 
 function extractionPrompt(turnContent: string): string {
-  return stringifyOfficialApiExtractionRequest(
-    buildOfficialApiExtractionRequest(turnContent, [])
-  );
+  return sourceStatementRequests([{ message_id: "recorded-user", role: "user", content: turnContent }])[0]!.userPrompt;
 }
 
 describe("runExtractionFill authority", () => {
@@ -187,10 +182,10 @@ describe("runExtractionFill live-write identity", () => {
         model: "gpt-5.4-mini",
         modelFamily: "family-b",
         providerUrl: "https://provider-b.invalid/v1",
-        requestProfile: "provider-default-v1",
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements",
         apiKey: "test-key"
       },
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       requireManifest: false,
       warn: () => undefined
     });
@@ -216,13 +211,13 @@ describe("runExtractionFill live-write identity", () => {
       config: {
         model: "gpt-5.4-mini", modelFamily: "family-b",
         providerUrl: "https://provider-b.invalid/v1",
-        requestProfile: "provider-default-v1"
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements"
       },
       cacheRoot,
       ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: extractionPrompt("I started a new project.")
     })).rejects.toThrow(/model family mismatch|provider URL mismatch/u);
     expect(delegate).not.toHaveBeenCalled();
@@ -235,13 +230,13 @@ describe("runExtractionFill live-write identity", () => {
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://provider.invalid/v1",
-        requestProfile: "provider-default-v1"
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements"
       },
       cacheRoot,
       ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: extractionPrompt("I am an uncached user.")
     })).rejects.toThrow(/require manifest\.json.*extraction-fill/su);
     expect(delegate).not.toHaveBeenCalled();
@@ -266,9 +261,7 @@ describe("runExtractionFill delegate mutation", () => {
       log: () => undefined
     });
     const turn = "I started a new project after fill.";
-    const key = computeSourceTurnCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
-    );
+    const key = computeCacheKey("gpt-5.4-mini", "provider-default-v1", SOURCE_STATEMENTS_PROMPT, extractionPrompt(turn));
     const liveWriter = createCachingSignalExtractor({
       delegate: {
         extract: async (input) => {
@@ -279,13 +272,13 @@ describe("runExtractionFill delegate mutation", () => {
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://fixture-provider.invalid/v1",
-        requestProfile: "provider-default-v1"
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements"
       },
       cacheRoot,
       ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: extractionPrompt(turn)
     })).rejects.toThrow(/require manifest\.json|manifest changed/u);
     expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
@@ -293,12 +286,12 @@ describe("runExtractionFill delegate mutation", () => {
 
   it("does not write a shard when lease ownership changes inside the delegate", async () => {
     writeExtractionCacheManifest(cacheRoot, {
-      schema_version: 3,
+      schema_version: 4, source_packing: "session-statements",
       extraction_model: "gpt-5.4-mini",
       model_family: "gpt-5.4-mini",
       request_profile: "provider-default-v1",
       provider_url: "https://fixture-provider.invalid/v1",
-      system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+      system_prompt_sha256: computeSystemPromptSha256(SOURCE_STATEMENTS_PROMPT),
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
       dataset: "longmemeval-oracle",
       dataset_revision: "fixture",
@@ -307,9 +300,7 @@ describe("runExtractionFill delegate mutation", () => {
       builder: "test"
     });
     const turn = "I lost ownership after fill.";
-    const key = computeSourceTurnCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
-    );
+    const key = computeCacheKey("gpt-5.4-mini", "provider-default-v1", SOURCE_STATEMENTS_PROMPT, extractionPrompt(turn));
     const liveWriter = createCachingSignalExtractor({
       delegate: {
         extract: async (input) => {
@@ -324,13 +315,13 @@ describe("runExtractionFill delegate mutation", () => {
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://fixture-provider.invalid/v1",
-        requestProfile: "provider-default-v1"
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements"
       },
       cacheRoot,
       ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: extractionPrompt(turn)
     })).rejects.toBeInstanceOf(AggregateError);
     expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
@@ -405,7 +396,7 @@ describe("runExtractionFill finalization", () => {
             extraction_model: "gpt-5.4-mini",
             model_family: "gpt-5.4-mini",
       provider_url: "https://fixture-provider.invalid/v1",
-            system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+            system_prompt_sha256: computeSystemPromptSha256(SOURCE_STATEMENTS_PROMPT),
             cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
             dataset: "longmemeval-oracle",
             dataset_revision: "fixture",

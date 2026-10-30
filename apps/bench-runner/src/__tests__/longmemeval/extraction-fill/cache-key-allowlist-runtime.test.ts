@@ -2,8 +2,8 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { createCachingSignalExtractor, type BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import { computeExtractionTurnCacheKey } from
   "../../../runs/compile-seed/compile-seed-cache.js";
 import { extractionCacheManifestPath } from
@@ -24,6 +24,8 @@ import {
 } from "../../../runs/extraction/authority/target-selection/receipt.js";
 import { digestExtractionTargetSelectionReceipt } from
   "../../../runs/extraction/authority/target-selection/receipt-shape.js";
+import { extractionTargetFinalIdentity } from
+  "../../../runs/extraction/authority/target-selection/final-identity.js";
 import { createExtractionCatalogRefillScope } from
   "../../../runs/extraction/authority/catalog-refill/scope.js";
 import { runExtractionFill } from
@@ -40,9 +42,13 @@ import {
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
-import { providerBackedResponseResult } from
+import { fixtureAttemptAuthority, providerBackedResponseResult } from
   "../extraction/extraction-cache-test-fixture.js";
-import { writeAuthorityReceipt } from "./authority-runtime/fixture.js";
+import { prepareExtractionFill } from "../../../runs/extraction/fill/fill-preparation.js";
+import { acquireExtractionCacheWriteLease, withExtractionCacheWriteLease } from
+  "../../../runs/extraction/fill/manifest/fill-root-guard.js";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
+import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
 import {
   registerCatalogRefillRecoveryCases
 } from "./cache-key-allowlist-runtime/recovery/cases.js";
@@ -72,6 +78,7 @@ describe("cache-key allowlist runtime completion", () => {
     await prefillFirstQuestion();
     const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
+    const retainedAccounting = listExtractionAttemptLedgerRecords(cacheRoot);
     const retryModes: Array<string | undefined> = [];
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       retryModes.push(input.retryMode);
@@ -92,6 +99,7 @@ describe("cache-key allowlist runtime completion", () => {
 
     expect(extract).toHaveBeenCalledTimes(2);
     expect(retryModes).toEqual(["disabled", "disabled"]);
+    expect(listExtractionAttemptLedgerRecords(cacheRoot)).toEqual(expect.arrayContaining(retainedAccounting));
     expect(logs).toContainEqual(expect.stringContaining("2/2"));
     expect(result).toMatchObject({
       requestedTurns: 4,
@@ -314,24 +322,24 @@ describe("cache-key allowlist runtime recovery", () => {
 
 async function prefillFirstQuestion(): Promise<void> {
   await createInitialTargetSelection();
-  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-    providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
-  );
-  const authorityReceiptPath = await writeAuthorityReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, {
-    limit: 1
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  await withExtractionCacheWriteLease(lease, async () => {
+    const prepared = await prepareExtractionFill({ variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot, dataDir, pinnedMetaRoot, questionBatchLimit: 1 }, cacheRoot, 1, () => undefined, undefined);
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async input =>
+      providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)));
+    // Recorded prior attempts belong to the full target generation, not the new refill grant's ledger.
+    const cached = createCachingSignalExtractor({ cacheRoot, config: prepared.config,
+      delegate: { extract }, writeLease: lease,
+      ...fixtureAttemptAuthority({ cacheRoot, model: prepared.config.model,
+        requestProfile: prepared.config.requestProfile, startingMissing: prepared.executionRequestedTurns }) });
+    for (const turn of prepared.executionExtractionTurns) {
+      for (const request of sourceStatementRequests(turn.turnMessages)) {
+        await cached.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt });
+      }
+    }
+    expect(extract).toHaveBeenCalledTimes(2);
   });
-  await runExtractionFill({
-    variant: EXTRACTION_FILL_VARIANT,
-    cacheRoot,
-    dataDir,
-    pinnedMetaRoot,
-    limit: 1,
-    authorityReceiptPath,
-    questionBatchLimit: 1,
-    extractorFactory: () => ({ extract }),
-    log: () => undefined
-  });
-  expect(extract).toHaveBeenCalledTimes(2);
 }
 
 async function createInitialTargetSelection(): Promise<void> {
@@ -346,27 +354,14 @@ async function createInitialTargetSelection(): Promise<void> {
     action: "fill"
   });
   rmSync(cacheRoot, { recursive: true });
-  const targetRoot = createFreshRetiredSourceRebuildTargetSelectionRoot({
-    cacheRoot,
-    operator: "catalog-refill-test"
-  });
+  // A synthetic small-window receipt isolates refill recovery from canonical 100Q issuance policy.
   const unsigned = {
     schema_version: 2 as const,
     kind: "longmemeval-extraction-target-selection" as const,
     created_at: "2026-08-12T00:00:00.000Z",
     selection_basis: { kind: "retired_source_rebuild" as const, operator: "catalog-refill-test" },
-    target_root: targetRoot,
-    final_identity: {
-      revision: inspection.observation.revision,
-      dataset_variant: inspection.observation.dataset.variant,
-      dataset_revision_sha256: inspection.observation.dataset.revisionSha256,
-      model: inspection.observation.extraction.model,
-      model_family: inspection.observation.extraction.modelFamily,
-      request_profile: inspection.observation.extraction.requestProfile,
-      provider_url: inspection.observation.extraction.providerUrl,
-      system_prompt_sha256: inspection.observation.extraction.systemPromptSha256,
-      cache_key_algorithm: inspection.observation.extraction.cacheKeyAlgorithm
-    },
+    target_root: createFreshRetiredSourceRebuildTargetSelectionRoot({ cacheRoot, operator: "catalog-refill-test" }),
+    final_identity: extractionTargetFinalIdentity(inspection.observation),
     initial_selection: {
       selection_digest: inspection.observation.selectionDigest,
       key_digest: inspection.observation.keyDigest,
@@ -376,8 +371,7 @@ async function createInitialTargetSelection(): Promise<void> {
     }
   };
   const selection = {
-    ...unsigned,
-    receipt_digest: digestExtractionTargetSelectionReceipt(unsigned)
+    ...unsigned, receipt_digest: digestExtractionTargetSelectionReceipt(unsigned)
   } satisfies ExtractionTargetSelectionReceipt;
   writeExtractionTargetSelectionReceipt(targetSelectionPath, selection);
 }
@@ -432,12 +426,12 @@ async function writeCatalogRefillAuthority(keys: readonly string[]): Promise<{
 }
 
 function cacheKey(questionValue: LongMemEvalQuestion, index: number): string {
-  const turn = inspectTurnContentKeySpace([questionValue]).distinctExtractionTurns[index];
+  const turn = inspectTurnContentKeySpace([questionValue], "session-statements").distinctExtractionTurns[index];
   if (turn === undefined) throw new Error("missing extraction turn fixture");
   return computeExtractionTurnCacheKey(
     "gpt-5.4-mini",
     "provider-default-v1",
-    OFFICIAL_API_SYSTEM_PROMPT,
+    SOURCE_STATEMENTS_PROMPT,
     turn
   );
 }

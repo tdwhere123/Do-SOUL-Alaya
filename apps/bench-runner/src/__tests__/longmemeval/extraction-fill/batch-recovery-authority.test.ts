@@ -1,16 +1,10 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus, computeOfficialApiSourceCorpusIdentity,
-  parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { readRetainedBatchRun } from "../../../runs/extraction/fill/batch/store.js";
 import { readExtractionCacheManifest, writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
-import { bindAdmittedActualModelShard, bindNativeAdmittedControlShard } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-publication.js";
-import { withPlantedSourceWorker } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption-plant.js";
-import { publicSearchRequest } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption.js";
-import { consumePublicSources } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumer.js";
-import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
-import { closeCachedDatabase } from "@do-soul/alaya-storage";
+import { inspectCachedExtraction } from "../../../runs/compile-seed/compile-seed-cache.js";
 import { preflightExtractionCache } from "../../../runs/compile-seed/compile-seed-preflight.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -34,54 +28,33 @@ let pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots));
 afterEach(() => vi.restoreAllMocks());
 
-it("keeps native Batch admission readable after completion finalization and reopen while rejecting generation drift", async () => {
+it("retains completed statement Batch receipts and rejects cache generation drift", async () => {
   const { run } = await setup();
-  await run("prepare");
-  await run("submit");
-  const imported = await run("resume");
-  expect(imported.manifest.fill_status).toBe("complete");
+  await run("prepare"); await run("submit");
+  expect((await run("resume")).manifest.fill_status).toBe("complete");
   await run("import");
   const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8"));
   const retained = readRetainedBatchRun(cacheRoot, plan.identity);
-  const corpora = inspectTurnContentKeySpace([buildAuthorityQuestion("q0", "alpha0", "decoy0")])
-    .distinctExtractionTurns.map((turn) => buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages));
-  const manifest = readExtractionCacheManifest(cacheRoot)!;
+  const required = inspectTurnContentKeySpace([buildAuthorityQuestion("q0", "alpha0", "decoy0")]);
+  expect(retained.plan.lines).toHaveLength(2);
   for (const line of retained.plan.lines) {
-    const request = parseOfficialApiExtractionRequest(JSON.parse(line.userPrompt));
-    const sourceCorpus = corpora.find((corpus) => computeOfficialApiSourceCorpusIdentity(corpus) === request.source_corpus_identity)!;
-    const input = { cacheRoot, model: retained.plan.model, modelFamily: manifest.model_family!,
-      providerUrl: manifest.provider_url, requestProfile: retained.plan.requestProfile,
-      sourcePacking: "reference-eight" as const, systemPrompt: line.systemPrompt,
-      sourceCorpus, artifactKey: "native-batch-control", request };
-    const actualInput = { ...input, retainedBatchPlanIdentity: plan.identity };
-    // Synthetic HTTP receipts test closure mechanics, not empirical provider quality.
-    expect(bindAdmittedActualModelShard(actualInput)).toMatchObject({ status: "complete", provenance: "cache-admitted" });
-    const statePath = join(cacheRoot, `batch-state-${plan.identity}.json`);
-    const stateBytes = readFileSync(statePath, "utf8");
-    writeFileSync(statePath, JSON.stringify({ ...JSON.parse(stateBytes), endpoint: "https://foreign-provider.invalid" }));
-    expect(bindAdmittedActualModelShard(actualInput)).toMatchObject({ status: "not_exercised", reason: "retained_provider_mismatch" });
-    writeFileSync(statePath, stateBytes);
-    const bind = bindNativeAdmittedControlShard(input);
-    expect(bind).toMatchObject({ status: "complete", provenance: "native-admitted-control" });
-    // Ordinary native delivery reads retained SourceRecords, not proposal-only gists.
-    await withPlantedSourceWorker(sourceCorpus, "unrelated distractor", () => ({}), async (planted, handler, receipts, client) => {
-      planted.database.close();
-      closeCachedDatabase(planted.filename);
-      await client.ready();
-      const trace = await consumePublicSources({ handler, receipts,
-        context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
-        request: publicSearchRequest({ group: "capability", intended: sourceCorpus, distractor: "unrelated distractor",
-          original_query: request.source_assertions[0]!.text, unknown: "native control only",
-          sketch: { predicate: request.source_assertions[0]!.text } }, "proposal", "source_only", "native_query") });
-      expect(trace.termination.source_bodies[planted.sourceId]).toBe(sourceCorpus);
-    });
-    writeExtractionCacheManifest(cacheRoot, { ...manifest, dataset_revision: "foreign-dataset" });
-    expect(bindNativeAdmittedControlShard(input)).toMatchObject({ status: "not_exercised", reason: "admission_generation_mismatch" });
-    writeExtractionCacheManifest(cacheRoot, manifest);
+    expect(line.systemPrompt).toBe(SOURCE_STATEMENTS_PROMPT);
+    expect(JSON.parse(line.userPrompt)).toMatchObject({ contract: "source-statements-v1" });
   }
+  const preflight = () => preflightExtractionCache({ cacheRoot,
+    config: { model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
+      providerUrl: "https://fixture-provider.invalid", apiKey: null, sourcePacking: "session-statements" },
+    systemPrompt: SOURCE_STATEMENTS_PROMPT, requireManifest: true,
+    requiredExtractionTurns: required.distinctExtractionTurns, requiredTurnContents: required.distinctTurnContents,
+    requiredQuestionWindow: { offset: 0, limit: 1 }, liveExtractionPossible: false });
+  expect(preflight).not.toThrow();
+  const manifest = readExtractionCacheManifest(cacheRoot)!;
+  writeExtractionCacheManifest(cacheRoot, { ...manifest, dataset_revision: "foreign-dataset" });
+  for (const line of retained.plan.lines) expect(inspectCachedExtraction(cacheRoot, line.key, retained.plan.model, retained.plan.requestProfile))
+    .toMatchObject({ status: "invalid", reason: expect.stringContaining("generation binding mismatch") });
 });
 
-type ResultKind = "valid" | "empty" | "error" | "missing" | "truncated" | "foreign-quote" | "substring";
+type ResultKind = "valid" | "empty" | "error" | "missing" | "truncated" | "unknown-target" | "rewrite";
 
 async function setup(questionCount = 1) {
   setExtractionCredentialFixture();
@@ -129,9 +102,9 @@ async function setup(questionCount = 1) {
         if (kind === "missing") return "";
         if (kind === "error") return JSON.stringify({ key: request.key, error: { code: 500, message: "synthetic" } });
         const raw = JSON.parse(buildGroundedInterpretationResponse(request.request.contents[0].parts[0].text));
-        if (kind === "empty") raw.interpretations = [];
-        if (kind === "foreign-quote") raw.interpretations[0].relations[0].predicate.text = "I completed a foreign activity.";
-        if (kind === "substring") raw.interpretations[0].relations[0].predicate.text = raw.interpretations[0].relations[0].predicate.text.replace(/^User: I /u, "");
+        if (kind === "empty") for (const message of raw.messages) message.statements = [];
+        if (kind === "unknown-target") raw.messages[0].message_id = "unknown-host-message";
+        if (kind === "rewrite") raw.messages[0].statements[0].text = raw.messages[0].statements[0].text.replace(/^I /u, "The user ");
         return JSON.stringify({ key: request.key, response: {
           candidates: [{ finishReason: kind === "truncated" ? "MAX_TOKENS" : "STOP",
             content: { parts: [{ text: JSON.stringify(raw) }] } }],
@@ -358,9 +331,9 @@ it("admits a completed empty selection alongside grounded signals without anothe
   expect(provider.downloads).toBe(1);
 });
 
-it("rejects a foreign quote before cache publication while admitting a valid source substring", async () => {
+it("quarantines unknown target identity while admitting rewritten statement text", async () => {
   const { run, provider } = await setup();
-  provider.results = ["foreign-quote", "substring"];
+  provider.results = ["unknown-target", "rewrite"];
   await run("prepare"); await run("submit");
   const imported = await run("resume");
   expect(Object.values(imported.batchState!.jobs[0]!.outcomes).map((outcome) => outcome.status).sort())
@@ -371,7 +344,7 @@ it("rejects a foreign quote before cache publication while admitting a valid sou
 
 it("reimporting an older quarantined window cannot settle a newer same-key retry reservation", async () => {
   const { run, provider } = await setup();
-  provider.results = ["foreign-quote", "valid"];
+  provider.results = ["unknown-target", "valid"];
   await run("prepare"); await run("submit");
   const initial = await run("resume");
   const failed = Object.entries(initial.batchState!.jobs[0]!.outcomes).find(([, value]) => value.status === "quarantined")![0];
@@ -396,8 +369,8 @@ it("reimporting an older quarantined window cannot settle a newer same-key retry
     expect(historical.batchState!.jobs[0]!.outcomes[failed]?.status).toBe("quarantined");
     expect(() => preflightExtractionCache({ cacheRoot,
       config: { model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
-        providerUrl: "https://fixture-provider.invalid", apiKey: null },
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, requireManifest: true,
+        providerUrl: "https://fixture-provider.invalid", apiKey: null, sourcePacking: "session-statements" },
+      systemPrompt: SOURCE_STATEMENTS_PROMPT, requireManifest: true,
       requiredExtractionTurns: required.distinctExtractionTurns,
       requiredTurnContents: required.distinctTurnContents,
       requiredQuestionWindow: { offset: 0, limit: 1 }, liveExtractionPossible: false

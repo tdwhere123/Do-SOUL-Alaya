@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import {
   readExtractionCacheManifest
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -25,6 +25,7 @@ import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestio
 import {
   inspectExtractionFillCompletion
 } from "../../../runs/extraction/fill/fill-completion.js";
+import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
 import { preflightExtractionCache } from
   "../../../runs/compile-seed/compile-seed-preflight.js";
 import {
@@ -69,9 +70,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-it("scopes an expanded fill before workers and refreshes honest partial progress", async () => {
+it("rolls back a wider generation that would unbind admitted shards before constructing a worker", async () => {
   const firstExpected = collectDistinctTurnContents(questions.slice(0, 1)).length;
-  const expandedExpected = collectDistinctTurnContents(questions).length;
   let firstWorkerManifest: unknown;
   const first = await runExtractionFill({
     variant: VARIANT,
@@ -116,7 +116,9 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
   expect(Object.keys(first.manifest.content_closure_index ?? {}))
     .toHaveLength(firstExpected);
 
-  let manifestSeenByWorker: unknown;
+  const manifestBytes = readFileSync(join(cacheRoot, "manifest.json"));
+  const shardPath = firstShardPath(), shardBytes = readFileSync(shardPath);
+  const extractorFactory = vi.fn(() => { throw new Error("changed generation must not dispatch"); });
   const expanded = runExtractionFill({
     variant: VARIANT,
     cacheRoot,
@@ -125,31 +127,15 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
     limit: 2,
     authorityReceiptPath: await authorize(2),
     concurrency: 1,
-    extractorFactory: () => ({
-      extract: async () => {
-        manifestSeenByWorker = readExtractionCacheManifest(cacheRoot);
-        throw new Error("terminal fixture failure");
-      }
-    }),
+    extractorFactory,
     log: () => undefined
   });
 
-  await expect(expanded).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
-  const expectedPartial = {
-    fill_status: "in_progress",
-    window_offset: 0,
-    window_limit: 2,
-    expected_turns: expandedExpected,
-    requested_turns: expandedExpected,
-    cached_turns: firstExpected,
-    coverage: firstExpected / expandedExpected
-  };
-  expect(manifestSeenByWorker).toMatchObject(expectedPartial);
-  expect(readExtractionCacheManifest(cacheRoot)).toMatchObject(expectedPartial);
-  expect(readExtractionCacheManifest(cacheRoot)?.content_closure_index)
-    .toBeUndefined();
-  expect(readExtractionCacheManifest(cacheRoot)?.expected_key_set_sha256)
-    .not.toBe(first.manifest.expected_key_set_sha256);
+  await expect(expanded).rejects.toThrow("extraction authority receipt cannot authorize invalid or orphan shards");
+  expect(extractorFactory).not.toHaveBeenCalled();
+  expect(readFileSync(join(cacheRoot, "manifest.json"))).toEqual(manifestBytes);
+  expect(readFileSync(shardPath)).toEqual(shardBytes);
+  expect(readExtractionCacheManifest(cacheRoot)).toEqual(first.manifest);
 });
 
 it("refuses completion when an expected shard is replaced by an orphan", async () => {
@@ -252,13 +238,14 @@ it("uses no partial closure when ledger exclusions leave no valid raw entries", 
     log: () => undefined
   });
   const excludedKeys = turns.map((turn) => computeExtractionTurnCacheKey(
-    "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turn
+    "gpt-5.4-mini", "provider-default-v1", SOURCE_STATEMENTS_PROMPT, turn, "session-statements"
   ));
   const inspection = inspectExtractionFillCompletion({
     cacheRoot,
     model: "gpt-5.4-mini",
     requestProfile: "provider-default-v1",
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT,
+    sourcePacking: "session-statements",
     extractionTurns: turns,
     excludeContentClosureKeys: excludedKeys
   });
@@ -267,8 +254,8 @@ it("uses no partial closure when ledger exclusions leave no valid raw entries", 
   expect(inspection.partialContentClosureSha256).toBeNull();
 });
 
-it("rejects a valid shard whose raw JSON changed after finalization", async () => {
-  const turnContents = collectDistinctTurnContents(questions.slice(0, 1));
+it("rejects changed physical statement bytes even when the parsed response is unchanged", async () => {
+  const keySpace = inspectTurnContentKeySpace(questions.slice(0, 1));
   await runExtractionFill({
     variant: VARIANT,
     cacheRoot,
@@ -283,19 +270,15 @@ it("rejects a valid shard whose raw JSON changed after finalization", async () =
   const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
   writeFileSync(shardPath, JSON.stringify({
     ...shard,
-    raw_json: "{ \"signals\": [] }"
+    raw_json: ` ${String(shard.raw_json)} `
   }), "utf8");
 
   expect(() => preflightExtractionCache({
     cacheRoot,
-    config: {
-      providerUrl: "https://example.test/v1",
-      model: "gpt-5.4-mini",
-      requestProfile: "provider-default-v1",
-      apiKey: null
-    },
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    requiredTurnContents: turnContents,
+    config: { ...resolveCompileSeedExtractionConfig({}, readExtractionCacheManifest(cacheRoot)), apiKey: null },
+    systemPrompt: SOURCE_STATEMENTS_PROMPT,
+    requiredTurnContents: keySpace.distinctTurnContents,
+    requiredExtractionTurns: keySpace.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 1 }
   })).toThrow(/content closure/iu);
 });
@@ -367,7 +350,8 @@ function inspect(extractionTurns: readonly LongMemEvalExtractionTurn[]) {
     cacheRoot,
     model: "gpt-5.4-mini",
     requestProfile: "provider-default-v1",
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT,
+    sourcePacking: "session-statements",
     extractionTurns
   });
 }

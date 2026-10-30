@@ -1,5 +1,3 @@
-import type { QuerySourceSketch } from "../../../../recall/conditional-field/query/query-source-sketch.js";
-
 export type CanaryGroupId = "aspiration" | "capability" | "release";
 
 export type CanaryCase = Readonly<{
@@ -7,12 +5,14 @@ export type CanaryCase = Readonly<{
   readonly original_query: string;
   readonly intended: string;
   readonly distractor: string;
-  readonly sketch: NonNullable<QuerySourceSketch["relation"]>;
+  readonly sketch: Readonly<{ predicate: string;
+    arguments: readonly Readonly<{ role: string; phrase: string }>[];
+    qualifiers?: readonly Readonly<{ role: string; phrase: string }>[] }>;
   readonly unknown: string;
   readonly event_time?: string;
 }>;
 
-/** Provider-free mechanism fixtures. Contract wordings ID2/ID4/ID8; not frozen-dataset inputs. */
+/** Recorded text and historical relation data for provenance/display tests, not frozen-dataset inputs. */
 export const SOURCE_DISCOVERY_CANARY: readonly CanaryCase[] = [
   {
     group: "aspiration",

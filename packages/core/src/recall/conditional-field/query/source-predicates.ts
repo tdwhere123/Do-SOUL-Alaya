@@ -27,7 +27,6 @@ const FROZEN_SOURCE_PREDICATE_SET: ReadonlySet<string> = new Set(FROZEN_SOURCE_P
 export type QueryPredicateClass =
   | { readonly kind: "missing" }
   | { readonly kind: "memory_filters" }
-  | { readonly kind: "proposal_lookup" }
   | { readonly kind: "frozen"; readonly name: FrozenSourcePredicateName }
   | { readonly kind: "unknown"; readonly name: string };
 
@@ -50,7 +49,6 @@ export type SourcePredicateSubject = Readonly<{
 export function classifyQueryPredicate(name: string | undefined): QueryPredicateClass {
   if (name === undefined || name.length === 0) return { kind: "missing" };
   if (name.startsWith(SOURCE_FILTER_PREDICATE)) return { kind: "memory_filters" };
-  if (name.startsWith("source.proposal.v1")) return { kind: "proposal_lookup" };
   if (FROZEN_SOURCE_PREDICATE_SET.has(name)) {
     return { kind: "frozen", name: name as FrozenSourcePredicateName };
   }

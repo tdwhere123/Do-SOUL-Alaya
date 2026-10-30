@@ -72,7 +72,7 @@ export class MemoryWriteService {
 
   public async create(input: MemoryEntryInput): Promise<Readonly<MemoryEntry>> {
     const {
-      enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, assertSourceCurrent, ...memoryEntryInput
+      enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, assertSourceCurrent, persistSourceStatementDependency, ...memoryEntryInput
     } = input;
     const enqueueEnrichment = freezeEnrichmentIntent(enrichmentIntent);
     const timestamp = this.now();
@@ -133,7 +133,7 @@ export class MemoryWriteService {
       memoryEntry,
       enqueueEnrichment,
       eventInput,
-      assertSourceCurrent
+      assertSourceCurrent, persistSourceStatementDependency
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(created);
@@ -175,7 +175,8 @@ export class MemoryWriteService {
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
     createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
-    assertSourceCurrent?: () => void
+    assertSourceCurrent?: () => void,
+    persistSourceStatementDependency?: () => void
   ): Promise<{
     readonly created: Readonly<MemoryEntry>;
     readonly event: EventLogEntry;
@@ -199,6 +200,7 @@ export class MemoryWriteService {
         if (event === undefined) {
           throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
         }
+        persistSourceStatementDependency?.();
         this.persistEnrichmentIntent(memoryEntry.workspace_id, memoryEntry.object_id, event.revision, enqueueEnrichment, memoryEntry.created_at);
       }
     });

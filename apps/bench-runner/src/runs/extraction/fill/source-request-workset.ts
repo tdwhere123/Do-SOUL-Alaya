@@ -1,7 +1,8 @@
 import { assertSourcePacketShardCapacity } from "../cache/source-packet-artifact.js";
 import { assertSourceSemanticShardCapacity } from "../cache/source-semantic-artifact.js";
 import { buildOfficialApiSourceCorpus, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
-import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode,
+import { statementSourceUnits } from "../source-statement-request.js";
+import { extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode, extractionRequestUnitCount,
   sourceSemanticArtifactPreparations, prepareSourceSemanticRequestLine,
   type ExtractionArtifactSource, type SourceSemanticArtifactPreparation,
   type SourceRequestLine } from "../request-artifact.js";
@@ -25,7 +26,7 @@ import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-see
 
 export type BatchExtractionSourceUnit = ReturnType<
   typeof planOfficialApiSemanticWorkset
->["units"][number] | ReturnType<typeof sourceSemanticTransportUnits>[number];
+>["units"][number] | ReturnType<typeof sourceSemanticTransportUnits>[number] | ReturnType<typeof statementSourceUnits>[number];
 
 export interface SourceExtractionRequest {
   readonly line: SourceRequestLine;
@@ -81,7 +82,7 @@ export function prepareSourceRequestWorkset(input: {
       );
     }
     if (cached.status === "hit") cachedRequests.push(item);
-    else if (item.request.source_assertions.length === 0) deterministicEmptyRequests.push(item);
+    else if (extractionRequestUnitCount(item.request) === 0) deterministicEmptyRequests.push(item);
     else lines.push(item.line);
   }
   return Object.freeze({
@@ -120,7 +121,7 @@ function selectedRequestKeys(
   allowlist: ReadonlySet<string> | undefined
 ): ReadonlySet<string> {
   const available = new Set(turns.flatMap((turn) => computeExtractionTurnCacheKeys(
-    prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics), turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile, prepared.config.openSemantics
+    prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics, prepared.config.sourcePacking), turn, prepared.config.sourcePacking, prepared.config.sourceInterpretationProfile, prepared.config.openSemantics
   )));
   if (allowlist === undefined) return available;
   for (const key of allowlist) {
@@ -151,10 +152,11 @@ function collectBatchRequests(
   for (const turn of occurrences) {
     const prompts = coveragePrompts(prepared, turn, coverageMemo);
     if (!prompts.some((item) => selectedKeys.has(item.key))) continue;
-    const units: readonly BatchExtractionSourceUnit[] = prepared.config.openSemantics === undefined
-      ? planOfficialApiSemanticWorkset(turn.turnContent, turn.turnMessages, prepared.datasetRevision).units
-      : sourceSemanticTransportUnits(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages),
-        turn.turnMessages.map((message) => message.message_id), prepared.datasetRevision);
+    const units = prepared.config.openSemantics !== undefined
+      ? sourceSemanticTransportUnits(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages),
+        turn.turnMessages.map((message) => message.message_id), prepared.datasetRevision)
+      : prepared.config.sourcePacking !== "session-statements"
+        ? planOfficialApiSemanticWorkset(turn.turnContent, turn.turnMessages, prepared.datasetRevision).units : [];
     const byAssertion = new Map(units.map((unit) => [unit.assertionId, unit]));
     for (const { request, userPrompt, key } of prompts) {
       if (!selectedKeys.has(key)) continue;
@@ -162,13 +164,15 @@ function collectBatchRequests(
         request, sourceTurn: structuredClone(turn), userPrompt,
         units: new Map<string, BatchExtractionSourceUnit>()
       };
-      for (const assertion of request.source_assertions) {
-        const unit = byAssertion.get(assertion.assertion_id);
-        if (unit === undefined || unit.text !== assertion.text) {
-          throw new ExtractionCacheInvariantError("Batch request lost its source assertion binding");
+      if ("messages" in request) {
+        for (const unit of statementSourceUnits(request, prepared.datasetRevision)) item.units.set(unit.binding.occurrenceIdentity, unit);
+      } else for (const assertion of request.source_assertions) {
+          const unit = byAssertion.get(assertion.assertion_id);
+          if (unit === undefined || unit.text !== assertion.text) {
+            throw new ExtractionCacheInvariantError("Batch request lost its source assertion binding");
+          }
+          item.units.set(unit.binding.occurrenceIdentity, unit);
         }
-        item.units.set(unit.binding.occurrenceIdentity, unit);
-      }
       collected.set(key, item);
     }
   }
@@ -184,7 +188,7 @@ function collectBatchRequests(
         key,
         unitKeys,
         requestSha256: createHash("sha256").update(item.userPrompt, "utf8").digest("hex"),
-        systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics),
+        systemPrompt: extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics, prepared.config.sourcePacking),
         userPrompt: item.userPrompt
       }) : Object.freeze(prepareSourceSemanticRequestLine(JSON.parse(item.userPrompt), unitKeys, prepared.config));
       if (line.key !== key || line.userPrompt !== item.userPrompt) {
@@ -285,7 +289,7 @@ function prepareNativeSourceRequestWorkset(input: Parameters<typeof prepareSourc
       throw new ExtractionCacheInvariantError(`native source shard ${item.line.key} is ${cached.status}`);
     }
     if (cached.status === "hit") cachedRequests.push(item);
-    else if (item.request.source_assertions.length === 0) deterministicEmptyRequests.push(item);
+    else if (extractionRequestUnitCount(item.request) === 0) deterministicEmptyRequests.push(item);
     else lines.push(item.line);
   }
   return Object.freeze({ requests: Object.freeze(requests), lines: Object.freeze(lines),
@@ -317,7 +321,7 @@ function coveragePrompts(
       request,
       userPrompt,
       key: computeCacheKey(
-        prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics), userPrompt
+        prepared.config.model, prepared.config.requestProfile, extractionArtifactPrompt(prepared.config.sourceInterpretationProfile, prepared.config.openSemantics, prepared.config.sourcePacking), userPrompt
       )
     });
   }));

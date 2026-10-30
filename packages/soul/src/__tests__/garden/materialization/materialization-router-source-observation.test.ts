@@ -1,35 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  BoundSourceInterpretationSchema,
-  CandidateMemorySignalSchema,
-  SOURCE_INTERPRETATION_CONTRACT,
-  type SourceInterpretationSignal
+  BoundSourceStatementSchema,
+  SourceStatementSignalSchema,
+  SOURCE_STATEMENTS_CONTRACT,
+  type SourceStatementSignal
 } from "@do-soul/alaya-protocol";
 import { MaterializationRouter } from "@do-soul/alaya-soul";
 import { buildClaimInput, buildMemoryInput } from "../../../garden/materialization/materialization-router/inputs.js";
 import { createDeps, createSignal } from "./materialization-router-fixture.js";
 
 const located = {
-  contract: SOURCE_INTERPRETATION_CONTRACT,
-  artifact_key: "artifact-1",
-  source_corpus_digest: "a".repeat(64),
-  assertion_binding: {
-    assertion_id: 1, source_span: [0, 12] as const, text: "A sent mail.", context_id: "context-1"
-  },
-  outcome: "empty" as const,
-  candidates: [],
-  diagnostics: []
+  contract: SOURCE_STATEMENTS_CONTRACT, session_id: "session-1",
+  artifact_key: "artifact-1", source_root_id: "sha256:" + "b".repeat(64),
+  source_corpus_digest: "a".repeat(64), source_span: [0, 12] as const,
+  message: { message_id: "message-1", role: "user", recorded_at: null, text: "A sent mail." },
+  statement: { text: "A sent mail.", relation: "mail delivery" }
 };
 
-function interpretationSignal(): SourceInterpretationSignal {
-  const parsed = CandidateMemorySignalSchema.parse({
+function interpretationSignal(): SourceStatementSignal {
+  const parsed = SourceStatementSignalSchema.parse({
     signal_id: "observation-1",
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
     source: "garden_compile",
     signal_kind: "potential_semantic_observation",
-    interpretation_contract: SOURCE_INTERPRETATION_CONTRACT,
+    interpretation_contract: SOURCE_STATEMENTS_CONTRACT,
     object_kind: null,
     confidence: null,
     scope_hint: "project",
@@ -40,7 +36,7 @@ function interpretationSignal(): SourceInterpretationSignal {
     exception_to_refs: [],
     contradicts_refs: [],
     incompatible_with_refs: [],
-    raw_payload: { source_interpretation: located },
+    raw_payload: { source_statement: located },
     source_observation: {
       observed_at: "2026-09-14T00:00:00.000Z",
       authority: "trusted_host_event",
@@ -73,7 +69,7 @@ describe("MaterializationRouter source observation routing", () => {
   it("publishes through the wired Core port and does not use legacy memory or claim writes", async () => {
     const deps = createDeps();
     const publish = vi.fn(async () => ({
-      bound: BoundSourceInterpretationSchema.parse({
+      bound: BoundSourceStatementSchema.parse({
         ...located,
         source_target: {
           kind: "source_evidence",
@@ -95,7 +91,7 @@ describe("MaterializationRouter source observation routing", () => {
     expect(result).toMatchObject({
       success: true,
       route_target: "memory_entry_only",
-      routing_reason: expect.stringContaining("empty"),
+      routing_reason: expect.stringContaining("source-bound observation"),
       created_objects: [
         { object_kind: "evidence_capsule", object_id: "evidence-obs-1" },
         { object_kind: "memory_entry", object_id: "memory-obs-1" }

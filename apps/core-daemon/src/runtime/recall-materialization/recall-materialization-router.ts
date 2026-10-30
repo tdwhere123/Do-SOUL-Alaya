@@ -8,7 +8,6 @@ import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ClaimService,
   ConflictDetectionService,
-  createAuditedSourceAdmission,
   createSignalEmissionWriter,
   createSourceObservationPublication,
   fieldContractSha256,
@@ -119,12 +118,6 @@ function createSourceObservationPublicationPort(
     deriveTemporalProjection: (assertion, sourceObservedAt) =>
       selectObservedTemporalProjection(assertion, undefined, sourceObservedAt ?? undefined) ?? {},
     stores: wiring.fieldComposition.stores,
-    sourceAdmission: createAuditedSourceAdmission({
-      sha256: fieldContractSha256,
-      stores: wiring.fieldComposition.stores,
-      eventLogRepo: wiring.eventLogRepo,
-      runtimeNotifier: wiring.runtimeNotifier
-    }),
     evidenceService: wiring.evidenceService,
     memoryService: wiring.memoryService,
     sha256: fieldContractSha256

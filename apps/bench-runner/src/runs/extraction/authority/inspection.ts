@@ -1,5 +1,5 @@
 import {
-  extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode,
+  extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode, extractionRequestUnitCount,
   type ExtractionOpenSemanticsGeneration
 } from "../request-artifact.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -124,7 +124,7 @@ function inspectAuthorityCompletion(
     sourcePacking: config.sourcePacking,
     sourceInterpretationProfile: config.sourceInterpretationProfile,
     openSemantics: config.openSemantics,
-    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
+    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking),
     ...(window.nativeSourceRecords === undefined ? { extractionTurns: authorizedTurns } : {
       expectedRequestKeys: nativeSourceRequestInventory(window.nativeSourceRecords,
         window.datasetRevision, config).requests.map(item => item.line.key) }),
@@ -199,7 +199,7 @@ function buildAuthorityExtractionObservation(
       sourcePacking: config.sourcePacking
     }),
     providerUrl: config.providerUrl,
-    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics)),
+    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking)),
     cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
     manifestSha256: manifestIdentity?.manifestSha256 ?? null,
     rawContentClosureSha256: completion.partialContentClosureSha256
@@ -262,15 +262,15 @@ function collectShardStatus(
   const requests = window.nativeSourceRecords === undefined
     ? turns.flatMap(turn => {
       const keys = computeExtractionTurnCacheKeys(config.model, config.requestProfile,
-        extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics), turn,
+        extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking), turn,
         config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
       return extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile,
         config.openSemantics).map((request, index) => ({ key: keys[index]!,
-          nonempty: request.source.source_assertions.length > 0,
+          nonempty: extractionRequestUnitCount(request.source) > 0,
           revision: request.semantic?.source_request.revision?.base_request_sha256 }));
     })
     : nativeSourceRequestInventory(window.nativeSourceRecords, window.datasetRevision, config).requests
-      .map(item => ({ key: item.line.key, nonempty: item.request.source_assertions.length > 0,
+      .map(item => ({ key: item.line.key, nonempty: extractionRequestUnitCount(item.request) > 0,
         revision: JSON.parse(item.line.userPrompt).source_request.revision?.base_request_sha256 as string | undefined }));
   for (const request of requests) {
       const { key } = request;

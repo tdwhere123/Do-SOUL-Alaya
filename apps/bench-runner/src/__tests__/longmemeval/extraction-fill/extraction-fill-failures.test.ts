@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
@@ -166,18 +166,18 @@ describe("runExtractionFill", () => {
     expectFirstShardModel(cacheRoot, shardDirs, MIMO.id);
     const answerTurn = inspectTurnContentKeySpace([
       buildAuthorityQuestion("key", "alpha", "decoy")
-    ]).distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
+    ], "session-statements").distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
     expect(answerTurn).toBeDefined();
     const exactKey = computeExtractionTurnCacheKey(
       MIMO.id,
       MIMO.requestProfile,
-      OFFICIAL_API_SYSTEM_PROMPT,
+      SOURCE_STATEMENTS_PROMPT,
       answerTurn!
     );
     const familyKey = computeExtractionTurnCacheKey(
       MIMO_FAMILY_PROBE,
       MIMO.requestProfile,
-      OFFICIAL_API_SYSTEM_PROMPT,
+      SOURCE_STATEMENTS_PROMPT,
       answerTurn!
     );
     expect(existsSync(cacheFilePath(cacheRoot, exactKey))).toBe(true);

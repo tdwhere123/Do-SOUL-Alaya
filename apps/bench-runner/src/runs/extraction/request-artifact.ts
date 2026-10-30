@@ -5,9 +5,10 @@ import {
   SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts, type SourceSemanticGenerationSchemaContract,
   type UtteranceAttribution, SourceSemanticGenerationTaskSchema, type SourceSemanticGenerationTask
 } from "@do-soul/alaya-protocol";
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import type { ExtractionSourcePacking, SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { sourceStatementRequests } from "./source-statement-request.js";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, sourceSemanticGenerationSystemPrompt,
+  SOURCE_STATEMENTS_PROMPT, OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, sourceSemanticGenerationSystemPrompt,
   buildOfficialApiSourceCorpus, collectOfficialApiExtractionCoverage, buildOfficialApiSourcePacketRequest,
   prepareSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
   type OfficialApiSourcePacketRequest, type SourceSemanticRequest, type SourceSemanticHostPreparation, type SourceSemanticProposalInput,
@@ -137,6 +138,16 @@ export type ExtractionGenerationInput = Readonly<{
   sourcePacking?: ExtractionSourcePacking;
 }>;
 
+/** New passive work has one contract. Retained descriptors remain readable for accounting/recovery. */
+export function assertCurrentConversationGeneration(input: ExtractionGenerationInput, retainedBatchOperation?: string): void {
+  // These operations only observe/cancel an acknowledged job. Import/resume would admit old output anew.
+  if (["status", "cancel", "recover"].includes(retainedBatchOperation ?? "")) return;
+  if (input.sourceInterpretationProfile !== undefined || input.openSemantics !== undefined ||
+      (input.sourcePacking !== undefined && input.sourcePacking !== "session-statements")) {
+    throw new AlayaError("UNAVAILABLE", "retired passive generation permits inspection and Batch status/cancel/recover only");
+  }
+}
+
 export function assertExclusiveExtractionGeneration(input: ExtractionGenerationInput): void {
   if (input.sourceInterpretationProfile !== undefined && input.openSemantics !== undefined) {
     throw new AlayaError("VALIDATION", "open semantics and packet profile are mutually exclusive");
@@ -158,17 +169,28 @@ export function extractionTypedArtifactMode(input: ExtractionGenerationInput): E
 
 export function extractionArtifactPrompt(
   profile?: SourceInterpretationProfile,
-  openSemantics?: ExtractionOpenSemanticsGeneration
+  openSemantics?: ExtractionOpenSemanticsGeneration,
+  packing?: ExtractionSourcePacking
 ): string {
   assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics });
   if (openSemantics !== undefined) {
     const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
     return sourceSemanticGenerationSystemPrompt(generation.generation_schema_contract, generation.generation_task);
   }
-  return profile === undefined ? OFFICIAL_API_SYSTEM_PROMPT : OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT;
+  return profile === undefined ? (retainedAssertionPacking(packing) ? OFFICIAL_API_SYSTEM_PROMPT : SOURCE_STATEMENTS_PROMPT)
+    : OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT;
 }
 
-export type ExtractionArtifactSource = OfficialApiExtractionRequest | ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+function retainedAssertionPacking(packing: ExtractionSourcePacking | undefined): boolean {
+  return packing === "reference-eight" || packing === "singleton";
+}
+
+export type ExtractionArtifactSource = SourceStatementRequest | OfficialApiExtractionRequest | ReturnType<typeof collectSourceSemanticUnitPacks>[number];
+
+/** Unit cardinality is owned by the selected historical or current request contract. */
+export function extractionRequestUnitCount(source: ExtractionArtifactSource): number {
+  return "messages" in source ? source.messages.length : source.source_assertions.length;
+}
 export type SourceSemanticArtifactPreparation =
   | Readonly<{ status: "ready"; source: ReturnType<typeof collectSourceSemanticUnitPacks>[number];
       semantic: SourceSemanticRequest; userPrompt: string }>
@@ -178,13 +200,18 @@ export type SourceSemanticArtifactPreparation =
 /** Each extraction generation owns its source membership and packing. */
 export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn, "turnContent"> &
   Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>, packing?: ExtractionSourcePacking,
-  profile?: SourceInterpretationProfile, openSemantics?: ExtractionOpenSemanticsGeneration): readonly Readonly<{
+  profile?: SourceInterpretationProfile, openSemantics?: ExtractionOpenSemanticsGeneration,
+  retainedOrdinary = retainedAssertionPacking(packing)): readonly Readonly<{
     source: ExtractionArtifactSource; packet?: OfficialApiSourcePacketRequest;
     semantic?: SourceSemanticRequest; userPrompt: string;
   }>[] {
   assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics, sourcePacking: packing });
   if (openSemantics !== undefined) {
     return sourceSemanticArtifactRequests(buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages ?? []), packing, openSemantics);
+  }
+  if (profile === undefined && !retainedOrdinary) {
+    if (packing !== undefined && packing !== "session-statements") throw new AlayaError("CONFLICT", "retired passive packing cannot construct current statement requests");
+    return sourceStatementRequests(turn.turnMessages ?? []);
   }
   return collectOfficialApiExtractionCoverage(turn.turnContent, turn.turnMessages ?? [], packing).requests.map((source) => {
     if (profile === undefined) return { source, userPrompt: stringifyOfficialApiExtractionRequest(source) };

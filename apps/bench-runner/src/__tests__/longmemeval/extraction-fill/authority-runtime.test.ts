@@ -7,19 +7,22 @@ import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildAuthorityQuestion as question,
   buildExtractionFillQuestion,
+  buildGroundedInterpretationResponse,
   EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks,
   setExtractionCredentialFixture as setCredentialFixture
 } from "./fixture.js";
 import {
   authorizedHttpExtractor,
-  batchedFact,
+  multiDetailMessage,
   mutateFirstRawShard as mutateFirstRawShardAt,
   singleSessionBatchedQuestion,
   writeAuthorityReceipt as writeAuthorityReceiptAt,
   writeCanonicalSFixtureDataset as writeCanonicalSFixtureDatasetAt,
   writeFixtureData as writeFixtureDataAt
 } from "./authority-runtime/fixture.js";
+
+import { emptyStatementResponse } from "../extraction/fill-pool/fixture.js";
 
 let cacheRoot: string;
 let dataDir: string;
@@ -75,14 +78,16 @@ describe("extraction authority runtime", () => {
     expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
   });
 
-  it("resumes provider and deterministic shards under one authority closure", async () => {
+  it("resumes nonempty and witnessed-empty session shards under one authority closure",  async () => {
     setCredentialFixture();
     await writeFixtureDataset([buildExtractionFillQuestion(
       "q001", "I completed alpha.", "Hello."
     )]);
     const receiptPath = await writeAuthorityReceipt({});
     const { extract, factory: extractorFactory } = authorizedHttpExtractor({
-      usage: { inputTokens: 3, outputTokens: 2 }
+      usage: { inputTokens: 3, outputTokens: 2 },
+      response: prompt => JSON.parse(prompt).messages.some((message: { text: string }) => message.text === "Hello.")
+        ? emptyStatementResponse(prompt) : buildGroundedInterpretationResponse(prompt)
     });
 
     const result = await runExtractionFill({
@@ -95,14 +100,14 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledOnce();
+    expect(extract).toHaveBeenCalledTimes(2);
     expect(result.authorityTelemetry).toMatchObject({
-      attempts: 1,
+      attempts: 2,
       successfulShards: 2,
       telemetry: {
-        inputTokens: 3,
-        outputTokens: 2,
-        totalTokens: 5,
+        inputTokens: 6,
+        outputTokens: 4,
+        totalTokens: 10,
         usageUnavailableRequests: 0
       }
     });
@@ -117,18 +122,18 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledOnce();
+    expect(extract).toHaveBeenCalledTimes(2);
     expect(resumed.authorityTelemetry).toMatchObject({
-      attempts: 1,
+      attempts: 2,
       successfulShards: 2,
-      telemetry: { totalTokens: 5 }
+      telemetry: { totalTokens: 10 }
     });
   });
 
   it("runs a bounded question prefix without narrowing or finalizing its authority window", async () => {
     setCredentialFixture();
     await writeFixtureDataset([
-      buildExtractionFillQuestion("q001", batchedFact(), "I completed decoy."),
+      buildExtractionFillQuestion("q001", multiDetailMessage(), "I completed decoy."),
       question("q002", "beta", "distraction")
     ]);
     const receiptPath = await writeAuthorityReceipt({});
@@ -145,16 +150,16 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(3);
+    expect(extract).toHaveBeenCalledTimes(2);
     expect(batch).toMatchObject({
-      requestedTurns: 3,
-      newlyExtracted: 3,
+      requestedTurns: 2,
+      newlyExtracted: 2,
       coverage: 1,
       manifest: {
         fill_status: "in_progress",
-        expected_turns: 5,
-        cached_turns: 3,
-        coverage: 0.6
+        expected_turns: 4,
+        cached_turns: 2,
+        coverage: 0.5
       }
     });
 
@@ -168,15 +173,15 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(5);
+    expect(extract).toHaveBeenCalledTimes(4);
     expect(completed.manifest.fill_status).toBe("complete");
   });
 
-  it("limits a one-key probe to its target inside a multi-key source turn", async () => {
+  it("limits a one-key probe to its target inside a multi-request captured session", async () => {
     setCredentialFixture();
     await writeFixtureDataset([singleSessionBatchedQuestion("q001")]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
-    const { extract, factory: extractorFactory } = authorizedHttpExtractor();
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor({ response: emptyStatementResponse });
 
     const probe = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -234,14 +239,14 @@ describe("extraction authority runtime", () => {
     });
   });
 
-  it("persists one strict-empty probe with a non-empty assertion catalog", async () => {
+  it("persists one witnessed-empty probe with nonempty captured messages", async () => {
     setCredentialFixture();
-    await writeFixtureDataset([buildExtractionFillQuestion(
-      "q001", "I moved to Berlin last spring.", "I stayed home last spring."
-    )]);
+    const captured = buildExtractionFillQuestion("q001", "I moved to Berlin last spring.", "I stayed home last spring.");
+    captured.haystack_sessions[1]!.push({ role: "assistant", content: "Acknowledged." });
+    await writeFixtureDataset([captured]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
     const { extract, factory: extractorFactory } = authorizedHttpExtractor({
-      response: () => '{"interpretations":[]}'
+      response: emptyStatementResponse
     });
 
     const probe = await runExtractionFill({
@@ -256,9 +261,8 @@ describe("extraction authority runtime", () => {
 
     expect(extract).toHaveBeenCalledOnce();
     expect(extract.mock.calls.map(([input]) => ({ retryMode: input.retryMode,
-      assertionCount: (JSON.parse(input.userPrompt) as { source_assertions?: readonly unknown[] })
-        .source_assertions?.length ?? 0 })))
-      .toEqual([{ retryMode: "disabled", assertionCount: 1 }]);
+      messageCount: (JSON.parse(input.userPrompt) as { messages: readonly unknown[] }).messages.length })))
+      .toEqual([{ retryMode: "disabled", messageCount: 2 }]);
     expect(probe).toMatchObject({ requestedTurns: 1, newlyExtracted: 1 });
     expect(probe.coverage).toBeLessThan(1);
   });

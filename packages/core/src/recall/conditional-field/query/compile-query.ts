@@ -59,7 +59,6 @@ export {
   FROZEN_SOURCE_PREDICATE_NAMES,
   UNSUPPORTED_POLICY_QUERY_ID
 } from "./source-predicates.js";
-export { compileQuerySourceSketch, type QuerySourceSketch } from "./query-source-sketch.js";
 export type { OpenRelationCapture } from "./ordinary-language.js";
 export {
   ANCHOR_EVENT_VARIABLE,

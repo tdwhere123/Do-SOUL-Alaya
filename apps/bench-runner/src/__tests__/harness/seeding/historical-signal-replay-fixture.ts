@@ -1,8 +1,22 @@
 import { vi } from "vitest";
-import { auditOfficialApiSignalFormation, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { auditOfficialApiSignalFormation, OfficialApiGardenProvider, type GardenCompileContext } from "@do-soul/alaya-soul";
+import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
+
+/** Inspection drafts for the historical grounding/receipt suites, never current compile publication. */
+export async function readHistoricalSeedInputs(input: { provider: OfficialApiGardenProvider;
+  turnContent: string; seedIndex: number; context: GardenCompileContext }): Promise<readonly Omit<BenchSignalSeedInput, "evidenceRef">[]> {
+  const signals = await input.provider.compile(input.turnContent, input.context);
+  return signals.map(signal => ({ signalKind: signal.signal_kind,
+    ...(signal.object_kind === null ? {} : { objectKind: signal.object_kind }),
+    ...(signal.confidence === null ? {} : { confidence: signal.confidence }),
+    distilledFact: typeof signal.raw_payload.distilled_fact === "string" ? signal.raw_payload.distilled_fact
+      : typeof signal.raw_payload.matched_text === "string" ? signal.raw_payload.matched_text : "",
+    turnContent: input.turnContent, turnMessages: input.context.turn_messages, turnSeedIndex: input.seedIndex,
+    productionSignalId: signal.signal_id, productionRawPayload: signal.raw_payload, extractionProvider: "official_api_compile" }));
+}
 
 // These receipt/payload tests consume historical signal envelopes. The live
-// provider now receives interpretations; only its seed-adapter interface is used.
+// provider receives statements. These mocks are only recorded legacy parser fixtures.
 export function createHistoricalSignalReplayProvider(
   options: NonNullable<ConstructorParameters<typeof OfficialApiGardenProvider>[0]>
 ): OfficialApiGardenProvider {

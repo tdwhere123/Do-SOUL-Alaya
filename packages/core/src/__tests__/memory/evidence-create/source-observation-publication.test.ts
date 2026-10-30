@@ -1,22 +1,6 @@
-import { createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation } from "../../../memory/evidence-create/source-interpretation-packet-publication.js";
-import { reasonSourceInterpretation } from "../../../recall/runtime/source-interpretation-reasoning.js";
-import { buildSourceReferenceCatalog, sourceReferenceResolver, canonicalJson, sourceInterpretationProfileIdentity, sourceInterpretationRelationKey, type QueryProgram } from "@do-soul/alaya-protocol";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BoundSourceInterpretationSchema,
-  CandidateMemorySignalSchema,
-  SOURCE_INTERPRETATION_CONTRACT,
-  locateSourceInterpretation,
-  type SourceLocatedInterpretation
-} from "@do-soul/alaya-protocol";
-import {
-  SqliteEventLogRepo,
-  SqliteKarmaEventRepo,
-  type StorageDatabase
-} from "@do-soul/alaya-storage";
+import { SOURCE_STATEMENTS_CONTRACT, SourceStatementSignalSchema, type SourceStatementSignal } from "@do-soul/alaya-protocol";
+import { SqliteEventLogRepo, SqliteKarmaEventRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { DynamicsService } from "../../../dynamics/dynamics-service.js";
 import { EvidenceService } from "../../../memory/evidence-service.js";
 import { MemoryService } from "../../../memory/memory-service.js";
@@ -25,615 +9,125 @@ import { createInMemoryFieldStores } from "../../../memory/evidence-create/field
 import { resolveCurrentSource } from "../../../memory/evidence-create/source-observation-currentness.js";
 import { createSourceObservationPublication } from "../../../memory/evidence-create/source-observation-publication.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
-import { CoreError } from "../../../shared/errors.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { evaluateSignalTriage } from "../../../memory/signal-service-helpers.js";
-import {
-  REAL_SQLITE_TEST_RUN_ID,
-  REAL_SQLITE_TEST_WORKSPACE_ID,
-  createRecallRealStorage
-} from "../../shared/real-sqlite.test-support.js";
+import { REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WORKSPACE,
+  createRecallRealStorage } from "../../shared/real-sqlite.test-support.js";
 
-const CLOCK = "2026-09-14T00:00:00.000Z";
-const ASSERTION = "Alice uses tools.";
-const SOURCE = `User: ${ASSERTION}`;
+const CLOCK = "2026-09-14T00:00:00.000Z", SOURCE = "User: Alice uses tools.";
 const databases = new Set<StorageDatabase>();
+afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
 
-afterEach(() => {
-  for (const database of databases) database.close();
-  databases.clear();
-});
-
-async function openFixture(filename = ":memory:") {
-  const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRecallRealStorage(
-    (db) => databases.add(db),
-    filename
-  );
-  const eventLogRepo = new SqliteEventLogRepo(database);
-  const stores = createInMemoryFieldStores();
+async function fixture(source = SOURCE) {
+  const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRecallRealStorage(db => databases.add(db));
+  const eventLogRepo = new SqliteEventLogRepo(database), stores = createInMemoryFieldStores();
   const notify = { notifyEntry: vi.fn(async () => undefined) };
-  const sourceAdmission = createAuditedSourceAdmission({
-    stores, eventLogRepo, sha256: fieldContractSha256,
-    runtimeNotifier: notify
-  });
-  const evidenceService = new EvidenceService({
-    evidenceCapsuleRepo, eventLogRepo, runtimeNotifier: notify
-  });
-  const memoryService = new MemoryService({
-    memoryEntryRepo, eventLogRepo, evidenceService, runtimeNotifier: notify,
-    dynamicsService: new DynamicsService({
-      memoryRepo: memoryEntryRepo,
-      karmaEventRepo: new SqliteKarmaEventRepo(database),
-      eventLogRepo, runtimeNotifier: notify
-    })
-  });
-  return {
-    database, stores, sourceAdmission, evidenceService, memoryService, notify, memoryEntryRepo,
-    evidenceCapsuleRepo, eventLogRepo,
-    publication: createSourceObservationPublication({
-      deriveTemporalProjection: () => ({}),
-      stores, sourceAdmission, evidenceService, memoryService, sha256: fieldContractSha256
-    })
-  };
+  const sourceAdmission = createAuditedSourceAdmission({ stores, eventLogRepo, sha256: fieldContractSha256,
+    runtimeNotifier: notify, hostCaptureBinding: request => ({ namespace: "recorded-session", producer: "recorded-host",
+      workspace_id: request.workspace_id, basis: "pinned_dataset" }) });
+  const evidenceService = new EvidenceService({ evidenceCapsuleRepo, eventLogRepo, runtimeNotifier: notify, fieldStores: stores });
+  const memoryService = new MemoryService({ memoryEntryRepo, eventLogRepo, evidenceService, runtimeNotifier: notify,
+    dynamicsService: new DynamicsService({ memoryRepo: memoryEntryRepo, karmaEventRepo: new SqliteKarmaEventRepo(database),
+      eventLogRepo, runtimeNotifier: notify }) });
+  const sourceRequest = { workspace_id: WORKSPACE, source_id: "artifact-1", source_version: "1", content_bytes: source,
+    evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
+    speaker: "user" as const, scope_class: "project" as const, spans: deriveAddressableSpanViews(source),
+    host_occurrences: [{ occurrence_id: "message-1", utf8_span: [0, Buffer.byteLength(source)] as const,
+      role: "user" as const, channel: null, author_ref: null, container_ref: null, upstream_message_ref: null,
+      upstream_position: null, completeness: "complete" as const, fidelity: "original_bytes" as const }] };
+  const admitted = await sourceAdmission.admit(sourceRequest, { workspaceId: WORKSPACE });
+  const signal = SourceStatementSignalSchema.parse({ signal_id: "signal-1", workspace_id: WORKSPACE, run_id: RUN,
+    surface_id: null, source: "garden_compile", signal_kind: "potential_semantic_observation",
+    interpretation_contract: SOURCE_STATEMENTS_CONTRACT, object_kind: null, confidence: null, scope_hint: "project",
+    domain_tags: [], evidence_refs: [], source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
+    contradicts_refs: [], incompatible_with_refs: [], created_at: CLOCK,
+    source_observation: { observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1" },
+    raw_payload: { source_statement: { contract: SOURCE_STATEMENTS_CONTRACT, session_id: "session-1", artifact_key: "artifact-1",
+      source_root_id: admitted.record.identity, source_corpus_digest: fieldContractSha256(source),
+      source_span: [0, Buffer.byteLength(source)], message: { message_id: "message-1", role: "user", text: source, recorded_at: null },
+      statement: { text: "Alice uses tools.", relation: "tool usage" } } } });
+  const deriveTemporalProjection = vi.fn(() => ({}));
+  const publication = createSourceObservationPublication({ deriveTemporalProjection, stores, evidenceService,
+    memoryService, sha256: fieldContractSha256 });
+  return { database, stores, sourceAdmission, sourceRequest, admitted, signal, memoryService, evidenceService,
+    eventLogRepo, notify, publication, deriveTemporalProjection };
 }
 
-async function admitSource(
-  fixture: Awaited<ReturnType<typeof openFixture>>,
-  content = SOURCE,
-  sourceVersion = "1",
-  recordedAt = CLOCK,
-  evidenceObjectId: string | null = null
-) {
-  return await fixture.sourceAdmission.admit({
-    workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
-    source_id: "artifact-1",
-    source_version: sourceVersion,
-    content_bytes: content,
-    evidence_object_id: evidenceObjectId,
-    recorded_at: recordedAt,
-    event_time: null,
-    valid_from: null,
-    valid_to: null,
-    speaker: "user",
-    scope_class: "project",
-    spans: deriveAddressableSpanViews(content)
-  }, { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID });
+function unpublished(database: StorageDatabase) {
+  expect(database.connection.prepare("SELECT COUNT(*) AS n FROM memory_entries").get()).toEqual({ n: 0 });
+  expect(database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get()).toEqual({ n: 0 });
 }
 
-function locatedInterpretation(
-  response: Parameters<typeof locateSourceInterpretation>[0]["response"] = {
-    kind: "received",
-    value: { interpretations: [{ assertion_id: 1, relations: [{
-      predicate: { text: "uses" },
-      arguments: [
-        { role: "agent", phrase: { text: "Alice" } },
-        { role: "object", phrase: { text: "tools" } }
-      ],
-      qualifiers: []
-    }] }] }
-  },
-  source = SOURCE,
-  assertion = ASSERTION
-): SourceLocatedInterpretation {
-  return locateSourceInterpretation({
-    source, artifactKey: "artifact-1", sha256: fieldContractSha256,
-    assertion: { assertion_id: 1, text: assertion, source_span: [source.indexOf(assertion), source.indexOf(assertion) + assertion.length] },
-    response
-  });
-}
-
-function observationSignal(located: SourceLocatedInterpretation, overrides: Record<string, unknown> = {}) {
-  const { raw_payload, ...rest } = overrides;
-  const signal = CandidateMemorySignalSchema.parse({
-    signal_id: "signal-1",
-    workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
-    run_id: REAL_SQLITE_TEST_RUN_ID,
-    surface_id: null,
-    source: "garden_compile",
-    signal_kind: "potential_semantic_observation",
-    interpretation_contract: SOURCE_INTERPRETATION_CONTRACT,
-    object_kind: null,
-    confidence: null,
-    scope_hint: "project",
-    domain_tags: [],
-    evidence_refs: [],
-    source_memory_refs: [],
-    supersedes_refs: [],
-    exception_to_refs: [],
-    contradicts_refs: [],
-    incompatible_with_refs: [],
-    raw_payload: { source_interpretation: located, ...(raw_payload as object ?? {}) },
-    source_observation: {
-      observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1"
-    },
-    created_at: CLOCK,
-    ...rest
-  });
-  if (signal.interpretation_contract !== SOURCE_INTERPRETATION_CONTRACT) throw new Error("Expected interpretation");
-  return signal;
-}
-
-describe("source observation publication", () => {
-  it("accepts interpretation signals without using the scored kind/confidence route", () => {
-    const signal = observationSignal(locatedInterpretation());
-    expect(evaluateSignalTriage(signal)).toBe("accepted");
-    expect(signal.confidence).toBeNull();
-    expect(signal.object_kind).toBeNull();
-  });
-
-  it.each([null, "source-evidence-alias"])("publishes and reopens the source identity with alias %s and unknown confidence", async (sourceAlias) => {
-    const directory = mkdtempSync(join(tmpdir(), "alaya-source-observation-"));
-    const filename = join(directory, "memory.sqlite");
-    const fixture = await openFixture(filename);
-    await admitSource(fixture, SOURCE, "1", CLOCK, sourceAlias);
-    const located = locatedInterpretation();
-    const published = await fixture.publication.publish({
-      signal: observationSignal(located),
-      sourceEventAnchor: {
-        event_type: "soul.signal.emitted", event_id: "emit-1", occurred_at: CLOCK
-      }
-    });
-    expect(published.memory.dimension).toBe("observation");
-    expect(published.memory.confidence).toBeNull();
-    expect(published.memory.content).toBe(ASSERTION);
-    expect(published.bound.source_target.root_kind).toBe("source_record");
-    expect(published.bound.source_target.evidence_object_id).toBe(sourceAlias);
-    expect(published.memory.evidence_refs).toContain(published.evidence.object_id);
-    expect(published.bound.candidates[0]?.scope_status).toBe("unsupported");
-    expect(published.bound.candidates[0]?.arguments[0]?.phrase.lookup_key).toBe("alice");
-    expect(published.evidence.evidence_health_state).toBe("questionable");
-    expect(published.evidence.excerpt).toBe(ASSERTION);
-    expect(BoundSourceInterpretationSchema.parse(JSON.parse(published.evidence.gist)).assertion_binding.context_id)
-      .toBe(located.assertion_binding.context_id);
-    expect(fixture.notify.notifyEntry).toHaveBeenCalled();
-    const memoryId = published.memory.object_id;
-    const evidenceId = published.evidence.object_id;
-    fixture.database.close();
-    databases.delete(fixture.database);
-
-    const reopened = await openFixture(filename);
-    const memory = await reopened.memoryService.findById(memoryId);
-    const evidence = await reopened.evidenceService.findById(evidenceId);
-    expect(memory).toMatchObject({
-      object_id: memoryId, dimension: "observation", confidence: null, content: ASSERTION
-    });
-    expect(evidence?.object_id).toBe(evidenceId);
-    const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(evidence!.gist));
-    expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
-    expect(rebound.source_target.root_id).toBe(published.bound.source_target.root_id);
-    expect(rebound.source_target.evidence_object_id).toBe(sourceAlias);
-  });
-
+describe("source statement publication ownership", () => {
   it("hashes each current source body once and rechecks integrity on later reads", async () => {
-    const fixture = await openFixture();
-    const admitted = await admitSource(fixture);
-    const stored = fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, admitted.record.identity)!;
-    const located = locatedInterpretation();
+    const f = await fixture(), located = f.signal.raw_payload.source_statement;
+    const stored = f.stores.getStoredRecord(WORKSPACE, f.admitted.record.identity)!;
     const sha256 = vi.fn(fieldContractSha256);
     for (let read = 1; read <= 2; read++) {
-      expect(resolveCurrentSource(fixture.stores, REAL_SQLITE_TEST_WORKSPACE_ID, located, sha256)).toEqual(stored);
-      expect(sha256).toHaveBeenCalledTimes(read);
-      expect(sha256).toHaveBeenLastCalledWith(SOURCE);
+      expect(resolveCurrentSource(f.stores, WORKSPACE, located, sha256)).toEqual(stored);
+      expect(sha256).toHaveBeenCalledTimes(read); expect(sha256).toHaveBeenLastCalledWith(SOURCE);
     }
     sha256.mockClear();
-    expect(() => resolveCurrentSource(fixture.stores, REAL_SQLITE_TEST_WORKSPACE_ID,
-      { ...located, source_corpus_digest: "0".repeat(64) }, sha256)).toThrowError(expect.objectContaining({
-      code: "VALIDATION", message: "source digest is not current", details: { admission: "filtered" }
-    }));
+    expect(() => resolveCurrentSource(f.stores, WORKSPACE, { ...located, source_corpus_digest: "0".repeat(64) }, sha256))
+      .toThrowError(expect.objectContaining({ code: "VALIDATION", message: "source digest is not current" }));
     expect(sha256).not.toHaveBeenCalled();
-    const corrupted = { ...fixture.stores, getStoredRecord: () => ({ ...stored, content_bytes: `${SOURCE} ` }) };
-    expect(() => resolveCurrentSource(corrupted, REAL_SQLITE_TEST_WORKSPACE_ID, located, sha256))
-      .toThrowError(expect.objectContaining({
-        code: "OBLIGATION_VIOLATION", message: "stored source body does not match its digest"
-      }));
+    const corrupted = { ...f.stores, getStoredRecord: () => ({ ...stored, content_bytes: `${SOURCE} ` }) };
+    expect(() => resolveCurrentSource(corrupted, WORKSPACE, located, sha256)).toThrowError(expect.objectContaining({
+      code: "OBLIGATION_VIOLATION", message: "stored source body does not match its digest" }));
     expect(sha256).toHaveBeenCalledExactlyOnceWith(`${SOURCE} `);
   });
 
-  it("retains ordinary source field admission for source observations with a currentness guard", async () => {
-    const fixture = await openFixture();
-    const original = await admitSource(fixture);
-    const evidenceService = new EvidenceService({
-      evidenceCapsuleRepo: fixture.evidenceCapsuleRepo, eventLogRepo: fixture.eventLogRepo,
-      runtimeNotifier: fixture.notify, fieldStores: fixture.stores
-    });
-    const publication = createSourceObservationPublication({
-      deriveTemporalProjection: () => ({}), stores: fixture.stores,
-      sourceAdmission: fixture.sourceAdmission, evidenceService,
-      memoryService: fixture.memoryService, sha256: fieldContractSha256
-    });
-    const published = await publication.publish({
-      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
-    });
-    const admitted = fixture.stores.getCurrentRecord(REAL_SQLITE_TEST_WORKSPACE_ID, original.record.content_digest);
-    expect(admitted?.evidence_object_id).toBe(published.evidence.object_id);
-    expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, admitted!.identity)?.content_bytes)
-      .toBe(ASSERTION);
-    expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, original.record.identity)?.content_bytes)
-      .toBe(SOURCE);
-    expect(published.bound.source_target.root_id).toBe(original.record.identity);
+  it("keeps a derived capsule as provenance rather than admitting a second source", async () => {
+    const f = await fixture(), records = f.stores.listStoredRecords(WORKSPACE);
+    const published = await f.publication.publish({ signal: f.signal, sourceEventAnchor: null });
+    expect(f.stores.listStoredRecords(WORKSPACE)).toEqual(records);
+    expect(f.stores.getCurrentRecord(WORKSPACE, f.admitted.record.content_digest)).toBeNull();
+    expect(published.bound.source_target.root_id).toBe(f.admitted.record.identity);
+    expect(published.memory).toMatchObject({ content: "Alice uses tools.", dimension: "observation", confidence: null });
+    expect(f.deriveTemporalProjection).toHaveBeenCalledWith(SOURCE, null);
   });
 
-  it("converts UTF-16 locators to UTF-8 durable spans", async () => {
-    const source = "A café sent mail.";
-    const fixture = await openFixture();
-    await admitSource(fixture, source);
-    const located = locatedInterpretation({
-      kind: "received",
-      value: { interpretations: [{ assertion_id: 1, relations: [{
-        predicate: { text: "sent" }, arguments: [], qualifiers: []
-      }] }] }
-    }, source, source);
-    const published = await fixture.publication.publish({
-      signal: observationSignal(located), sourceEventAnchor: null
-    });
-    expect(published.bound.source_target.span).toEqual({
-      content_start: 0,
-      content_end: Buffer.byteLength(source, "utf8"),
-      retained_extent: "body",
-      content_complete: true,
-      original_complete: true
-    });
-    expect(published.bound.source_target.span?.content_end).toBe(source.length + 1);
-    expect(published.bound.assertion_binding.source_span).toEqual([
-      0, Buffer.byteLength(source, "utf8")
-    ]);
-    const sentAt = Buffer.byteLength(source.slice(0, source.indexOf("sent")), "utf8");
-    expect(published.bound.candidates[0]?.predicate.source_span).toEqual([
-      sentAt, sentAt + Buffer.byteLength("sent", "utf8")
-    ]);
+  it("preserves exact UTF-8 host spans and rejects UTF-16 offsets before publication", async () => {
+    const source = "User: A café sent 中文🙂 mail.", f = await fixture(source);
+    const wrong = { ...f.signal, raw_payload: { source_statement: { ...f.signal.raw_payload.source_statement,
+      source_span: [0, source.length] as const } } };
+    await expect(f.publication.publish({ signal: wrong, sourceEventAnchor: null })).rejects.toThrow(/span/);
+    unpublished(f.database);
+    const published = await f.publication.publish({ signal: f.signal, sourceEventAnchor: null });
+    expect(published.bound.source_span).toEqual([0, Buffer.byteLength(source)]);
+    expect(published.bound.source_target.span?.content_end).toBe(Buffer.byteLength(source));
   });
 
-  it("publishes empty and failed interpretations without minting a certified graph", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const empty = await fixture.publication.publish({
-      signal: observationSignal(locatedInterpretation({
-        kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [] }] }
-      })),
-      sourceEventAnchor: null
-    });
-    expect(empty.bound.outcome).toBe("empty");
-    expect(empty.bound.candidates).toEqual([]);
-    expect(empty.memory.dimension).toBe("observation");
-    const failed = await fixture.publication.publish({
-      signal: observationSignal(locatedInterpretation({
-        kind: "unavailable", reason: "missing_response"
-      }), { signal_id: "signal-failed" }),
-      sourceEventAnchor: null
-    });
-    expect(failed.bound.outcome).toBe("failed");
-    expect(failed.bound.diagnostics[0]?.reason).toBe("missing_response");
-    expect(failed.memory.object_id).not.toBe(empty.memory.object_id);
+  it.each(["role", "message_id", "source_root_id", "scope"])("rejects forged %s binding before durable effects", async field => {
+    const f = await fixture(), altered = structuredClone(f.signal) as unknown as {
+      scope_hint: string; raw_payload: { source_statement: { source_root_id: string; message: { role: string; message_id: string } } } };
+    if (field === "scope") altered.scope_hint = "personal";
+    else if (field === "source_root_id") altered.raw_payload.source_statement.source_root_id = "replaced-root";
+    else if (field === "role") altered.raw_payload.source_statement.message.role = "assistant";
+    else altered.raw_payload.source_statement.message.message_id = "different-host";
+    await expect(f.publication.publish({ signal: altered as unknown as SourceStatementSignal, sourceEventAnchor: null })).rejects.toThrow();
+    unpublished(f.database);
   });
 
-  it("rejects wrong root, revision, digest, span, and scope at the shared owner", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const located = locatedInterpretation();
-    await expect(fixture.publication.publish({
-      signal: observationSignal(located, { scope_hint: "global_core" }),
-      sourceEventAnchor: null
-    })).rejects.toThrow(/scope is not current/);
-    await expect(fixture.publication.publish({
-      signal: observationSignal(located, { scope_hint: "not-a-scope" }),
-      sourceEventAnchor: null
-    })).rejects.toThrow(/unknown scope_hint/);
-    await expect(fixture.publication.publish({
-      signal: observationSignal({
-        ...located,
-        assertion_binding: { ...located.assertion_binding, text: "not the source text" }
-      }),
-      sourceEventAnchor: null
-    })).rejects.toThrow(/assertion binding does not match/);
-    const mismatchedPhrase = {
-      ...located,
-      candidates: located.candidates.map((candidate, index) => index === 0
-        ? { ...candidate, predicate: { ...candidate.predicate, text: "used" } }
-        : candidate)
-    };
-    await expect(fixture.publication.publish({
-      signal: observationSignal(mismatchedPhrase), sourceEventAnchor: null
-    })).rejects.toThrow(/candidate phrase does not match/);
-    const mismatchedKey = {
-      ...located,
-      candidates: located.candidates.map((candidate, index) => index === 0
-        ? {
-          ...candidate,
-          predicate: { ...candidate.predicate, lookup_key: "not-the-source-key" }
-        }
-        : candidate)
-    };
-    await expect(fixture.publication.publish({
-      signal: observationSignal(mismatchedKey), sourceEventAnchor: null
-    })).rejects.toThrow(/lookup_key does not match/);
-    expectNoPublishedObservation(fixture.database);
-    await expect(fixture.publication.publish({
-      signal: observationSignal(located, { workspace_id: "workspace-other" }),
-      sourceEventAnchor: null
-    })).rejects.toThrow(/not currently admitted|workspace/);
-    await admitSource(fixture, "User: Alice uses apps.", "2", "2026-09-15T00:00:00.000Z");
-    await expect(fixture.publication.publish({
-      signal: observationSignal(located), sourceEventAnchor: null
-    })).rejects.toThrow(/digest is not current/);
-    expectNoPublishedObservation(fixture.database);
-    const other = await openFixture();
-    await other.sourceAdmission.admit({
-      workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
-      source_id: "artifact-other",
-      source_version: "1",
-      content_bytes: SOURCE,
-      evidence_object_id: null,
-      recorded_at: CLOCK,
-      event_time: null, valid_from: null, valid_to: null,
-      speaker: "user", scope_class: "project",
-      spans: deriveAddressableSpanViews(SOURCE)
-    }, { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID });
-    await expect(other.publication.publish({
-      signal: observationSignal(located), sourceEventAnchor: null
-    })).rejects.toThrow(/not currently admitted/);
-    expectNoPublishedObservation(other.database);
+  it("replays the same statement without additional evidence, memory, or source-admission audit", async () => {
+    const f = await fixture();
+    const first = await f.publication.publish({ signal: f.signal, sourceEventAnchor: null });
+    const count = f.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get();
+    const replay = await f.publication.publish({ signal: f.signal, sourceEventAnchor: null });
+    expect(replay).toMatchObject(first);
+    expect(f.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get()).toEqual(count);
   });
 
-  it("ignores model confidence, policy labels, and participant guesses", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const located = locatedInterpretation();
-    expect(CandidateMemorySignalSchema.safeParse({
-      ...observationSignal(located), confidence: 1
-    }).success).toBe(false);
-    const published = await fixture.publication.publish({
-      signal: observationSignal(located, {
-        raw_payload: { policy: "admin", confidence: 0.99, participant: "false-agent" }
-      }),
-      sourceEventAnchor: null
-    });
-    expect(published.memory.dimension).toBe("observation");
-    expect(published.memory.confidence).toBeNull();
-    expect(published.bound.candidates[0]?.scope_status).toBe("unsupported");
-    expect(published.bound).not.toHaveProperty("policy");
-  });
-
-  it("replays duplicate publication with the same identity and recovers an interrupted memory write", async () => {
-    const base = await openFixture();
-    await admitSource(base);
-    const located = locatedInterpretation();
-    const signal = observationSignal(located);
-    const first = await base.publication.publish({ signal, sourceEventAnchor: null });
-    const again = await base.publication.publish({ signal, sourceEventAnchor: null });
-    expect(again.memory.object_id).toBe(first.memory.object_id);
-    expect(again.evidence.object_id).toBe(first.evidence.object_id);
-
-    const interrupted = await openFixture();
-    await admitSource(interrupted);
-    const create = interrupted.memoryService.create.bind(interrupted.memoryService);
-    let fail = true;
-    const publication = createSourceObservationPublication({
-      deriveTemporalProjection: () => ({}),
-      stores: interrupted.stores,
-      sourceAdmission: interrupted.sourceAdmission,
-      evidenceService: interrupted.evidenceService,
-      memoryService: {
-        create: async (input) => {
-          if (fail) {
-            fail = false;
-            throw new Error("memory write interrupted");
-          }
-          return await create(input);
-        },
-        findByIdScoped: interrupted.memoryService.findByIdScoped.bind(interrupted.memoryService)
-      },
-      sha256: fieldContractSha256
-    });
-    const retrySignal = observationSignal(located, { signal_id: "signal-retry" });
-    const interruptedError = await publication.publish({
-      signal: retrySignal, sourceEventAnchor: null
-    }).then(() => null, (error: unknown) => error);
-    expect(interruptedError).toBeInstanceOf(CoreError);
-    expect((interruptedError as CoreError).code).toBe("CONFLICT");
-    expect((interruptedError as CoreError).message).toMatch(/interrupted after evidence creation/);
-    const capsules = await interrupted.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID);
-    expect(capsules).toHaveLength(1);
-    expect((interruptedError as CoreError).details).toEqual({
-      evidence_object_id: capsules[0]!.object_id
-    });
-    expect(await interrupted.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation")).toEqual([]);
-    const recovered = await publication.publish({ signal: retrySignal, sourceEventAnchor: null });
-    expect(recovered.evidence.object_id).toBe(capsules[0]!.object_id);
-    expect(recovered.memory.dimension).toBe("observation");
-    expect(await interrupted.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID)).toHaveLength(1);
-  });
-
-  it.each(["complete", "interrupted"] as const)("rejects a legacy invented source alias on %s publication recovery", async (state) => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const signal = observationSignal(locatedInterpretation());
-    const publication = state === "complete" ? fixture.publication : createSourceObservationPublication({
-      deriveTemporalProjection: () => ({}), stores: fixture.stores, sourceAdmission: fixture.sourceAdmission,
-      evidenceService: fixture.evidenceService, sha256: fieldContractSha256,
-      memoryService: { findByIdScoped: fixture.memoryService.findByIdScoped.bind(fixture.memoryService),
-        create: async () => { throw new Error("interrupted memory write"); } }
-    });
-    await publication.publish({ signal, sourceEventAnchor: null }).catch((error: unknown) => {
-      if (state === "complete") throw error;
-    });
-    const evidence = (await fixture.evidenceService.findByWorkspaceId(REAL_SQLITE_TEST_WORKSPACE_ID))[0]!;
-    const prior = BoundSourceInterpretationSchema.parse(JSON.parse(evidence.gist));
-    const legacy = JSON.stringify({ ...prior, source_target: { ...prior.source_target, evidence_object_id: evidence.object_id } });
-    fixture.database.connection.prepare("UPDATE evidence_capsules SET gist=? WHERE object_id=?").run(legacy, evidence.object_id);
-    await expect(fixture.publication.publish({ signal, sourceEventAnchor: null }))
-      .rejects.toMatchObject({ code: "VALIDATION", message: "stored source observation binding differs from its publication" });
-    expect((await fixture.evidenceService.findById(evidence.object_id))!.gist).toBe(legacy);
-    expect(await fixture.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation"))
-      .toHaveLength(state === "complete" ? 1 : 0);
-  });
-
-  it("reserves one identity for concurrent overlapping publish and after dormancy", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const located = locatedInterpretation();
-    const [first, second] = await Promise.all([
-      fixture.publication.publish({
-        signal: observationSignal(located, { signal_id: "signal-a" }), sourceEventAnchor: null
-      }),
-      fixture.publication.publish({
-        signal: observationSignal(located, { signal_id: "signal-b" }), sourceEventAnchor: null
-      })
-    ]);
-    expect(second.memory.object_id).toBe(first.memory.object_id);
-    expect(second.evidence.object_id).toBe(first.evidence.object_id);
-    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(1);
-    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM evidence_capsules")).toBe(1);
-    fixture.database.connection.prepare(
-      "UPDATE memory_entries SET lifecycle_state = 'dormant', storage_tier = 'cold' WHERE object_id = ?"
-    ).run(first.memory.object_id);
-    expect(await fixture.memoryService.findByDimensionAll(REAL_SQLITE_TEST_WORKSPACE_ID, "observation")).toEqual([]);
-    const afterDormant = await fixture.publication.publish({
-      signal: observationSignal(located, { signal_id: "signal-dormant" }), sourceEventAnchor: null
-    });
-    expect(afterDormant.memory.object_id).toBe(first.memory.object_id);
-    expect(afterDormant.evidence.object_id).toBe(first.evidence.object_id);
-    expect(countRows(fixture.database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(1);
-  });
-
-  it("does not extra-audit source admission on duplicate publish", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const located = locatedInterpretation();
-    await fixture.publication.publish({
-      signal: observationSignal(located), sourceEventAnchor: null
-    });
-    const afterFirst = countRows(
-      fixture.database,
-      "SELECT COUNT(*) AS n FROM event_log WHERE event_type = 'soul.field.source_record.admitted'"
-    );
-    await fixture.publication.publish({
-      signal: observationSignal(located, { signal_id: "signal-dup" }), sourceEventAnchor: null
-    });
-    expect(countRows(
-      fixture.database,
-      "SELECT COUNT(*) AS n FROM event_log WHERE event_type = 'soul.field.source_record.admitted'"
-    )).toBe(afterFirst);
-  });
-
-  it("rejects a withdrawn newer revision instead of resurrecting an older body", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const withdrawn = await admitSource(
-      fixture, "User: Alice uses apps.", "2", "2026-09-15T00:00:00.000Z"
-    );
-    const stores = {
-      ...fixture.stores,
-      getStoredRecord: (workspaceId: string, recordId: string) =>
-        recordId === withdrawn.record.identity
-          ? null
-          : fixture.stores.getStoredRecord(workspaceId, recordId),
-      listStoredRecords: (workspaceId: string) => fixture.stores.listStoredRecords(workspaceId)
-        .filter((row) => row.record.identity !== withdrawn.record.identity)
-    };
-    const publication = createSourceObservationPublication({
-      deriveTemporalProjection: () => ({}),
-      stores,
-      sourceAdmission: fixture.sourceAdmission,
-      evidenceService: fixture.evidenceService,
-      memoryService: fixture.memoryService,
-      sha256: fieldContractSha256
-    });
-    await expect(publication.publish({
-      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
-    })).rejects.toThrow(/current source body is not available/);
-    expectNoPublishedObservation(fixture.database);
-  });
-
-  it.each([
-    ["2026-09-15T12:00:00.001Z", "2026-09-15T12:00Z"],
-    ["2026-09-15T12:00:00.00000000002Z", "2026-09-15T12:00:00.00000000001Z"]
-  ])("selects the later UTC instant %s over %s", async (newer, older) => {
-    const fixture = await openFixture();
-    await admitSource(fixture, SOURCE, "1", newer);
-    await admitSource(fixture, "User: Alice uses apps.", "2", older);
-    const published = await fixture.publication.publish({
-      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
-    });
-    expect(published.memory.content).toBe(ASSERTION);
+  it("rejects a same-body replacement even though its content digest is unchanged", async () => {
+    const f = await fixture();
+    await f.sourceAdmission.admit({ ...f.sourceRequest, source_version: "2", recorded_at: "2026-09-15T00:00:00.000Z" }, { workspaceId: WORKSPACE });
+    await expect(f.publication.publish({ signal: f.signal, sourceEventAnchor: null })).rejects.toThrow(/revision/);
+    unpublished(f.database);
   });
 
   it("rejects observation confidence mutation at the memory update owner", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const published = await fixture.publication.publish({
-      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
-    });
-    await expect(fixture.memoryService.update(
-      published.memory.object_id, { confidence: 0.9 }, "model score"
-    )).rejects.toThrow(/observation confidence cannot be mutated/);
-    expect((await fixture.memoryService.findById(published.memory.object_id))?.confidence).toBeNull();
-  });
-});
-
-function expectNoPublishedObservation(database: StorageDatabase): void {
-  expect(countRows(database, "SELECT COUNT(*) AS n FROM memory_entries WHERE dimension = 'observation'")).toBe(0);
-  expect(countRows(database, "SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%source-interpretation-v1%'")).toBe(0);
-}
-
-function countRows(database: StorageDatabase, sql: string): number {
-  return (database.connection.prepare(sql).get() as { n: number }).n;
-}
-
-
-describe("source interpretation conditional premises", () => {
-  it("publishes exact source premises and composes them without making a memory object", async () => {
-    const fixture = await openFixture();
-    await admitSource(fixture);
-    const owner = { ...fixture, sha256: fieldContractSha256 };
-    const publication = createSourceInterpretationPacketPublication(owner);
-    const profile = { contract: "source-interpretation-profile-v1" as const, description: "Literal use relations",
-      predicates: [{ symbol: "uses", governing_roles: [], meaning: "A source nominates use by an agent of a theme." }],
-      roles: [{ symbol: "agent", meaning: "Actor of the event." }, { symbol: "theme", meaning: "Object involved in the event." }] };
-    const profileId = sourceInterpretationProfileIdentity(profile, fieldContractSha256);
-    const catalog = buildSourceReferenceCatalog(fieldContractSha256(SOURCE), [{ assertion_id: 1, text: ASSERTION }], fieldContractSha256);
-    const references = sourceReferenceResolver(catalog, fieldContractSha256);
-    const sourceRef = (text: string) => references.referenceForSpan(1, [ASSERTION.indexOf(text), ASSERTION.indexOf(text) + text.length]);
-    const publicationInput = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
-      runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1", source: SOURCE, profile,
-      assertions: [{ assertion_id: 1, text: ASSERTION, source_span: [6, SOURCE.length] }],
-      provenance: { request_key: "authored-independent", raw_response_id: "authored-packet", producer_id: "test-author" },
-      packet: { contract: "source-interpretation-v2", profile_id: profileId, source_catalog_id: catalog.catalog_id,
-        mentions: [{ id: "aliceMention", assertion_id: 1, source_ref: sourceRef("Alice") },
-          { id: "usesMention", assertion_id: 1, source_ref: sourceRef("uses") },
-          { id: "toolsMention", assertion_id: 1, source_ref: sourceRef("tools") }],
-        referents: [{ id: "alice", mentions: ["aliceMention"] }, { id: "tools", mentions: ["toolsMention"] }],
-        propositions: [{ id: "use", predicate: "uses", implicit: false, predicate_mentions: ["usesMention"],
-          assertion_ids: [1], arguments: [{ role: "agent", target: "alice" }, { role: "theme", target: "tools" }] }],
-        operators: [], roots: ["use"] } } as const;
-    const [published, raced] = await Promise.all([publication.publish(publicationInput), publication.publish(publicationInput)]);
-    expect(raced.evidence.object_id).toBe(published.evidence.object_id);
-    expect((await publication.publish(publicationInput)).bound).toEqual(published.bound);
-    const checked = verifyPublishedSourceInterpretation(owner, JSON.parse(published.evidence.gist), REAL_SQLITE_TEST_WORKSPACE_ID);
-    for (const forged of [
-      { ...published.bound, assertions: published.bound.assertions.map((row) => ({ ...row, text: "Alice owns tools." })) },
-      { ...published.bound, mention_spans: published.bound.mention_spans.map((row) => ({ ...row, utf8_span: [0, 1] as const })) }
-    ]) {
-      const { packet_id: _packet, hypothesis_id: _hypothesis, ...body } = forged;
-      const identity = `sha256:${fieldContractSha256(canonicalJson(body))}`;
-      expect(() => verifyPublishedSourceInterpretation(owner, { ...body, packet_id: identity, hypothesis_id: identity },
-        REAL_SQLITE_TEST_WORKSPACE_ID)).toThrow();
-    }
-    const relation = (kind: "asserted" | "role", symbol: string, from: string, to: string): QueryProgram => ({
-      schema_version: 1, kind: "relation", relation_kind: sourceInterpretationRelationKey(kind, symbol),
-      source_variable: from, target_variable: to, guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", time_scope: "none" },
-      facet_mode: "same_path", threshold_milligrades: 0 });
-    const result = reasonSourceInterpretation({ bound: checked.bound, workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
-      scope: "project", authorizedScopes: ["project"], asOf: CLOCK,
-      request: { contract: "source-interpretation-reasoning-v1", accepts_unreviewed_conditional_results: true,
-        packet_id: published.bound.packet_id, profile_id: profileId, original_query: "What does Alice use?",
-        seed_nodes: ["use"], program: { schema_version: 1, kind: "sequence", steps: [
-          relation("asserted", "uses", "event", "event"), relation("role", "theme", "event", "item")] },
-        budget: { schema_version: 1, work_units: 100000, memory_bytes: 10000000, page_budget: 100000,
-          finalization_reserve: 10000, min_envelope: 10 }, output_byte_limit: 1000000 } });
-    expect(result.premises.map((row) => [row.statement_id, row.from_node, row.to_node])).toEqual([
-      ["use", "use", "use"], ["use", "use", "tools"]]);
-    expect(result.premises.every((row) => row.source_assertions[0]?.text === ASSERTION)).toBe(true);
-    expect(result.interpretation.world_claim).toBe("unknown");
-    expect(result.index?.entries.map((entry) => entry.interpretation_node?.node_id)).toContain("tools");
+    const f = await fixture(), published = await f.publication.publish({ signal: f.signal, sourceEventAnchor: null });
+    await expect(f.memoryService.update(published.memory.object_id, { confidence: 0.9 }, "model score"))
+      .rejects.toThrow(/observation confidence cannot be mutated/);
+    expect((await f.memoryService.findById(published.memory.object_id))?.confidence).toBeNull();
   });
 });

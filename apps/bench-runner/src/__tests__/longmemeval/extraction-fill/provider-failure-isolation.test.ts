@@ -276,10 +276,10 @@ async function writeUnboundAuthority(): Promise<string> {
 
 function readTurnContent(userPrompt: string): string {
   const request = JSON.parse(userPrompt) as {
-    readonly source_assertions?: readonly { readonly text?: unknown }[];
+    readonly messages?: readonly { readonly text?: unknown }[];
   };
-  const text = request.source_assertions?.[0]?.text;
-  if (typeof text !== "string") throw new Error("expected a source assertion");
+  const text = request.messages?.[0]?.text;
+  if (typeof text !== "string") throw new Error("expected a captured host message");
   return text;
 }
 

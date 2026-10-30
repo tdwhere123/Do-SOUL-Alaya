@@ -10,7 +10,8 @@ vi.hoisted(() => {
     return nativeFetch(input, init);
   });
 });
-import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
 import { createExtractionSampleScope, assertSampleKeys, assertSampleReceipt } from
@@ -28,7 +29,6 @@ import { runAuthorizeExtractionCommand } from "../../../cli/extraction-authority
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill, type ExtractionFillOptions } from "../../../runs/extraction/extraction-fill.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
-import { computeExtractionKeySetSha256 } from "../../../runs/extraction/content-closure.js";
 import { createGeminiBatchHttp } from "../../../runs/extraction/fill/batch/http.js";
 import type { GeminiBatchLimits, GeminiBatchOperation } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildExtractionFillQuestion, buildGroundedInterpretationResponse,
@@ -51,9 +51,16 @@ async function sampleScenario(questionCount = 100, sampleSize = 8) {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_SOURCE_PACKING", "");
-  const source = Array.from({ length: 18 }, (_, i) => `I recorded durable detail number ${i + 1}.`).join(" ");
-  const questions = Array.from({ length: questionCount }, (_, i) =>
-    buildExtractionFillQuestion(`q${i}`, source, "I enjoy gardening."));
+  const questions = Array.from({ length: questionCount }, (_, i) => {
+    const question = buildExtractionFillQuestion(`q${i}`, "unused", "I enjoy gardening.");
+    const ids = Array.from({ length: i === 0 ? 18 : 1 }, (_, session) => `q${i}-source-${session}`);
+    return { ...question, haystack_session_ids: [...ids, question.haystack_session_ids[1]!],
+      haystack_dates: [...ids.map(() => "2025-12-01"), "2025-11-01"],
+      haystack_sessions: [...ids.map((_, session) => [
+        { role: "user", content: `I recorded durable detail number ${session + 1}.`, has_answer: true },
+        { role: "assistant", content: "Acknowledged." }
+      ]), question.haystack_sessions[1]!], answer_session_ids: ids };
+  });
   questions[0] = { ...questions[0]!,
     haystack_session_ids: [...questions[0]!.haystack_session_ids, "assistant-only"],
     haystack_dates: [...questions[0]!.haystack_dates, "2025-12-01"],
@@ -62,13 +69,13 @@ async function sampleScenario(questionCount = 100, sampleSize = 8) {
   await writeDataset(questions);
   const inspectInput = { ...roots, variant: "longmemeval_s" as const, limit: questionCount,
     revision: readCurrentExtractionAuthorityRevision(), action: "sample" as const,
-    sourcePacking: "singleton" as const };
+    sourcePacking: "session-statements" as const };
   const inspection = await inspectExtractionAuthority(inspectInput);
-  const turns = inspectTurnContentKeySpace(questions, "singleton");
-  const turn = turns.distinctExtractionTurns.find((value) => value.turnContent.includes("detail number"))!;
-  const requests = buildOfficialApiExtractionRequests(turn.turnContent, turn.turnMessages, "singleton");
-  const keys = computeExtractionTurnCacheKeys("gemini-3.1-flash-lite", "gemini-3.1-low-v1",
-    OFFICIAL_API_SYSTEM_PROMPT, turn, "singleton");
+  const turns = inspectTurnContentKeySpace(questions, "session-statements");
+  const sourceTurns = turns.distinctExtractionTurns.filter((value) => value.turnContent.includes("detail number"));
+  const requests = sourceTurns.flatMap(turn => sourceStatementRequests(turn.turnMessages));
+  const keys = sourceTurns.flatMap(turn => computeExtractionTurnCacheKeys("gemini-3.1-flash-lite", "gemini-3.1-low-v1",
+    SOURCE_STATEMENTS_PROMPT, turn, "session-statements"));
   const selected = keys.slice(0, sampleSize);
   const scope = createExtractionSampleScope(selected, inspection);
   rmSync(roots.cacheRoot, { recursive: true });
@@ -128,8 +135,11 @@ async function startProvider() {
     } else if (req.url === "/download/v1beta/files/output:download?alt=media") {
       res.end(state.uploads[0]!.trim().split("\n").reverse().map((line) => {
         const input = JSON.parse(line);
-        const raw = state.quarantine ? '{"signals":[{}]}' : state.empty ? '{"interpretations":[]}'
-          : buildGroundedInterpretationResponse(input.request.contents[0].parts[0].text);
+        const prompt = input.request.contents[0].parts[0].text;
+        const raw = state.quarantine ? '{"signals":[{}]}' : state.empty
+          ? JSON.stringify({ messages: JSON.parse(prompt).messages.map(({ message_id }: { message_id: string }) =>
+            ({ message_id, statements: [] })) })
+          : buildGroundedInterpretationResponse(prompt);
         return JSON.stringify({ key: input.key, response: {
           candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }],
           usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
@@ -144,12 +154,13 @@ async function startProvider() {
   return { state, http: createGeminiBatchHttp({ endpoint, apiKey: "fixture", timeoutMs: 1_000 }) };
 }
 
-it("binds a finite native sample to the complete inventory and retains the 18-way source plan", async () => {
+it("binds a finite native sample to the complete inventory of captured sessions", async () => {
   const fixture = await sampleScenario();
   expect(fixture.requests).toHaveLength(18);
-  expect(fixture.requests.slice(0, 8).map((request) => [request.batch_index, request.batch_count,
-    request.source_assertions[0]!.assertion_id])).toEqual(Array.from({ length: 8 }, (_, i) => [i, 18, i + 1]));
-  expect(new Set(fixture.requests.map((request) => request.source_corpus_identity)).size).toBe(1);
+  expect(fixture.requests.slice(0, 8).map(({ source }) => source.messages.map(message => [message.role, message.text])))
+    .toEqual(Array.from({ length: 8 }, (_, i) => [["user", `I recorded durable detail number ${i + 1}.`],
+      ["assistant", "Acknowledged."]]));
+  expect(new Set(fixture.requests.map(({ source }) => source.session_id)).size).toBe(18);
   expect(fixture.inspection.observation.inventory.missingTurns).toBe(20);
   expect(fixture.receipt.limits).toMatchObject({ starting_missing: 20,
     maximum_attempts: 8, successful_shard_ceiling: 8 });
@@ -174,23 +185,17 @@ it("binds a finite native sample to the complete inventory and retains the 18-wa
   for (const keys of [[], [...fixture.selected, fixture.selected[0]!], ["f".repeat(64)]]) {
     expect(() => createExtractionSampleScope(keys, fixture.inspection)).toThrow();
   }
-  const empty = fixture.inspection.missingKeys.find((key) => !fixture.inspection.nonemptyKeys!.includes(key))!;
-  expect(empty).toBeDefined();
-  expect(() => createExtractionSampleScope([empty], fixture.inspection)).toThrow(/nonempty/u);
-  expect(() => createExtractionAuthorityReceipt({ action: "sample",
-    sampleScope: { keys: [empty], key_set_sha256: computeExtractionKeySetSha256([empty]) },
-    observation: fixture.inspection.observation, inspection: fixture.inspection,
-    targetSelectionDigest: fixture.selection!.receipt_digest,
-    outputTokenCap: { field: "maxOutputTokens", value: 512 }, diskFloorBytes: 0,
-    priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 100_000 }
-  })).toThrow(/nonempty/u);
+  const assistant = fixture.turns.distinctExtractionTurns.find(turn => turn.turnMessages.every(message => message.role === "assistant"))!;
+  const [assistantKey] = computeExtractionTurnCacheKeys("gemini-3.1-flash-lite", "gemini-3.1-low-v1",
+    SOURCE_STATEMENTS_PROMPT, assistant, "session-statements");
+  expect(fixture.inspection.nonemptyKeys).toContain(assistantKey);
+  expect(() => createExtractionSampleScope([assistantKey!], fixture.inspection)).not.toThrow();
   const proposedPath = join(roots.cacheRoot, "..", "proposed-keys.json");
   const issuedPath = join(roots.cacheRoot, "..", "issued-sample.json");
   writeFileSync(proposedPath, JSON.stringify(fixture.selected));
   const args = ["--variant", "s", "--limit", "100", "--data-dir", roots.dataDir,
     "--pinned-meta-root", roots.pinnedMetaRoot, "--extraction-cache-root", roots.cacheRoot,
-    "--extraction-source-packing", "singleton", "--extraction-action", "sample",
+    "--extraction-source-packing", "session-statements", "--extraction-action", "sample",
     "--extraction-sample-keys", proposedPath, "--extraction-target-selection", fixture.selectionPath,
     "--extraction-receipt-out", issuedPath, "--extraction-output-token-cap", "512",
     "--extraction-output-token-field", "maxOutputTokens", "--extraction-input-price-usd-per-million", "1",
@@ -205,26 +210,26 @@ it("binds a finite native sample to the complete inventory and retains the 18-wa
   const issued = readExtractionAuthorityReceipt(issuedPath);
   expect(issued.sample_scope).toEqual(fixture.scope);
   expect(issued.lineage_digest).toBe(fixture.receipt.lineage_digest);
-  writeFileSync(proposedPath, JSON.stringify([empty]));
+  writeFileSync(proposedPath, JSON.stringify(["f".repeat(64)]));
   expect(await runAuthorizeExtractionCommand(args)).toBe(2);
   for (const keys of [fixture.selected.slice(0, 7), [...fixture.selected, fixture.keys[8]!],
     [...fixture.selected.slice(0, 7), fixture.keys[8]!], [...fixture.selected.slice(0, 7), fixture.selected[0]!]]) {
     expect(() => assertSampleKeys(fixture.scope, keys)).toThrow("exactly");
   }
-  const prepared = await fixture.run("prepare", { sourcePacking: "singleton" });
-  expect(prepared.manifest).toMatchObject({ schema_version: 4, source_packing: "singleton", expected_turns: 20 });
+  const prepared = await fixture.run("prepare", { sourcePacking: "session-statements" });
+  expect(prepared.manifest).toMatchObject({ schema_version: 4, source_packing: "session-statements", expected_turns: 20 });
   expect(prepared.batchState!.jobs).toHaveLength(1);
   expect([...prepared.batchState!.jobs[0]!.lineKeys].sort()).toEqual([...fixture.selected].sort());
   expect(fixture.provider.state.creates).toBe(0);
-  await expect(fixture.run("prepare", { sourcePacking: "reference-eight" })).rejects.toThrow(/packing/iu);
+  await expect(fixture.run("prepare", { sourcePacking: "reference-eight" })).rejects.toThrow(/retired passive generation/iu);
   await expect(fixture.run("prepare", { batch: undefined })).rejects.toThrow(/sample/iu);
   await expect(fixture.run("prepare", { batch: { operation: "prepare",
     limits: { ...fixture.limits, maxJobs: 2 } } })).rejects.toThrow(/sample/iu);
 });
 
-it("reopens singleton manifests, submits once through HTTP, and keeps sample results partial", async () => {
+it("reopens session manifests, submits once through HTTP, and keeps sample results partial", async () => {
   const fixture = await sampleScenario();
-  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("prepare");
   const planPath = join(roots.cacheRoot, "gemini-batch-plan-sample.json");
   const planBytes = readFileSync(planPath, "utf8");
   await fixture.run("submit");
@@ -233,9 +238,11 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
   expect(uploaded).toHaveLength(8);
   for (const line of uploaded) {
     const request = JSON.parse(line.request.contents[0].parts[0].text);
-    expect(request.batch_count).toBe(18);
-    expect(request.source_assertions).toHaveLength(1);
-    expect(line.request.generationConfig.responseJsonSchema.properties.interpretations).not.toHaveProperty("maxItems");
+    expect(request).toMatchObject({ contract: "source-statements-v1", chunk_index: 0, context: [] });
+    expect(request.messages).toHaveLength(2);
+    const messageSchema = line.request.generationConfig.responseJsonSchema.properties.messages.items;
+    expect(messageSchema.required).toEqual(["message_id", "statements"]);
+    expect(messageSchema.properties.statements.items.required).toEqual(["text", "relation"]);
   }
   fixture.provider.state.finished = true;
   const imported = await fixture.run("resume");
@@ -246,7 +253,7 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
   await fixture.run("submit");
   expect(fixture.provider.state.creates).toBe(1);
   expect(readFileSync(planPath, "utf8")).toBe(planBytes);
-  expect(readExtractionCacheManifestIdentity(roots.cacheRoot)!.manifest).toMatchObject({ source_packing: "singleton" });
+  expect(readExtractionCacheManifestIdentity(roots.cacheRoot)!.manifest).toMatchObject({ source_packing: "session-statements" });
   expect(() => createCompileSeedRunner({ cacheRoot: roots.cacheRoot,
     requiredTurnContents: fixture.turns.distinctTurnContents,
     requiredExtractionTurns: fixture.turns.distinctExtractionTurns,
@@ -257,14 +264,14 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
 it("rejects a non-first-100 ordinary Gemini sample through CLI before publishing authority", async () => {
   await expect(sampleScenario(2, 2)).rejects.toThrow(/first-100/u);
   const inspection = await inspectExtractionAuthority({ ...roots, variant: "longmemeval_s", limit: 2,
-    revision: readCurrentExtractionAuthorityRevision(), action: "sample", sourcePacking: "singleton" });
+    revision: readCurrentExtractionAuthorityRevision(), action: "sample", sourcePacking: "session-statements" });
   const proposedPath = join(roots.cacheRoot, "..", "diagnostic-keys.json");
   const issuedPath = join(roots.cacheRoot, "..", "diagnostic-authority.json");
   writeFileSync(proposedPath, JSON.stringify(inspection.nonemptyKeys!.slice(0, 2)));
   expect(await runAuthorizeExtractionCommand([
     "--variant", "s", "--limit", "2", "--data-dir", roots.dataDir,
     "--pinned-meta-root", roots.pinnedMetaRoot, "--extraction-cache-root", roots.cacheRoot,
-    "--extraction-source-packing", "singleton", "--extraction-action", "sample",
+    "--extraction-source-packing", "session-statements", "--extraction-action", "sample",
     "--extraction-sample-keys", proposedPath, "--extraction-receipt-out", issuedPath,
     "--extraction-output-token-cap", "512", "--extraction-output-token-field", "maxOutputTokens",
     "--extraction-input-price-usd-per-million", "1", "--extraction-output-price-usd-per-million", "2",
@@ -276,7 +283,7 @@ it("rejects a non-first-100 ordinary Gemini sample through CLI before publishing
 
 it("retains an ambiguous submission intent across reopen and refuses a second dispatch", async () => {
   const fixture = await sampleScenario();
-  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("prepare");
   fixture.provider.state.ambiguous = true;
   await expect(fixture.run("submit")).rejects.toThrow();
   expect(fixture.provider.state.creates).toBe(1);
@@ -290,7 +297,7 @@ it("retains an ambiguous submission intent across reopen and refuses a second di
 
 it("does not retry sample keys after transport success is quarantined by strict admission", async () => {
   const fixture = await sampleScenario();
-  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("prepare");
   await fixture.run("submit");
   fixture.provider.state.finished = true;
   fixture.provider.state.quarantine = true;
@@ -321,7 +328,7 @@ it("does not retry sample keys after transport success is quarantined by strict 
 
 it("imports witnessed empty Batch responses, reopens their completion and never redispatches", async () => {
   const fixture = await sampleScenario();
-  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("prepare");
   await fixture.run("submit");
   fixture.provider.state.finished = true;
   fixture.provider.state.empty = true;
@@ -330,7 +337,9 @@ it("imports witnessed empty Batch responses, reopens their completion and never 
   expect(imported.manifest).toMatchObject({ fill_status: "in_progress", cached_turns: 8, expected_turns: 20 });
   for (const key of fixture.selected) {
     const persisted = JSON.parse(readFileSync(cacheFilePath(roots.cacheRoot, key), "utf8"));
-    expect(persisted).toMatchObject({ raw_json: '{"interpretations":[]}', empty_classification: "completed_empty",
+    expect(JSON.parse(persisted.raw_json)).toEqual({ messages: fixture.requests[fixture.keys.indexOf(key)]!.source.messages
+      .map(({ message_id }) => ({ message_id, statements: [] })) });
+    expect(persisted).toMatchObject({ empty_classification: "completed_empty",
       request_completion: { version: 1, status: "completed_empty" },
       transport_provenance: { model: "gemini-3.1-flash-lite" }, response_metadata: {
         finish_reason: "STOP", completion_contract_version: 1, completion_witness: "finish_reason" } });
@@ -349,7 +358,7 @@ it("imports witnessed empty Batch responses, reopens their completion and never 
 
 it("rejects persisted sample plans with omitted, substituted, or duplicate lines before dispatch", async () => {
   const fixture = await sampleScenario();
-  await fixture.run("prepare", { sourcePacking: "singleton" });
+  await fixture.run("prepare");
   const path = join(roots.cacheRoot, "gemini-batch-plan-sample.json");
   const original = readFileSync(path, "utf8");
   const saved = JSON.parse(original);

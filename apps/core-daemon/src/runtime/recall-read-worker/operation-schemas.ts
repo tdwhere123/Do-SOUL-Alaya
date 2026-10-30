@@ -2,8 +2,6 @@ import { z } from "zod";
 import { PreparedQuerySchema } from "./prepared-source-query.js";
 import {
   AuthorizedScopesAdmissionSchema,
-  SourceInterpretationReasoningRequestSchema,
-  SourceInterpretationReasoningResultSchema,
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
@@ -101,9 +99,6 @@ const PAYLOAD_SCHEMAS = {
   "snapshot.commit": EmptyObjectSchema,
   "snapshot.rollback": EmptyObjectSchema,
   "conditionalField.recall": ConditionalFieldRecallWorkerPayloadSchema,
-  "conditionalField.interpretation": z.object({ workspace_id: z.string().min(1),
-    as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
-    request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
     prepared_query: PreparedQuerySchema.optional()
   }).strict(),
@@ -276,7 +271,6 @@ const RESULT_SCHEMAS = {
   "snapshot.commit": z.null(),
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
-  "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
   "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([

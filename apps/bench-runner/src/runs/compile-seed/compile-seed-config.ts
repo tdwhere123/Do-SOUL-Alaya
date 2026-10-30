@@ -1,4 +1,4 @@
-import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, DEFAULT_CONVERSATION_EXTRACTION_PACKING, parseDefaultOnFlag, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   EXTRACTION_OPEN_SEMANTICS_GENERATION, assertExclusiveExtractionGeneration, parseExtractionOpenSemanticsGeneration,
   type ExtractionOpenSemanticsGeneration
@@ -167,7 +167,7 @@ export function resolveExtractionSourcePacking(
     throw new Error("extraction source packing overrides disagree");
   }
   const bound = manifest?.schema_version === 4
-    ? manifest.source_packing : DEFAULT_EXTRACTION_SOURCE_PACKING;
+    ? manifest.source_packing : manifest === undefined ? DEFAULT_CONVERSATION_EXTRACTION_PACKING : DEFAULT_EXTRACTION_SOURCE_PACKING;
   const sourcePacking = explicit[0] ?? bound;
   if (manifest !== undefined && sourcePacking !== bound) {
     throw new Error("extraction source packing differs from the cache generation");

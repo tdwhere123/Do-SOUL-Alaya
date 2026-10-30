@@ -6,6 +6,7 @@ import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "../field/retained-source-chunks.js";
 import { guardSourceIndexTarget, sourceReadCost } from "./native-source.js";
 import { readCapsuleIndexChunk } from "./capsule-source.js";
+import { readStatementIndexChunk } from "./statement-artifact.js";
 
 type ProgressResult = SourceIndexGuardedWriteResult & Readonly<{ analysis_units: number; complete: boolean }>;
 
@@ -39,7 +40,12 @@ export function advanceSegmentedLexicalDocument(database: StorageDatabase, recor
         budget.native_bytes - resources.native_bytes < RETAINED_SOURCE_READ_RESERVATION) return rejected("read_budget");
     const remaining = { work: budget.work - resources.work, native_bytes: budget.native_bytes - resources.native_bytes };
     let body: string | undefined, end: number;
-    if (source.target.root_kind === "evidence_capsule") {
+    if (source.auxiliary !== undefined) {
+      if (remaining.native_bytes < source.body_bytes) return rejected("read_budget");
+      const read = readStatementIndexChunk(database, source, SOURCE_INDEX_SEGMENTED_UNIT_BYTES, offset);
+      resources.work += read.resources.work; resources.native_bytes += read.resources.native_bytes;
+      body = read.row?.content; end = read.row?.content_end ?? offset;
+    } else if (source.target.root_kind === "evidence_capsule") {
       const read = readCapsuleIndexChunk(database, source, SOURCE_INDEX_SEGMENTED_UNIT_BYTES, offset);
       resources.work += read.resources.work; resources.native_bytes += read.resources.native_bytes;
       body = read.row?.content; end = read.row?.content_end ?? offset;
@@ -75,13 +81,13 @@ function publishSegmentedDocument(database: StorageDatabase, source: SourceIndex
     SELECT ?,?,?,?,COALESCE(group_concat(body,''),'') FROM (${chunks}) WHERE true
     ON CONFLICT(workspace_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
       body_bytes=excluded.body_bytes,body=excluded.body`)
-    .run(source.target.workspace_id, source.root_key, source.target.content_digest, source.body_bytes, ...parameters);
+    .run(source.target.workspace_id, source.root_key, source.auxiliary?.key_digest ?? source.target.content_digest, source.body_bytes, ...parameters);
   database.connection.prepare(`INSERT INTO source_index_lexical_projections
     (workspace_id,generation_id,root_key,content_digest,body_bytes,projection)
     SELECT ?,?,?,?,?,COALESCE(group_concat(body,''),'') || ' ' || COALESCE(group_concat(projection,' '),'') FROM (${chunks}) WHERE true
     ON CONFLICT(workspace_id,generation_id,root_key) DO UPDATE SET content_digest=excluded.content_digest,
       body_bytes=excluded.body_bytes,projection=excluded.projection`)
-    .run(source.target.workspace_id, generationId, source.root_key, source.target.content_digest, source.body_bytes, ...parameters);
+    .run(source.target.workspace_id, generationId, source.root_key, source.auxiliary?.key_digest ?? source.target.content_digest, source.body_bytes, ...parameters);
   database.connection.prepare(`UPDATE source_index_lexical_targets SET complete=1
     WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(...parameters);
   database.connection.prepare(`DELETE FROM source_index_lexical_progress

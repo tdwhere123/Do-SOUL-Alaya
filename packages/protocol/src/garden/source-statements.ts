@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { RecordedSourceTimeSchema } from "../conversation/conversation-message.js";
+import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { BoundedIdSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { Sha256HexSchema } from "../recall/conditional-field/common.js";
@@ -19,8 +21,10 @@ export type SourceStatement = z.infer<typeof SourceStatementSchema>;
 export const SourceStatementMessageSchema = z.object({
   message_id: BoundedIdSchema, role: z.string().min(1).max(256), recorded_at: IsoDatetimeStringSchema.nullable(),
   // An empty host message is observed input, unlike an empty generated statement.
-  text: z.string().max(4 * 1024 * 1024).refine(value => !/[\uD800-\uDFFF]/u.test(value), "Unicode scalar text required")
-}).strict().readonly();
+  text: z.string().max(4 * 1024 * 1024).refine(value => !/[\uD800-\uDFFF]/u.test(value), "Unicode scalar text required"),
+  recorded_time: RecordedSourceTimeSchema.optional()
+}).strict().refine(value => value.recorded_time === undefined || value.recorded_at === value.recorded_time.normalized,
+  "recorded source time must retain its normalization coordinate").readonly();
 export type SourceStatementMessage = z.infer<typeof SourceStatementMessageSchema>;
 export const SourceStatementRequestSchema = z.object({
   contract: z.literal(SOURCE_STATEMENTS_CONTRACT), session_id: BoundedIdSchema,
@@ -55,10 +59,20 @@ export type SourceStatementReceipt = Readonly<{
     usage: Readonly<{ input_tokens: number; output_tokens: number }> | null }>[];
 }>;
 
+const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
+/** Other model-visible raw roots; these dependencies do not become navigation roots. */
+export const SourceStatementContextSourceSchema = z.object({
+  workspace_id: SourceRecordFields.workspace_id, root_id: SourceRecordFields.identity,
+  source_id: SourceRecordFields.source_id, source_version: SourceRecordFields.source_version,
+  content_digest: SourceRecordFields.content_digest
+}).strict().readonly();
+export type SourceStatementContextSource = z.infer<typeof SourceStatementContextSourceSchema>;
+
 /** A rewritten statement is not a literal quotation. Only the host message claims an exact span. */
 export const LocatedSourceStatementSchema = z.object({
   contract: z.literal(SOURCE_STATEMENTS_CONTRACT), session_id: BoundedIdSchema,
   artifact_key: BoundedIdSchema, source_root_id: BoundedIdSchema, source_corpus_digest: Sha256HexSchema,
+  source_context: z.array(SourceStatementContextSourceSchema).max(2 * SOURCE_STATEMENT_LIMITS.requestMessages).readonly().default([]),
   message: SourceStatementMessageSchema.refine(message => message.text.trim().length > 0 &&
     new TextEncoder().encode(message.text).length <= SOURCE_STATEMENT_LIMITS.targetBytes,
     "statement requires a nonempty message within target capacity"),

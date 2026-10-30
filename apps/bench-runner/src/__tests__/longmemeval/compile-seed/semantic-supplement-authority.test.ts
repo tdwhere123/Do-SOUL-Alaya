@@ -1,79 +1,19 @@
-// @ts-nocheck
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
+afterEach(() => vi.unstubAllEnvs());
 
-const fixture = vi.hoisted(() => ({
-  createRuntime: vi.fn(),
-  createCachingExtractor: vi.fn(() => ({ extract: vi.fn() })),
-  binding: Object.freeze({
-    kind: "longmemeval-source-assertion-semantic-supplement" as const,
-    receipt_sha256: "1".repeat(64),
-    entry_count: 1,
-    assertion_count: 1,
-    occurrence_count: 1,
-    entry_set_sha256: "2".repeat(64),
-    primary_manifest_sha256: "3".repeat(64),
-    source_manifest_sha256: "4".repeat(64),
-    parser_semantics: "official-api-signal-parser-v8",
-    grounding_semantics: "official-api-source-grounding-v3"
-  })
-}));
-
-vi.mock(
-  "../../../runs/extraction/cache/semantic-supplement/" +
-    "source-assertion-supplement-runtime.js",
-  () => ({ createSourceAssertionSupplementRuntime: fixture.createRuntime })
-);
-
-vi.mock(
-  "../../../runs/compile-seed/compile-seed-cache.js",
-  () => ({ createCachingSignalExtractor: fixture.createCachingExtractor })
-);
-
-import {
-  createCompileSeedRunner,
-  toSeedExtractionPathKpi
-} from "../../../runs/compile-seed.js";
-
-describe("semantic supplement run authority", () => {
-  it("is fixed when the runner is created, before any turn is seeded", async () => {
-    const cacheRoot = await mkdtemp(join(tmpdir(), "semantic-supplement-authority-"));
-    onTestFinished(() => rm(cacheRoot, { recursive: true, force: true }));
-    fixture.createRuntime.mockReturnValue({
-      receipt: Object.freeze({}),
-      binding: fixture.binding,
-      beginTurn: vi.fn(),
-      compile: vi.fn(),
-      mergeTurnStats: vi.fn()
-    });
-
-    const runner = createCompileSeedRunner({
-      cacheRoot,
-      config: {
-        providerUrl: "https://example.test/v1",
-        model: "same-logical-model",
-        requestProfile: "provider-default-v1",
-        apiKey: "test-key"
-      },
-      skipPreflight: true,
-      diagnosticDir: null,
-      sourceAssertionSupplement: {
-        receiptPath: join(cacheRoot, "receipt.json"),
-        sourceCacheRoot: join(cacheRoot, "source")
-      }
-    });
-
-    expect(runner.semanticSupplementBinding).toBe(fixture.binding);
-    expect(runner.stats).not.toHaveProperty("semanticSupplementBinding");
-    const supplementInput = fixture.createRuntime.mock.calls[0]?.[0];
-    const primaryInput = fixture.createCachingExtractor.mock.calls[0]?.[0];
-    expect(supplementInput.rawShardInspector).toBe(primaryInput.rawShardInspector);
-    expect(runner.stats.rawShardInspection).toBe(
-      primaryInput.rawShardInspector.diagnostics
-    );
-    expect(toSeedExtractionPathKpi(runner.stats))
-      .not.toHaveProperty("rawShardInspection");
+describe("retired passive supplement entry", () => {
+  it("refuses explicit supplemental compilation before reading a receipt or constructing a transport", () => {
+    const extractorFactory = vi.fn();
+    expect(() => createCompileSeedRunner({ extractorFactory, sourceAssertionSupplement: {
+      receiptPath: "/must-not-read/receipt.json", sourceCacheRoot: "/must-not-read/source"
+    } })).toThrow("supplemental passive extraction is retired");
+    expect(extractorFactory).not.toHaveBeenCalled();
   });
+
+  it.each(["ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT", "ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_CACHE_ROOT"])(
+    "does not reactivate the retired producer through %s", name => {
+      vi.stubEnv(name, "/must-not-read");
+      expect(() => createCompileSeedRunner()).toThrow("supplemental passive extraction is retired");
+    });
 });

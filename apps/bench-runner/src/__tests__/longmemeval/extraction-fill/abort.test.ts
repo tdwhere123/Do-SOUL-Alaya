@@ -21,7 +21,6 @@ import { providerBackedResponseResult,
   "../extraction/extraction-cache-test-fixture.js";
 import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 import { groundedExtractionResult } from "./fixture.js";
-import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -55,9 +54,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return providerBackedResponseResult(input, interpretationsEnvelope([{
-      matched: "I saved alpha."
-    }]));
+    if (calls === 1) return groundedExtractionResult(input);
     secondStarted.resolve();
     return waitForAbort(input.abortSignal);
   });
@@ -185,7 +182,7 @@ it("stops without caching a semantically invalid extraction payload", async () =
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async (input) => providerBackedResponseResult(input, '{"not_signals":[]}')
+      extract: async (input) => providerBackedResponseResult(input, '{"not_messages":[]}')
     }),
     authorityReceiptPath,
     log: () => undefined

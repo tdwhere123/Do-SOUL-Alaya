@@ -5,7 +5,7 @@ import type {
 } from "../../../../harness/daemon.js";
 import { benchSessionSurfacesEnabled } from "../../../../harness/daemon/daemon-support.js";
 import {
-  buildLongMemEvalRoundMessages,
+  buildLongMemEvalSessionMessages,
   pairSessionIntoRounds,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
@@ -13,7 +13,7 @@ import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   type CompileSeedExtractionStats,
-  type CompileSeedRunner,
+  type CompileSeedRunner, type CompileSeedTurnInput,
   type SessionSeededTurn
 } from "../../../../runs/compile-seed.js";
 import {
@@ -100,6 +100,9 @@ async function seedQuestionSession(
   if (session === undefined) return seedIndex;
   const sessionId = input.question.haystack_session_ids[sessionIndex] ?? `session-${sessionIndex}`;
   const sessionTurns: SessionSeededTurn[] = [];
+  const sourceSession = buildLongMemEvalSessionMessages(session, input.question.haystack_dates[sessionIndex]);
+  const sourceSessionRounds = pairSessionIntoRounds(session).map((round, index) => ({ seedIndex: seedIndex + index,
+    turnContent: round.content, turnMessages: round.messageIndices.map(position => sourceSession[position]!) }));
   let sessionHasAnswer = false;
   let previousTurnSeedMemoryIds: readonly string[] = [];
   for (let ri = 0; ri < pairSessionIntoRounds(session).length; ri++) {
@@ -109,6 +112,7 @@ async function seedQuestionSession(
       sessionIndex,
       roundIndex: ri,
       sessionId,
+      sourceSession, sourceSessionRounds,
       seedIndex,
       previousTurnSeedMemoryIds,
       sessionTurns
@@ -128,6 +132,8 @@ async function seedQuestionSession(
 }
 
 interface SeedRoundContext {
+  readonly sourceSession: ReturnType<typeof buildLongMemEvalSessionMessages>;
+  readonly sourceSessionRounds: NonNullable<CompileSeedTurnInput["sourceSessionRounds"]>;
   readonly sessionIndex: number;
   readonly roundIndex: number;
   readonly sessionId: string;
@@ -154,11 +160,8 @@ async function seedQuestionRound(
   const seedResult = await input.seedRunner.seedTurn({
     daemon: input.workspace,
     turnContent: round.content,
-    turnMessages: buildLongMemEvalRoundMessages(
-      input.question.haystack_sessions[context.sessionIndex]!,
-      round,
-      `${input.question.question_id}-s${context.sessionIndex}-r${context.roundIndex}`
-    ),
+    turnMessages: round.messageIndices.map(index => context.sourceSession[index]!),
+    sourceSession: context.sourceSession, sourceSessionRounds: context.sourceSessionRounds,
     evidenceRefBase: evidenceRef,
     seedIndex: context.seedIndex,
     workspaceId: input.workspace.workspaceId,

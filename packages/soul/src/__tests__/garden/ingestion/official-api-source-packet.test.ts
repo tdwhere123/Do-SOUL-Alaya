@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { sourceReferenceResolver, SourceInterpretationPacketSchema, type SourceInterpretationProfile } from "@do-soul/alaya-protocol";
-import { OfficialApiGardenProvider } from "../../../garden/ingestion/official-api-garden-provider.js";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketRequest,
-  OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-packet-request.js";
+} from "../../../garden/ingestion/official-api/source-packet-request.js";
 import { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, MAX_OFFICIAL_API_SOURCE_PACKET_RESPONSE_BYTES } from "../../../garden/ingestion/official-api/source-packet-receive.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage,
   OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE } from "../../../garden/ingestion/official-api/response-schema.js";
@@ -32,17 +31,10 @@ function fixture() {
   return { request, packet, rawJson, input };
 }
 
-describe("request-bound interpretation packet producer", () => {
-  it("uses the explicit packet capability and preserves distinct referents despite equal mention text", async () => {
+describe("retained request-bound interpretation packet reading", () => {
+  it("preserves distinct referents despite equal mention text in retained output", () => {
     const f = fixture();
-    const provider = new OfficialApiGardenProvider({ injectedExtractorCapability: "cache_only", diagnosticDir: null,
-      extractor: { extract: async (input) => {
-        expect(input.systemPrompt).toBe(OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT);
-        expect(JSON.parse(input.userPrompt)).toEqual(f.request);
-        input.validateRawJson?.(f.rawJson);
-        return { rawJson: f.rawJson };
-      } } });
-    const received = await provider.extractSourcePacket(f.request, f.input);
+    const received = receiveOfficialApiSourcePacket(f.rawJson, f.request, f.input);
     expect(received.status).toBe("received");
     if (received.status !== "received") throw new Error("expected packet");
     expect(received.draft.packet.referents).toEqual([{ id: "r0", mentions: ["m0"] }, { id: "r1", mentions: ["m1"] }]);
@@ -85,14 +77,9 @@ describe("request-bound interpretation packet producer", () => {
   });
 });
 
-it("completes a genuinely empty source without credentials or invoking the extractor", async () => {
+it("recognizes a retained genuinely empty source without credentials or a producer", () => {
   const request = buildOfficialApiSourcePacketRequest("", [], PROFILE);
   const input = { sourceCorpus: "", artifactKey: "empty-source", producerId: "empty-control" };
-  let calls = 0;
-  const provider = new OfficialApiGardenProvider({ diagnosticDir: null,
-    extractor: { extract: async () => { calls++; throw new Error("must not dispatch"); } } });
-  expect((await provider.extractSourcePacket(request, input)).status).toBe("empty");
-  expect(calls).toBe(0);
   expect(completeEmptyOfficialApiSourcePacket(request, input).received.status).toBe("empty");
   expect(() => completeEmptyOfficialApiSourcePacket(request, { ...input, sourceCorpus: "Alice sees Alice." })).toThrow();
   const f = fixture();

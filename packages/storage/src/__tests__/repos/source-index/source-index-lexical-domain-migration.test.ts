@@ -12,9 +12,9 @@ import { SqliteSourceIndexRepository } from "../../../repos/source-index/source-
 import { lexicalDomainTables } from "../../../repos/source-index/lexical-domain.js";
 import { applyBaselineSql, currentSchemaVersion } from "../../migrations/apply-baseline.js";
 import { seedWorkspaces } from "../field/field-contract-fixture.js";
-import { WORKSPACE, CLOCK, fieldSha256, publishSource, buildReady } from "./source-index-fixture.js";
+import { WORKSPACE, CLOCK, BUDGET, fieldSha256, publishSource, buildReady } from "./source-index-fixture.js";
 
-it("migrates the selected segmented corpus without changing coverage, source or vector state", async () => {
+it("preserves historical segmented bytes and recaptures a current generation after preparation invalidation", async () => {
   expect(await warmCjkSegmentation()).toBe(true);
   const directory = mkdtempSync(join(tmpdir(), "lexical-domain-migration-")), filename = join(directory, "source.sqlite");
   let database = new StorageDatabase(filename, new BetterSqlite3(filename));
@@ -49,21 +49,33 @@ it("migrates the selected segmented corpus without changing coverage, source or 
       JOIN source_index_lexical_projections p ON p.id=f.rowid WHERE source_index_lexical_fts MATCH 'alpha OR beta'
       AND p.generation_id=? ORDER BY bm25(source_index_lexical_fts),p.root_key`).all(active);
     expect(oldOrder).toEqual([{ projection: "beta" }, { projection: "beta" }, { projection: "alpha" }]);
-    const tables = ["source_index_text", "source_index_vectors", "source_index_lexical_selections", "source_index_lexical_generations",
-      "source_index_lexical_targets", "source_index_lexical_projections"];
+    const tables = ["source_index_text", "source_index_vectors", "source_index_lexical_targets", "source_index_lexical_projections"];
     const before = tables.map(table => database.connection.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     database.close({ optimize: false }); database = initDatabase({ filename });
     expect(tables.map(table => database.connection.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
     expect(database.connection.prepare("SELECT name FROM sqlite_master WHERE name='source_index_lexical_fts'").get()).toBeUndefined();
     const index = new SqliteSourceIndexRepository(database, fieldSha256);
+    expect(index.lexical.lexicalState(WORKSPACE)?.active_generation_id).toBeNull();
+    expect(index.lexical.lexicalGeneration(WORKSPACE, active)).toMatchObject({ status: "retired", reason: "payload_incomplete" });
+    expect(index.lexical.activateLexical(WORKSPACE, active)).toEqual({ status: "rejected", reason: "superseded" });
+    const fresh = index.lexical.beginLexical(index.lexical.lexicalState(WORKSPACE)!.selection);
+    expect(index.lexical.captureLexicalPage(WORKSPACE, fresh.generation_id, 128, BUDGET).generation.enumeration_complete).toBe(true);
+    for (;;) {
+      const pending = index.lexical.pendingLexicalTarget(WORKSPACE, fresh.generation_id, BUDGET);
+      if (pending.source === null) { expect(pending.complete).toBe(true); break; }
+      const document = index.lexical.readLexicalDocument(WORKSPACE, fresh.generation_id, pending.source.root_key, 65536, BUDGET);
+      if (document.status !== "ready") throw new Error(document.reason);
+      expect(index.lexical.writeLexicalDocument(WORKSPACE, fresh.generation_id, document.source, document.body, BUDGET).status).toBe("accepted");
+    }
+    expect(index.lexical.activateLexical(WORKSPACE, fresh.generation_id)).toEqual({ status: "accepted" });
     const read = () => index.readLexicalCandidates(WORKSPACE, "alpha beta", 8, { work_units: 100_000, memory_bytes: 16 * 1024 * 1024 });
     const after = read();
-    expect(after.tokenization?.lexical_binding).toMatchObject({ generation_id: active, representation: "segmented-unicode61.v1" });
+    expect(after.tokenization?.lexical_binding).toMatchObject({ generation_id: fresh.generation_id, representation: "segmented-unicode61.v1" });
     expect(after.limitations).toContain("generation_scoped_bm25_statistics");
     expect(after.candidates).toHaveLength(3);
     expect(after.candidates[0]!.source.target.root_id).toBe(alpha.record_id);
     expect(after.candidates[0]!.lexical.bm25).toBeLessThan(after.candidates[1]!.lexical.bm25!);
-    for (const table of Object.values(lexicalDomainTables(active))) {
+    for (const table of Object.values(lexicalDomainTables(fresh.generation_id))) {
       expect(database.connection.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 3 });
       database.connection.exec(`INSERT INTO ${table}(${table}) VALUES('integrity-check')`);
     }

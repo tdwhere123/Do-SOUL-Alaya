@@ -33,6 +33,8 @@ export type MemoryEntryInput = Omit<
 > & {
   readonly object_id?: string;
   readonly assertSourceCurrent?: () => void;
+  /** Source publication's private dependency projection, in the audited create transaction. */
+  readonly persistSourceStatementDependency?: () => void;
   readonly storage_tier?: MemoryEntry["storage_tier"];
   // invariant: enqueueEnrichment means source + EventLog + raw/lexical +
   // recoverable Garden intent commit atomically, or create throws instead of

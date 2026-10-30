@@ -5,7 +5,8 @@ import {
 import { loadLocomo } from "./fetch.js";
 import { buildLocomoPayload } from "./runner-payload.js";
 import type { LocomoRunOptions } from "./runner-types.js";
-import { collectDistinctLocomoTurnContents } from "./runner-utils.js";
+import { collectLocomoExtractionSessions } from "./runner-utils.js";
+import { createCompileSeedRunner } from "../../runs/compile-seed.js";
 import {
   runLocomoConversationWindow,
   type LocomoConversationAggregate
@@ -29,7 +30,10 @@ export const locomoCampaignAdapter: BenchCampaignAdapter<
       pinnedMetaRoot: opts.pinnedMetaRoot
     });
   },
-  collectRequiredTurnContents: collectDistinctLocomoTurnContents,
+  collectRequiredTurnContents: window => collectLocomoExtractionSessions(window).map(session => session.turnContent),
+  createSeedRunner: input => createCompileSeedRunner({ requiredTurnContents: input.requiredTurnContents,
+    requiredExtractionTurns: collectLocomoExtractionSessions(input.window),
+    requiredQuestionWindow: { offset: input.offset, limit: input.window.length } }),
   runWindow: runLocomoConversationWindow,
   buildPayload(input) {
     return buildLocomoPayload({

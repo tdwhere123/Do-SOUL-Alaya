@@ -1,4 +1,4 @@
-import { memoryRecallTarget, sourceGoldRootIdentity, hashContentDigest, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
+import { memoryRecallTarget, sourceGoldRootIdentity, sourceIndexNavigationLocation, hashContentDigest, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   type FieldValue, type RecallNavigationWitness, type RecallTargetRef } from "@do-soul/alaya-protocol";
 import { sourceFactKey } from "../conditional-field/engine/binding-environment.js";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
@@ -72,11 +72,12 @@ function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticR
         ?? (occurrence.view === "original" ? state.native_sources?.result?.navigation_digest ?? undefined : undefined);
       if (queryDigest === undefined) throw new CoreError("OBLIGATION_VIOLATION", "Hint occurrence lacks its query identity");
       const window = route.kind === "vector" && route.window?.status === "available" ? route.window.window : undefined;
+      const location = sourceIndexNavigationLocation(occurrence.source, window);
       const witness: RecallNavigationWitness = { contract: "native-query-navigation.v1", query_digest: queryDigest,
         view: occurrence.view, operator: route.kind === "lexical" ? "source_lexical" : "source_vector",
         ordinal: lane.length, native_rank: route.native_rank, reference: occurrence.reference,
         ...(occurrence.domain === undefined ? {} : { domain: occurrence.domain }),
-        ...(window === undefined ? {} : { location: { start_byte: window.start_byte, end_byte: window.end_byte } }) };
+        ...(location === undefined ? {} : { location }) };
       const row = { reference: occurrence.reference, root_key: key, native_rank: route.native_rank };
       append(key, row, witness); lane.push(row);
     }

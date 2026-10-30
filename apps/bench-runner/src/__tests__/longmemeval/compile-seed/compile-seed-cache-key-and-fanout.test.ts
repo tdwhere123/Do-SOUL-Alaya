@@ -1,436 +1,153 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const boundary = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT, OfficialApiGardenProvider, resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
-import {
-  createCachingSignalExtractor,
-  createCompileSeedRunner,
-  createGardenHttpExtractor,
-  resolveCompileSeedExtractionConfig,
-  toSeedExtractionPathKpi,
-  type BenchSignalExtractor,
-  type CompileSeedExtractionConfig,
-  type CompileSeedExtractionStats
-} from "../../../runs/compile-seed.js";
-import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
-import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
-import {
-  buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG,
-  providerBackedResult,
-  OFFLINE_CONFIG,
-  makeSeed,
-  admitCompileSeedTurnCache,
-  interpretationsEnvelope
-} from "./compile-seed-fixture.js";
-import {
-  TEST_EXTRACTION_PROVIDER_URL,
-  writeExtractionCacheTestManifest, providerBackedResponseResult,
-  fixtureAttemptAuthority
-} from "../extraction/extraction-cache-test-fixture.js";
-import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
-import {
-  computeExtractionTurnCacheKeys,
-  computeExtractionTurnCacheKey,
-  computeSourceTurnCacheKeys,
-  computeSourceTurnCacheKey
-} from "../../../runs/compile-seed/compile-seed-cache.js";
-import { inspectCachedExtraction, inspectCachedExtractionContent,
-  writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import type { ConversationMessage, SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { OFFICIAL_API_SYSTEM_PROMPT, SOURCE_STATEMENTS_PROMPT, OfficialApiGardenProvider,
+  resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
+import { createCachingSignalExtractor, createCompileSeedRunner, type BenchSignalExtractor,
+  type CompileSeedExtractionConfig } from "../../../runs/compile-seed.js";
+import { computeExtractionTurnCacheKeys, computeSourceTurnCacheKey, computeSourceTurnCacheKeys }
+  from "../../../runs/compile-seed/compile-seed-cache.js";
+import { cacheFilePath, inspectCachedExtraction, inspectCachedExtractionContent, writeCachedExtraction }
+  from "../../../runs/compile-seed/cache/cache-shard.js";
+import { sourceStatementRequests, sourceStatementSession } from "../../../runs/extraction/source-statement-request.js";
+import { readExtractionCacheManifest, writeExtractionCacheManifest }
+  from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { buildCompileSeedDaemon, makeSeed } from "./compile-seed-fixture.js";
+import { TEST_EXTRACTION_PROVIDER_URL, writeExtractionCacheTestManifest,
+  providerBackedResponseResult, fixtureAttemptAuthority } from "../extraction/extraction-cache-test-fixture.js";
 
-describe("canonical extraction request cache identity", () => {
-  let cacheRoot: string;
+const CONFIG: CompileSeedExtractionConfig = { model: "test-model", modelFamily: "test-model",
+  providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "test-key",
+  sourcePacking: "session-statements" };
+const messages = (count = 2): ConversationMessage[] => Array.from({ length: count }, (_, index) => ({
+  message_id: `m${index}`, role: index % 2 === 0 ? "user" : "assistant", content: `Recorded event ${index}.`
+}));
+const response = (prompt: string) => JSON.stringify({ messages: (JSON.parse(prompt) as SourceStatementRequest)
+  .messages.map(message => ({ message_id: message.message_id,
+    statements: [{ text: message.text, relation: "recorded event" }] })) });
+let cacheRoot: string;
+beforeEach(() => { cacheRoot = mkdtempSync(join(tmpdir(), "statement-cache-identity-")); });
+afterEach(() => { rmSync(cacheRoot, { recursive: true, force: true }); });
+afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
 
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-promptshape-"));
-  });
+function currentManifest(count: number) {
+  writeExtractionCacheTestManifest({ cacheRoot, model: CONFIG.model, systemPrompt: SOURCE_STATEMENTS_PROMPT });
+  writeExtractionCacheManifest(cacheRoot, { ...readExtractionCacheManifest(cacheRoot)!,
+    requested_turns: count, cached_turns: count, coverage: 1 });
+}
 
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-  });
+function currentExtractor(raw: (prompt: string) => string = response, count = 1) {
+  currentManifest(count);
+  const delegate: BenchSignalExtractor = { extract: vi.fn(input => providerBackedResponseResult(input, raw(input.userPrompt))) };
+  const extractor = createCachingSignalExtractor({ config: CONFIG, cacheRoot, delegate,
+    ...fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile, startingMissing: count }) });
+  return { delegate, extractor };
+}
 
-  it("keeps retained historical extraction identity distinct from current guidance", () => {
-    const retainedPrompt = resolveOfficialApiSystemPrompt(
-      "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705"
-    );
-    expect(retainedPrompt).toBeDefined();
+function context(host: readonly ConversationMessage[]) {
+  return { workspace_id: "workspace-1", run_id: sourceStatementSession(host).sessionId,
+    surface_id: null, turn_messages: host };
+}
+
+describe("canonical session request cache identity", () => {
+  it("keeps retained historical prompts and assertion-batch identities inspectable", () => {
+    const retained = resolveOfficialApiSystemPrompt("bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705");
+    expect(retained).toBeDefined();
     const input = { turnContent: "I prefer jasmine tea." };
-    const retainedKeys = computeSourceTurnCacheKeys(
-      "test-model", "provider-default-v1", retainedPrompt!, input
-    );
-    const currentKeys = computeSourceTurnCacheKeys(
-      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, input
-    );
-    expect(retainedKeys).toHaveLength(1);
-    expect(currentKeys).toHaveLength(1);
-    expect(currentKeys[0]).not.toBe(retainedKeys[0]);
+    expect(computeSourceTurnCacheKeys(CONFIG.model, CONFIG.requestProfile, retained!, input))
+      .not.toEqual(computeSourceTurnCacheKeys(CONFIG.model, CONFIG.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, input));
+    const source = Array.from({ length: 9 }, (_, index) => `I recorded durable detail number ${index}.`).join(" ");
+    expect(computeSourceTurnCacheKeys(CONFIG.model, CONFIG.requestProfile, OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source })).toHaveLength(2);
   });
 
-  it("derives one raw cache key for each bounded assertion batch", () => {
-    const source = Array.from(
-      { length: 9 },
-      (_, index) => `I recorded durable detail number ${index + 1}.`
-    ).join(" ");
-    const input = { turnContent: source };
-
-    const sourceKeys = computeSourceTurnCacheKeys(
-      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, input
-    );
-    const turnKeys = computeExtractionTurnCacheKeys(
-      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT,
-      { ...input, turnMessages: [] }
-    );
-
-    expect(sourceKeys).toHaveLength(2);
-    expect(turnKeys).toEqual(sourceKeys);
-    expect(new Set(sourceKeys)).toHaveLength(2);
-  });
-
-  it("accounts and receipts every bounded shard in one seed turn", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = Array.from(
-      { length: 9 },
-      (_, index) => `I recorded durable detail number ${index + 1}.`
-    ).join(" ");
-    await admitCompileSeedTurnCache({ cacheRoot, turnContent: source,
-      rawJson: '{"interpretations":[]}' });
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    await runner.seedTurn({
-      daemon: buildCompileSeedDaemon(() => makeSeed("unexpected")),
-      turnContent: source,
-      evidenceRefBase: "q-1-s0-r0",
-      seedIndex: 0,
-      workspaceId: "workspace-1",
-      runId: "run-1"
-    });
-
-    expect(runner.stats.extractionAttempts).toBe(2);
-    expect(runner.stats.cacheHits).toBe(2);
-    expect(runner.stats.llmCalls).toBe(0);
-    expect(runner.stats.lastExtractionShards).toHaveLength(2);
-    expect(runner.stats.lastExtractionShards?.map(({ cacheKey }) => cacheKey)).toEqual(
-      computeSourceTurnCacheKeys(
-        CREDENTIALLED_CONFIG.model,
-        CREDENTIALLED_CONFIG.requestProfile,
-        OFFICIAL_API_SYSTEM_PROMPT,
-        { turnContent: source }
-      )
-    );
-  });
-
-  it("the production provider's userPrompt carries only the canonical assertion catalog", async () => {
-    let capturedUserPrompt: string | null = null;
-    const capturingExtractor: BenchSignalExtractor = {
-      extract: async (input) => {
-        capturedUserPrompt = input.userPrompt;
-        return providerBackedResult('{"interpretations":[]}');
-      }
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: capturingExtractor
-    });
-
-    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
-      workspace_id: "ws-1",
-      run_id: "run-cq-abc-1700000000000",
-      surface_id: null,
-      turn_messages: []
-    });
-
-    expect(capturedUserPrompt).not.toBeNull();
-    const parsed = JSON.parse(capturedUserPrompt as unknown as string) as Record<
-      string,
-      unknown
-    >;
-    expect(parsed).toEqual({
-      schema_version: 2,
-      source_locator_contract_version: 4,
-      batch_contract_version: 1,
-      source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      batch_index: 0,
-      batch_count: 1,
-      source_assertions: [{ assertion_id: 1, text: "User: I moved to Berlin last spring." }]
-    });
-  });
-
-  it("the cache hits for the same turn across a different run_id, end to end", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    // Full-chain check: run_id is absent from the canonical request and cannot
-    // change a cache identity.
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) =>
-        providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)))
-    };
-    const cachingExtractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" })
-    });
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: cachingExtractor
-    });
-
-    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
-      workspace_id: "ws-1",
-      run_id: "run-cq-abc-1700000000000",
-      surface_id: null,
-      turn_messages: []
-    });
-    expect(delegate.extract).toHaveBeenCalledOnce();
-
-    await provider.extractSourceInterpretations("I moved to Berlin last spring.", {
-      workspace_id: "ws-1",
-      run_id: "run-cq-abc-1799999999999",
-      surface_id: null,
-      turn_messages: []
-    });
-    expect(delegate.extract).toHaveBeenCalledOnce();
-  });
-
-  it("passes the live semantic validator through the cache delegate boundary", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => {
-        input.validateRawJson?.('{"signals":[42]}');
-        return providerBackedResult('{"interpretations":[]}');
-      })
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot,
-        ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
-          requestProfile: "provider-default-v1" })
-      })
-    });
-
-    await expect(provider.extractSourceInterpretations("I moved to Berlin.", {
-      workspace_id: "ws-1", run_id: "run-validator", surface_id: null,
-      turn_messages: []
-    })).rejects.toMatchObject({ kind: "invalid_response" });
-    expect(delegate.extract).toHaveBeenCalledOnce();
-  });
-
-  it("does not reuse a shard when the User assertion catalog changes", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) =>
-        providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: {
-          model: "test-model", modelFamily: "test-model",
-          providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-          requestProfile: "provider-default-v1"
-        },
-        cacheRoot,
-        ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
-          requestProfile: "provider-default-v1", startingMissing: 2 })
-      })
-    });
-    const turnContent = "User: I chose A.\nAssistant: You chose B.";
-
-    await provider.extractSourceInterpretations(turnContent, {
-      workspace_id: "ws-1", run_id: "run-1", surface_id: null,
-      turn_messages: [
-        { message_id: "m1", role: "user", content: "I chose A." },
-        { message_id: "m2", role: "assistant", content: "You chose B." }
-      ]
-    });
-    await provider.extractSourceInterpretations(turnContent, {
-      workspace_id: "ws-1", run_id: "run-2", surface_id: null,
-      turn_messages: [
-        { message_id: "m3", role: "assistant", content: "I chose A." },
-        { message_id: "m4", role: "user", content: "You chose B." }
-      ]
-    });
-
+  it("shares complete target/context request keys between planning and actual extraction", async () => {
+    const host = messages(65), requests = sourceStatementRequests(host);
+    expect(requests.map(row => row.source.messages.length)).toEqual([64, 1]);
+    expect(requests[1]!.source.context.map(row => row.message_id)).toEqual(host.slice(0, 64).map(row => row.message_id));
+    const { delegate, extractor } = currentExtractor(response, 2);
+    const provider = new OfficialApiGardenProvider({ apiKey: "test-key", extractor });
+    const receipt = await provider.extractSourceStatements("unused fallback", context(host));
+    expect(receipt.status).toBe("complete");
+    expect(receipt.messages).toHaveLength(65);
     expect(delegate.extract).toHaveBeenCalledTimes(2);
+    const keys = computeExtractionTurnCacheKeys(CONFIG.model, CONFIG.requestProfile, SOURCE_STATEMENTS_PROMPT,
+      { turnContent: "unused fallback", turnMessages: host });
+    expect(keys).toHaveLength(2);
+    for (const key of keys) expect(inspectCachedExtraction(cacheRoot, key, CONFIG.model, CONFIG.requestProfile).status).toBe("hit");
+    expect(vi.mocked(delegate.extract).mock.calls.map(([input]) => input.userPrompt))
+      .toEqual(requests.map(row => row.userPrompt));
   });
 
-  it("retains historical non-empty content without admitting it to current extraction", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = "I use TypeScript, but I avoid any.";
-    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
-    const canonicalKey = computeSourceTurnCacheKey(
-      "test-model",
-      "provider-default-v1",
-      OFFICIAL_API_SYSTEM_PROMPT,
-      { turnContent: source, turnMessages: messages }
-    );
-    writeCachedExtraction(cacheRoot, canonicalKey, {
-      model: "test-model",
-      request_profile: "provider-default-v1",
-      cache_key: canonicalKey,
-      raw_json: interpretationsEnvelope([{ assertionId: 3, matched: "I avoid any." }]),
-      extracted_at: "2026-07-22T00:00:00.000Z"
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
-    };
-    const historical = inspectCachedExtractionContent({
-      raw_json: interpretationsEnvelope([{ assertionId: 3, matched: "I avoid any." }])
-    });
-    expect(historical.status).toBe("hit");
-    expect(inspectCachedExtraction(cacheRoot, canonicalKey, "test-model", "provider-default-v1"))
+  it("reuses session cache across publication runs without redispatch or session-sized replacement of the raw round", async () => {
+    const host = messages(), { delegate, extractor } = currentExtractor();
+    await new OfficialApiGardenProvider({ apiKey: "test-key", extractor }).extractSourceStatements("", context(host));
+    const received: string[] = [];
+    const daemon = buildCompileSeedDaemon(input => { received.push(input.distilledFact); return makeSeed(`memory-${received.length}`); });
+    for (const runId of ["run-first", "run-replay"]) {
+      const runner = createCompileSeedRunner({ config: CONFIG, cacheRoot });
+      await runner.seedTurn({ daemon, workspaceId: "workspace-1", runId, seedIndex: 0,
+        evidenceRefBase: runId, turnContent: "raw round", turnMessages: host });
+      expect(runner.stats).toMatchObject({ cacheHits: 1, llmCalls: 0, factsProduced: 2 });
+      expect(runner.stats.lastExtractionShards).toHaveLength(1);
+    }
+    expect(received).toEqual([...host, ...host].map(message => message.content));
+    expect(delegate.extract).toHaveBeenCalledOnce();
+  });
+
+  it("changes request identity for role, body, order and recorded time while excluding caller fallback copy", () => {
+    const host = messages();
+    const keys = (rows: readonly ConversationMessage[], fallback = "fallback") => computeExtractionTurnCacheKeys(
+      CONFIG.model, CONFIG.requestProfile, SOURCE_STATEMENTS_PROMPT, { turnContent: fallback, turnMessages: rows });
+    const original = keys(host);
+    expect(keys(host, "another run summary")).toEqual(original);
+    for (const changed of [[...host].reverse(), [{ ...host[0]!, role: "assistant" as const }, host[1]!],
+      [{ ...host[0]!, content: "Changed event." }, host[1]!],
+      [{ ...host[0]!, created_at: "2026-01-01T00:00:00.000Z" }, host[1]!]]) {
+      expect(keys(changed)).not.toEqual(original);
+    }
+  });
+
+  it("does not classify malformed cached transport output as a successful empty extraction", async () => {
+    const host = messages(), { delegate, extractor } = currentExtractor(() => '{"messages":[');
+    const provider = new OfficialApiGardenProvider({ apiKey: "test-key", extractor });
+    await expect(provider.extractSourceStatements("", context(host))).rejects.toBeDefined();
+    expect(delegate.extract).toHaveBeenCalledOnce();
+    const [key] = computeExtractionTurnCacheKeys(CONFIG.model, CONFIG.requestProfile, SOURCE_STATEMENTS_PROMPT,
+      { turnContent: "", turnMessages: host });
+    expect(inspectCachedExtraction(cacheRoot, key!, CONFIG.model, CONFIG.requestProfile).status).not.toBe("hit");
+  });
+
+  it("retains historical nonempty bytes without treating them as a current session response", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: CONFIG.model, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
+    const host = messages(1), raw = '{"interpretations":[{"assertion_id":1,"relations":[{"predicate":{"text":"recorded"},"arguments":[],"qualifiers":[]}]}]}';
+    const key = computeSourceTurnCacheKey(CONFIG.model, CONFIG.requestProfile, OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: host[0]!.content, turnMessages: host });
+    writeCachedExtraction(cacheRoot, key, { model: CONFIG.model, request_profile: CONFIG.requestProfile,
+      cache_key: key, raw_json: raw, extracted_at: "2026-07-22T00:00:00.000Z" });
+    const before = readFileSync(cacheFilePath(cacheRoot, key));
+    expect(inspectCachedExtractionContent({ raw_json: raw }).status).toBe("hit");
+    expect(inspectCachedExtraction(cacheRoot, key, CONFIG.model, CONFIG.requestProfile))
       .toMatchObject({ status: "retired", eligibility: "retained_only" });
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot,
-        allowLiveExtraction: false })
-    });
-
-    await expect(provider.extractSourceInterpretations(source, {
-      workspace_id: "ws-1", run_id: "run-legacy-id", surface_id: null,
-      turn_messages: messages
-    })).rejects.toMatchObject({ cause: { message: expect.stringContaining("retained-only") } });
-
-    const liveProvider = new OfficialApiGardenProvider({
-      apiKey: "test-key", model: "test-model",
-      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot,
-        allowLiveExtraction: true })
-    });
-    await expect(liveProvider.extractSourceInterpretations(source, {
-      workspace_id: "ws-1", run_id: "run-legacy-live", surface_id: null,
-      turn_messages: messages
-    })).rejects.toMatchObject({ cause: { message: expect.stringContaining("retained-only") } });
-
+    const delegate = { extract: vi.fn(async () => { throw new Error("retired output must not dispatch"); }) };
+    const provider = new OfficialApiGardenProvider({ apiKey: "test-key", extractor: createCachingSignalExtractor({
+      cacheRoot, config: CONFIG, delegate, allowLiveExtraction: false }) });
+    await expect(provider.extractSourceStatements("", context(host))).rejects.toBeDefined();
     expect(delegate.extract).not.toHaveBeenCalled();
+    expect(readFileSync(cacheFilePath(cacheRoot, key))).toEqual(before);
   });
 
-  it("uses the same changed-catalog key in preflight and the live provider", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
-    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
-    const cacheKey = computeExtractionTurnCacheKey(
-      "test-model",
-      "provider-default-v1",
-      OFFICIAL_API_SYSTEM_PROMPT,
-      { turnContent: source, turnMessages: messages }
-    );
-    writeCachedExtraction(cacheRoot, cacheKey, {
-      model: "test-model",
-      request_profile: "provider-default-v1",
-      cache_key: cacheKey,
-      raw_json: '{"interpretations":[]}',
-      empty_classification: "deterministic_empty",
-      extracted_at: "2026-07-22T00:00:00.000Z"
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot
-      })
-    });
-
-    await provider.extractSourceInterpretations(source, {
-      workspace_id: "ws-1", run_id: "run-catalog-preflight", surface_id: null,
-      turn_messages: messages
-    });
-
-    expect(delegate.extract).not.toHaveBeenCalled();
-  });
-
-  it("uses the same changed-catalog key without trusted turn messages", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise.";
-    const cacheKey = computeSourceTurnCacheKey(
-      "test-model",
-      "provider-default-v1",
-      OFFICIAL_API_SYSTEM_PROMPT,
-      { turnContent: source }
-    );
-    writeCachedExtraction(cacheRoot, cacheKey, {
-      model: "test-model",
-      request_profile: "provider-default-v1",
-      cache_key: cacheKey,
-      raw_json: '{"interpretations":[]}',
-      empty_classification: "deterministic_empty",
-      extracted_at: "2026-07-22T00:00:00.000Z"
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot
-      })
-    });
-
-    await provider.extractSourceInterpretations(source, {
-      workspace_id: "ws-1", run_id: "run-catalog-text-only", surface_id: null,
-      turn_messages: []
-    });
-
-    expect(delegate.extract).not.toHaveBeenCalled();
+  it("refuses string-only extraction without inventing host message identities", async () => {
+    const extract = vi.fn(async () => ({ rawJson: '{"messages":[]}' }));
+    const provider = new OfficialApiGardenProvider({ apiKey: "test-key", extractor: { extract } });
+    await expect(provider.extractSourceStatements("Unbound body", { workspace_id: "workspace-1",
+      run_id: "run", surface_id: null, turn_messages: [] })).rejects.toThrow("host message identities");
+    expect(extract).not.toHaveBeenCalled();
   });
 });
-
-function testCacheConfig(): CompileSeedExtractionConfig {
-  return {
-    model: "test-model",
-    modelFamily: "test-model",
-    providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-    requestProfile: "provider-default-v1",
-    apiKey: "test-key"
-  };
-}

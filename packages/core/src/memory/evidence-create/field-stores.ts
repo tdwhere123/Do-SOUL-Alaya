@@ -6,7 +6,8 @@ import {
   type DerivationJobReceipt,
   type FactorDescriptor,
   type FactorIncidence,
-  type SourceRecordIdentity
+  type SourceRecordIdentity,
+  type SourceStatementArtifact
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { newerSourceRecord } from "./source-observation-currentness.js";
@@ -33,6 +34,8 @@ export interface FieldFormationStores {
   putRecord(record: SourceRecordIdentity, contentBytes: string): SourceRecordIdentity;
   getHostInventory(workspaceId: string, recordId: string): string | null;
   putHostInventory(workspaceId: string, recordId: string, canonicalInventory: string): void;
+  putSourceStatementArtifact(artifact: SourceStatementArtifact): void;
+  putSourceStatementMemoryBinding(workspaceId: string, memoryId: string, evidenceId: string): void;
   hasHostCaptureResourceLimit(workspaceId: string, recordId: string): boolean;
   putHostCaptureResourceLimit(workspaceId: string, recordId: string): void;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
@@ -77,6 +80,8 @@ export function createInMemoryFieldStores(): FieldFormationStores {
     records: new Map<string, SourceRecordIdentity>(),
     recordBodies: new Map<string, string>(),
     hostInventories: new Map<string, string>(),
+    statementArtifacts: new Map<string, SourceStatementArtifact>(),
+    statementMemoryBindings: new Map<string, string>(),
     hostCaptureLimits: new Map<string, true>(),
     spans: new Map<string, AddressableSourceSpan>(),
     factors: new Map<string, FactorDescriptor>(),
@@ -95,6 +100,8 @@ function bindFieldStores(maps: Readonly<{
   readonly jobs: Map<string, DerivationJobReceipt>;
   readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
   readonly hostInventories: Map<string, string>;
+  readonly statementArtifacts: Map<string, SourceStatementArtifact>;
+  readonly statementMemoryBindings: Map<string, string>;
   readonly hostCaptureLimits: Map<string, true>;
 }>): FieldFormationStores {
   let atomicDepth = 0;
@@ -121,6 +128,10 @@ function bindFieldStores(maps: Readonly<{
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
     putRecord: (record, contentBytes) => putRecordWithBinding(maps, record, contentBytes),
     getHostInventory: (workspaceId, recordId) => maps.hostInventories.get(key(workspaceId, recordId)) ?? null,
+    putSourceStatementArtifact: artifact => { maps.statementArtifacts.set(key(artifact.bound.source_target.workspace_id, artifact.artifact_id), artifact); },
+    putSourceStatementMemoryBinding: (workspaceId, memoryId, evidenceId) => {
+      putSame(maps.statementMemoryBindings, key(workspaceId, memoryId), evidenceId, (a, b) => a === b, "statement memory binding");
+    },
     putHostInventory: (workspaceId, recordId, canonicalInventory) => {
       putSame(maps.hostInventories, key(workspaceId, recordId), canonicalInventory, (a, b) => a === b, "host inventory");
     },

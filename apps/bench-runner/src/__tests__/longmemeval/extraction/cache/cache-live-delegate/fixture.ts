@@ -1,13 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { expect, vi } from "vitest";
 import {
-  buildOfficialApiExtractionRequest,
-  buildOfficialApiSourceCorpus,
-  stringifyOfficialApiExtractionRequest
+  SOURCE_STATEMENTS_PROMPT
 } from "@do-soul/alaya-soul";
 import { createGardenHttpExtractor } from
   "../../../../../runs/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from
+import { sourceStatementRequests, sourceStatementSession } from "../../../../../runs/extraction/source-statement-request.js";
+import { cacheFilePath, computeCacheKey } from
   "../../../../../runs/compile-seed/compile-seed-cache.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL
@@ -15,7 +14,9 @@ import {
 
 
 export const MODEL = "test-model";
-export const SYSTEM_PROMPT = "test-system-prompt";
+export const SYSTEM_PROMPT = SOURCE_STATEMENTS_PROMPT;
+export const EMPTY_RESPONSE = '{"messages":[{"message_id":"recorded-user","statements":[]}]}';
+const hostMessages = [{ message_id: "recorded-user", role: "user" as const, content: "I completed the review today." }];
 export const REQUEST_PROFILE = "provider-default-v1" as const;
 
 export function extractionConfig() {
@@ -23,7 +24,8 @@ export function extractionConfig() {
     model: MODEL,
     modelFamily: MODEL,
     providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-    requestProfile: REQUEST_PROFILE
+    requestProfile: REQUEST_PROFILE,
+    sourcePacking: "session-statements"
   } as const;
 }
 
@@ -38,12 +40,7 @@ export function failure(attempt: number, digit: string) {
 }
 
 function shardPath(cacheRoot: string): string {
-  return cacheFilePath(cacheRoot, computeSourceTurnCacheKey(
-    MODEL,
-    REQUEST_PROFILE,
-    SYSTEM_PROMPT,
-    { turnContent: "I completed the review today." }
-  ));
+  return cacheFilePath(cacheRoot, computeCacheKey(MODEL, REQUEST_PROFILE, SYSTEM_PROMPT, userPromptWithAssertions()));
 }
 
 export function readShard(cacheRoot: string): {
@@ -65,9 +62,7 @@ export function readShard(cacheRoot: string): {
 }
 
 export function userPromptWithAssertions(): string {
-  return stringifyOfficialApiExtractionRequest(
-    buildOfficialApiExtractionRequest("I completed the review today.", [])
-  );
+  return sourceStatementRequests(hostMessages)[0]!.userPrompt;
 }
 
 export function createHttpExtractor(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
@@ -82,29 +77,29 @@ export function createHttpExtractor(fetchMock: ReturnType<typeof vi.fn<typeof fe
 }
 
 export function assertionBatchCorpus(assertionIds: readonly number[]): string {
-  return buildOfficialApiSourceCorpus(assertionBatchText(assertionIds), []);
+  return sourceStatementSession(batchMessages(assertionIds)).rendered.content;
 }
 
-function assertionBatchText(assertionIds: readonly number[]): string {
-  return assertionIds.map((id) => `I completed assertion ${id}.`).join(" ");
+function batchMessages(assertionIds: readonly number[]) {
+  return assertionIds.map(id => ({ message_id: `recorded-${id}`, role: "user" as const, content: `I completed assertion ${id}.` }));
 }
 
 export function assertionBatchPrompt(assertionIds: readonly number[]): string {
-  return stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(assertionBatchText(assertionIds), []));
+  return sourceStatementRequests(batchMessages(assertionIds))[0]!.userPrompt;
 }
 
 export function sourceCorpusWithAssertions(): string {
-  return buildOfficialApiSourceCorpus("I completed the review today.", []);
+  return sourceStatementSession(hostMessages).rendered.content;
 }
 
 export function cacheInterpretationResponse(assertionId: number): Response {
-  return sseResponse(JSON.stringify({ interpretations: [{ assertion_id: assertionId,
-    relations: [{ predicate: { text: `I completed assertion ${assertionId}.` }, arguments: [], qualifiers: [] }]
+  return sseResponse(JSON.stringify({ messages: [{ message_id: `recorded-${assertionId}`,
+    statements: [{ text: `I completed assertion ${assertionId}.`, relation: "recorded event" }]
   }] }), "stop");
 }
 
 export function truncatedSseResponse(): Response {
-  return sseResponse('{"interpretations":[]}', "length");
+  return sseResponse(EMPTY_RESPONSE, "length");
 }
 
 export function sseResponse(content: string, finishReason: string): Response {

@@ -1,32 +1,22 @@
 import { mkdirSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildOfficialApiExtractionRequest,
-  OFFICIAL_API_SYSTEM_PROMPT,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
-import {
-  EXTRACTION_CACHE_KEY_ALGO,
-  computeSystemPromptSha256,
-  writeExtractionCacheManifest
-} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
-import { providerBackedResponseResult } from
+import { cacheFilePath, computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { providerBackedResponseResult, fixtureAttemptAuthority, writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
 import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,
   buildGroundedInterpretationResponse,
-  expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
   groundedExtractionResult,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -38,9 +28,7 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 });
 
 function extractionPrompt(turnContent: string): string {
-  return stringifyOfficialApiExtractionRequest(
-    buildOfficialApiExtractionRequest(turnContent, [])
-  );
+  return sourceStatementRequests([{ message_id: "recorded-user", role: "user", content: turnContent }])[0]!.userPrompt;
 }
 
 describe("runExtractionFill", () => {
@@ -89,23 +77,8 @@ describe("runExtractionFill", () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    writeExtractionCacheManifest(cacheRoot, {
-      schema_version: 3,
-      extraction_model: "gpt-5.4-mini",
-      model_family: "gpt-5.4-mini",
-      request_profile: "provider-default-v1",
-      provider_url: "https://provider.invalid/v1",
-      system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-      dataset: "longmemeval-oracle",
-      dataset_revision: "rev",
-      requested_turns: 2,
-      cached_turns: 0,
-      coverage: 0,
-      storage: "git-tracked",
-      built_at: "2026-07-12T00:00:00.000Z",
-      builder: "test"
-    });
+    writeExtractionCacheTestManifest({ cacheRoot, model: "gpt-5.4-mini",
+      providerUrl: "https://provider.invalid/v1", systemPrompt: SOURCE_STATEMENTS_PROMPT });
     const extractorFactory = vi.fn(() => ({
       extract: vi.fn(async (input) => groundedExtractionResult(input))
     }));
@@ -121,23 +94,11 @@ describe("runExtractionFill", () => {
   });
 
   it("treats shard persistence failure as a fatal cache invariant", async () => {
-    writeExtractionCacheManifest(cacheRoot, {
-      schema_version: 3,
-      extraction_model: "gpt-5.4-mini",
-      model_family: "gpt-5.4-mini",
-      request_profile: "provider-default-v1",
-      provider_url: "https://fixture-provider.invalid/v1",
-      system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-      dataset: "longmemeval-oracle",
-      dataset_revision: "fixture",
-      storage: "git-tracked",
-      built_at: "2026-07-12T00:00:00.000Z",
-      builder: "test"
-    });
+    writeExtractionCacheTestManifest({ cacheRoot, model: "gpt-5.4-mini",
+      providerUrl: "https://fixture-provider.invalid/v1", systemPrompt: SOURCE_STATEMENTS_PROMPT });
     const turn = "unwritable shard turn";
-    const key = computeSourceTurnCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
+    const key = computeCacheKey(
+      "gpt-5.4-mini", "provider-default-v1", SOURCE_STATEMENTS_PROMPT, extractionPrompt(turn)
     );
     mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
     const liveWriter = createCachingSignalExtractor({
@@ -145,12 +106,13 @@ describe("runExtractionFill", () => {
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://fixture-provider.invalid/v1",
-        requestProfile: "provider-default-v1"
+        requestProfile: "provider-default-v1", sourcePacking: "session-statements"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: extractionPrompt(turn)
     })).rejects.toThrow(/failed to persist extraction cache shard/u);
   });

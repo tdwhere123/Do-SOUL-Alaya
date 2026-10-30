@@ -1,13 +1,14 @@
+import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   benchSessionSurfacesEnabled
 } from "../../harness/daemon/daemon-support.js";
 import type { BenchWorkspaceHandle } from "../../harness/daemon.js";
 import {
   computeNextTurnSeedRefs,
-  type CompileSeedRunner
+  type CompileSeedRunner, type CompileSeedTurnInput
 } from "../../runs/compile-seed.js";
 import { extractSessions, type LocomoSample, type LocomoTurn } from "./dataset.js";
-import { buildLocomoSeedContent } from "./runner-utils.js";
+import { buildLocomoSeedContent, buildLocomoSessionMessages } from "./runner-utils.js";
 import { isSeededMemoryResult } from
   "../../harness/daemon/seed/daemon-seed-results.js";
 
@@ -73,6 +74,9 @@ async function seedLocomoSession(input: {
   const sessionSurfaceId = benchSessionSurfacesEnabled()
     ? `${input.conversation.sample_id}-s${input.sessionOrdinal}`
     : undefined;
+  const sourceSession = buildLocomoSessionMessages(input.session);
+  const sourceSessionRounds = input.session.turns.map((turn, index) => ({ seedIndex: input.seedIndex + index,
+    turnContent: buildLocomoSeedContent(turn), turnMessages: [sourceSession[index]!] }));
   let previousTurnSeedMemoryIds: readonly string[] = [];
   let seedIndex = input.seedIndex;
   for (let turnOrdinal = 0; turnOrdinal < input.session.turns.length; turnOrdinal += 1) {
@@ -84,7 +88,7 @@ async function seedLocomoSession(input: {
       turnOrdinal,
       seedIndex,
       sessionSurfaceId,
-      previousTurnSeedMemoryIds
+      previousTurnSeedMemoryIds, sourceSession, sourceSessionRounds
     });
     seedIndex += 1;
     previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
@@ -103,11 +107,17 @@ async function seedLocomoTurn(input: {
   readonly turnOrdinal: number;
   readonly seedIndex: number;
   readonly previousTurnSeedMemoryIds: readonly string[];
+  readonly sourceSession: readonly ConversationMessage[];
+  readonly sourceSessionRounds: NonNullable<CompileSeedTurnInput["sourceSessionRounds"]>;
 }) {
   const evidenceRef = `${input.conversation.sample_id}-s${input.sessionOrdinal}-r${input.turnOrdinal}`;
   return input.seedRunner.seedTurn({
     daemon: input.workspace,
     turnContent: buildLocomoSeedContent(input.turn),
+    turnMessages: [input.sourceSession[input.turnOrdinal]!], sourceSession: input.sourceSession,
+    sourceSessionRounds: input.sourceSessionRounds,
+    ...(input.sourceSession[input.turnOrdinal]!.created_at === undefined ? {} : {
+      sourceObservedAt: input.sourceSession[input.turnOrdinal]!.created_at }),
     evidenceRefBase: evidenceRef,
     seedIndex: input.seedIndex,
     workspaceId: input.workspace.workspaceId,

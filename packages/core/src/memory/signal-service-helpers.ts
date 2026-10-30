@@ -201,6 +201,7 @@ export function hasInvalidSchemaGrounding(
 export function evaluateSignalTriage(signal: CandidateMemorySignal): SignalTriageResult {
   // Interpretation signals use Core source-observation admission, not the
   // scored kind/confidence route. A format discriminator never grants that route.
+  if (signal.interpretation_contract === "source-interpretation-v1") return "dropped";
   if (signal.interpretation_contract !== undefined) return "accepted";
   if (hasInvalidSchemaGrounding(signal)) return "deferred";
   if (signal.confidence < 0.3 && signal.signal_kind === "potential_conflict") return "deferred";

@@ -1,5 +1,5 @@
 import process from "node:process";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { assertCurrentConversationGeneration, extractionArtifactPrompt } from "../request-artifact.js";
 import {
   createCachingSignalExtractor,
   createGardenHttpExtractor,
@@ -19,10 +19,6 @@ import {
 import type { ExtractionFillStatus } from "./manifest/fill-manifest-contract.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import { runExtractionPool } from "./fill-pool.js";
-import { runSemanticFillUnderLease } from "./semantic-fill-executor.js";
-import { createOfflineSemanticEnvelope, createOfflineSemanticReplay } from
-  "./semantic-fill-envelope.js";
-import { collectSemanticFillTasks } from "./semantic-workset-tasks.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import {
   countTerminalProviderFailures,
@@ -92,6 +88,7 @@ export async function executeExtractionFill(
   markProgress: (() => void) | undefined
 ): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
   refuseRecallCampaignLiveExtraction("extraction_write");
+  assertCurrentConversationGeneration(prepared.config);
   if (authority?.receipt.action === "sample") throw new Error("ordinary extraction fill cannot use sample authority");
   const resolved = resolveFillTurns(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
@@ -101,38 +98,9 @@ export async function executeExtractionFill(
     log(`[extraction-fill] sparse execution keys=${resolved.executionCacheKeys.size} ` +
       `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
   }
-  if (options.ingestionMode === "lazy_field") {
-    if (options.semanticArtifactRoot === undefined)
-      throw new ExtractionCacheInvariantError("lazy_field requires a semantic artifact root");
-    writeLease.assertOwned();
-    const receipt = await runSemanticFillUnderLease({
-      root: options.semanticArtifactRoot,
-      lease: writeLease,
-      tasks: collectSemanticFillTasks(resolved.turns, prepared),
-      envelope: createOfflineSemanticEnvelope({
-        maxCalls: options.semanticMaxCalls ?? Number.MAX_SAFE_INTEGER,
-        maxFailures: options.semanticMaxFailures ?? Number.MAX_SAFE_INTEGER,
-        transportPolicy: options.semanticTransportPolicy
-      }),
-      transport: options.semanticTransport ?? createOfflineSemanticReplay({ defaultResult: {
-        kind: "failure", reason: "semantic replay required"
-      } }),
-      ...(signal === undefined ? {} : { signal })
-    });
-    const unavailable = receipt.lazyRunReceipt.unavailable;
-    if (receipt.failures > 0 || receipt.stopLoss || receipt.unresolved > 0 ||
-        unavailable > 0) {
-      const attempts = receipt.attempts
-        .map((attempt) => `${attempt.outcome}:${attempt.reason ?? "none"}`)
-        .join(",");
-      throw new ExtractionCacheInvariantError(
-        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved} unavailable=${unavailable} attempts=${attempts}`
-      );
-    }
-    return receipt;
+  if (options.ingestionMode === "lazy_field" || options.semanticArtifactRoot !== undefined) {
+    throw new ExtractionCacheInvariantError("passive semantic overlays are retired");
   }
-  if (options.semanticArtifactRoot !== undefined)
-    throw new ExtractionCacheInvariantError("semantic overlay requires lazy_field");
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress,
     resolved.executionCacheKeys
@@ -186,7 +154,6 @@ function createFillCachingExtractor(
       onTransportAttempt: authority.reserveAttempt,
       providerAttemptLineageDigest: authority.receipt.lineage_digest,
       onLiveProviderExtractionSucceeded: authority.commitSuccessfulShard,
-      onDeterministicExtractionSucceeded: authority.commitDeterministicShard,
       onLiveExtractionFailed: authority.abandonPendingShard,
       onLiveExtractionOutcome: authority.recordTransportOutcome
     }),
@@ -274,7 +241,7 @@ function resolveRepairTurns(
       computeExtractionTurnCacheKeys(
         prepared.config.model,
         prepared.config.requestProfile,
-        OFFICIAL_API_SYSTEM_PROMPT,
+        extractionArtifactPrompt(undefined, undefined, prepared.config.sourcePacking),
         turn, prepared.config.sourcePacking
       ).some((cacheKey) => keys.has(cacheKey))
     ),
@@ -461,7 +428,7 @@ function selectProbeTurn(
     computeExtractionTurnCacheKeys(
       prepared.config.model,
       prepared.config.requestProfile,
-      OFFICIAL_API_SYSTEM_PROMPT,
+      extractionArtifactPrompt(undefined, undefined, prepared.config.sourcePacking),
       turn, prepared.config.sourcePacking
     ).includes(targetKey)
   );

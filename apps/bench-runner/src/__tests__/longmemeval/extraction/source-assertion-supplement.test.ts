@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -16,8 +15,6 @@ import {
   parseSourceAssertionSupplementReceipt,
   sourceAssertionSupplementBinding
 } from "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement.js";
-import { resolveSourceAssertionSupplementOptions } from
-  "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 import { computeSourceAssertionSupplementReceiptEntrySetSha256 } from
   "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
 
@@ -305,19 +302,6 @@ describe("source assertion semantic supplement", () => {
     }, "model drift")).toThrow(/invalid/u);
   });
 
-  it("requires an explicit receipt and source root as one runtime pair", () => {
-    expect(resolveSourceAssertionSupplementOptions({}, "/repo")).toBeUndefined();
-    expect(resolveSourceAssertionSupplementOptions({
-      ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT: "receipt.json",
-      ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_CACHE_ROOT: "old-cache"
-    }, "/repo")).toEqual({
-      receiptPath: resolve("/repo", "receipt.json"),
-      sourceCacheRoot: resolve("/repo", "old-cache")
-    });
-    expect(() => resolveSourceAssertionSupplementOptions({
-      ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT: "receipt.json"
-    }, "/repo")).toThrow(/both/u);
-  });
 });
 
 function createFixture() {

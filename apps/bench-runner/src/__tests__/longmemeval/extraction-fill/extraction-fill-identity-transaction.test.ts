@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   computeSystemPromptSha256,
+  EXTRACTION_CACHE_KEY_ALGO,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -172,12 +173,14 @@ async function writeDataset(questions: readonly LongMemEvalQuestion[]): Promise<
 
 function writeIdentityManifest(providerUrl: string, modelFamily: string, builder: string): void {
   writeExtractionCacheManifest(cacheRoot, {
-    schema_version: 2,
+    schema_version: 4,
+    source_packing: "session-statements",
+    request_profile: "provider-default-v1",
     extraction_model: "fixture-model",
     model_family: modelFamily,
     provider_url: providerUrl,
-    system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-    cache_key_algo: "sha256(model\\0systemPrompt\\0turnContent)",
+    system_prompt_sha256: computeSystemPromptSha256(SOURCE_STATEMENTS_PROMPT),
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: "longmemeval-oracle",
     dataset_revision: "fixture",
     storage: "git-tracked",

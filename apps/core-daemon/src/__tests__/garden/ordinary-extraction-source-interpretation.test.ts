@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenRole,
-  SOURCE_INTERPRETATION_CONTRACT
+  SOURCE_STATEMENTS_CONTRACT
 } from "@do-soul/alaya-protocol";
 import {
   DynamicsService,
@@ -51,7 +51,7 @@ const CLOCK = "2026-09-14T12:00:00.000Z";
 const ASSERTION = "Alice uses tools.";
 const LONG_ASSERTION = `${"The archive retains neutral context. ".repeat(26)}${ASSERTION}`;
 
-describe("ordinary extraction source interpretation adapters", () => {
+describe("ordinary extraction source statement adapters", () => {
   it.each(["post-turn", "interactive"] as const)("runs the production %s entry through parsing and SQLite publication with retries", async (mode) => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-ordinary-extraction-"));
     const filename = join(directory, "memory.sqlite");
@@ -142,16 +142,9 @@ describe("ordinary extraction source interpretation adapters", () => {
         extractor: {
           extract: async ({ userPrompt }) => ({
             rawJson: JSON.stringify({
-              interpretations: JSON.parse(userPrompt).source_assertions.map((assertion: { assertion_id: number; text: string }) => ({
-                assertion_id: assertion.assertion_id,
-                relations: assertion.text.includes(ASSERTION) ? [{
-                  predicate: { text: "uses" },
-                  arguments: [
-                    { role: "agent", phrase: { text: "Alice" } },
-                    { role: "object", phrase: { text: "tools" } }
-                  ],
-                  qualifiers: []
-                }] : []
+              messages: JSON.parse(userPrompt).messages.map((message: { message_id: string; text: string }) => ({
+                message_id: message.message_id,
+                statements: message.text.includes(ASSERTION) ? [{ text: ASSERTION, relation: "tool usage" }] : []
               }))
             })
           })
@@ -194,7 +187,7 @@ describe("ordinary extraction source interpretation adapters", () => {
       if (mode === "post-turn") {
         await process();
         expect(gardenTaskRepo.findById(taskId!)?.status).toBe("completed");
-        enqueue(); await process();
+        await enqueue(); await process();
       } else {
         const completed = vi.fn(async () => undefined);
         const warn = vi.fn();
@@ -229,12 +222,12 @@ describe("ordinary extraction source interpretation adapters", () => {
       expect(memories).toHaveLength(1);
       received.memoryId = memories[0]!.object_id;
       const signals = await signalService.listByRun("run-1");
-      const observation = signals.find((signal) => signal.interpretation_contract === SOURCE_INTERPRETATION_CONTRACT);
+      const observation = signals.find((signal) => signal.interpretation_contract === SOURCE_STATEMENTS_CONTRACT);
       expect(observation).toMatchObject({
         source: "garden_compile",
         object_kind: null,
         confidence: null,
-        interpretation_contract: SOURCE_INTERPRETATION_CONTRACT
+        interpretation_contract: SOURCE_STATEMENTS_CONTRACT
       });
       expect(received.memoryId).toBeDefined();
       const published = await memoryService.findById(received.memoryId!);

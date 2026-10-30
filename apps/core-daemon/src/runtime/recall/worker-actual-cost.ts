@@ -206,12 +206,6 @@ function instrumentObserverReaders(
     ...(readers.sourceRoot === undefined ? {} : {
       sourceRoot: (input) => chargeNativePage(counters, readers.sourceRoot!(input))
     }),
-    ...(readers.boundInterpretations === undefined ? {} : {
-      boundInterpretations: (input) => chargeNativePage(counters, readers.boundInterpretations!(input))
-    }),
-    ...(readers.sourceTextHints === undefined ? {} : {
-      sourceTextHints: (input) => chargeNativePage(counters, readers.sourceTextHints!(input))
-    }),
     ...(readers.relation === undefined ? {} : {
       relation: (input) => chargeNativePage(counters, readers.relation!(input))
     }),

@@ -14,7 +14,7 @@ import {
   SqliteSourceRootRecallReader
 } from "@do-soul/alaya-storage";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../../../garden/support/task-signal-id.js";
-import { readRetainedPostTurnSource } from "./post-turn-source-fixture.js";
+import { readRetainedPostTurnSource, recordedPostTurnResponses } from "./post-turn-source-fixture.js";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
@@ -316,7 +316,7 @@ describe("post-turn extract Garden task", () => {
     ).toBe(0);
   });
 
-  it("host_worker end-to-end: enqueue then MCP claim/complete delivers candidate signals", async () => {
+  it("host_worker claim and completion bind statement responses to the retained host messages", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
     harness.enqueuePostTurnTask();
     await harness.runScheduler();
@@ -352,24 +352,9 @@ describe("post-turn extract Garden task", () => {
           task_id: "post-turn-task-1",
           status: "completed",
           result_envelope: {
-            candidate_signals: [
-              {
-                signal_kind: "potential_preference",
-                object_kind: "memory_entry",
-                scope_hint: "project",
-                domain_tags: ["preference"],
-                confidence: 0.78,
-                evidence_refs: ["evidence-1"],
-                // invariant: graph-edge ref hints are first-class on
-                // CandidateMemorySignal (see candidate-memory-signal.ts §79-84).
-                // raw_payload is not a back-door for them.
-                source_memory_refs: ["memory-a"],
-                incompatible_with_refs: ["memory-b"],
-                raw_payload: {
-                  observation: "user prefers vitest watch mode"
-                }
-              }
-            ]
+            source_statement_responses: recordedPostTurnResponses("post-turn-task-1",
+              harness.gardenTaskRepo.findById("post-turn-task-1")!.payload,
+              [{ text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" }])
           }
         },
         context: defaultContext()
@@ -381,21 +366,22 @@ describe("post-turn extract Garden task", () => {
     });
     const signals = await harness.signalService.listByRun("run-1");
     expect(signals).toHaveLength(1);
-    expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
-      source: SignalSource.GARDEN_COMPILE,
-      signal_state: "triaged",
-      source_memory_refs: ["memory-a"],
-      incompatible_with_refs: ["memory-b"],
-      raw_payload: { observation: "user prefers vitest watch mode" }
-    });
+    expect(signals[0]).toMatchObject({ source: SignalSource.GARDEN_COMPILE, signal_state: "triaged",
+      interpretation_contract: "source-statements-v1", object_kind: null, confidence: null,
+      source_memory_refs: [], incompatible_with_refs: [],
+      raw_payload: { source_statement: { statement: {
+        text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" } } } });
     expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
       .toContain("I prefer pnpm commands in this repo.");
   });
 
-  it("preserves first-class graph refs and ignores raw-payload arrays when completing Garden tasks", async () => {
+  it("preserves explicit graph refs on non-extraction tasks without promoting raw-payload arrays", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
-    harness.enqueuePostTurnTask();
-    await harness.runScheduler();
+    harness.gardenTaskRepo.enqueue({ id: "post-turn-task-1", workspace_id: "workspace-1",
+      role: GardenRole.JANITOR, kind: GardenTaskKind.TTL_CLEANUP, created_at: "2026-05-07T00:10:00.000Z",
+      payload: { task_id: "post-turn-task-1", task_kind: GardenTaskKind.TTL_CLEANUP, required_tier: GardenTier.TIER_1,
+        workspace_id: "workspace-1", run_id: "run-1", target_object_refs: [], priority: 20,
+        created_at: "2026-05-07T00:10:00.000Z" } });
 
     const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
     await handler.call({
@@ -450,8 +436,7 @@ describe("post-turn extract Garden task", () => {
         incompatible_with_refs: ["raw-conflict"]
       }
     });
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
-      .toContain("I prefer pnpm commands in this repo.");
+    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")).toBeUndefined();
   });
 
   it("scheduler reclaims abandoned claims (status=claimed older than stale TTL) back to pending", async () => {

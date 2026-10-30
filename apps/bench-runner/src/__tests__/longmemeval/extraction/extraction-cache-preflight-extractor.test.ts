@@ -1,234 +1,99 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import {
-  buildOfficialApiExtractionRequest,
-  buildOfficialApiSourceCorpus,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
-import {
-  createCachingSignalExtractor,
-  createCompileSeedRunner,
-  type BenchSignalExtractor
+  createCachingSignalExtractor, createCompileSeedRunner, type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
-import { writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { cacheFilePath, computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { sourceStatementRequests } from "../../../runs/extraction/source-statement-request.js";
+import { admitStatementSessionCache, buildCompileSeedDaemon, makeSeed } from "../compile-seed/compile-seed-fixture.js";
 import {
-  buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG,
-  interpretationsEnvelope
-} from "../compile-seed/compile-seed-fixture.js";
-import {
-  providerBackedResponseResult,
-  fixtureAttemptAuthority,
-  TEST_EXTRACTION_PROVIDER_URL,
+  providerBackedResponseResult, fixtureAttemptAuthority, TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
-import { groundedExtractionResult } from "../extraction-fill/fixture.js";
-import {
-  EXTRACTION_CONFIG as CONFIG,
-  manifestFor,
-  registerCacheRootHooks,
-} from "./extraction-cache-preflight-fixture.js";
-import { writeSettledProviderShardFixture } from "./authority/provider-shard-fixture.js";
+import { EXTRACTION_CONFIG, registerCacheRootHooks } from "./extraction-cache-preflight-fixture.js";
 
-const TURN_CONTENT = "I moved to Berlin.";
-const TURN_REQUEST = stringifyOfficialApiExtractionRequest(
-  buildOfficialApiExtractionRequest(TURN_CONTENT, [])
-);
-const TURN_RESPONSE = interpretationsEnvelope([{
-  matched: TURN_CONTENT,
-}]);
+const config = { ...EXTRACTION_CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+  sourcePacking: "session-statements" as const };
+const messages = [{ message_id: "recorded-user", role: "user" as const, content: "I moved to Berlin." }];
+const request = sourceStatementRequests(messages)[0]!;
+const input = { systemPrompt: SOURCE_STATEMENTS_PROMPT, sourceCorpus: messages[0]!.content,
+  userPrompt: request.userPrompt };
+const response = JSON.stringify({ messages: [{ message_id: "recorded-user",
+  statements: [{ text: "I moved to Berlin.", relation: "recorded event" }] }] });
 
-describe("cache-only compile seed smoke", () => {
-  let cacheRoot: string;
-  registerCacheRootHooks(
-    "extraction-cache-smoke-",
-    (root) => { cacheRoot = root; },
-    (root) => writeExtractionCacheManifest(root, manifestFor({
-      extraction_model: CREDENTIALLED_CONFIG.model,
-      model_family: CREDENTIALLED_CONFIG.model
-    }))
-  );
-
-  it("reports cacheHits>0 and llmCalls=0 without calling the live extractor", async () => {
-    const turnContent = "I moved to Berlin and started a new job in March 2024.";
-    await writeSettledProviderShardFixture({
-      cacheRoot, label: "cache-only smoke", model: CREDENTIALLED_CONFIG.model,
-      requestProfile: CREDENTIALLED_CONFIG.requestProfile,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(turnContent, [])),
-      rawJson: interpretationsEnvelope([{
-        matched: "I moved to Berlin and started a new job in March 2024.",
-      }])
-    });
-
-    const liveExtract: BenchSignalExtractor = {
-      extract: vi.fn(async () => {
-        throw new Error("live extraction must not run in cache-only smoke");
-      })
-    };
-
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      requiredTurnContents: [turnContent],
-      extractorFactory: () => liveExtract
-    });
-    const daemon = buildCompileSeedDaemon(() => ({
-      memoryId: "memory-cache-smoke",
-      signalId: "signal-cache-smoke",
-      proposalId: "proposal-cache-smoke",
-      evidenceId: "evidence-cache-smoke",
-      truncated: false,
-      charsClipped: 0
-    }));
-
-    await runner.seedTurn({
-      daemon,
-      turnContent,
-      evidenceRefBase: "q-smoke-t0",
-      seedIndex: 0,
-      workspaceId: "ws-smoke",
-      runId: "run-smoke"
-    });
-
-    expect(runner.stats.cacheHits).toBeGreaterThan(0);
-    expect(runner.stats.llmCalls).toBe(0);
-    expect(liveExtract.extract).not.toHaveBeenCalled();
-  });
-
+let cacheRoot: string;
+registerCacheRootHooks("extraction-cache-preflight-", root => { cacheRoot = root; }, root => {
+  writeExtractionCacheTestManifest({ cacheRoot: root, model: config.model,
+    requestProfile: config.requestProfile, providerUrl: config.providerUrl,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT });
 });
 
-describe("single-source extraction model", () => {
-  let cacheRoot: string;
-  registerCacheRootHooks("extraction-single-source-", (root) => { cacheRoot = root; });
+function delegate() {
+  return { extract: vi.fn<BenchSignalExtractor["extract"]>(attempt => providerBackedResponseResult(attempt, response)) };
+}
+function authority() {
+  return fixtureAttemptAuthority({ cacheRoot, model: config.model, requestProfile: config.requestProfile });
+}
 
-  it("writes the same model into the cache fixture that the config carries", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "gpt-5.4-mini",
-      systemPrompt: "sys"
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => providerBackedResponseResult(input, TURN_RESPONSE))
-    };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
-      cacheRoot,
-      ...fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile })
-    });
-    await extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
+describe("request-bound cache preflight", () => {
+  it("reports a cache hit without calling the live extractor", async () => {
+    await admitStatementSessionCache({ cacheRoot, config, messages, rawJson: () => response });
+    const live = { extract: vi.fn<BenchSignalExtractor["extract"]>(async () => {
+      throw new Error("cache-only smoke must not dispatch");
+    }) };
+    const turn = { turnContent: messages[0]!.content, turnMessages: messages };
+    const runner = createCompileSeedRunner({ config, cacheRoot, requiredExtractionTurns: [turn],
+      extractorFactory: () => live, diagnosticDir: null });
+    const result = await runner.seedTurn({ ...turn,
+      daemon: buildCompileSeedDaemon(() => makeSeed("cached-memory")),
+      evidenceRefBase: "raw-round", seedIndex: 0, workspaceId: "workspace-1", runId: "run-1" });
+    expect(result.seeds).toHaveLength(1);
+    expect(runner.stats).toMatchObject({ cacheHits: 1, llmCalls: 0 });
+    expect(live.extract).not.toHaveBeenCalled();
+  });
 
-    // The cache-key model component and the persisted fixture model both come
-    // from the single `model` field — there is no independent re-derivation.
-    const shardDirs = readdirSync(cacheRoot);
-    const shardDir = shardDirs.find((d) => /^[0-9a-f]{2}$/u.test(d));
-    expect(shardDir).toBeDefined();
-    const shardFiles = readdirSync(join(cacheRoot, shardDir as string));
-    const fixturePath = join(cacheRoot, shardDir as string, shardFiles[0] as string);
-    const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
-      model: string;
-    };
-    expect(fixture.model).toBe("gpt-5.4-mini");
+  it("writes the exact configured model into the admitted shard", async () => {
+    const live = delegate();
+    const extractor = createCachingSignalExtractor({ delegate: live, config, cacheRoot, ...authority() });
+    await extractor.extract(input);
+    const key = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, input.userPrompt);
+    expect(JSON.parse(readFileSync(cacheFilePath(cacheRoot, key), "utf8"))).toMatchObject({ model: "gpt-5.4-mini" });
+    expect(live.extract).toHaveBeenCalledOnce();
   });
 
   it("rejects a model change before writing its different cache key", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "gpt-5.4-mini",
-      systemPrompt: "sys"
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => providerBackedResponseResult(input, TURN_RESPONSE))
-    };
-    const authority = fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile });
-    const writer = createCachingSignalExtractor({
-      delegate,
-      config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
-      cacheRoot,
-      ...authority
-    });
-    await writer.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
-    expect(delegate.extract).toHaveBeenCalledOnce();
-
-    const reader = createCachingSignalExtractor({
-      delegate,
-      config: {
-        ...CONFIG,
-        model: "gpt-4.1-mini",
-        modelFamily: "gpt-4.1-mini",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL
-      },
-      cacheRoot,
-      ...authority
-    });
-    await expect(
-      reader.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST })
-    ).rejects.toThrow(/extraction model mismatch/u);
-    expect(delegate.extract).toHaveBeenCalledOnce();
+    const live = delegate(), grants = authority();
+    await createCachingSignalExtractor({ delegate: live, config, cacheRoot, ...grants }).extract(input);
+    const changed = { ...config, model: "gpt-4.1-mini", modelFamily: "gpt-4.1-mini" };
+    await expect(createCachingSignalExtractor({ delegate: live, config: changed, cacheRoot, ...grants })
+      .extract(input)).rejects.toThrow(/extraction model mismatch/u);
+    expect(live.extract).toHaveBeenCalledOnce();
+    const key = computeCacheKey(changed.model, changed.requestProfile, input.systemPrompt, input.userPrompt);
+    expect(() => readFileSync(cacheFilePath(cacheRoot, key))).toThrow(/ENOENT/u);
   });
 
   it("rejects a request-profile change before the delegate or shard write", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CONFIG.model,
-      systemPrompt: "sys"
-    });
-    const delegate = vi.fn(async (input) => groundedExtractionResult(input));
-    const extractor = createCachingSignalExtractor({
-      delegate: { extract: delegate },
-      config: { ...CONFIG, requestProfile: "deepseek-v4-nonthinking-v1" },
-      cacheRoot,
-      ...fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile })
-    });
-
-    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
-      .rejects.toThrow(/request profile mismatch/u);
-    expect(delegate).not.toHaveBeenCalled();
-    expect(readdirSync(cacheRoot).filter((entry) => /^[0-9a-f]{2}$/u.test(entry)))
-      .toEqual([]);
+    const live = delegate();
+    const extractor = createCachingSignalExtractor({ delegate: live,
+      config: { ...config, requestProfile: "deepseek-v4-nonthinking-v1" }, cacheRoot, ...authority() });
+    await expect(extractor.extract(input)).rejects.toThrow(/request profile mismatch/u);
+    expect(live.extract).not.toHaveBeenCalled();
+    expect(readdirSync(cacheRoot).filter(entry => /^[0-9a-f]{2}$/u.test(entry))).toEqual([]);
   });
 
-  it("fails closed on a cache miss when live extraction is disabled", async () => {
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => groundedExtractionResult(input))
-    };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: CONFIG,
-      cacheRoot,
-      allowLiveExtraction: false
-    });
-
-    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
-      .rejects.toThrow(/cache-only.*missing|missing.*live extraction disabled/u);
-    expect(delegate.extract).not.toHaveBeenCalled();
+  it.each(["missing", "invalid"] as const)("fails closed on a %s shard when live extraction is disabled", async status => {
+    const key = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, input.userPrompt);
+    if (status === "invalid") {
+      mkdirSync(join(cacheRoot, key.slice(0, 2)), { recursive: true });
+      writeFileSync(cacheFilePath(cacheRoot, key), "{torn", "utf8");
+    }
+    const live = delegate();
+    const extractor = createCachingSignalExtractor({ delegate: live, config, cacheRoot, allowLiveExtraction: false });
+    await expect(extractor.extract(input)).rejects.toThrow(status === "invalid"
+      ? /cache-only.*invalid/u : /cache-only.*missing|missing.*live extraction disabled/u);
+    expect(live.extract).not.toHaveBeenCalled();
+    if (status === "invalid") expect(readFileSync(cacheFilePath(cacheRoot, key), "utf8")).toBe("{torn");
   });
-
-  it("fails closed on a corrupt cache entry when live extraction is disabled", async () => {
-    const cacheKey = computeSourceTurnCacheKey(
-      CONFIG.model,
-      CONFIG.requestProfile,
-      "sys",
-      { turnContent: TURN_CONTENT }
-    );
-    mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
-    writeFileSync(cacheFilePath(cacheRoot, cacheKey), "{torn", "utf8");
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => groundedExtractionResult(input))
-    };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: CONFIG,
-      cacheRoot,
-      allowLiveExtraction: false
-    });
-
-    await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))
-      .rejects.toThrow(/cache-only.*invalid/u);
-    expect(delegate.extract).not.toHaveBeenCalled();
-  });
-
 });

@@ -405,22 +405,20 @@ describe("trustworthy-loop-trace", () => {
     const harness = await createTrustworthyLoopHarness({ warn });
     harness.enqueueGardenTask("garden-task-1");
 
-    await harness.callTool("garden.claim_task", { task_id: "garden-task-1" });
+    const claimed = await harness.callTool<{ payload: { source_statements: {
+      requests: readonly import("@do-soul/alaya-protocol").SourceStatementRequest[] } } }>(
+      "garden.claim_task", { task_id: "garden-task-1" });
     await harness.callTool("garden.complete_task", {
       task_id: "garden-task-1",
       status: "completed",
       result_envelope: {
-        candidate_signals: [
-          {
-            signal_kind: "potential_preference",
-            object_kind: "memory_entry",
-            scope_hint: ScopeClass.PROJECT,
-            domain_tags: ["garden"],
-            confidence: 0.9,
-            evidence_refs: [PRIMARY_MEMORY_ID],
-            raw_payload: { observation: "Garden extracted an unanchored signal." }
-          }
-        ]
+        source_statement_responses: claimed.payload.source_statements.requests.map(request => ({
+          chunk_index: request.chunk_index,
+          raw_json: JSON.stringify({ messages: request.messages.map((message, index) => ({
+            message_id: message.message_id,
+            statements: index === 0 ? [{ text: message.text, relation: "recorded observation" }] : []
+          })) })
+        }))
       }
     });
 

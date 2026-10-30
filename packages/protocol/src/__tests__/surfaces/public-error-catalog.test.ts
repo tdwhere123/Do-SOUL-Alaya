@@ -38,6 +38,9 @@ describe("public error catalog", () => {
     ).toBe(
       "Garden task candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope."
     );
+    expect(resolvePublicErrorMessage("VALIDATION",
+      "Garden task source_statement_responses changed after a previous partial completion attempt; retry with the original source statement response envelope: private-task-id"
+    )).toBe("Garden task source_statement_responses changed after a previous partial completion attempt; retry with the original source statement response envelope.");
     expect(isPublicErrorMessage("Proposal not found: prop-1")).toBe(false);
     expect(isPublicErrorMessage("Proposal not found.")).toBe(true);
   });

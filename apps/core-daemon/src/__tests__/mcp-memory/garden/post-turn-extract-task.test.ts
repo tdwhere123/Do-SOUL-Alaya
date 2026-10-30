@@ -6,7 +6,7 @@ import {
   GardenTaskKind,
 } from "@do-soul/alaya-protocol";
 import {
-  OfficialApiGardenCompileIncompleteError,
+  OfficialApiGardenCompileIncompleteError, extractSourceStatementSession,
   type GardenComputeProvider
 } from "@do-soul/alaya-soul";
 
@@ -405,25 +405,12 @@ describe("post-turn extract Garden task", () => {
 
   it("retains grounded candidates but fails the task when official compile is incomplete", async () => {
     const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
-      throw new OfficialApiGardenCompileIncompleteError({
-        contract_version: 1,
-        producer: "official-api-garden-compile-v1",
-        status: "partial",
-        drafts: [],
-        rejections: [],
-        pending_batches: [{
-          source_corpus_identity: "corpus",
-          batch_index: 1,
-          batch_count: 2,
-          assertion_ids: [9]
-        }],
-        catalog: {
-          inventory_count: 9,
-          coverage: "budget_complete",
-          residual: [],
-          next_cursor: null
-        }
-      }, { signals: [createSignal()] });
+      const receipt = await extractSourceStatementSession({ session_id: "recorded-session", request_ceiling: 1, messages: [
+        { message_id: "m1", role: "user", recorded_at: null, text: "Recorded event." },
+        { message_id: "m2", role: "user", recorded_at: null, text: "Another recorded event." }
+      ], transport: async () => ({ rawJson: JSON.stringify({ messages: [{ message_id: "m1",
+        statements: [{ text: "Recorded event.", relation: "recorded event" }] }] }) }) });
+      throw new OfficialApiGardenCompileIncompleteError(receipt, { signals: [createSignal()] });
     });
     const harness = await createRoutingHarness({
       provider_kind: "official_api",
@@ -447,20 +434,10 @@ describe("post-turn extract Garden task", () => {
 
   it("fails post-turn extract when incomplete compile has no candidate signals", async () => {
     const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
-      throw new OfficialApiGardenCompileIncompleteError({
-        contract_version: 1,
-        producer: "official-api-garden-compile-v1",
-        status: "partial",
-        drafts: [],
-        rejections: [{ index: 0, reason: "malformed_response" }],
-        pending_batches: [],
-        catalog: {
-          inventory_count: 1,
-          coverage: "budget_complete",
-          residual: [],
-          next_cursor: null
-        }
-      }, { signals: [] });
+      const receipt = await extractSourceStatementSession({ session_id: "recorded-session", request_ceiling: 1,
+        messages: [{ message_id: "m1", role: "user", recorded_at: null, text: "Recorded event." }],
+        transport: async () => ({ rawJson: "not-json" }) });
+      throw new OfficialApiGardenCompileIncompleteError(receipt, { signals: [] });
     });
     const harness = await createRoutingHarness({
       provider_kind: "official_api",

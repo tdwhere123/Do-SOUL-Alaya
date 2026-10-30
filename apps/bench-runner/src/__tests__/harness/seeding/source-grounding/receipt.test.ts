@@ -1,4 +1,4 @@
-import { createHistoricalSignalReplayProvider } from "../historical-signal-replay-fixture.js";
+import { createHistoricalSignalReplayProvider, readHistoricalSeedInputs } from "../historical-signal-replay-fixture.js";
 import { createHash } from "node:crypto";
 import {
   buildVerifiedUserAssertionReceiptPreimage,
@@ -14,10 +14,6 @@ import {
 } from "@do-soul/alaya-soul";
 import { attachCompileSourceGrounding } from
   "../../../../harness/seeding/source-grounding.js";
-import { extractSeedInputs } from
-  "../../../../runs/compile-seed/compile-seed-extract.js";
-import type { CompileSeedExtractionStats } from
-  "../../../../runs/compile-seed.js";
 import { withOpenSemanticFactorGraph } from
   "../../../longmemeval/compile-seed/compile-seed-fixture.js";
 
@@ -123,9 +119,8 @@ describe("compile source grounding receipts", () => {
       },
       generateSignalId: () => "signal-long-context"
     });
-    const [draft] = await extractSeedInputs({
+    const [draft] = await readHistoricalSeedInputs({
       provider,
-      stats: extractionStats(),
       turnContent: userContent,
       seedIndex: 0,
       context: {
@@ -278,9 +273,8 @@ async function extractDraft(input: {
     }) }) },
     generateSignalId: () => "signal-receipt"
   });
-  const [draft] = await extractSeedInputs({
+  const [draft] = await readHistoricalSeedInputs({
     provider,
-    stats: extractionStats(),
     turnContent: input.source,
     seedIndex: 0,
     context: {
@@ -339,25 +333,3 @@ function assertionLocator(assertionId: number) {
   };
 }
 
-function extractionStats(): CompileSeedExtractionStats {
-  return {
-    path: "official_api_compile",
-    extractionAttempts: 0,
-    cacheHits: 0,
-    llmCalls: 0,
-    offlineFallbacks: 0,
-    liveExtractionFailures: 0,
-    cachedExtractionFailures: 0,
-    factsProduced: 0,
-    signalsDropped: 0,
-    signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
-    parseDropped: 0,
-    compileOverflowDropped: 0,
-    lastTurnRawSignalCount: 1,
-    lastTurnDraftCount: 1,
-    lastExtractionSource: null,
-    lastExtractionShards: [],
-    lastCacheKey: null,
-    lastRawJsonSha256: null
-  };
-}

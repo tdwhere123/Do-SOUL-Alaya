@@ -1,7 +1,7 @@
 import {
   CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema, SOURCE_INDEX_MAX_WINDOWS,
   SourceIndexOperationError, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
-  sourceGoldRootIdentity, splitFtsLanes,
+  sourceIndexRootKey, splitFtsLanes,
   type QuestionTimePreference, type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
   type SourceIndexQueryResources, type SourceIndexResources, type SourceIndexTarget,
   type SourceIndexNominationAllowance, type SourceIndexQueryCapacity,
@@ -444,7 +444,7 @@ export function admitSourceIndexQueryCandidate(database: StorageDatabase, record
       meter.ledger.retain(source, "source admission target capture");
       target = SourceIndexTargetSchema.parse(source);
       meter.ledger.charge(target.root_key.length, 0, "source admission target identity");
-      if (target.root_key !== sourceGoldRootIdentity(target.target)) return { status: "stale", reason: "target_identity", resources: meter.resources() };
+      if (target.root_key !== sourceIndexRootKey(target.target, target.auxiliary)) return { status: "stale", reason: "target_identity", resources: meter.resources() };
     }
     if (vectorBinding !== null) {
       meter.ledger.retain(vectorBinding);
@@ -480,7 +480,7 @@ export function sourceIndexWindowWithinSource(window: { start_byte: number; end_
 
 function parseTarget(raw: unknown, workspaceId: string, meter: QueryReadMeter): SourceIndexTarget {
   const source = SourceIndexTargetSchema.parse(readJsonColumn(readRecord(raw, "source query target"), "target_json"));
-  if (source.target.workspace_id !== workspaceId || source.root_key !== sourceGoldRootIdentity(source.target)) {
+  if (source.target.workspace_id !== workspaceId || source.root_key !== sourceIndexRootKey(source.target, source.auxiliary)) {
     throw new StorageError("VALIDATION_FAILED", "source query target identity mismatch");
   }
   meter.ledger.charge(1, 16, "source target identity ownership");

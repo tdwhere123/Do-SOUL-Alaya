@@ -1,6 +1,6 @@
 import {
   SourceSemanticAccessProfileSchema, SourceSemanticNominationOccurrenceSchema, SourceSemanticProfiledAcquisitionPhaseSchema,
-  SourceSemanticRetainedNominationWitnessSchema,
+  SourceSemanticRetainedNominationWitnessSchema, sourceIndexNativeRootKey, sourceIndexNavigationLocation,
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   type FieldContractSha256, type SourceIndexQueryRepository, type SourceIndexQueryVector, type SourceIndexScopeAdmission,
   type SourceSemanticAccessProfile, type SourceSemanticNominationOccurrence,
@@ -77,7 +77,7 @@ function runProfiledAcquisition(input: Parameters<typeof acquireProfiledSourceIn
   const lanes = capturedLanes(views, profile.channels, input.hint !== undefined && input.hint.navigation !== input.original.navigation);
   const refusals = views.flatMap(row => row.capture.result.resource_refusals);
   const progress = grouped ? nominateGrouped(input, profile, meter, lanes, views, witness, refusals.length > 0, resources) : undefined;
-  const retainedRoots = new Set(witness.map(row => row.source.root_key));
+  const retainedRoots = new Set(witness.map(row => sourceIndexNativeRootKey(row.source)));
   const counts = progress === undefined ? legacyCounts(views, witness, retainedRoots.size) : {
     attempts: progress.counts.attempts_consumed, retained_occurrences: witness.length,
     distinct_roots: progress.counts.admitted_roots, duplicate_occurrences: progress.counts.duplicate_occurrences,
@@ -90,7 +90,7 @@ function runProfiledAcquisition(input: Parameters<typeof acquireProfiledSourceIn
     if (row.outcome.status === "resource_refused") refusals.push({ stage: "admission", phase: row.outcome.reason });
   }
   const original = views[0]!.capture.result;
-  const nominations = [...new Map(witness.map(row => [row.source.root_key, row.source])).values()];
+  const nominations = [...new Map(witness.map(row => [sourceIndexNativeRootKey(row.source), row.source])).values()];
   const failed = views.some(row => row.capture.result.resource_refusals.some(refusal => refusal.phase === "acquisition_failed_unknown_additional_cost"));
   const phase: SourceSemanticProfiledAcquisitionPhase = {
     policy: profile.acquisition_policy, channels: profile.channels, declared_allowance: allowance,
@@ -129,9 +129,11 @@ function capturedLanes(views: readonly CapturedView[], channels: SourceSemanticA
       ? { ...base, state: "unavailable" as const, reason: "shared_nomination_allowance" }
       : { ...base, state: "absent" as const };
     const occurrences = route === "lexical" ? capture.lexical.map(row => ({ reference: `${view}:lexical:${row.lexical.rank}`,
-      root_key: row.source.root_key, native_rank: row.lexical.rank })) : capture.vector.map(row => ({
-      reference: `${view}:vector:${row.vector.rank}`, root_key: row.source.root_key, native_rank: row.vector.rank,
-      window: { status: "captured" as const, reference: row.vector.window.window_id, start: row.vector.window.start_byte, end: row.vector.window.end_byte }
+      root_key: sourceIndexNativeRootKey(row.source), native_rank: row.lexical.rank })) : capture.vector.map(row => ({
+      reference: `${view}:vector:${row.vector.rank}`, root_key: sourceIndexNativeRootKey(row.source), native_rank: row.vector.rank,
+      window: { status: "captured" as const, reference: row.vector.window.window_id,
+        start: sourceIndexNavigationLocation(row.source, row.vector.window).start_byte,
+        end: sourceIndexNavigationLocation(row.source, row.vector.window).end_byte }
     }));
     if (occurrences.length > 0) return { ...base, state: "exact-captured" as const, occurrences };
     const evidence = capture.result[route];

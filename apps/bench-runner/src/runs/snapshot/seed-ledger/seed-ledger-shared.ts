@@ -15,6 +15,7 @@ export interface SnapshotSeedLedgerClosureAuthority {
 }
 
 export interface LedgerTotals {
+  readonly statementSessions: Map<string, import("./statement-session-proof.js").VerifiedStatementSession>;
   attempts: number;
   factsProduced: number;
   parseDropped: number;
@@ -34,6 +35,7 @@ export function sha256(value: string): string {
 
 export function emptyTotals(): LedgerTotals {
   return {
+    statementSessions: new Map(),
     attempts: 0,
     factsProduced: 0,
     parseDropped: 0,
@@ -80,7 +82,9 @@ export function addClosureEntry(
 }
 
 export function addTotals(totals: LedgerTotals, round: LongMemEvalSnapshotSeedRound): void {
-  totals.attempts += readRoundExtractionShards(round).length;
+  if (round.statementSession === undefined || round.statementSession.firstUse) {
+    totals.attempts += readRoundExtractionShards(round).length;
+  }
   totals.factsProduced += round.factsProduced;
   totals.parseDropped += round.parseDropped;
   totals.compileOverflowDropped += round.compileOverflowDropped;

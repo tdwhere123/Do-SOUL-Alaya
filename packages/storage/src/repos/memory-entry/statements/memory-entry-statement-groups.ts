@@ -1,3 +1,5 @@
+import { CURRENT_STATEMENT_MEMORY_FILTER_SQL } from "../../source-index/statement-dependencies.js";
+import { ACTIVE_MEMORY_FILTER_SQL } from "./recall/active-memory-filter-sql.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { LOW_ACTIVITY_MEMORY_SQL } from "../low-activity-predicate.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "../mappers/row-mapper.js";
@@ -85,11 +87,6 @@ export interface MemoryEntryLifecycleStatements {
   readonly findDormantMemoriesStatement: SqliteStatement;
   readonly autonomousTombstoneStatement: SqliteStatement;
 }
-
-const ACTIVE_MEMORY_FILTER_SQL = `
-        AND COALESCE(retention_state, '') != 'tombstoned'
-        AND COALESCE(lifecycle_state, '') != 'dormant'
-`;
 
 const CONFLICT_MEMORY_FILTER_SQL = `
         AND contradiction_count > 0
@@ -384,6 +381,7 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
         workspace_id = ?
         AND lifecycle_state = 'active'
         AND storage_tier = 'hot'
+        ${CURRENT_STATEMENT_MEMORY_FILTER_SQL}
         AND COALESCE(activation_score, 0.0) <= 0.3
         AND COALESCE(last_hit_at, last_used_at, updated_at, created_at)
           <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-14 days')
@@ -450,6 +448,7 @@ const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatement
       WHERE workspace_id = ?
         AND lifecycle_state = 'dormant'
         AND COALESCE(retention_state, '') != 'tombstoned'
+        ${CURRENT_STATEMENT_MEMORY_FILTER_SQL}
       ORDER BY COALESCE(last_hit_at, last_used_at, updated_at, created_at) ASC, object_id ASC
     `,
   autonomousTombstoneStatement: `

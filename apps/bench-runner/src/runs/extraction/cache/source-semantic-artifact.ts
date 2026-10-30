@@ -1,4 +1,3 @@
-import { interactiveSourceTransportBinding } from "../request-profile.js";
 import {
   parseSourceSemanticRequest, completeEmptySourceSemantics, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES,
   type SourceSemanticProposalResult, type SourceSemanticRequest
@@ -7,27 +6,24 @@ import {
   AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT
 } from "@do-soul/alaya-protocol";
-import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
+import { readCachedEntry, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
 import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../compile-seed/cache/cached-response-metadata.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
 import { receiveSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
-import type { GeminiBatchInvocation, GeminiBatchPlan } from "../fill/batch/contract.js";
-import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
+import type { GeminiBatchInvocation } from "../fill/batch/contract.js";
 import { buildExtractionTransportProvenance } from "../transport-route.js";
-import { assertExtractionCacheIdentity } from "./cache-identity.js";
 import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity,
   readRetainedSourceSemanticManifestIdentity, computeSystemPromptSha256 } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
-import { assertInteractiveProvenance, inspectInteractiveTransportEvidence, interactiveResponseMetadata } from "./source-interactive-binding.js";
+import { inspectInteractiveTransportEvidence } from "./source-interactive-binding.js";
 import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
-import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
 import { inspectSettledProviderAttempt } from "../authority/attempt-ledger/admission.js";
 import {
-  SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION, parseSourceSemanticRequestLine
+  SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
 } from "../request-artifact.js";
 import { SourceRequestLineSchema, type SourceRequestLine } from "../request-artifact.js";
 
@@ -352,167 +348,5 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
     completionWitness: "finish_reason" }, retained.result.provenance.usage, true);
   if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
     throw new AlayaError("CONFLICT", "retained batch response metadata mismatch");
-  }
-}
-
-type SourceSemanticImportBase = Readonly<{
-  config: CompileSeedExtractionConfig; cacheRoot: string; writeLease: ExtractionCacheWriteLease;
-  sourceCorpus: string;
-}>;
-
-export function importSourceSemanticArtifact(input: SourceSemanticImportBase & (
-  | Readonly<{
-      plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt;
-      result: Parameters<GeminiBatchInvocation["importLine"]>[0];
-    }>
-  | Readonly<{ result: InteractiveSemanticLineResult }>
-)) {
-  return "plan" in input ? importBatchSourceSemanticArtifact(input) : importInteractiveSourceSemanticArtifact(input);
-}
-
-function admitSourceSemanticLine(input: SourceSemanticImportBase & {
-  readonly line: SourceRequestLine; readonly rawJson: string;
-  readonly retained?: Parameters<typeof receiveSourceSemanticBatchLine>[0]["retained"];
-}): { admitted: SourceSemanticProposalResult; completion: NonNullable<ReturnType<typeof retainableOutcome>> } {
-  const request = parseSourceSemanticRequest(JSON.parse(input.line.userPrompt));
-  let admitted: SourceSemanticProposalResult;
-  try {
-    admitted = receiveSourceSemanticBatchLine({
-      config: input.config, line: input.line, rawJson: input.rawJson, sourceCorpus: input.sourceCorpus,
-      proposal: proposalForRequest(input.sourceCorpus, request),
-      ...(input.retained === undefined ? {} : { retained: input.retained })
-    });
-  } catch (cause) {
-    throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
-  }
-  const completion = retainableOutcome(admitted);
-  if (completion === undefined) {
-    throw new SourceSemanticAdmissionError(`source semantics failed request-bound admission: ${JSON.stringify(admitted.outcome)}; raw_response_id=${admitted.raw_response_id}`);
-  }
-  return { admitted, completion };
-}
-
-function bindOpenSemanticsImport(input: SourceSemanticImportBase, line: SourceRequestLine) {
-  input.writeLease.assertOwned(); input.writeLease.assertRoot(input.cacheRoot);
-  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  if (identity === undefined || input.config.openSemantics === undefined) {
-    throw new AlayaError("CONFLICT", "open-semantics import requires a pinned typed generation");
-  }
-  assertExtractionCacheIdentity({
-    config: input.config, manifest: identity.manifest, systemPrompt: line.systemPrompt, validateProvider: true
-  });
-  parseSourceSemanticRequestLine(line, input.config);
-  return identity;
-}
-
-function importBatchSourceSemanticArtifact(input: SourceSemanticImportBase & Readonly<{
-  plan: GeminiBatchPlan; authority: ExtractionAuthorityReceipt;
-  result: Parameters<GeminiBatchInvocation["importLine"]>[0];
-}>) {
-  const { result, config, cacheRoot } = input;
-  assertCompleteProviderFinish(result.provenance.finishReason, config.requestProfile);
-  const identity = bindOpenSemanticsImport(input, result.line);
-  const transport = buildExtractionTransportProvenance(config);
-  const authority = readRetainedBatchAuthority(cacheRoot, input.plan.identity, input.authority.receipt_digest);
-  if (canonicalJson(transport) !== canonicalJson(buildExtractionTransportProvenance(authority.observation.transport!))) {
-    throw new AlayaError("CONFLICT", "open-semantics physical route differs from retained authority");
-  }
-  if (input.plan.model !== transport.model || input.plan.requestProfile !== config.requestProfile) {
-    throw new AlayaError("CONFLICT", "open-semantics native transport differs from generation");
-  }
-  const { admitted, completion } = admitSourceSemanticLine({
-    ...input, line: result.line, rawJson: result.rawJson,
-    retained: { plan: input.plan, provenance: result.provenance }
-  });
-  persistSemanticEntry(input, {
-    model: config.model, request_profile: config.requestProfile,
-    cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
-    transport_provenance: transport,
-    ...persistedResponseMetadata({ finishReason: result.provenance.finishReason, completionContractVersion: 1, completionWitness: "finish_reason" }, result.provenance.usage, true),
-    admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
-      request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
-    source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
-      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "gemini_batch", completion,
-      source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-      plan_identity: input.plan.identity, authority_receipt_digest: input.authority.receipt_digest, result }
-  }, identity.manifestSha256);
-  return admitted;
-}
-
-function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase & Readonly<{
-  result: InteractiveSemanticLineResult;
-}>) {
-  const { result, config } = input;
-  assertInteractiveProvenance(result.provenance, config.requestProfile);
-  assertCompleteProviderFinish(result.provenance.finishReason, config.requestProfile);
-  const response = interactiveResponseMetadata(result.provenance);
-  inspectCachedResponseMetadata(response.response_metadata, true);
-  const identity = bindOpenSemanticsImport(input, result.line);
-  const { admitted, completion } = admitSourceSemanticLine({
-    ...input, line: result.line, rawJson: result.rawJson
-  });
-  const entry: CachedExtractionEntry = {
-    model: config.model, request_profile: config.requestProfile,
-    cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
-    transport_provenance: buildExtractionTransportProvenance(config),
-    ...response,
-    admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
-      request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
-    source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
-      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
-      kind: interactiveSourceTransportBinding(config.requestProfile).kind, completion,
-      source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
-  };
-  inspectInteractiveTransportEvidence(entry.source_semantic as Extract<CachedSourceSemantic,
-    { kind: "gemini_generate_content" | "step_chat_completion" | "intern_chat_completion" }>, entry, input.cacheRoot);
-  persistSemanticEntry(input, entry, identity.manifestSha256);
-  return admitted;
-}
-
-export function writeDeterministicSourceSemanticArtifact(input: Readonly<{
-  config: CompileSeedExtractionConfig; cacheRoot: string; writeLease: ExtractionCacheWriteLease;
-  line: SourceRequestLine; sourceCorpus: string;
-}>) {
-  const { cacheRoot, config, writeLease, line } = input;
-  writeLease.assertOwned(); writeLease.assertRoot(cacheRoot);
-  const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  if (identity === undefined || config.openSemantics === undefined) throw new AlayaError("CONFLICT", "deterministic open semantics requires a pinned typed generation");
-  assertExtractionCacheIdentity({ config, manifest: identity.manifest, systemPrompt: line.systemPrompt, validateProvider: true });
-  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
-  if (computeCacheKey(config.model, config.requestProfile, line.systemPrompt, line.userPrompt) !== line.key) {
-    throw new AlayaError("CONFLICT", "deterministic open-semantics generation mismatch");
-  }
-  completeEmptySourceSemantics(request, proposalForRequest(input.sourceCorpus, request));
-  const rawJson = "";
-  const entry: CachedExtractionEntry = { model: config.model, request_profile: config.requestProfile,
-    cache_key: line.key, raw_json: rawJson, extracted_at: new Date().toISOString(),
-    admission_identity: { generation_sha256: extractionAdmissionGenerationSha256(identity.manifest),
-      request_key: line.key, raw_json_sha256: computeExtractionRawJsonSha256(rawJson) },
-    source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
-      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, kind: "deterministic_empty",
-      completion: "no_eligible_source", source_corpus: input.sourceCorpus,
-      producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, line } };
-  persistSemanticEntry(input, entry, identity.manifestSha256);
-}
-
-function persistSemanticEntry(input: Readonly<{ cacheRoot: string; config: CompileSeedExtractionConfig; writeLease: ExtractionCacheWriteLease }>,
-  entry: CachedExtractionEntry, manifestSha256: string) {
-  const { cacheRoot, config, writeLease } = input;
-  const existing = readCachedEntry(cacheRoot, entry.cache_key, config.model, config.requestProfile);
-  if (existing.status === "hit") {
-    const inspected = inspectCachedSourceSemantic(cacheRoot, entry.cache_key, config.model, config.requestProfile);
-    if (inspected.status !== "hit" && inspected.status !== "pending") {
-      throw new AlayaError("CONFLICT", "existing open-semantics generation is invalid");
-    }
-    if (canonicalJson(existing.entry.source_semantic) !== canonicalJson(entry.source_semantic)) {
-      throw new AlayaError("CONFLICT", "open-semantics import conflicts with admitted artifact");
-    }
-  } else {
-    if (existing.status !== "missing") throw new AlayaError("CONFLICT", existing.reason);
-    writeCachedExtraction(cacheRoot, entry.cache_key, entry);
-  }
-  writeLease.assertOwned();
-  if (readExtractionCacheManifestIdentity(cacheRoot)?.manifestSha256 !== manifestSha256) {
-    throw new AlayaError("CONFLICT", "open-semantics generation changed during publication");
   }
 }

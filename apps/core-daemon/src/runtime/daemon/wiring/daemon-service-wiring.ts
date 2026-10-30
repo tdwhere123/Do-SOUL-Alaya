@@ -25,7 +25,7 @@ import {
 } from "@do-soul/alaya-storage";
 import {
   ComputeRoutingService,
-  LocalHeuristics,
+  UnavailableGardenProvider,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import { createOfficialGardenExtractor } from "../../garden-wiring/official-garden-extractor.js";
@@ -119,7 +119,7 @@ export async function createGardenComputeRuntime(
     readonly rawConfigService: AppConfigService;
   }
 ) {
-  const localHeuristicsProvider = new LocalHeuristics();
+  const localHeuristicsProvider = new UnavailableGardenProvider();
   const gardenComputeProviderResolver = new GardenComputeProviderResolver({
     configReader: input.rawConfigService,
     fallbackProvider: localHeuristicsProvider,
@@ -165,7 +165,7 @@ function createHotReloadingConfigService(
   gardenComputeProviderResolver: GardenComputeProviderResolver,
   computeRoutingService: ComputeRoutingService,
   officialGardenProvider: GardenComputeProviderResolver,
-  localHeuristicsProvider: LocalHeuristics
+  localHeuristicsProvider: UnavailableGardenProvider
 ): AppConfigService {
   return {
     ...rawConfigService,

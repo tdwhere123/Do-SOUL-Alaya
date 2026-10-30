@@ -115,12 +115,12 @@ export function groundedExtractor() {
 
 export function buildGroundedInterpretationResponse(userPrompt: string): string {
   const request = JSON.parse(userPrompt) as {
-    readonly source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
+    readonly messages: readonly { readonly message_id: string; readonly role: string; readonly text: string }[];
   };
-  if (request.source_assertions.length === 0) throw new Error("expected a source assertion");
-  return JSON.stringify({ interpretations: request.source_assertions.map((assertion) => ({
-    assertion_id: assertion.assertion_id,
-    relations: [{ predicate: { text: assertion.text }, arguments: [], qualifiers: [] }]
+  if (!Array.isArray(request.messages) || request.messages.length === 0) throw new Error("expected a session statement request");
+  return JSON.stringify({ messages: request.messages.map(message => ({ message_id: message.message_id,
+    statements: message.role === "user" && message.text.trim().length > 0
+      ? [{ text: message.text, relation: "recorded event" }] : []
   })) });
 }
 

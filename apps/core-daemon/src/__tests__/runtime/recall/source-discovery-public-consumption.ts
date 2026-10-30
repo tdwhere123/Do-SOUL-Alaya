@@ -1,6 +1,5 @@
 import {
   BoundSourceInterpretationSchema,
-  CONDITIONAL_FIELD_SCHEMA_VERSION,
   locateSourceInterpretation,
   SoulMemorySearchRequestSchema,
   sourceRecallTarget,
@@ -9,21 +8,10 @@ import {
   type SoulMemorySearchResponse,
   type SourceLocatedInterpretation
 } from "@do-soul/alaya-protocol";
-import {
-  compileQuerySourceSketch,
-  toSourceRootObserverRow,
-  type ConditionalFieldExecutionReceipt,
-  type ObserverReaders
-} from "@do-soul/alaya-core";
-import {
-  observeConditionalField,
-  startObserverCursor
-} from "../../../../../../packages/core/src/recall/conditional-field/observers/observe.js";
+import type { ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
+import { deploymentProposal } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment-proposal.fixture.js";
 import {
   SqliteEvidenceCapsuleRepo,
-  SqliteFieldSourceRecordRepo,
-  SqliteSourceHintReader,
-  SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import type { FirstExposurePage } from
@@ -35,14 +23,8 @@ import {
   type CanaryCase
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import {
-  INTERPRETATION_CLOCK,
-  SNAPSHOT_ID,
-  associativeView,
-  defaultBudget,
-  defaultView,
   identityAssociationCap
 } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
-import { fieldSha256 } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import type { RecallUsageToolCallContext } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 
 export const PUBLIC_CONSUMPTION_PROTOCOL = Object.freeze({
@@ -184,41 +166,6 @@ export type ConsumptionTrace = Readonly<{
   readonly expansions_by_target: Readonly<Record<string, number>>;
 }>;
 
-export type NativeDiscovery = Readonly<{
-  readonly first_id: string | undefined;
-  readonly ids: readonly string[];
-  readonly wording: string | undefined;
-  readonly visits: number;
-  readonly bytes: number;
-  readonly work_units: number;
-  readonly candidate_scans: number;
-  readonly hydrated_contexts: number;
-  readonly lookup_kind: string | undefined;
-  readonly lookup_reasons: NonNullable<SoulMemorySearchResponse["results"][number]["source_lookup_reasons"]>;
-}>;
-
-export function compileCanarySketch(
-  canary: CanaryCase,
-  lookup: LookupMode,
-  view: ResultView,
-  enumeration: Enumeration
-) {
-  return compileQuerySourceSketch({
-    snapshot_id: SNAPSHOT_ID,
-    budget: defaultBudget(),
-    interpretation_clock: INTERPRETATION_CLOCK,
-    view: {
-      ...(enumeration === "associative" ? associativeView() : defaultView()),
-      result_kind_view: view
-    },
-    sketch: {
-      original_query: canary.original_query,
-      relation: canary.sketch,
-      lookup_mode: lookup
-    }
-  });
-}
-
 export function publicSearchRequest(
   canary: CanaryCase,
   lookup: LookupMode,
@@ -226,7 +173,6 @@ export function publicSearchRequest(
   enumeration: Enumeration,
   maxResults: number = PUBLIC_CONSUMPTION_PROTOCOL.max_results
 ): SoulMemorySearchRequest {
-  const compiled = compileCanarySketch(canary, lookup, view, enumeration);
   return SoulMemorySearchRequestSchema.parse({
     query: canary.original_query,
     max_results: maxResults,
@@ -235,7 +181,8 @@ export function publicSearchRequest(
     domain_tags: null,
     result_kind_view: view,
     enumeration_policy: enumeration,
-    interpretation_proposal: compiled.interpretation_proposal,
+    // Explicit graph control shares native nomination, but its conditional proof can differ.
+    ...(lookup === "proposal" ? { interpretation_proposal: deploymentProposal(canary.original_query) } : {}),
     protocol_version: 1,
     supported_result_kinds: ["memory_entry", "source_evidence"],
     supports_source_evidence: true,
@@ -436,96 +383,6 @@ export function insertBoundGist(
   return insertLocatedBoundGist(
     database, objectId, source, rootId, digest, evidenceObjectId, located, workspaceId, runId, now
   );
-}
-
-/** Private proposal-observer mechanism probe; this bypasses ordinary native nomination.
- * Its reasons are not evidence that a public worker exposed or used a proposal.
- */
-export function observePlantedDiscovery(
-  database: StorageDatabase,
-  workspaceId: string,
-  canary: CanaryCase,
-  lookup: LookupMode,
-  view: ResultView,
-  enumeration: Enumeration
-): NativeDiscovery {
-  const measurement = { candidateScans: 0, hydratedContexts: 0 };
-  const query = compileCanarySketch(canary, lookup, view, enumeration);
-  const observed = observeConditionalField({
-    lease: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      lease_id: "lease-public-consumption",
-      snapshot_id: SNAPSHOT_ID,
-      query_id: query.query_id,
-      status: "active"
-    },
-    action: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      action: "seed",
-      region_id: "seed",
-      work_limit: PUBLIC_CONSUMPTION_PROTOCOL.native_observer_work_limit
-    },
-    cursor: startObserverCursor({
-      cursor_id: "seed",
-      snapshot_id: SNAPSHOT_ID,
-      query_id: query.query_id,
-      region_id: "seed"
-    }),
-    query,
-    workspace_id: workspaceId,
-    authorized_scopes: null,
-    readers: sqliteObserverReaders(database, measurement)
-  });
-  return {
-    first_id: observed.page.observations[0]?.object_id,
-    ids: observed.page.observations.map((row) => row.object_id),
-    wording: observed.source_roots?.[0]?.content,
-    visits: observed.work.native_visits,
-    bytes: observed.work.bytes_read,
-    work_units: observed.work.work_units,
-    candidate_scans: measurement.candidateScans,
-    hydrated_contexts: measurement.hydratedContexts,
-    lookup_kind: observed.lookup_reasons?.[0]?.kind,
-    lookup_reasons: observed.lookup_reasons ?? []
-  };
-}
-
-function sqliteObserverReaders(
-  database: StorageDatabase,
-  measurement: { candidateScans: number; hydratedContexts: number }
-): ObserverReaders {
-  const roots = new SqliteSourceRootRecallReader(
-    new SqliteFieldSourceRecordRepo(database, fieldSha256),
-    new SqliteEvidenceCapsuleRepo(database)
-  );
-  return {
-    sourceRoots: (input) => {
-      const page = roots.page(input);
-      return { ...page, rows: page.rows.map(toSourceRootObserverRow) };
-    },
-    boundInterpretations: (input) => {
-      const page = new SqliteSourceHintReader(database.connection).pageBoundInterpretations(input);
-      measurement.candidateScans += page.nativeVisits;
-      return page;
-    },
-    sourceTextHints: (input) => {
-      const page = new SqliteSourceHintReader(database.connection).pageSourceTextHints(input);
-      measurement.candidateScans += page.nativeVisits;
-      return { ...page, rows: page.rows.map(toSourceRootObserverRow) };
-    },
-    sourceRoot: (input) => {
-      measurement.hydratedContexts += 1;
-      const page = roots.hydrate(input.workspaceId, sourceRecallTarget({
-        workspace_id: input.workspaceId,
-        root_kind: input.rootKind,
-        root_id: input.rootId,
-        source_version: input.revision!,
-        content_digest: input.digest!,
-        evidence_object_id: input.evidenceObjectId ?? null
-      }), input.byteLimit, input.offset, input.nativeByteLimit);
-      return { ...page, row: page.row === null ? null : toSourceRootObserverRow(page.row) };
-    }
-  };
 }
 
 function publicRunResourceRejected(trace: ConsumptionTrace): boolean {

@@ -5,7 +5,7 @@ import { mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { readExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
@@ -20,6 +20,7 @@ import {
   groundedExtractionResult,
   providerBackedResponseResult
 } from "./fixture.js";
+import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { authorizedHttpExtractor, writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const VARIANT = "longmemeval_oracle";
@@ -133,7 +134,7 @@ describe("extraction-fill cache validity", () => {
           const key = computeCacheKey(
             "fixture-model",
             "provider-default-v1",
-            OFFICIAL_API_SYSTEM_PROMPT,
+            SOURCE_STATEMENTS_PROMPT,
             input.userPrompt
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
@@ -157,11 +158,10 @@ describe("extraction-fill cache validity", () => {
     expect(temporaryShards).toEqual([]);
   });
 
-  it("aggregates retry and terminal transport telemetry", async () => {
+  it("stops current fill on a physical rate limit without hidden retries or completion", async () => {
     await writeDataset();
-    let call = 0;
     const logs: string[] = [];
-    const recovered = authorizedHttpExtractor({ rateLimitRetries: 1 });
+    const limited = authorizedHttpExtractor({ rateLimitRetries: 1 });
     const run = runExtractionFill({
       variant: VARIANT,
       cacheRoot,
@@ -169,22 +169,7 @@ describe("extraction-fill cache validity", () => {
       pinnedMetaRoot,
       concurrency: 1,
       authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
-      extractorFactory: (config) => {
-        const transport = recovered.factory(config);
-        return {
-          extract: async (input) => {
-            call += 1;
-            if (call === 1) return transport.extract(input);
-            const error = new Error("provider retries exhausted");
-            (error as { benchRetry?: unknown }).benchRetry = {
-              retryCount: 3,
-              retryClassification: "failure_max_retries",
-              rateLimitRetries: 2
-            };
-            throw error;
-          }
-        };
-      },
+      extractorFactory: limited.factory,
       log: (message) => logs.push(message)
     });
 
@@ -193,8 +178,14 @@ describe("extraction-fill cache validity", () => {
       retryClassification: "failure_max_retries"
     });
     expect(logs).toEqual(expect.arrayContaining([expect.stringMatching(
-      /retry_classification=failure_max_retries.*retry_successes=1.*rate_limit_retries=3/u
+      /retry_classification=failure_max_retries.*retry_successes=0.*rate_limit_retries=1/u
     )]));
+    expect(limited.extract).toHaveBeenCalledOnce();
+    expect(limited.extract.mock.calls[0]![0].retryMode).toBe("disabled");
+    expect(listExtractionAttemptLedgerRecords(cacheRoot)).toEqual([
+      expect.objectContaining({ attempts: 1, successful_shards: [] })
+    ]);
+    expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({ fill_status: "in_progress", cached_turns: 0, coverage: 0 });
     expect(logs.some((message) => message.includes("[extraction-fill] done"))).toBe(false);
   });
 

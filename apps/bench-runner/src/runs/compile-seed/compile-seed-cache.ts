@@ -1,18 +1,15 @@
 import {
-  parseOfficialApiExtractionRequest,
-  classifyOfficialApiExtractionResult,
-  stringifyOfficialApiExtractionRequest,
   OfficialApiInterpretationAdmissionError,
-  type OfficialApiExtractionRequest,
   type OfficialApiInterpretationEntryRejection,
   type OfficialApiInterpretationReceiveReceipt
 } from "@do-soul/alaya-soul";
+import type { SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { parseStatementRequest, inspectStatementResponse, assertStatementRequestPrompt } from "../extraction/source-statement-request.js";
 import {
   classifyExtractionEnvelope,
   extractionEnvelopeCountsTowardCoverage,
   EXTRACTION_REQUEST_COMPLETION_VERSION,
   type ExtractionRequestCompletion,
-  EMPTY_INTERPRETATIONS_ENVELOPE,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../extraction/empty-classification.js";
 import { resolveEffectiveExtractionCacheRoot } from "./compile-seed-config.js";
@@ -82,7 +79,7 @@ interface CachingSignalExtractorOptions {
   readonly config: Pick<
     CompileSeedExtractionConfig,
     "model" | "modelFamily" | "providerUrl" | "requestProfile" |
-      "transportModel" | "transportProviderUrl"
+      "transportModel" | "transportProviderUrl" | "sourcePacking"
   >;
   readonly cacheRoot?: string;
   readonly stats?: CompileSeedExtractionStats;
@@ -96,8 +93,6 @@ interface CachingSignalExtractorOptions {
   readonly providerAttemptLineageDigest?: string;
   /** Called only after a reserved provider-backed shard is atomically written. */
   readonly onLiveProviderExtractionSucceeded?: (cacheKey: string) => void;
-  /** Records an atomically written canonical empty shard without a provider attempt. */
-  readonly onDeterministicExtractionSucceeded?: (cacheKey: string) => void;
   /** Releases a reserved shard slot after its live delegate fails. */
   readonly onLiveExtractionFailed?: (cacheKey: string) => void;
   /** Records the exact provider-reported usage, or an explicit unavailable outcome. */
@@ -174,13 +169,14 @@ export function importExtractionResponse(input: {
   const { writeLease: lease, cacheRoot, result } = input;
   lease.assertOwned();
   lease.assertRoot(cacheRoot);
+  assertStatementRequestPrompt(input.systemPrompt);
   const extraction = extractCacheInputIdentity(input.userPrompt);
   const key = computeCacheKey(input.config.model, input.config.requestProfile,
     input.systemPrompt, extraction.canonical);
   if (key !== input.expectedCacheKey) throw new ExtractionCacheInvariantError("import request identity mismatch");
   let completion: ExtractionRequestCompletion;
   try {
-    completion = classifyOfficialApiExtractionResult(result.rawJson, extraction.request, input.sourceCorpus).status;
+    completion = classifyStatementResponse(result.rawJson, extraction.request);
   } catch (cause) {
     throw new ExtractionResponseAdmissionError("provider response failed request-bound admission", { cause });
   }
@@ -202,6 +198,7 @@ async function extractWithCache(
   cacheRoot: string,
   input: Parameters<BenchSignalExtractor["extract"]>[0]
 ): ReturnType<BenchSignalExtractor["extract"]> {
+  assertStatementRequestPrompt(input.systemPrompt);
   const extractionInput = extractCacheInputIdentity(input.userPrompt);
   const cacheKey = computeCacheKey(
     options.config.model,
@@ -224,6 +221,8 @@ async function extractWithCache(
   const cached = inspectPrimaryShard(options, cacheRoot, cacheKey);
   if (cached.status === "hit") {
     recordCacheHit(options, cacheKey, cached);
+    options.stats?.lastStatementResponses?.push({ request: extractionInput.request, rawJson: cached.rawJson,
+      ...(cached.usage === undefined ? {} : { usage: { input_tokens: cached.usage.inputTokens, output_tokens: cached.usage.outputTokens } }) });
     options.onExtractionProgress?.();
     return cachedExtractionResult(cached);
   }
@@ -238,14 +237,6 @@ async function extractWithCache(
       `[longmemeval cache-only] extraction fixture ${cached.status}: ` +
       `${cacheKey}; live extraction disabled${cached.reason === undefined ? "" : ` (${cached.reason})`}`
     );
-  }
-  if (extractionInput.request.source_assertions.length === 0) {
-    if (options.requireProviderBackedExtraction) {
-      throw new ExtractionCacheInvariantError(
-        "catalog refill requires provider-backed extraction for every authorized shard"
-      );
-    }
-    return persistDeterministicEmpty(options, cacheRoot, cacheKey, input);
   }
   assertLiveAttemptAuthority(options);
   return extractLive(options, cacheRoot, cacheKey, input);
@@ -262,50 +253,6 @@ function assertLiveAttemptAuthority(options: CachingSignalExtractorOptions): voi
       "live extraction requires provider attempt reservation, settlement, and shard admission authority"
     );
   }
-}
-
-async function persistDeterministicEmpty(
-  options: CachingSignalExtractorOptions,
-  cacheRoot: string,
-  cacheKey: string,
-  input: Parameters<BenchSignalExtractor["extract"]>[0]
-): ReturnType<BenchSignalExtractor["extract"]> {
-  const ownedLease = options.writeLease;
-  const lease = ownedLease ?? acquireExtractionCacheWriteLease(cacheRoot);
-  const write = async (): ReturnType<BenchSignalExtractor["extract"]> => {
-    lease.assertOwned();
-    const recached = inspectPrimaryShard(options, cacheRoot, cacheKey);
-    if (recached.status === "hit") {
-      recordCacheHit(options, cacheKey, recached);
-      options.onExtractionProgress?.();
-      return cachedExtractionResult(recached);
-    }
-    if (recached.status === "quarantined") {
-      return refuseQuarantinedExtraction(cacheKey, recached.reason);
-    }
-    if (recached.status === "retired") {
-      return refuseRetiredExtraction(cacheKey, recached.reason);
-    }
-    const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
-    const result = { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE };
-    const persisted = persistExtraction(
-      options, cacheRoot, cacheKey, result, false,
-      extractCacheInputIdentity(input.userPrompt).request
-    );
-    const inspection = persisted.inspection;
-    assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
-    options.onDeterministicExtractionSucceeded?.(cacheKey);
-    if (options.stats !== undefined) {
-      options.stats.lastExtractionSource = "cache";
-      options.stats.lastCacheKey = cacheKey;
-      options.stats.cacheHits += 1;
-      recordExtractionInspection(options, cacheKey, "cache", inspection);
-    }
-    options.onExtractionProgress?.();
-    return result;
-  };
-  if (ownedLease !== undefined) return write();
-  return withExtractionCacheWriteLease(lease, write);
 }
 
 function recordCacheHit(
@@ -435,11 +382,7 @@ async function extractLiveWithLease(
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
   const request = extractCacheInputIdentity(input.userPrompt).request;
-  const completion = classifyOfficialApiExtractionResult(
-    result.rawJson,
-    request,
-    requireExtractSourceCorpus(input)
-  ).status;
+  const completion = classifyStatementResponse(result.rawJson, request);
   let persisted: ReturnType<typeof persistExtraction>;
   try {
     persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion,
@@ -458,6 +401,8 @@ async function extractLiveWithLease(
     throw cause;
   }
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
+  options.stats?.lastStatementResponses?.push({ request, rawJson: result.rawJson,
+    ...(result.usage === undefined ? {} : { usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens } }) });
   return result;
 }
 
@@ -467,25 +412,16 @@ function withSemanticValidation(
   return {
     ...input,
     validateRawJson: (rawJson) => {
-      classifyOfficialApiExtractionResult(
-        rawJson,
-        extractCacheInputIdentity(input.userPrompt).request,
-        requireExtractSourceCorpus(input)
-      );
+      classifyStatementResponse(rawJson, extractCacheInputIdentity(input.userPrompt).request);
       input.validateRawJson?.(rawJson);
     }
   };
 }
 
-function requireExtractSourceCorpus(
-  input: Parameters<BenchSignalExtractor["extract"]>[0]
-): string {
-  if (input.sourceCorpus === undefined) {
-    throw new ExtractionCacheInvariantError(
-      "live extraction classify requires the source corpus"
-    );
-  }
-  return input.sourceCorpus;
+function classifyStatementResponse(rawJson: string, request: SourceStatementRequest): ExtractionRequestCompletion {
+  const inspected = inspectStatementResponse(request, rawJson);
+  if (inspected.status === "unclassified_empty") throw new ExtractionResponseAdmissionError("no admitted statement or valid-empty message completion");
+  return inspected.status;
 }
 
 function markLiveExtractionStarted(
@@ -503,7 +439,7 @@ function persistExtraction(
   cacheKey: string,
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
   providerBacked: boolean,
-  request: OfficialApiExtractionRequest,
+  request: SourceStatementRequest,
   requestCompletion?: ExtractionRequestCompletion,
   providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
     readonly lastUsage?: BenchProviderUsage | null },
@@ -517,7 +453,8 @@ function persistExtraction(
   readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
 } {
   const classificationContext = {
-    sourceAssertionCount: request.source_assertions.length,
+    sourceAssertionCount: request.messages.length,
+    sourceStatementRequest: request,
     planMembership: "in_plan" as const,
     requestCompletion
   };
@@ -544,6 +481,7 @@ function persistExtraction(
       raw_json: result.rawJson,
       extracted_at: new Date().toISOString(),
       empty_classification: emptyClassification,
+      source_statement: { request, receipt: inspectStatementResponse(request, result.rawJson).receipt },
       ...(providerBacked ? {
         transport_provenance: buildExtractionTransportProvenance(options.config),
         ...(providerAttempt === undefined ? {} : { provider_attempt: {
@@ -674,12 +612,12 @@ function assertWriteIdentity(
 }
 
 function extractCacheInputIdentity(userPrompt: string): {
-  readonly request: OfficialApiExtractionRequest;
+  readonly request: SourceStatementRequest;
   readonly canonical: string;
 } {
   try {
-    const request = parseOfficialApiExtractionRequest(JSON.parse(userPrompt) as unknown);
-    return { request, canonical: stringifyOfficialApiExtractionRequest(request) };
+    const request = parseStatementRequest(userPrompt);
+    return { request, canonical: JSON.stringify(request) };
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
       "cache extractor received a non-canonical official API extraction request",

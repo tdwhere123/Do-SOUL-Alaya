@@ -12,7 +12,6 @@ import {
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
-  ExtractionResponseAdmissionError,
   computeCacheKey,
   importExtractionResponse,
   inspectCachedExtraction
@@ -56,7 +55,7 @@ describe("interpretation admission diagnostics", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("adapts structured locator refusals without writing a completed shard", () => {
+  it("preserves retained locator diagnostics while refusing renewed cache admission", () => {
     const source = "we planned work because we needed time.";
     const request = buildOfficialApiExtractionRequest(source, []);
     const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
@@ -87,35 +86,12 @@ describe("interpretation admission diagnostics", () => {
         expectedCacheKey,
         sourceCorpus,
         result: { rawJson, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
-      })).toThrow(ExtractionResponseAdmissionError);
-      try {
-        importExtractionResponse({
-          config: {
-            model: MODEL,
-            modelFamily: MODEL,
-            providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-            requestProfile: PROFILE
-          },
-          cacheRoot: root,
-          writeLease: lease,
-          systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-          userPrompt,
-          expectedCacheKey,
-          sourceCorpus,
-          result: { rawJson, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(ExtractionResponseAdmissionError);
-        const admission = error as ExtractionResponseAdmissionError;
-        expect(admission.message).toBe("provider response failed request-bound admission");
-        expect(admission.cause).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
-        expect(admission.rejections[0]).toMatchObject({
-          assertion_id: 1,
-          candidate_index: 0,
-          diagnostic_reason: "ambiguous"
-        });
-        expect(admission.receive?.located[0]?.outcome).toBe("failed");
-      }
+      })).toThrow("statement request prompt identity mismatch");
+      expect(() => classifyOfficialApiExtractionResult(rawJson, request, sourceCorpus))
+        .toThrow(OfficialApiInterpretationAdmissionError);
+      const received = receiveOfficialApiSourceInterpretations(rawJson, request, { sourceCorpus, artifactKey: "retained" });
+      expect(received.rejections[0]).toMatchObject({ assertion_id: 1, candidate_index: 0, diagnostic_reason: "ambiguous" });
+      expect(received.located[0]?.outcome).toBe("failed");
       expect(inspectCachedExtraction(root, expectedCacheKey, MODEL, PROFILE).status).toBe("missing");
       expect(fetches).toBe(0);
     } finally {
@@ -123,7 +99,7 @@ describe("interpretation admission diagnostics", () => {
     }
   });
 
-  it("routes malformed JSON through receive into import refusal without a completed shard", () => {
+  it("retains malformed-response diagnostics without reopening retired import", () => {
     const source = "Alice uses tools.";
     const request = buildOfficialApiExtractionRequest(source, []);
     const sourceCorpus = buildOfficialApiSourceCorpus(source, []);
@@ -162,11 +138,8 @@ describe("interpretation admission diagnostics", () => {
         });
         throw new Error("expected import admission refusal");
       } catch (error) {
-        expect(error).toBeInstanceOf(ExtractionResponseAdmissionError);
-        const admission = error as ExtractionResponseAdmissionError;
-        expect(admission.cause).toBeInstanceOf(OfficialApiInterpretationAdmissionError);
-        expect(admission.rejections[0]?.reason).toBe("malformed_response");
-        expect(admission.receive?.rejections[0]?.reason).toBe("malformed_response");
+        expect(error).toBeInstanceOf(TypeError);
+        expect((error as Error).message).toBe("statement request prompt identity mismatch");
       }
       expect(inspectCachedExtraction(root, expectedCacheKey, MODEL, PROFILE).status).toBe("missing");
       expect(fetches).toBe(0);

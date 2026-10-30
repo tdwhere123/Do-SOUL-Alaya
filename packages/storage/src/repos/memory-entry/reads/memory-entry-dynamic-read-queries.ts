@@ -1,4 +1,5 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { ACTIVE_MEMORY_FILTER_SQL, ACTIVE_MEMORY_ENTRIES_FILTER_SQL } from "../statements/recall/active-memory-filter-sql.js";
 import { StorageError } from "../../../shared/errors.js";
 import type { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prepared-statement-cache.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
@@ -74,8 +75,7 @@ export class MemoryEntryDynamicReadQueries {
         ON filter_tags.value = tag.value
       WHERE memory_entries.workspace_id = ?
         AND memory_entries.storage_tier = 'hot'
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+        ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ORDER BY memory_entries.created_at ASC, memory_entries.object_id ASC
     `);
 
@@ -202,8 +202,7 @@ function queryEvidenceRefRows(
         `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
        FROM memory_entries
        WHERE workspace_id = ?
-         AND COALESCE(retention_state, '') != 'tombstoned'
-         AND COALESCE(lifecycle_state, '') != 'dormant'
+         ${ACTIVE_MEMORY_FILTER_SQL}
          AND object_id IN (
            SELECT memory_id
            FROM memory_entry_evidence_refs

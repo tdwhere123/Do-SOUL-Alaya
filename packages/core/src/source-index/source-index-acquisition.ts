@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
   BoundedIdSchema, QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
-  canonicalJson, hashContentDigest, sourceIndexProfileId,
+  canonicalJson, hashContentDigest, sourceIndexProfileId, sourceIndexNativeRootKey,
   unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceSemanticResourceBudget, type SourceIndexQueryCapacity,
@@ -611,7 +611,7 @@ class AcquisitionQuery {
     if (!Number.isFinite(cosine)) return;
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
-    const key = this.candidate?.grouped === true ? candidate.window.window_id : candidate.source.root_key;
+    const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);
     // Both keys are captured by the native reader. Reuse their identities rather
     // than reconstructing the same canonical root for every vector window.
     this.meter.charge(VECTOR_COST.lookup_work, 0, "source vector root lookup");
@@ -720,12 +720,12 @@ class AcquisitionQuery {
       lexical = { ...lexical, domain: "question_time" };
       this.meter.retain(lexical, "restricted lexical rank provenance");
     }
-    const key = source.root_key, previous = this.nominations.get(key);
+    const key = sourceIndexNativeRootKey(source), previous = this.nominations.get(key);
     if (previous !== undefined) {
       this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
       this.retainOccurrence(source, lexical, vector);
       if (lexical !== null) previous.lexical.push(lexical);
-      if (vector !== null) previous.vector = vector;
+      if (vector !== null && previous.source.root_key === source.root_key) previous.vector = vector;
       this.counts.duplicate++;
       this.observeNomination(channel, source, "duplicate", undefined, previous.source.target); return;
     }

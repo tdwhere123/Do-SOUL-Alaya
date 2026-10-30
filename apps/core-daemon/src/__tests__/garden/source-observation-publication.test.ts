@@ -3,10 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-  BoundSourceInterpretationSchema,
+  BoundSourceStatementSchema,
   CandidateMemorySignalSchema,
-  SOURCE_INTERPRETATION_CONTRACT,
-  locateSourceInterpretation
+  SOURCE_STATEMENTS_CONTRACT, SourceStatementSignalSchema
 } from "@do-soul/alaya-protocol";
 import {
   DynamicsService,
@@ -40,6 +39,22 @@ import { createSourceGroundingDeferTransitions } from "../../runtime/source-grou
 const CLOCK = "2026-09-14T12:00:00.000Z";
 const ASSERTION = "Alice uses tools.";
 const SOURCE = `User: ${ASSERTION}`;
+const hostCaptureBinding = (request: { readonly workspace_id: string }) => ({ namespace: "recorded-source",
+  workspace_id: request.workspace_id, producer: "recorded-host", basis: "pinned_dataset" as const });
+const hostOccurrences = [{ occurrence_id: "message-1", utf8_span: [6, Buffer.byteLength(SOURCE)] as const,
+  role: "user" as const, channel: null, author_ref: null, container_ref: null, upstream_message_ref: null,
+  upstream_position: null, completeness: "complete" as const, fidelity: "original_bytes" as const }];
+function statementSignal(sourceRootId: string, signalId: string) {
+  return SourceStatementSignalSchema.parse({ signal_id: signalId, workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+    source: "garden_compile", signal_kind: "potential_semantic_observation", interpretation_contract: SOURCE_STATEMENTS_CONTRACT,
+    object_kind: null, confidence: null, scope_hint: "project", domain_tags: [], evidence_refs: [], source_memory_refs: [],
+    supersedes_refs: [], exception_to_refs: [], contradicts_refs: [], incompatible_with_refs: [], created_at: CLOCK,
+    source_observation: { observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1" },
+    raw_payload: { source_statement: { contract: SOURCE_STATEMENTS_CONTRACT, session_id: "session-1", artifact_key: "artifact-1",
+      source_root_id: sourceRootId, source_corpus_digest: fieldContractSha256(SOURCE), source_span: hostOccurrences[0]!.utf8_span,
+      message: { message_id: "message-1", role: "user", recorded_at: null, text: ASSERTION },
+      statement: { text: ASSERTION, relation: "tool usage" } } } });
+}
 
 describe("source observation publication wiring", () => {
   it.each(["normal", "lookup replacement", "memory transaction withdrawal"] as const)("publishes only the current source across %s and reopen", async (interleaving) => {
@@ -75,13 +90,13 @@ describe("source observation publication wiring", () => {
       });
       const sourceAdmission = createAuditedSourceAdmission({
         stores: field.stores, eventLogRepo, sha256: fieldContractSha256,
-        runtimeNotifier: notifier
+        runtimeNotifier: notifier, hostCaptureBinding
       });
       const admitted = await sourceAdmission.admit({
         workspace_id: "workspace-1", source_id: "artifact-1", source_version: "1",
         content_bytes: SOURCE, evidence_object_id: null, recorded_at: CLOCK,
         event_time: null, valid_from: null, valid_to: null, speaker: "user",
-        scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
+        scope_class: "project", spans: deriveAddressableSpanViews(SOURCE), host_occurrences: hostOccurrences
       }, { workspaceId: "workspace-1" });
       const router = createMaterializationRouter({
         wiring: {
@@ -124,32 +139,7 @@ describe("source observation publication wiring", () => {
           materialize: async (signal, context) => await router.materializeSignal(signal, context)
         }
       });
-      const located = locateSourceInterpretation({
-        source: SOURCE, artifactKey: "artifact-1", sha256: fieldContractSha256,
-        assertion: {
-          assertion_id: 1, text: ASSERTION,
-          source_span: [SOURCE.indexOf(ASSERTION), SOURCE.indexOf(ASSERTION) + ASSERTION.length]
-        },
-        response: { kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [{
-          predicate: { text: "uses" }, arguments: [
-            { role: "agent", phrase: { text: "Alice" } },
-            { role: "object", phrase: { text: "tools" } }
-          ], qualifiers: []
-        }] }] } }
-      });
-      const signal = CandidateMemorySignalSchema.parse({
-        signal_id: "observation-1", workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
-        source: "garden_compile", signal_kind: "potential_semantic_observation",
-        interpretation_contract: SOURCE_INTERPRETATION_CONTRACT, object_kind: null, confidence: null,
-        scope_hint: "project", domain_tags: [], evidence_refs: [],
-        source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
-        contradicts_refs: [], incompatible_with_refs: [],
-        raw_payload: { source_interpretation: located, policy: "admin" },
-        source_observation: {
-          observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1"
-        },
-        created_at: CLOCK
-      });
+      const signal = statementSignal(admitted.record.identity, "observation-1");
       if (interleaving === "lookup replacement") {
         const lookup = memoryService.findByIdScoped.bind(memoryService);
         vi.spyOn(memoryService, "findByIdScoped").mockImplementationOnce(async (...args) => {
@@ -192,8 +182,7 @@ describe("source observation publication wiring", () => {
       });
       expect(liveMemory?.evidence_refs).toEqual([evidenceId]);
       const withdrawn = await signalService.receiveSignal({
-        ...signal, signal_id: "stale-observation",
-        raw_payload: { source_interpretation: located }
+        ...signal, signal_id: "stale-observation"
       });
       database.connection.prepare(
         "UPDATE source_records SET source_body = NULL WHERE workspace_id = ? AND record_id = ?"
@@ -207,13 +196,12 @@ describe("source observation publication wiring", () => {
 
       database.close();
       database = initDatabase({ filename });
-      const reopenedMemory = await new SqliteMemoryEntryRepo(database).findById(memoryId!);
+      await expect(new SqliteMemoryEntryRepo(database).findById(memoryId!)).rejects.toThrow("no longer current");
       const reopenedEvidence = await new SqliteEvidenceCapsuleRepo(database).findById(evidenceId!);
-      expect(reopenedMemory).toMatchObject({
-        object_id: memoryId, dimension: "observation", confidence: null, content: ASSERTION
-      });
-      const rebound = BoundSourceInterpretationSchema.parse(JSON.parse(reopenedEvidence!.gist));
-      expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
+      expect(database.connection.prepare("SELECT object_id,lifecycle_state,content FROM memory_entries WHERE object_id=?").get(memoryId))
+        .toEqual({ object_id: memoryId, lifecycle_state: "active", content: ASSERTION });
+      const rebound = BoundSourceStatementSchema.parse(JSON.parse(reopenedEvidence!.gist));
+      expect(rebound.message.message_id).toBe("message-1");
       expect(rebound.source_target.root_id).toBe(admitted.record.identity);
       expect(rebound.source_target.evidence_object_id).toBe(admitted.record.evidence_object_id);
       expect(reopenedEvidence?.excerpt).toBe(ASSERTION);
@@ -310,13 +298,13 @@ describe("source observation publication wiring", () => {
       });
       const sourceAdmission = createAuditedSourceAdmission({
         stores: field.stores, eventLogRepo, sha256: fieldContractSha256,
-        runtimeNotifier: notifier
+        runtimeNotifier: notifier, hostCaptureBinding
       });
-      await sourceAdmission.admit({
+      const original = await sourceAdmission.admit({
         workspace_id: "workspace-1", source_id: "artifact-1", source_version: "1",
         content_bytes: SOURCE, evidence_object_id: null, recorded_at: CLOCK,
         event_time: null, valid_from: null, valid_to: null, speaker: "user",
-        scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
+        scope_class: "project", spans: deriveAddressableSpanViews(SOURCE), host_occurrences: hostOccurrences
       }, { workspaceId: "workspace-1" });
       const v2 = await sourceAdmission.admit({
         workspace_id: "workspace-1", source_id: "artifact-1", source_version: "2",
@@ -347,27 +335,7 @@ describe("source observation publication wiring", () => {
         conflictDetectionService: null, reconciliationService: null,
         handoffGapHandler: new InMemoryHandoffGapHandler()
       });
-      const located = locateSourceInterpretation({
-        source: SOURCE, artifactKey: "artifact-1", sha256: fieldContractSha256,
-        assertion: {
-          assertion_id: 1, text: ASSERTION,
-          source_span: [SOURCE.indexOf(ASSERTION), SOURCE.indexOf(ASSERTION) + ASSERTION.length]
-        },
-        response: { kind: "received", value: { interpretations: [{ assertion_id: 1, relations: [] }] } }
-      });
-      const signal = CandidateMemorySignalSchema.parse({
-        signal_id: "withdrawn-head", workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
-        source: "garden_compile", signal_kind: "potential_semantic_observation",
-        interpretation_contract: SOURCE_INTERPRETATION_CONTRACT, object_kind: null, confidence: null,
-        scope_hint: "project", domain_tags: [], evidence_refs: [],
-        source_memory_refs: [], supersedes_refs: [], exception_to_refs: [],
-        contradicts_refs: [], incompatible_with_refs: [],
-        raw_payload: { source_interpretation: located },
-        source_observation: {
-          observed_at: CLOCK, authority: "trusted_host_event", source_event_id: "event-1"
-        },
-        created_at: CLOCK
-      });
+      const signal = statementSignal(original.record.identity, "withdrawn-head");
       const result = await router.materializeSignal(signal);
       expect(result.success).toBe(false);
       expect(result.created_objects).toEqual([]);
@@ -378,7 +346,7 @@ describe("source observation publication wiring", () => {
       ).toBe(0);
       expect(
         (database.connection.prepare(
-          "SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%source-interpretation-v1%'"
+          "SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%source-statements-v1%'"
         ).get() as { n: number }).n
       ).toBe(0);
     } finally {

@@ -10,7 +10,7 @@ vi.mock("node:dns/promises", () => ({
     return options?.all === true ? [answer] : answer;
   })
 }));
-import { LocalHeuristics } from "@do-soul/alaya-soul";
+import { UnavailableGardenProvider } from "@do-soul/alaya-soul";
 import {
   buildGardenComputeRoutingProviders,
   createConflictDetectionLlmPort
@@ -175,7 +175,7 @@ describe("buildGardenComputeRoutingProviders", () => {
     const providers = buildGardenComputeRoutingProviders({
       config: createOfficialGardenConfig({ secret_ref: "env:ALAYA_MISSING_GARDEN_KEY" }),
       officialGardenProvider: createOfficialResolver(),
-      localHeuristicsProvider: new LocalHeuristics(),
+      localHeuristicsProvider: new UnavailableGardenProvider(),
       warn
     });
 
@@ -226,7 +226,7 @@ function createOfficialResolver(): GardenComputeProviderResolver {
   return new GardenComputeProviderResolver({
     configReader: { getRuntimeGardenComputeConfig: vi.fn() },
     secretReader: vi.fn(),
-    makeProvider: vi.fn(() => new LocalHeuristics())
+    makeProvider: vi.fn(() => new UnavailableGardenProvider())
   });
 }
 

@@ -28,42 +28,6 @@ type PacketInput = Readonly<{
 type Owner = Readonly<{ stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">; sha256: FieldContractSha256;
   evidenceService: Pick<EvidenceService, "create" | "findByIdScoped">; meter?: SourceSemanticResourceLedger }>;
 
-/** Publishes a source interpretation as evidence, without forming memory or temporal relation truth. */
-export function createSourceInterpretationPacketPublication(owner: Owner) {
-  return {
-    async publish(input: PacketInput) {
-      const bound = bindPacket(owner, input);
-      const objectId = packetEvidenceId(bound.packet_id, owner.sha256);
-      const current = () => verifyPublishedSourceInterpretation(owner, bound, input.workspaceId);
-      const existing = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
-      current();
-      if (existing !== null) {
-        if (existing.lifecycle_state !== "active" || canonicalJson(JSON.parse(existing.gist)) !== canonicalJson(bound)) {
-          throw new CoreError("VALIDATION", "published interpretation packet differs from its source binding");
-        }
-        return { bound, evidence: existing };
-      }
-      let evidence;
-      try { evidence = await owner.evidenceService.create({ object_id: objectId,
-        created_by: input.provenance.producer_id, evidence_kind: "conversation_excerpt",
-        semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
-        event_anchor: null, physical_anchor: { file_path: null, line_range: null, symbol_name: null, artifact_ref: null },
-        evidence_health_state: "questionable", gist: JSON.stringify(bound),
-        excerpt: bound.assertions.map((row) => row.text).join("\n"), source_hash: bound.source_target.content_digest,
-        run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
-      }, [], undefined, undefined, undefined, current, SOURCE_PROVENANCE_CAPSULE);
-      } catch (error) {
-        const raced = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
-        if (raced === null || raced.lifecycle_state !== "active" || canonicalJson(JSON.parse(raced.gist)) !== canonicalJson(bound)) throw error;
-        current();
-        evidence = raced;
-      }
-      current();
-      return { bound, evidence };
-    }
-  };
-}
-
 function bindPacket(owner: Pick<Owner, "stores" | "sha256">, input: PacketInput): PublishedSourceInterpretationPacket {
   const packet = SourceInterpretationPacketSchema.parse(input.packet);
   assertSourceInterpretationPacketProfile(packet, input.profile, owner.sha256);

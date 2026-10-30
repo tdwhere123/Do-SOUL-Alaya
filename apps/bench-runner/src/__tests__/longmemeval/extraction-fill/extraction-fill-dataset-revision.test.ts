@@ -47,15 +47,18 @@ describe("extraction-fill dataset revision", () => {
     expect(result.manifest.dataset_revision).toBe(await pinnedRevision());
   });
 
-  it("preserves the pinned revision when extending the fill window", async () => {
+  it("preserves the pinned revision while completing a partially filled full window", async () => {
     await writeQuestions(2);
 
-    const first = await fill(1);
+    const first = await fill(2, 1);
     const extended = await fill(2);
 
     expect(extended.manifest.dataset_revision).toBe(first.manifest.dataset_revision);
     expect(extended.manifest.dataset_revision).toBe(await pinnedRevision());
-    expect(extended.manifest.requested_turns).toBeGreaterThan(first.manifest.requested_turns ?? 0);
+    expect(extended.manifest.requested_turns).toBe(first.manifest.requested_turns);
+    expect(extended.manifest.cached_turns).toBeGreaterThan(first.manifest.cached_turns ?? 0);
+    expect(first.coverage).toBeLessThan(1);
+    expect(extended.coverage).toBe(1);
   });
 
   it("rejects a conflicting revision before creating the live delegate", async () => {
@@ -105,10 +108,11 @@ async function writeQuestions(count: number): Promise<void> {
   });
 }
 
-async function fill(limit: number) {
+async function fill(limit: number, questionBatchLimit?: number) {
   const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit });
   return runExtractionFill({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, limit,
+    ...(questionBatchLimit === undefined ? {} : { questionBatchLimit }),
     authorityReceiptPath,
     extractorFactory: () => extractor(), log: () => undefined
   });

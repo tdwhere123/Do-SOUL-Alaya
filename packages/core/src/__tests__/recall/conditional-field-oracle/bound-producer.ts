@@ -12,7 +12,6 @@ import {
 import {
   SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo,
-  SqliteSourceHintReader,
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -72,7 +71,6 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
     new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256),
     new SqliteEvidenceCapsuleRepo(slice.database)
   );
-  const sourceHints = new SqliteSourceHintReader(slice.database.connection);
   return {
     sourceRootMetadataByteLimit: 8192,
     sourceRootChunkByteLimit: 4096,
@@ -111,22 +109,6 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
         truncated: page.truncated,
         committedThrough: page.committedThrough,
         unavailable: page.unavailable
-      };
-    },
-    boundInterpretations: (input) => sourceHints.pageBoundInterpretations(input),
-    sourceTextHints: (input) => {
-      const page = sourceHints.pageSourceTextHints(input);
-      return {
-        rows: page.rows.map(toSourceRootObserverRow),
-        nativeVisits: page.nativeVisits,
-        nativeBytes: page.nativeBytes,
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        nativeWork: page.nativeWork,
-        truncated: page.truncated,
-        committedThrough: page.committedThrough,
-        unavailable: page.unavailable,
-        resourceLimited: page.resourceLimited
       };
     },
     sourceRoot: (input) => {

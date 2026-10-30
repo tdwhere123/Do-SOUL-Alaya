@@ -1,438 +1,67 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const boundary = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import {
-  createCompileSeedRunner,
-  type CompileSeedDaemon
-} from "../../../runs/compile-seed.js";
-import type {
-  BenchSignalSeedInput
-} from "../../../harness/daemon.js";
-import type { SeededObjectResult } from
-  "../../../harness/daemon/seed/daemon-seed-types.js";
-import {
-  CREDENTIALLED_CONFIG,
-  admitCompileSeedTurnCache,
-  interpretationsEnvelope
-} from "./compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from
-  "../extraction/extraction-cache-test-fixture.js";
+import { tmpdir } from "node:os";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
+import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import { admitStatementSessionCache, buildCompileSeedDaemon, CREDENTIALLED_CONFIG, OFFLINE_CONFIG, makeSeed }
+  from "./compile-seed-fixture.js";
 
-let cacheRoot: string | undefined;
+const directories: string[] = [];
+afterEach(() => { for (const root of directories.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
+const messages = [{ message_id: "user-record", role: "user" as const, content: "The original turn remains available." }];
+const turn = { workspaceId: "workspace-1", runId: "run-1", seedIndex: 0, evidenceRefBase: "raw-turn",
+  turnContent: messages[0]!.content, turnMessages: messages };
 
-afterEach(async () => {
-  if (cacheRoot !== undefined) {
-    await rm(cacheRoot, { recursive: true, force: true });
-  }
-  cacheRoot = undefined;
+it("retains admitted raw bytes without fabricating a memory or duplicate evidence capsule when extraction is unavailable", async () => {
+  const onSignal = vi.fn(() => makeSeed("unexpected")), daemon = buildCompileSeedDaemon(onSignal);
+  const imported = vi.spyOn(daemon, "importSourceRecord"), publish = vi.spyOn(daemon, "proposeMemoriesFromCompileSignals");
+  const runner = createCompileSeedRunner({ config: OFFLINE_CONFIG });
+  expect(await runner.seedTurn({ ...turn, daemon })).toMatchObject({ seeds: [] });
+  expect(imported).toHaveBeenCalledOnce();
+  expect(imported.mock.calls[0]![0]).toMatchObject({ content_bytes: `User: ${messages[0]!.content}` });
+  expect((await imported.mock.results[0]!.value).record).toMatchObject({ scope_class: "project" });
+  expect(onSignal).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled();
+  expect(runner.stats).toMatchObject({ offlineFallbacks: 1, factsProduced: 0, signalsDropped: 0, llmCalls: 0 });
 });
 
-describe("compile seed source evidence fallback", () => {
-  it("sends an empty official extraction through the evidence-only receive path", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-evidence-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const turnMessages = structuredTurnMessages();
-    const turnContent = structuredTurnContent(turnMessages);
-    await admitCompileSeedTurnCache({ cacheRoot, turnContent, turnMessages,
-      rawJson: '{"interpretations":[]}' });
-    const received: BenchSignalSeedInput[] = [];
-    const evidence: SeededObjectResult = {
-      kind: "evidence_capsule",
-      evidenceId: "evidence-only",
-      signalId: "signal-evidence-only",
-      truncated: false,
-      charsClipped: 0
-    };
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async (inputs) => {
-        received.push(...inputs);
-        return { seeds: [evidence], dropped: [], createdEvidence: true };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent,
-      turnMessages,
-      evidenceRefBase: "q-source-s0-r0",
-      seedIndex: 0,
-      workspaceId: "workspace-source",
-      runId: "run-source",
-      sourceEvidenceFallback: "trusted_source_turn",
-      sourceObservedAt: "2026-07-20T00:00:00.000Z"
-    });
-
-    expect(received).toEqual([
-      expect.objectContaining({
-        evidenceFallbackReason: "empty_extraction",
-        turnContent,
-        turnMessages,
-        extractionProvider: "official_api_compile"
-      })
-    ]);
-    expect(result.seeds).toEqual([evidence]);
-    expect(runner.stats.factsProduced).toBe(0);
-  });
-
-  it("does not charge a rejected empty-extraction fallback to extracted signals", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-empty-rejected-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const turnContent = structuredTurnContent(structuredTurnMessages());
-    await admitCompileSeedTurnCache({ cacheRoot, turnContent,
-      turnMessages: structuredTurnMessages(), rawJson: '{"interpretations":[]}' });
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => ({
-        seeds: [],
-        dropped: [{
-          reason: "materialization_drop",
-          detail: "trusted User projection unavailable"
-        }],
-        createdEvidence: false
-      }),
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    const result = await runner.seedTurn(seedInput(daemon));
-
-    expect(result.seeds).toEqual([]);
-    expect(runner.stats.factsProduced).toBe(0);
-    expect(runner.stats.signalsDropped).toBe(0);
-    expect(runner.stats.signalsDroppedByReason).toEqual({
-      candidate_absent: 0,
-      materialization_drop: 0
-    });
-  });
-
-  it("does not add fallback evidence when extraction materializes memory", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-memory-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    await admitCompileSeedTurnCache({ cacheRoot,
-      turnContent: "I take the 7:15 train.",
-      rawJson: interpretationsEnvelope([{ matched: "I take the 7:15 train." }]) });
-    const received: BenchSignalSeedInput[] = [];
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async (inputs) => {
-        received.push(...inputs);
-        return {
-          seeds: [{
-            kind: "memory_entry",
-            memoryId: "memory-one",
-            evidenceId: "evidence-one",
-            signalId: "signal-one",
-            proposalId: "proposal-one",
-            truncated: false,
-            charsClipped: 0
-          }],
-          dropped: [],
-          createdEvidence: true
-        };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent: "I take the 7:15 train.",
-      evidenceRefBase: "q-memory-s0-r0",
-      seedIndex: 0,
-      workspaceId: "workspace-memory",
-      runId: "run-memory"
-    });
-
-    expect(received).toHaveLength(1);
-    expect(received[0]?.evidenceFallbackReason).toBeUndefined();
-    expect(result.seeds).toEqual([
-      expect.objectContaining({ kind: "memory_entry", memoryId: "memory-one" })
-    ]);
-  });
-
-  it("adds the production no-evidence-created fallback after an unroutable batch", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-no-evidence-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const received: BenchSignalSeedInput[][] = [];
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async (inputs) => {
-        received.push([...inputs]);
-        if (received.length === 1) {
-          return {
-            seeds: [],
-            dropped: [{
-              reason: "candidate_absent",
-              detail: "triage=deferred routing=n/a"
-            }],
-            createdEvidence: false
-          };
-        }
-        return {
-          seeds: [{
-            kind: "evidence_capsule",
-            evidenceId: "evidence-fallback",
-            signalId: "signal-fallback",
-            truncated: false,
-            charsClipped: 0
-          }],
-          dropped: [],
-          createdEvidence: true
-        };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = await createRunnerWithOneClaim(cacheRoot);
-
-    const result = await runner.seedTurn(seedInput(daemon));
-
-    expect(received).toHaveLength(2);
-    expect(received[0]?.[0]?.evidenceFallbackReason).toBeUndefined();
-    expect(received[1]).toEqual([
-      expect.objectContaining({
-        evidenceFallbackReason: "no_evidence_created",
-        signalKind: "potential_evidence_anchor",
-        objectKind: "source_turn",
-        turnMessages: structuredTurnMessages()
-      })
-    ]);
-    expect(result.seeds).toEqual([
-      expect.objectContaining({
-        kind: "evidence_capsule",
-        evidenceId: "evidence-fallback"
-      })
-    ]);
-  });
-
-  it("does not charge a rejected supplemental fallback twice", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-supplement-rejected-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    let calls = 0;
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        calls += 1;
-        return {
-          seeds: [],
-          dropped: [{
-            reason: calls === 1 ? "candidate_absent" : "materialization_drop",
-            detail: calls === 1 ? "unroutable claim" : "trusted User projection unavailable"
-          }],
-          createdEvidence: false
-        };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = await createRunnerWithOneClaim(cacheRoot);
-
-    const result = await runner.seedTurn(seedInput(daemon));
-
-    expect(result.seeds).toEqual([]);
-    expect(runner.stats.factsProduced).toBe(1);
-    expect(runner.stats.signalsDropped).toBe(1);
-    expect(runner.stats.signalsDroppedByReason).toEqual({
-      candidate_absent: 1,
-      materialization_drop: 0
-    });
-  });
-
-  it("keeps ordinary evidence-only materialization dropped without relabeling it trusted", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-untrusted-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    let calls = 0;
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        calls += 1;
-        return {
-          seeds: [],
-          dropped: [{
-            reason: "candidate_absent",
-            detail: "triage=evidence_only routing=evidence_only"
-          }],
-          createdEvidence: true
-        };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = await createRunnerWithOneClaim(cacheRoot);
-
-    const result = await runner.seedTurn(seedInput(daemon));
-
-    expect(calls).toBe(1);
-    expect(result.seeds).toEqual([]);
-    expect(runner.stats.signalsDroppedByReason.candidate_absent).toBe(1);
-  });
-
-  it("does not create source-only objects when a consumer disables the fallback", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-disabled-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    await admitCompileSeedTurnCache({ cacheRoot,
-      turnContent: structuredTurnContent(structuredTurnMessages()),
-      turnMessages: structuredTurnMessages(), rawJson: '{"interpretations":[]}' });
-    let compileSeedCalls = 0;
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        compileSeedCalls += 1;
-        return { seeds: [], dropped: [], createdEvidence: false };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-
-    const result = await runner.seedTurn({
-      ...seedInput(daemon),
-      sourceEvidenceFallback: "disabled"
-    });
-
-    expect(compileSeedCalls).toBe(0);
-    expect(result.seeds).toEqual([]);
-  });
-
-  it("defaults source-only fallback to disabled without a trusted opt-in", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-default-closed-"));
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    await admitCompileSeedTurnCache({ cacheRoot,
-      turnContent: "I take the 7:15 train.", rawJson: '{"interpretations":[]}' });
-    let compileSeedCalls = 0;
-    const daemon: CompileSeedDaemon = {
-      importSourceRecord: async () => undefined,
-      proposeMemoryFromSignal: async () => {
-        throw new Error("degraded fallback must not run");
-      },
-      proposeMemoriesFromCompileSignals: async () => {
-        compileSeedCalls += 1;
-        return { seeds: [], dropped: [], createdEvidence: false };
-      },
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent: "I take the 7:15 train.",
-      evidenceRefBase: "q-memory-s0-r0",
-      seedIndex: 0,
-      workspaceId: "workspace-memory",
-      runId: "run-memory"
-    });
-
-    expect(compileSeedCalls).toBe(0);
-    expect(result.seeds).toEqual([]);
-  });
+it("keeps a valid-empty cached session distinct from unavailable extraction and creates no synthetic publication", async () => {
+  const cacheRoot = mkdtempSync(join(tmpdir(), "empty-statement-session-")); directories.push(cacheRoot);
+  const config = { ...CREDENTIALLED_CONFIG, sourcePacking: "session-statements" as const };
+  writeExtractionCacheTestManifest({ cacheRoot, model: config.model, providerUrl: config.providerUrl,
+    systemPrompt: SOURCE_STATEMENTS_PROMPT });
+  await admitStatementSessionCache({ cacheRoot, config, messages, rawJson: request => JSON.stringify({
+    messages: request.messages.map(message => ({ message_id: message.message_id, statements: [] })) }) });
+  const onSignal = vi.fn(() => makeSeed("unexpected")), daemon = buildCompileSeedDaemon(onSignal);
+  const imported = vi.spyOn(daemon, "importSourceRecord"), publish = vi.spyOn(daemon, "proposeMemoriesFromCompileSignals");
+  const runner = createCompileSeedRunner({ config, cacheRoot });
+  expect(await runner.seedTurn({ ...turn, daemon })).toMatchObject({ seeds: [] });
+  expect(imported).toHaveBeenCalledOnce(); expect(onSignal).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled();
+  expect(runner.stats).toMatchObject({ cacheHits: 1, offlineFallbacks: 0, factsProduced: 0, signalsDropped: 0, llmCalls: 0,
+    lastStatementSession: { receipt: { status: "complete", messages: [{ status: "complete", statements: [] }] } } });
 });
 
-async function createRunnerWithOneClaim(cacheRoot: string) {
-  await admitCompileSeedTurnCache({ cacheRoot,
-    turnContent: structuredTurnContent(structuredTurnMessages()),
-    turnMessages: structuredTurnMessages(),
-    rawJson: (request) => {
-      const assertion = request.source_assertions[0]!;
-      return interpretationsEnvelope([{ matched: assertion.text,
-        assertionId: assertion.assertion_id }]);
-    } });
-  return createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
-}
+it("keeps string-only sources raw rather than inventing host message identities", async () => {
+  const onSignal = vi.fn(() => makeSeed("unexpected")), daemon = buildCompileSeedDaemon(onSignal);
+  const imported = vi.spyOn(daemon, "importSourceRecord");
+  const runner = createCompileSeedRunner({ config: OFFLINE_CONFIG });
+  expect(await runner.seedTurn({ ...turn, turnMessages: [], daemon })).toMatchObject({ seeds: [] });
+  expect(imported).toHaveBeenCalledOnce(); expect(imported.mock.calls[0]![0].host_occurrences).toEqual([]);
+  expect(onSignal).not.toHaveBeenCalled(); expect(runner.stats.extractionAttempts).toBe(0);
+});
 
-function seedInput(daemon: CompileSeedDaemon) {
-  const turnMessages = structuredTurnMessages();
-  return {
-    daemon,
-    turnContent: structuredTurnContent(turnMessages),
-    turnMessages,
-    evidenceRefBase: "q-memory-s0-r0",
-    seedIndex: 0,
-    workspaceId: "workspace-memory",
-    runId: "run-memory",
-    sourceEvidenceFallback: "trusted_source_turn" as const
-  };
-}
-
-function structuredTurnMessages() {
-  return [
-    {
-      message_id: "user-1",
-      role: "user" as const,
-      content: "Please preserve both lines.\nAssistant: this is quoted user text."
-    },
-    {
-      message_id: "assistant-1",
-      role: "assistant" as const,
-      content: "Take the 7:15 train.\nUser: this is quoted assistant text."
-    }
-  ] as const;
-}
-
-function structuredTurnContent(
-  messages: ReturnType<typeof structuredTurnMessages>
-): string {
-  return messages.map((message) =>
-    `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`
-  ).join("\n");
-}
+it("stops before extraction and publication when raw-source admission fails", async () => {
+  const onSignal = vi.fn(() => makeSeed("unexpected")), daemon = buildCompileSeedDaemon(onSignal);
+  vi.spyOn(daemon, "importSourceRecord").mockRejectedValue(new Error("source audit unavailable"));
+  const publish = vi.spyOn(daemon, "proposeMemoriesFromCompileSignals");
+  const runner = createCompileSeedRunner({ config: OFFLINE_CONFIG });
+  await expect(runner.seedTurn({ ...turn, daemon })).rejects.toThrow("source audit unavailable");
+  expect(publish).not.toHaveBeenCalled(); expect(onSignal).not.toHaveBeenCalled();
+  expect(runner.stats.extractionAttempts).toBe(0);
+});

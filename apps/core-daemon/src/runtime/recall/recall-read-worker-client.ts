@@ -1,7 +1,7 @@
 import type { Worker } from "node:worker_threads";
 import { SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, indexEntryCacheKey,
   unavailableSourceQueryPreparation, admitSourceSemanticWorkerResultFamily,
-  type InformationIndex, type SourceInterpretationReasoningResult,
+  type InformationIndex,
   type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
@@ -63,7 +63,6 @@ export interface RecallReadWorkerClient {
   readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
   readonly readSnapshot: RecallReadSnapshotPort;
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
-  readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
   readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
   readonly observeSourceSemantics: SourceSemanticObservationScope;
   ready(): Promise<void>;
@@ -295,14 +294,6 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }
     };
   }
-
-  public readonly sourceInterpretationPort = {
-    reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> => {
-      const run = async () => await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input);
-      return await this.lifecycle.withinDeadline("conditionalField.interpretation", async () =>
-        await this.lifecycle.isolate(run));
-    }
-  };
 
   public readonly observeSourceSemantics: SourceSemanticObservationScope = async (options, work) =>
     await this.lifecycle.observeSourceSemantics(options, work);

@@ -1,13 +1,9 @@
-import { createHistoricalSignalReplayProvider } from "./historical-signal-replay-fixture.js";
+import { createHistoricalSignalReplayProvider, readHistoricalSeedInputs } from "./historical-signal-replay-fixture.js";
 import { describe, expect, it } from "vitest";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   buildOfficialApiSourceCorpus,
 } from "@do-soul/alaya-soul";
-import { extractSeedInputs } from "../../../runs/compile-seed/compile-seed-extract.js";
-import type {
-  CompileSeedExtractionStats
-} from "../../../runs/compile-seed.js";
 import { attachCompileSourceGrounding } from "../../../harness/seeding/source-grounding.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";
@@ -148,9 +144,8 @@ describe("compile source grounding revalidation", () => {
       },
       generateSignalId: () => "signal-embedded-newline"
     });
-    const [draft] = await extractSeedInputs({
+    const [draft] = await readHistoricalSeedInputs({
       provider,
-      stats: extractionStats(),
       turnContent,
       seedIndex: 0,
       context: {
@@ -442,22 +437,3 @@ function assertionLocator(assertionId: number) {
   };
 }
 
-function extractionStats(): CompileSeedExtractionStats {
-  return {
-    path: "official_api_compile",
-    cacheHits: 0,
-    llmCalls: 0,
-    offlineFallbacks: 0,
-    liveExtractionFailures: 0,
-    cachedExtractionFailures: 0,
-    factsProduced: 0,
-    signalsDropped: 0,
-    signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
-    parseDropped: 0,
-    compileOverflowDropped: 0,
-    lastTurnRawSignalCount: 1,
-    lastTurnDraftCount: 1,
-    lastExtractionSource: null,
-    lastRawJsonSha256: null
-  };
-}

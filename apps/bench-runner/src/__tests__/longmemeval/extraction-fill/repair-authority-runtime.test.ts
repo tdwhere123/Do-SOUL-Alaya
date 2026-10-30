@@ -1,5 +1,7 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { inspectCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from
   "../../../datasets/longmemeval/ingestion/dataset.js";
@@ -35,7 +37,7 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 });
 
 describe("strict JSON repair authority runtime", () => {
-  it("repairs one key without reading its valid sibling from the same source turn", async () => {
+  it("repairs one request without dispatching its valid sibling from the same captured session",  async () => {
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
     vi.stubEnv("REPAIR_TEST_KEY", "test-key");
     await writeFixtureDataset([singleSessionBatchedQuestion("q001")]);
@@ -46,17 +48,21 @@ describe("strict JSON repair authority runtime", () => {
       pinnedMetaRoot,
       authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
-        extract: async (input) => groundedExtractionResult(input)
+        extract: async input => providerBackedResponseResult(input, shortStatementResponse(input.userPrompt))
       }),
       log: () => undefined
     });
     const [invalidPath, preservedPath] = shardPaths();
-    mutateRawJson(invalidPath!, '{"signals":[{"signal_kind":"potential_preference"}');
+    const invalidBytes = '{"messages":[';
+    mutateRawJson(invalidPath!, invalidBytes);
+    const invalidEntry = JSON.parse(readFileSync(invalidPath!, "utf8"));
+    expect(inspectCachedExtraction(cacheRoot, invalidEntry.cache_key, invalidEntry.model, invalidEntry.request_profile))
+      .toMatchObject({ status: "invalid", rawJsonSha256: createHash("sha256").update(invalidBytes).digest("hex") });
     const preservedBefore = readFileSync(preservedPath!, "utf8");
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       return providerBackedResponseResult(input,
-        buildGroundedInterpretationResponse(input.userPrompt),
+        shortStatementResponse(input.userPrompt),
         { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
       );
     });
@@ -306,6 +312,31 @@ describe("strict JSON repair authority runtime", () => {
   });
 });
 
+it("does not expose a foreign statement request as bounded repair work", async () => {
+  await writeFixtureDataset([buildExtractionFillQuestion("q001", "alpha", "decoy")]);
+  await runExtractionFill({ variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
+    extractorFactory: () => ({ extract: groundedExtractionResult }), log: () => undefined });
+  const path = shardPaths()[0]!, entry = JSON.parse(readFileSync(path, "utf8"));
+  entry.source_statement.request.messages[0].message_id = "foreign-host";
+  writeFileSync(path, JSON.stringify(entry), "utf8");
+  const bytes = readFileSync(path);
+  expect(inspectCachedExtraction(cacheRoot, entry.cache_key, entry.model, entry.request_profile))
+    .toEqual({ status: "invalid", reason: "statement request key differs" });
+  const inspection = await inspectExtractionAuthority({ variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    revision: readCurrentExtractionAuthorityRevision(), action: "fill", repairInvalidShards: true });
+  expect(inspection.observation.inventory).toMatchObject({ invalidTurns: 1, validTurns: 1 });
+  expect(inspection.invalidShards).toEqual([]);
+  expect(() => createExtractionRepairScope(inspection.invalidShards, inspection.preservedValidClosure)).toThrow("repair scope is invalid");
+  expect(readFileSync(path)).toEqual(bytes);
+});
+
+function shortStatementResponse(userPrompt: string): string {
+  const request = JSON.parse(userPrompt) as { messages: readonly { message_id: string; text: string }[] };
+  return JSON.stringify({ messages: request.messages.map(message => ({ message_id: message.message_id,
+    statements: [{ text: message.text.slice(0, 64), relation: "recorded detail" }] })) });
+}
+
 async function writeRepairReceipt(): Promise<string> {
   const inspection = await inspectExtractionAuthority({
     variant: EXTRACTION_FILL_VARIANT,
@@ -379,10 +410,7 @@ function providerTimeoutFailure(): Error {
 }
 
 function singleSessionBatchedQuestion(id: string): LongMemEvalQuestion {
-  const content = Array.from(
-    { length: 9 },
-    (_, index) => `I recorded durable detail number ${index + 1}.`
-  ).join(" ");
+  const content = "a".repeat(15_000);
   return {
     question_id: id,
     question_type: "single_session",
@@ -393,7 +421,7 @@ function singleSessionBatchedQuestion(id: string): LongMemEvalQuestion {
     haystack_dates: ["2025-12-01"],
     haystack_sessions: [[
       { role: "user", content, has_answer: true },
-      { role: "assistant", content: "Acknowledged." }
+      { role: "assistant", content: "b".repeat(20_000) }
     ]],
     answer_session_ids: [`s-${id}`]
   };

@@ -68,7 +68,9 @@ it("retains a v1 selection during upgrade and permits an explicit v2 selection",
     expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get())
       .toEqual({ version: currentSchemaVersion() });
     expect(index.lexical.lexicalState(WORKSPACE)).toMatchObject({
-      selection: { selection_revision: 1, representation: "segmented-unicode61.v1" }, active_generation_id: active });
+      selection: { selection_revision: 1, representation: "segmented-unicode61.v1" }, active_generation_id: null });
+    expect(index.lexical.lexicalGeneration(WORKSPACE, active)).toMatchObject({ status: "retired", reason: "preparation_revision_changed" });
+    expect(index.lexical.activateLexical(WORKSPACE, active)).toEqual({ status: "rejected", reason: "superseded" });
     const selected = index.lexical.selectLexical(WORKSPACE, "segmented-unicode61.v2");
     expect(selected).toMatchObject({ selection_revision: 2, representation: "segmented-unicode61.v2" });
     const generation = index.lexical.beginLexical(selected);

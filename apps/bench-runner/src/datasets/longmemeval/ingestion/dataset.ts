@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import type { RecordedSourceTime } from "@do-soul/alaya-protocol";
+import { describeLongMemEvalSessionTime } from "./source-time.js";
 
 export const LongMemEvalTurnSchema = z.object({
   role: z.string(),
@@ -29,13 +32,10 @@ export const LongMemEvalVariant = z.enum([
 export type LongMemEvalVariant = z.infer<typeof LongMemEvalVariant>;
 
 /**
- * @anchor longmemeval-round — extraction unit for the bench seed path.
+ * @anchor longmemeval-round — raw storage/display unit, not an extraction boundary.
  *
- * A haystack session is a flat array of `{role, content}` MESSAGES. The
- * production POST_TURN_EXTRACT path extracts per ROUND — one user message
- * plus its assistant response — never per bare message: a lone message
- * gives the extractor no context to resolve pronouns/dates, and the
- * LongMemEval paper finds round granularity optimal for storage.
+ * Minimal statement extraction observes the ordered whole session. Rounds retain
+ * the existing raw source/display coordinates and scoring sidecars.
  *
  * `messageIndices` keeps the source message indices the round covers so the
  * scoring sidecar can stay correct (the evidence ref records exactly which
@@ -56,6 +56,18 @@ export interface LongMemEvalRoundMessage {
   readonly message_id: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly created_at?: string;
+  readonly source_time?: RecordedSourceTime;
+}
+
+/** Dataset source identities never include question IDs or answer annotations. */
+export function buildLongMemEvalSessionMessages(session: readonly LongMemEvalTurn[], sourceDate?: string): readonly LongMemEvalRoundMessage[] {
+  const sourceTime = sourceDate === undefined ? undefined : describeLongMemEvalSessionTime(sourceDate);
+  const digest = createHash("sha256").update(JSON.stringify(session.map(({ role, content }) => ({ role, content })))).digest("hex");
+  return Object.freeze(session.map((message, index) => Object.freeze({
+    message_id: `${digest}-m${index}`, role: conversationRole(message.role), content: message.content,
+    ...(sourceTime === undefined ? {} : { source_time: sourceTime })
+  })));
 }
 
 export function buildLongMemEvalRoundMessages(

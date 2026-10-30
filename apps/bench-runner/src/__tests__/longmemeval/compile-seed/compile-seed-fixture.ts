@@ -1,3 +1,5 @@
+import { createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
+import { createInMemoryFieldStores } from "../../../../../../packages/core/src/memory/evidence-create/field-stores.js";
 import type {
   BenchSignalSeedInput,
   SeededMemoryResult
@@ -12,27 +14,23 @@ import {
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus,
+  SOURCE_STATEMENTS_PROMPT, OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus,
   collectOfficialApiExtractionCoverage, stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { fixtureAttemptAuthority, providerBackedResponseResult } from
   "../extraction/extraction-cache-test-fixture.js";
+import type { ConversationMessage, SourceStatementRequest } from "@do-soul/alaya-protocol";
+import { sourceStatementRequests, sourceStatementSession } from "../../../runs/extraction/source-statement-request.js";
 
-/**
- * A test CompileSeedDaemon stub. The compile (credentialled) seed path
- * materializes a round's signals through proposeMemoriesFromCompileSignals
- * (the in-process signalService.receiveSignal seam); the no-credentials
- * fallback path uses proposeMemoryFromSignal. Both delegate to one per-signal
- * handler so tests can inspect every BenchSignalSeedInput regardless of path.
- */
+/** Source imports use the admission owner; the callback observes only emitted signal inputs. */
 export function buildCompileSeedDaemon(
   onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
 ): CompileSeedDaemon {
   return {
-    importSourceRecord: async () => undefined,
+    importSourceRecord: createCompileSeedSourceImporter(),
     proposeMemoryFromSignal: async (input) => onSignal(input),
     proposeMemoriesFromCompileSignals: async (inputs) => {
-      const seeds = inputs.map((input) => seedCompileInput(input, onSignal));
+      const seeds = inputs.map(onSignal);
       return {
         seeds,
         dropped: [],
@@ -43,22 +41,14 @@ export function buildCompileSeedDaemon(
   };
 }
 
-function seedCreatedEvidence(seed: SeededObjectResult): boolean {
-  return seed.kind === "evidence_capsule" || seed.evidenceId !== null;
+export function createCompileSeedSourceImporter(workspaceId = "workspace-1"): CompileSeedDaemon["importSourceRecord"] {
+  const admission = createSourceAdmissionPort({ stores: createInMemoryFieldStores(), sha256: fieldContractSha256 });
+  return async (input, hostCapture) => admission.admit({ ...input, workspace_id: workspaceId, evidence_object_id: null },
+    { workspaceId, ...(hostCapture === undefined ? {} : { hostCapture }) });
 }
 
-function seedCompileInput(
-  input: BenchSignalSeedInput,
-  onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
-): SeededObjectResult {
-  if (input.evidenceFallbackReason === undefined) return onSignal(input);
-  return {
-    kind: "evidence_capsule",
-    evidenceId: `evidence-${input.evidenceRef}`,
-    signalId: `signal-${input.evidenceRef}`,
-    truncated: false,
-    charsClipped: 0
-  };
+function seedCreatedEvidence(seed: SeededObjectResult): boolean {
+  return seed.kind === "evidence_capsule" || seed.evidenceId !== null;
 }
 
 export const CREDENTIALLED_CONFIG: CompileSeedExtractionConfig = {
@@ -75,7 +65,24 @@ export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
   apiKey: null
 };
 
-/** Prewarm the actual runner's request keys through an admitted local attempt ledger. */
+/** Prewarm current session requests with recorded transport output and its attempt ledger. */
+export async function admitStatementSessionCache(input: { cacheRoot: string; messages: readonly ConversationMessage[];
+  config?: CompileSeedExtractionConfig; rawJson: (request: SourceStatementRequest) => string }): Promise<void> {
+  const config = input.config ?? CREDENTIALLED_CONFIG, requests = sourceStatementRequests(input.messages);
+  const manifestPath = join(input.cacheRoot, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  writeFileSync(manifestPath, JSON.stringify({ ...manifest,
+    requested_turns: requests.length, cached_turns: requests.length, coverage: 1 }));
+  const authority = fixtureAttemptAuthority({ cacheRoot: input.cacheRoot, model: config.model,
+    requestProfile: config.requestProfile, startingMissing: Math.max(1, requests.length) });
+  const extractor = createCachingSignalExtractor({ cacheRoot: input.cacheRoot, config, ...authority,
+    delegate: { extract: attempt => providerBackedResponseResult(attempt, input.rawJson(JSON.parse(attempt.userPrompt))) } });
+  const sourceCorpus = sourceStatementSession(input.messages).rendered.content;
+  for (const request of requests) await extractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
+    userPrompt: request.userPrompt, sourceCorpus });
+}
+
+/** Retained assertion-cache fixture, not current session extraction. */
 export async function admitCompileSeedTurnCache(input: {
   readonly cacheRoot: string;
   readonly turnContent: string;

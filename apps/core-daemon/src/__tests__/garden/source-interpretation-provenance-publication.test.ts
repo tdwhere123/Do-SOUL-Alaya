@@ -10,7 +10,6 @@ const isolation = await vi.hoisted(async () => {
 });
 import {
   buildSourceReferenceCatalog,
-  sourceInterpretationProfileIdentity,
   sourceReferenceResolver,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   type EventLogEntry
@@ -18,9 +17,7 @@ import {
 import { EvidenceService, createAuditedSourceAdmission, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteEventLogRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import {
-  createSourceInterpretationPacketPublication,
-  createSourceSemanticInterpretationPublication,
-  verifyPublishedSourceInterpretation
+  createSourceSemanticInterpretationPublication
 } from "../../../../../packages/core/src/memory/evidence-create/source-interpretation-packet-publication.js";
 import { deriveAddressableSpanViews } from
   "../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
@@ -101,21 +98,10 @@ function publicationInputs() {
         bindings: [{ slot_id: "agent", target: { kind: "node" as const, id: "alice" }, support: [] },
           { slot_id: "theme", target: { kind: "node" as const, id: "tools" }, support: [] }] }],
       operators: [], gaps: [] } };
-  const profile = { contract: "source-interpretation-profile-v1" as const, description: "Literal use relations",
-    predicates: [{ symbol: "uses", governing_roles: [], meaning: "An agent uses a theme." }],
-    roles: [{ symbol: "agent", meaning: "Actor of the event." }, { symbol: "theme", meaning: "Object involved." }] };
-  const packet = { ...base, profile,
-    assertions: [{ assertion_id: 1, text: ASSERTION, source_span: [6, 6 + ASSERTION.length] as const }],
-    packet: { contract: "source-interpretation-v2" as const,
-      profile_id: sourceInterpretationProfileIdentity(profile, fieldContractSha256), source_catalog_id: catalog.catalog_id,
-      mentions, referents: [{ id: "alice", mentions: ["aliceMention"] }, { id: "tools", mentions: ["toolsMention"] }],
-      propositions: [{ id: "use", predicate: "uses", implicit: false, predicate_mentions: ["usesMention"], assertion_ids: [1],
-        arguments: [{ role: "agent", target: "alice" }, { role: "theme", target: "tools" }] }],
-      operators: [], roots: ["use"] } };
-  return { semantic, packet };
+  return { semantic };
 }
 
-it.each(["semantic", "packet"] as const)("persists %s provenance without admitting its excerpt as another source through SQLite reopen", async kind => {
+it("persists explicit semantic provenance without admitting its excerpt as another source through SQLite reopen", async () => {
   const directory = mkdtempSync(join(tmpdir(), "alaya-source-provenance-"));
   directories.push(directory);
   const filename = join(directory, "memory.sqlite");
@@ -124,15 +110,11 @@ it.each(["semantic", "packet"] as const)("persists %s provenance without admitti
   const records = fixture.stores.listStoredRecords(WORKSPACE_ID);
   const spans = fixture.stores.listSpans(WORKSPACE_ID);
   const inputs = publicationInputs();
-  const publication = kind === "semantic"
-    ? await createSourceSemanticInterpretationPublication(fixture.owner).publish(inputs.semantic)
-    : await createSourceInterpretationPacketPublication(fixture.owner).publish(inputs.packet);
-  expect(publication.evidence.excerpt).toBe(kind === "semantic" ? "Alice\nuses\ntools" : ASSERTION);
+  const publication = await createSourceSemanticInterpretationPublication(fixture.owner).publish(inputs.semantic);
+  expect(publication.evidence.excerpt).toBe("Alice\nuses\ntools");
   expect(publication.bound.source_target.root_id).toBe(original.record.identity);
   expect(publication.bound.source_target.evidence_object_id).toBeNull();
-  if ("source_record" in publication) expect(publication.source_record).toEqual(original.record);
-  else expect(verifyPublishedSourceInterpretation(fixture.owner, publication.bound, WORKSPACE_ID).stored.record)
-    .toEqual(original.record);
+  expect(publication.source_record).toEqual(original.record);
   expect(fixture.stores.listStoredRecords(WORKSPACE_ID)).toEqual(records);
   expect(fixture.stores.listSpans(WORKSPACE_ID)).toEqual(spans);
   expect(fixture.stores.getCurrentRecord(WORKSPACE_ID, original.record.content_digest)).toBeNull();
@@ -155,9 +137,7 @@ it.each(["semantic", "packet"] as const)("persists %s provenance without admitti
   expect(await reopened.evidenceService.findById(publication.evidence.object_id)).toEqual(publication.evidence);
   expect(reopened.stores.listStoredRecords(WORKSPACE_ID)).toEqual(records);
   expect(reopened.stores.getCurrentRecord(WORKSPACE_ID, "artifact-1")).toEqual(original.record);
-  const replay = kind === "semantic"
-    ? await createSourceSemanticInterpretationPublication(reopened.owner).publish(inputs.semantic)
-    : await createSourceInterpretationPacketPublication(reopened.owner).publish(inputs.packet);
+  const replay = await createSourceSemanticInterpretationPublication(reopened.owner).publish(inputs.semantic);
   expect(replay.evidence).toEqual(publication.evidence);
   expect(reopened.notifications).toEqual([]);
 
@@ -181,7 +161,7 @@ it.each(["semantic", "packet"] as const)("persists %s provenance without admitti
   ]);
 });
 
-it.each(["semantic", "packet"] as const)("rejects %s publication when its source changes before the SQLite create transaction", async kind => {
+it("rejects explicit semantic publication when its source changes before the SQLite create transaction", async () => {
   const fixture = await openFixture(":memory:");
   const original = await fixture.admission.admit(sourceRequest(), { workspaceId: WORKSPACE_ID });
   const evidenceService: Pick<EvidenceService, "create" | "findByIdScoped"> = {
@@ -200,9 +180,7 @@ it.each(["semantic", "packet"] as const)("rejects %s publication when its source
   };
   const owner = { ...fixture.owner, evidenceService };
   const inputs = publicationInputs();
-  const publication = kind === "semantic"
-    ? createSourceSemanticInterpretationPublication(owner).publish(inputs.semantic)
-    : createSourceInterpretationPacketPublication(owner).publish(inputs.packet);
+  const publication = createSourceSemanticInterpretationPublication(owner).publish(inputs.semantic);
   await expect(publication).rejects.toThrow(/digest is not current/u);
   expect(fixture.stores.getStoredRecord(WORKSPACE_ID, original.record.identity)?.content_bytes).toBe(SOURCE);
   expect(fixture.stores.listStoredRecords(WORKSPACE_ID)).toHaveLength(2);

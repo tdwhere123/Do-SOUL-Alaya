@@ -14,8 +14,6 @@ import {
   LIVE_ORDINARY_ENUMERATION,
   LIVE_ORDINARY_ENUMERATIONS,
   PUBLIC_CONSUMPTION_PROTOCOL,
-  compileCanarySketch,
-  observePlantedDiscovery,
   publicSearchRequest,
   scoreConsumption,
   type ConsumptionTrace,
@@ -75,10 +73,6 @@ describe("public source consumption comparison", () => {
     "$canary.group $view distractor-first equal-budget public pair",
     async ({ canary, view }) => {
       await withPlantedWorker(canary, view, false, async (planted, handler, receipts, client) => {
-        const native = {
-          proposal: observePlantedDiscovery(planted.database, WS, canary, "proposal", view, LIVE_ORDINARY_ENUMERATION),
-          source_text: observePlantedDiscovery(planted.database, WS, canary, "source_text", view, LIVE_ORDINARY_ENUMERATION)
-        };
         planted.database.close();
         closeCachedDatabase(planted.filename);
         await awaitWorkerAfterMainSqliteClose(client);
@@ -90,7 +84,7 @@ describe("public source consumption comparison", () => {
             }, async () => {
               const run = await runPair({
                 canary, view, enumeration, lookup, intendedId: planted.intendedId,
-                handler, receipts, native: native[lookup], maxResults: PUBLIC_CONSUMPTION_PROTOCOL.max_results,
+                handler, receipts, maxResults: PUBLIC_CONSUMPTION_PROTOCOL.max_results,
                 cell: "primary"
               });
               assertSettledConsumption(run.row);
@@ -179,13 +173,13 @@ describe("public source consumption comparison", () => {
     });
   }, 90_000);
 
-  it("keeps lookup mode as the only compiled interpretation difference in a pair", () => {
+  it("keeps the native request unchanged apart from an unrelated authored proposal", () => {
     const canary = SOURCE_DISCOVERY_CANARY[1]!;
-    const proposal = compileCanarySketch(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION);
-    const text = compileCanarySketch(canary, "source_text", "source_only", LIVE_ORDINARY_ENUMERATION);
-    expect(proposal.query_id).not.toBe(text.query_id);
-    expect(proposal.interpretation_proposal?.original_query_digest)
-      .toBe(text.interpretation_proposal?.original_query_digest);
+    const proposal = publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION);
+    const text = publicSearchRequest(canary, "source_text", "source_only", LIVE_ORDINARY_ENUMERATION);
+    const { interpretation_proposal, ...native } = proposal;
+    expect(interpretation_proposal).toBeDefined();
+    expect(native).toEqual(text);
   });
 
   it("completes the first public SourceRecord then reads a later omitted record alongside standalone capsules", async () => {
@@ -198,7 +192,7 @@ describe("public source consumption comparison", () => {
       await awaitWorkerAfterMainSqliteClose(client);
       const identity: CaseIdentity = {
         cell: "public_first_complete_then_later_read", group: canary.group,
-        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
+        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "source_text"
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
@@ -236,7 +230,7 @@ describe("public source consumption comparison", () => {
     await withPublicOrderedPairWorker(canary, publicFirstBody, laterBody, async (planted, handler, receipts) => {
       const identity: CaseIdentity = {
         cell: "public_first_capped_then_later_complete", group: canary.group,
-        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
+        view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "source_text"
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
@@ -283,7 +277,6 @@ async function runPair(input: Readonly<{
   readonly intendedId: string;
   readonly handler: ReturnType<typeof createRecallHandler>;
   readonly receipts: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt[];
-  readonly native?: ReturnType<typeof observePlantedDiscovery>;
   readonly maxResults: number;
   readonly cell: string;
 }>) {
@@ -324,7 +317,7 @@ async function runPair(input: Readonly<{
       lookup: input.lookup,
       max_results: input.maxResults,
       intended_id: input.intendedId,
-      native: input.native ?? null,
+      native: null,
       first_page_identities: trace.first_page_identities,
       first_page_preview_complete: trace.first_page_preview_complete,
       first_exposure_delivery: trace.first_exposure?.delivery_id ?? null,
@@ -396,7 +389,7 @@ async function consumePairTrace(
       return response;
     },
     context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
-    request: publicSearchRequest(canary, "proposal", "source_only", LIVE_ORDINARY_ENUMERATION),
+    request: publicSearchRequest(canary, "source_text", "source_only", LIVE_ORDINARY_ENUMERATION),
     receipts
   });
   expect(trace.steps[0]?.public_exchange.request.continuation).toBeNull();
@@ -659,11 +652,11 @@ function selectedPublicConsumptionCases(): CaseIdentity[] {
   }
   cases.push({
     cell: "public_first_complete_then_later_read", group: SOURCE_DISCOVERY_CANARY[1]!.group,
-    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
+    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "source_text"
   });
   cases.push({
     cell: "public_first_capped_then_later_complete", group: SOURCE_DISCOVERY_CANARY[1]!.group,
-    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "proposal"
+    view: "source_only", enumeration: LIVE_ORDINARY_ENUMERATION, lookup: "source_text"
   });
   return cases;
 }

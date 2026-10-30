@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
+import { postTurnHostMessageId } from "./admitted-source-root.js";
 import {
   readVerifiedDeliverySourceObservation,
   type VerifiedDeliverySourceObservation
@@ -17,6 +18,7 @@ export interface PostTurnExtractTaskPayload {
       readonly role: string;
       readonly content_excerpt: string;
       readonly message_id?: string;
+      readonly recorded_at?: string;
     }>[];
   }>;
 }
@@ -49,13 +51,15 @@ export function buildPostTurnContent(payload: PostTurnExtractTaskPayload): strin
 }
 
 export function buildPostTurnConversationMessages(
-  payload: PostTurnExtractTaskPayload
+  payload: PostTurnExtractTaskPayload,
+  taskId: string
 ): readonly ConversationMessage[] {
   return Object.freeze(
     payload.turn_digest.last_messages.map((message, index) => ({
-      message_id: message.message_id ?? `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
+      message_id: postTurnHostMessageId(taskId, index),
       role: message.role as ConversationMessage["role"],
-      content: message.content_excerpt
+      content: message.content_excerpt,
+      ...(message.recorded_at === undefined ? {} : { created_at: message.recorded_at })
     }))
   );
 }
@@ -73,6 +77,7 @@ function parsePostTurnMessages(
   readonly role: string;
   readonly content_excerpt: string;
   readonly message_id?: string;
+  readonly recorded_at?: string;
 }>[] {
   if (!isRecord(turnDigest) || !Array.isArray(turnDigest.last_messages)) {
     throw new Error("Invalid post-turn extract task payload.");
@@ -84,6 +89,7 @@ function parsePostTurnDigestMessage(value: unknown): {
   readonly role: string;
   readonly content_excerpt: string;
   readonly message_id?: string;
+  readonly recorded_at?: string;
 } {
   if (!isRecord(value)) {
     throw new Error("Invalid post-turn extract task payload.");
@@ -94,7 +100,8 @@ function parsePostTurnDigestMessage(value: unknown): {
   return {
     role: parseStringField(value, "role"),
     content_excerpt: parseStringField(value, "content_excerpt"),
-    ...(messageId === undefined ? {} : { message_id: messageId })
+    ...(messageId === undefined ? {} : { message_id: messageId }),
+    ...(value.recorded_at === undefined ? {} : { recorded_at: parseStringField(value, "recorded_at") })
   };
 }
 

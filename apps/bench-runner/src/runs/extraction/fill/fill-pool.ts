@@ -1,9 +1,7 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
-  collectOfficialApiExtractionCoverage,
   GardenProviderError,
-  OfficialApiGardenProvider,
-  stringifyOfficialApiExtractionRequest
+  OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
 import {
   attemptInputByteUpperBound,
@@ -28,9 +26,8 @@ import {
   createExtractionRequestPlanDeadline,
   resolveExtractionRequestPlanBudget
 } from "./policy/provider-request-plan-budget.js";
-import { inspectExtractionRawJson } from "../content-closure.js";
+import { sourceStatementRequests, sourceStatementSession } from "../source-statement-request.js";
 import {
-  EMPTY_INTERPRETATIONS_ENVELOPE,
   isPlanSkippedExtraction
 } from "../empty-classification.js";
 import type { ExtractionOutputTokenField } from "../authority/receipt-limits.js";
@@ -123,7 +120,7 @@ async function runExtractionTask(
   await adaptive.acquire(scope.signal);
   let outcome: AdaptiveConcurrencyReleaseOutcome = "neutral";
   try {
-    outcome = await extractTurn(input.extractor, turn, scope.signal, input.transport, input.sourcePacking) > 0
+    outcome = await extractTurn(input.extractor, turn, scope.signal, input.transport, input.log, input.sourcePacking) > 0
       ? "rate_limit"
       : "success";
   } catch (cause) {
@@ -192,9 +189,10 @@ async function extractTurn(
   turn: LongMemEvalExtractionTurn,
   signal: AbortSignal,
   transport: ExtractionPoolInput["transport"],
+  log: ExtractionPoolInput["log"],
   sourcePacking?: ExtractionSourcePacking
 ): Promise<number> {
-  const runtime = createExtractionTurnRuntime(extractor, turn, signal, transport, sourcePacking);
+  const runtime = createExtractionTurnRuntime(extractor, turn, signal, transport, log, sourcePacking);
   try {
     await compileExtractionTurn(runtime.provider, turn);
   } finally {
@@ -208,26 +206,22 @@ function createExtractionTurnRuntime(
   turn: LongMemEvalExtractionTurn,
   signal: AbortSignal,
   transport: ExtractionPoolInput["transport"],
+  log: ExtractionPoolInput["log"],
   sourcePacking?: ExtractionSourcePacking
 ) {
   const timeBudget = resolveExtractionFillProviderTimeBudget(transport?.maxOutputTokens);
-  const requests = collectOfficialApiExtractionCoverage(
-    turn.turnContent,
-    turn.turnMessages, sourcePacking
-  ).requests;
+  const requests = sourceStatementRequests(turn.turnMessages);
   const inputBound = transport?.maximumInputTokensPerAttempt;
   if (inputBound !== undefined) {
     for (const request of requests) {
       assertAttemptInputWithinReceiptLimit(
-        attemptInputByteUpperBound(stringifyOfficialApiExtractionRequest(request)),
+        attemptInputByteUpperBound(request.userPrompt),
         inputBound
       );
     }
   }
-  const planBudget = resolveExtractionRequestPlanBudget(
-    requests,
-    transport?.maxOutputTokens ?? 2_048
-  );
+  const planBudget = requests.length === 0 ? { wallClockBudgetMs: timeBudget.providerWallClockBudgetMs }
+    : resolveExtractionRequestPlanBudget(requests, transport?.maxOutputTokens ?? 2_048);
   const deadline = createExtractionRequestPlanDeadline({
     budgetMs: planBudget.wallClockBudgetMs
   });
@@ -239,6 +233,10 @@ function createExtractionTurnRuntime(
       requestTimeoutMs: timeBudget.requestTimeoutMs,
       wallClockBudgetMs: planBudget.wallClockBudgetMs,
       diagnosticDir: null,
+      recordSession: event => {
+        if (event.kind === "started") log(`[extraction-fill] session=${event.session_id} planned_requests=${event.planned_requests} ceiling=${event.request_ceiling}`);
+        else log(`[extraction-fill] session=${event.receipt.session_id} status=${event.receipt.status} raw_fallbacks=${event.receipt.messages.filter(row => row.status === "failed").length} reasons=${[...new Set(event.receipt.messages.flatMap(row => row.rejections.map(rejection => rejection.reason)))].join(",")}`);
+      },
       extractor: createPlanBoundExtractor(
         extractor, signal, transport, deadline, state
       )
@@ -260,17 +258,14 @@ function createPlanBoundExtractor(
       const result = await extractor.extract(deadline.bindRequest({
         ...request,
         ...(transport === undefined ? {} : transport),
-        // Envelope-only. Identities-only membership keeps graphless signals;
-        // requiring a graph here retries the provider as if the transport failed.
-        validateRawJson: inspectExtractionRawJson,
+        retryMode: "disabled",
         abortSignal: request.abortSignal === undefined
           ? signal
           : AbortSignal.any([signal, request.abortSignal])
       }));
       if (isPlanSkippedExtraction(result)) {
-        // Sibling keys outside a probe/repair plan must not persist or count as
-        // empty extraction; compile still needs a parseable envelope.
-        return { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, extractionSkip: "plan_skipped" };
+        // The shared session owner records a skipped request as not dispatched, not valid-empty.
+        return result;
       }
       state.rateLimitRetries = result.taskRateLimitRetries ??
         result.extractorMeta?.rateLimitRetries ?? 0;
@@ -284,9 +279,9 @@ async function compileExtractionTurn(
   turn: LongMemEvalExtractionTurn
 ): Promise<void> {
   try {
-    await provider.extractSourceInterpretations(turn.turnContent, {
+    await provider.extractSourceStatements(turn.turnContent, {
       workspace_id: "extraction-fill",
-      run_id: "extraction-fill",
+      run_id: sourceStatementSession(turn.turnMessages).sessionId,
       surface_id: null,
       turn_messages: turn.turnMessages
     });

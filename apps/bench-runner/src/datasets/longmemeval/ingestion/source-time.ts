@@ -1,3 +1,5 @@
+import type { RecordedSourceTime } from "@do-soul/alaya-protocol";
+
 const SOURCE_DATE_PATTERN =
   /^(\d{4})[/-](\d{2})[/-](\d{2})(?:\s+\([^)]*\))?(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/u;
 const CANONICAL_ISO_PATTERN =
@@ -31,7 +33,7 @@ export function requireLongMemEvalTimestamp(value: string | undefined): string {
 
 /** Normalization supplies a comparison coordinate, not evidence of a timezone or
  * per-message/event precision absent from the original session date. */
-export function describeLongMemEvalSessionTime(raw: string) {
+export function describeLongMemEvalSessionTime(raw: string): RecordedSourceTime {
   const normalized = requireLongMemEvalTimestamp(raw);
   const match = SOURCE_DATE_PATTERN.exec(raw.trim());
   return {

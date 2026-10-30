@@ -59,14 +59,20 @@ export function createCompileSeedRunner(
   options?: CompileSeedRunnerOptions
 ): CompileSeedRunner {
   const context = createCompileSeedRunnerContext(options);
+  let pending = Promise.resolve();
   return {
     stats: context.stats,
     ...(context.extractionCachePreflightProof === undefined ? {} : {
       extractionCachePreflightProof: context.extractionCachePreflightProof
     }),
-    ...(context.semanticSupplement === null
-      ? {}
-      : { semanticSupplementBinding: context.semanticSupplement.binding }),
-    seedTurn: (input) => seedCompileTurn(context, input)
+    seedTurn: (input) => {
+      const captured = { ...input,
+        ...(input.turnMessages === undefined ? {} : { turnMessages: structuredClone(input.turnMessages) }),
+        ...(input.sourceSession === undefined ? {} : { sourceSession: structuredClone(input.sourceSession) }),
+        ...(input.sourceSessionRounds === undefined ? {} : { sourceSessionRounds: structuredClone(input.sourceSessionRounds) }) };
+      const result = pending.then(() => seedCompileTurn(context, captured));
+      pending = result.then(() => undefined, () => undefined);
+      return result;
+    }
   };
 }

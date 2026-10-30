@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SOURCE_STATEMENTS_CONTRACT, LocatedSourceStatementSchema } from "../garden/source-statements.js";
 import { SOURCE_INTERPRETATION_CONTRACT, SourceLocatedInterpretationSchema } from "../garden/source-interpretation.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
@@ -172,8 +173,25 @@ export const SourceInterpretationSignalSchema = CandidateMemorySignalBaseSchema.
   source: z.literal(SignalSource.GARDEN_COMPILE),
   source_observation: SignalSourceObservationSchema
 }).readonly();
+export const SourceStatementSignalSchema = CandidateMemorySignalBaseSchema.extend({
+  ...InterpretationFields,
+  interpretation_contract: z.literal(SOURCE_STATEMENTS_CONTRACT),
+  source: z.literal(SignalSource.GARDEN_COMPILE),
+  source_observation: SignalSourceObservationSchema.nullable(),
+  // The located statement owns its bounds; the legacy opaque-JSON cap would reject admitted messages.
+  raw_payload: z.record(z.string(), z.unknown()).readonly().and(
+    z.object({ source_statement: LocatedSourceStatementSchema }).strict().readonly())
+}).readonly();
+/** A retained signal identity after governed source erasure; never an admission input. */
+export const UnavailableSourceStatementSignalSchema = SourceStatementSignalSchema.unwrap().extend({
+  raw_payload: z.record(z.string(), z.unknown()).readonly().and(z.object({ source_statement_unavailable: z.object({
+    reason: z.literal("source_erased"), source_root_id: BoundedIdSchema,
+    erased_dependency_id: BoundedIdSchema, erase_barrier_id: BoundedIdSchema
+  }).strict().readonly() }).strict().readonly())
+}).readonly();
 export const CandidateMemorySignalSchema = z.union([
-  LegacyCandidateMemorySignalSchema, SourceInterpretationSignalSchema
+  LegacyCandidateMemorySignalSchema, SourceInterpretationSignalSchema, SourceStatementSignalSchema,
+  UnavailableSourceStatementSignalSchema
 ]);
 
 // Content-only fields that the agent supplies. workspace_id / run_id /
@@ -236,6 +254,7 @@ export type SignalState = z.infer<typeof SignalStateSchema>;
 export type CandidateMemorySignal = z.infer<typeof CandidateMemorySignalSchema>;
 export type LegacyCandidateMemorySignal = z.infer<typeof LegacyCandidateMemorySignalSchema>;
 export type SourceInterpretationSignal = z.infer<typeof SourceInterpretationSignalSchema>;
+export type SourceStatementSignal = z.infer<typeof SourceStatementSignalSchema>;
 export type CandidateMemorySignalInput = z.infer<typeof CandidateMemorySignalInputSchema>;
 export type EmitCandidateSignalRequest = z.infer<typeof EmitCandidateSignalRequestSchema>;
 export type McpEmitCandidateSignalRequest = z.infer<typeof McpEmitCandidateSignalRequestSchema>;

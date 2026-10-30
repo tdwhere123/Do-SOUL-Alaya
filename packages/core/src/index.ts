@@ -217,7 +217,7 @@ export * from "./runtime/runs/workspace-service.js";
 export * from "./governance/security/zero-day-security-layer.js";
 
 export {
-  createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation, packetEvidenceId,
+  verifyPublishedSourceInterpretation, packetEvidenceId,
   createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation
 } from "./memory/evidence-create/source-interpretation-packet-publication.js";
 export { semanticInterpretationEvidenceId } from "./memory/evidence-create/source-semantic-capsule.js";
@@ -234,7 +234,6 @@ export {
   SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
   SourceSemanticCorrespondenceProducerRegistry, defaultSourceSemanticCorrespondenceProducerRegistry
 } from "./recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
-export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
 export { createSourceFeedbackSession, captureSourceFeedbackTerminalCause, type SourceFeedbackSessionInput, type SourceFeedbackSession,
   type SourceFeedbackAction, type SourceFeedbackSettlement, type SourceFeedbackTerminalCause } from "./recall/runtime/source-feedback-session.js";

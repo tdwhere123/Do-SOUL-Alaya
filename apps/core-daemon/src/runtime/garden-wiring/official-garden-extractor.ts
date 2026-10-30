@@ -60,7 +60,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
         env: processEnvLookup(),
         ...(profile === undefined ? {} : { profile })
       }, {
-        maxRetries: OFFICIAL_GARDEN_MAX_RETRIES,
+        maxRetries: options?.providerRetryMode === "disabled" ? 0 : OFFICIAL_GARDEN_MAX_RETRIES,
         retryDelaysMs: [],
         retryJitter: { baseMs: 250, maxMs: 1_500, random: Math.random },
         maxTimeoutRetries: 1,
@@ -71,6 +71,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
       });
       return {
         content: [{ type: "text", text: execution.result.text }],
+        ...(execution.result.usage === undefined ? {} : { usage: execution.result.usage }),
         executionMeta: {
           retryCount: execution.retryCount,
           retryClassification: execution.retryClassification

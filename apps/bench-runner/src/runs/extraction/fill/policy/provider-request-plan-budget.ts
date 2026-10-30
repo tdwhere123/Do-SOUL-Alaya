@@ -1,4 +1,3 @@
-import type { OfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import type { BenchSignalExtractor } from
   "../../../compile-seed/compile-seed-types.js";
 import {
@@ -17,7 +16,7 @@ export interface ExtractionRequestPlanBudget {
 }
 
 export function resolveExtractionRequestPlanBudget(
-  requests: readonly OfficialApiExtractionRequest[],
+  requests: readonly unknown[],
   maxOutputTokens: number
 ): ExtractionRequestPlanBudget {
   if (requests.length < 1) {

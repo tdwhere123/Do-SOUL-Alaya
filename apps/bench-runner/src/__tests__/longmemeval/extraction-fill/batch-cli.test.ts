@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fieldContractSha256, SourceIndexLifecycle } from "@do-soul/alaya-core";
 import { initDatabase, SqliteSignalRepo, SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo, SqliteFieldProjectionGenerationRepo,
-  SqliteFieldFactorRepo, SqliteFieldSourceSpanRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+  SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { configuration as sourceIndexConfiguration, BUDGET as SOURCE_INDEX_BUDGET } from
   "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { startBenchDaemon } from "../../../harness/daemon.js";
@@ -25,14 +25,14 @@ let pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots));
 afterEach(() => vi.unstubAllGlobals());
 
-it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens and consumes %s through the actual fill CLI without duplicate spend", async (sourcePacking) => {
+it.each([1, 2])("consumes %i session statements through the fill CLI and native recall without duplicate spend or roots", async (expectedDrafts) => {
+  const sourcePacking = "session-statements" as const;
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-2.5-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-2.5-nonthinking-v1");
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
   const questions = [buildAuthorityQuestion("q1", "alpha", "decoy")];
-  if (sourcePacking === "singleton") questions[0]!.haystack_sessions[0]![0]!.content += " I completed beta.";
-  const expectedDrafts = sourcePacking === "singleton" ? 2 : 1;
+  if (expectedDrafts === 2) questions[0]!.haystack_sessions[0]![0]!.content += " I completed beta.";
   await writeDataset(questions);
   const inspection = await inspectExtractionAuthority({ variant: EXTRACTION_FILL_VARIANT,
     cacheRoot, dataDir, pinnedMetaRoot, sourcePacking, revision: readCurrentExtractionAuthorityRevision(), action: "fill" });
@@ -70,10 +70,19 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
         displayName, inputConfig: { fileName: inputFile } }, response: { responsesFile: "files/output" } });
     if (path === "/download/v1beta/files/output:download") {
       const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8")) as GeminiBatchPlan;
-      return new Response(plan.lines.map((line) => JSON.stringify({ key: line.key, response: {
-        candidates: [{ finishReason: "STOP", content: { parts: [{ text: buildGroundedInterpretationResponse(line.userPrompt) }] } }],
-        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
-      } })).join("\n"));
+      return new Response(plan.lines.map((line) => {
+        const response = JSON.parse(buildGroundedInterpretationResponse(line.userPrompt));
+        if (expectedDrafts === 2) for (const message of response.messages) {
+          if (message.statements[0]?.text.includes("alpha")) message.statements = [
+            { text: "I completed alpha.", relation: "recorded event" },
+            { text: "I completed beta.", relation: "recorded event" }
+          ];
+        }
+        return JSON.stringify({ key: line.key, response: {
+          candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(response) }] } }],
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 }
+        } });
+      }).join("\n"));
     }
     throw new Error(`unexpected fixture request ${path}`);
   });
@@ -84,7 +93,7 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
     "--batch-operation", operation, "--batch-limits", limitsPath,
     ...(packing === undefined ? [] : ["--extraction-source-packing", packing])]);
   expect(await run("prepare", sourcePacking)).toBe(0);
-  if (sourcePacking === "singleton") expect(await run("prepare", "reference-eight")).toBe(2);
+  expect(await run("prepare", "reference-eight")).toBe(2);
   expect(fetchMock).not.toHaveBeenCalled();
   expect(await run("submit")).toBe(0);
   expect(creates).toBe(1);
@@ -109,7 +118,7 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
   try {
     const result = await runner.seedTurn({ daemon, turnContent: turn.turnContent,
       turnMessages: turn.turnMessages, seedIndex: 1, evidenceRefBase: "batch-consumer-evidence",
-      workspaceId: daemon.workspaceId, runId: daemon.runId, sourceObservedAt: "2026-01-01T00:00:00.000Z" });
+      workspaceId: daemon.workspaceId, runId: daemon.runId, sourceObservedAt: turn.turnMessages[0]!.source_time!.normalized });
     expect(result.seeds).toHaveLength(expectedDrafts);
     const seed = result.seeds[0]!;
     expect(seed.evidenceId).not.toBeNull();
@@ -117,9 +126,11 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
     // initDatabase reuses the daemon's connection; daemon.shutdown owns its close.
     const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
     const signal = await new SqliteSignalRepo(db).getById(seed.signalId);
-    expect(signal).toMatchObject({ interpretation_contract: "source-interpretation-v1",
-      raw_payload: { source_interpretation: {
-        assertion_binding: { text: "User: I completed alpha." }, outcome: "candidates"
+    expect(signal).toMatchObject({ interpretation_contract: "source-statements-v1",
+      raw_payload: { source_statement: {
+        message: { role: "user", text: questions[0]!.haystack_sessions[0]![0]!.content,
+          recorded_time: { raw: "2025-12-01", level: "session", precision: "day" } },
+        statement: { text: "I completed alpha.", relation: "recorded event" }
       } } });
     const evidence = await new SqliteEvidenceCapsuleRepo(db).findById(seed.evidenceId!);
     expect(evidence?.excerpt).toContain("I completed alpha.");
@@ -127,15 +138,8 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
       .listByWorkspace(daemon.workspaceId);
     const originalSource = sourceRecords.find((row) => row.source_id === "compile-seed:batch-consumer:batch-consumer-run:1");
     expect(originalSource?.source_body).toContain("I completed alpha.");
-    const source = sourceRecords.find((row) => row.evidence_object_id === seed.evidenceId);
-    expect(source?.source_body).toContain("I completed alpha.");
-    if (source === undefined) throw new Error("materialization must retain its original source record");
-    const spans = new SqliteFieldSourceSpanRepo(db, fieldContractSha256)
-      .listByWorkspace(daemon.workspaceId).filter((row) => row.record_id === source.record_id);
-    expect(spans.length).toBeGreaterThan(0);
-    const incidences = new SqliteFieldFactorRepo(db, fieldContractSha256)
-      .listIncidences(daemon.workspaceId);
-    expect(incidences.some((row) => spans.some((span) => span.span_id === row.span_id))).toBe(true);
+    expect(sourceRecords).toHaveLength(1);
+    expect(sourceRecords.filter(row => result.seeds.some(item => item.evidenceId === row.evidence_object_id))).toEqual([]);
     const generation = new SqliteFieldProjectionGenerationRepo(db, fieldContractSha256)
       .readActive(daemon.workspaceId);
     expect(generation?.status).toBe("active");
@@ -160,6 +164,7 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
         content_preview: expect.stringContaining("alpha")
       });
       expect(delivered).not.toHaveProperty("object_id");
+      expect(recalled.results.filter(row => row.target.kind === "source_evidence" && row.target.root_id === originalSource?.record_id)).toHaveLength(1);
       expect(recalled.provider_calls).toBe(0);
       expect(recalled.garden_enqueue).toBe(0);
     }
@@ -170,7 +175,7 @@ it.each(["reference-eight", "singleton"] as const)("prepares, submits, reopens a
   try {
     const sources = new SqliteFieldSourceRecordRepo(reopened, fieldContractSha256).listByWorkspace(daemon.workspaceId);
     expect(sources.some((row) => row.source_body?.includes("I completed alpha."))).toBe(true);
-    if (sourcePacking === "singleton") {
+    if (expectedDrafts === 2) {
       expect(sources.some((row) => row.source_body?.includes("I completed beta."))).toBe(true);
     }
   } finally { reopened.close(); }

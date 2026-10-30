@@ -102,9 +102,7 @@ export type {
 } from "./runtime/conditional-field-execution-receipt.js";
 export {
   compileConditionalFieldQuery,
-  compileQuerySourceSketch,
-  interpretationIdentity,
-  type QuerySourceSketch
+  interpretationIdentity
 } from "./conditional-field/query/compile-query.js";
 export type {
   KeywordSearchBatchQuery,

@@ -1,16 +1,18 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { assertLongMemEvalTimeline } from "../../datasets/longmemeval/ingestion/source-time.js";
+import type { ConversationMessage, ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import {
   collectOfficialApiExtractionCoverage, collectSourceSemanticUnitPacks, buildOfficialApiSourceCorpus,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
-  buildLongMemEvalRoundMessages,
+  buildLongMemEvalRoundMessages, buildLongMemEvalSessionMessages,
   pairSessionIntoRounds,
   type LongMemEvalRoundMessage,
   type LongMemEvalQuestion
 } from "../../datasets/longmemeval/ingestion/dataset.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations } from "./request-artifact.js";
+import { sourceStatementRequests, sourceStatementSession } from "./source-statement-request.js";
 
 export interface LongMemEvalExtractionTurn {
   readonly turnContent: string;
@@ -50,7 +52,24 @@ export function inspectTurnContentKeySpace(
   const occurrences: LongMemEvalExtractionTurn[] = [];
   const coverageMemo = new Map<string, CachedTurnCoverage>();
   for (const question of questions) {
+    if (!openSemantics && (sourcePacking === undefined || sourcePacking === "session-statements")) assertLongMemEvalTimeline(question);
     for (const [sessionIndex, session] of question.haystack_sessions.entries()) {
+      if (!openSemantics && (sourcePacking === undefined || sourcePacking === "session-statements")) {
+        const turnMessages = buildLongMemEvalSessionMessages(session, question.haystack_dates[sessionIndex]);
+        if (turnMessages.length === 0) continue;
+        const occurrence = Object.freeze({ turnContent: pairSessionIntoRounds(session).map(round => round.content).join("\n"), turnMessages });
+        const source = sourceStatementSession(turnMessages);
+        const requests = sourceStatementRequests(turnMessages);
+        turnOccurrences++;
+        occurrences.push(occurrence);
+        unsupportedSourceOccurrences += source.messages.length - requests.reduce((sum, request) => sum + request.source.messages.length, 0);
+        if (!distinct.has(source.sessionId)) {
+          distinctExtractionRequestCount += requests.length;
+          distinct.set(source.sessionId, occurrence);
+        }
+        continue;
+      }
+      // Historical semantic-generation inventory retains its original round boundaries.
       for (const [roundIndex, round] of pairSessionIntoRounds(session).entries()) {
         const normalized = round.content.trim();
         if (normalized.length === 0) continue;
@@ -88,12 +107,15 @@ export function collectDistinctTurnContents(
   return inspectTurnContentKeySpace(questions, sourcePacking).distinctTurnContents;
 }
 
-/** Request bytes ignore occurrence message ids; cache them per role/content round. */
+/** Current requests consume captured message authority; retained assertion requests consume role/body only. */
 export function extractionRequestCoverageMemoKey(
   turnContent: string,
-  messages: readonly { readonly role: string; readonly content: string }[],
+  messages: readonly ConversationMessage[],
   sourcePacking?: ExtractionSourcePacking
 ): string {
+  if (sourcePacking === undefined || sourcePacking === "session-statements") {
+    return sourceStatementSession(messages).sessionId;
+  }
   return JSON.stringify({
     content: turnContent,
     packing: sourcePacking ?? null,

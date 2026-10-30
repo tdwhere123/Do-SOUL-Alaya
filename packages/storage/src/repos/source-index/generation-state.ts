@@ -41,7 +41,7 @@ export function readSourceIndexGeneration(database: StorageDatabase, workspaceId
     completed_count: readIntegerField(row, "completed_count"), reason: readNullableStringField(row, "reason") });
 }
 /** Shared serving/coverage predicate. Private measurement reads adapt this owner, not a second qualification rule. */
-export const SOURCE_INDEX_LEXICAL_CURRENT = `x.content_digest=json_extract(r.target_json,'$.target.content_digest')
+export const SOURCE_INDEX_LEXICAL_CURRENT = `x.content_digest=COALESCE(json_extract(r.target_json,'$.auxiliary.key_digest'),json_extract(r.target_json,'$.target.content_digest'))
   AND x.body_bytes=json_extract(r.target_json,'$.body_bytes')`;
 
 /** Reconcile captured manifests in SQLite, never hydrating the source population into JavaScript. */

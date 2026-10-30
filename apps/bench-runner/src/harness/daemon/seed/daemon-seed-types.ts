@@ -61,6 +61,7 @@ export interface BenchSignalSeedInput {
   readonly matchedText?: string;
   readonly surfaceId?: string | null;
   readonly productionRawPayload?: Readonly<Record<string, unknown>>;
+  readonly productionSignal?: import("@do-soul/alaya-protocol").SourceStatementSignal;
   readonly productionSignalId?: string;
   readonly evidenceRef: string;
   readonly turnSeedIndex: number;
