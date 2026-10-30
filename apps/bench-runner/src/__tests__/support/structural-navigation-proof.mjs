@@ -283,11 +283,11 @@ try {
     const fault = join(root, `repair-${name}.mjs`), trace = join(root, `repair-${name}-trace.json`);
     writeFileSync(fault, `await import(${JSON.stringify(preload)});
       const storage = await import(${JSON.stringify(pathToFileURL(join(tree, 'packages/storage/dist/index.js')).href)});
-      const fs = await import('node:fs'); const { syncBuiltinESMExports } = await import('node:module');
+      const fs = await import('node:fs'); const { win32 } = await import('node:path'); const { syncBuiltinESMExports } = await import('node:module');
       const write = fs.default.writeFileSync, read = storage.SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
       const mode = ${JSON.stringify(mode)}, trace = ${JSON.stringify(trace)}; let deliveries = 0;
       if (mode === 'capture') { fs.default.writeFileSync = function (path, ...args) {
-        if (String(path).endsWith('/001.json')) throw new Error('authored capture write failure'); return write(path, ...args);
+        if (win32.basename(String(path)) === '001.json') throw new Error('authored capture write failure'); return write(path, ...args);
       }; syncBuiltinESMExports(); }
       storage.SqliteFieldSourceRecordRepo.prototype.findByIdBounded = function (...args) {
         const result = read.apply(this, args); if (args[2] !== 4096) return result;

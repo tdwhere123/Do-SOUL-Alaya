@@ -64,6 +64,8 @@ function usage(handler: Awaited<ReturnType<typeof handlerFor>>["handler"], deliv
 }
 
 describe("standalone capsule delivery through built worker and MCP usage", () => {
+  // Each case boots three real workers across cold, indexed, and reopened SQLite
+  // states. Budget the whole integration separately from unchanged request deadlines.
   it.each(["excerpt", "gist"] as const)("delivers exact retained %s bytes and validates the issued delivery after restart", async extent => {
     const dir = await mkdtemp(join(tmpdir(), "alaya-capsule-delivery-")); directories.push(dir);
     const filename = join(dir, "capsules.sqlite");
@@ -118,5 +120,5 @@ describe("standalone capsule delivery through built worker and MCP usage", () =>
     reopened.connection.prepare("UPDATE evidence_capsules SET lifecycle_state='tombstone',gist='erased',excerpt=NULL WHERE object_id=?").run(id);
     expect((await recall(live.handler)).results).toEqual([]);
     expect((await usage(live.handler, afterRestart.delivery_id!, target)).ok).toBe(false);
-  });
+  }, 30_000);
 });
