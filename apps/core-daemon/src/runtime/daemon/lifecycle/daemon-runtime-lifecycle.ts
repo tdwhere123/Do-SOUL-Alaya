@@ -317,10 +317,12 @@ function createHttpServerStarter(
     warnIfRemoteDaemonListening(processEnvLookup(), hostname, (message) => {
       input.warnLogger.warn(message, {});
     });
-    logListeningAddress(input, hostname, port, policy.kind === "unix" ? policy.path : undefined);
+    const address = (tcpServer as Partial<Server>).address?.();
+    const listeningPort = address !== null && typeof address === "object" ? address.port : port;
+    logListeningAddress(input, hostname, listeningPort, policy.kind === "unix" ? policy.path : undefined);
     return Object.freeze({
       hostname,
-      port,
+      port: listeningPort,
       bindProcessWorkspaceIds: (workspaceIds: readonly string[]) => {
         bindRequestProtectionWorkspaceIds(input.requestProtection, workspaceIds);
       },

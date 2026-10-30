@@ -51,7 +51,8 @@ async function bootStartedDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const runtime = await bootDaemonRuntime();
   // @anchor test-port-zero — OS-assigned port avoids parallel bind race.
   // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:startHttpServer
-  await runtime.startHttpServer({ port: 0, allowEphemeralRequestToken: true });
+  const server = await runtime.startHttpServer({ port: 0, allowEphemeralRequestToken: true });
+  expect(server.port).toBeGreaterThan(0);
   return runtime;
 }
 
