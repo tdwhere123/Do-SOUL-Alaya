@@ -83,6 +83,10 @@ it("captures authorized config and workset before native readiness yields withou
 it("cancels readiness at the phase deadline and refuses reservation even if readiness returns late", async () => {
   let requests = 0, cancelled = false;
   const current = await fixture((_req, res) => { requests++; reply(res); });
+  const started = performance.now();
+  // Keep synchronous fixture/ledger setup from consuming this readiness-only
+  // deadline on a loaded runner. AbortSignal.timeout still uses the real timer.
+  const clock = vi.spyOn(performance, "now").mockReturnValue(started);
   try {
     const native = createSemanticProviderHttpExtractor(current.config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
     const extractor = { ...native, assertTransportReady: async (signal?: AbortSignal, timeoutMs?: number) => {
@@ -96,7 +100,7 @@ it("cancels readiness at the phase deadline and refuses reservation even if read
     expect(cancelled).toBe(true);
     expect(requests).toBe(0);
     expect(openEvidenceSelectionAttemptLedger(current).snapshot()).toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [] });
-  } finally { await current.close(); }
+  } finally { clock.mockRestore(); await current.close(); }
 });
 
 it("retains independent legacy readiness and request timeouts when no phase deadline is supplied", async () => {

@@ -3,7 +3,7 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulInterpretationFieldRecallDeliverySchema,
@@ -24,7 +24,7 @@ const roots: string[] = [];
 afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); isolation.restore(); });
 
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "library-continuation-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "library-continuation-")));
   roots.push(root);
   const snapshot = await prepareNativeSourceRecordsSnapshot({ snapshotPath: join(root, "input.sqlite"),
     dataDirRoot: join(root, "publication"), workspaceId: "stone-library", runId: "stone-library-run",

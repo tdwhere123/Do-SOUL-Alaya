@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, unlink } from "node:fs/promises";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createBenchDaemonLaunchConfig, BENCH_DAEMON_MANAGED_ENV_KEYS } from "../../../harness/daemon/daemon-environment.js";
 import { createBenchDaemonConfigDirectoryLease } from "../../../harness/daemon/daemon-config-directory.js";
+import { installProviderFreeBoundary } from "../../support/provider-free-boundary.js";
 import { samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const defaults = { dataDir: "/fixture-data", embeddingMode: "disabled" as const,
   embeddingProviderKind: "local_onnx" as const, tokenFactory: () => "fixture" };
 
@@ -29,7 +31,7 @@ it("leaves ambient queue and Garden defaults intact unless launch effects are se
     ALAYA_SQLITE_WRITE_QUEUE: "1", ALAYA_GARDEN_PROVIDER_KIND: "host_worker",
     ALAYA_CONFLICT_DETECTION_ENABLED: "true"
   } });
-  expect(dirname(launch.configDir)).toBe(tmpdir());
+  expect(dirname(launch.configDir)).toBe(realpathSync(tmpdir()));
   expect(launch).not.toHaveProperty("embeddingStartupProbe");
   expect(launch.environment).toMatchObject({ ALAYA_SQLITE_WRITE_QUEUE: "1",
     ALAYA_GARDEN_PROVIDER_KIND: "host_worker", ALAYA_CONFLICT_DETECTION_ENABLED: "true" });
@@ -99,4 +101,27 @@ it("does not create an absent explicit root or remove an unowned conflicting lea
 it("rejects unsupported effect values before planning a directory", () => {
   // @ts-expect-error Invalid JavaScript caller must fail at the boundary too.
   expect(() => createBenchDaemonLaunchConfig({ ...defaults, sqliteWriteQueue: "enabled", ambientEnv: {} })).toThrow(/unsupported/);
+});
+
+it("plans the default config lease under the physical temp root", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "bench-default-config-root-")));
+  roots.push(root);
+  const physical = join(root, "physical"), alias = join(root, "alias");
+  await mkdir(physical);
+  await symlink(physical, alias, "junction");
+  for (const key of ["TMPDIR", "TMP", "TEMP"]) vi.stubEnv(key, alias);
+  const launch = createBenchDaemonLaunchConfig({ ...defaults, ambientEnv: {} });
+  expect(dirname(launch.configDir)).toBe(realpathSync(physical));
+  await unlink(alias);
+  const lease = createBenchDaemonConfigDirectoryLease(launch.configDir);
+  await lease.prepare();
+  expect(await readdir(physical)).toHaveLength(1);
+  const isolation = installProviderFreeBoundary();
+  try {
+    const env = join(lease.path, ".env");
+    writeFileSync(env, "FIXTURE_KEY=synthetic");
+    expect(readFileSync(env, "utf8")).toBe("FIXTURE_KEY=synthetic");
+    expect(isolation.violations).toEqual([]);
+  } finally { isolation.restore(); await lease.cleanup(); }
+  expect(await readdir(physical)).toEqual([]);
 });

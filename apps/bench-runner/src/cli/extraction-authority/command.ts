@@ -33,6 +33,7 @@ import { computeExtractionFillAttemptCeiling } from
   "../../runs/extraction/authority/receipt-limits.js";
 import {
   parseAuthorizeExtractionArgs,
+  parseAuthorizeExtractionFlags,
   type AuthorizeExtractionArgs
 } from "./args.js";
 import {
@@ -77,8 +78,8 @@ async function buildAuthorizedReceipt(
   args: ReadonlyArray<string>,
   deps: AuthorizeExtractionDependencies
 ) {
-  const flags = parseFlags(args);
   const authority = parseAuthorizeExtractionArgs(args);
+  const flags = parseAuthorizeExtractionFlags(args);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
   const { inspection, ledger, inspectInput, predecessorBaseInspection } =
     await inspectAuthorityForReceipt(flags, authority, cacheRoot, deps);

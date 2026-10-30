@@ -15,7 +15,9 @@ test("Git storage policy permits maintained definitions and rejects force-added 
     execFileSync("git", ["init", "--quiet", root]);
     writeFileSync(path.join(root, ".gitignore"), readFileSync(path.join(repoRoot, ".gitignore")));
     const maintained = ["README.md", "datasets/README.md", "datasets/.gitkeep", "datasets/locomo10.meta.json",
-      "datasets/longmemeval_oracle.meta.json", "datasets/longmemeval_s.meta.json", "datasets/longmemeval_s.stratified-100.v1.json"];
+      "datasets/longmemeval_oracle.meta.json", "datasets/longmemeval_s.meta.json", "datasets/longmemeval_s.stratified-100.v1.json",
+      "datasets/longmemeval_s.heldout-100.v1.json", "datasets/longmemeval_s.dev2-288.v1.json",
+      "datasets/longmemeval_s.confirmation-selection.v1.md"];
     for (const file of maintained) {
       const target = path.join(root, "docs/bench-history", file);
       mkdirSync(path.dirname(target), { recursive: true });

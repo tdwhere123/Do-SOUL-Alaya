@@ -145,14 +145,11 @@ describe("local ONNX artifact snapshot", () => {
     const parent = makeCache();
     const sibling = join(parent, "unrelated");
     writeFileSync(sibling, "keep");
-    vi.stubEnv("ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT", parent);
-    try {
-      const snapshot = await takeSnapshot(original.cacheRoot, original.modelId);
-      expect(dirname(dirname(snapshot.modelRoot))).toBe(parent);
-      await snapshot.dispose();
-      expect(readFileSync(sibling, "utf8")).toBe("keep");
-      expect(existsSync(parent)).toBe(true);
-    } finally { vi.unstubAllEnvs(); }
+    const snapshot = await takeSnapshot(original.cacheRoot, original.modelId, parent);
+    expect(dirname(dirname(snapshot.modelRoot))).toBe(parent);
+    await snapshot.dispose();
+    expect(readFileSync(sibling, "utf8")).toBe("keep");
+    expect(existsSync(parent)).toBe(true);
   });
 
   it("removes the private tree after a normal dispose", async () => {
@@ -229,8 +226,8 @@ function writeEncoderTree(options: { onnx: Buffer; extra?: FixtureFile }): {
   return writeTree(files, "fixture-encoder");
 }
 
-async function takeSnapshot(cacheRoot: string, modelId: string): Promise<VerifiedLocalOnnxArtifacts> {
-  const snapshot = await snapshotLocalOnnxArtifacts(cacheRoot, modelId);
+async function takeSnapshot(cacheRoot: string, modelId: string, snapshotParent?: string): Promise<VerifiedLocalOnnxArtifacts> {
+  const snapshot = await snapshotLocalOnnxArtifacts(cacheRoot, modelId, snapshotParent);
   snapshots.push(snapshot);
   return snapshot;
 }

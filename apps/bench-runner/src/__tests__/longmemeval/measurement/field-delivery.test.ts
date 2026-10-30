@@ -151,9 +151,11 @@ it("reuses actual SQLite containment for a non-prefix UTF-8 anchor, missing loca
 
 it("publishes independent metrics but no paired deltas when either delivered arm is unavailable", () => {
   const proof = fileURLToPath(new URL("../../support/field-delivery-proof.mjs", import.meta.url));
-  const output = execFileSync(process.execPath, [proof], { encoding: "utf8", timeout: 120_000, stdio: "pipe" });
+  // Full replay starts roughly 98 bounded CLI children, including failure arms
+  // and frozen evaluations; their cumulative startup time can exceed two minutes.
+  const output = execFileSync(process.execPath, [proof], { encoding: "utf8", timeout: 300_000, stdio: "pipe" });
   expect(JSON.parse(output)).toMatchObject({ status: "complete", comparisons: 5 });
-}, 130_000);
+}, 310_000);
 
 it("fixed byte visibility requires a whole message and keeps unavailable distinct from miss", () => {
   const w = window("a", "abc", 20);

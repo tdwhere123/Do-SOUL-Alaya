@@ -2,7 +2,8 @@ import { readExtractionGeneration } from "../extraction-fill/packet-profile.js";
 import process from "node:process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { parseFlags } from "../cli-options.js";
+import type { parseFlags } from "../cli-options.js";
+import { parseFlagsWithoutCommandOptions } from "../options/command-flags.js";
 import { resolveEffectiveExtractionCacheRoot } from
   "../../runs/compile-seed/compile-seed-config.js";
 import {
@@ -121,7 +122,11 @@ async function executeTargetSelection(
   deps: TargetSelectionDependencies,
   state: TargetSelectionRunState
 ): Promise<void> {
-  const flags = parseFlags(args);
+  const flags = parseFlagsWithoutCommandOptions(args, [
+    "--cache-audit-receipt", "--materialization-receipt", "--retired-source-rebuild-operator",
+    "--predecessor-target-selection", "--adopt-existing-child-target-selection",
+    "--adopt-existing-child-authority", "--target-selection-out"
+  ]);
   const selection = parseTargetSelectionArgs(args);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
   state.cacheRoot = cacheRoot;

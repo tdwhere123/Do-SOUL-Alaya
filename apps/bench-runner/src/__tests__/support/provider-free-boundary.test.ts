@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, linkSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, readFileSync, writeFileSync, symlinkSync, linkSync, rmSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { installProviderFreeBoundary } from "./provider-free-boundary.js";
 
 const directories: string[] = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
-const temporary = () => { const path = mkdtempSync(join(tmpdir(), "provider-boundary-fixture-")); directories.push(path); return path; };
+const temporary = () => { const path = realpathSync(mkdtempSync(join(tmpdir(), "provider-boundary-fixture-"))); directories.push(path); return path; };
 
 type DescendantObservation = { entry: string; execArgv: string[]; refusal: string | null };
 function descendantFixture() {

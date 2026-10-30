@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { bindPostTurnTaskSource } from "../../../../../core-daemon/src/__tests__/mcp-memory/garden/post-turn-source-fixture.js";
 import { installHistoricalSignalReplay } from "./historical-signal-replay-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -178,15 +179,20 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           throw new Error("enqueue() must not publish events");
         }
       };
+      const database = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       const gardenTaskRepo = new SqliteGardenTaskRepo(
-        initDatabase({ filename: join(daemon.dataDir, "alaya.db") }).connection,
+        database.connection,
         enqueueOnlyEventPublisher
       );
       const { task_id: taskId } = gardenTaskRepo.enqueue({
         workspace_id: daemon.workspaceId,
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: { run_id: daemon.runId }
+        // A claimable task must retain source provenance, just like the real producer.
+        payload: bindPostTurnTaskSource(database, {
+          run_id: daemon.runId, workspace_id: daemon.workspaceId, turn_index: 0,
+          turn_digest: { last_messages: [{ role: "user", content_excerpt: SOURCE_TURN }] }
+        }, "no-autotick-source")
       });
 
       // Give any startup pass / interval tick a real window to fire. Without
@@ -212,6 +218,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         | undefined;
       expect(claimStructured?.ok).toBe(true);
       expect(claimStructured?.output.status).toBe("claimed");
+      database.close();
     },
     60_000
   );

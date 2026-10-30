@@ -168,6 +168,18 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it("passes the injected fork snapshot parent to the loader without ambient lookup", async () => {
+    const loader = vi.fn(async () => stubExtractor([[dimRow(1)]]).extractor);
+    const client = new LocalOnnxEmbeddingClient({
+      pipelineLoader: loader, env: { ALAYA_LOCAL_ONNX_SNAPSHOT_PARENT: "/owned-snapshots" }
+    });
+    try {
+      await client.embedTexts(["a"], { timeoutMs: 5_000 });
+      expect(loader).toHaveBeenCalledWith(expect.any(String), expect.any(String),
+        expect.objectContaining({ snapshotParent: "/owned-snapshots" }));
+    } finally { await client.close(); }
+  });
+
   it("threads bounded ONNX session options from the environment into the pipeline loader", async () => {
     const loader = vi.fn(async () => stubExtractor([[dimRow(1)]]).extractor);
     const client = new LocalOnnxEmbeddingClient({

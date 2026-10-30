@@ -12,7 +12,7 @@ const { materializeFrozenAnswers, FROZEN_ANSWER_KIND } = await import('../../../
 const { runFrozenAnswerCommand } = await import('../../../dist/runs/frozen-answer/command.js');
 const { prepareSemanticProviderRequest } = await import('../../../dist/runs/compile-seed/http/semantic-provider-http.js');
 const { executeProviderChatCompletion } = await import('@do-soul/alaya-engine-gateway');
-const scratch = fs.mkdtempSync(join(tmpdir(), 'frozen-answer-request-capture-'));
+const scratch = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'frozen-answer-request-capture-')));
 const received = [], mutations = [];
 let phase = 'idle', ready = () => {}, liveSchema;
 const server = createServer(async (req, res) => {

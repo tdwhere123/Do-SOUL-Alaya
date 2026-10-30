@@ -1,11 +1,13 @@
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   closeCachedDatabase,
   EMBEDDING_OVERLAY_BIND_FILENAME,
-  initDatabase
+  initDatabase,
+  SqliteClaimElectionLeaseRepo,
+  SqliteReconciliationLeaseRepo
 } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
@@ -119,6 +121,51 @@ describe("packed workspace slice explode", () => {
     }
   });
 
+  it("does not transfer packed process leases into either workspace slice", async () => {
+    const now = "2026-08-10T00:00:00.000Z";
+    const expires = "2026-08-10T00:05:00.000Z";
+    const leaseCases = [
+      { table: "reconciliation_leases", Repo: SqliteReconciliationLeaseRepo,
+        keys: [WORKSPACE_A, WORKSPACE_B] },
+      { table: "claim_election_leases", Repo: SqliteClaimElectionLeaseRepo,
+        keys: ["claim-election:[\"workspace-a\",\"claim-a\"]",
+          "claim-election:[\"workspace-b\",\"claim-b\"]"] }
+    ] as const;
+    const packed = initDatabase({ filename: packedPath });
+    try {
+      for (const { Repo, keys } of leaseCases) {
+        const repo = new Repo(packed);
+        for (const key of keys) {
+          expect(repo.tryAcquire(key, "packed-owner", now, expires)).not.toBeNull();
+        }
+      }
+    } finally {
+      packed.close();
+    }
+    const packedBytes = readFileSync(packedPath);
+    const exploded = await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir: join(root, "slices-operational-leases"),
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
+    });
+    expect(readFileSync(packedPath)).toEqual(packedBytes);
+    for (const [index, workspaceId] of [WORKSPACE_A, WORKSPACE_B].entries()) {
+      const slice = initDatabase({ filename: exploded.sliceDbPaths[workspaceId]! });
+      try {
+        for (const { table, Repo, keys } of leaseCases) {
+          expect(countTable(slice, table)).toBe(0);
+          const repo = new Repo(slice);
+          expect(repo.tryAcquire(keys[index]!, "slice-owner", now, expires))
+            .toMatchObject({ owner_token: "slice-owner" });
+        }
+        expect(countTableWhere(slice, "memory_entries", workspaceId)).toBe(1);
+        expect(countTable(slice, "memory_entries")).toBe(1);
+      } finally {
+        slice.close();
+      }
+    }
+  });
+
   it("reports completed slice work as bounded monotonic progress", async () => {
     const progress: Array<{
       readonly stage: string;
@@ -227,8 +274,13 @@ describe("packed workspace slice explode", () => {
     const packed = initDatabase({ filename: packedPath });
     const packedHistory = readHistoryDigest(packed);
     packed.close();
-    const sliceA = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_A]! });
-    const sliceB = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_B]! });
+    // Runtime initialization can write metadata; inspect copies, not sealed artifacts.
+    const inspectionA = join(root, "inspect-temporal-a.db");
+    const inspectionB = join(root, "inspect-temporal-b.db");
+    copyFileSync(exploded.sliceDbPaths[WORKSPACE_A]!, inspectionA);
+    copyFileSync(exploded.sliceDbPaths[WORKSPACE_B]!, inspectionB);
+    const sliceA = initDatabase({ filename: inspectionA });
+    const sliceB = initDatabase({ filename: inspectionB });
     try {
       expect(countTable(sliceA, "relation_path_projections")).toBeGreaterThanOrEqual(1);
       expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(0);

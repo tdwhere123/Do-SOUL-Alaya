@@ -32,6 +32,8 @@ export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = 
   }),
   global_memory_entries: COPY_ALL,
   reconciliation_leases: COPY_NONE,
+  // Election completion is in EventLog; packed process ownership cannot transfer to a slice.
+  claim_election_leases: COPY_NONE,
   proposal_reviewer_assignments: Object.freeze({
     action: "copy_via_fk" as const,
     parentTable: "proposals",
