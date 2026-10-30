@@ -53,7 +53,8 @@ for (const method of ['findCurrentBounded', 'findByIdBounded']) {
 if (['publication', 'context-publication', 'balanced-publication'].includes(fault)) fs.writeFileSync = function(path, ...args) {
   const suffix = fault === 'publication' ? '/002-window-native-anchor.json' : fault === 'context-publication'
     ? '/001-window-source-context.json' : '/001-window-balanced-prefix.json';
-  if (String(path).endsWith(suffix)) throw new Error('authored frozen capture publication failure');
+  // The authored publication fault must bind native Windows separators too.
+  if (String(path).replaceAll("\\", "/").endsWith(suffix)) throw new Error('authored frozen capture publication failure');
   return originalWrite.call(this, path, ...args);
 };
 syncBuiltinESMExports();

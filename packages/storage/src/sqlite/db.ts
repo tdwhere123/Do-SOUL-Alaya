@@ -177,7 +177,8 @@ export class StorageDatabase {
     this.connection.close();
     this.closed = true;
 
-    if (this.filename !== ":memory:") {
+    // Independently wrapped connections must not evict the live cached owner.
+    if (this.filename !== ":memory:" && databaseCache.get(this.filename) === this) {
       databaseCache.delete(this.filename);
     }
   }

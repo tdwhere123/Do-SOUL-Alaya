@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
 const root = mkdtempSync(join(tmpdir(), 'navigation-search-acquisition-'));
@@ -28,7 +28,7 @@ const run = async (args, preload = localPreload, extra = {}) => {
 };
 let server, proof;
 try {
-  const { readEvidenceSelectionResults } = await import(join(tree, 'apps/bench-runner/dist/runs/evidence-selection/execute.js'));
+  const { readEvidenceSelectionResults } = await import(pathToFileURL(join(tree, 'apps/bench-runner/dist/runs/evidence-selection/execute.js')).href);
   const { initDatabase, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo } = await import('@do-soul/alaya-storage');
   const { fieldContractSha256 } = await import('@do-soul/alaya-core');
   const { sourceIndexTarget, hashSourceRecordId, hashContentDigest, SOURCE_SPAN_IDENTITY_OPERATOR_ID,

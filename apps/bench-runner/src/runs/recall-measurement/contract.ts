@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, toNamespacedPath } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
@@ -185,7 +185,10 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
   const selectedMemory = config.source_index === undefined ? undefined : memorySelection(config.source_index);
   assertMemoryEmbeddingReceipts(config, root, "prior");
   mkdirSync(root, { recursive: true });
-  const directory = mkdtempSync(join(root, "native-session-"));
+  // mkdtemp needs the Windows extended prefix for deeply nested full-hash paths.
+  // Keep that host spelling at the filesystem boundary, not in restoration identity.
+  const created = mkdtempSync(toNamespacedPath(join(root, "native-session-")));
+  const directory = join(root, basename(created));
   const snapshotPath = config.snapshot_path;
   const restoration = Object.freeze({ snapshotSha256: config.snapshot_sha256, workspaceId: config.workspace_id,
     databasePath: join(directory, BENCH_DAEMON_DB_FILENAME) });

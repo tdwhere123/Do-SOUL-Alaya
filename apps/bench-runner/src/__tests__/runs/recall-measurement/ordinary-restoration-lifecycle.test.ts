@@ -4,9 +4,9 @@ const boundary = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 import { readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
-import { withSemanticChainDaemon } from "../../../runs/recall-measurement/contract.js";
+import { readSemanticChainDaemonRestoration, withSemanticChainDaemon } from "../../../runs/recall-measurement/contract.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { nativeRecallFixture } from "./native-recall.test-support.js";
 
@@ -17,8 +17,13 @@ it("removes a successful private restore and retains a failed restore after shut
   const config = fixture.admitted.plan.config;
   const home = process.env.HOME;
   try {
-    const success = join(fixture.root, "successful-restore");
+    const success = join(fixture.root, "successful-restore", "a".repeat(90), "b".repeat(90), "c".repeat(90));
+    expect(success.length).toBeGreaterThan(260);
     await withSemanticChainDaemon(config, success, async daemon => {
+      const restoration = readSemanticChainDaemonRestoration(daemon);
+      expect(restoration.databasePath.startsWith("\\\\?\\")).toBe(false);
+      expect(relative(success, dirname(restoration.databasePath))).toMatch(/^native-session-[^/\\]+$/u);
+      expect(restoration.databasePath).toBe(join(daemon.dataDir, "alaya.db"));
       expect(process.env.HOME).not.toBe(home);
       expect((await daemon.mcpClient.listTools()).tools.some(tool => tool.name === "soul.recall")).toBe(true);
     });

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
 const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
 const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
@@ -37,7 +37,7 @@ const run = (args, env = {}, code = 0) => {
   return JSON.parse(outcome.stdout);
 };
 try {
-  const { inspectSourceRecordsArtifact } = await import(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js'));
+  const { inspectSourceRecordsArtifact } = await import(pathToFileURL(join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/contract.js')).href);
   const { StorageDatabase, SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } = await import('@do-soul/alaya-storage');
   const { fieldContractSha256 } = await import('@do-soul/alaya-core');
   const { sourceIndexTarget, prepareSourceIndexDocument } = await import('@do-soul/alaya-protocol');

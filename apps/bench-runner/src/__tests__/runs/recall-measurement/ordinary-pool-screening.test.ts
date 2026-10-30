@@ -198,7 +198,7 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
     }`;
   writeFileSync(hook, `import { registerHooks } from 'node:module';
     registerHooks({ resolve(specifier, context, next) {
-      if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(fetchPath)})
+      if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(pathToFileURL(fetchPath).href)})
         return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
       return next(specifier, context);
     } });`);
@@ -207,13 +207,13 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   const unpinned = await promisify(execFile)(process.execPath, resumeArgs)
     .then(() => { throw new Error("synthetic data must not satisfy the official pin"); }, (cause: Error & { stderr: string }) => cause);
   expect(unpinned.stderr).toContain("dataset checksum mismatch");
-  const error = await promisify(execFile)(process.execPath, [`--import=${hook}`, ...resumeArgs])
+  const error = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, ...resumeArgs])
     .then(() => { throw new Error("plain rows must not satisfy a capture request"); }, (cause: Error & { stderr: string }) => cause);
   expect(error.stderr).toContain("existing rows use a different pool-capture mode");
   const unresolved = join(fixture.root, "unresolved"), oldRoot = join(unresolved, "runs/project/plain");
   mkdirSync(oldRoot, { recursive: true });
   writeFileSync(join(oldRoot, "reservation"), "preserve");
-  await promisify(execFile)(process.execPath, [`--import=${hook}`, harness, "--out", unresolved, "--arms", arms, "--capture-pool", "--ids", "project",
+  await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, "--out", unresolved, "--arms", arms, "--capture-pool", "--ids", "project",
     "--dataset", join(fixture.root, "data/longmemeval_s.json"), "--cache", join(fixture.root, "cache")]);
   expect(readFileSync(join(oldRoot, "reservation"), "utf8")).toBe("preserve");
   expect(JSON.parse(readFileSync(join(unresolved, "rows.jsonl"), "utf8")).error).toContain("prior first exposure may be unresolved");

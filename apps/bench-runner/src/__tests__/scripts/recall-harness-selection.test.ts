@@ -72,11 +72,11 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       }`;
     writeFileSync(hook, `import { registerHooks } from 'node:module';
       registerHooks({ resolve(specifier, context, next) {
-        if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(fetchPath)})
+        if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(pathToFileURL(fetchPath).href)})
           return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
         return next(specifier, context);
       } });`);
-    const args = (output: string, modelCache: string) => [`--import=${hook}`, harness, "--out", output, "--arms", arms, "--dataset", dataset,
+    const args = (output: string, modelCache: string) => [`--import=${pathToFileURL(hook).href}`, harness, "--out", output, "--arms", arms, "--dataset", dataset,
       "--cache", cache, "--model-cache", modelCache, "--ids", "fixture"];
     await promisify(execFile)(process.execPath, args(out, cacheA), { timeout: 30_000 });
     const rowA = JSON.parse(readFileSync(join(out, "rows.jsonl"), "utf8"));
@@ -97,7 +97,7 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       ["ordered", [], [["third", 2], ["fixture", 0]]],
       ["sharded", ["--shard", "1/2"], [["fixture", 0]]]
     ] as const) {
-      await promisify(execFile)(process.execPath, [`--import=${hook}`, harness, "--out", join(root, `${name}-out`),
+      await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, "--out", join(root, `${name}-out`),
         "--arms", emptyArms, "--dataset", dataset, "--cache", join(root, `${name}-cache`),
         "--ids", "third,fixture,second", "--limit", "2", ...shard], { timeout: 30_000 });
       const selected = JSON.parse(readFileSync(trace, "utf8"));
@@ -112,7 +112,7 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       ["unknown", dataset, "missing", "unknown question missing"]
     ] as const) {
       const refusedOut = join(root, `${name}-out`), refusedCache = join(root, `${name}-cache`);
-      const refusal = await promisify(execFile)(process.execPath, [`--import=${hook}`, harness, "--out", refusedOut, "--arms", arms,
+      const refusal = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, "--out", refusedOut, "--arms", arms,
         "--dataset", selectedDataset, "--cache", refusedCache, "--ids", id], { timeout: 30_000 })
         .then(() => { throw new Error("invalid dataset selection must be refused"); }, (error: Error & { stderr: string }) => error);
       expect(refusal.stderr).toContain(expected);

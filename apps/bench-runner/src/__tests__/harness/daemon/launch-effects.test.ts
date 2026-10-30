@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, unlink } from "node:fs/promises";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createBenchDaemonLaunchConfig, BENCH_DAEMON_MANAGED_ENV_KEYS } from "../../../harness/daemon/daemon-environment.js";
 import { createBenchDaemonConfigDirectoryLease } from "../../../harness/daemon/daemon-config-directory.js";
@@ -14,15 +14,16 @@ const defaults = { dataDir: "/fixture-data", embeddingMode: "disabled" as const,
   embeddingProviderKind: "local_onnx" as const, tokenFactory: () => "fixture" };
 
 it("uses only an explicitly selected Source model and does not change Memory settings", () => {
+  const memoryCache = resolve("/memory");
   const ambientEnv = { ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR: "/stale-source", ALAYA_SOURCE_INDEX_LOCAL_MODEL: "stale/model",
-    ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/memory", ALAYA_LOCAL_EMBEDDING_MODEL: "memory/model" };
+    ALAYA_LOCAL_EMBEDDING_CACHE_DIR: memoryCache, ALAYA_LOCAL_EMBEDDING_MODEL: "memory/model" };
   const base = createBenchDaemonLaunchConfig({ ...defaults, embeddingMode: "env", ambientEnv });
   expect(base.environment.ALAYA_SOURCE_INDEX_LOCAL_MODEL).toBeUndefined();
   expect(base.environment.ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR).toBeUndefined();
   const selected = createBenchDaemonLaunchConfig({ ...defaults, embeddingMode: "env", ambientEnv,
     cachedLocalSourceEmbedding: { cache_root: "/source", model_id: "Xenova/bge-m3" } });
   expect(selected.environment).toMatchObject({ ALAYA_SOURCE_INDEX_LOCAL_CACHE_DIR: "/source",
-    ALAYA_SOURCE_INDEX_LOCAL_MODEL: "Xenova/bge-m3", ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/memory",
+    ALAYA_SOURCE_INDEX_LOCAL_MODEL: "Xenova/bge-m3", ALAYA_LOCAL_EMBEDDING_CACHE_DIR: memoryCache,
     ALAYA_LOCAL_EMBEDDING_MODEL: "memory/model" });
 });
 

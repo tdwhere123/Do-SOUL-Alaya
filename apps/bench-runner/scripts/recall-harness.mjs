@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { AlayaError, captureSourceIndexLexicalPreparationAllocation } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
@@ -40,13 +40,13 @@ process.on("exit", () => {
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "../dist");
 const repo = resolve(here, "../../..");
-const { publishSourceSemanticSnapshot } = await import(join(dist, "runs/snapshot/source-records/publish.js"));
-const { prepareSemanticChainSourceIndex } = await import(join(dist, "runs/recall-measurement/source-index-binding.js"));
-const { executeOrdinaryRecallEntry } = await import(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js"));
-const { questionTimeProposalFromCoordinates } = await import(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js"));
-const { chainIdentity } = await import(join(dist, "runs/recall-measurement/contract.js"));
-const { readCurrentExtractionAuthorityRevision } = await import(join(dist, "runs/extraction/authority/inspection.js"));
-const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(join(dist, "datasets/longmemeval/ingestion/fetch.js"));
+const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
+const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
+const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
+const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
+const { chainIdentity } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
+const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
+const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
 
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },

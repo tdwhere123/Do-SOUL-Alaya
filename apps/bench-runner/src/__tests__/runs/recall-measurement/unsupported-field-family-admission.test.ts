@@ -4,7 +4,7 @@ const isolation = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -34,7 +34,7 @@ const DIGEST = `sha256:${"c".repeat(64)}`;
 /** Real sealed SQLite snapshot plus a frozen chain root whose recorded page is the live field family.
  * `firstExposure` states whether the recording captured exposure: a refusal must not depend on it. */
 async function fixture(options: Readonly<{ firstExposure?: "present" | "absent"; response?: "delivered" | "missing" }> = {}) {
-  const root = mkdtempSync(join(tmpdir(), "unsupported-field-family-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "unsupported-field-family-")));
   roots.push(root);
   const snapshot = await prepareNativeSourceRecordsSnapshot({ snapshotPath: join(root, "input.sqlite"),
     dataDirRoot: join(root, "publication"), workspaceId: "field-family", runId: "field-family-run",
