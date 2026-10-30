@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { isSourcePayloadOmitted } from "../measurement/source-delivery-visibility.js";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { admitSourceSemanticQuery, authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256,
@@ -76,7 +77,7 @@ export function admitSemanticChainLibraryBinding(config: SemanticChainConfig, qu
 export function admitSealedSemanticChainLibraryDelivery(config: SemanticChainConfig, query: Query, response: Recall,
   correspondences: Correspondences, trace: Query["discovery_trace"] | null | undefined): SourceRecordIdentity[] {
   const scopes = admitSemanticChainLibraryBinding(config, query, response, correspondences, trace);
-  const connection = new BetterSqlite3(config.snapshot_path, { readonly: true, fileMustExist: true });
+  const connection = new BetterSqlite3(sqliteHostFilename(config.snapshot_path), { readonly: true, fileMustExist: true });
   try {
     connection.pragma("query_only = ON");
     return admitDeliveredSources(config, response, sourceLookupStores(new StorageDatabase(config.snapshot_path, connection)),

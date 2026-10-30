@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { z } from "zod";
 import { StorageDatabase } from "@do-soul/alaya-storage";
 import { AlayaError, canonicalJson, sourceEvidenceRootTarget, type SoulMemorySearchResponse,
@@ -22,7 +23,7 @@ export function verifyOrdinaryMultiSourceDelivery(config: OrdinaryRecallMultiSou
   calls: readonly CapturedOrdinaryRecallCall[], observation: Observation | undefined) {
   return withCachedSqliteSnapshot({ filePath: config.snapshot_path, expectedSha256: config.snapshot_sha256,
     operation: databasePath => {
-      const connection = new BetterSqlite3(databasePath, { readonly: true, fileMustExist: true });
+      const connection = new BetterSqlite3(sqliteHostFilename(databasePath), { readonly: true, fileMustExist: true });
       try {
         connection.pragma("query_only = ON");
         const sequence = new MultiSourceDelivery(config, sourceLookupStores(new StorageDatabase(databasePath, connection)));

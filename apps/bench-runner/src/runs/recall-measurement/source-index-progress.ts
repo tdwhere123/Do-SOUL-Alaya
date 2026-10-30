@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { canonicalJson, sourceIndexGenerationId, sourceIndexConfigurationId, sourceIndexProfileId,
   type SourceIndexGeneration, type SourceIndexSelection, type SourceIndexPendingResult,
   type SourceIndexTarget } from "@do-soul/alaya-protocol";
@@ -32,7 +33,7 @@ export function captureSourceIndexProgress(filename: string, workspace: string, 
   let connection: InstanceType<typeof BetterSqlite3> | undefined;
   try {
     if (signal?.aborted) { result.reason = "scope_cancelled"; return result; }
-    connection = new BetterSqlite3(filename, { readonly: true, fileMustExist: true, timeout: 50 });
+    connection = new BetterSqlite3(sqliteHostFilename(filename), { readonly: true, fileMustExist: true, timeout: 50 });
     connection.pragma("query_only = ON");
     const database = new StorageDatabase(filename, connection);
     const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);

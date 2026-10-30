@@ -1,6 +1,7 @@
 import { currentBenchScope, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../harness/daemon-task.js";
 import { basename, join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { z } from "zod";
 import { AlayaError, canonicalJson, SoulInterpretationResponseSchema,
@@ -385,7 +386,7 @@ export function admitSemanticChainReplay(root: string, replayPath: string) {
   verifySemanticChainQueries(plan);
   const retained = readSemanticChainCorrespondences(plan, replay.arm);
   if (retained.identity !== replay.identity) throw new AlayaError("CONFLICT", "retained native semantic-correspondence state changed");
-  const connection = new BetterSqlite3(plan.config.snapshot_path, { readonly: true, fileMustExist: true });
+  const connection = new BetterSqlite3(sqliteHostFilename(plan.config.snapshot_path), { readonly: true, fileMustExist: true });
   try {
     connection.pragma("query_only = ON");
     const database = new StorageDatabase(plan.config.snapshot_path, connection);

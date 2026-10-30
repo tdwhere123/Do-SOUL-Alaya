@@ -1,4 +1,5 @@
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "./open-sqlite-connection.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -15,7 +16,7 @@ export interface TemporalMaintenanceLease {
 export function acquireTemporalMaintenanceLease(lockFilename: string): TemporalMaintenanceLease {
   const normalizedLockFilename = normalizeLockFilename(lockFilename);
   fs.mkdirSync(path.dirname(normalizedLockFilename), { recursive: true, mode: 0o700 });
-  const database = new BetterSqlite3(normalizedLockFilename);
+  const database = new BetterSqlite3(sqliteHostFilename(normalizedLockFilename));
   let acquired = false;
   try {
     fs.chmodSync(normalizedLockFilename, 0o600);

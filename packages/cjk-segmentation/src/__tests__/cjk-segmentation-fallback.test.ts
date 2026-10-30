@@ -5,6 +5,7 @@ import {
   analyzeSourceIndexLexical,
   advanceSourceIndexLexicalV2,
   readCjkSegmentationStatus,
+  readSourceIndexLexicalAnalysisStatus,
   segmentCjkRun,
   warmCjkSegmentation
 } from "../index.js";
@@ -126,5 +127,47 @@ describe("CJK segmentation native owner", () => {
     expect(segmentCjkRun(sample)).toEqual(pieces);
     expect(tokenizeFactFrameSource(sample).map((token) => token.text)).toEqual(pieces);
     expect(segmentCjkRun("")).toEqual([]);
+  });
+});
+
+describe("strict source lexical analysis", () => {
+  it("rejects cold analysis without initializing native state", () => {
+    expect(() => analyzeSourceIndexLexical("中文", "source")).toThrow("segmenter_uninitialized");
+    expect(readCjkSegmentationStatus()).toBe("uninitialized");
+  });
+
+  it.each([{ pieces: [] }, { pieces: [" "] }, { pieces: ["改写"] }])("latches invalid v2 output %j without disabling legacy segmentation", async ({ pieces }) => {
+    __setCjkSegmentationLoaderForTests(async () => ({ cut: () => pieces }));
+    await warmCjkSegmentation();
+    expect(() => analyzeSourceIndexLexical("中文", "query", "v2")).toThrow(/segmenter_(invalid|nonconserving)_output/u);
+    expect(readSourceIndexLexicalAnalysisStatus()).toBe("unavailable");
+    expect(readCjkSegmentationStatus()).toBe("ready");
+    expect(() => analyzeSourceIndexLexical("中文", "source")).toThrow("segmenter_unavailable");
+    expect(segmentCjkRun("中文")).toEqual(pieces.length === 0 || pieces[0] === " " ? ["中文"] : pieces);
+  });
+
+  it("bounds query segmentation by UTF-8 bytes while preserving multibyte characters", async () => {
+    const calls: string[] = [];
+    __setCjkSegmentationLoaderForTests(async () => ({ cut: token => { calls.push(token); return [token]; } }));
+    await warmCjkSegmentation();
+    const text = "甲".repeat(22);
+    expect(analyzeSourceIndexLexical(text, "query", "v2")).toEqual([text, "甲".repeat(21)]);
+    expect(calls).toEqual(["甲".repeat(21), "甲"]);
+    const work: number[] = [];
+    const result = advanceSourceIndexLexicalV2("甲乙", "", true, units => work.push(units));
+    expect(result).toEqual({ projection: "甲乙", pending: "", expanded_units: 2 });
+    expect(work).toEqual([2, 2]);
+  });
+
+  it("shares an in-flight warmup and reuses the ready segmenter", async () => {
+    let release!: (value: { cut(input: string): readonly string[] }) => void;
+    const loader = vi.fn(() => new Promise<{ cut(input: string): readonly string[] }>(resolve => { release = resolve; }));
+    __setCjkSegmentationLoaderForTests(loader);
+    const first = warmCjkSegmentation(), second = warmCjkSegmentation();
+    expect(loader).toHaveBeenCalledTimes(1);
+    release({ cut: token => [token] });
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    await expect(warmCjkSegmentation()).resolves.toBe(true);
+    expect(loader).toHaveBeenCalledTimes(1);
   });
 });

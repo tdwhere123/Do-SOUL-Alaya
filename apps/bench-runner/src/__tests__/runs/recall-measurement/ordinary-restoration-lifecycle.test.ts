@@ -9,6 +9,8 @@ import BetterSqlite3 from "better-sqlite3";
 import { readSemanticChainDaemonRestoration, withSemanticChainDaemon } from "../../../runs/recall-measurement/contract.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { nativeRecallFixture } from "./native-recall.test-support.js";
+import { captureFrozenSourceIndexQualifications } from "../../../runs/recall-measurement/index-qualification.js";
+import { inspectSemanticChainSourceIndex } from "../../../runs/recall-measurement/source-index-binding.js";
 
 afterAll(() => { expect(boundary.violations).toEqual([]); boundary.restore(); });
 
@@ -24,6 +26,8 @@ it("removes a successful private restore and retains a failed restore after shut
       expect(restoration.databasePath.startsWith("\\\\?\\")).toBe(false);
       expect(relative(success, dirname(restoration.databasePath))).toMatch(/^native-session-[^/\\]+$/u);
       expect(restoration.databasePath).toBe(join(daemon.dataDir, "alaya.db"));
+      expect(inspectSemanticChainSourceIndex(restoration.databasePath, config.workspace_id).complete).toBe(false);
+      expect(captureFrozenSourceIndexQualifications({ daemon, onPage: () => undefined }).roots).toBe(1);
       expect(process.env.HOME).not.toBe(home);
       expect((await daemon.mcpClient.listTools()).tools.some(tool => tool.name === "soul.recall")).toBe(true);
     });

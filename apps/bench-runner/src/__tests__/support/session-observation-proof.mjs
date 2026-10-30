@@ -16,7 +16,7 @@ const preparation = join(tree, 'apps/bench-runner/dist/runs/snapshot/source-reco
 const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 if (process.argv[2] === 'prepare') {
   const guard = await import('./source-import-boundary.mjs');
-  const { prepareSourceRecordsSnapshot } = await import(preparation);
+  const { prepareSourceRecordsSnapshot } = await import(pathToFileURL(preparation).href);
   const manifest = await prepareSourceRecordsSnapshot(json(process.argv[3]));
   assert.equal(guard.receipt().operations.some(row => row.blocked), false);
   process.stdout.write(JSON.stringify(manifest));

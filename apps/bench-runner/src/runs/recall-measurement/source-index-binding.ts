@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { z } from "zod";
 import { AlayaError, canonicalJson, captureSourceIndexLexicalPreparationAllocation,
   sourceIndexConfigurationId, sourceIndexGenerationId, sourceIndexProfileId, sourceIndexGenerationCanServeQueries,
@@ -32,7 +33,7 @@ const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 /** Metadata alone is diagnostic. With a budget, the query reader owns epoch/active eligibility;
  * this chain additionally requires complete captured coverage, not the product's partial-index mode. */
 export function inspectSemanticChainSourceIndex(filename: string, workspace: string, budget?: SourceSemanticResourceBudget) {
-  const connection = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
+  const connection = new BetterSqlite3(sqliteHostFilename(filename), { readonly: true, fileMustExist: true });
   try {
     const repository = new SqliteSourceIndexRepository(new StorageDatabase(filename, connection), fieldContractSha256);
     return connection.transaction(() => {
