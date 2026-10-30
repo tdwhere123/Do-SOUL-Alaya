@@ -19,7 +19,7 @@ export const SOURCE_STATEMENTS_PROMPT = [
 ].join("\n");
 
 type Chunk = Readonly<{ request: SourceStatementRequest }> | Readonly<{
-  message: SourceStatementMessage; reason: "message_capacity";
+  message: SourceStatementMessage; reason: "message_capacity" | "context_capacity";
 }>;
 const encodedBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
@@ -34,12 +34,11 @@ export function planSourceStatementSession(sessionId: string, input: readonly So
     if (encodedBytes(first) > SOURCE_STATEMENT_LIMITS.targetBytes) {
       chunks.push({ message: first, reason: "message_capacity" }); index++; continue;
     }
-    const context: SourceStatementMessage[] = [];
-    let contextBytes = 2;
-    for (let previous = index - 1; previous >= 0 && context.length < SOURCE_STATEMENT_LIMITS.requestMessages; previous--) {
-      const message = messages[previous]!, size = encodedBytes(message) + 1;
-      if (contextBytes + size > SOURCE_STATEMENT_LIMITS.contextBytes) break;
-      context.unshift(message); contextBytes += size;
+    const context = messages.slice(0, index);
+    // A suffix cannot truthfully provide the session context needed to resolve references.
+    // Keep the known target as an explicit raw fallback rather than silently omit history.
+    if (context.length > SOURCE_STATEMENT_LIMITS.requestMessages || encodedBytes(context) > SOURCE_STATEMENT_LIMITS.contextBytes) {
+      chunks.push({ message: first, reason: "context_capacity" }); index++; continue;
     }
     const targets: SourceStatementMessage[] = [];
     let bytes = 2;
@@ -105,24 +104,25 @@ export async function extractSourceStatementSession(input: Readonly<{
   request_ceiling: number; signal?: AbortSignal;
   record?: (event: SourceStatementSessionEvent) => void | Promise<void>;
 }>): Promise<SourceStatementReceipt> {
-  if (!Number.isSafeInteger(input.request_ceiling) || input.request_ceiling < 0) throw new TypeError("invalid request ceiling");
-  const plan = planSourceStatementSession(input.session_id, input.messages);
-  await input.record?.({ kind: "started", session_id: input.session_id,
-    planned_requests: plan.filter(chunk => "request" in chunk).length, request_ceiling: input.request_ceiling });
+  const { session_id, request_ceiling, transport, record, signal } = input;
+  if (!Number.isSafeInteger(request_ceiling) || request_ceiling < 0) throw new TypeError("invalid request ceiling");
+  const plan = planSourceStatementSession(session_id, input.messages);
+  await record?.({ kind: "started", session_id,
+    planned_requests: plan.filter(chunk => "request" in chunk).length, request_ceiling });
   const messages: SourceStatementMessageResult[] = [], chunks: SourceStatementReceipt["chunks"][number][] = [];
   const rejections: SourceStatementRejection[] = [];
   let dispatched = 0, stopped = false;
   for (const chunk of plan) {
     if (!("request" in chunk)) { messages.push(failedMessage(chunk.message, chunk.reason)); continue; }
     const request = chunk.request;
-    if (stopped || input.signal?.aborted || dispatched >= input.request_ceiling) {
-      const reason = stopped ? "not_dispatched" : input.signal?.aborted ? "cancelled" : "request_budget";
+    if (stopped || signal?.aborted || dispatched >= request_ceiling) {
+      const reason = stopped ? "not_dispatched" : signal?.aborted ? "cancelled" : "request_budget";
       messages.push(...request.messages.map(message => failedMessage(message, reason))); continue;
     }
     dispatched++;
     try {
-      const response = await input.transport({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
-        userPrompt: JSON.stringify(request), ...(input.signal === undefined ? {} : { signal: input.signal }) });
+      const response = await transport({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
+        userPrompt: JSON.stringify(request), ...(signal === undefined ? {} : { signal }) });
       const received = receiveSourceStatements(request, response.rawJson);
       messages.push(...received.messages); rejections.push(...received.rejections);
       chunks.push({ chunk_index: request.chunk_index, status: statusOf(received.messages, received.rejections),
@@ -134,9 +134,9 @@ export async function extractSourceStatementSession(input: Readonly<{
       stopped = true;
     }
   }
-  const receipt: SourceStatementReceipt = { contract: SOURCE_STATEMENTS_CONTRACT, session_id: input.session_id,
+  const receipt: SourceStatementReceipt = { contract: SOURCE_STATEMENTS_CONTRACT, session_id,
     status: statusOf(messages, rejections), messages, rejections, chunks };
-  await input.record?.({ kind: "settled", receipt });
+  await record?.({ kind: "settled", receipt });
   return receipt;
 }
 

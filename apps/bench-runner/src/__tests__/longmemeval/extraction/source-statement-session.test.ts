@@ -33,8 +33,9 @@ describe("ordered source statement session", () => {
   });
 
   it("validates consumed fields without rejecting unrelated model fields", () => {
-    const received = receiveSourceStatements(request([message("m1")]), JSON.stringify({ messages: [
-      { message_id: "m1", statements: [{ text: "A request remains a request.", relation: "request", confidence: "invalid unused field" }] }
+    const received = receiveSourceStatements(request([message("m1")]), JSON.stringify({ unused_envelope_metadata: { invalid: true }, messages: [
+      { message_id: "m1", unused_message_metadata: null,
+        statements: [{ text: "A request remains a request.", relation: "request", confidence: "invalid unused field" }] }
     ] }));
     expect(received.messages[0]).toMatchObject({ status: "complete", statements: [{ text: "A request remains a request.", relation: "request" }] });
     expect(Object.keys(received.messages[0]!.statements[0]!)).toEqual(["text", "relation"]);
@@ -52,8 +53,8 @@ describe("ordered source statement session", () => {
     expect(receiveSourceStatements(request(), '{"messages":[').messages.every(row => row.status === "failed")).toBe(true);
   });
 
-  it("chunks every message in order with bounded preceding context and no context targets", () => {
-    const input = Array.from({ length: 12 }, (_, index) => message(`m${index}`, "x".repeat(6000)));
+  it("chunks ordered messages only when their complete preceding context fits", () => {
+    const input = Array.from({ length: 70 }, (_, index) => message(`m${index}`));
     const plan = planSourceStatementSession("session", input);
     const requests = plan.flatMap(chunk => "request" in chunk ? [chunk.request] : []);
     expect(requests.length).toBeGreaterThan(1);
@@ -62,7 +63,7 @@ describe("ordered source statement session", () => {
       expect(Buffer.byteLength(JSON.stringify(row.messages))).toBeLessThanOrEqual(SOURCE_STATEMENT_LIMITS.targetBytes);
       expect(Buffer.byteLength(JSON.stringify(row.context))).toBeLessThanOrEqual(SOURCE_STATEMENT_LIMITS.contextBytes);
       const first = input.findIndex(value => value.message_id === row.messages[0]!.message_id);
-      expect(row.context).toEqual(input.slice(first - row.context.length, first));
+      expect(row.context).toEqual(input.slice(0, first));
     }
     expect(() => planSourceStatementSession("session", [message("same"), message("same")])).toThrow("duplicate");
   });
@@ -70,14 +71,50 @@ describe("ordered source statement session", () => {
   it("preserves raw fallback on capacity, transport failure and undispatched work without retries", async () => {
     const transport = vi.fn(async () => { throw new Error("recorded transport failure"); });
     const receipt = await extractSourceStatementSession({ session_id: "session", request_ceiling: 8,
-      messages: [message("oversize", "x".repeat(40000)), ...Array.from({ length: 10 }, (_, i) => message(`m${i}`, "x".repeat(6000)))], transport });
+      messages: [...Array.from({ length: 65 }, (_, i) => message(`m${i}`)), message("oversize", "x".repeat(40000))], transport });
     expect(transport).toHaveBeenCalledTimes(1);
     expect(receipt.status).toBe("failed");
-    expect(receipt.messages).toHaveLength(11);
+    expect(receipt.messages).toHaveLength(66);
     expect(new Set(receipt.messages.flatMap(row => row.rejections.map(item => item.reason))))
       .toEqual(new Set(["message_capacity", "transport_failure", "not_dispatched"]));
     expect(receipt.messages.every(row => row.statements.length === 0)).toBe(true);
     expect(receipt.chunks).toEqual([{ chunk_index: 0, status: "failed", usage: null }]);
+  });
+
+  it("makes omitted known history an explicit raw fallback rather than a context-free request", async () => {
+    const messages = [message("intro", "x".repeat(30017)), message("followup", "It was memorable. " + "y".repeat(4000))];
+    const transport = vi.fn(async ({ userPrompt }: { userPrompt: string }) => ({ rawJson: JSON.stringify({
+      messages: (JSON.parse(userPrompt) as SourceStatementRequest).messages.map(row => ({ message_id: row.message_id, statements: [] }))
+    }) }));
+    const receipt = await extractSourceStatementSession({ session_id: "session", messages, transport, request_ceiling: 2 });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(receipt.status).toBe("partial");
+    expect(receipt.messages[1]).toMatchObject({ message: messages[1], status: "failed", statements: [],
+      rejections: [{ reason: "context_capacity" }] });
+  });
+
+  it("captures the committed ceiling, identity and callbacks before yielding while cancellation stays live", async () => {
+    const events: unknown[] = [], controller = new AbortController();
+    const transport = vi.fn(async ({ userPrompt }: { userPrompt: string }) => ({ rawJson: JSON.stringify({
+      messages: (JSON.parse(userPrompt) as SourceStatementRequest).messages.map(row => ({ message_id: row.message_id, statements: [] }))
+    }) }));
+    const replaced = vi.fn(async (...args: Parameters<typeof transport>) => transport(...args)), replacedRecord = vi.fn();
+    const input = { session_id: "committed", messages: Array.from({ length: 65 }, (_, i) => message(`m${i}`)),
+      request_ceiling: 1, transport, signal: controller.signal,
+      record: async (event: unknown) => {
+        events.push(event);
+        input.request_ceiling = 2; input.session_id = "mutated";
+        input.transport = replaced; input.record = replacedRecord;
+      } };
+    const receipt = await extractSourceStatementSession(input);
+    expect(transport).toHaveBeenCalledTimes(1); expect(replaced).not.toHaveBeenCalled(); expect(replacedRecord).not.toHaveBeenCalled();
+    expect(receipt).toMatchObject({ session_id: "committed", status: "partial" });
+    expect(receipt.messages[64]!.rejections[0]!.reason).toBe("request_budget");
+    expect(events).toEqual([{ kind: "started", session_id: "committed", planned_requests: 2, request_ceiling: 1 }, { kind: "settled", receipt }]);
+    const cancelled = await extractSourceStatementSession({ ...input, session_id: "cancelled", transport,
+      record: event => { if (event.kind === "started") controller.abort(); } });
+    expect(cancelled.messages[0]!.rejections[0]!.reason).toBe("cancelled");
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 
   it("distinguishes cancellation from an exhausted request ceiling without dispatch", async () => {

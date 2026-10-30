@@ -35,13 +35,13 @@ export type SourceStatementRequest = z.infer<typeof SourceStatementRequestSchema
 /** Parsing the envelope never requires a sibling statement to be valid. */
 export const SourceStatementResponseEnvelopeSchema = z.object({
   messages: z.array(z.unknown()).max(1024)
-}).strict();
+}).strip();
 export const SourceStatementResponseMessageSchema = z.object({
   message_id: BoundedIdSchema, statements: z.array(z.unknown()).max(1024)
-}).strict();
+}).strip();
 export type SourceStatementRejection = Readonly<{ message_id: string | null; statement_index: number | null;
   reason: "invalid_statement" | "unknown_message" | "duplicate_message" | "missing_message" |
-    "invalid_message" | "malformed_response" | "transport_failure" | "message_capacity" | "request_budget" |
+    "invalid_message" | "malformed_response" | "transport_failure" | "message_capacity" | "context_capacity" | "request_budget" |
     "cancelled" | "not_dispatched" }>;
 export type SourceStatementMessageResult = Readonly<{
   message: SourceStatementMessage; status: "complete" | "partial" | "failed";
