@@ -121,6 +121,11 @@ describe("whole-session cache fill and round-bound publication", () => {
     (forged.statementSession!.responses![0] as { rawJson: string }).rawJson = '{"messages":[]}';
     expect(() => assertStatementRound({ round: forged, sessionMessages: messages, roundMessages: messages.slice(0, 2),
       extraction, seen: new Map() })).toThrow("receipt");
+    const miscounted = { ...ledgers[0]!, draftCount: ledgers[0]!.draftCount! + 1 };
+    expect(() => assertStatementRound({ round: miscounted, sessionMessages: messages,
+      roundMessages: messages.slice(0, 2), extraction, seen: new Map() })).toThrow(expect.objectContaining({
+        code: "CONFLICT", message: "statement round projection or request accounting differs"
+      }));
 
     const sourceQuestion = { question_id: "q1", question_type: "lookup", question: "not extraction input", answer: "not extraction input",
       question_date: "2099-01-01", haystack_sessions: [session], haystack_dates: [SOURCE_DATE],
@@ -171,7 +176,10 @@ describe("whole-session cache fill and round-bound publication", () => {
       expect((await new SqliteMemoryEntryRepo(database).findById(seeded[1]!))?.content).toBe(statements[1]!.text);
       database.connection.prepare("UPDATE evidence_capsules SET gist=json_remove(gist,'$.source_context') WHERE object_id=?").run(evidenceIds[0]);
       const forgedProof = new DatabaseSync(dbPath, { readOnly: true });
-      try { expect(() => readSourceObservationProof(forgedProof, evidenceIds[0]!, snapshotQuestion, sourceQuestion)).toThrow("dependency mismatch"); }
+      try {
+        expect(() => readSourceObservationProof(forgedProof, evidenceIds[0]!, snapshotQuestion, sourceQuestion))
+          .toThrow(expect.objectContaining({ code: "CONFLICT", message: "snapshot statement request dependency mismatch" }));
+      }
       finally { forgedProof.close(); }
     } finally { if (!database.isClosed()) database.close(); }
 

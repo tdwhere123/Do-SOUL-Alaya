@@ -71,7 +71,9 @@ describe("contained snapshot seed-ledger closure", () => {
       ...rounds[0]!,
       cacheKey: CONTENT_ONLY_SELECTED_KEY
     };
-    expect(() => verifyRounds(rounds)).toThrow(/canonical seed round identity mismatch/u);
+    expect(() => verifyRounds(rounds)).toThrow(expect.objectContaining({
+      code: "CONFLICT", message: "snapshot canonical seed round identity mismatch"
+    }));
   });
 
   it("accepts an explicitly supplied historical prompt without weakening cache binding", () => {

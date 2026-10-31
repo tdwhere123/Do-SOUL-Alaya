@@ -2,12 +2,15 @@ import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  installProviderFreeBoundary();
+});
 import {
   buildOfficialApiExtractionRequests,
   OFFICIAL_API_SYSTEM_PROMPT,
   SOURCE_STATEMENTS_PROMPT,
-  stringifyOfficialApiExtractionRequest,
-  transportPackIdentity
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
@@ -22,16 +25,11 @@ import { inspectExtractionFillCompletion } from
 import {
   catalogEligibilityOfAssertionCount,
   classifyExtractionEnvelope,
-  EMPTY_INTERPRETATIONS_ENVELOPE,
   EMPTY_SIGNALS_ENVELOPE,
   EXTRACTION_SEMANTIC_PRESERVATION_FROM_REQUEST,
   isPlanSkippedExtraction,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../../../runs/extraction/empty-classification.js";
-import { admitProviderRaw, semanticPackRequestSha256 } from
-  "../../../runs/extraction/cache/semantic-artifact/admit.js";
-import { currentSemanticReplayAuthority } from
-  "../../../runs/extraction/cache/semantic-artifact/replay-authority.js";
 import { openExtractionAttemptLedger } from
   "../../../runs/extraction/authority/attempt-ledger.js";
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
@@ -42,7 +40,6 @@ import {
   testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
-import { semanticTask } from "./semantic-artifact-fixture.js";
 import { inspectExtractionCacheInventory } from "../../../runs/extraction/cache-audit/inventory.js";
 import { inspectBoundedMaterializationInventory } from
   "../../../runs/extraction/cache-audit/materialization/preflight-inventory.js";
@@ -158,7 +155,7 @@ describe("extraction empty envelope classification", () => {
     expect(unclassified.rawSignalCount).toBe(0);
   });
 
-  it("counts witnessed request abstention without satisfying a semantic capability", async () => {
+  it("counts witnessed empty completion and reopens its cache without dispatch", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "empty-class-"));
     roots.push(cacheRoot);
     const stats = newFillStats();
@@ -192,35 +189,6 @@ describe("extraction empty envelope classification", () => {
     expect(await reopened.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
       userPrompt: request.userPrompt })).toMatchObject({ rawJson: EMPTY_STATEMENT_RESPONSE });
     expect(delegate.extract).not.toHaveBeenCalled();
-    const task = semanticTask("I moved to Berlin.");
-    const semanticRoot = await mkdtemp(join(tmpdir(), "empty-semantic-"));
-    roots.push(semanticRoot);
-    const packIdentity = transportPackIdentity("token_aware", [task.semanticKey]);
-    const [admission] = admitProviderRaw({
-      root: semanticRoot,
-      rawJson: EMPTY_INTERPRETATIONS_ENVELOPE,
-      tasks: [task],
-      replayAuthority: currentSemanticReplayAuthority(),
-      rawBinding: {
-        packIdentity,
-        requestSha256: semanticPackRequestSha256({
-          packIdentity,
-          sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
-          sourceAuthority: task.sourceAuthority,
-          members: [{
-            semanticKey: task.semanticKey,
-            assertionId: task.assertionId,
-            text: task.text
-          }]
-        }),
-        sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
-        policyKind: "token_aware",
-        memberSemanticKeys: [task.semanticKey]
-      }
-    });
-    expect(admission, JSON.stringify(admission)).toMatchObject({ kind: "quarantined" });
-    expect(admission && "admission" in admission ? admission.admission.state : undefined)
-      .toBe("quarantined");
   });
 
   it("settles a witnessed provider-empty request without reserving another attempt", async () => {

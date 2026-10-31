@@ -407,10 +407,6 @@
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/harness/daemon/seed/daemon-source-evidence-fallback.ts": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/harness/daemon/workspace/daemon-workspace-manager.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -801,10 +797,6 @@
   },
   "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-catalog-rebind.ts": {
     "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.ts": {
-    "max": 9,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/cache/semantic-supplement/source-assertion-supplement.ts": {
@@ -1387,20 +1379,12 @@
     "max": 19,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-rounds.ts": {
-    "max": 5,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-shared.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/seed-ledger/semantic-supplement-binding.ts": {
     "max": 6,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/snapshot/seed-ledger/source-observation-proof.ts": {
-    "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/sidecar-validation.ts": {
@@ -2121,10 +2105,6 @@
   },
   "packages/soul/src/garden/ingestion/compute-routing-service.ts": {
     "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/soul/src/garden/ingestion/official-api-garden-provider.ts": {
-    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/soul/src/garden/ingestion/official-api-signal-parser.ts": {

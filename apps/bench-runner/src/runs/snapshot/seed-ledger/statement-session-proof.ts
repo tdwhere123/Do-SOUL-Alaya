@@ -1,4 +1,4 @@
-import { canonicalJson, type ConversationMessage, type SourceStatementReceipt } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, type ConversationMessage, type SourceStatementReceipt } from "@do-soul/alaya-protocol";
 import { assertSourceStatementSessionReceipt, SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
 import { inspectExtractionRawJson } from "../../extraction/content-closure.js";
@@ -22,13 +22,13 @@ export function assertStatementRound(input: {
 }): void {
   const { round, extraction } = input;
   const record = round.statementSession;
-  if (record === undefined) throw new Error("snapshot statement session receipt is missing");
+  if (record === undefined) throw new AlayaError("CONFLICT", "snapshot statement session receipt is missing");
   const source = sourceStatementSession(input.sessionMessages);
   const receiptJson = canonicalJson(record.receipt);
   let verified = input.seen.get(source.sessionId);
-  if (record.firstUse !== (verified === undefined)) throw new Error("statement session first-use accounting differs");
+  if (record.firstUse !== (verified === undefined)) throw new AlayaError("CONFLICT", "statement session first-use accounting differs");
   if (verified === undefined) {
-    if (record.responses === undefined) throw new Error("statement session response bytes are missing");
+    if (record.responses === undefined) throw new AlayaError("CONFLICT", "statement session response bytes are missing");
     assertSourceStatementSessionReceipt({ session_id: source.sessionId, messages: source.messages,
       receipt: record.receipt, responses: record.responses });
     const shards = record.responses.map(response => {
@@ -41,13 +41,13 @@ export function assertStatementRound(input: {
     verified = { receiptJson, shards };
     input.seen.set(source.sessionId, verified);
   } else if (record.responses !== undefined || receiptJson !== verified.receiptJson) {
-    throw new Error("statement session replay changes its original receipt");
+    throw new AlayaError("CONFLICT", "statement session replay changes its original receipt");
   }
   if (canonicalJson(round.extractionShards) !== canonicalJson(verified.shards) ||
-      (round.semanticSupplementShards?.length ?? 0) !== 0) throw new Error("statement session shard identity differs");
+      (round.semanticSupplementShards?.length ?? 0) !== 0) throw new AlayaError("CONFLICT", "statement session shard identity differs");
   const ids = new Set(input.roundMessages.map(message => message.message_id));
   const selected = record.receipt.messages.filter(result => ids.has(result.message.message_id));
-  if (selected.length !== ids.size) throw new Error("statement round lacks its host messages");
+  if (selected.length !== ids.size) throw new AlayaError("CONFLICT", "statement round lacks its host messages");
   const accepted = selected.reduce((sum, result) => sum + result.statements.length, 0);
   const unassigned = Math.max(0, verified.shards.reduce((sum, shard) => sum + shard.rawSignalCount, 0) -
     record.receipt.messages.reduce((sum, result) => sum + result.statements.length, 0) - rejectedStatements(record.receipt.messages));
@@ -56,7 +56,7 @@ export function assertStatementRound(input: {
   if (record.unassignedRawStatements !== unassigned || round.rawSignalCount !== raw || round.draftCount !== accepted ||
       round.extractionSource !== (verified.shards.length === 0 ? "fallback" : "cache") ||
       round.cacheKey !== (single?.cacheKey ?? null) || round.rawJsonSha256 !== (single?.rawJsonSha256 ?? null)) {
-    throw new Error("statement round projection or request accounting differs");
+    throw new AlayaError("CONFLICT", "statement round projection or request accounting differs");
   }
 }
 

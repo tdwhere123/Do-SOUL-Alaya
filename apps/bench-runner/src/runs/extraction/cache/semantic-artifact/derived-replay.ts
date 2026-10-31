@@ -1,5 +1,4 @@
-import type { AdmissionTask } from "./admit.js";
-import { assertSemanticArtifactCompatibility } from "./admission-identity.js";
+import { assertSemanticArtifactCompatibility, type SemanticAdmissionIdentity } from "./admission-identity.js";
 import {
   currentSemanticReplayAuthority,
   semanticReplayIdentityDigest,
@@ -13,7 +12,7 @@ import {
 
 export function inspectCurrentOrReplayDerived(
   root: string,
-  task: AdmissionTask
+  task: SemanticAdmissionIdentity
 ): SemanticArtifactInspectResult {
   const current = inspectSemanticArtifact(root, task.semanticKey, task.capability);
   if (current.status !== "missing") return current;

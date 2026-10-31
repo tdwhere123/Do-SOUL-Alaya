@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { DatabaseSync } from "node:sqlite";
 import { collectOfficialApiExtractionCoverage, SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { computeExtractionTurnCacheKeys } from "../../compile-seed/compile-seed-cache.js";
@@ -46,11 +47,11 @@ export function assertQuestionLedger(
   const ledger = question.seedRounds;
   const expected = canonicalRounds(source);
   if (ledger === undefined || ledger.length !== expected.length) {
-    throw new Error(`snapshot canonical seed round count mismatch for ${source.question_id}`);
+    throw new AlayaError("CONFLICT", `snapshot canonical seed round count mismatch for ${source.question_id}`);
   }
   ledger.forEach((round, index) => {
     const canonical = expected[index];
-    if (canonical === undefined) throw new Error("snapshot canonical seed round order mismatch");
+    if (canonical === undefined) throw new AlayaError("CONFLICT", "snapshot canonical seed round order mismatch");
     assertRoundIdentity(
       round, canonical, extraction, source, semanticEntries, semanticBinding,
       systemPrompt, totals
@@ -94,7 +95,7 @@ function assertRoundIdentity(
   if (systemPrompt === SOURCE_STATEMENTS_PROMPT) {
     if (actual.sessionIndex !== expected.sessionIndex || actual.roundIndex !== expected.roundIndex ||
         actual.sessionId !== expected.sessionId || actual.hasAnswer !== expected.round.hasAnswer || actual.contentSha256 !== sha256(content)) {
-      throw new Error("snapshot canonical raw round identity mismatch");
+      throw new AlayaError("CONFLICT", "snapshot canonical raw round identity mismatch");
     }
     const sessionMessages = buildLongMemEvalSessionMessages(source.haystack_sessions[expected.sessionIndex]!, source.haystack_dates[expected.sessionIndex]);
     assertStatementRound({ round: actual, sessionMessages,
@@ -102,7 +103,7 @@ function assertRoundIdentity(
       seen: totals.statementSessions });
     return;
   }
-  if (actual.statementSession !== undefined) throw new Error("historical round cannot acquire a statement receipt");
+  if (actual.statementSession !== undefined) throw new AlayaError("CONFLICT", "historical round cannot acquire a statement receipt");
   const turnMessages = buildLongMemEvalRoundMessages(
     source.haystack_sessions[expected.sessionIndex]!,
     expected.round,
@@ -137,7 +138,7 @@ function assertRoundIdentity(
       ) || actual.cacheKey !== (single?.cacheKey ?? null) ||
       actual.rawJsonSha256 !== (single?.rawJsonSha256 ?? null) ||
       actual.rawSignalCount !== rawSignalCount || actual.draftCount !== draftCount) {
-    throw new Error("snapshot canonical seed round identity mismatch");
+    throw new AlayaError("CONFLICT", "snapshot canonical seed round identity mismatch");
   }
 }
 
@@ -155,9 +156,9 @@ function assertRoundConservation(round: LongMemEvalSnapshotSeedRound): void {
       round.factsProduced !== bindings.length + round.candidateAbsent + round.materializationDrop ||
       boundObjects.length !== round.memoryObjectIds.length ||
       boundObjects.some((objectId, index) => objectId !== round.memoryObjectIds[index])) {
-    throw new Error("snapshot seed round signal conservation mismatch");
+    throw new AlayaError("CONFLICT", "snapshot seed round signal conservation mismatch");
   }
   if (new Set(round.memoryObjectIds).size !== round.memoryObjectIds.length) {
-    throw new Error("snapshot seed round repeats a memory object");
+    throw new AlayaError("CONFLICT", "snapshot seed round repeats a memory object");
   }
 }
