@@ -12,7 +12,7 @@ import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest,
   sourceSemanticInteractiveWireSha256, SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT } from "./source-semantic-interactive-request.js";
 import { isNativeGeminiRequestProfile } from "../request-profile.js";
 import { SourceRequestLineSchema, parseExtractionOpenSemanticsGeneration,
-  parseSourceSemanticRequestLine } from "../request-artifact.js";
+  parseSourceSemanticRequestLine, assertNoRetiredExtractionOverlay } from "../request-artifact.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 
 export const STEP_SOURCE_OUTPUT_TOKEN_DEFAULT = 4096;
@@ -171,11 +171,12 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
   readonly preflightOutputTokenCap?: number;
   readonly geminiQuoteRates?: Readonly<{ inputUsdPerMillion: number; outputUsdPerMillion: number }>;
 }) {
+  assertNoRetiredExtractionOverlay(options);
   const maxOutputTokens = InteractiveSourceOutputTokenCapSchema.parse(
     options.preflightOutputTokenCap === undefined
       ? STEP_SOURCE_OUTPUT_TOKEN_DEFAULT : options.preflightOutputTokenCap);
   if (options.batch !== undefined || options.authorityReceiptPath !== undefined ||
-      options.ingestionMode === "lazy_field" || options.extractorFactory !== undefined ||
+      options.extractorFactory !== undefined ||
       options.expansionCapability !== undefined || options.openSemantics === undefined ||
       options.sourcePacking !== "complete-source") {
     throw new AlayaError("VALIDATION", "interactive source dry preflight requires complete-source open semantics without execution authority");

@@ -1,9 +1,8 @@
-import { assertCurrentConversationGeneration } from "./request-artifact.js";
+import { assertCurrentConversationGeneration, assertNoRetiredExtractionOverlay,
+  type RetiredExtractionOverlayOptions } from "./request-artifact.js";
 import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import process from "node:process";
 import { executeExtractionBatchFill } from "./fill/batch-fill.js";
-import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   resolveEffectiveExtractionCacheRoot,
   type BenchSignalExtractor,
@@ -17,11 +16,6 @@ import {
   type ExtractionCacheWriteLease
 } from "./fill/manifest/fill-root-guard.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
-import { hasCompleteExtractionFillAuthority } from "./fill/fill-authority.js";
-import { digestSemanticOverlay } from "./cache/semantic-artifact/store.js";
-import { inspectHistoricalKeyRawClosure } from
-  "./fill/manifest/substrate-key-raw-closure.js";
-import { assertSafeBudget } from "./fill/semantic-fill-envelope.js";
 import {
   prepareExpansionFillAuthority,
   type PreparedExpansionFillAuthority
@@ -43,7 +37,7 @@ import {
   refreshIncompleteFill,
 } from "./fill/fill-execution.js";
 import {
-  newFillStats, readFillRetryTelemetry, type FillRetryTelemetry
+  newFillStats, type FillRetryTelemetry
 } from "./fill/fill-stats.js";
 import { createExtractionExecutionAuthority } from "./fill/execution-authority.js";
 import {
@@ -77,7 +71,7 @@ export {
   EXTRACTION_FILL_DEFAULT_CONCURRENCY,
   EXTRACTION_FILL_MAX_CONCURRENCY
 } from "./fill/policy/fill-concurrency.js";
-export interface ExtractionFillOptions {
+export interface ExtractionFillOptions extends RetiredExtractionOverlayOptions {
   readonly sourceInterpretationProfile?: import("@do-soul/alaya-protocol").SourceInterpretationProfile;
   readonly openSemantics?: import("./request-artifact.js").ExtractionOpenSemanticsGeneration;
   readonly sourcePacking?: ExtractionSourcePacking;
@@ -114,12 +108,6 @@ export interface ExtractionFillOptions {
   readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly expansionSpendApproval?: ExpansionSpendApproval;
-  readonly ingestionMode?: "precomputed_full" | "lazy_field";
-  readonly semanticArtifactRoot?: string;
-  readonly semanticTransport?: import("./fill/semantic-fill-executor.js").SemanticFillTransport;
-  readonly semanticTransportPolicy?: import("./fill/semantic-fill-envelope.js").SemanticTransportPolicy;
-  readonly semanticMaxCalls?: number;
-  readonly semanticMaxFailures?: number;
 }
 export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly batchState?: import("./fill/batch/contract.js").GeminiBatchState;
@@ -129,12 +117,6 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly coverage: number;
   readonly manifest: ExtractionCacheManifest;
   readonly authorityTelemetry?: import("./authority/attempt-ledger.js").ExtractionAttemptLedgerSnapshot;
-  readonly semanticOverlayIdentity?: string;
-  readonly semanticNewlyExtracted?: number;
-  readonly semanticCacheHits?: number;
-  readonly semanticUnavailable?: number;
-  readonly lazySemanticRunReceipt?: import("./fill/semantic-fill-receipt.js").LazySemanticRunReceipt;
-  readonly lazySemanticRunReceiptHandle?: import("./fill/semantic-fill-receipt.js").VerifiedLazySemanticRunReceipt;
 }
 
 export const CATALOG_REFILL_TEST_FAILPOINT_ENV =
@@ -172,25 +154,21 @@ async function runExtractionFillBody(
 ): Promise<ExtractionFillResult> {
   const fill = freezeExtractionFillOptions(options);
   assertCurrentConversationGeneration(fill, fill.batch?.operation);
-  if (options.sourceInterpretationProfile !== undefined && (options.batch === undefined ||
-      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
+  if (fill.sourceInterpretationProfile !== undefined && (fill.batch === undefined ||
+      fill.expansionCapability !== undefined || fill.extractorFactory !== undefined)) {
     throw new AlayaError("VALIDATION", "source packet fill requires explicit isolated Batch execution");
   }
-  if (options.openSemantics !== undefined && (
-      options.ingestionMode === "lazy_field" || options.expansionCapability !== undefined || options.extractorFactory !== undefined)) {
-    throw new AlayaError("VALIDATION", "open semantics fill cannot mix lazy_field, expansion, or an injected extractor");
+  if (fill.openSemantics !== undefined && (
+      fill.expansionCapability !== undefined || fill.extractorFactory !== undefined)) {
+    throw new AlayaError("VALIDATION", "open semantics fill cannot mix expansion or an injected extractor");
   }
   const cacheRoot = resolveEffectiveExtractionCacheRoot(fill.cacheRoot);
   const entryManifest = readExtractionCacheManifestIdentity(cacheRoot);
-  if (fill.ingestionMode === "lazy_field" || fill.semanticArtifactRoot !== undefined || fill.semanticTransport !== undefined) {
-    throw new AlayaError("UNAVAILABLE", "passive semantic overlays are retired; retained artifacts are inspection-only");
-  }
   const retainedManifest = entryManifest?.manifest;
   if (retainedManifest !== undefined) assertCurrentConversationGeneration({
     sourcePacking: retainedManifest.schema_version === 4 ? retainedManifest.source_packing : "reference-eight",
     sourceInterpretationProfile: retainedManifest.source_interpretation_profile,
     openSemantics: retainedManifest.source_semantic_generation }, fill.batch?.operation);
-  assertLazyFieldIsolation(fill, cacheRoot);
   const authority = fill.authorityReceiptPath === undefined
     ? undefined
     : await loadExtractionAuthority(fill, cacheRoot);
@@ -236,20 +214,15 @@ async function runExtractionFillBody(
 }
 
 export function freezeExtractionFillOptions(options: ExtractionFillOptions): ExtractionFillOptions {
-  const {
-    extractorFactory, log, signal, semanticTransport, semanticTransportPolicy, batchHttp,
-    cacheKeyAllowlist, ...cloneable
-  } = options;
+  const captured = { ...options };
+  assertNoRetiredExtractionOverlay(captured);
+  const { extractorFactory, log, signal, batchHttp, cacheKeyAllowlist, ...cloneable } = captured;
   return Object.freeze({
     ...structuredClone(cloneable),
     ...(extractorFactory === undefined ? {} : { extractorFactory }),
     ...(batchHttp === undefined ? {} : { batchHttp }),
     ...(log === undefined ? {} : { log }),
     ...(signal === undefined ? {} : { signal }),
-    ...(semanticTransport === undefined ? {} : { semanticTransport }),
-    ...(semanticTransportPolicy === undefined ? {} : {
-      semanticTransportPolicy: Object.freeze({ ...semanticTransportPolicy })
-    }),
     ...(cacheKeyAllowlist === undefined
       ? {}
       : { cacheKeyAllowlist: Object.freeze([...cacheKeyAllowlist]) })
@@ -372,27 +345,15 @@ async function executeLockedExtractionFill(input: {
   readonly durableFailpoint: CatalogRefillResumeFailpoint | undefined;
 }): Promise<ExtractionFillResult> {
   try {
-    const semanticReport = await executePreparedExtractionFill({ ...input,
+    await executePreparedExtractionFill({ ...input,
       signal: input.watchdog?.signal ?? input.options.signal,
       markProgress: input.watchdog?.markProgress });
-    if (input.options.ingestionMode === "lazy_field") {
-      return overlayFillResult(
-        input.prepared,
-        input.stats,
-        input.cacheRoot,
-        input.options.semanticArtifactRoot,
-        semanticReport,
-        input.executionAuthority?.snapshot()
-      );
-    }
     return finishPreparedExtractionFill(
       input.prepared, input.cacheRoot, input.stats, input.log, input.writeLease,
       input.executionAuthority, input.tolerateProviderTaskFailures, input.durableFailpoint
     );
   } catch (cause) {
-    if (input.options.ingestionMode !== "lazy_field") {
-      refreshFailedExtractionFill(input, cause);
-    }
+    refreshFailedExtractionFill(input, cause);
     throw cause;
   } finally {
     input.watchdog?.dispose();
@@ -432,8 +393,8 @@ async function executePreparedExtractionFill(input: {
   readonly tolerateProviderTaskFailures: boolean;
   readonly signal: AbortSignal | undefined;
   readonly markProgress: (() => void) | undefined;
-}): Promise<import("./fill/semantic-fill-executor.js").SemanticFillReport | undefined> {
-  const semanticReport = await executeExtractionFill(
+}): Promise<void> {
+  await executeExtractionFill(
     input.options,
     input.prepared,
     input.cacheRoot,
@@ -448,7 +409,6 @@ async function executePreparedExtractionFill(input: {
     input.markProgress
   );
   input.signal?.throwIfAborted();
-  return semanticReport;
 }
 async function prepareReceiptBoundExtractionFill(
   options: ExtractionFillOptions,
@@ -480,89 +440,4 @@ async function prepareReceiptBoundExtractionFill(
     throw cause;
   }
   return prepared;
-}
-
-function assertLazyFieldIsolation(options: ExtractionFillOptions, cacheRoot: string): void {
-  if (options.semanticArtifactRoot !== undefined && options.ingestionMode !== "lazy_field") {
-    throw new ExtractionCacheInvariantError("semantic overlay requires lazy_field");
-  }
-  if (options.ingestionMode !== "lazy_field") return;
-  if (options.semanticArtifactRoot === undefined) {
-    throw new ExtractionCacheInvariantError(
-      "lazy_field requires a semantic artifact root"
-    );
-  }
-  assertSafeBudget(options.semanticMaxCalls ?? Number.MAX_SAFE_INTEGER, "semanticMaxCalls");
-  assertSafeBudget(options.semanticMaxFailures ?? Number.MAX_SAFE_INTEGER, "semanticMaxFailures");
-  assertSeparatedRoots(cacheRoot, options.semanticArtifactRoot);
-  if (options.authorityReceiptPath !== undefined ||
-      options.expansionCapability !== undefined ||
-      options.cacheKeyAllowlist !== undefined ||
-      options.questionBatchLimit !== undefined) {
-    throw new ExtractionCacheInvariantError(
-      "lazy_field cannot mix v3 fill authority"
-    );
-  }
-}
-
-function assertSeparatedRoots(cacheRoot: string, semanticRoot: string): void {
-  const left = canonicalRootCandidate(cacheRoot);
-  const right = canonicalRootCandidate(semanticRoot);
-  const leftToRight = relative(left, right);
-  const rightToLeft = relative(right, left);
-  if (left === right ||
-      (!leftToRight.startsWith("..") && !isAbsolute(leftToRight)) ||
-      (!rightToLeft.startsWith("..") && !isAbsolute(rightToLeft))) {
-    throw new ExtractionCacheInvariantError(
-      "semantic artifact root must be disjoint from the historical extraction cache root"
-    );
-  }
-}
-
-function canonicalRootCandidate(path: string): string {
-  const absolute = resolve(path);
-  if (existsSync(absolute)) return realpathSync(absolute);
-  const parent = dirname(absolute);
-  if (parent === absolute) return absolute;
-  return resolve(canonicalRootCandidate(parent), basename(absolute));
-}
-
-function overlayFillResult(
-  prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
-  stats: ReturnType<typeof newFillStats>,
-  cacheRoot: string,
-  semanticArtifactRoot: string | undefined,
-  semanticReport: import("./fill/semantic-fill-executor.js").SemanticFillReport | undefined,
-  authorityTelemetry: import("./authority/attempt-ledger.js").ExtractionAttemptLedgerSnapshot | undefined
-): ExtractionFillResult {
-  if (semanticArtifactRoot === undefined || semanticReport === undefined) {
-    throw new ExtractionCacheInvariantError(
-      "lazy_field requires existing complete extraction authority"
-    );
-  }
-  const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  const historical = inspectHistoricalKeyRawClosure(cacheRoot);
-  if (identity === undefined ||
-      identity.manifestSha256 !== prepared.pinnedManifestSha256 ||
-      !hasCompleteExtractionFillAuthority(identity.manifest) ||
-      !historical.complete || historical.coverage !== 1) {
-    throw new ExtractionCacheInvariantError(
-      "lazy_field lost complete extraction authority"
-    );
-  }
-  return {
-    requestedTurns: prepared.requestedTurns,
-    cacheHits: stats.cacheHits,
-    newlyExtracted: 0,
-    coverage: historical.coverage,
-    ...readFillRetryTelemetry(stats, authorityTelemetry),
-    ...(authorityTelemetry === undefined ? {} : { authorityTelemetry }),
-    manifest: identity.manifest,
-    semanticOverlayIdentity: digestSemanticOverlay(semanticArtifactRoot),
-    semanticNewlyExtracted: semanticReport.admitted,
-    semanticCacheHits: semanticReport.lazyRunReceipt.warm,
-    semanticUnavailable: semanticReport.lazyRunReceipt.unavailable,
-    lazySemanticRunReceipt: semanticReport.lazyRunReceipt,
-    lazySemanticRunReceiptHandle: semanticReport.lazyRunReceiptHandle
-  };
 }

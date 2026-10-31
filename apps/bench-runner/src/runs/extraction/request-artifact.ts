@@ -138,8 +138,31 @@ export type ExtractionGenerationInput = Readonly<{
   sourcePacking?: ExtractionSourcePacking;
 }>;
 
+/** Legacy CLI/JS selectors remain typed for refusal, not as supported execution ports. */
+export interface RetiredExtractionOverlayOptions {
+  readonly ingestionMode?: "precomputed_full" | "lazy_field";
+  readonly semanticArtifactRoot?: string;
+  readonly semanticTransport?: unknown;
+  readonly semanticTransportPolicy?: unknown;
+  readonly semanticMaxCalls?: number;
+  readonly semanticMaxFailures?: number;
+}
+
+/** Inspection and current production share this refusal, without restricting historical sizing. */
+export function assertNoRetiredExtractionOverlay(input: RetiredExtractionOverlayOptions): void {
+  if ((input.ingestionMode !== undefined && input.ingestionMode !== "precomputed_full") ||
+      input.semanticArtifactRoot !== undefined || input.semanticTransport !== undefined ||
+      input.semanticTransportPolicy !== undefined || input.semanticMaxCalls !== undefined ||
+      input.semanticMaxFailures !== undefined) {
+    throw new AlayaError("UNAVAILABLE", "passive semantic overlays are retired; retained artifacts are inspection-only");
+  }
+}
+
 /** New passive work has one contract. Retained descriptors remain readable for accounting/recovery. */
-export function assertCurrentConversationGeneration(input: ExtractionGenerationInput, retainedBatchOperation?: string): void {
+export function assertCurrentConversationGeneration(
+  input: ExtractionGenerationInput & RetiredExtractionOverlayOptions, retainedBatchOperation?: string
+): void {
+  assertNoRetiredExtractionOverlay(input);
   // These operations only observe/cancel an acknowledged job. Import/resume would admit old output anew.
   if (["status", "cancel", "recover"].includes(retainedBatchOperation ?? "")) return;
   if (input.sourceInterpretationProfile !== undefined || input.openSemantics !== undefined ||

@@ -1,4 +1,9 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const boundary = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { boundary.restore(); expect(boundary.violations).toEqual([]); });
 import { parseFlags, type ParsedFlags } from "../../../cli/cli-options.js";
 import { peelExtractionFillLazyFlags } from "../../../cli/extraction-fill/lazy-field-flags.js";
 import { ExtractionFillTaskError } from
@@ -184,52 +189,36 @@ it("passes an explicit extraction initial concurrency to the fill runtime", asyn
   }));
 });
 
-it("parses lazy_field flags and hands overlay receipt fields back from fill", async () => {
-  const peeled = peelExtractionFillLazyFlags([
-    "--variant", "s",
-    "--ingestion-mode", "lazy_field",
-    "--semantic-artifact-root", "/tmp/semantic-overlay",
-    "--semantic-max-calls", "4",
-    "--semantic-max-failures", "1"
-  ]);
-  const parsed = parseFlags(peeled.rest);
-  expect(parsed).toMatchObject({
-    variant: "longmemeval_s"
-  });
-  expect(peeled.lazy).toMatchObject({
-    ingestionMode: "lazy_field",
-    semanticArtifactRoot: "/tmp/semantic-overlay",
-    semanticMaxCalls: 4,
-    semanticMaxFailures: 1
-  });
-
+it.each([
+  ["--ingestion-mode", "lazy_field"],
+  ["--semantic-artifact-root", "/unused-retired-overlay"],
+  ["--semantic-max-calls", "0"],
+  ["--semantic-max-failures", "0"]
+])("refuses %s before dispatch, signal subscriptions or dry-preflight key reads", async (flag, value) => {
+  const peeled = peelExtractionFillLazyFlags(["--variant", "s", flag, value]);
   const signalSource = new FakeSignalSource();
   const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
-  const run = vi.fn(async () => ({
-    ...completedFillResult(),
-    semanticOverlayIdentity: "aa".repeat(32),
-    semanticNewlyExtracted: 2,
-    semanticCacheHits: 1,
-    semanticUnavailable: 0,
-    lazySemanticRunReceipt: { runIdentity: "bb".repeat(32) }
-  }));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const run = vi.fn(async () => completedFillResult());
+  for (const extra of [[], ["--extraction-open-semantics", "--extraction-source-packing", "complete-source",
+    "--extraction-cache-root", "/absent-cache", "--extraction-preflight-out", "/unwritable-report.json",
+    "--extraction-preflight-keys", "/absent-keys.json"]]) {
+    const parsed = parseFlags([...peeled.rest, ...extra]);
+    expect(await runExtractionFillCommand(parsed, { runExtractionFill: run, signalSource }, peeled.lazy)).toBe(2);
+    expect(stderr).toHaveBeenLastCalledWith(expect.stringContaining("passive semantic overlays are retired"));
+  }
+  expect(run).not.toHaveBeenCalled();
+  expect(stdout).not.toHaveBeenCalled();
+  expect(signalSource.listenerCount()).toBe(0);
+});
 
-  const exitCode = await runExtractionFillCommand(
-    parsed,
-    { runExtractionFill: run as never, signalSource },
-    peeled.lazy
-  );
-
-  expect(exitCode).toBe(0);
-  expect(run).toHaveBeenCalledWith(expect.objectContaining({
-    ingestionMode: "lazy_field",
-    semanticArtifactRoot: "/tmp/semantic-overlay",
-    semanticMaxCalls: 4,
-    semanticMaxFailures: 1
-  }));
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("semantic_overlay="));
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("lazy_run="));
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("semantic_newly_extracted=2"));
+it("continues forwarding explicit precomputed_full to the current producer", async () => {
+  const peeled = peelExtractionFillLazyFlags(["--variant", "s", "--ingestion-mode", "precomputed_full"]);
+  const run = vi.fn(async () => completedFillResult());
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  expect(await runExtractionFillCommand(parseFlags(peeled.rest),
+    { runExtractionFill: run, signalSource: new FakeSignalSource() }, peeled.lazy)).toBe(0);
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ ingestionMode: "precomputed_full" }));
 });
 
 it("passes explicit provider task failure isolation to the fill runtime", async () => {

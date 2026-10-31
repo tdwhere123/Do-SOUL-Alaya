@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { preflightExtractionBatch } from "../../runs/extraction/fill/batch-preflight.js";
 import { preflightSourceSemanticInteractive } from "../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { readExtractionGeneration } from "./packet-profile.js";
+import { assertNoRetiredExtractionOverlay } from "../../runs/extraction/request-artifact.js";
 import process from "node:process";
 import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js";
 import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
@@ -34,6 +35,7 @@ export async function runExtractionFillCommand(
   batch?: ExtractionBatchOptions
 ): Promise<number> {
   try {
+    assertNoRetiredExtractionOverlay(lazy);
     if (opts.extractionPreflightKeys !== undefined && opts.extractionPreflightOut === undefined) {
       throw new AlayaError("VALIDATION", "preflight keys require dry preflight output");
     }
@@ -140,13 +142,6 @@ function renderStart(opts: ParsedFlags, lazy: ExtractionFillLazyFlags): string {
     (opts.tolerateProviderTaskFailures
       ? " provider_failure_isolation=on" : "") +
     (lazy.ingestionMode === undefined ? "" : ` ingestion_mode=${lazy.ingestionMode}`) +
-    (lazy.semanticArtifactRoot === undefined
-      ? ""
-      : ` semantic_artifact_root=${lazy.semanticArtifactRoot}`) +
-    (lazy.semanticMaxCalls === undefined ? "" : ` semantic_max_calls=${lazy.semanticMaxCalls}`) +
-    (lazy.semanticMaxFailures === undefined
-      ? ""
-      : ` semantic_max_failures=${lazy.semanticMaxFailures}`) +
     "...\n";
 }
 
@@ -171,7 +166,6 @@ function renderResult(result: ExtractionFillResult): string {
     `terminal_nonretryable_response=${result.terminalRetryClassifications.failure_non_retryable_response} ` +
     `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
     `${coverage}` +
-    renderLazyOverlay(result) +
     `\n`;
 }
 
@@ -188,15 +182,6 @@ function renderAuthorityTelemetry(
     `usage_invalid=${telemetry.telemetry.usageInvalidAttempts} ` +
     `usage_unresolved=${telemetry.telemetry.unresolvedTransportAttempts} ` +
     `usage_unknown=${telemetry.telemetry.usageUnknownAttempts} `;
-}
-
-function renderLazyOverlay(result: ExtractionFillResult): string {
-  if (result.lazySemanticRunReceipt === undefined) return "";
-  return ` semantic_overlay=${result.semanticOverlayIdentity ?? "unknown"}` +
-    ` semantic_newly_extracted=${result.semanticNewlyExtracted ?? 0}` +
-    ` semantic_cache_hits=${result.semanticCacheHits ?? 0}` +
-    ` semantic_unavailable=${result.semanticUnavailable ?? 0}` +
-    ` lazy_run=${result.lazySemanticRunReceipt.runIdentity}`;
 }
 
 function handleExtractionFillError(error: unknown): number {

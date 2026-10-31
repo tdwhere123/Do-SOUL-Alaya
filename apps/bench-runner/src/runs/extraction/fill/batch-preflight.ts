@@ -5,15 +5,16 @@ import { inspectExtractionFillPreparation } from "./fill-preparation.js";
 import { prepareSourceRequestWorkset } from "./source-request-workset.js";
 import { batchDigest, canonicalBatchPlan, prepareBatchJobs } from "./batch/plan.js";
 import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
-import { SourceRequestLineSchema } from "../request-artifact.js";
+import { SourceRequestLineSchema, assertNoRetiredExtractionOverlay } from "../request-artifact.js";
 import type { GeminiBatchPlan } from "./batch/contract.js";
 import { resolveExtractionTransportRoute } from "../transport-route.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 
 /** Read-only sizing never pins a manifest, grants authority, reserves, or creates HTTP transport. */
 export async function preflightExtractionBatch(options: ExtractionFillOptions & { readonly cacheRoot: string; readonly preflightKeys?: unknown }) {
+  assertNoRetiredExtractionOverlay(options);
   if (options.batch?.operation !== "prepare" || options.authorityReceiptPath !== undefined ||
-      options.batch.reconcile !== undefined || options.ingestionMode === "lazy_field" ||
+      options.batch.reconcile !== undefined ||
       options.expansionCapability !== undefined || options.extractorFactory !== undefined) {
     throw new AlayaError("VALIDATION", "Batch dry preflight requires prepare settings without execution authority or alternate execution modes");
   }

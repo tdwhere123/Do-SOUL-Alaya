@@ -1,5 +1,6 @@
 import process from "node:process";
-import { assertCurrentConversationGeneration, extractionArtifactPrompt } from "../request-artifact.js";
+import { assertCurrentConversationGeneration, assertNoRetiredExtractionOverlay,
+  extractionArtifactPrompt } from "../request-artifact.js";
 import {
   createCachingSignalExtractor,
   createGardenHttpExtractor,
@@ -86,8 +87,9 @@ export async function executeExtractionFill(
   authority: ExecutionExtractionAuthority | undefined,
   signal: AbortSignal | undefined,
   markProgress: (() => void) | undefined
-): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
+): Promise<void> {
   refuseRecallCampaignLiveExtraction("extraction_write");
+  assertNoRetiredExtractionOverlay(options);
   assertCurrentConversationGeneration(prepared.config);
   if (authority?.receipt.action === "sample") throw new Error("ordinary extraction fill cannot use sample authority");
   const resolved = resolveFillTurns(
@@ -97,9 +99,6 @@ export async function executeExtractionFill(
   if (resolved.executionCacheKeys !== undefined) {
     log(`[extraction-fill] sparse execution keys=${resolved.executionCacheKeys.size} ` +
       `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
-  }
-  if (options.ingestionMode === "lazy_field" || options.semanticArtifactRoot !== undefined) {
-    throw new ExtractionCacheInvariantError("passive semantic overlays are retired");
   }
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress,
@@ -126,7 +125,6 @@ export async function executeExtractionFill(
     } }),
     ...(tolerateProviderTaskFailures ? { tolerateProviderTaskFailures: true } : {})
   });
-  return undefined;
 }
 
 function createFillCachingExtractor(
