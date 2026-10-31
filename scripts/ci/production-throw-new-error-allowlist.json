@@ -767,10 +767,6 @@
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/derived-replay.ts": {
-    "max": 4,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/file-adapter.ts": {
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -903,10 +899,6 @@
     "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/extraction/fill/fulfillment/fulfill.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/extraction/fill/manifest/durable-exclusive-publication.ts": {
     "max": 7,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -947,36 +939,12 @@
     "max": 11,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-envelope.ts": {
-    "max": 13,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-execution-authority.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-executor.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-pack-execution.ts": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-fill-plan.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt-ledger-bind.ts": {
     "max": 7,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt.ts": {
     "max": 17,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/extraction/fill/semantic-workset-tasks.ts": {
-    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/transport-route.ts": {

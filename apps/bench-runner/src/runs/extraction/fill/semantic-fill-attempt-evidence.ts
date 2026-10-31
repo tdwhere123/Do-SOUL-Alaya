@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import type { TransportPack } from "@do-soul/alaya-soul";
 import { SEMANTIC_ARTIFACT_MAX_BYTES } from
   "../cache/semantic-artifact/contract.js";
-import type {
-  SemanticFillAttempt,
-  SemanticFillTransportResult
-} from "./semantic-fill-executor.js";
+
+export interface SemanticFillAttempt {
+  readonly semanticKey: string;
+  readonly capability: string;
+  readonly outcome: "admitted" | "unresolved" | "skipped" | "failed";
+  readonly reason?: string;
+}
 
 export const SEMANTIC_FILL_ATTEMPT_SCHEMA_VERSION = 1;
 export const MAX_SEMANTIC_FILL_ATTEMPT_BYTES =
@@ -48,30 +51,6 @@ export interface SemanticFillDurableAttemptEvidence {
   readonly response?: DurableSemanticTransportResponse;
   readonly memberOutcomes: readonly SemanticFillAttempt[];
   readonly packComplete: boolean;
-}
-
-export function captureDurableSemanticResponse(
-  result: SemanticFillTransportResult
-): DurableSemanticTransportResponse {
-  if (result.kind !== "raw") return Object.freeze({ kind: result.kind, reason: result.reason });
-  const bytes = Buffer.from(result.rawJson, "utf8");
-  const rawSha256 = digestBytes(bytes);
-  const canonical = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  if (bytes.byteLength > SEMANTIC_ARTIFACT_MAX_BYTES || canonical !== result.rawJson) {
-    const reason = bytes.byteLength > SEMANTIC_ARTIFACT_MAX_BYTES
-      ? "raw artifact exceeds its size limit"
-      : "raw artifact UTF-8 bytes are not canonical";
-    return Object.freeze({
-      kind: "malformed_raw",
-      reason,
-      rawUtf8: bytes.subarray(0, SEMANTIC_ARTIFACT_MAX_BYTES).toString("utf8"),
-      rawSha256,
-      rawBytes: bytes.byteLength
-    });
-  }
-  return Object.freeze({
-    kind: "raw", rawUtf8: result.rawJson, rawSha256, rawBytes: bytes.byteLength
-  });
 }
 
 export function assertSemanticFillAttemptEvidence(

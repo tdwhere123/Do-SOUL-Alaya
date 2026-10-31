@@ -4,9 +4,6 @@ import { readdirSync, realpathSync } from "node:fs";
 import { z } from "zod";
 import { readBoundedCanonicalUtf8Artifact, withRootBoundDirectory } from
   "../cache-audit/bounded-artifact-reader.js";
-import { publishBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
-import { semanticTaskIdentity } from
-  "../cache/semantic-artifact/admission-identity.js";
 import {
   digestSemanticCacheState,
   digestSemanticOverlayState,
@@ -15,27 +12,15 @@ import {
 } from "../cache/semantic-artifact/store.js";
 import {
   assertLazySemanticAuthorityMatchesExtraction,
-  captureSemanticRunSourceAuthority,
   SemanticRunSourceAuthoritySchema,
   substrateAuthorityIdentity
 } from "./semantic-fill-authority.js";
-import type { SemanticFillEnvelope } from "./semantic-fill-executor.js";
-import {
-  unwrapVerifiedSemanticFillExecution,
-  type VerifiedSemanticFillExecution
-} from "./semantic-fill-execution-authority.js";
-import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { readExtractionCacheManifestIdentity } from
   "../cache/extraction-cache-manifest.js";
-import {
-  assertReceiptLedgerMemberOutcomes,
-  publishLedgerBoundReceiptReplica
-} from "./semantic-fill-receipt-ledger-bind.js";
-import {
-  semanticReplayIdentityDigest,
-  unwrapSemanticReplayAuthority,
-  type VerifiedSemanticReplayAuthority
-} from "../cache/semantic-artifact/replay-authority.js";
+import { assertReceiptLedgerMemberOutcomes } from
+  "./semantic-fill-receipt-ledger-bind.js";
+import { semanticReplayIdentityDigest } from
+  "../cache/semantic-artifact/replay-authority.js";
 
 const Hex64 = z.string().regex(/^[a-f0-9]{64}$/u);
 const BoundedIdentityLabel = z.string().min(1).max(512);
@@ -165,92 +150,6 @@ export interface VerifiedLazySemanticRunReceipt {
 }
 const verifiedReceipts = new WeakMap<object, Readonly<{ root: string; runIdentity: string }>>();
 
-export function persistLazySemanticRunReceipt(input: {
-  readonly root: string;
-  readonly endingCacheIdentity: string;
-  readonly endingOverlayIdentity: string;
-  readonly envelope: SemanticFillEnvelope;
-  readonly execution: VerifiedSemanticFillExecution;
-  readonly replayAuthority: VerifiedSemanticReplayAuthority;
-  readonly lease: ExtractionCacheWriteLease;
-  readonly maxReceiptBytes?: number;
-}): VerifiedLazySemanticRunReceipt {
-  input.lease.assertOwned();
-  const execution = structuredClone(unwrapVerifiedSemanticFillExecution(input.execution));
-  const envelope = structuredClone(input.envelope);
-  const endingCacheIdentity = input.endingCacheIdentity;
-  const endingOverlayIdentity = input.endingOverlayIdentity;
-  input.lease.assertRoot(input.root);
-  const capturedOccurrences = new Set(execution.tasks.map(
-    (task) => task.binding.occurrenceIdentity
-  ));
-  const capabilityPolicy = [...new Set(execution.tasks.map((task) => task.capability))].sort();
-  if (capabilityPolicy.length === 0) {
-    throw new Error("NOT_REPLAYABLE: empty demand has no persisted lazy receipt");
-  }
-  const sourceAuthority = captureSemanticRunSourceAuthority(execution.tasks);
-  const demandUnits = execution.tasks.map((task) => ({
-    compatibilityIdentity: digest(semanticTaskIdentity(task)),
-    semanticKey: task.semanticKey,
-    capability: task.capability,
-    occurrenceIdentity: task.binding.occurrenceIdentity,
-    sourceCorpusIdentity: task.binding.sourceCorpusIdentity
-  }));
-  if (demandUnits.some((unit) => !capturedOccurrences.has(unit.occurrenceIdentity))) {
-    throw new Error("lazy semantic demand unit occurrence is not in captured execution tasks");
-  }
-  const demandTraceIdentity = digest(demandUnits.map((unit) =>
-    `${unit.semanticKey}\u0000${unit.capability}\u0000${unit.occurrenceIdentity}` +
-      `\u0000${unit.sourceCorpusIdentity}`
-  ).join("\n"));
-  const counts = {
-    cold: execution.attempts.filter((attempt) => attempt.outcome === "admitted").length,
-    warm: execution.attempts.filter((attempt) => attempt.outcome === "skipped").length,
-    calls: execution.calls,
-    failures: execution.failures,
-    failedUnits: execution.attempts.filter((attempt) => attempt.outcome === "failed").length,
-    unavailable: execution.attempts.filter((attempt) =>
-      attempt.outcome === "unresolved" || attempt.outcome === "failed").length,
-    attemptCount: execution.attempts.length
-  };
-  const unsigned = {
-    schemaVersion: 3 as const,
-    status: "replayable" as const,
-    ledgerScopeIdentity: execution.ledgerScopeIdentity,
-    startingCacheIdentity: execution.startingCacheIdentity,
-    endingCacheIdentity,
-    startingOverlayIdentity: execution.startingOverlayIdentity,
-    endingOverlayIdentity,
-    sourceAuthority,
-    transportPolicy: envelope.transportPolicy,
-    replaySemantics: unwrapSemanticReplayAuthority(input.replayAuthority),
-    capabilityPolicy,
-    budget: { maxCalls: envelope.maxCalls, maxFailures: envelope.maxFailures },
-    demandTraceIdentity,
-    demandUnits,
-    attempts: execution.attempts.map((attempt) => ({ ...attempt })),
-    uniqueUnits: execution.uniqueUnits,
-    occurrenceCount: execution.occurrenceCount,
-    bindingCount: execution.bindingCount,
-    ...counts
-  };
-  const receipt = sealLazySemanticRunReceipt(unsigned);
-  publishLazyReceipt(input.root, receipt.runIdentity, receipt, input.maxReceiptBytes);
-  publishLedgerBoundReceiptReplica({
-    root: input.root,
-    lease: input.lease,
-    runIdentity: receipt.runIdentity,
-    ledgerScopeIdentity: receipt.ledgerScopeIdentity,
-    attempts: receipt.attempts
-  });
-  readPersistedLazySemanticRunReceipt(input.root, receipt.runIdentity);
-  const handle = Object.freeze({ kind: "verified-lazy-semantic-run-receipt" as const });
-  verifiedReceipts.set(handle, Object.freeze({
-    root: input.lease.cacheRoot, runIdentity: receipt.runIdentity
-  }));
-  return handle;
-}
-
 export function sealLazySemanticRunReceipt(
   unsigned: Omit<LazySemanticRunReceipt, "runIdentity" | "receiptDigest">
 ): LazySemanticRunReceipt {
@@ -259,30 +158,6 @@ export function sealLazySemanticRunReceipt(
     ...unsigned,
     runIdentity,
     receiptDigest: digest(JSON.stringify({ ...unsigned, runIdentity }))
-  });
-}
-
-function publishLazyReceipt(
-  root: string,
-  runIdentity: string,
-  receipt: LazySemanticRunReceipt,
-  maxReceiptBytes?: number
-): void {
-  const bytes = serializeLazySemanticRunReceipt(receipt, maxReceiptBytes);
-  withRootBoundDirectory({
-    root, segments: ["receipts"], createSegments: true,
-    label: "lazy semantic receipt root"
-  }, (directory, stableRoot) => {
-    withRootBoundDirectory({
-      root: stableRoot, segments: [".tmp"], createSegments: true,
-      label: "lazy semantic receipt temporary root"
-    }, (temporaryDirectory) => publishBytesExclusiveDurable({
-      destination: `${directory}/${runIdentity}.json`,
-      bytes,
-      ownerIdentity: runIdentity,
-      temporaryDirectory,
-      allowExistingExact: true
-    }));
   });
 }
 

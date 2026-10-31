@@ -91,7 +91,7 @@ describe("current enrichment preflight", () => {
     expect(preflight.identities.prompt_sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(preflight.annotation_interpolation).toBe("absent");
     expect(preflight.semantic_fill.status).toBe("not_run");
-    expect(preflight.semantic_fill.reason).toMatch(/substrate manifest/u);
+    expect(preflight.semantic_fill.reason).toMatch(/passive semantic overlays are retired/u);
     expect(preflight.semantic_fill.uniqueUnits).toBeNull();
     expect(preflight.requests.length).toBeGreaterThan(0);
     expect(preflight.requests.some((request) =>

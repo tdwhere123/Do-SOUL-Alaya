@@ -8,10 +8,10 @@ import { computeExtractionKeySetSha256 } from
   "../../../runs/extraction/content-closure.js";
 import type { SemanticArtifactUnsigned } from
   "../../../runs/extraction/cache/semantic-artifact/contract.js";
-import type { SemanticFillTask } from
-  "../../../runs/extraction/fill/semantic-fill-executor.js";
-import { computeSemanticSourceCorpusCacheKeys } from
-  "../../../runs/extraction/fill/semantic-fill-authority.js";
+import {
+  computeSemanticSourceCorpusCacheKeys,
+  type SemanticFillTask
+} from "../../../runs/extraction/fill/semantic-fill-authority.js";
 import {
   currentSemanticReplayAuthority,
   semanticReplayIdentityDigest,

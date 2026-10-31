@@ -1,4 +1,3 @@
-import { semanticInterpretation } from "./semantic-artifact-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
@@ -49,34 +48,18 @@ import {
 import {
   SEMANTIC_CAPABILITY as CAP,
   SEMANTIC_RAW as RAW,
-  TOKEN_AWARE_POLICY,
   semanticArtifactUnsigned,
   semanticTask
 } from "./semantic-artifact-fixture.js";
-import { runSemanticFill } from
-  "../../../runs/extraction/fill/semantic-fill-executor.js";
-import {
-  createOfflineSemanticEnvelope,
-  createOfflineSemanticReplayForTasks
-} from "../../../runs/extraction/fill/semantic-fill-envelope.js";
+import { plantAuthoredProviderBackedArtifact } from "./authored-lazy-receipt-test-support.js";
 import { acquireExtractionCacheWriteLease } from
   "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 
 const CAP_B = "temporal_validity:v1";
 
-async function admitTask(root: string, task = semanticTask()): Promise<void> {
-  const rawJson = JSON.stringify({ interpretations: [semanticInterpretation(task)] });
-  const report = await runSemanticFill({
-    root, tasks: [task],
-    envelope: createOfflineSemanticEnvelope({
-      maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
-    }),
-    transport: createOfflineSemanticReplayForTasks({
-      tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
-      result: { kind: "raw", rawJson }
-    })
-  });
-  expect(report.admitted).toBe(1);
+function admitTask(root: string, task = semanticTask()): void {
+  plantAuthoredProviderBackedArtifact(root, task);
+  expect(inspectSemanticArtifact(root, task.semanticKey, CAP).status).toBe("provider_backed");
 }
 
 describe("semantic artifact store", () => {

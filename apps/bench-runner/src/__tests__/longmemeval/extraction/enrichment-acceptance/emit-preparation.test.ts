@@ -54,7 +54,7 @@ describe("enrichment preparation emit", () => {
     expect(result.candidate).toBe(PINNED_CANDIDATE);
     expect(result.code_tree).toBe(PINNED_TREE);
     expect(result.semantic_fill.status).toBe("not_run");
-    expect(result.semantic_fill.reason).toMatch(/substrate manifest/u);
+    expect(result.semantic_fill.reason).toMatch(/passive semantic overlays are retired/u);
     expect(result.source_fidelity.denominator).toBe(38);
     expect(existsSync(result.sourceMapPath)).toBe(true);
     expect(existsSync(result.preflightPath)).toBe(true);

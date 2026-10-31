@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 import { resolveLocalArtifactTreeSha256 } from "../../../runs/provenance/embedding/local-onnx.js";
 import {
   buildLongMemEvalRunProvenance,
@@ -20,8 +25,6 @@ import {
   registerRunProvenanceRootCleanup
 } from "./run-provenance-fixture.js";
 import { resolveBenchCommitSha7 } from "../../../shared/version.js";
-import { runSemanticFill } from
-  "../../../runs/extraction/fill/semantic-fill-executor.js";
 import {
   computeLazySemanticRunIdentity,
   loadVerifiedLazySemanticRunReceipt,
@@ -30,27 +33,15 @@ import {
   type LazySemanticRunReceipt
 } from "../../../runs/extraction/fill/semantic-fill-receipt.js";
 import {
-  createOfflineSemanticEnvelope,
-  createOfflineSemanticReplayForTasks
-} from "../../../runs/extraction/fill/semantic-fill-envelope.js";
-import {
   SEMANTIC_FIXTURE_DATASET_REVISION,
-  SEMANTIC_RAW,
-  TOKEN_AWARE_POLICY,
-  semanticArtifactUnsigned,
   semanticTask
 } from "../extraction/semantic-artifact-fixture.js";
+import { writeAuthoredSkippedLazyReceipt } from
+  "../extraction/authored-lazy-receipt-test-support.js";
 import { writeCompletedExtractionCacheFixture } from
   "../extraction/completed-extraction-cache-fixture.js";
 import { readExtractionCacheManifestIdentity } from
   "../../../runs/extraction/cache/extraction-cache-manifest.js";
-import { sealSemanticArtifact } from
-  "../../../runs/extraction/cache/semantic-artifact/contract.js";
-import {
-  persistRawArtifact,
-  recordSourceBinding,
-  semanticArtifactPath
-} from "../../../runs/extraction/cache/semantic-artifact/store.js";
 import { buildSemanticSubstrateManifestAuthority } from
   "../../../runs/extraction/fill/semantic-fill-authority.js";
 
@@ -331,38 +322,13 @@ async function persistLazyProvenanceReceipt(receiptRoot: string, cacheRoot: stri
       substrateCacheKeys: Object.keys(extraction.manifest.content_closure_index!)
     }
   };
-  persistRawArtifact(receiptRoot, SEMANTIC_RAW);
-  const planted = sealSemanticArtifact(semanticArtifactUnsigned(boundTask));
-  const plantedPath = semanticArtifactPath(
-    receiptRoot, boundTask.semanticKey, boundTask.capability
-  );
-  mkdirSync(dirname(plantedPath), { recursive: true });
-  writeFileSync(plantedPath, `${JSON.stringify(planted, null, 2)}\n`);
-  recordSourceBinding(receiptRoot, boundTask.semanticKey, boundTask.capability, boundTask.binding);
-  return runSemanticFill({
-    root: receiptRoot,
-    tasks: [boundTask],
-    envelope: createOfflineSemanticEnvelope({
-      maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
-    }),
-    transport: createOfflineSemanticReplayForTasks({
-      tasks: [boundTask],
-      transportPolicy: TOKEN_AWARE_POLICY,
-      result: {
-        kind: "raw",
-        rawJson: JSON.stringify({ signals: [{
-          object_kind: "fact",
-          confidence: 0.9,
-          matched_text: boundTask.text.replace(/^(?:User|Assistant): /u, ""),
-          source_locator: {
-            contract_version: 4,
-            kind: "assertion_catalog",
-            assertion_id: boundTask.assertionId
-          }
-        }] })
-      }
-    })
+  const lazyRunReceipt = writeAuthoredSkippedLazyReceipt(receiptRoot, boundTask);
+  const lazyRunReceiptHandle = loadVerifiedLazySemanticRunReceipt({
+    semanticRoot: receiptRoot,
+    extractionCacheRoot: cacheRoot,
+    runIdentity: lazyRunReceipt.runIdentity
   });
+  return { lazyRunReceipt, lazyRunReceiptHandle };
 }
 
 function rewriteMemberOutcomes(receipt: LazySemanticRunReceipt): LazySemanticRunReceipt {

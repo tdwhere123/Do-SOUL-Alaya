@@ -20,11 +20,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { bindSourceInterpretationAnchors } from "../../../runs/extraction/cache/semantic-supplement/source-interpretation-anchor-binding.js";
 import { inspectSemanticArtifact } from "../../../runs/extraction/cache/semantic-artifact/store.js";
-import { runSemanticFill } from "../../../runs/extraction/fill/semantic-fill-executor.js";
-import {
-  createOfflineSemanticEnvelope,
-  createOfflineSemanticReplayForTasks
-} from "../../../runs/extraction/fill/semantic-fill-envelope.js";
+import { plantAuthoredProviderBackedArtifact } from "./authored-lazy-receipt-test-support.js";
 import type { FrozenAssertion } from "../../../runs/extraction/enrichment-acceptance/frozen-population.js";
 import { bindFrozenPopulation } from "../../../runs/extraction/enrichment-acceptance/source-binding.js";
 import {
@@ -39,10 +35,8 @@ import {
 } from "../../../runs/extraction/enrichment-acceptance/preparation-report.js";
 import {
   SEMANTIC_CAPABILITY as CAP,
-  TOKEN_AWARE_POLICY,
   semanticInterpretation,
-  semanticTask,
-  semanticTasks
+  semanticTask
 } from "./semantic-artifact-fixture.js";
 
 const BERLIN = "I moved to Berlin.";
@@ -277,21 +271,11 @@ describe("enrichment acceptance native fixtures", () => {
     expect(located.outcome).not.toBe("empty");
   });
 
-  it("reopens a nonempty current-contract artifact from the native file cache", async () => {
+  it("reopens a nonempty current-contract artifact from the native file cache", () => {
     const task = semanticTask(BERLIN);
     const rawJson = JSON.stringify({ interpretations: [semanticInterpretation(task)] });
     expect(rawJson.includes('"signals"')).toBe(false);
-    const report = await runSemanticFill({
-      root,
-      tasks: [task],
-      envelope: createOfflineSemanticEnvelope({
-        maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
-      }),
-      transport: createOfflineSemanticReplayForTasks({
-        tasks: [task], transportPolicy: TOKEN_AWARE_POLICY, result: { kind: "raw", rawJson }
-      })
-    });
-    expect(report.admitted).toBe(1);
+    plantAuthoredProviderBackedArtifact(root, task, rawJson);
     const first = inspectSemanticArtifact(root, task.semanticKey, CAP);
     expect(first.status).toBe("provider_backed");
     expect(first.artifact?.capability).toBe("official_api_signals:v1");
@@ -304,27 +288,6 @@ describe("enrichment acceptance native fixtures", () => {
     const reopened = inspectSemanticArtifact(root, task.semanticKey, CAP);
     expect(reopened.status).toBe("provider_backed");
     expect(reopened.artifact?.semantic_key).toBe(task.semanticKey);
-    expect(fetches).toBe(0);
-  });
-
-  it("does not admit a foreign identity or source-revision replay as complete generation", async () => {
-    const [berlin, paris] = semanticTasks([BERLIN, "I moved to Paris."]);
-    const rawJson = JSON.stringify({
-      interpretations: [semanticInterpretation(berlin!), { ...semanticInterpretation(berlin!), assertion_id: 999 }]
-    });
-    const report = await runSemanticFill({
-      root,
-      tasks: [berlin!, paris!],
-      envelope: createOfflineSemanticEnvelope({
-        maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
-      }),
-      transport: createOfflineSemanticReplayForTasks({
-        tasks: [berlin!, paris!], transportPolicy: TOKEN_AWARE_POLICY, result: { kind: "raw", rawJson }
-      })
-    });
-    expect(report.admitted).toBe(0);
-    expect(inspectSemanticArtifact(root, berlin!.semanticKey, CAP).status).toBe("missing");
-    expect(inspectSemanticArtifact(root, paris!.semanticKey, CAP).status).toBe("missing");
     expect(fetches).toBe(0);
   });
 

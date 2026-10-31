@@ -1,10 +1,8 @@
 import { readBoundedCanonicalUtf8Artifact, withRootBoundDirectory } from
   "../cache-audit/bounded-artifact-reader.js";
-import { publishBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
-import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { readSemanticFillAttemptEvidence } from
   "./semantic-fill-attempt-ledger.js";
-import type { SemanticFillAttempt } from "./semantic-fill-executor.js";
+import type { SemanticFillAttempt } from "./semantic-fill-attempt-evidence.js";
 
 const PRIVATE_ROOT = ".semantic-fill-private";
 const PUBLISHED_RECEIPTS = "published-receipts";
@@ -14,46 +12,6 @@ interface ReceiptLedgerMemberBindView {
   readonly runIdentity: string;
   readonly ledgerScopeIdentity: string;
   readonly attempts: readonly SemanticFillAttempt[];
-}
-
-export function publishLedgerBoundReceiptReplica(input: {
-  readonly root: string;
-  readonly lease: ExtractionCacheWriteLease;
-  readonly runIdentity: string;
-  readonly ledgerScopeIdentity: string;
-  readonly attempts: readonly SemanticFillAttempt[];
-}): void {
-  input.lease.assertOwned();
-  input.lease.assertRoot(input.root);
-  const bytes = Buffer.from(`${JSON.stringify({
-    runIdentity: input.runIdentity,
-    ledgerScopeIdentity: input.ledgerScopeIdentity,
-    attempts: input.attempts
-  })}\n`, "utf8");
-  if (bytes.byteLength > MAX_REPLICA_BYTES) {
-    throw new Error("lazy semantic receipt ledger replica exceeds its bound");
-  }
-  withRootBoundDirectory({
-    root: input.root, label: "ledger-published lazy receipt root"
-  }, (stableRoot) => {
-    withRootBoundDirectory({
-      root: stableRoot,
-      segments: [PRIVATE_ROOT, PUBLISHED_RECEIPTS],
-      createSegments: true,
-      label: "ledger-published lazy receipts"
-    }, (directory) => {
-      withRootBoundDirectory({
-        root: stableRoot, segments: [".tmp"], createSegments: true,
-        label: "ledger-published lazy receipt temporary root"
-      }, (temporaryDirectory) => publishBytesExclusiveDurable({
-        destination: `${directory}/${input.runIdentity}.json`,
-        bytes,
-        ownerIdentity: input.runIdentity,
-        temporaryDirectory,
-        allowExistingExact: true
-      }));
-    });
-  });
 }
 
 export function assertReceiptLedgerMemberOutcomes(

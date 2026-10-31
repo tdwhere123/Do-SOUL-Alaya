@@ -11,13 +11,18 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT
 } from "@do-soul/alaya-soul";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
-import type { SemanticFillTask } from "./semantic-fill-executor.js";
+import type { SemanticAdmissionIdentity } from
+  "../cache/semantic-artifact/admission-identity.js";
 import {
   SemanticSubstrateManifestAuthoritySchema,
   SemanticTaskSourceAuthoritySchema,
   type SemanticSubstrateManifestAuthority,
   type SemanticTaskSourceAuthority
 } from "../cache/semantic-artifact/source-authority.js";
+
+export interface SemanticFillTask extends SemanticAdmissionIdentity {
+  readonly sourceAuthority: SemanticTaskSourceAuthority;
+}
 
 export {
   SemanticSubstrateManifestAuthoritySchema,

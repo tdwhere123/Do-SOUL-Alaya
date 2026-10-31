@@ -1,51 +1,16 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  planOfficialApiSemanticWorkset,
-  type OfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
 import { readVerifiedLegacyExtractionEntry } from
   "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-sealed-entry.js";
-import { fulfillAssertionCapability } from
-  "../../../runs/extraction/fill/fulfillment/fulfill.js";
-import { shadowLazyF3Fulfillment } from
-  "../../../runs/extraction/fill/fulfillment/lazy-f3-shadow.js";
-import {
-  createOfflineSemanticEnvelope,
-  createOfflineSemanticReplayForTasks
-} from "../../../runs/extraction/fill/semantic-fill-envelope.js";
-import {
-  TOKEN_AWARE_POLICY,
-  semanticFixtureSourceAuthority
-} from "./semantic-artifact-fixture.js";
 import {
   buildSnapshotExtractionSummary
 } from "../../../runs/snapshot/extraction-authority.js";
-import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
-import type { SemanticFillTask } from "../../../runs/extraction/fill/semantic-fill-executor.js";
 import type { ExtractionCacheManifestV3 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 
-const FIXTURES = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
-const DATASET_REVISION =
-  "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
 const SINGLE_KEY = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
 const MULTI_KEY = "0cf56b73a55320505f980064c64b0d51afe2143754bd6340199703d9f4e5e673";
-
-function loadTurn(cacheKey: string) {
-  const turns = JSON.parse(readFileSync(join(FIXTURES, "mimo-legacy-turns.json"), "utf8")) as
-    readonly {
-      readonly cache_key: string;
-      readonly turn: { readonly turnContent: string; readonly turnMessages: readonly { role: "user" | "assistant"; content: string }[] };
-      readonly request: OfficialApiExtractionRequest;
-    }[];
-  const found = turns.find((item) => item.cache_key === cacheKey);
-  if (found === undefined) throw new Error(`missing turn fixture ${cacheKey}`);
-  return found;
-}
 
 describe("sealed MiMo shard conversion", () => {
   let root: string;
@@ -64,62 +29,6 @@ describe("sealed MiMo shard conversion", () => {
     expect(() => readVerifiedLegacyExtractionEntry({
       root, cacheKey: MULTI_KEY
     } as never)).toThrow(/loaded extraction authority/u);
-  });
-
-  it("keeps a historical source-catalog response unavailable through fill and Lazy F3", async () => {
-    const fixture = loadTurn(SINGLE_KEY);
-    const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const unit = planOfficialApiSemanticWorkset(
-      fixture.turn.turnContent,
-      fixture.turn.turnMessages,
-      DATASET_REVISION
-    ).units.find((item) => item.assertionId === fixture.request.source_assertions[0]!.assertion_id);
-    if (unit === undefined) throw new Error("missing minted binding");
-    const fixtureAuthority = semanticFixtureSourceAuthority(unit.sourceCorpus);
-    const task: SemanticFillTask = {
-      ...unit,
-      capability: "official_api_signals:v1",
-      semanticContract: unit.semanticIdentity.contractId,
-      modelFamily: "mimo-v2.5",
-      modelId: "mimo-v2.5",
-      transportModelId: "mimo-v2.5",
-      requestProfile: "mimo-v2.5-nonthinking-v1",
-      providerUrlSha256: "1d0c8dae4013f0dd0883ac7692d61535aa7cdbad5eab0302c57fa1d0f07fe77a",
-      sourceAuthority: {
-        ...fixtureAuthority,
-        datasetRevision: DATASET_REVISION,
-        substrateManifest: {
-          ...fixtureAuthority.substrateManifest,
-          datasetRevision: DATASET_REVISION
-        }
-      }
-    };
-    const envelope = createOfflineSemanticEnvelope({
-      maxCalls: 2, maxFailures: 2, transportPolicy: TOKEN_AWARE_POLICY
-    });
-    const shadow = await shadowLazyF3Fulfillment({
-      root,
-      demand: [task],
-      envelope,
-      transport: createOfflineSemanticReplayForTasks({
-        tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
-        result: { kind: "raw", rawJson: entry.raw_json }
-      })
-    });
-    expect(shadow.revealed[0]?.state).toBe("unavailable");
-    expect(shadow.warm[0]?.state).toBe("unavailable");
-    expect(shadow.coldCalls).toBe(1);
-    expect((await fulfillAssertionCapability({
-      root,
-      task: { ...task, providerUrlSha256: "ff".repeat(32) },
-      envelope
-    })).state).toBe("unavailable");
-    const temporal = await fulfillAssertionCapability({
-      root,
-      task: { ...task, capability: "temporal_validity:v1" },
-      envelope
-    });
-    expect(temporal.state).toBe("unavailable");
   });
 });
 

@@ -49,7 +49,6 @@ import {
 
 export const SEMANTIC_ARTIFACT_ROOT_KIND = "assertion_semantic_artifact_root_v1";
 export { recordSourceBinding, recordedSourceBindings } from "./bindings.js";
-export { materializeDerivedReplayFromRaw } from "./derived-replay.js";
 export {
   reclaimAbandonedReservation,
   recoverMalformedSemanticReservations,

@@ -19,17 +19,12 @@ import {
 } from "@do-soul/alaya-soul";
 import { loadDatasetWindowWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { EXTRACTION_CACHE_KEY_ALGO } from "../cache/extraction-cache-manifest.js";
-import type { PreparedExtractionFill } from "../fill/fill-preparation.js";
 import { prepareSourceRequestWorkset } from "../fill/source-request-workset.js";
 import {
   batchDigest,
   canonicalBatchPlan,
   prepareBatchJobs
 } from "../fill/batch/plan.js";
-import { acquireExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
-import { prepareSemanticFill } from "../fill/semantic-fill-plan.js";
-import { collectSemanticFillTasks } from "../fill/semantic-workset-tasks.js";
-import type { SemanticFillAttempt } from "../fill/semantic-fill-executor.js";
 import {
   inspectTurnContentKeySpace,
   type LongMemEvalExtractionTurn
@@ -131,7 +126,6 @@ export async function runCurrentEnrichmentPreflight(options: {
   readonly frozenRows?: readonly FrozenAssertion[];
   readonly turns?: readonly LongMemEvalExtractionTurn[];
   readonly datasetRevision?: string;
-  readonly preparedFill?: PreparedExtractionFill;
 }): Promise<EnrichmentPreflight> {
   const packing = options.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING;
   const previousFetch = globalThis.fetch;
@@ -184,7 +178,7 @@ export async function runCurrentEnrichmentPreflight(options: {
     });
     const packs = planCurrentPacks(units, packing);
     const bounds = sizeWorksetLines(workset.lines);
-    const semanticFill = captureSemanticFill(options, executionTurns);
+    const semanticFill = captureRetiredSemanticFill();
     const provenance = collectEnrichmentOccurrenceProvenance(occurrenceTurns ?? executionTurns, datasetRevision);
     if (attemptedFetches !== 0) {
       throw new AlayaError("CONFLICT", `enrichment preflight attempted ${attemptedFetches} provider fetches`);
@@ -333,58 +327,13 @@ function sizeWorksetLines(
   }));
 }
 
-function captureSemanticFill(
-  options: {
-    readonly cacheRoot: string;
-    readonly sourcePacking?: ExtractionSourcePacking;
-    readonly preparedFill?: PreparedExtractionFill;
-  },
-  turns: readonly LongMemEvalExtractionTurn[]
-): EnrichmentSemanticFillCapture {
-  if (options.preparedFill === undefined) {
-    return Object.freeze({
-      status: "not_run",
-      reason: "missing F0-F2 substrate manifest",
-      unresolved: null,
-      uniqueUnits: null,
-      occurrenceCount: null,
-      bindingCount: null
-    });
-  }
-  try {
-    const tasks = collectSemanticFillTasks(turns, options.preparedFill);
-    const attempts: SemanticFillAttempt[] = [];
-    const packing = options.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING;
-    const size = extractionSourcePackingSize(packing);
-    const policy = size === 1
-      ? { kind: "reference_batch" as const, assertionsPerPack: 1 as const }
-      : { kind: "reference_batch_8" as const };
-    const lease = acquireExtractionCacheWriteLease(options.cacheRoot);
-    try {
-      const prepared = prepareSemanticFill(options.cacheRoot, tasks, attempts, policy, lease);
-      return Object.freeze({
-        status: "prepared",
-        reason: null,
-        unresolved: prepared.unresolved,
-        uniqueUnits: prepared.uniqueUnits,
-        occurrenceCount: prepared.occurrenceCount,
-        bindingCount: prepared.bindingCount
-      });
-    } finally {
-      lease.release();
-    }
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    if (/substrate manifest/u.test(message)) {
-      return Object.freeze({
-        status: "not_run",
-        reason: message,
-        unresolved: null,
-        uniqueUnits: null,
-        occurrenceCount: null,
-        bindingCount: null
-      });
-    }
-    throw cause;
-  }
+function captureRetiredSemanticFill(): EnrichmentSemanticFillCapture {
+  return Object.freeze({
+    status: "not_run",
+    reason: "passive semantic overlays are retired; retained artifacts are inspection-only",
+    unresolved: null,
+    uniqueUnits: null,
+    occurrenceCount: null,
+    bindingCount: null
+  });
 }
