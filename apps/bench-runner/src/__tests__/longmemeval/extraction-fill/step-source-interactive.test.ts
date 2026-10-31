@@ -43,7 +43,7 @@ import { tableCompletedResponse } from "./source-semantic-table-response.test-su
 import {
   authoredSourceCorpusFromRequest,
   authoredStepHttpWire,
-  writeAuthoredHistoricalStepArtifact
+  writeAuthoredHistoricalChatArtifact
 } from "./historical-extraction-test-support.js";
 
 const MODEL = "step-3.5-flash-2603";
@@ -91,7 +91,7 @@ async function authorLine(
 ) {
   const planned = plannedLine(fixture, key);
   const rawJson = extra.rawJson ?? responseFor(planned.userPrompt);
-  await writeAuthoredHistoricalStepArtifact({
+  await writeAuthoredHistoricalChatArtifact({
     cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
     line: {
       key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,
@@ -253,7 +253,7 @@ it("withholds a Step source stream beyond the complete evidence limit from reuse
   const truncatedJson = responseFor(truncatedPlanned.userPrompt);
   const truncatedBase = authoredStepHttpWire(truncatedJson);
   const truncatedPad = Math.max(0, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES - Buffer.byteLength(truncatedBase));
-  await writeAuthoredHistoricalStepArtifact({
+  await writeAuthoredHistoricalChatArtifact({
     cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
     line: {
       key: truncatedPlanned.key, unitKeys: truncatedPlanned.unitKeys, requestSha256: truncatedPlanned.requestSha256,
@@ -423,7 +423,7 @@ it("settles contradictory Step usage as accounting-invalid quarantine without tr
   const invalid = { inputTokens: 11, outputTokens: 4097, totalTokens: 4108 };
   const planned = plannedLine(fixture, fixture.selected[0]!);
   const rawJson = responseFor(planned.userPrompt);
-  await writeAuthoredHistoricalStepArtifact({
+  await writeAuthoredHistoricalChatArtifact({
     cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
     line: {
       key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,
@@ -469,7 +469,7 @@ it("retains bytes received before caller cancellation and spends no second Step 
   const fixture = await scenario(1);
   const prefix = 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n';
   const planned = plannedLine(fixture, fixture.selected[0]!);
-  await writeAuthoredHistoricalStepArtifact({
+  await writeAuthoredHistoricalChatArtifact({
     cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
     line: {
       key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,

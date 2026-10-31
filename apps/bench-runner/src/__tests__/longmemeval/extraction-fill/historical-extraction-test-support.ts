@@ -51,6 +51,8 @@ import {
 } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { buildExtractionTransportProvenance } from "../../../runs/extraction/transport-route.js";
 import { interactiveResponseMetadata } from "../../../runs/extraction/cache/source-interactive-binding.js";
+import { interactiveSourceTransportBinding } from "../../../runs/extraction/request-profile.js";
+import type { InteractiveSemanticProvenance } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { persistedResponseMetadata } from "../../../runs/compile-seed/cache/cached-response-metadata.js";
 import {
   batchDigest,
@@ -178,10 +180,11 @@ function writeAuthoredHistoricalSourceManifest(input: {
   });
 }
 
-function httpEvidence(wire: string, bodyComplete = true): ProviderHttpResponseEvidence {
+function httpEvidence(wire: string, bodyComplete = true,
+  contentType = "text/event-stream"): ProviderHttpResponseEvidence {
   const bytes = Buffer.from(wire, "utf8");
   return {
-    contentType: "text/event-stream",
+    contentType,
     bodyBase64: bytes.toString("base64"),
     bodyByteLength: bytes.length,
     bodySha256: createHash("sha256").update(bytes).digest("hex"),
@@ -209,25 +212,29 @@ function storedUsage(usage: AuthoredStepUsage) {
   };
 }
 
-export async function writeAuthoredHistoricalStepArtifact(input: {
+interface AuthoredHistoricalChatArtifact {
   cacheRoot: string;
   receipt: ExtractionAuthorityReceipt;
   line: SourceRequestLine;
   requestDigest: string;
   rawJson: string;
   httpWire: string;
-  usage?: AuthoredStepUsage;
+  /** Null records unknown usage; omission uses the existing Step fixture defaults. */
+  usage?: AuthoredStepUsage | null;
   finishReason?: string;
   bodyComplete?: boolean;
   commitSuccess?: boolean;
   invalidReportedUsage?: AuthoredStepUsage;
   generation?: ExtractionOpenSemanticsGeneration;
   sourceCorpus: string;
-}): Promise<void> {
+}
+
+export async function writeAuthoredHistoricalChatArtifact(input: AuthoredHistoricalChatArtifact): Promise<void> {
   const { cacheRoot, receipt, line } = input;
   const logical = receipt.observation.extraction;
-  const transport = receipt.observation.transport!;
-  const usage = input.usage ?? DEFAULT_STEP_USAGE;
+  const usage = input.usage === undefined ? DEFAULT_STEP_USAGE : input.usage;
+  const binding = interactiveSourceTransportBinding(logical.requestProfile);
+  if (binding.kind === "gemini_generate_content") throw new Error("expected an authored chat fixture");
   const finishReason = input.finishReason ?? "stop";
   const bodyComplete = input.bodyComplete ?? true;
   writeAuthoredHistoricalSourceManifest({
@@ -239,15 +246,16 @@ export async function writeAuthoredHistoricalStepArtifact(input: {
     join(cacheRoot, `interactive-authority-${receipt.receipt_digest}.json`),
     receipt
   );
-  const sourceCorpus = input.sourceCorpus;
   const rawJsonSha256 = computeExtractionRawJsonSha256(input.rawJson);
   const ledger = openAuthoredHistoricalAttemptLedger(cacheRoot, receipt);
   const ordinal = ledger.reserveAttemptOrdinal(line.key);
   writeProviderRawAttempt({
     root: cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: "source_semantic",
     model: logical.model, requestProfile: logical.requestProfile, requestDigest: input.requestDigest,
-    decodedText: input.rawJson, finishReason, usage: storedUsage(usage),
-    httpResponse: httpEvidence(input.httpWire, bodyComplete),
+    decodedText: input.rawJson, finishReason,
+    ...(usage === null ? {} : { usage: storedUsage(usage) }),
+    httpResponse: httpEvidence(input.httpWire, bodyComplete,
+      binding.kind === "intern_chat_completion" ? "application/json" : "text/event-stream"),
     ...(bodyComplete ? {} : { transportFailure: {
       kind: "aborted" as const, phase: "response_body" as const, httpStatus: null,
       fingerprint: "authored-incomplete-body", attempt: ordinal
@@ -256,39 +264,14 @@ export async function writeAuthoredHistoricalStepArtifact(input: {
     authorityLineageDigest: receipt.lineage_digest,
     sourceRequestSha256: line.requestSha256
   });
-  const provenance = {
-    transport: "step-chat-completion" as const,
-    finishReason,
-    attemptOrdinal: ordinal,
-    responseSha256: rawJsonSha256,
-    usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens }
+  const provenance: InteractiveSemanticProvenance = {
+    transport: binding.transport, finishReason, attemptOrdinal: ordinal, responseSha256: rawJsonSha256,
+    ...(usage === null ? {} : {
+      usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens }
+    })
   };
-  const manifest = readExtractionCacheManifest(cacheRoot)!;
   if (input.commitSuccess !== false && input.invalidReportedUsage === undefined) {
-    writeCachedExtraction(cacheRoot, line.key, {
-      model: logical.model,
-      request_profile: logical.requestProfile,
-      cache_key: line.key,
-      raw_json: input.rawJson,
-      extracted_at: "2026-08-15T09:29:28.024Z",
-      transport_provenance: buildExtractionTransportProvenance(transport),
-      response_metadata: interactiveResponseMetadata(provenance).response_metadata,
-      admission_identity: {
-        generation_sha256: extractionAdmissionGenerationSha256(manifest),
-        request_key: line.key,
-        raw_json_sha256: rawJsonSha256
-      },
-      source_semantic: {
-        contract: SOURCE_SEMANTIC_CACHE_CONTRACT,
-        interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
-        source_binding: "unbound",
-        kind: "step_chat_completion",
-        completion: "interpreted",
-        source_corpus: sourceCorpus,
-        producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-        result: { line, rawJson: input.rawJson, provenance }
-      }
-    });
+    writeAuthoredHistoricalChatShard(input, provenance, binding.kind);
   }
   if (input.invalidReportedUsage !== undefined) {
     ledger.recordTransportOutcome(line.key, {
@@ -303,11 +286,39 @@ export async function writeAuthoredHistoricalStepArtifact(input: {
   }
   ledger.recordTransportOutcome(line.key, {
     retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1,
-    transportFailures: [], usageRequestCount: 1, usage: storedUsage(usage)
+    transportFailures: [], usageRequestCount: usage === null ? 0 : 1,
+    ...(usage === null ? {} : { usage: storedUsage(usage) })
   }, ordinal);
   if (input.commitSuccess === false) return;
   assertAuthoredShardCommitReady(cacheRoot, line.key, logical.model, logical.requestProfile);
   ledger.commitSuccessfulShard(line.key);
+}
+
+function writeAuthoredHistoricalChatShard(
+  input: AuthoredHistoricalChatArtifact,
+  provenance: InteractiveSemanticProvenance,
+  kind: "step_chat_completion" | "intern_chat_completion"
+): void {
+  const { cacheRoot, receipt, line } = input;
+  const logical = receipt.observation.extraction;
+  const manifest = readExtractionCacheManifest(cacheRoot)!;
+  writeCachedExtraction(cacheRoot, line.key, {
+    model: logical.model, request_profile: logical.requestProfile, cache_key: line.key,
+    raw_json: input.rawJson, extracted_at: "2026-08-15T09:29:28.024Z",
+    transport_provenance: buildExtractionTransportProvenance(receipt.observation.transport!),
+    response_metadata: interactiveResponseMetadata(provenance).response_metadata,
+    admission_identity: {
+      generation_sha256: extractionAdmissionGenerationSha256(manifest),
+      request_key: line.key, raw_json_sha256: provenance.responseSha256
+    },
+    source_semantic: {
+      contract: SOURCE_SEMANTIC_CACHE_CONTRACT,
+      interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
+      source_binding: "unbound", kind, completion: "interpreted", source_corpus: input.sourceCorpus,
+      producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
+      result: { line, rawJson: input.rawJson, provenance }
+    }
+  });
 }
 
 export async function writeAuthoredRetiredStepArtifact(input: {
