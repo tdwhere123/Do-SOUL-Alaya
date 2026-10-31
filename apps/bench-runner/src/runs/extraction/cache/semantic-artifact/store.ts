@@ -43,15 +43,13 @@ import {
 import {
   consumeSemanticArtifactReservation,
   createSemanticArtifactReservation,
-  readReserveOwnerFromFd,
-  recoverMalformedSemanticReservations
+  readReserveOwnerFromFd
 } from "./reservation.js";
 
 export const SEMANTIC_ARTIFACT_ROOT_KIND = "assertion_semantic_artifact_root_v1";
 export { recordSourceBinding, recordedSourceBindings } from "./bindings.js";
 export {
   reclaimAbandonedReservation,
-  recoverMalformedSemanticReservations,
   releaseSemanticArtifactReservation
 } from "./reservation.js";
 export { semanticArtifactPath } from "./derived-path.js";
@@ -234,7 +232,7 @@ export function digestSemanticOverlayState(root: string): string {
 
 export function digestSemanticCacheState(root: string): string {
   assertSemanticArtifactRoot(root);
-  recoverMalformedSemanticReservations(root);
+  // Historical receipt inspection cannot repair reservations or change its evidence root.
   const rows: string[] = [];
   try {
     withRootBoundDirectory({ root, label: "semantic cache inventory" }, (stableRoot) => {
@@ -414,7 +412,8 @@ function assertValidReserveInventory(directory: string, filename: string): void 
     `${directory}/${filename}`, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG
   );
   try {
-    if (readReserveOwnerFromFd(descriptor) === undefined) {
+    if (parseArtifactFilename(filename.slice(0, -".reserve".length)) === undefined ||
+        readReserveOwnerFromFd(descriptor) === undefined) {
       throw new Error("semantic cache inventory contains a corrupt reservation");
     }
   } finally {

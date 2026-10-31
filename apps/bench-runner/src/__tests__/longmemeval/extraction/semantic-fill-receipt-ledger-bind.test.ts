@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { rmSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
@@ -22,6 +22,9 @@ import {
   writeAuthoredSkippedLazyReceipt,
   writeSealedLazyReceipt
 } from "./authored-lazy-receipt-test-support.js";
+
+import { reserveSemanticArtifact, semanticArtifactPath } from
+  "../../../runs/extraction/cache/semantic-artifact/store.js";
 
 const FOREIGN_OCCURRENCE = "ab".repeat(32);
 
@@ -48,6 +51,23 @@ describe("lazy semantic receipt ledger rebind", () => {
     writeSealedLazyReceipt(root, skipped);
     expect(() => readPersistedLazySemanticRunReceipt(root, skipped.runIdentity))
       .toThrow(/call totals differ from durable ledger authority|member outcome differs from durable ledger evidence|skipped outcomes are not bound to starting cache evidence/u);
+  });
+
+  it.each(["owner", "path"])("rejects corrupt reservation %s without repairing historical files", (corruption) => {
+    const task = semanticTask();
+    const receipt = writeAuthoredFailedLazyReceipt(root, task);
+    expect(readPersistedLazySemanticRunReceipt(root, receipt.runIdentity)).toEqual(receipt);
+    reserveSemanticArtifact(root, task.semanticKey, task.capability);
+    let path = `${semanticArtifactPath(root, task.semanticKey, task.capability)}.reserve`;
+    if (corruption === "owner") writeFileSync(path, "malformed\n");
+    else {
+      const foreignPath = join(dirname(path), "not-an-artifact.json.reserve");
+      renameSync(path, foreignPath);
+      path = foreignPath;
+    }
+    const retained = readFileSync(path);
+    expect(() => readPersistedLazySemanticRunReceipt(root, receipt.runIdentity)).toThrow("corrupt reservation");
+    expect(readFileSync(path)).toEqual(retained);
   });
 
   it("rejects admitted-to-skipped forgery after recomputing public digests", () => {

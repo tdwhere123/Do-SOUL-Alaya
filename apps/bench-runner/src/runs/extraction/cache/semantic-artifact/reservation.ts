@@ -7,7 +7,6 @@ import {
   lstatSync,
   openSync,
   readSync,
-  readdirSync,
   renameSync,
   unlinkSync,
   writeSync
@@ -22,8 +21,7 @@ import { readProcessStartIdentity } from
   "../../fill/manifest/process-start-identity.js";
 import {
   artifactFilename,
-  artifactPrefix,
-  parseArtifactFilename
+  artifactPrefix
 } from "./derived-path.js";
 import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 import { openHeldReserveDescriptor } from "./reservation-fd.js";
@@ -127,19 +125,6 @@ export function consumeSemanticArtifactReservation(
   }, true);
 }
 
-export function recoverMalformedSemanticReservations(root: string): void {
-  withRootBoundDirectory({ root, label: "semantic reservation recovery" }, (stableRoot) => {
-    for (const shard of readdirSync(stableRoot, { withFileTypes: true })) {
-      if (!shard.isDirectory() || shard.isSymbolicLink() || !/^[a-f0-9]{2}$/u.test(shard.name)) {
-        continue;
-      }
-      withRootBoundDirectory({
-        root: stableRoot, segments: [shard.name], label: "semantic reservation recovery shard"
-      }, (directory) => recoverMalformedInDirectory(directory));
-    }
-  });
-}
-
 export function readReserveOwnerFromFd(descriptor: number): ReserveOwner | undefined {
   try {
     const opened = fstatSync(descriptor, { bigint: true });
@@ -156,24 +141,6 @@ export function readReserveOwnerFromFd(descriptor: number): ReserveOwner | undef
     return parseReserveOwner(JSON.parse(decoded) as unknown);
   } catch {
     return undefined;
-  }
-}
-
-function recoverMalformedInDirectory(directory: string): void {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.name.endsWith(".json.reserve")) continue;
-    const artifactName = entry.name.slice(0, -".reserve".length);
-    if (parseArtifactFilename(artifactName) === undefined) {
-      withHeldReserveFile(directory, entry.name, (descriptor, boundPath) => {
-        unlinkHeldReserve(descriptor, boundPath, directory);
-      }, false);
-      continue;
-    }
-    withHeldReserveFile(directory, entry.name, (descriptor, boundPath) => {
-      if (readReserveOwnerFromFd(descriptor) === undefined) {
-        unlinkHeldReserve(descriptor, boundPath, directory);
-      }
-    }, false);
   }
 }
 

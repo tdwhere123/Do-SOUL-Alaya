@@ -238,13 +238,13 @@ describe("semantic artifact store", () => {
     expect(token).toHaveLength(36);
   });
 
-  it("recovers a malformed reservation before inventory digest", () => {
+  it("rejects a malformed reservation without mutating it during inventory digest", () => {
     const task = semanticTask();
     const token = reserveSemanticArtifact(root, task.semanticKey, CAP);
     const reservation = `${semanticArtifactPath(root, task.semanticKey, CAP)}.reserve`;
     writeFileSync(reservation, "malformed\n", "utf8");
-    expect(() => digestSemanticCacheState(root)).not.toThrow();
-    expect(existsSync(reservation)).toBe(false);
+    expect(() => digestSemanticCacheState(root)).toThrow("corrupt reservation");
+    expect(fs.readFileSync(reservation, "utf8")).toBe("malformed\n");
     expect(token).toHaveLength(36);
   });
 
