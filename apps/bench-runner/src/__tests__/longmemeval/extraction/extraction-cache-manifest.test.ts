@@ -528,7 +528,7 @@ describe("extraction-cache-manifest", () => {
     const packed: ExtractionCacheManifest = {
       ...complete, schema_version: EXTRACTION_CACHE_MANIFEST_VERSION, source_packing: "session-statements"
     };
-    const otherPacking: ExtractionCacheManifest = { ...packed, source_packing: "singleton" };
+    const otherPacking: ExtractionCacheManifest = { ...packed, source_packing: "singleton" as const };
     expect(extractionAdmissionGenerationSha256(complete)).toBe(
       extractionAdmissionGenerationSha256(complete, EXTRACTION_ADMISSION_GENERATION_WINDOWED));
     expect(extractionAdmissionGenerationSha256(complete)).not.toBe(

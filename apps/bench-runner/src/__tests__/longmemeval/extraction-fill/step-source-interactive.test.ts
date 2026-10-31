@@ -35,7 +35,10 @@ import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import {
+  EXTRACTION_OPEN_SEMANTICS_GENERATION,
+  parseExtractionOpenSemanticsGeneration
+} from "../../../runs/extraction/request-artifact.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
@@ -232,7 +235,10 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFI
   const fixture = await scenario(1, undefined, model, quote, profile);
   const key = fixture.selected[0]!;
   const planned = plannedLine(fixture, key);
-  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, planned, fixture.preflight.max_output_tokens);
+  const wire = prepareSourceSemanticRequestWire({
+    ...fixture.preflight.config,
+    openSemantics: parseExtractionOpenSemanticsGeneration(fixture.preflight.config.openSemantics)
+  }, planned, fixture.preflight.max_output_tokens);
   const body = JSON.parse(wire.body) as { model: string; reasoning_effort: string };
   expect(body.model).toBe(model);
   expect(body.reasoning_effort).toBe(profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low");
@@ -301,7 +307,10 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFI
   const quote = model === "step-5-preview" ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const fixture = await scenario(4, undefined, model, quote, profile);
   const planned = plannedLine(fixture, fixture.selected[0]!);
-  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, planned, fixture.preflight.max_output_tokens);
+  const wire = prepareSourceSemanticRequestWire({
+    ...fixture.preflight.config,
+    openSemantics: parseExtractionOpenSemanticsGeneration(fixture.preflight.config.openSemantics)
+  }, planned, fixture.preflight.max_output_tokens);
   const body = JSON.parse(wire.body) as {
     model: string; reasoning_effort: string; max_tokens: number; stream: boolean; response_format: { type: string };
   };
@@ -343,7 +352,10 @@ it.each([
 ])("binds an explicit source cap to $path, retained bounds, receipt price, and the reopened attempt", async ({ basis, path }) => {
   const fixture = await scenario(1, 16384, MODEL, basis);
   const line = fixture.preflight.planned_requests[0]!;
-  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, line, fixture.preflight.max_output_tokens);
+  const wire = prepareSourceSemanticRequestWire({
+    ...fixture.preflight.config,
+    openSemantics: parseExtractionOpenSemanticsGeneration(fixture.preflight.config.openSemantics)
+  }, line, fixture.preflight.max_output_tokens);
   expect(wire.url.pathname).toBe(path);
   expect(JSON.parse(wire.body).max_tokens).toBe(16384);
   const encodedInputUpper = Buffer.byteLength(wire.body, "utf8") + 256;

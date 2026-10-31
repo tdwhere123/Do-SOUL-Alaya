@@ -149,7 +149,7 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
   const author = async (mode: "semantic" | "unknown_alias" | "duplicate_gap_channel" | "partial" | "disposition" = "semantic") => {
     const report = await preview();
     const responses = new Map(report.planned_requests.map(line => [line.key,
-      mode === "disposition" ? dispositionResponse(line.userPrompt) : authoredResponse(line.userPrompt, mode === "disposition" ? "semantic" : mode)]));
+      mode === "disposition" ? dispositionResponse(line.userPrompt) : authoredResponse(line.userPrompt, mode)]));
     return writeAuthoredHistoricalBatchArtifacts({
       cacheRoot, receipt, lines: report.planned_requests, responses, limits: report.limits,
       mode: "open_semantics", sourcePacking, generation,

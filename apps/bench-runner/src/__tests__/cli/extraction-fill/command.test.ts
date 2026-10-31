@@ -10,6 +10,8 @@ import { ExtractionFillTaskError } from
   "../../../runs/extraction/fill/fill-pool.js";
 import { emptyBenchTerminalRetryClassifications } from
   "../../../runs/compile-seed/compile-seed-types.js";
+import type { ExtractionFillResult } from
+  "../../../runs/extraction/extraction-fill.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -306,7 +308,7 @@ async function invokeCommand(deps: {
   } as ParsedFlags, deps);
 }
 
-function completedFillResult() {
+function completedFillResult(): ExtractionFillResult {
   return {
     requestedTurns: 0,
     cacheHits: 0,
@@ -319,6 +321,17 @@ function completedFillResult() {
     adaptiveConcurrencyBackoffs: 0,
     adaptiveConcurrencyBackoffMs: 0,
     terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
-    manifest: {}
+    manifest: {
+      schema_version: 1,
+      extraction_model: "test-model",
+      provider_url: "https://example.com/v1",
+      system_prompt_sha256: "0".repeat(64),
+      cache_key_algo: "sha256(test)",
+      dataset: "test-dataset",
+      dataset_revision: "test-rev",
+      storage: "git-tracked",
+      built_at: "2026-01-01T00:00:00Z",
+      builder: "test"
+    }
   };
 }

@@ -19,6 +19,7 @@ import {
 } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { computeExtractionRawJsonSha256 } from "../../../runs/extraction/content-closure.js";
 import {
+  EXTRACTION_CACHE_MANIFEST_VERSION,
   readExtractionCacheManifest,
   writeExtractionCacheManifest,
   extractionAdmissionGenerationSha256
@@ -45,15 +46,19 @@ import {
 } from "../../../runs/extraction/authority/attempt-ledger/contract.js";
 import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/attempt-ledger/outcome.js";
 import { isInteractiveSourceSampleReceipt } from "../../../runs/extraction/authority/sample-scope.js";
+import type { ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
 import {
-  writeProviderRawAttempt,
-  type ProviderHttpResponseEvidence
+  writeProviderRawAttempt
 } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { buildExtractionTransportProvenance } from "../../../runs/extraction/transport-route.js";
 import { interactiveResponseMetadata } from "../../../runs/extraction/cache/source-interactive-binding.js";
-import { interactiveSourceTransportBinding } from "../../../runs/extraction/request-profile.js";
+import {
+  interactiveSourceTransportBinding,
+  type ExtractionRequestProfile
+} from "../../../runs/extraction/request-profile.js";
 import type { InteractiveSemanticProvenance } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { persistedResponseMetadata } from "../../../runs/compile-seed/cache/cached-response-metadata.js";
+import { isGeminiGenerateContentProfile } from "../../../runs/extraction/fill/batch/native-codec.js";
 import {
   batchDigest,
   canonicalBatchPlan,
@@ -161,6 +166,9 @@ function writeAuthoredHistoricalSourceManifest(input: {
   const base = readExtractionCacheManifest(input.cacheRoot)!;
   writeExtractionCacheManifest(input.cacheRoot, {
     ...base,
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    model_family: logical.modelFamily,
+    request_profile: logical.requestProfile,
     source_packing: input.sourcePacking ?? logical.sourcePacking ?? "complete-source",
     ...(input.generation === undefined ? {} : { source_semantic_generation: input.generation }),
     ...(input.sourceInterpretationProfile === undefined ? {} : {
@@ -194,7 +202,7 @@ function httpEvidence(wire: string, bodyComplete = true,
 }
 
 function assertAuthoredShardCommitReady(
-  cacheRoot: string, cacheKey: string, model: string, requestProfile: string
+  cacheRoot: string, cacheKey: string, model: string, requestProfile: ExtractionRequestProfile
 ): void {
   const inspected = inspectUnadmittedRawExtraction(cacheRoot, cacheKey, model, requestProfile);
   if (inspected.status !== "hit" && inspected.status !== "pending") {
@@ -441,6 +449,9 @@ export function writeAuthoredHistoricalBatchArtifacts(input: {
     generation: mode === "open_semantics" ? input.generation ?? EXTRACTION_OPEN_SEMANTICS_GENERATION : undefined,
     sourceInterpretationProfile: mode === "source_packet" ? input.sourceInterpretationProfile : undefined
   });
+  if (!isGeminiGenerateContentProfile(logical.requestProfile)) {
+    throw new Error(`invalid gemini batch request profile: ${logical.requestProfile}`);
+  }
   const content = { model: logical.model, requestProfile: logical.requestProfile, lines, limits };
   const plan = canonicalBatchPlan({ ...content, identity: batchDigest(JSON.stringify(content)) });
   const prepared = prepareBatchJobs(plan)[0]!;
