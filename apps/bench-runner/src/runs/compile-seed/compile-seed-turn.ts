@@ -48,7 +48,6 @@ async function buildTurnSignalInputs(context: CompileSeedRunnerContext, input: C
   return seeds.map((seed, index) => ({ ...seed,
     evidenceRef: seeds.length === 1 ? input.evidenceRefBase : `${input.evidenceRefBase}-f${index}`,
     ...(input.surfaceId == null ? {} : { surfaceId: input.surfaceId }),
-    ...(input.sourceMemoryRefs === undefined ? {} : { sourceMemoryRefs: input.sourceMemoryRefs }),
     ...(input.sourceObservedAt === undefined ? {} : { sourceObservedAt: input.sourceObservedAt })
   }));
 }

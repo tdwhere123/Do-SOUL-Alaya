@@ -101,7 +101,6 @@
     "apps/bench-runner/src/__tests__/longmemeval/archive/executed-dist-closure.test.ts": 3,
     "apps/bench-runner/src/__tests__/longmemeval/archive/release-evidence-validator.test.ts": 7,
     "apps/bench-runner/src/__tests__/longmemeval/compile-seed/cache-key-and-fanout/diagnostic-dump.test.ts": 3,
-    "apps/bench-runner/src/__tests__/longmemeval/compile-seed/cache-key-and-fanout/fanout.test.ts": 3,
     "apps/bench-runner/src/__tests__/longmemeval/compile-seed/cached-response-metadata.test.ts": 3,
     "apps/bench-runner/src/__tests__/longmemeval/compile-seed/compile-seed-cache-and-drops.test.ts": 5,
     "apps/bench-runner/src/__tests__/longmemeval/compile-seed/compile-seed-cache-hit-publication.test.ts": 6,

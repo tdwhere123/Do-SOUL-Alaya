@@ -496,8 +496,6 @@ export interface CompileSeedTurnInput {
   readonly runId: string;
   readonly surfaceId?: string | null;
   readonly sourceObservedAt?: string;
-  // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
-  readonly sourceMemoryRefs?: readonly string[];
 }
 
 export interface CompileSeedResult {

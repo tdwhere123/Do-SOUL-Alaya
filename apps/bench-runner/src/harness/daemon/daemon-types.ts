@@ -192,7 +192,6 @@ export interface BenchDaemonHandle {
     options?: {
       readonly objectKind?: SeedObjectKind;
       readonly distilledFact?: string;
-      // see also: BenchSignalSeedInput.sourceMemoryRefs
       readonly sourceMemoryRefs?: readonly string[];
     }
   ): Promise<SeededMemoryResult>;

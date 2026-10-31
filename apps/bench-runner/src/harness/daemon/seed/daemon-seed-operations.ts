@@ -198,7 +198,6 @@ export async function proposeMemoryFromSignal(
       domain_tags: ["bench-seed"],
       confidence: signalInput.confidence,
       evidence_refs: [signalInput.evidenceRef],
-      ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
       raw_payload: buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact)
     }
   );

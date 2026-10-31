@@ -54,11 +54,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       });
       handles.push(daemon);
 
-      const parent = await daemon.proposeMemory(
-        "The degraded-path parent memory exists.",
-        "fallback-source-parent",
-        { objectKind: "fact" }
-      );
       const seed = await daemon.proposeMemoryFromSignal({
         signalKind: "potential_preference",
         objectKind: "fact",
@@ -67,15 +62,13 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         turnContent: "A full degraded-path turn fact.",
         evidenceRef: "fallback-source-q0",
         turnSeedIndex: 1,
-        extractionProvider: "no_credentials_fallback",
-        sourceMemoryRefs: [parent.memoryId]
+        extractionProvider: "no_credentials_fallback"
       });
 
       const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       const signal = await new SqliteSignalRepo(db).getById(seed.signalId);
       expect(signal?.source).toBe(SignalSource.MODEL_TOOL);
-      expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
-      expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+      expect(signal?.source_memory_refs).toEqual([]);
     },
     60_000
   );

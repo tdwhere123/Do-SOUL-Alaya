@@ -3,10 +3,7 @@ import {
   benchSessionSurfacesEnabled
 } from "../../harness/daemon/daemon-support.js";
 import type { BenchWorkspaceHandle } from "../../harness/daemon.js";
-import {
-  computeNextTurnSeedRefs,
-  type CompileSeedRunner, type CompileSeedTurnInput
-} from "../../runs/compile-seed.js";
+import type { CompileSeedRunner, CompileSeedTurnInput } from "../../runs/compile-seed.js";
 import { extractSessions, type LocomoSample, type LocomoTurn } from "./dataset.js";
 import { buildLocomoSeedContent, buildLocomoSessionMessages } from "./runner-utils.js";
 import { isSeededMemoryResult } from
@@ -77,7 +74,6 @@ async function seedLocomoSession(input: {
   const sourceSession = buildLocomoSessionMessages(input.session);
   const sourceSessionRounds = input.session.turns.map((turn, index) => ({ seedIndex: input.seedIndex + index,
     turnContent: buildLocomoSeedContent(turn), turnMessages: [sourceSession[index]!] }));
-  let previousTurnSeedMemoryIds: readonly string[] = [];
   let seedIndex = input.seedIndex;
   for (let turnOrdinal = 0; turnOrdinal < input.session.turns.length; turnOrdinal += 1) {
     const turn = input.session.turns[turnOrdinal];
@@ -88,10 +84,9 @@ async function seedLocomoSession(input: {
       turnOrdinal,
       seedIndex,
       sessionSurfaceId,
-      previousTurnSeedMemoryIds, sourceSession, sourceSessionRounds
+      sourceSession, sourceSessionRounds
     });
     seedIndex += 1;
-    previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
     recordLocomoSeedResult(input, turn, seedResult);
   }
   return seedIndex;
@@ -106,7 +101,6 @@ async function seedLocomoTurn(input: {
   readonly turn: LocomoTurn;
   readonly turnOrdinal: number;
   readonly seedIndex: number;
-  readonly previousTurnSeedMemoryIds: readonly string[];
   readonly sourceSession: readonly ConversationMessage[];
   readonly sourceSessionRounds: NonNullable<CompileSeedTurnInput["sourceSessionRounds"]>;
 }) {
@@ -122,10 +116,7 @@ async function seedLocomoTurn(input: {
     seedIndex: input.seedIndex,
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
-    ...(input.sessionSurfaceId === undefined ? {} : { surfaceId: input.sessionSurfaceId }),
-    ...(input.previousTurnSeedMemoryIds.length === 0
-      ? {}
-      : { sourceMemoryRefs: input.previousTurnSeedMemoryIds })
+    ...(input.sessionSurfaceId === undefined ? {} : { surfaceId: input.sessionSurfaceId })
   });
 }
 

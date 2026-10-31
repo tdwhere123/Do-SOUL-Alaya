@@ -1,10 +1,6 @@
 import type {
   BenchSynthesisSeedInput
 } from "../../harness/daemon.js";
-import type { SeededObjectResult } from
-  "../../harness/daemon/seed/daemon-seed-types.js";
-import { isSeededMemoryResult } from
-  "../../harness/daemon/seed/daemon-seed-results.js";
 
 /** One seeded turn's content plus the real evidence_capsule id it materialized. */
 export interface SessionSeededTurn {
@@ -68,39 +64,4 @@ export function buildSessionSynthesisInput(input: {
     evidenceRefs,
     summary
   };
-}
-
-/**
- * @anchor longmemeval-adjacent-turn-fanout — adjacent-turn derives_from handoff
- *
- * Compute the sourceMemoryRefs for the next turn's seed signal, given the
- * seed result of the current turn. Single-id semantics by design: only the
- * first seed of the current turn carries the derives_from link into the
- * next turn's signal.
- *
- * invariant: returned array length is 0 or 1 — never the union of every
- * fact in the current turn. Unioning N facts per turn would create
- * N x M edges per adjacent pair and scale as
- * session_count * turn_count * fact_per_turn^2; on a 500q LongMemEval run
- * that breaches the WSL2 memory ceiling. Adjacent-turn linking is
- * "adjacent sentence derives_from", not "every fact derives from every
- * prior fact".
- *
- * invariant: returns [] when the current turn produced no seeds — the
- * caller treats [] as "no prior turn", emitting the next signal with
- * sourceMemoryRefs omitted (undefined), which is the same shape used for
- * the very first turn of a session and for the first turn of a new
- * session after a session boundary reset.
- *
- * see also: apps/bench-runner/src/datasets/longmemeval/runner.ts previousTurnSeedMemoryIds
- */
-export function computeNextTurnSeedRefs(
-  seedResult: Readonly<{
-    readonly seeds: readonly SeededObjectResult[];
-  }>
-): readonly string[] {
-  const firstMemory = seedResult.seeds.find(
-    isSeededMemoryResult
-  );
-  return firstMemory === undefined ? [] : [firstMemory.memoryId];
 }

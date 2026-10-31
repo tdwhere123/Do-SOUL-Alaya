@@ -11,7 +11,6 @@ import {
 } from "../../ingestion/dataset.js";
 import {
   buildSessionSynthesisInput,
-  computeNextTurnSeedRefs,
   type CompileSeedExtractionStats,
   type CompileSeedRunner, type CompileSeedTurnInput,
   type SessionSeededTurn
@@ -104,22 +103,19 @@ async function seedQuestionSession(
   const sourceSessionRounds = pairSessionIntoRounds(session).map((round, index) => ({ seedIndex: seedIndex + index,
     turnContent: round.content, turnMessages: round.messageIndices.map(position => sourceSession[position]!) }));
   let sessionHasAnswer = false;
-  let previousTurnSeedMemoryIds: readonly string[] = [];
   for (let ri = 0; ri < pairSessionIntoRounds(session).length; ri++) {
     const round = pairSessionIntoRounds(session)[ri];
     if (round === undefined) continue;
-    const result = await seedQuestionRound(input, state, {
+    await seedQuestionRound(input, state, {
       sessionIndex,
       roundIndex: ri,
       sessionId,
       sourceSession, sourceSessionRounds,
       seedIndex,
-      previousTurnSeedMemoryIds,
       sessionTurns
     });
     seedIndex += 1;
     sessionHasAnswer = sessionHasAnswer || round.hasAnswer;
-    previousTurnSeedMemoryIds = result.nextTurnSeedMemoryIds;
   }
   await seedSessionSynthesis(input.workspace, state, {
     questionId: input.question.question_id,
@@ -138,7 +134,6 @@ interface SeedRoundContext {
   readonly roundIndex: number;
   readonly sessionId: string;
   readonly seedIndex: number;
-  readonly previousTurnSeedMemoryIds: readonly string[];
   readonly sessionTurns: SessionSeededTurn[];
 }
 
@@ -146,7 +141,7 @@ async function seedQuestionRound(
   input: Parameters<typeof seedLongMemEvalQuestion>[0],
   state: LongMemEvalQuestionSeedState,
   context: SeedRoundContext
-): Promise<{ readonly nextTurnSeedMemoryIds: readonly string[] }> {
+): Promise<void> {
   const round = pairSessionIntoRounds(input.question.haystack_sessions[context.sessionIndex]!)[context.roundIndex]!;
   const evidenceRef = buildLongMemEvalRoundEvidenceRef(
     input.question.question_id,
@@ -167,8 +162,7 @@ async function seedQuestionRound(
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
     sourceObservedAt,
-    ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {}),
-    ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
+    ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {})
   });
   recordTruncation(state, seedResult, round.hasAnswer);
   recordAnswerSeedDrops(
@@ -187,7 +181,6 @@ async function seedQuestionRound(
     round,
     seeds: seedResult.seeds
   }));
-  return { nextTurnSeedMemoryIds: computeNextTurnSeedRefs(seedResult) };
 }
 
 function buildSeedRoundLedger(input: {

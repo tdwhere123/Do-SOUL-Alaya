@@ -19,7 +19,6 @@ export { collectBenchSeedFuelInventory } from "./extraction/seed-fuel/seed-fuel-
 export { toSeedFuelInventoryKpi } from "./extraction/seed-fuel/seed-fuel-inventory-kpi.js";
 export {
   buildSessionSynthesisInput,
-  computeNextTurnSeedRefs,
   type SessionSeededTurn
 } from "./compile-seed/compile-seed-session.js";
 export type {
