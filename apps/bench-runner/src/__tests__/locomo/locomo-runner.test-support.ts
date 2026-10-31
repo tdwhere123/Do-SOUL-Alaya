@@ -9,6 +9,8 @@ import { createInMemoryFieldStores, createSourceAdmissionPort, fieldContractSha2
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as compileSeedModule from "../../runs/compile-seed.js";
+import type { CompileSeedExtractionStats, CompileSeedRunner } from "../../runs/compile-seed.js";
 
 type VitestFn = ReturnType<typeof vi.fn>;
 
@@ -40,6 +42,27 @@ export function benchRefToDiaId(evidenceRef: string): string {
   const match = /-s\d+-r(\d+)/u.exec(evidenceRef);
   if (match !== null) return `d${Number.parseInt(match[1]!, 10) + 1}`;
   return evidenceRef.split("-").at(-1) ?? "unknown";
+}
+
+/** Materialized inputs for downstream runner tests, not extraction or no-credential evidence. */
+export function mockLocomoMaterializedSeeds() {
+  const stats: CompileSeedExtractionStats = {
+    path: "official_api_compile", cacheHits: 0, llmCalls: 0, offlineFallbacks: 0,
+    liveExtractionFailures: 0, cachedExtractionFailures: 0, factsProduced: 0,
+    signalsDropped: 0, signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
+    parseDropped: 0, compileOverflowDropped: 0, lastTurnRawSignalCount: 0,
+    lastTurnDraftCount: 0, lastExtractionSource: null, lastCacheKey: null, lastRawJsonSha256: null
+  };
+  return vi.spyOn(compileSeedModule, "createCompileSeedRunner").mockReturnValue({
+    stats,
+    seedTurn: vi.fn<CompileSeedRunner["seedTurn"]>(async ({ evidenceRefBase }) => {
+      const id = benchRefToDiaId(evidenceRefBase);
+      stats.factsProduced += 1;
+      return { seeds: [{ memoryId: `memory-${id}`, signalId: `signal-${id}`,
+        proposalId: `proposal-${id}`, evidenceId: null, truncated: false, charsClipped: 0 }],
+        turnTruncated: false, charsClipped: 0 };
+    })
+  });
 }
 
 export let tmpDir: string;
@@ -110,7 +133,7 @@ export function buildMockDaemon(overrides: {
   readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly runEdgePlanePassIfConfigured?: ReturnType<typeof vi.fn>;
   readonly importSourceRecord?: ReturnType<typeof vi.fn>;
-}): Record<string, unknown> {
+}): Record<string, unknown> & { readonly attachWorkspace: VitestFn } {
   const createImporter = (workspaceId: string) => {
     const admission = createSourceAdmissionPort({
       stores: createInMemoryFieldStores(),
@@ -317,6 +340,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await rm(tmpDir, { recursive: true, force: true });
 });

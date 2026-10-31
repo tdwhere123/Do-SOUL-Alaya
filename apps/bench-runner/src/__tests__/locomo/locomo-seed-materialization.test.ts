@@ -176,8 +176,9 @@ describe("LoCoMo runner", () => {
     }
   });
 
-  it("archives the seed-extraction path and blocker text on the LoCoMo surface", async () => {
-    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+  it("archives unavailable extraction without minting memories or scoring absent materialization", async () => {
+    const daemon = buildMockDaemon({});
+    startBenchDaemonMock.mockResolvedValue(daemon);
 
     const result = await runLocomo({
       variant: "locomo10",
@@ -189,8 +190,15 @@ describe("LoCoMo runner", () => {
 
     expect(kpi.kpi.seed_extraction_path).toMatchObject({
       path: "no_credentials_fallback",
-      offline_fallbacks: 2
+      offline_fallbacks: 2,
+      facts_produced: 0
     });
+    expect(kpi.evaluated_count).toBe(0);
+    expect(daemon.attachWorkspace).toHaveBeenCalledOnce();
+    const workspace = await daemon.attachWorkspace.mock.results[0]!.value;
+    expect(workspace.importSourceRecord).toHaveBeenCalled();
+    expect(workspace.proposeMemoryFromSignal).not.toHaveBeenCalled();
+    expect(workspace.proposeMemoriesFromCompileSignals).not.toHaveBeenCalled();
     expect(report).toContain("seed_extraction_path no_credentials_fallback");
     expect(findings).toContain("seed_extraction_path no_credentials_fallback");
   });

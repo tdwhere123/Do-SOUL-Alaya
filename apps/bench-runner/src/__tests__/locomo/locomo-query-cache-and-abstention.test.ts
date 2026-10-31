@@ -1,5 +1,6 @@
 import {
   buildMockDaemon,
+  mockLocomoMaterializedSeeds,
   buildRecallResult,
   describe,
   expect,
@@ -11,6 +12,7 @@ import {
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
 import { runLocomo } from "../../datasets/locomo/runner.js";
+import { beforeEach } from "vitest";
 import { loadLocomo } from "../../datasets/locomo/fetch.js";
 import { QaChatError } from "../../runs/qa/qa-chat.js";
 import { releaseHardGateAllowsLatestPassing } from "@do-soul/alaya-eval";
@@ -18,6 +20,8 @@ import { buildLongMemEvalQualityMetrics } from
   "../../diagnostics/quality/diagnostics-quality.js";
 import { promotionMeasurementDiagnostic } from
   "../longmemeval/recall-eval/specialized-answerable-recall-fixture.js";
+
+beforeEach(() => { mockLocomoMaterializedSeeds(); });
 
 describe("LoCoMo runner", () => {
   it("archives failed conversation question identities separately from completed recall", async () => {

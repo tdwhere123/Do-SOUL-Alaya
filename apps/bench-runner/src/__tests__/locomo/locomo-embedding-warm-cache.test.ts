@@ -1,5 +1,6 @@
 import {
   buildMockDaemon,
+  mockLocomoMaterializedSeeds,
   buildRecallResult,
   describe,
   expect,
@@ -12,6 +13,9 @@ import {
 import { readFile } from "node:fs/promises";
 import { LocomoSampleSchema } from "../../datasets/locomo/dataset.js";
 import { runLocomo } from "../../datasets/locomo/runner.js";
+import { beforeEach } from "vitest";
+
+beforeEach(() => { mockLocomoMaterializedSeeds(); });
 
 describe("LoCoMo runner", () => {
 

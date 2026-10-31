@@ -1,5 +1,6 @@
 import {
   buildMockDaemon,
+  mockLocomoMaterializedSeeds,
   buildRecallResult,
   describe,
   expect,
@@ -10,6 +11,9 @@ import {
   vi
 } from "./locomo-runner.test-support.js";
 import { runLocomo } from "../../datasets/locomo/runner.js";
+import { beforeEach } from "vitest";
+
+beforeEach(() => { mockLocomoMaterializedSeeds(); });
 
 describe("LoCoMo runner", () => {
 
