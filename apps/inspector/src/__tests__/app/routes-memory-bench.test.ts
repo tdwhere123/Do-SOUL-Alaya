@@ -261,7 +261,7 @@ describe("inspector routes", () => {
   });
 
 
-  it("returns a 30-day bench trend payload with path expansion shares", async () => {
+  it("returns a 30-day bench trend with path expansion shares and unknown figures for an unavailable token economy", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "bench-history-trend-"));
     const first = path.join(root, "public", "2026-05-14T100000Z-aaaaaaa");
     const second = path.join(root, "public", "2026-05-15T100000Z-bbbbbbb");
@@ -308,7 +308,9 @@ describe("inspector routes", () => {
         ...basePayload,
         alaya_commit: "bbbbbbb",
         run_at: "2026-05-15T10:00:00.000Z",
-        kpi: { ...basePayload.kpi, r_at_5: 0.72, latency_ms_p95: 130 }
+        kpi: { ...basePayload.kpi, r_at_5: 0.72, latency_ms_p95: 130, token_saved_ratio_vs_full_prompt: null,
+          token_economy: { schema_version: "bench-token-economy-unavailable.v1",
+            reason: "statement_seed_no_token_projection", unprojected_seed_event_count: 4 } }
       }),
       "utf8"
     );
@@ -357,6 +359,9 @@ describe("inspector routes", () => {
     ]);
     expect(body.data.public.points[1]).toMatchObject({
       r_at_5: 0.72,
+      token_saved_ratio_vs_full_prompt: null,
+      raw_history_tokens: null,
+      seed_event_count: null,
       path_expansion_share: 0.3,
       graph_expansion_share: 0.2
     });

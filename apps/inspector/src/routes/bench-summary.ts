@@ -247,6 +247,10 @@ async function readTrendPoint(
   const payload = await readEntry(layout, benchName, slug);
   if (payload === null) return null;
   const expansion = await readExpansionShares(historyRoot, benchName, slug);
+  // An unavailable economy reports unknown figures, never zeros.
+  const economy = payload.kpi.token_economy?.schema_version === "bench-token-economy.v1"
+    ? payload.kpi.token_economy
+    : undefined;
   return {
     slug,
     bench_name: benchName,
@@ -263,10 +267,10 @@ async function readTrendPoint(
     r_at_10: payload.kpi.r_at_10,
     latency_ms_p95: payload.kpi.latency_ms_p95,
     token_saved_ratio_vs_full_prompt: payload.kpi.token_saved_ratio_vs_full_prompt,
-    raw_history_tokens: payload.kpi.token_economy?.raw_history_tokens ?? null,
-    stored_memory_tokens: payload.kpi.token_economy?.stored_memory_tokens ?? null,
-    recalled_context_tokens_mean: payload.kpi.token_economy?.recalled_context_tokens_mean ?? null,
-    seed_event_count: payload.kpi.token_economy?.seed_event_count ?? null,
+    raw_history_tokens: economy?.raw_history_tokens ?? null,
+    stored_memory_tokens: economy?.stored_memory_tokens ?? null,
+    recalled_context_tokens_mean: economy?.recalled_context_tokens_mean ?? null,
+    seed_event_count: economy?.seed_event_count ?? null,
     path_expansion_share: expansion.pathExpansionShare,
     graph_expansion_share: expansion.graphExpansionShare
   };
