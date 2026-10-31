@@ -10,7 +10,7 @@ import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import {
   BoundSourceStatementSchema, renderOfficialApiSourceCorpus,
-  sourceIndexProfileId, sourceIndexNavigationLocation, hashLabeledIdentity, type ConversationMessage,
+  sourceIndexProfileId, sourceIndexNavigationLocation, sourceIndexNativeRootKey, hashLabeledIdentity, type ConversationMessage,
   type SourceStatementSignal
 } from "@do-soul/alaya-protocol";
 import {
@@ -176,6 +176,27 @@ describe("audited source statements and auxiliary retrieval keys", () => {
     expect(reopened.connection.prepare("SELECT COUNT(*) AS n FROM source_statement_artifacts").get()).toEqual({ n: 1 });
     expect(reopened.connection.prepare("SELECT source_body FROM source_records WHERE record_id=?").get(environment.admitted.record.identity))
       .toEqual({ source_body: rendered.content });
+  });
+
+  it("retains statement-key witnesses for roots nominated under question time", async () => {
+    const environment = await fixture(), signal = await environment.compile();
+    await createSourceObservationPublication({ stores: environment.field.stores,
+      evidenceService: environment.evidenceService, memoryService: environment.memoryService,
+      sha256: fieldContractSha256, deriveTemporalProjection: () => ({}) }).publish({ signal, sourceEventAnchor: null });
+    const { index } = prepareRecordedStatementIndex(environment.database, WORKSPACE);
+    // Only the statement relation contains "attendance"; the raw messages do not.
+    const capture = environment.database.connection.transaction(() => new SourceIndexAcquisition(index, fieldContractSha256)
+      .nominateWithWitness({ workspace_id: WORKSPACE, navigation_text: "attendance",
+        vector: { status: "unavailable", reason: "lexical_only" },
+        allowance: { max_roots: 10, max_attempts: 20, max_vector_windows: 64 }, budget: QUERY_BUDGET,
+        question_time: { interpretation_clock: CLOCK, intervals: [{ start: "2026-09-14", end: "2026-09-14" }] }
+      }, () => "admitted"))();
+    expect(capture.question_time_order).toBeDefined();
+    expect(capture.result.nominations).toHaveLength(1);
+    const nominated = sourceIndexNativeRootKey(capture.result.nominations[0]!.source);
+    expect(capture.witness.some(row => row.source.auxiliary !== undefined)).toBe(true);
+    expect(capture.witness.every(row => sourceIndexNativeRootKey(row.source) === nominated)).toBe(true);
+    expect(capture.question_time_order).toEqual([nominated]);
   });
 
   it("keeps valid siblings from a partial receipt and recovers evidence-first failure without duplicate memory or key", async () => {

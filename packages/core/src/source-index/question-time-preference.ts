@@ -1,6 +1,7 @@
 import type { QuestionTimePreference, SourceIndexAcquisitionResult, SourceIndexLexicalCandidate,
   SourceIndexNominationAccounting, SourceIndexQueryRepository, SourceIndexQueryResources, SourceIndexTarget,
   SourceSemanticNominationOccurrence, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceIndexNativeRootKey } from "@do-soul/alaya-protocol";
 
 type MutableAccounting = { -readonly [K in keyof SourceIndexNominationAccounting]: SourceIndexNominationAccounting[K] };
 
@@ -51,7 +52,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     counts.nomination_limit += displaced;
     input.ordered([...nominations.keys()]);
     if (input.occurrences !== undefined) input.occurrences.splice(0, input.occurrences.length,
-      ...input.occurrences.filter(row => nominations.has(row.source.root_key)));
+      ...input.occurrences.filter(row => nominations.has(sourceIndexNativeRootKey(row.source))));
   }
   return lexical !== undefined && lexical.completion !== "complete";
 }

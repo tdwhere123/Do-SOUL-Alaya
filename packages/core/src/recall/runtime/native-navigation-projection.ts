@@ -1,4 +1,4 @@
-import { memoryRecallTarget, sourceGoldRootIdentity, sourceIndexNavigationLocation, hashContentDigest, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
+import { memoryRecallTarget, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceIndexNavigationLocation, hashContentDigest, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   type FieldValue, type RecallNavigationWitness, type RecallTargetRef } from "@do-soul/alaya-protocol";
 import { sourceFactKey } from "../conditional-field/engine/binding-environment.js";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
@@ -62,7 +62,7 @@ function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticR
       meter.charge(1, 0, "native occurrence scope association");
       const route = occurrence.route, key = sourceFactKey(occurrence.source.target);
       if (state.native_sources?.admitted_roots !== undefined && !pool.has(key)) continue;
-      sourceKeys.set(occurrence.source.root_key, key);
+      sourceKeys.set(sourceIndexNativeRootKey(occurrence.source), key);
       if (occurrence.domain !== undefined && (occurrence.view !== "original" || route.kind !== "lexical")) {
         throw new CoreError("OBLIGATION_VIOLATION", "Question-time capture requires original-query lexical provenance");
       }

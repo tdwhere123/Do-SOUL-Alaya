@@ -1,4 +1,4 @@
-import { indexEntryCacheKey, sourceGoldRootIdentity, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
@@ -268,7 +268,7 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
       limitations: [...new Set(results.flatMap(row => row.limitations))] },
     witness: membership.witness,
     ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
-      captures[0].question_time_order.filter(key => membership.nominations.some(row => row.source.root_key === key)) }),
+      captures[0].question_time_order.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
     ...(digests.original === null ? {} : { navigation_digests: { original: digests.original,
       ...(digests.hint === undefined ? {} : { hint: digests.hint }) } }),
     ...(options?.catalog_positions === undefined ? {} : { catalog_positions: options.catalog_positions }),
