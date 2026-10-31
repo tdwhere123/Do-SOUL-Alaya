@@ -180,7 +180,8 @@ export function emptyTokenMetrics() {
     recalled_context_tokens_total: 0,
     recall_event_count: 0,
     recalled_context_tokens_mean: 0,
-    seed_event_count: 0
+    seed_event_count: 0,
+    unprojected_statement_seed_event_count: 0
   };
 }
 

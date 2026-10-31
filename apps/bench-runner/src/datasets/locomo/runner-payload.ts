@@ -1,12 +1,5 @@
-import {
-  buildTokenEconomy,
-  computeTokenSavedRatio,
-  type KpiPayload
-} from "@do-soul/alaya-eval";
-import {
-  aggregateBenchTokenMetrics,
-  assertBenchTokenEconomyContract
-} from "../../harness/token/token-economy.js";
+import type { KpiPayload } from "@do-soul/alaya-eval";
+import { resolveBenchTokenEconomy } from "../../harness/token/token-economy.js";
 import type { BenchEmbeddingMode } from "../../harness/daemon.js";
 import {
   aggregateQaVerdicts,
@@ -170,10 +163,10 @@ function buildLocomoQaCategorySummary(
 }
 
 function buildLocomoKpiSummaries(aggregate: LocomoConversationAggregate) {
-  const tokenEconomyInput = aggregateBenchTokenMetrics(
+  const token = resolveBenchTokenEconomy(
+    "public-locomo",
     aggregate.conversationResults.map((result) => result.tokenMetrics)
   );
-  assertBenchTokenEconomyContract("public-locomo", tokenEconomyInput);
   return {
     providerStateSummary: summarizeProviderStates(aggregate.questionDiagnostics),
     rAt5EmbeddingReturned: rAt5WithProviderReturned(aggregate.questionDiagnostics),
@@ -190,8 +183,8 @@ function buildLocomoKpiSummaries(aggregate: LocomoConversationAggregate) {
     recallTokenEconomy: aggregateRecallTokenEconomy(
       aggregate.conversationResults.flatMap((result) => result.recallTokenEconomySamples)
     ),
-    tokenEconomy: buildTokenEconomy(tokenEconomyInput),
-    tokenSavedRatio: computeTokenSavedRatio(tokenEconomyInput)
+    tokenEconomy: token.tokenEconomy,
+    tokenSavedRatio: token.tokenSavedRatio
   };
 }
 

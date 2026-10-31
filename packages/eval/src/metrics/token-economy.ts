@@ -1,4 +1,4 @@
-import type { TokenEconomy } from "../contracts/kpi-schema.js";
+import type { AvailableTokenEconomy } from "../contracts/kpi-auxiliary-schema.js";
 
 /**
  * Raw event-sourced token counts a bench run derives from its EventLog.
@@ -22,7 +22,7 @@ const TOKEN_ECONOMY_SCHEMA_VERSION = "bench-token-economy.v1" as const;
  * counts. Pure projection: it only stamps the schema version and copies
  * the figures the harness already derived from the EventLog.
  */
-export function buildTokenEconomy(input: TokenEconomyInput): TokenEconomy {
+export function buildTokenEconomy(input: TokenEconomyInput): AvailableTokenEconomy {
   return {
     schema_version: TOKEN_ECONOMY_SCHEMA_VERSION,
     raw_history_tokens: input.raw_history_tokens,

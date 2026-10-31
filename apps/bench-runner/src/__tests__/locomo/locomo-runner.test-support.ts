@@ -220,7 +220,8 @@ export function buildMockDaemon(overrides: {
     recalled_context_tokens_total: 100,
     recall_event_count: 2,
     recalled_context_tokens_mean: 50,
-    seed_event_count: 4
+    seed_event_count: 4,
+    unprojected_statement_seed_event_count: 0
   }));
   const runEdgePlanePassIfConfigured =
     overrides.runEdgePlanePassIfConfigured ?? vi.fn(async () => undefined);

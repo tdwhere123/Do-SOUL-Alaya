@@ -177,7 +177,7 @@ export const RecallTokenEconomySchema = z
   .strict();
 export type RecallTokenEconomy = z.infer<typeof RecallTokenEconomySchema>;
 
-export const TokenEconomySchema = z
+const AvailableTokenEconomySchema = z
   .object({
     schema_version: z.literal("bench-token-economy.v1"),
     // Token size of the full ingested haystack — what an agent would
@@ -199,7 +199,20 @@ export const TokenEconomySchema = z
     seed_event_count: z.number().int().nonnegative()
   })
   .strict();
+
+// Statement-seeded signals carry no bench token projection, so their run has
+// no event-sourced history to save against; this is reported, never zeroed.
+const UnavailableTokenEconomySchema = z
+  .object({
+    schema_version: z.literal("bench-token-economy-unavailable.v1"),
+    reason: z.literal("statement_seed_no_token_projection"),
+    unprojected_seed_event_count: z.number().int().positive()
+  })
+  .strict();
+
+export const TokenEconomySchema = z.union([AvailableTokenEconomySchema, UnavailableTokenEconomySchema]);
 export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
+export type AvailableTokenEconomy = z.infer<typeof AvailableTokenEconomySchema>;
 
 // @anchor edge-proposal-rate: edge proposals produced per
 // workspace-day across a bench run. Per-workspace-per-day stats let the

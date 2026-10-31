@@ -68,6 +68,40 @@ describe("buildTokenEconomy", () => {
   });
 });
 
+describe("token economy KPI contract", () => {
+  function kpiPayload(kpi: Record<string, unknown>) {
+    return {
+      bench_name: "public", split: "longmemeval-s", run_at: "2026-05-21T00:00:00.000Z",
+      alaya_commit: "abc1234", alaya_version: "0.3.10", embedding_provider: "none", chat_provider: "none",
+      dataset: { name: "lme", size: 1, source: "hf" }, sample_size: 1, evaluated_count: 1,
+      harness_mode: "mcp_propose_review",
+      kpi: { r_at_1: 0.3, r_at_5: 0.66, r_at_10: 0.78, latency_ms_p50: 80, latency_ms_p95: 150,
+        tier_distribution: { hot: 1, warm: 0, cold: 0 },
+        degradation_reasons: { none: 1, warm_cascade_engaged: 0, cold_cascade_engaged: 0 },
+        per_scenario: [], ...kpi }
+    };
+  }
+  const unavailable = { schema_version: "bench-token-economy-unavailable.v1",
+    reason: "statement_seed_no_token_projection", unprojected_seed_event_count: 2 };
+
+  it("accepts an unavailable economy with a null saved ratio", () => {
+    const parsed = KpiPayloadSchema.parse(kpiPayload({ token_saved_ratio_vs_full_prompt: null, token_economy: unavailable }));
+    expect(parsed.kpi.token_economy).toEqual(unavailable);
+  });
+
+  it("refuses an unavailable economy that still reports a saved ratio", () => {
+    expect(KpiPayloadSchema.safeParse(kpiPayload({ token_saved_ratio_vs_full_prompt: 0, token_economy: unavailable }))
+      .success).toBe(false);
+  });
+
+  it("refuses a seeded economy that folded to a zero raw history", () => {
+    const silentZero = buildTokenEconomy(input({ raw_history_tokens: 0, recalled_context_tokens_mean: 0 }));
+    const result = KpiPayloadSchema.safeParse(kpiPayload({ token_saved_ratio_vs_full_prompt: 0, token_economy: silentZero }));
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toMatch(/zero raw history/);
+  });
+});
+
 describe("computeTokenSavedRatio", () => {
   it("derives the saved ratio as 1 - recalled_mean / raw_history", () => {
     // 200 recalled vs 10000 raw history => 0.98 saved.

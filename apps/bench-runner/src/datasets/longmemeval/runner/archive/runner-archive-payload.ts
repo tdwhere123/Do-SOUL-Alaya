@@ -3,14 +3,12 @@ import { overallRecallAt5 } from "../../../../runs/measurement/answerable-recall
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
-  buildTokenEconomy,
-  computeTokenSavedRatio,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
   type BenchSplit,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../../../../harness/token/token-economy.js";
+import { resolveBenchTokenEconomy, type BenchTokenEconomy } from "../../../../harness/token/token-economy.js";
 import type { BenchRecallWeightOverrides } from "../../../../harness/recall/recall-weight-overrides.js";
 import { aggregateRecallTokenEconomy } from "../../../../runs/qa/recall-token-economy.js";
 import {
@@ -115,8 +113,7 @@ function buildPayload(
   embeddingVectorCache: ReturnType<typeof summarizeEmbeddingVectorCache>,
   queryEmbeddingCache: ReturnType<typeof summarizeQueryEmbeddingCache>
 ): KpiPayload {
-  const tokenEconomyInput = aggregateBenchTokenMetrics(input.aggregate.tokenMetricsPerQuestion);
-  assertBenchTokenEconomyContract("public", tokenEconomyInput);
+  const tokenEconomy = resolveBenchTokenEconomy("public", input.aggregate.tokenMetricsPerQuestion);
   const edgeRows = input.aggregate.edgeProposalKpiRowsPerQuestion.flat();
   const edgeProposalRate = aggregateEdgeProposalRate(
     edgeRows,
@@ -146,7 +143,7 @@ function buildPayload(
     evaluated_count: input.aggregate.perScenario.length,
     answerable_evaluated_count: input.aggregate.answerableCount,
     harness_mode: "mcp_propose_review",
-    kpi: buildKpi(input, rates, providerSummary, embeddingVectorCache, queryEmbeddingCache, tokenEconomyInput, edgeProposalRate, edgeProposalAutoAccept)
+    kpi: buildKpi(input, rates, providerSummary, embeddingVectorCache, queryEmbeddingCache, tokenEconomy, edgeProposalRate, edgeProposalAutoAccept)
   };
 }
 
@@ -193,7 +190,7 @@ function buildKpi(
   providerSummary: ReturnType<typeof summarizeProviderStates>,
   embeddingVectorCache: ReturnType<typeof summarizeEmbeddingVectorCache>,
   queryEmbeddingCache: ReturnType<typeof summarizeQueryEmbeddingCache>,
-  tokenEconomyInput: Parameters<typeof buildTokenEconomy>[0],
+  tokenEconomy: BenchTokenEconomy,
   edgeProposalRate: ReturnType<typeof aggregateEdgeProposalRate>,
   edgeProposalAutoAccept: ReturnType<typeof aggregateEdgeProposalAutoAccept>
 ): KpiPayload["kpi"] {
@@ -208,8 +205,8 @@ function buildKpi(
     latency_ms_p50: rates.latencyP50,
     latency_ms_p95: rates.latencyP95,
     latency_source: "exact",
-    token_saved_ratio_vs_full_prompt: computeTokenSavedRatio(tokenEconomyInput),
-    token_economy: buildTokenEconomy(tokenEconomyInput),
+    token_saved_ratio_vs_full_prompt: tokenEconomy.tokenSavedRatio,
+    token_economy: tokenEconomy.tokenEconomy,
     ...(recallTokenEconomy === null ? {} : { recall_token_economy: recallTokenEconomy }),
     tier_distribution: { hot: input.aggregate.tierHot, warm: input.aggregate.tierWarm, cold: input.aggregate.tierCold },
     degradation_reasons: {

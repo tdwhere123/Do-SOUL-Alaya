@@ -1,10 +1,11 @@
 import {
   RecallContextEventType,
   SignalEventType,
+  SignalSource,
   SoulContextLensAssembledPayloadSchema,
   SoulSignalEmittedPayloadSchema
 } from "@do-soul/alaya-protocol";
-import { computeTokenSavedRatio, type TokenEconomyInput } from "@do-soul/alaya-eval";
+import { buildTokenEconomy, computeTokenSavedRatio, type TokenEconomy, type TokenEconomyInput } from "@do-soul/alaya-eval";
 import type { BenchTokenMetrics } from "../daemon.js";
 
 // @anchor bench-token-chars-per-token: the bench token-economy KPI is a
@@ -78,8 +79,9 @@ function readRawNumber(
  *
  * Rows whose event_type does not match, or whose payload fails the
  * protocol schema, are skipped. A SOUL_SIGNAL_EMITTED row carrying no bench
- * seed marker is skipped rather than charged 0, so it does not dilute the
- * economy figures.
+ * seed marker is not charged 0, so it does not dilute the economy figures;
+ * a garden_compile row without the marker is a statement-published seed and
+ * is counted as unprojected so the run reports its economy as unavailable.
  */
 export function deriveBenchTokenMetrics(
   signalEmittedRows: readonly TokenEconomyEventRow[],
@@ -87,6 +89,7 @@ export function deriveBenchTokenMetrics(
 ): BenchTokenMetrics {
   let storedMemoryTokens = 0;
   let seedEventCount = 0;
+  let unprojectedStatementSeedEventCount = 0;
   // raw_history is counted once per source turn. Rows that share a
   // bench_turn_seed_index are the same turn's fact fan-out; rows without an
   // index are each their own turn and get a unique synthetic key.
@@ -102,6 +105,7 @@ export function deriveBenchTokenMetrics(
     }
     const rawPayload = parsed.data.raw_payload;
     if (rawPayload[BENCH_SUMMARY_SEED_MARKER_KEY] !== true) {
+      if (parsed.data.source === SignalSource.GARDEN_COMPILE) unprojectedStatementSeedEventCount += 1;
       continue;
     }
     seedEventCount += 1;
@@ -153,8 +157,52 @@ export function deriveBenchTokenMetrics(
       recallEventCount === 0
         ? 0
         : recalledContextTokensTotal / recallEventCount,
-    seed_event_count: seedEventCount
+    seed_event_count: seedEventCount,
+    unprojected_statement_seed_event_count: unprojectedStatementSeedEventCount
   });
+}
+
+export type BenchTokenEconomy = Readonly<{
+  tokenEconomy: TokenEconomy;
+  tokenSavedRatio: number | null;
+}>;
+
+/**
+ * Run-level token economy owner. Statement-published seeds have no
+ * event-sourced history or stored-token projection, so any run carrying them
+ * reports an explicit unavailable economy and a null ratio, never zeros.
+ */
+export function resolveBenchTokenEconomy(
+  benchName: string,
+  perQuestion: readonly BenchTokenMetrics[]
+): BenchTokenEconomy {
+  const unprojected = perQuestion.reduce(
+    (sum, metrics) => sum + metrics.unprojected_statement_seed_event_count, 0);
+  if (unprojected > 0) return unavailableTokenEconomy(unprojected);
+  const input = aggregateBenchTokenMetrics(perQuestion);
+  assertBenchTokenEconomyContract(benchName, input);
+  return { tokenEconomy: buildTokenEconomy(input), tokenSavedRatio: computeTokenSavedRatio(input) };
+}
+
+/** Shard merge keeps any shard's unavailable economy unavailable for the whole run. */
+export function mergeBenchTokenEconomies(shards: readonly TokenEconomy[]): BenchTokenEconomy {
+  let unprojected = 0;
+  const available: TokenEconomyInput[] = [];
+  for (const shard of shards) {
+    if (shard.schema_version === "bench-token-economy.v1") available.push(shard);
+    else unprojected += shard.unprojected_seed_event_count;
+  }
+  if (unprojected > 0) return unavailableTokenEconomy(unprojected);
+  const input = aggregateBenchTokenMetrics(available);
+  return { tokenEconomy: buildTokenEconomy(input), tokenSavedRatio: computeTokenSavedRatio(input) };
+}
+
+function unavailableTokenEconomy(unprojectedSeedEventCount: number): BenchTokenEconomy {
+  return {
+    tokenEconomy: { schema_version: "bench-token-economy-unavailable.v1",
+      reason: "statement_seed_no_token_projection", unprojected_seed_event_count: unprojectedSeedEventCount },
+    tokenSavedRatio: null
+  };
 }
 
 /**
@@ -169,8 +217,8 @@ export function deriveBenchTokenMetrics(
  * averaging the per-question means, so a question with more recalls is
  * not under-counted.
  */
-export function aggregateBenchTokenMetrics(
-  perQuestion: readonly BenchTokenMetrics[]
+function aggregateBenchTokenMetrics(
+  perQuestion: readonly TokenEconomyInput[]
 ): TokenEconomyInput {
   let rawHistoryTokens = 0;
   let storedMemoryTokens = 0;
@@ -210,7 +258,7 @@ export function aggregateBenchTokenMetrics(
  * a 0 ratio is honest, not a missing marker.
  * see also: apps/bench-runner/src/harness/daemon.ts benchTokenEconomyPayload
  */
-export function assertBenchTokenEconomyContract(
+function assertBenchTokenEconomyContract(
   benchName: string,
   input: TokenEconomyInput
 ): void {

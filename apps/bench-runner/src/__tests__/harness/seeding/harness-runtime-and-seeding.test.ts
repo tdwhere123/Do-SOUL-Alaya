@@ -1,8 +1,10 @@
 // @ts-nocheck
 import { bindPostTurnTaskSource } from "../../../../../core-daemon/src/__tests__/mcp-memory/garden/post-turn-source-fixture.js";
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
@@ -17,10 +19,16 @@ import {
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
+import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
+import { resolveBenchTokenEconomy } from "../../../harness/token/token-economy.js";
+import { admitStatementSessionCache, CREDENTIALLED_CONFIG } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
-const SOURCE_TURN = "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.";
+const SOURCE_STATEMENTS = ["I would like to spend three days in Kyoto.", "I prefer low-impact morning workouts."];
+const SOURCE_TURN = SOURCE_STATEMENTS.join(" ");
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -165,6 +173,55 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(claimStructured?.ok).toBe(true);
       expect(claimStructured?.output.status).toBe("claimed");
       database.close();
+    },
+    60_000
+  );
+  it(
+    "reports statement-seeded token economy as unavailable instead of zeros",
+    async () => {
+      // Statement publication carries no bench token projection; the EventLog
+      // fold must count those seeds as unprojected, not as an empty history.
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-token-economy-ws",
+        runId: "harness-token-economy-run"
+      });
+      handles.push(daemon);
+
+      const cacheRoot = await mkdtemp(join(tmpdir(), "harness-tokenecon-cache-"));
+      tmpRoots.push(cacheRoot);
+      const config = { ...CREDENTIALLED_CONFIG, sourcePacking: "session-statements" as const };
+      writeExtractionCacheTestManifest({ cacheRoot, model: config.model, providerUrl: config.providerUrl,
+        systemPrompt: SOURCE_STATEMENTS_PROMPT });
+      const turnMessages = [{ message_id: "tokenecon-user-0", role: "user" as const, content: SOURCE_TURN }];
+      await admitStatementSessionCache({ cacheRoot, config, messages: turnMessages, rawJson: () => JSON.stringify({
+        messages: [{ message_id: "tokenecon-user-0", statements: SOURCE_STATEMENTS.map(text => ({
+          text, relation: "recorded statement" })) }] }) });
+      const runner = createCompileSeedRunner({ config, cacheRoot, extractorFactory: () => ({
+        extract: async () => { throw new Error("admitted statements must not call the live extractor"); }
+      }) });
+
+      const result = await runner.seedTurn({
+        daemon,
+        turnContent: SOURCE_TURN,
+        turnMessages,
+        evidenceRefBase: "tokenecon-q0-t0",
+        seedIndex: 0,
+        workspaceId: daemon.workspaceId,
+        runId: daemon.runId
+      });
+      expect(result.seeds).toHaveLength(2);
+
+      await daemon.recall("Kyoto morning workouts", { maxResults: 5 });
+
+      const metrics = await daemon.queryTokenMetrics();
+
+      expect(metrics).toMatchObject({ seed_event_count: 0, raw_history_tokens: 0,
+        unprojected_statement_seed_event_count: 2, recall_event_count: 1 });
+      expect(resolveBenchTokenEconomy("public", [metrics])).toEqual({
+        tokenEconomy: { schema_version: "bench-token-economy-unavailable.v1",
+          reason: "statement_seed_no_token_projection", unprojected_seed_event_count: 2 },
+        tokenSavedRatio: null
+      });
     },
     60_000
   );

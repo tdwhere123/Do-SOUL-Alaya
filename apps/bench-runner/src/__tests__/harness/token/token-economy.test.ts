@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildTokenEconomy,
-  computeTokenSavedRatio
-} from "@do-soul/alaya-eval";
-import {
   RecallContextEventType,
   SignalEventType
 } from "@do-soul/alaya-protocol";
+import type { BenchTokenMetrics } from "../../../harness/daemon.js";
 import {
-  aggregateBenchTokenMetrics,
-  assertBenchTokenEconomyContract,
   deriveBenchTokenMetrics,
+  mergeBenchTokenEconomies,
+  resolveBenchTokenEconomy,
   BENCH_FULL_TURN_TOKENS_KEY,
   BENCH_SUMMARY_SEED_MARKER_KEY,
   BENCH_SUMMARY_TURN_SEED_INDEX_KEY,
@@ -18,14 +15,17 @@ import {
   type TokenEconomyEventRow
 } from "../../../harness/token/token-economy.js";
 
-function emittedRow(rawPayload: Record<string, unknown>): TokenEconomyEventRow {
+function emittedRow(
+  rawPayload: Record<string, unknown>,
+  source: "garden_compile" | "model_tool" = "garden_compile"
+): TokenEconomyEventRow {
   return {
     event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
     payload_json: {
       signal_id: "sig-1",
       workspace_id: "ws-1",
       run_id: "run-1",
-      source: "garden_compile",
+      source,
       signal_kind: "potential_preference",
       source_observation: null,
       source_memory_refs: [],
@@ -243,9 +243,9 @@ describe("deriveBenchTokenMetrics", () => {
     expect(metrics.recall_event_count).toBe(0);
   });
 
-  it("skips a seed event carrying no bench KPI block", () => {
+  it("skips a model-tool event carrying no bench KPI block", () => {
     const metrics = deriveBenchTokenMetrics(
-      [emittedRow({ excerpt: "noise", turn_content_excerpt: "noise" })],
+      [emittedRow({ excerpt: "noise", turn_content_excerpt: "noise" }, "model_tool")],
       []
     );
     expect(metrics.seed_event_count).toBe(0);
@@ -273,103 +273,106 @@ describe("deriveBenchTokenMetrics", () => {
   });
 });
 
-describe("aggregateBenchTokenMetrics", () => {
-  it("returns a zeroed baseline for an empty input", () => {
-    const aggregate = aggregateBenchTokenMetrics([]);
-    expect(aggregate.raw_history_tokens).toBe(0);
-    expect(aggregate.stored_memory_tokens).toBe(0);
-    expect(aggregate.recalled_context_tokens_total).toBe(0);
-    expect(aggregate.recall_event_count).toBe(0);
-    expect(aggregate.recalled_context_tokens_mean).toBe(0);
-    expect(aggregate.seed_event_count).toBe(0);
+function questionMetrics(input: Partial<BenchTokenMetrics>): BenchTokenMetrics {
+  return {
+    raw_history_tokens: 0,
+    stored_memory_tokens: 0,
+    recalled_context_tokens_total: 0,
+    recall_event_count: 0,
+    recalled_context_tokens_mean: 0,
+    seed_event_count: 0,
+    unprojected_statement_seed_event_count: 0,
+    ...input
+  };
+}
+
+describe("resolveBenchTokenEconomy", () => {
+  it("returns a zeroed available economy for a run that seeded nothing", () => {
+    const resolved = resolveBenchTokenEconomy("public", []);
+    expect(resolved.tokenEconomy).toEqual({
+      schema_version: "bench-token-economy.v1",
+      raw_history_tokens: 0,
+      stored_memory_tokens: 0,
+      recalled_context_tokens_total: 0,
+      recall_event_count: 0,
+      recalled_context_tokens_mean: 0,
+      seed_event_count: 0
+    });
+    expect(resolved.tokenSavedRatio).toBe(0);
   });
 
   it("sums per-question metrics and recomputes a question-weighted mean", () => {
-    const aggregate = aggregateBenchTokenMetrics([
-      {
-        raw_history_tokens: 1_000,
-        stored_memory_tokens: 100,
-        recalled_context_tokens_total: 300,
-        recall_event_count: 3,
-        recalled_context_tokens_mean: 100,
-        seed_event_count: 10
-      },
-      {
-        raw_history_tokens: 2_000,
-        stored_memory_tokens: 200,
-        recalled_context_tokens_total: 700,
-        recall_event_count: 1,
-        recalled_context_tokens_mean: 700,
-        seed_event_count: 20
-      }
+    const resolved = resolveBenchTokenEconomy("public", [
+      questionMetrics({ raw_history_tokens: 1_000, stored_memory_tokens: 100,
+        recalled_context_tokens_total: 300, recall_event_count: 3, recalled_context_tokens_mean: 100, seed_event_count: 10 }),
+      questionMetrics({ raw_history_tokens: 2_000, stored_memory_tokens: 200,
+        recalled_context_tokens_total: 700, recall_event_count: 1, recalled_context_tokens_mean: 700, seed_event_count: 20 })
     ]);
-    expect(aggregate.raw_history_tokens).toBe(3_000);
-    expect(aggregate.stored_memory_tokens).toBe(300);
-    expect(aggregate.recalled_context_tokens_total).toBe(1_000);
-    expect(aggregate.recall_event_count).toBe(4);
     // weighted mean: 1000 total / 4 events = 250, NOT (100+700)/2 = 400.
-    expect(aggregate.recalled_context_tokens_mean).toBe(250);
-    expect(aggregate.seed_event_count).toBe(30);
+    expect(resolved.tokenEconomy).toMatchObject({ raw_history_tokens: 3_000, stored_memory_tokens: 300,
+      recalled_context_tokens_total: 1_000, recall_event_count: 4, recalled_context_tokens_mean: 250,
+      seed_event_count: 30 });
+    expect(resolved.tokenSavedRatio).toBeCloseTo(1 - 250 / 3_000, 10);
+  });
+
+  it("refuses a seeded run whose seeds emitted no full-turn marker", () => {
+    expect(() => resolveBenchTokenEconomy("public-locomo", [
+      questionMetrics({ recalled_context_tokens_total: 100, recall_event_count: 1,
+        recalled_context_tokens_mean: 100, seed_event_count: 5 })
+    ])).toThrow(/raw_history_tokens===0/);
+  });
+
+  it("reports statement-published seeds as unavailable rather than a zero baseline", () => {
+    const resolved = resolveBenchTokenEconomy("public", [
+      questionMetrics({ recalled_context_tokens_total: 40, recall_event_count: 1,
+        recalled_context_tokens_mean: 40, unprojected_statement_seed_event_count: 2 }),
+      questionMetrics({ raw_history_tokens: 80, seed_event_count: 1, unprojected_statement_seed_event_count: 1 })
+    ]);
+    expect(resolved).toEqual({
+      tokenEconomy: { schema_version: "bench-token-economy-unavailable.v1",
+        reason: "statement_seed_no_token_projection", unprojected_seed_event_count: 3 },
+      tokenSavedRatio: null
+    });
   });
 });
 
-describe("assertBenchTokenEconomyContract", () => {
-  it("throws when a seeded run emitted no full-turn marker", () => {
-    // raw_history_tokens===0 with seeds present = the seed path forgot the
-    // marker, so token_saved_ratio cannot be derived: fail closed.
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", {
-        raw_history_tokens: 0,
-        stored_memory_tokens: 0,
-        recalled_context_tokens_total: 100,
-        recall_event_count: 1,
-        recalled_context_tokens_mean: 100,
-        seed_event_count: 5
-      })
-    ).toThrow(/raw_history_tokens===0/);
+describe("mergeBenchTokenEconomies", () => {
+  it("keeps a merged run unavailable when any shard is unavailable", () => {
+    const available = resolveBenchTokenEconomy("public", [
+      questionMetrics({ raw_history_tokens: 100, seed_event_count: 1 })
+    ]).tokenEconomy;
+    const unavailable = resolveBenchTokenEconomy("public", [
+      questionMetrics({ unprojected_statement_seed_event_count: 4 })
+    ]).tokenEconomy;
+    expect(mergeBenchTokenEconomies([available, unavailable])).toEqual({
+      tokenEconomy: { schema_version: "bench-token-economy-unavailable.v1",
+        reason: "statement_seed_no_token_projection", unprojected_seed_event_count: 4 },
+      tokenSavedRatio: null
+    });
+    expect(mergeBenchTokenEconomies([available, available]).tokenEconomy).toMatchObject({
+      schema_version: "bench-token-economy.v1", raw_history_tokens: 200, seed_event_count: 2 });
   });
+});
 
-  it("passes a healthy run that carries a full-turn baseline", () => {
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", {
-        raw_history_tokens: 1_000,
-        stored_memory_tokens: 100,
-        recalled_context_tokens_total: 50,
-        recall_event_count: 1,
-        recalled_context_tokens_mean: 50,
-        seed_event_count: 5
-      })
-    ).not.toThrow();
-  });
-
-  it("exempts a run that seeded nothing (no history to save against)", () => {
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", {
-        raw_history_tokens: 0,
-        stored_memory_tokens: 0,
-        recalled_context_tokens_total: 0,
-        recall_event_count: 0,
-        recalled_context_tokens_mean: 0,
-        seed_event_count: 0
-      })
-    ).not.toThrow();
+describe("deriveBenchTokenMetrics statement seeds", () => {
+  it("counts an unmarked compile signal as an unprojected statement seed", () => {
+    const metrics = deriveBenchTokenMetrics([emittedRow({ excerpt: "Caroline: hi" })], [lensRow(40)]);
+    expect(metrics).toMatchObject({ seed_event_count: 0, raw_history_tokens: 0,
+      unprojected_statement_seed_event_count: 1 });
   });
 });
 
 /**
  * LoCoMo seeds each turn through workspace.proposeMemory, then SignalService
  * persists the redacted EventLog summary. This pins the EventLog-summary
- * contract end to end: fold -> aggregate -> contract -> token_economy +
- * saved ratio.
+ * contract end to end: fold -> resolve -> token_economy + saved ratio.
  * see also: apps/bench-runner/src/datasets/locomo/runner.ts runOneConversation
  */
 describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
   function locomoSeedRow(charCount: number): TokenEconomyEventRow {
     return emittedRow(
-      summarySeedPayload({
-        fullTurnTokens: benchTokens(charCount),
-        storedTokens: benchTokens(charCount)
-      })
+      summarySeedPayload({ fullTurnTokens: benchTokens(charCount), storedTokens: benchTokens(charCount) }),
+      "model_tool"
     );
   }
 
@@ -384,38 +387,20 @@ describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
     expect(metrics.stored_memory_tokens).toBe(80);
     expect(metrics.seed_event_count).toBe(2);
 
-    const input = aggregateBenchTokenMetrics([metrics]);
-    // Contract holds: a seeded LoCoMo run carries a full-turn baseline.
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", input)
-    ).not.toThrow();
-
-    const economy = buildTokenEconomy(input);
-    expect(economy.raw_history_tokens).toBe(80);
-    const ratio = computeTokenSavedRatio(input);
+    const resolved = resolveBenchTokenEconomy("public-locomo", [metrics]);
+    expect(resolved.tokenEconomy).toMatchObject({ raw_history_tokens: 80 });
     // 1 - 40/80 = 0.5 saved vs re-reading the full history.
-    expect(ratio).toBeCloseTo(0.5, 10);
+    expect(resolved.tokenSavedRatio).toBeCloseTo(0.5, 10);
   });
 
-  it("contract fails a LoCoMo-shape run whose EventLog summary never stamped the marker", () => {
-    // A regression where SignalService dropped the bench summary marker: the
-    // fold skips the row, and the aggregate has zero raw_history despite real
-    // recalls.
+  it("treats an unmarked proposeMemory summary as no seed", () => {
+    // A model_tool row without the bench summary marker is not a seed; the
+    // run has nothing to save against and is not refused.
     const metrics = deriveBenchTokenMetrics(
-      [emittedRow({ excerpt: "Caroline: hi", turn_content_excerpt: "hi" })],
+      [emittedRow({ excerpt: "Caroline: hi", turn_content_excerpt: "hi" }, "model_tool")],
       [lensRow(40)]
     );
-    expect(metrics.seed_event_count).toBe(0);
-    const input = aggregateBenchTokenMetrics([metrics]);
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", input)
-    ).not.toThrow(); // seed_event_count===0 is exempt (honest empty)
-    // But a run that DID seed yet folded to zero raw_history must fail:
-    expect(() =>
-      assertBenchTokenEconomyContract("public-locomo", {
-        ...input,
-        seed_event_count: 3
-      })
-    ).toThrow(/full-turn marker/);
+    expect(metrics).toMatchObject({ seed_event_count: 0, unprojected_statement_seed_event_count: 0 });
+    expect(() => resolveBenchTokenEconomy("public-locomo", [metrics])).not.toThrow();
   });
 });

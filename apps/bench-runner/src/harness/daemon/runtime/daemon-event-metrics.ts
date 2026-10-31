@@ -98,7 +98,7 @@ export async function emitBenchContextLensAssembledEvent(
 // so an unscoped queryByType returns every prior question's events too —
 // turning each per-question fold into an O(all-prior-questions) scan AND
 // double-counting every earlier question into this question's token metrics
-// (the run-level aggregateBenchTokenMetrics then SUMS those cumulative
+// (the run-level resolveBenchTokenEconomy then SUMS those cumulative
 // snapshots). queryByWorkspaceAndType uses idx_event_log_workspace_type_created
 // so the read stays bounded to this workspace's own emitted/lens events.
 // see also: packages/storage/src/repos/runtime/event-log-repo.ts queryByWorkspaceAndType

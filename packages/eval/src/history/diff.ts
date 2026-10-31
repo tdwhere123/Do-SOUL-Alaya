@@ -132,12 +132,14 @@ function pushTokenEconomyDelta(
   // @anchor token-economy-diff: secondary token-economy signal. The ratio
   // above is the headline; this surfaces a swelling per-recall payload even
   // when the ratio happens to stay flat (e.g. raw history grew in step).
-  // Gated on BOTH sides carrying the event-sourced token_economy block so a
-  // older baseline never produces a spurious delta. Reuses the latency
-  // growth classifier — a bigger recalled-context mean is "growth_bad".
+  // Gated on BOTH sides carrying an available event-sourced token_economy
+  // block so an older or unavailable baseline never produces a spurious delta.
+  // Reuses the latency growth classifier — a bigger recalled-context mean is
+  // "growth_bad".
   const currentEconomy = current.kpi.token_economy;
   const previousEconomy = previous.kpi.token_economy;
-  if (currentEconomy === undefined || previousEconomy === undefined) {
+  if (currentEconomy?.schema_version !== "bench-token-economy.v1" ||
+      previousEconomy?.schema_version !== "bench-token-economy.v1") {
     return;
   }
   const meanVerdict = classifyLatencyGrowth(

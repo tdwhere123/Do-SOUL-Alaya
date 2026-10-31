@@ -5,4 +5,6 @@ export interface BenchTokenMetrics {
   readonly recall_event_count: number;
   readonly recalled_context_tokens_mean: number;
   readonly seed_event_count: number;
+  // Statement-published compile seeds carry no bench token projection.
+  readonly unprojected_statement_seed_event_count: number;
 }

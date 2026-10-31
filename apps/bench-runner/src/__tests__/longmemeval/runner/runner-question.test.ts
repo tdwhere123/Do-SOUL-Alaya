@@ -146,7 +146,8 @@ describe("runLongMemEvalQuestion QA delivery", () => {
         recalled_context_tokens_total: 10,
         recall_event_count: 1,
         recalled_context_tokens_mean: 10,
-        seed_event_count: 4
+        seed_event_count: 4,
+        unprojected_statement_seed_event_count: 0
       })),
       queryEdgeProposalKpiRows: vi.fn(async () => []),
       detach: vi.fn(async () => undefined)

@@ -480,5 +480,24 @@ export const KpiPayloadSchema = z
     payload.reporting_recall_denominator <= payload.evaluated_count &&
     (payload.answerable_evaluated_count === undefined || payload.reporting_recall_denominator === payload.answerable_evaluated_count),
   { message: "reporting recall denominator must fit the evaluated cohort and agree with explicit authority", path: ["reporting_recall_denominator"] })
-  .superRefine(validateLongMemEvalSelectionContract);
+  .superRefine(validateLongMemEvalSelectionContract)
+  .superRefine(validateTokenEconomyContract);
 export type KpiPayload = z.infer<typeof KpiPayloadSchema>;
+
+// An unavailable economy has no ratio, and seeds never fold to a zero history.
+function validateTokenEconomyContract(
+  payload: { readonly kpi: Pick<KpiCore, "token_economy" | "token_saved_ratio_vs_full_prompt"> },
+  context: z.RefinementCtx
+): void {
+  const economy = payload.kpi.token_economy;
+  if (economy === undefined) return;
+  if (economy.schema_version !== "bench-token-economy.v1") {
+    if (payload.kpi.token_saved_ratio_vs_full_prompt !== null) {
+      context.addIssue({ code: "custom", path: ["kpi", "token_saved_ratio_vs_full_prompt"],
+        message: "unavailable token economy must not report a saved ratio" });
+    }
+  } else if (economy.seed_event_count > 0 && economy.raw_history_tokens === 0) {
+    context.addIssue({ code: "custom", path: ["kpi", "token_economy"],
+      message: "seeded token economy must not report a zero raw history" });
+  }
+}

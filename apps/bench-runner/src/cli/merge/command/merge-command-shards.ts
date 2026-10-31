@@ -1,12 +1,10 @@
 import {
-  buildTokenEconomy,
-  computeTokenSavedRatio,
   KpiPayloadSchema,
   type KpiPayload,
-  type PerScenarioRow
+  type PerScenarioRow,
+  type TokenEconomy
 } from "@do-soul/alaya-eval";
-import { aggregateBenchTokenMetrics } from "../../../harness/token/token-economy.js";
-import type { BenchTokenMetrics } from "../../../harness/daemon.js";
+import { mergeBenchTokenEconomies } from "../../../harness/token/token-economy.js";
 import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 import { buildMergedFullGoldCoverage, hasExactQuestionDiagnosticsSet } from "../merge-full-gold.js";
@@ -176,7 +174,7 @@ type ProviderRateTotals = Record<ProviderRateField, number>;
 
 interface MergeShardAggregate {
   readonly perScenario: PerScenarioRow[];
-  readonly shardTokenEconomies: BenchTokenMetrics[];
+  readonly shardTokenEconomies: TokenEconomy[];
   providerRateFields: readonly ProviderRateField[];
   providerRateTotals: ProviderRateTotals;
   tierHot: number;
@@ -436,8 +434,8 @@ function buildMergedTokenEconomy(
   if (aggregate.shardTokenEconomies.length !== shardCount) {
     return { savedRatio: null };
   }
-  const input = aggregateBenchTokenMetrics(aggregate.shardTokenEconomies);
-  return { economy: buildTokenEconomy(input), savedRatio: computeTokenSavedRatio(input) };
+  const merged = mergeBenchTokenEconomies(aggregate.shardTokenEconomies);
+  return { economy: merged.tokenEconomy, savedRatio: merged.tokenSavedRatio };
 }
 
 function providerKpiFields(
