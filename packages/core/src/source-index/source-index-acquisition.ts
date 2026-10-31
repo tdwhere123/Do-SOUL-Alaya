@@ -392,7 +392,7 @@ class AcquisitionQuery {
       } else {
         const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
           this.input.allowance.max_attempts, this.meter.remaining());
-        this.lexicalCandidates = lexical.candidates;
+        this.lexicalCandidates = this.collapseStatementCandidates(lexical.candidates);
         this.lexical = { completion: lexical.completion, reason: lexical.reason,
           index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
         if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
@@ -429,7 +429,7 @@ class AcquisitionQuery {
             ordered: keys => { this.questionTimeOrder = keys; },
             ...(this.candidate === undefined ? {} : { occurrences: this.candidate.retained }),
             nominate: candidates => {
-              this.timeRoute = true; this.lexicalCandidates = candidates; this.vectorCandidates = [];
+              this.timeRoute = true; this.lexicalCandidates = this.collapseStatementCandidates(candidates); this.vectorCandidates = [];
               const pending = this.nominatePrefix(true); this.limited ||= pending;
             } });
           this.limited ||= partial;
@@ -621,6 +621,21 @@ class AcquisitionQuery {
     this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
       + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
+  }
+
+  /** Like a vector window, a statement key reaches its raw root once per lane: only its best-ranked
+   * key competes, so repeated statements of one root neither spend attempts nor retain occurrences. */
+  private collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[]): readonly SourceIndexLexicalCandidate[] {
+    if (!candidates.some(row => row.source.auxiliary !== undefined)) return candidates;
+    this.meter.charge(candidates.length, 0, "statement candidate collapse");
+    const seen = new Set<string>();
+    return candidates.filter(row => {
+      if (row.source.auxiliary === undefined) return true;
+      const key = `${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   private nominatePrefix(stopAtRootLimit = false,

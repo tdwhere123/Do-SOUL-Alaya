@@ -199,6 +199,34 @@ describe("audited source statements and auxiliary retrieval keys", () => {
     expect(capture.question_time_order).toEqual([nominated]);
   });
 
+  it("lets one statement key per root and lane compete in lexical nomination", async () => {
+    const environment = await fixture();
+    const statements = ["first", "second", "third"].map(ordinal =>
+      ({ text: `The user recorded the ${ordinal} museum visit.`, relation: "museum attendance" }));
+    const response = JSON.stringify({ messages: [{ message_id: "a1", statements: [] }, { message_id: "u1", statements }] });
+    const signals = await environment.provider(response).compile(rendered.content, environment.compileContext) as SourceStatementSignal[];
+    const publication = createSourceObservationPublication({ stores: environment.field.stores,
+      evidenceService: environment.evidenceService, memoryService: environment.memoryService,
+      sha256: fieldContractSha256, deriveTemporalProjection: () => ({}) });
+    expect(signals).toHaveLength(3);
+    // The recorded provider reuses one signal id; each statement needs its own publication identity.
+    for (const [ordinal, signal] of signals.entries()) {
+      await publication.publish({ signal: { ...signal, signal_id: `recorded-statement-${ordinal}` }, sourceEventAnchor: null });
+    }
+    const { index, targets } = prepareRecordedStatementIndex(environment.database, WORKSPACE);
+    expect(targets.filter(row => row.auxiliary !== undefined)).toHaveLength(3);
+    const capture = environment.database.connection.transaction(() => new SourceIndexAcquisition(index, fieldContractSha256)
+      .nominateWithWitness({ workspace_id: WORKSPACE, navigation_text: "attendance",
+        vector: { status: "unavailable", reason: "lexical_only" },
+        allowance: { max_roots: 10, max_attempts: 20, max_vector_windows: 64 }, budget: QUERY_BUDGET }, () => "admitted"))();
+    expect(capture.result.nominations).toHaveLength(1);
+    const lanes = capture.witness.filter(row => row.source.auxiliary !== undefined)
+      .map(row => row.route.kind === "lexical" ? row.route.lane : "vector");
+    expect(lanes.length).toBeGreaterThan(0);
+    expect(new Set(lanes).size).toBe(lanes.length);
+    expect(capture.result.accounting.duplicate).toBe(capture.witness.length - 1);
+  });
+
   it("keeps valid siblings from a partial receipt and recovers evidence-first failure without duplicate memory or key", async () => {
     const environment = await fixture();
     let partial: OfficialApiGardenCompileIncompleteError | undefined;
