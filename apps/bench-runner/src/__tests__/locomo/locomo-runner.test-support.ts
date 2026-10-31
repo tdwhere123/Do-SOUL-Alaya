@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 
 import { join } from "node:path";
 
+import { createInMemoryFieldStores, createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
+
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -107,7 +109,31 @@ export function buildMockDaemon(overrides: {
   readonly warmEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly runEdgePlanePassIfConfigured?: ReturnType<typeof vi.fn>;
+  readonly importSourceRecord?: ReturnType<typeof vi.fn>;
 }): Record<string, unknown> {
+  const createImporter = (workspaceId: string) => {
+    const admission = createSourceAdmissionPort({
+      stores: createInMemoryFieldStores(),
+      sha256: fieldContractSha256
+    });
+    return vi.fn(
+      async (
+        request: Parameters<typeof admission.admit>[0],
+        hostCapture?: NonNullable<Parameters<typeof admission.admit>[1]>["hostCapture"]
+      ) =>
+        admission.admit(
+          {
+            ...request,
+            workspace_id: workspaceId,
+            evidence_object_id: null
+          },
+          {
+            workspaceId,
+            ...(hostCapture === undefined ? {} : { hostCapture })
+          }
+        )
+    );
+  };
   const recall = overrides.recall ?? vi.fn(async () => buildRecallResult());
   const warmEmbeddingCache =
     overrides.warmEmbeddingCache ??
@@ -175,7 +201,9 @@ export function buildMockDaemon(overrides: {
   }));
   const runEdgePlanePassIfConfigured =
     overrides.runEdgePlanePassIfConfigured ?? vi.fn(async () => undefined);
+  const defaultImporter = overrides.importSourceRecord ?? createImporter("default");
   return {
+    importSourceRecord: defaultImporter,
     proposeMemory,
     warmEmbeddingCache,
     warmQueryEmbeddingCache,
@@ -185,7 +213,7 @@ export function buildMockDaemon(overrides: {
     attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
       workspaceId: input.workspaceId,
       runId: input.runId,
-      importSourceRecord: vi.fn(async () => undefined),
+      importSourceRecord: overrides.importSourceRecord ?? createImporter(input.workspaceId),
       proposeMemory,
       proposeMemoryFromSignal,
       proposeMemoriesFromCompileSignals,
