@@ -9,107 +9,13 @@ import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provi
 import { inspectExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
-import { bindProviderRawAttempt, readSingleSourceRawAttempt, providerRawSuccessEvidenceState, readProviderRawAttempt,
-  verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
+import { providerRawSuccessEvidenceState, readProviderRawAttempt, verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
 import { readRetainedInteractiveAuthority } from "../fill/retained-interactive-authority.js";
-import { sourceSemanticInteractiveWireSha256, sourceSemanticRequestWireDigest } from
-  "../fill/source-semantic-interactive-request.js";
+import { sourceSemanticRequestWireDigest } from "../fill/source-semantic-interactive-request.js";
 import { assertExtractionAuthorityKeyInScope } from "../authority/receipt/scope.js";
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { computeSystemPromptSha256, readRetainedSourceSemanticManifestIdentity } from "./extraction-cache-manifest.js";
 import type { CachedSourceSemantic, InteractiveSemanticProvenance } from "./source-semantic-artifact.js";
-import type { SourceSemanticInteractivePreflight } from "../fill/source-semantic-interactive-preflight.js";
-import { assertInteractiveSourcePreflightReceipt } from "../authority/source-preflight-binding.js";
-import type { SourceRequestLine } from "../request-artifact.js";
-import { parseExtractionOpenSemanticsGeneration } from "../request-artifact.js";
-
-export type OptionalCompleteRetainedSourceResponse =
-  | { readonly status: "complete"; readonly text: string }
-  | { readonly status: "unavailable"; readonly reason: "missing_raw" | "incomplete" };
-
-/** Bench-only: missing raw and validated incomplete parents are unavailable, not I/O failure. */
-export function inspectOptionalCompleteSourceResponse(input: Readonly<{
-  cacheRoot: string; preflight: SourceSemanticInteractivePreflight; line: SourceRequestLine;
-}>): OptionalCompleteRetainedSourceResponse {
-  const { cacheRoot, preflight, line } = input;
-  const planned = preflight.planned_requests.find(row => row.key === line.key);
-  if (planned === undefined || !preflight.ready_requests.some(row => canonicalJson(row) === canonicalJson(line))) {
-    throw new AlayaError("CONFLICT", "source revision parent is outside its selected physical preparation");
-  }
-  const raw = readSingleSourceRawAttempt(cacheRoot, line.key);
-  if (raw === undefined) return { status: "unavailable", reason: "missing_raw" };
-  if (raw.kind !== "source_semantic" || raw.authority_receipt_digest === undefined ||
-      raw.authority_lineage_digest === undefined) {
-    throw new AlayaError("CONFLICT", "source revision parent has no retained source authority");
-  }
-  const receipt = readRetainedInteractiveAuthority(cacheRoot, raw.authority_receipt_digest,
-    raw.authority_lineage_digest);
-  assertInteractiveSourcePreflightReceipt(preflight, receipt);
-  assertExtractionAuthorityKeyInScope(receipt, line.key);
-  bindProviderRawAttempt(raw, { kind: "source_semantic", cacheKey: line.key,
-    model: preflight.config.model, requestProfile: preflight.config.requestProfile,
-    requestDigest: planned.request_digest, authorityReceiptDigest: receipt.receipt_digest,
-    authorityLineageDigest: receipt.lineage_digest, sourceRequestSha256: line.requestSha256 });
-  const ledger = inspectExtractionAttemptLedger({ cacheRoot, lineageDigest: receipt.lineage_digest,
-    cacheIdentity: { model: preflight.config.model, requestProfile: preflight.config.requestProfile } });
-  // A complete quarantined response can parent a revision, but it still needs
-  // the same exact settlement witness as an admitted executable response.
-  if (verifyProviderRawReservation(raw, ledger, "executable", receipt.limits.max_output_tokens) === "accounting_invalid") {
-    throw new AlayaError("CONFLICT", "source revision parent has invalid accounting");
-  }
-  if (!ledger?.historyComplete || !ledger.settledAttempts.some(row =>
-      row.cacheKey === line.key && row.attemptOrdinal === raw.attempt_ordinal) ||
-      raw.transport_failure !== undefined || !raw.full_replay_possible ||
-      providerRawSuccessEvidenceState(raw) !== "bound" ||
-      !isCompleteSemanticFinish(preflight.config.requestProfile, raw.finish_reason)) {
-    return { status: "unavailable", reason: "incomplete" };
-  }
-  return { status: "complete", text: raw.decoded_text };
-}
-
-/** A complete rejected response is still a physical parent, while its rejection stays settled. */
-export function readCompleteRetainedSourceResponse(input: Readonly<{
-  cacheRoot: string; preflight: SourceSemanticInteractivePreflight; line: SourceRequestLine;
-}>): string {
-  const inspected = inspectOptionalCompleteSourceResponse(input);
-  if (inspected.status === "complete") return inspected.text;
-  throw new AlayaError("CONFLICT", inspected.reason === "missing_raw"
-    ? "source revision requires one retained physical response for this request"
-    : "source revision parent has no complete settled physical response");
-}
-
-/** One complete physical response may serve a new verified occurrence only when its full wire is unchanged. */
-export function readCompletePhysicalSourceResponseForRequest(input: Readonly<{
-  cacheRoot: string; physicalPreflight: SourceSemanticInteractivePreflight;
-  currentLine: SourceRequestLine; currentPreflight?: SourceSemanticInteractivePreflight;
-}>): string {
-  const { cacheRoot, physicalPreflight, currentLine, currentPreflight } = input;
-  const physicalLine = physicalPreflight.ready_requests.find(row => row.key === currentLine.key);
-  const physicalPlanned = physicalPreflight.planned_requests.find(row => row.key === currentLine.key);
-  if (physicalLine === undefined || physicalPlanned === undefined ||
-      physicalLine.requestSha256 !== currentLine.requestSha256 ||
-      physicalLine.systemPrompt !== currentLine.systemPrompt ||
-      physicalLine.userPrompt !== currentLine.userPrompt) {
-    throw new AlayaError("CONFLICT", "current source request differs from its complete physical parent");
-  }
-  if (currentPreflight !== undefined) {
-    const currentReady = currentPreflight.ready_requests.find(row => row.key === currentLine.key);
-    const physicalWire = sourceSemanticInteractiveWireSha256({ ...physicalPreflight.config,
-      openSemantics: parseExtractionOpenSemanticsGeneration(physicalPreflight.config.openSemantics) }, physicalLine,
-      physicalPreflight.max_output_tokens);
-    const currentWire = sourceSemanticInteractiveWireSha256({ ...currentPreflight.config,
-      openSemantics: parseExtractionOpenSemanticsGeneration(currentPreflight.config.openSemantics) }, currentLine,
-      currentPreflight.max_output_tokens);
-    if (canonicalJson(currentReady) !== canonicalJson(currentLine) ||
-        currentPreflight.config.model !== physicalPreflight.config.model ||
-        currentPreflight.config.requestProfile !== physicalPreflight.config.requestProfile ||
-        physicalWire !== currentWire ||
-        (physicalPlanned.wire_sha256 !== undefined && physicalPlanned.wire_sha256 !== physicalWire)) {
-      throw new AlayaError("CONFLICT", "current source transport wire differs from its physical parent");
-    }
-  }
-  return readCompleteRetainedSourceResponse({ cacheRoot, preflight: physicalPreflight, line: physicalLine });
-}
 
 export function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
   const transport = interactiveSourceTransportBinding(requestProfile).transport;

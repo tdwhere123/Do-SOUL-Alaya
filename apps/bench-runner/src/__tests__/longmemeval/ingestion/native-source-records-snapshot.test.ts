@@ -1,14 +1,9 @@
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
-import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
-import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
-import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
-import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
-import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
+import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
 import { prepareSemanticChain } from "../../../runs/recall-measurement/prepare.js";
 import { prepareNativeSourceRecordsSnapshot, readVerifiedNativeSourceSnapshot } from "../../../runs/snapshot/source-records/native.js";
@@ -53,41 +48,6 @@ it("reports an available empty native source as complete under a tuple-bound pre
   expect(plan.queries[0]).toMatchObject({ discovery_pages: 1, discovery_trace: [{ access: {
     source_candidates: [expect.objectContaining({ source_id: "source-empty", read_bytes: 0, body_bytes: 0, complete: true })],
     unvisited_sources: false } }] });
-});
-
-it("stops a selected Gemini source sample after its first failed key on dispatch and reopen", async () => {
-  const root = mkdtempSync(join(tmpdir(), "native-source-sample-failure-")); roots.push(root);
-  const snapshotPath = join(root, "sources.sqlite"), cacheRoot = join(root, "cache"); mkdirSync(cacheRoot);
-  await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "daemon"),
-    workspaceId: "sample-failure", runId: "sample-failure", producerCommit: "0".repeat(40),
-    sources: ["One source sentence.\n", "Another source sentence.\n"].map((content, index) => ({
-      source_id: `source-${index}`, source_version: "1", title: `Source ${index}`, content_bytes: content,
-      source_observed_at: "2026-09-20T12:00:00.000Z", recorded_at: "2026-09-21T09:00:00.000Z" })) });
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
-  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://generativelanguage.googleapis.com");
-  const options = { variant: "native_source_snapshot" as const,
-    nativeSourcePopulation: { name: "sample-failure", snapshotPath }, cacheRoot,
-    sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
-  const inspection = await inspectExtractionAuthority({ ...options, action: "sample", revision: readCurrentExtractionAuthorityRevision() });
-  expect(inspection.missingKeys).toHaveLength(2);
-  const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: inspection.missingKeys,
-    preflightOutputTokenCap: 16_384, geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
-  const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection),
-    sourcePreflight: preflight, observation: inspection.observation, inspection, maxConcurrency: 1,
-    outputTokenCap: { field: "maxOutputTokens", value: 16_384 }, diskFloorBytes: 0,
-    priceEstimate: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5,
-      maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } });
-  const receiptPath = join(root, "receipt.json"); writeExtractionAuthorityReceipt(receiptPath, receipt);
-  setExtractionCredentialFixture();
-  const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ error: { message: "failed" } }, { status: 503 }));
-  vi.stubGlobal("fetch", fetchMock);
-  await expect(runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 }))
-    .rejects.toThrow(/selected interactive source fill stopped/u);
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  await expect(runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 }))
-    .rejects.toThrow(/selected interactive source fill stopped/u);
-  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it("preserves source clocks, revisions and document newlines through native installation and reopened publication", async () => {

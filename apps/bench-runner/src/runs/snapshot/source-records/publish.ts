@@ -59,11 +59,6 @@ function parseSourcePublicationAssociationRow(row: unknown): SourcePublicationAs
   return { source_id, source_version, content_digest, corpus_digest, ...disposition, provider_attempts };
 }
 
-export function parseSourcePublicationAssociations(value: unknown): readonly SourcePublicationAssociation[] {
-  return z.object({ contract: z.literal("source-publication-associations-v2"),
-    publicationAssociations: z.array(SourcePublicationAssociationRowSchema).max(10000) }).strict().parse(value).publicationAssociations;
-}
-
 type SourcePublicationPopulationBase = Readonly<{
   name: string;
   cacheRoots?: readonly string[];

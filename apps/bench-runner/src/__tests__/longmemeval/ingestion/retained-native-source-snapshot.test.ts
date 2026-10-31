@@ -1,11 +1,11 @@
-import { copyFileSync, existsSync, linkSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { deriveAddressableSpanViews, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION,
   sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { closeCachedDatabase, initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -16,16 +16,9 @@ import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/freeze/db-copy.
 import { snapshotPublishLockPath } from "../../../runs/snapshot/freeze/publish-lock.js";
 import { BENCH_DAEMON_DB_FILENAME, restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
-import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
-import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
-import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
-import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
-import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from "../../../runs/snapshot/source-records/publish.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
   sourceSemanticArtifactPreparations } from "../../../runs/extraction/request-artifact.js";
-import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
 
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
@@ -40,10 +33,6 @@ const attribution = { contract: "utterance-attribution-v1" as const, status: "ca
   issuer_scope: "fixture-conversation", utterances: [{ occurrence_id: "retained-utterance",
     utf8_span: [0, Buffer.byteLength(capturedContent)] as const, conversation_ref: "fixture-conversation", author_ref: "fixture-author" }] };
 const clock = "2026-09-25T00:00:00.000Z", candidate = "a".repeat(40);
-const generation = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_task: {
-  contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
-  original_query: "Which source format did the retained author choose?",
-  responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } } };
 const budget = { schema_version: 1, work_units: 10_000_000, memory_bytes: 200_000_000,
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 } as const;
 let original: Buffer, expectedSha256: string;
@@ -237,8 +226,8 @@ it("preserves version 1 manifest bytes and default source request identities", a
   expect(readFileSync(nativeSourceSnapshotManifestPath(snapshotPath))).toEqual(bytes);
 });
 
-// Two restore/checkpoint daemon cycles plus fill and public delivery; not the default unit-test timeout.
-it("carries retained author and attribution through outgoing H, audited publication and public delivery", async () => {
+// Two restore/checkpoint daemon cycles plus raw publication; not the default unit-test timeout.
+it("carries retained author and attribution through raw publication and explicit source preparation", async () => {
   const snapshotPath = path("chain.sqlite"); await admission(snapshotPath);
   const sourceDirectory = path("source-preparation-daemon");
   restoreSnapshotToDataDir({ snapshotDbPath: snapshotPath, expectedSha256, dataDirRoot: sourceDirectory });
@@ -254,68 +243,15 @@ it("carries retained author and attribution through outgoing H, audited publicat
     expect(source.catalog?.assertions.map(row => row.segments.map(segment => segment.text).join("")))
       .toEqual(["User: The retained author chose a source format.", "Assistant: The author quoted another role label."]);
   } finally { await sourceDaemon.shutdown(); }
-  const cacheRoot = path("cache"); mkdirSync(cacheRoot);
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
-  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://generativelanguage.googleapis.com");
-  const options = { variant: "native_source_snapshot" as const, nativeSourcePopulation: { name: "retained", snapshotPath },
-    cacheRoot, sourcePacking: "complete-source" as const, openSemantics: generation };
-  const inspection = await inspectExtractionAuthority({ ...options, action: "sample", revision: readCurrentExtractionAuthorityRevision() });
-  const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: inspection.missingKeys,
-    preflightOutputTokenCap: 16_384, geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
-  expect(preflight.ready_requests).toHaveLength(2);
-  const requests = preflight.ready_requests.map(row => parseSourceSemanticRequest(JSON.parse(row.userPrompt)));
-  expect(requests.find(request => request.source_request.original_source === content)?.source_request.source_assertions).toHaveLength(95);
-  expect(requests.find(request => request.source_request.original_source === capturedContent)?.source_request.attribution_context).toEqual(attribution);
-  expect(requests.find(request => request.source_request.original_source === content)?.source_request.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
-  expect(requests.every(request => request.source_request.source_role === "assistant"
-    && request.source_request.source_assertions.every(unit => unit.source_role === "assistant"))).toBe(true);
-  expect(sourceSemanticRequestCatalog(requests.find(request => request.source_request.original_source === capturedContent)!)).toEqual(originalCatalog);
-  const receipt = createExtractionAuthorityReceipt({ action: "sample", inspection, observation: inspection.observation,
-    sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection), sourcePreflight: preflight,
-    maxConcurrency: 1, outputTokenCap: { field: "maxOutputTokens", value: 16_384 }, diskFloorBytes: 0,
-    priceEstimate: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5, maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } });
-  const authorityReceiptPath = path("receipt.json"); writeExtractionAuthorityReceipt(authorityReceiptPath, receipt);
-  setExtractionCredentialFixture();
-  const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
-    const request = parseSourceSemanticRequest(JSON.parse(JSON.parse(String(init?.body)).contents[0].parts[0].text));
-    expect(requests).toContainEqual(request);
-    expect(request.source_request.source_assertions.every(unit => unit.source_role === "assistant")).toBe(true);
-    const assertion = request.source_request.source_assertions[0]!;
-    const response = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
-      content: { roots: [{ act: "assertion", expression: { kind: "content_ref", key: "statement" } }],
-        entities: [{ form: "entity", key: "entity", semantic_key: "entity", mentions: [{ assertion_id: assertion.assertion_id, text: assertion.text }] }],
-        nodes: [{ kind: "statement", key: "statement", predicate: { kind: "explicit", reading: "record",
-          support: { assertion_id: assertion.assertion_id, text: assertion.text } },
-          arguments: [{ role: "theme", target: { kind: "entity_ref", key: "entity" } }], qualifications: [] }], gaps: [] } });
-    return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: response }] } }],
-      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  expect((await runExtractionFill({ ...options, authorityReceiptPath, concurrency: 1 })).newlyExtracted).toBe(2);
-  await runExtractionFill({ ...options, authorityReceiptPath, concurrency: 1 });
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  const retainedPreparationPath = path("preflight.json"); writeFileSync(retainedPreparationPath, JSON.stringify(preflight));
-  const population = { name: "retained", nativeSnapshotPath: snapshotPath, model: "gemini-3.1-flash-lite",
-    requestProfile: "gemini-3.1-low-v1" as const, openSemantics: generation };
-  const associations = await prepareSourcePublicationAssociations(population, [{ cacheRoot, retainedPreparationPath }], path("associations.json"));
-  expect(associations.sources.every(row => row.status === "associated")).toBe(true);
   const publishedPath = path("published.sqlite");
   const publication = await publishSourceSemanticSnapshot({ snapshotPath: publishedPath, dataDirRoot: path("publish-daemon"),
     recordedAt: clock, workspaceId, runId, producerCommit: candidate,
-    descriptorExportSourceIds: ["assistant-source", "captured-source"],
-    populations: [{ ...population, cacheRoots: [cacheRoot], publicationAssociations: associations.publicationAssociations }] });
-  expect(publication.published_count).toBe(2);
+    populations: [{ name: "retained", nativeSnapshotPath: snapshotPath, model: "gemini-3.1-flash-lite",
+      requestProfile: "gemini-3.1-low-v1" }] });
+  expect(publication).toMatchObject({ admitted_count: 2, published_count: 0 });
   const report = readNativeSourcePublicationReport(publishedPath, snapshotPath);
   expect(report.sources.map(row => row.source_record)).toEqual(readVerifiedNativeSourceSnapshot(snapshotPath).records.map(row => row.record));
-  expect(report.sources.every(row => row.correspondence_descriptor !== undefined)).toBe(true);
-  for (const source of report.sources) {
-    const expectedContent = source.source_id === "assistant-source" ? content : capturedContent;
-    const line = preflight.ready_requests.find(row => parseSourceSemanticRequest(JSON.parse(row.userPrompt))
-      .source_request.original_source === expectedContent)!;
-    expect(source.source_interpretation_generation_key).toBe(line.key);
-    expect(source.source_interpretation_binding).toEqual({ kind: "host_publication_association", request_digest: line.requestSha256 });
-  }
+  expect(report.sources.every(row => row.correspondence_descriptor === undefined)).toBe(true);
   const directory = path("public-daemon");
   restoreSnapshotToDataDir({ snapshotDbPath: publishedPath, expectedSha256: publication.db_sha256, dataDirRoot: directory });
   const daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId, runId,
@@ -336,15 +272,6 @@ it("carries retained author and attribution through outgoing H, audited publicat
     if (quoted.operation !== "prepare_source") throw new Error("public source preparation required");
     expect(quoted.catalog).toEqual(originalCatalog);
     expect(quoted.attribution_context).toEqual(attribution);
-    const prepared = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
-      SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: generation.generation_task.original_query,
-        source_handle: delivered.source_handle, budget, authorized_scopes: { mode: "named", scopes: ["project"] } })));
-    expect(prepared).toMatchObject({ operation: "prepare_query" });
-    if (prepared.operation !== "prepare_query") throw new Error("public query preparation required");
-    expect(sourceSemanticExecutionPhases(prepared.execution)).toMatchObject({
-      query_preparation: { external_api_attempts: 0 }, semantic_generation_attempts: 0 });
-    expect(prepared.candidates.map(row => row.interpretation_id)).toContain(
-      report.sources.find(row => row.source_id === "assistant-source")?.interpretation_id);
   } finally { await daemon.shutdown(); }
   const changed = { ...publication, sources: publication.sources.map((row, index) => index === 0
     ? { ...row, source_record: { ...row.source_record!, speaker: "user" } } : row) };

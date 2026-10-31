@@ -17,9 +17,6 @@ import * as sourcePublication from "../../../runs/snapshot/source-records/publis
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
-import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
-import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
-import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
@@ -48,8 +45,7 @@ async function fixture(duplicate = false, abstention = false, authoredQuestions?
   roots.add(root);
   const dataDir = join(root, "data");
   const pinnedMetaRoot = join(root, "meta");
-  const cacheRoot = join(root, "cache");
-  await mkdir(dataDir); await mkdir(pinnedMetaRoot); await mkdir(join(cacheRoot, "ab"), { recursive: true });
+  await mkdir(dataDir); await mkdir(pinnedMetaRoot);
   const questions = authoredQuestions ?? [
     question("mixed-roles", [[{ role: "user", content: "A café source record." },
       { role: "assistant", content: "Noted the café source." }]]),
@@ -63,8 +59,7 @@ async function fixture(duplicate = false, abstention = false, authoredQuestions?
     sha256: createHash("sha256").update(source).digest("hex"),
     size_bytes: Buffer.byteLength(source), question_count: questions.length
   }));
-  await writeFile(join(cacheRoot, "ab", `${"ab".repeat(32)}.json`), "{}");
-  return { root, dataDir, pinnedMetaRoot, cacheRoot };
+  return { root, dataDir, pinnedMetaRoot };
 }
 
 function question(id: string, sessions: { role: string; content: string }[][]) {
@@ -396,23 +391,6 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected).toHaveLength(2);
   }, 60000);
 
-  it("rejects invalid or repeated publication associations before creating the snapshot", async () => {
-    const f = await fixture();
-    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
-    const source = census.records[0]!;
-    const binding = { source_id: source.source_id, source_version: source.source_version,
-      generation_key: "ab".repeat(32), request_digest: "c".repeat(64) };
-    const base = { snapshotPath: join(f.root, "invalid.sqlite"), dataDirRoot: join(f.root, "invalid-seed"),
-      recordedAt: CLOCK, producerCommit: "a".repeat(40) };
-    for (const [cacheRoot, bindings] of [[undefined, [binding]], [f.cacheRoot, [binding, binding]]] as const) {
-      await expect(publishSourceSemanticSnapshot({ ...base, populations: [{
-        name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, cacheRoots: cacheRoot === undefined ? [] : [cacheRoot],
-        model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", publicationAssociations: bindings
-      }] })).rejects.toThrow(/association requires a cache root|association repeats a source/u);
-      expect(existsSync(base.snapshotPath)).toBe(false);
-      expect(existsSync(base.dataDirRoot)).toBe(false);
-    }
-  });
   it("preserves identical text belonging to distinct source sessions", async () => {
     const f = await fixture(true);
     const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
@@ -460,26 +438,6 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected[0]!.source_manifest).toHaveLength(2);
     expect(frozen.selected[0]!.source_manifest).toMatchObject(expected);
     expect(readChainArtifact(join(freezeRoot, "freeze.json"))).toEqual(frozen);
-    const preflightPath = join(f.root, "retained-preflight.json");
-    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", population.model);
-    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", population.requestProfile);
-    vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "http://127.0.0.1:9");
-    const cleanCacheRoot = join(f.root, "clean-cache");
-    await mkdir(cleanCacheRoot);
-    const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot: cleanCacheRoot,
-      dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot, offset: 0, limit: 1,
-      sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
-      batch: { operation: "prepare", limits: { maxJobs: 1, maxRequestsPerJob: 64, maxFileBytes: 1_000_000,
-        maxInputTokensPerJob: 1_000_000, maxEnqueuedTokens: 1_000_000, maxOutputTokens: 4096,
-        maxUsd: 1, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
-        deadlineMs: 60_000, requestTimeoutMs: 5000, maxPolls: 10 } } });
-    await writeFile(preflightPath, JSON.stringify(preflight));
-    const associations = await prepareSourcePublicationAssociations(population,
-      [{ cacheRoot: cleanCacheRoot, retainedPreparationPath: preflightPath }], join(f.root, "associations.json"));
-    expect(associations.publicationAssociations).toEqual([]);
-    expect(associations.sources).toEqual(expected.map(({ source_id }) => ({
-      source_id, source_version: census.dataset_sha256, status: "unbound", reason: "missing_current_artifact"
-    })));
     const report = await publishSourceSemanticSnapshot({ snapshotPath: join(f.root, "occurrences.sqlite"),
       dataDirRoot: join(f.root, "seed"), recordedAt: CLOCK, producerCommit: "a".repeat(40), populations: [population] });
     expect(report).toMatchObject({ census_count: 2, admitted_count: 2, rejected_count: 0 });
@@ -500,21 +458,6 @@ describe("complete-source census and publication", () => {
     const f = await fixture(false, false, [first, { ...first, haystack_session_ids: [label] }]);
     await expect(censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot }))
       .rejects.toThrow("duplicate logical source occurrence");
-  });
-  it("rejects repeated cache roots and ambiguous generation keys before creating any snapshot", async () => {
-    const f = await fixture();
-    const second = join(f.root, "second-cache");
-    await mkdir(join(second, "ab"), { recursive: true });
-    await writeFile(join(second, "ab", `${"ab".repeat(32)}.json`), "{}");
-    for (const cacheRoots of [[f.cacheRoot, f.cacheRoot], [f.cacheRoot, second]]) {
-      const snapshotPath = join(f.root, "ambiguous.sqlite"), dataDirRoot = join(f.root, "ambiguous-runtime");
-      await expect(publishSourceSemanticSnapshot({ snapshotPath, dataDirRoot, recordedAt: CLOCK,
-        producerCommit: "a".repeat(40), populations: [{ name: "fixture", dataDir: f.dataDir,
-          pinnedMetaRoot: f.pinnedMetaRoot, cacheRoots, model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" }]
-      })).rejects.toThrow(/repeat a generation directory|occurs in multiple cache roots/u);
-      expect(existsSync(snapshotPath)).toBe(false);
-      expect(existsSync(dataDirRoot)).toBe(false);
-    }
   });
   it("keeps census and publication ownership out of the launcher", async () => {
     expect(await runSourceSemanticPublicationLauncher([])).toBe(2);
@@ -539,36 +482,7 @@ describe("complete-source census and publication", () => {
     expect(repeated.repeated_assertion_text).toBe(true);
     expect(repeated.speaker).toBe("user");
   });
-
-  it("admits every census source when source interpretation is absent and keeps failed source interpretation source retrieval", async () => {
-    const f = await fixture();
-    const report = await publishSourceSemanticSnapshot({
-      snapshotPath: join(f.root, "library.sqlite"), dataDirRoot: join(f.root, "seed"),
-      recordedAt: CLOCK, producerCommit: "a".repeat(40),
-      populations: [{
-        name: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot,
-        cacheRoots: [f.cacheRoot], model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1"
-      }]
-    });
-    expect(report.census_count).toBe(3);
-    expect(report.admitted_count).toBe(3);
-    expect(report.rejected_count).toBe(0);
-    expect(report.published_count).toBe(0);
-    expect(report.source_interpretation_counts.absent).toBe(3);
-    expect(report.unbound_source_interpretation_artifacts).toEqual([{ population: "fixture", generation_key: "ab".repeat(32), status: "invalid" }]);
-    expect(report.source_interpretation_binding_complete).toBe(false);
-    expect(report.sources.every((row) => row.admission === "admitted")).toBe(true);
-    expect(report.sources.every((row) => row.source_interpretation === "absent" && row.publication === "not_attempted")).toBe(true);
-    const db = new Database(report.snapshot_path, { readonly: true });
-    try {
-      expect(db.prepare("SELECT count(*) AS n FROM source_records").get()).toMatchObject({ n: 3 });
-      expect(db.prepare("SELECT count(*) AS n FROM memory_entries").get()).toMatchObject({ n: 0 });
-    } finally { db.close(); }
-    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
-    await expectPublishedSourceDelivery(join(f.root, "restore"), report, census.records);
-  }, 120000);
 });
-
 
 function cancellationGate() {
   let resolve: () => void = () => undefined;

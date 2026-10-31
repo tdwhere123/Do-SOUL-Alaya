@@ -117,10 +117,7 @@ async function publishQuestion(frozen: LongMemEvalSemanticFreeze, selected: Long
       dataDirRoot: join(directory, "publication-runtime"), recordedAt: config.recorded_at, producerCommit: config.producer_commit,
       workspaceId: questionWorkspace(frozen, selected.index), runId: questionWorkspace(frozen, selected.index),
       populations: [{ name: "longmemeval_s", dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root,
-        questionWindow: { offset: selected.index, limit: 1 }, model: config.model, requestProfile: config.request_profile,
-        ...("arm" in config ? { cacheRoots: config.source_cache_roots,
-          publicationAssociations: config.source_publication_associations.filter((association) =>
-            selected.source_manifest.some((source) => source.source_id === association.source_id)) } : {}) }] });
+        questionWindow: { offset: selected.index, limit: 1 }, model: config.model, requestProfile: config.request_profile }] });
     }
   }
   refuseBenchWorkAfterCancel();

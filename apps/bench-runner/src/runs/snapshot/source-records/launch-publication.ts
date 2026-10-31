@@ -1,7 +1,5 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
-import { readFileSync } from "node:fs";
-import { z } from "zod";
+import { publishSourceSemanticSnapshot, type SourcePublicationPopulation } from "./publish.js";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { isExtractionRequestProfile } from "../../extraction/request-profile.js";
 
@@ -34,21 +32,12 @@ export async function runSourceSemanticPublicationLauncher(args: readonly string
 
 function population(flags: ReadonlyMap<string, string>, name: "original" | "challenge"): SourcePublicationPopulation {
   const prefix = `--${name}`;
-  const cacheRoot = flags.get(`${prefix}-cache-root`);
-  const cacheRootsJson = flags.get(`${prefix}-cache-roots`);
-  if (cacheRoot !== undefined && cacheRootsJson !== undefined) throw new AlayaError("VALIDATION", "choose one cache roots flag per population");
-  const cacheRoots = cacheRootsJson === undefined ? (cacheRoot === undefined ? undefined : [cacheRoot])
-    : z.array(z.string().min(1)).min(1).max(32).parse(JSON.parse(cacheRootsJson));
-  const bindingsPath = flags.get(`${prefix}-publication-associations`);
   return {
     name,
     dataDir: required(flags, `${prefix}-data-dir`),
     pinnedMetaRoot: required(flags, `${prefix}-pinned-meta-root`),
     model: required(flags, "--model"),
-    requestProfile: requestProfile(required(flags, "--request-profile")),
-    ...(bindingsPath === undefined ? {} : { publicationAssociations: parseSourcePublicationAssociations(
-      JSON.parse(readFileSync(bindingsPath, "utf8"))) }),
-    ...(cacheRoots === undefined ? {} : { cacheRoots })
+    requestProfile: requestProfile(required(flags, "--request-profile"))
   };
 }
 
@@ -56,10 +45,8 @@ function parseFlags(args: readonly string[]): Map<string, string> {
   const allowed = [
     "--snapshot", "--data-dir-root", "--recorded-at", "--producer-commit", "--workspace-id", "--run-id",
     "--model", "--request-profile",
-    "--original-data-dir", "--original-pinned-meta-root", "--original-cache-root",
-    "--challenge-data-dir", "--challenge-pinned-meta-root", "--challenge-cache-root",
-    "--original-publication-associations", "--challenge-publication-associations",
-    "--original-cache-roots", "--challenge-cache-roots"
+    "--original-data-dir", "--original-pinned-meta-root",
+    "--challenge-data-dir", "--challenge-pinned-meta-root"
   ];
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
