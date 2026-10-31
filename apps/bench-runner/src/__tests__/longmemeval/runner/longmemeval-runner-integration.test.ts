@@ -80,8 +80,7 @@ describe("LongMemEval runner", () => {
         buildMockQuestion("q001", "session-a"),
         buildMockQuestion("q002", "session-b")
       ].map(question => ({ ...question,
-        // The old deictic "stored here" sentence has no current catalog assertion.
-        // Plant supported source statements so gold memories still traverse propose+review.
+        // Both questions share the identical decoy session, so three sessions are extracted.
         haystack_sessions: [
           [{ role: "user" as const, content: `I prefer topic ${question.question_id}.`, has_answer: true },
             { role: "assistant" as const, content: "Acknowledged." }],
@@ -191,7 +190,8 @@ describe("LongMemEval runner", () => {
 
       const extractionCacheRoot = join(tmpDir, "extraction-cache");
       await mkdir(extractionCacheRoot);
-      await admitRunnerExtractionFixture(extractionCacheRoot, mockQuestions);
+      await admitRunnerExtractionFixture(extractionCacheRoot, mockQuestions,
+        { name: "longmemeval-oracle", revision: datasetSha });
 
       const result = await runLongMemEval({
         variant,
@@ -238,7 +238,7 @@ describe("LongMemEval runner", () => {
       // A clean cache-backed run has no degradation findings artifact.
       await expect(readFile(result.findingsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
       expect(result.payload.kpi.seed_extraction_path).toMatchObject({
-        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        path: "official_api_compile", extraction_attempts: 3, cache_hits: 3,
         llm_calls: 0, offline_fallbacks: 0, live_extraction_failures: 0,
         cached_extraction_failures: 0, signals_dropped: 0, parse_dropped: 0
       });
@@ -316,7 +316,7 @@ describe("LongMemEval runner", () => {
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.seed_extraction_path).toMatchObject({
-        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        path: "official_api_compile", extraction_attempts: 3, cache_hits: 3,
         llm_calls: 0, offline_fallbacks: 0
       });
       expect(diagnostics.report_usage.mode).toBe("mixed");
@@ -395,7 +395,7 @@ describe("LongMemEval runner", () => {
         sha7: expect.stringMatching(/^[0-9a-f]{7}$/iu)
       });
       expect(fullDiagnostics.seed_extraction_path).toMatchObject({
-        path: "official_api_compile", extraction_attempts: 4, cache_hits: 4,
+        path: "official_api_compile", extraction_attempts: 3, cache_hits: 3,
         llm_calls: 0, offline_fallbacks: 0
       });
       expect(fullDiagnostics.report_side_effects?.snapshots).toHaveLength(2);

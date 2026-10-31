@@ -1,13 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
-  readExtractionCacheManifest,
   writeExtractionCacheManifest
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { LongMemEvalDiagnosticsSpool } from
@@ -55,12 +54,8 @@ describe("LongMemEval-S effective extraction root", () => {
       questions
     });
     // A successful preflight needs admitted shards, not just a provenance manifest.
-    await admitRunnerExtractionFixture(fixture.extractionCacheRoot, questions);
-    const manifest = readExtractionCacheManifest(fixture.extractionCacheRoot);
-    if (manifest === undefined) throw new Error("admitted extraction fixture manifest is missing");
-    writeExtractionCacheManifest(fixture.extractionCacheRoot, {
-      ...manifest, dataset: "longmemeval-s", dataset_revision: fixture.datasetSha256
-    });
+    await admitRunnerExtractionFixture(fixture.extractionCacheRoot, questions,
+      { name: "longmemeval-s", revision: fixture.datasetSha256 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("cache preflight must remain offline"));
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
     const spool = await LongMemEvalDiagnosticsSpool.create();
@@ -80,7 +75,7 @@ describe("LongMemEval-S effective extraction root", () => {
       expect(context.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
       expect(provenance.extraction_cache).toMatchObject({
         schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-        source_packing: "reference-eight",
+        source_packing: "session-statements",
         dataset_revision: fixture.datasetSha256,
         request_profile: "provider-default-v1"
       });
@@ -148,12 +143,12 @@ async function provenanceFor(
 function writeCurrentCacheManifest(cacheRoot: string, datasetSha256: string): void {
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-    source_packing: "reference-eight",
+    source_packing: "session-statements",
     extraction_model: "test-extraction-model",
     model_family: "test-extraction-model",
     request_profile: "provider-default-v1",
     provider_url: "https://provider.invalid/v1",
-    system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+    system_prompt_sha256: computeSystemPromptSha256(SOURCE_STATEMENTS_PROMPT),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: "longmemeval-s",
     dataset_revision: datasetSha256,

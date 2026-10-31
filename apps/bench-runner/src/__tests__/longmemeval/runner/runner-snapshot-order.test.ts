@@ -287,6 +287,8 @@ function snapshotContext(drift: SnapshotPolicyDrift = {}): LongMemEvalRunContext
     questions: [] as unknown as LongMemEvalRunContext["questions"],
     window: QUESTION_IDS.map((question_id) => ({
       question_id,
+      haystack_session_ids: [],
+      haystack_dates: [],
       haystack_sessions: []
     })) as
       unknown as LongMemEvalRunContext["window"],

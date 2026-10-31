@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
@@ -394,7 +394,7 @@ async function prepareCanonicalContext(
   writeExtractionCacheTestManifest({
     cacheRoot: extractionCacheRoot,
     model: "fixture-model",
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    systemPrompt: SOURCE_STATEMENTS_PROMPT
   });
   const spool = await LongMemEvalDiagnosticsSpool.create();
   try {

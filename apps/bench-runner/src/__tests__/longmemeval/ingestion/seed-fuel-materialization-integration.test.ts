@@ -9,11 +9,7 @@ import {
   WorkspaceState,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import {
-  buildOfficialApiExtractionRequest,
-  buildOfficialApiSourceCorpus,
-  stringifyOfficialApiExtractionRequest
-} from "@do-soul/alaya-soul";
+import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteMemoryEntryRepo,
@@ -28,9 +24,9 @@ import {
   type CompileSeedExtractionStats
 } from "../../../runs/compile-seed.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
-import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
+import { sourceStatementRequests, sourceStatementSession } from "../../../runs/extraction/source-statement-request.js";
+import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
 import {
-  providerBackedExtractionResult,
   providerBackedResponseResult,
   fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL,
@@ -214,43 +210,27 @@ describe("materialization fuel inventory integration", () => {
 
   it("protects materialization fuel inventory: cache replay serves extraction without new LLM calls before materialization", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
-    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: SOURCE_STATEMENTS_PROMPT });
+    const messages = [{ message_id: "seed-fuel-user", role: "user" as const, content: "I moved to Berlin." }];
+    const request = sourceStatementRequests(messages)[0]!;
+    const sourceCorpus = sourceStatementSession(messages).rendered.content;
     const delegate = {
-      extract: vi.fn(async (input) => providerBackedResponseResult(input, interpretationsEnvelope([
-          { matched: "moved to Berlin" }
-        ])))
+      extract: vi.fn(async (input: { userPrompt: string; onTransportAttempt?: () => void | Promise<void> }) =>
+        providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)))
     };
+    const config = { model: "test-model", modelFamily: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+      requestProfile: "provider-default-v1" as const, sourcePacking: "session-statements" as const };
     const warmStats = freshStats();
-    const warmExtractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
+    const warmExtractor = createCachingSignalExtractor({ delegate, config, cacheRoot,
       ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" }),
-      stats: warmStats
-    });
-    const userPrompt = stringifyOfficialApiExtractionRequest(
-      buildOfficialApiExtractionRequest("I moved to Berlin.", [])
-    );
-    await warmExtractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", []) });
+      stats: warmStats });
+    await warmExtractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt, sourceCorpus });
     expect(warmStats.llmCalls).toBe(1);
 
     const replayStats = freshStats();
-    const replayExtractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model", modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      stats: replayStats
-    });
-    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt, sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", []) });
-    expect(replay.rawJson).toContain("moved");
+    const replayExtractor = createCachingSignalExtractor({ delegate, config, cacheRoot, stats: replayStats });
+    const replay = await replayExtractor.extract({ systemPrompt: SOURCE_STATEMENTS_PROMPT, userPrompt: request.userPrompt, sourceCorpus });
+    expect(replay.rawJson).toContain("I moved to Berlin.");
     expect(replayStats.cacheHits).toBe(1);
     expect(replayStats.llmCalls).toBe(0);
     expect(delegate.extract).toHaveBeenCalledTimes(1);

@@ -21,6 +21,7 @@ import {
   readJson,
   stubOfflineExtractionEnv
 } from "./fixture.js";
+import { admitRunnerExtractionFixture } from "../runner/longmemeval-runner-fixture.js";
 
 let tmpRoot: string;
 
@@ -71,12 +72,15 @@ it("scores end-to-end QA over delivered recall", async () => {
 }, 180_000);
 
 it.each(["answer", "judge"] as const)("retains Recall in collection and archive after a terminal QA %s failure", async (stage) => {
+  const questions = buildRunnerQuestions("q", 2);
   const fixture = await createRunnerFixture({
     root: tmpRoot,
     label: "qa-failure",
     variant: "longmemeval_oracle",
-    questions: buildRunnerQuestions("q", 2)
+    questions
   });
+  await admitRunnerExtractionFixture(fixture.extractionCacheRoot, questions,
+    { name: "longmemeval-oracle", revision: fixture.datasetSha256 });
   const failure = new QaChatError("transient qa failure");
   const chat = vi.fn(async (_system: string, user: string) => {
     if (stage === "answer" && /topic q002/iu.test(user)) throw failure;

@@ -107,6 +107,8 @@ export function writeExtractionCacheTestManifest(input: {
   readonly modelFamily?: string;
   readonly providerUrl?: string;
   readonly requestProfile?: ExtractionRequestProfile;
+  readonly dataset?: string;
+  readonly datasetRevision?: string;
 }): void {
   writeExtractionCacheManifest(input.cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -117,8 +119,8 @@ export function writeExtractionCacheTestManifest(input: {
     provider_url: input.providerUrl ?? TEST_EXTRACTION_PROVIDER_URL,
     system_prompt_sha256: computeSystemPromptSha256(input.systemPrompt),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-    dataset: "test-fixture",
-    dataset_revision: "test-fixture",
+    dataset: input.dataset ?? "test-fixture",
+    dataset_revision: input.datasetRevision ?? "test-fixture",
     storage: "git-tracked",
     built_at: "2026-07-12T00:00:00.000Z",
     builder: "test"
