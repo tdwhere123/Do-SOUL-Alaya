@@ -35,10 +35,6 @@ const SeedBindingSchema = z.object({
   signalId: NonEmptyStringSchema,
   evidenceId: NonEmptyStringSchema.nullable()
 }).strict();
-const DirectEvidenceBindingSchema = z.object({
-  signalId: NonEmptyStringSchema,
-  evidenceId: NonEmptyStringSchema
-}).strict();
 const ExtractionShardSchema = z.object({
   cacheKey: Sha256Schema,
   rawJsonSha256: Sha256Schema,
@@ -81,7 +77,9 @@ const SeedRoundSchema = z.object({
   materializationDrop: CountSchema,
   memoryObjectIds: z.array(NonEmptyStringSchema),
   memoryBindings: z.array(SeedBindingSchema).optional(),
-  directEvidenceBindings: z.array(DirectEvidenceBindingSchema).optional()
+  // Earlier writers always emitted this key; only the empty form stays readable.
+  directEvidenceBindings: z.array(z.unknown())
+    .max(0, "direct evidence bindings are a retired fallback snapshot format").optional()
 }).strict();
 const SnapshotQuestionSchema = z.object({
   questionId: NonEmptyStringSchema,

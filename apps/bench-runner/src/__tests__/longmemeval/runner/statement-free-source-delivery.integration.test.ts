@@ -68,7 +68,6 @@ describe("LongMemEval statement-free source delivery", () => {
     expect(state.answerSeedDropReasons).toEqual({ candidate_absent: 1, materialization_drop: 0 });
     expect(state.seedRounds).toHaveLength(1);
     expect(state.seedRounds[0]).toMatchObject({ factsProduced: 0, memoryObjectIds: [], memoryBindings: [] });
-    expect(state.seedRounds[0]!.directEvidenceBindings ?? []).toEqual([]);
     // Seeding retained the source record; lexical readiness is separate.
     prepareSourceRecordLexicalIndex(daemon.dataDir, daemon.workspaceId);
     const recallResult = await daemon.recall(question.question, {

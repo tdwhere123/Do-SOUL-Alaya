@@ -218,12 +218,6 @@ function buildSeedRoundLedger(input: {
         objectId: seed.memoryId,
         signalId: seed.signalId,
         evidenceId: seed.evidenceId
-      })),
-    directEvidenceBindings: input.seeds
-      .filter((seed) => seed.kind === "evidence_capsule")
-      .map((seed) => ({
-        signalId: seed.signalId,
-        evidenceId: seed.evidenceId
       }))
   };
 }

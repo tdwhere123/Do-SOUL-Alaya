@@ -13,7 +13,6 @@ import type {
 } from "../materialize.js";
 import { assertStatementRound } from "./statement-session-proof.js";
 import { assertSeedLedgerMaterializationProof } from "./seed-ledger-materialization-proof.js";
-import { assertDirectSourceEvidenceClosure } from "./direct-source-evidence-proof.js";
 import type { SourceAssertionSupplementBinding } from
   "../../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import {
@@ -66,7 +65,6 @@ export function assertQuestionLedger(
     source,
     ledger
   });
-  assertDirectSourceEvidenceClosure({ db, question, source, ledger });
   assertSidecarSourceClosure(question, ledger, ledgerMemorySources);
   assertAnswerDropReasons(question, ledger);
 }

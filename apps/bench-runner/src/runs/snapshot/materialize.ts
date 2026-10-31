@@ -95,11 +95,6 @@ export interface LongMemEvalSnapshotSeedBinding {
   readonly evidenceId: string | null;
 }
 
-export interface LongMemEvalSnapshotDirectEvidenceBinding {
-  readonly signalId: string;
-  readonly evidenceId: string;
-}
-
 export interface LongMemEvalSnapshotExtractionShard {
   readonly cacheKey: string;
   readonly rawJsonSha256: string;
@@ -129,7 +124,6 @@ export interface LongMemEvalSnapshotSeedRound {
   readonly materializationDrop: number;
   readonly memoryObjectIds: readonly string[];
   readonly memoryBindings?: readonly LongMemEvalSnapshotSeedBinding[];
-  readonly directEvidenceBindings?: readonly LongMemEvalSnapshotDirectEvidenceBinding[];
 }
 
 export interface LongMemEvalAnswersWithFormationReceipt {

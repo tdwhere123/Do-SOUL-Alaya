@@ -26,8 +26,6 @@ import type {
   LongMemEvalSnapshotSidecarEntry,
   LongMemEvalSnapshotSidecarFile
 } from "./materialize.js";
-import { assertDirectSourceEvidenceClosure } from
-  "./seed-ledger/direct-source-evidence-proof.js";
 
 import { readSourceObservationProof } from "./seed-ledger/source-observation-proof.js";
 
@@ -92,12 +90,6 @@ export function assertSnapshotDatasetSubstrateIdentity(input: {
             return [id, proof === null ? row : { ...row, sourceBoundRound: proof.round }];
           }))
       );
-      assertDirectSourceEvidenceClosure({
-        db,
-        question: sidecar,
-        source,
-        ledger: sidecar.seedRounds ?? []
-      });
     });
   } finally {
     db.close();
