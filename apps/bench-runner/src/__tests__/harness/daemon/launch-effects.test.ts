@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, unlink } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -110,11 +111,10 @@ it("plans the default config lease under the physical temp root", async () => {
   const physical = join(root, "physical"), alias = join(root, "alias");
   await mkdir(physical);
   await symlink(physical, alias, "junction");
-  for (const key of ["TMPDIR", "TMP", "TEMP"]) vi.stubEnv(key, alias);
-  const launch = createBenchDaemonLaunchConfig({ ...defaults, ambientEnv: {} });
-  expect(dirname(launch.configDir)).toBe(realpathSync(physical));
+  const configDir = planDefaultConfigDirInChild(alias);
+  expect(dirname(configDir)).toBe(realpathSync(physical));
   await unlink(alias);
-  const lease = createBenchDaemonConfigDirectoryLease(launch.configDir);
+  const lease = createBenchDaemonConfigDirectoryLease(configDir);
   await lease.prepare();
   expect(await readdir(physical)).toHaveLength(1);
   const isolation = installProviderFreeBoundary();
@@ -126,3 +126,20 @@ it("plans the default config lease under the physical temp root", async () => {
   } finally { isolation.restore(); await lease.cleanup(); }
   expect(await readdir(physical)).toEqual([]);
 });
+
+// os.tmpdir() reads the native process environment, which an in-process stub cannot
+// reach once a test guard has replaced process.env; a child owns its own environment.
+function planDefaultConfigDirInChild(temporaryRoot: string): string {
+  const owner = new URL("../../../../dist/harness/daemon/daemon-environment.js", import.meta.url).href;
+  const program = `const { createBenchDaemonLaunchConfig } = await import(${JSON.stringify(owner)});
+    const launch = createBenchDaemonLaunchConfig({ dataDir: "/fixture-data", embeddingMode: "disabled",
+      embeddingProviderKind: "local_onnx", tokenFactory: () => "fixture", ambientEnv: {} });
+    process.stdout.write(launch.configDir);`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", program], {
+    env: { PATH: process.env.PATH, TMPDIR: temporaryRoot, TMP: temporaryRoot, TEMP: temporaryRoot,
+      ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot } : {}) },
+    encoding: "utf8", timeout: 30_000
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout;
+}

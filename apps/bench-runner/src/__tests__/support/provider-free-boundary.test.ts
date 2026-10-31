@@ -9,6 +9,14 @@ import type { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { installProviderFreeBoundary } from "./provider-free-boundary.js";
 
+// An outer provider-free run may already guard descendants with its own preload;
+// that guard appends its import after ours and is not part of this unit's argv.
+const ambientImports = (process.env.NODE_OPTIONS ?? "").split(/\s+/u).filter(token => token.startsWith("--import="));
+function expectDescendantArgv(observed: readonly string[], expected: readonly string[]) {
+  expect(observed.slice(0, expected.length)).toEqual(expected);
+  for (const token of observed.slice(expected.length)) expect(ambientImports).toContain(token);
+}
+
 const directories: string[] = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
 const temporary = () => { const path = realpathSync(mkdtempSync(join(tmpdir(), "provider-boundary-fixture-"))); directories.push(path); return path; };
@@ -111,7 +119,7 @@ it.each(["supplied", "default", "already-present"] as const)("preserves repeated
     try {
       const { observation, code } = await observeDescendant(child);
       expect(observation.entry).toBe(pathToFileURL(path).href);
-      expect(observation.execArgv).toEqual(expected);
+      expectDescendantArgv(observation.execArgv, expected);
       expect(observation.refusal).toBe("Provider-free test refused non-loopback fetch");
       expect(code).toBe(1); // The preload refuses even a caught provider attempt at exit.
       expect(supplied).toEqual(mode === "already-present" ? expected : expected.slice(0, -1));
@@ -131,7 +139,7 @@ it("preserves repeated Worker flags and an already-present guard while retaining
     try {
       const { observation, code } = await observeDescendant(worker);
       expect(deadlineFired).toBe(false);
-      expect(observation.entry).toBe(pathToFileURL(path).href); expect(observation.execArgv).toEqual(expected);
+      expect(observation.entry).toBe(pathToFileURL(path).href); expectDescendantArgv(observation.execArgv, expected);
       expect(observation.refusal).toBe("Provider-free test refused non-loopback fetch"); expect(code).toBe(1);
       expect(supplied).toEqual(expected);
     } finally { clearTimeout(deadline); }

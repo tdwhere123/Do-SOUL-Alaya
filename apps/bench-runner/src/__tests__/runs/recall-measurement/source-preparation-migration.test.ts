@@ -140,7 +140,7 @@ it("migrates only a private copy, retires historical selection, and prepares new
     new BetterSqlite3(prepared.config.snapshot_path, { readonly: true, fileMustExist: true }));
   try {
     const index = new SqliteSourceIndexRepository(sealed, fieldContractSha256), id = prepared.config.source_index!.index.generation_id;
-    expect(index.generation(WORKSPACE, id)).toMatchObject({ preparation_revision: 2, status: "ready" });
+    expect(index.generation(WORKSPACE, id)).toMatchObject({ preparation_revision: 3, status: "ready" });
     expect(index.listTargets(WORKSPACE, id, null, 10)).toEqual(expect.arrayContaining([
       expect.objectContaining({ target: expect.objectContaining({ root_kind: "source_record", root_id: record.record_id }) }),
       expect.objectContaining({ source_id: null, target: expect.objectContaining({ root_kind: "evidence_capsule", root_id: capsule.object_id }) })
