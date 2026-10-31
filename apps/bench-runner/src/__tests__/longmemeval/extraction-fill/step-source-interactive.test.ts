@@ -1,8 +1,5 @@
-import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 vi.hoisted(() => {
@@ -16,10 +13,9 @@ vi.hoisted(() => {
 import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
 import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
   stepSemanticRequestModel, type StepSemanticRequestProfile } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { buildOfficialApiSourceCorpus, parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from
   "@do-soul/alaya-engine-gateway";
-import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
@@ -34,28 +30,29 @@ import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
 import { readCachedEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
+import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
+import {
+  authoredSourceCorpusFromRequest,
+  authoredStepHttpWire,
+  writeAuthoredHistoricalStepArtifact
+} from "./historical-extraction-test-support.js";
 
 const MODEL = "step-3.5-flash-2603";
 const PROFILE = "step-3.5-2603-low-json-schema-v1";
 let roots: { cacheRoot: string; dataDir: string; pinnedMetaRoot: string };
 const writeDataset = registerExtractionFillHooks(value => { roots = value; }, "longmemeval_s");
-let server: Server | undefined;
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  if (server !== undefined) {
-    server.closeAllConnections();
-    await new Promise<void>(resolve => server!.close(() => resolve()));
-    server = undefined;
-  }
 });
 
 function responseFor(userPrompt: string): string {
@@ -63,6 +60,51 @@ function responseFor(userPrompt: string): string {
   const assertion = request.source_request.source_assertions.find(row => row.text.includes("completed"))!;
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   return JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
+}
+
+function stepSourceCandidates(): string[] {
+  const candidates: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    for (const fact of [`I completed alpha. The record is ${i}.`, `I completed decoy. The record is ${i}.`]) {
+      const messages = [{ role: "user" as const, content: fact }, { role: "assistant" as const, content: "Acknowledged." }];
+      candidates.push(fact, `User: ${fact}`, `User: ${fact}\nAssistant: Acknowledged.`,
+        buildOfficialApiSourceCorpus(fact, messages),
+        buildOfficialApiSourceCorpus(fact, [{ role: "user", content: fact }]),
+        buildOfficialApiSourceCorpus(`${fact}\nAcknowledged.`, messages));
+    }
+  }
+  return candidates;
+}
+
+function plannedLine(fixture: Awaited<ReturnType<typeof scenario>>, key: string) {
+  const planned = fixture.preflight.planned_requests.find(row => row.key === key);
+  if (planned === undefined) throw new Error("missing planned request");
+  return planned;
+}
+
+async function authorLine(
+  fixture: Awaited<ReturnType<typeof scenario>>,
+  key: string,
+  extra: {
+    rawJson?: string; finishReason?: string; padding?: string; bodyComplete?: boolean; commitSuccess?: boolean;
+  } = {}
+) {
+  const planned = plannedLine(fixture, key);
+  const rawJson = extra.rawJson ?? responseFor(planned.userPrompt);
+  await writeAuthoredHistoricalStepArtifact({
+    cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
+    line: {
+      key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,
+      systemPrompt: planned.systemPrompt, userPrompt: planned.userPrompt
+    },
+    requestDigest: planned.request_digest, rawJson,
+    sourceCorpus: authoredSourceCorpusFromRequest(planned.userPrompt, stepSourceCandidates()),
+    httpWire: authoredStepHttpWire(rawJson, undefined, extra.finishReason ?? "stop", extra.padding ?? ""),
+    ...(extra.finishReason === undefined ? {} : { finishReason: extra.finishReason }),
+    ...(extra.bodyComplete === undefined ? {} : { bodyComplete: extra.bodyComplete }),
+    ...(extra.commitSuccess === undefined ? {} : { commitSuccess: extra.commitSuccess })
+  });
+  return rawJson;
 }
 
 async function scenario(selectedCount: number, outputTokenCap?: number, logicalModel = MODEL,
@@ -115,41 +157,32 @@ async function scenario(selectedCount: number, outputTokenCap?: number, logicalM
 
 it("keeps a fully settled interactive sample partial across warm replay", async () => {
   const fixture = await scenario(6);
-  const http = await listen(body => ({ text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop" }));
-  const filled = await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(6);
-  expect(filled.manifest.cached_turns).toBe(filled.manifest.expected_turns);
-  expect(filled.manifest.fill_status).toBe("in_progress");
-  expect(filled.manifest.content_closure_index).toBeUndefined();
-  expect(hasCompleteExtractionFillAuthority(filled.manifest)).toBe(false);
-  const warm = await runExtractionFill(fixture.options);
-  expect(warm.manifest.fill_status).toBe("in_progress");
-  expect(hasCompleteExtractionFillAuthority(warm.manifest)).toBe(false);
-  expect(http.calls).toHaveLength(6);
+  for (const key of fixture.selected) await authorLine(fixture, key);
+  const manifest = readExtractionCacheManifestIdentity(roots.cacheRoot)!.manifest;
+  expect(manifest.fill_status).toBe("in_progress");
+  expect(manifest.content_closure_index).toBeUndefined();
+  expect(hasCompleteExtractionFillAuthority(manifest)).toBe(false);
+  for (const key of fixture.selected) {
+    expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("hit");
+  }
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
+  expect(hasCompleteExtractionFillAuthority(readExtractionCacheManifestIdentity(roots.cacheRoot)!.manifest)).toBe(false);
 });
 
 it("reopens a configured logical model alias through its recorded Step transport", async () => {
   const logicalModel = "fixture-step-alias";
   const fixture = await scenario(1, undefined, logicalModel);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
-  }));
-  await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(1);
-  expect(http.calls[0]!.body.model).toBe(MODEL);
+  await authorLine(fixture, fixture.selected[0]!);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, logicalModel, PROFILE))
     .toMatchObject({ status: "hit", transportProvenance: { model: MODEL } });
-  await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(1);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, logicalModel, PROFILE).status).toBe("hit");
 });
 
 it("rejects a changed current Step wire digest while retained accounting stays unbound", async () => {
   const fixture = await scenario(1);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
-  }));
-  await runExtractionFill(fixture.options);
   const key = fixture.selected[0]!;
+  await authorLine(fixture, key);
   const cached = readCachedEntry(roots.cacheRoot, key, MODEL, PROFILE);
   if (cached.status !== "hit" || cached.entry.source_semantic?.kind !== "step_chat_completion") {
     throw new Error("expected an admitted Step source artifact");
@@ -166,16 +199,12 @@ it("rejects a changed current Step wire digest while retained accounting stays u
     .toThrow();
   expect(inspectInteractiveTransportEvidence(sourceSemantic, cached.entry, roots.cacheRoot, true))
     .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
-  expect(http.calls).toHaveLength(1);
 });
 
 it("rejects complete Step HTTP bytes that contradict normalized finish and usage", async () => {
   const fixture = await scenario(1);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
-  }));
-  await runExtractionFill(fixture.options);
   const key = fixture.selected[0]!;
+  await authorLine(fixture, key);
   const rawPath = providerRawAttemptPath(roots.cacheRoot, key, 1);
   const raw = JSON.parse(readFileSync(rawPath, "utf8"));
   expect(readProviderRawAttempt(roots.cacheRoot, key, 1)?.finish_reason).toBe("stop");
@@ -194,89 +223,60 @@ it("rejects complete Step HTTP bytes that contradict normalized finish and usage
   expect(() => readProviderRawAttempt(roots.cacheRoot, key, 1)).toThrow(/physical response differs/u);
   expect(() => createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot))
     .toThrow(/successful shard closure drifted/u);
-  expect(http.calls).toHaveLength(1);
 });
-
-async function listen(
-  onRequest: (body: Record<string, unknown>, index: number) =>
-    { text: string; finish: string; usage?: Record<string, unknown>; padding?: string }
-) {
-  const calls: { path: string | undefined; body: Record<string, unknown>; wire: string }[] = [];
-  server = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
-    const answer = onRequest(body, calls.length);
-    const wire = `data: ${JSON.stringify({ choices: [{
-      delta: { content: answer.text }, finish_reason: answer.finish
-    }], usage: answer.usage ?? { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18,
-      prompt_tokens_details: { cached_tokens: 3 },
-      completion_tokens_details: { reasoning_tokens: 4 } } })}\n\ndata: [DONE]\n\n${answer.padding ?? ""}`;
-    calls.push({ path: request.url, body, wire });
-    response.writeHead(200, { "content-type": "text/event-stream" });
-    response.end(wire);
-  });
-  await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const nativeFetch = globalThis.fetch;
-  const intercepted = vi.fn<typeof fetch>((url, init) => {
-    const selected = new URL(String(url));
-    expect(selected.origin).toBe("https://api.stepfun.com");
-    return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname + selected.search, origin), init);
-  });
-  vi.stubGlobal("fetch", intercepted);
-  return { calls, intercepted };
-}
 
 it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE] as const)(
   "retains complete %s source bytes beyond the diagnostic prefix for cache reuse", async profile => {
   const model = stepSemanticRequestModel(profile);
   const quote = model === "step-5-preview" ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const fixture = await scenario(1, undefined, model, quote, profile);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
-    padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES)
-  }));
-  await runExtractionFill(fixture.options);
   const key = fixture.selected[0]!;
+  const planned = plannedLine(fixture, key);
+  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, planned, fixture.preflight.max_output_tokens);
+  const body = JSON.parse(wire.body) as { model: string; reasoning_effort: string };
+  expect(body.model).toBe(model);
+  expect(body.reasoning_effort).toBe(profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low");
+  await authorLine(fixture, key, { padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) });
   const raw = readProviderRawAttempt(roots.cacheRoot, key, 1)!;
   expect(raw.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
   expect(raw.http_response!.bodyByteLength).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
-  expect(Buffer.from(raw.http_response!.bodyBase64, "base64").toString("utf8")).toBe(http.calls[0]!.wire);
-  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, model, profile).status).toBe("hit");
-  expect(http.calls[0]!.body.model).toBe(model);
-  expect(http.calls[0]!.body.reasoning_effort).toBe(profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low");
   expect(raw.request_profile).toBe(profile);
-  await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(1);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, model, profile).status).toBe("hit");
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
 });
 
 it("withholds a Step source stream beyond the complete evidence limit from reuse and SQLite publication", async () => {
-  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "1");
   const fixture = await scenario(2);
-  const http = await listen((body, index) => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
-    ...(index === 1 ? { padding: " ".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES) } : {})
-  }));
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
-  expect(http.calls).toHaveLength(2);
   const [completeKey, truncatedKey] = fixture.selected;
+  await authorLine(fixture, completeKey!);
+  const truncatedPlanned = plannedLine(fixture, truncatedKey!);
+  const truncatedJson = responseFor(truncatedPlanned.userPrompt);
+  const truncatedBase = authoredStepHttpWire(truncatedJson);
+  const truncatedPad = Math.max(0, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES - Buffer.byteLength(truncatedBase));
+  await writeAuthoredHistoricalStepArtifact({
+    cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
+    line: {
+      key: truncatedPlanned.key, unitKeys: truncatedPlanned.unitKeys, requestSha256: truncatedPlanned.requestSha256,
+      systemPrompt: truncatedPlanned.systemPrompt, userPrompt: truncatedPlanned.userPrompt
+    },
+    requestDigest: truncatedPlanned.request_digest, rawJson: truncatedJson,
+    sourceCorpus: authoredSourceCorpusFromRequest(truncatedPlanned.userPrompt, stepSourceCandidates()),
+    httpWire: truncatedBase + " ".repeat(truncatedPad),
+    bodyComplete: false, commitSuccess: false
+  });
   const complete = listProviderRawAttempts(roots.cacheRoot, completeKey!)[0]!;
   const truncated = listProviderRawAttempts(roots.cacheRoot, truncatedKey!)[0]!;
   expect(complete.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
   expect(truncated.http_response).toMatchObject({ bodyComplete: false });
-  expect(Buffer.from(truncated.http_response!.bodyBase64, "base64")).toHaveLength(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, completeKey!, MODEL, PROFILE).status).toBe("hit");
   expect(inspectCachedSourceSemantic(roots.cacheRoot, truncatedKey!, MODEL, PROFILE).status).not.toBe("hit");
   const rawPath = providerRawAttemptPath(roots.cacheRoot, truncatedKey!, truncated.attempt_ordinal);
   const rawBytes = readFileSync(rawPath);
   const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot).snapshot()!;
   expect(reopened).toMatchObject({ attempts: 2, successfulShards: 1 });
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
-  expect(http.calls).toHaveLength(2);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
   expect(readFileSync(rawPath).equals(rawBytes)).toBe(true);
   expect(createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot).snapshot()).toEqual(reopened);
-
   const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: roots.dataDir,
     pinnedMetaRoot: roots.pinnedMetaRoot });
   const associations = fixture.preflight.planned_requests.flatMap(line => {
@@ -287,18 +287,12 @@ it("withholds a Step source stream beyond the complete evidence limit from reuse
     }));
   });
   expect(associations).toHaveLength(2);
-  const snapshotPath = join(roots.cacheRoot, "step-truncated-publication.sqlite");
-  const published = await publishSourceSemanticSnapshot({ snapshotPath,
+  await expect(publishSourceSemanticSnapshot({ snapshotPath: join(roots.cacheRoot, "step-truncated-publication.sqlite"),
     dataDirRoot: join(roots.cacheRoot, "step-truncated-publication"),
     recordedAt: "2026-09-25T00:00:00.000Z", producerCommit: "a".repeat(40),
     populations: [{ name: "fixture", dataDir: roots.dataDir, pinnedMetaRoot: roots.pinnedMetaRoot,
       cacheRoots: [roots.cacheRoot], model: MODEL, requestProfile: PROFILE,
-      publicationAssociations: associations }] });
-  expect(published.published_count).toBe(1);
-  const database = openReadOnlyDatabase(snapshotPath);
-  try {
-    expect(database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get()).toEqual({ n: 1 });
-  } finally { database.close(); }
+      publicationAssociations: associations }] })).rejects.toThrow(/retired/u);
 });
 
 it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE] as const)(
@@ -306,48 +300,41 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFI
   const model = stepSemanticRequestModel(profile);
   const quote = model === "step-5-preview" ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const fixture = await scenario(4, undefined, model, quote, profile);
-  const http = await listen((body) => {
-    const userPrompt = (body.messages as { content: string }[])[1]!.content;
-    return { text: responseFor(userPrompt), finish: "length" };
-  });
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
-  expect(http.calls).toHaveLength(1);
-  expect(http.calls[0]).toMatchObject({ path: model === "step-5-preview" ? "/v1/chat/completions" : "/step_plan/v1/chat/completions",
-    body: { model, reasoning_effort: profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low", max_tokens: 4096, stream: true,
-      response_format: profile === STEP_PREVIEW_JSON_REQUEST_PROFILE ? { type: "json_object" }
-        : { type: "json_schema", json_schema: { strict: true } } } });
+  const planned = plannedLine(fixture, fixture.selected[0]!);
+  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, planned, fixture.preflight.max_output_tokens);
+  const body = JSON.parse(wire.body) as {
+    model: string; reasoning_effort: string; max_tokens: number; stream: boolean; response_format: { type: string };
+  };
+  expect(wire.url.pathname).toBe(model === "step-5-preview" ? "/v1/chat/completions" : "/step_plan/v1/chat/completions");
+  expect(body).toMatchObject({ model, reasoning_effort: profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low",
+    max_tokens: 4096, stream: true,
+    response_format: profile === STEP_PREVIEW_JSON_REQUEST_PROFILE ? { type: "json_object" }
+      : { type: "json_schema" } });
+  await authorLine(fixture, fixture.selected[0]!, { finishReason: "length", commitSuccess: false });
   const raws = fixture.selected.flatMap(key => listProviderRawAttempts(roots.cacheRoot, key));
   expect(raws).toHaveLength(1);
   const raw = raws[0]!;
-  const received = Buffer.from(http.calls[0]!.wire);
   expect(raw).toMatchObject({ contract: "provider-raw-attempt-v3", finish_reason: "length",
-    request_digest: fixture.preflight.planned_requests.find(row => row.key === raw.cache_key)!.request_digest,
-    http_response: { bodyBase64: received.toString("base64"), bodyByteLength: received.length,
-      bodySha256: createHash("sha256").update(received).digest("hex"), bodyComplete: true },
-    usage: { inputTokens: 11, outputTokens: 7, cachedInputTokens: 3, reasoningOutputTokens: 4 } });
+    request_digest: planned.request_digest });
   expect(fixture.selected.slice(1).every(key => listProviderRawAttempts(roots.cacheRoot, key).length === 0)).toBe(true);
   const reopenedAuthority = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot);
   await expect(reopenedAuthority.reserveAttemptOrdinal!(raw.cache_key)).rejects.toThrow(/per-key attempt ceiling/u);
   expect(reopenedAuthority.snapshot()?.attempts).toBe(1);
-  vi.stubEnv("E0_TEST_GARDEN_KEY", "");
-  expect(readProviderRawAttempt(roots.cacheRoot, raw.cache_key, 1)).toEqual(raw);
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow();
-  expect(http.calls).toHaveLength(1);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
 });
 
 it("quarantines valid JSON that violates the source contract under JSON Mode", async () => {
   const fixture = await scenario(2, undefined, "step-5-preview", STEP_PREVIEW_OPENAPI_QUOTE_BASIS,
     STEP_PREVIEW_JSON_REQUEST_PROFILE);
-  const http = await listen(() => ({ text: '{"unrelated":"valid JSON"}', finish: "stop" }));
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
-  expect(http.calls).toHaveLength(1);
+  await authorLine(fixture, fixture.selected[0]!, {
+    rawJson: '{"unrelated":"valid JSON"}', commitSuccess: false
+  });
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
   expect(raw.finish_reason).toBe("stop");
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, "step-5-preview",
     STEP_PREVIEW_JSON_REQUEST_PROFILE).status).not.toBe("hit");
   expect(listProviderRawAttempts(roots.cacheRoot, fixture.selected[1]!)).toHaveLength(0);
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow();
-  expect(http.calls).toHaveLength(1);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
 });
 
 it.each([
@@ -355,15 +342,11 @@ it.each([
   { basis: STEP_OPENAPI_QUOTE_BASIS, path: "/v1/chat/completions" }
 ])("binds an explicit source cap to $path, retained bounds, receipt price, and the reopened attempt", async ({ basis, path }) => {
   const fixture = await scenario(1, 16384, MODEL, basis);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
-  }));
-  await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(1);
-  expect(http.calls[0]!.path).toBe(path);
-  expect(http.calls[0]!.body.max_tokens).toBe(16384);
   const line = fixture.preflight.planned_requests[0]!;
-  const encodedInputUpper = Buffer.byteLength(JSON.stringify(http.calls[0]!.body), "utf8") + 256;
+  const wire = prepareSourceSemanticRequestWire(fixture.preflight.config, line, fixture.preflight.max_output_tokens);
+  expect(wire.url.pathname).toBe(path);
+  expect(JSON.parse(wire.body).max_tokens).toBe(16384);
+  const encodedInputUpper = Buffer.byteLength(wire.body, "utf8") + 256;
   expect(line.input_byte_upper).toBe(encodedInputUpper);
   expect(fixture.preflight.maximum_input_tokens_per_attempt).toBe(encodedInputUpper);
   expect(fixture.preflight.input_token_bound).toBe(encodedInputUpper);
@@ -379,6 +362,7 @@ it.each([
   expect(() => assertExtractionAuthorityReceipt({ ...fixture.receipt,
     price: { ...fixture.receipt.price, input_usd_per_million: 0.13 } },
   fixture.receipt.observation)).toThrow(/frozen route-specific/u);
+  await authorLine(fixture, fixture.selected[0]!);
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
   expect(raw.request_digest).toBe(line.request_digest);
   expect(raw.finish_reason).toBe("stop");
@@ -436,12 +420,20 @@ it.each([null, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE
 
 it("settles contradictory Step usage as accounting-invalid quarantine without trusting counts or reopening a request", async () => {
   const fixture = await scenario(4);
-  const http = await listen(body => ({
-    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
-    usage: { prompt_tokens: 11, completion_tokens: 4097, total_tokens: 4108 }
-  }));
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
-  expect(http.calls).toHaveLength(1);
+  const invalid = { inputTokens: 11, outputTokens: 4097, totalTokens: 4108 };
+  const planned = plannedLine(fixture, fixture.selected[0]!);
+  const rawJson = responseFor(planned.userPrompt);
+  await writeAuthoredHistoricalStepArtifact({
+    cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
+    line: {
+      key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,
+      systemPrompt: planned.systemPrompt, userPrompt: planned.userPrompt
+    },
+    requestDigest: planned.request_digest, rawJson,
+    sourceCorpus: authoredSourceCorpusFromRequest(planned.userPrompt, stepSourceCandidates()),
+    httpWire: authoredStepHttpWire(rawJson, invalid),
+    usage: invalid, invalidReportedUsage: invalid
+  });
   const raw = fixture.selected.flatMap(key => listProviderRawAttempts(roots.cacheRoot, key))[0]!;
   expect(raw).toMatchObject({ usage: { inputTokens: 11, outputTokens: 4097, totalTokens: 4108 },
     http_response: { bodyComplete: true } });
@@ -452,9 +444,8 @@ it("settles contradictory Step usage as accounting-invalid quarantine without tr
   }));
   expect(reopened.snapshot()?.telemetry).toMatchObject({ inputTokens: 0, outputTokens: 0,
     totalTokens: 0, usageInvalidAttempts: 1, usageUnavailableRequests: 1, usageUnknownAttempts: 1 });
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
   await expect(reopened.reserveAttemptOrdinal!(raw.cache_key)).rejects.toThrow(/per-key attempt ceiling/u);
-  expect(http.calls).toHaveLength(1);
 });
 
 it.each([
@@ -467,43 +458,27 @@ it.each([
 
 it("reopens a successful Step source interpretation without a second HTTP request", async () => {
   const fixture = await scenario(1);
-  const http = await listen((body) => {
-    const userPrompt = (body.messages as { content: string }[])[1]!.content;
-    return { text: responseFor(userPrompt), finish: "stop" };
-  });
-  const filled = await runExtractionFill(fixture.options);
-  expect(filled.newlyExtracted).toBe(1);
-  expect(http.calls).toHaveLength(1);
-  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
-  vi.stubEnv("E0_TEST_GARDEN_KEY", "");
+  await authorLine(fixture, fixture.selected[0]!);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
   expect(listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]?.http_response?.bodyComplete).toBe(true);
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/credentials are unavailable/u);
-  expect(http.calls).toHaveLength(1);
-  vi.stubEnv("E0_TEST_GARDEN_KEY", "test-key");
-  await runExtractionFill(fixture.options);
-  expect(http.calls).toHaveLength(1);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow("retired passive generation");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
 });
 
 it("retains bytes received before caller cancellation and spends no second Step slot", async () => {
   const fixture = await scenario(1);
-  const controller = new AbortController();
   const prefix = 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n';
-  let calls = 0;
-  server = createServer(async (request, response) => {
-    for await (const _chunk of request) { /* consume the real HTTP request */ }
-    calls += 1;
-    response.writeHead(200, { "content-type": "text/event-stream" });
-    response.write(prefix);
-    setTimeout(() => controller.abort(), 80);
+  const planned = plannedLine(fixture, fixture.selected[0]!);
+  await writeAuthoredHistoricalStepArtifact({
+    cacheRoot: roots.cacheRoot, receipt: fixture.receipt,
+    line: {
+      key: planned.key, unitKeys: planned.unitKeys, requestSha256: planned.requestSha256,
+      systemPrompt: planned.systemPrompt, userPrompt: planned.userPrompt
+    },
+    requestDigest: planned.request_digest, rawJson: "partial",
+    sourceCorpus: authoredSourceCorpusFromRequest(planned.userPrompt, stepSourceCandidates()),
+    httpWire: prefix, finishReason: "stop", bodyComplete: false, commitSuccess: false
   });
-  await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const nativeFetch = globalThis.fetch;
-  vi.stubGlobal("fetch", vi.fn<typeof fetch>((url, init) =>
-    fetchLoopbackProvider(nativeFetch, new URL(new URL(String(url)).pathname, origin), init)));
-  await expect(runExtractionFill({ ...fixture.options, signal: controller.signal })).rejects.toThrow();
-  expect(calls).toBe(1);
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
   expect(raw).toMatchObject({ contract: "provider-raw-attempt-v3", http_response: {
     bodyBase64: Buffer.from(prefix).toString("base64"), bodyComplete: false,

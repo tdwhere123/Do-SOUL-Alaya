@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { runCli } from '../../../../cli/cli.js';
 import { runExtractionFill } from '../../../../runs/extraction/extraction-fill.js';
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from '../../../../runs/extraction/authority/inspection.js';
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from '../../../../runs/extraction/authority/receipt.js';
@@ -10,9 +9,13 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from '../../../../runs/extractio
 import { cacheFilePath, inspectCachedExtractionArtifact } from '../../../../runs/compile-seed/cache/cache-shard.js';
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildGroundedInterpretationResponse } from '../../extraction-fill/fixture.js';
 import { createGardenHttpExtractor } from '../../../../runs/compile-seed/compile-seed-http.js';
-import { parseOfficialApiSourcePacketRequest } from '@do-soul/alaya-soul';
+import { buildOfficialApiSourceCorpus, parseOfficialApiSourcePacketRequest, parseSourceSemanticRequest } from '@do-soul/alaya-soul';
 import { sourceReferenceResolver } from '@do-soul/alaya-protocol';
 import { fieldContractSha256 } from '@do-soul/alaya-core';
+import { preflightExtractionBatch } from '../../../../runs/extraction/fill/batch-preflight.js';
+import { tableCompletedResponse } from '../../extraction-fill/source-semantic-table-response.test-support.js';
+import { authoredSourceCorpusFromRequest, writeAuthoredHistoricalBatchArtifacts } from '../../extraction-fill/historical-extraction-test-support.js';
+import type { GeminiBatchLimits } from '../../../../runs/extraction/fill/batch/contract.js';
 
 const MODEL = 'gemini-2.5-flash-lite';
 const REQUEST_PROFILE = 'gemini-2.5-nonthinking-v1';
@@ -37,6 +40,13 @@ function packetResponse(userPrompt: string) {
       assertion_ids: [assertion.assertion_id], arguments: [{ role: 'theme', target: 'r0' }] }], operators: [], roots: ['p0'] } });
 }
 
+function semanticResponse(userPrompt: string) {
+  const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
+  const assertion = request.source_request.source_assertions.find(row => row.text.includes('completed'))!;
+  const theme = assertion.text.includes('alpha') ? 'alpha' : 'decoy';
+  return JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
+}
+
 it.each(['open_semantics', 'source_packet', 'ordinary'] as const)(
   'requires durable attempt and usage admission when reopening %s Batch artifacts', async mode => {
     setExtractionCredentialFixture();
@@ -44,54 +54,40 @@ it.each(['open_semantics', 'source_packet', 'ordinary'] as const)(
     vi.stubEnv('ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE', REQUEST_PROFILE);
     vi.stubEnv('OFFICIAL_API_GARDEN_PROVIDER_URL', 'https://fixture-provider.invalid');
     await writeDataset([buildAuthorityQuestion('authored', 'alpha', 'decoy')]);
-    const extra = mode === 'open_semantics' ? { openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION }
-      : mode === 'source_packet' ? { sourceInterpretationProfile: PROFILE } : {};
+    const extra = mode === 'open_semantics' ? { openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, sourcePacking: 'reference-eight' as const }
+      : mode === 'source_packet' ? { sourceInterpretationProfile: PROFILE, sourcePacking: 'reference-eight' as const }
+        : { sourcePacking: 'reference-eight' as const };
     const inspection = await inspectExtractionAuthority({ variant: 'longmemeval_s', cacheRoot, dataDir, pinnedMetaRoot,
       ...extra, revision: readCurrentExtractionAuthorityRevision(), action: 'fill' });
     const receipt = createExtractionAuthorityReceipt({ action: 'fill', observation: inspection.observation,
       outputTokenCap: { field: 'maxOutputTokens', value: 4096 }, diskFloorBytes: 0,
       priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2, maximumInputTokensPerAttempt: 100000 }, inspection });
-    const authorityPath = join(cacheRoot, 'authority.json');
-    writeExtractionAuthorityReceipt(authorityPath, receipt);
-    const limitsPath = join(cacheRoot, 'limits.json');
-    writeFileSync(limitsPath, JSON.stringify({ maxJobs: 1, maxRequestsPerJob: 100, maxFileBytes: 1000000,
+    const limits: GeminiBatchLimits = { maxJobs: 1, maxRequestsPerJob: 100, maxFileBytes: 1000000,
       maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000, maxOutputTokens: 4096,
       maxUsd: receipt.price.estimated_upper_usd, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
-      deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 }));
-    const profilePath = join(cacheRoot, 'profile.json');
-    writeFileSync(profilePath, JSON.stringify(PROFILE));
-    let creates = 0, displayName = '';
-    const plan = () => JSON.parse(readFileSync(join(cacheRoot, 'gemini-batch-plan.json'), 'utf8'));
-    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
-      const path = new URL(String(url)).pathname;
-      if (path === '/upload/v1beta/files') return new Response(null, { headers: { 'x-goog-upload-url': 'https://fixture-provider.invalid/upload-session' } });
-      if (path === '/upload-session') return Response.json({ file: { name: 'files/input' } });
-      if (path.endsWith(':batchGenerateContent')) {
-        creates++; displayName = JSON.parse(String(init?.body)).batch.displayName;
-        return Response.json({ name: 'batches/job' });
-      }
-      if (path === '/v1beta/batches/job') return Response.json({ name: 'batches/job', metadata: { displayName,
-        model: `models/${MODEL}`, state: 'BATCH_STATE_SUCCEEDED', inputConfig: { fileName: 'files/input' }, output: { responsesFile: 'files/output' } } });
-      if (path === '/download/v1beta/files/output:download') return new Response(plan().lines.map((line: { key: string; userPrompt: string }) => {
-        const request = JSON.parse(line.userPrompt);
-        const row = request.source_request?.source_assertions[0];
-        const text = mode === 'open_semantics'
-          ? JSON.stringify({ contract: request.source_request.proposal_contract, outcome: { status: 'no_executable_proposition',
-            description: 'Authored unreviewed disposition', context_support: [{ assertion_id: row.assertion_id, text: row.text }] } })
-          : mode === 'source_packet' ? packetResponse(line.userPrompt) : buildGroundedInterpretationResponse(line.userPrompt);
-        return JSON.stringify({ key: line.key, response: { candidates: [{ finishReason: 'STOP', content: { parts: [{ text }] } }],
-          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } } });
-      }).join('\n'));
-      throw new Error(`unexpected authored transport request: ${path}`);
-    }));
-    const args = ['extraction-fill', '--variant', 's', '--data-dir', dataDir, '--pinned-meta-root', pinnedMetaRoot,
-      '--extraction-cache-root', cacheRoot, '--extraction-authority', authorityPath, '--batch-limits', limitsPath,
-      ...(mode === 'open_semantics' ? ['--extraction-open-semantics']
-        : mode === 'source_packet' ? ['--extraction-packet-profile', profilePath] : [])];
-    for (const operation of ['prepare', 'submit', 'resume']) {
-      expect(await runCli([...args, '--batch-operation', operation])).toBe(0);
-    }
-    const key = plan().lines[0].key;
+      deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
+    const report = await preflightExtractionBatch({ variant: 'longmemeval_s', cacheRoot, dataDir, pinnedMetaRoot,
+      ...extra, batch: { operation: 'prepare', limits } });
+    const responses = new Map(report.planned_requests.map(line => [line.key,
+      mode === 'open_semantics' ? semanticResponse(line.userPrompt)
+        : mode === 'source_packet' ? packetResponse(line.userPrompt)
+          : '{"interpretations":[{"assertion_id":1,"relations":[{"predicate":{"text":"completed"},"arguments":[],"qualifiers":[]}]}]}']));
+    const facts = ['I completed alpha.', 'I completed decoy.'];
+    const candidates = facts.flatMap(fact => {
+      const messages = [{ role: 'user' as const, content: fact }, { role: 'assistant' as const, content: 'Acknowledged.' }];
+      return [fact, `User: ${fact}`, `User: ${fact}\nAssistant: Acknowledged.`,
+        buildOfficialApiSourceCorpus(fact, messages),
+        buildOfficialApiSourceCorpus(fact, [{ role: 'user', content: fact }]),
+        buildOfficialApiSourceCorpus(`${fact}\nAcknowledged.`, messages)];
+    });
+    writeAuthoredHistoricalBatchArtifacts({
+      cacheRoot, receipt, lines: report.planned_requests, responses, limits,
+      mode, sourcePacking: 'reference-eight',
+      sourceCorpusForLine: line => mode === 'ordinary' ? '' : authoredSourceCorpusFromRequest(line.userPrompt, candidates),
+      ...(mode === 'open_semantics' ? { generation: EXTRACTION_OPEN_SEMANTICS_GENERATION } : {}),
+      ...(mode === 'source_packet' ? { sourceInterpretationProfile: PROFILE } : {})
+    });
+    const key = report.planned_requests[0]!.key;
     const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${receipt.lineage_digest}.json`);
     const ledgerInput = { cacheRoot, lineageDigest: receipt.lineage_digest,
       cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE } } as const;
@@ -113,7 +109,6 @@ it.each(['open_semantics', 'source_packet', 'ordinary'] as const)(
         ledger.telemetry.input_tokens -= 10; ledger.telemetry.output_tokens -= 20; ledger.telemetry.total_tokens -= 30;
       }
       if (damage === 'ledger_missing') {
-        // Test only: remove the ledger through a rename while keeping original bytes.
         const { renameSync } = await import('node:fs');
         renameSync(ledgerPath, `${ledgerPath}.retained`);
       } else writeFileSync(ledgerPath, JSON.stringify(ledger));
@@ -138,7 +133,6 @@ it.each(['open_semantics', 'source_packet', 'ordinary'] as const)(
       expect(inspected.status).not.toBe('hit');
       writeFileSync(shardPath, shardBytes);
     }
-    expect(creates).toBe(1);
     expect.soft(results.find(row => row.damage === 'usage_witness_missing')?.status).not.toBe('hit');
     expect.soft(results.find(row => row.damage === 'unresolved_original_attempt')?.status).not.toBe('hit');
     expect.soft(results.find(row => row.damage === 'ledger_missing')?.status).not.toBe('hit');
