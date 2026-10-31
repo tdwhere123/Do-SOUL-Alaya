@@ -136,13 +136,23 @@ describe("no-network extraction authority inspection", () => {
   });
 
   it("counts bounded request shards as the authority window key space", async () => {
-    const fact = Array.from(
-      { length: 9 },
-      (_value, index) => `I completed task ${index + 1}.`
-    ).join(" ");
-    await writeFixtureDataset([
-      buildExtractionFillQuestion("q001", fact, "Hello.")
-    ]);
+    await writeFixtureDataset([{
+      question_id: "q001",
+      question_type: "single_session",
+      question: "What about q001?",
+      answer: "answer q001",
+      question_date: "2026-01-01",
+      haystack_session_ids: ["s-q001", "decoy-q001"],
+      haystack_dates: ["2025-12-01", "2025-11-01"],
+      haystack_sessions: [
+        [
+          { role: "user", content: "a".repeat(15_000), has_answer: true },
+          { role: "assistant", content: "b".repeat(20_000) }
+        ],
+        [{ role: "user", content: "Hello." }]
+      ],
+      answer_session_ids: ["s-q001"]
+    }]);
 
     const inspected = await inspectExtractionAuthority({
       variant: EXTRACTION_FILL_VARIANT,
