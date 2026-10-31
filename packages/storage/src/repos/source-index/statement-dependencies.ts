@@ -17,7 +17,7 @@ function unavailableDependencySql(dependency: string): string {
 }
 
 /** A shared eligibility projection for native keys and only explicitly bound derived memory. */
-export const UNAVAILABLE_STATEMENT_DEPENDENCY_SQL = unavailableDependencySql("dependency");
+const UNAVAILABLE_STATEMENT_DEPENDENCY_SQL = unavailableDependencySql("dependency");
 const UNAVAILABLE_BOUND_STATEMENT_SQL = `NOT EXISTS (SELECT 1 FROM evidence_capsules evidence
     WHERE evidence.workspace_id=binding.workspace_id AND evidence.object_id=binding.artifact_id AND evidence.lifecycle_state='active')
   OR NOT EXISTS (SELECT 1 FROM source_statement_dependencies dependency

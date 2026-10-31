@@ -42,7 +42,7 @@ export function anchorTimeGuard(window: QueryTimeWindow, variable = ANCHOR_EVENT
 
 export const STORED_RELATION_KIND = "stored_relation";
 export const SOURCE_FILTER_PREDICATE = "source.filters";
-export const UNINTERPRETED_HOLE_ID = "hole.query.uninterpreted";
+const UNINTERPRETED_HOLE_ID = "hole.query.uninterpreted";
 export const ANCHOR_EVENT_VARIABLE = "r";
 export const SERVICE_VARIABLE = "s";
 export const USES_SERVICE_RELATION = "uses_service";

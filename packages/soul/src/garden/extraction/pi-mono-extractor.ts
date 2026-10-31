@@ -30,7 +30,7 @@ export interface SignalExtractor {
 // inspectJsonRecovery path salvaged the body, or "none" when the model
 // returned strict JSON. Retry fields are an opaque execution receipt from the
 // injected transport; Soul never derives provider retry policy.
-export interface SignalExtractorMeta {
+interface SignalExtractorMeta {
   readonly recoveryKind: JsonRecoveryKind;
   readonly retryCount: number;
   readonly retryClassification: string;

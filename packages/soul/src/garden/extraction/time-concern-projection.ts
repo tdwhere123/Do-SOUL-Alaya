@@ -16,7 +16,7 @@ export interface TemporalProjection {
 
 const DAY_MS = 86_400_000;
 
-export function normalizeWindowDigest(matchedText: string): string {
+function normalizeWindowDigest(matchedText: string): string {
   return matchedText.trim().toLowerCase().replace(/\s+/gu, "_");
 }
 
@@ -63,11 +63,6 @@ export function resolveTemporalProjection(
   if (month !== null) return month;
   const explicit = parseEnglishCalendarDate(matchedText) ?? parseStrictCalendarDateToUtcDay(normalized);
   return explicit === null ? null : explicitDayProjection(explicit);
-}
-
-/** Relative phrases need a source observation; absolute matches may still emit without a projection. */
-export function isRelativeTimeConcern(matchedText: string): boolean {
-  return parseRelativeTemporalTerm(normalizeRelativeArticle(matchedText)) !== null;
 }
 
 function parseFixedOffsetMinutes(value: string): number | null {
