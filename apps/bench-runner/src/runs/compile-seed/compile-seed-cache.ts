@@ -25,7 +25,10 @@ import {
   withExtractionCacheWriteLease,
   type ExtractionCacheWriteLease
 } from "../extraction/fill/manifest/fill-root-guard.js";
-import { readExtractionCacheManifestIdentity, extractionAdmissionGenerationSha256 } from "../extraction/cache/extraction-cache-manifest.js";
+import {
+  readExtractionCacheManifestIdentity, extractionAdmissionGenerationSha256,
+  EXTRACTION_ADMISSION_GENERATION_STATEMENT
+} from "../extraction/cache/extraction-cache-manifest.js";
 import {
   extractLiveDelegate,
   type ExtractionLiveTransportOutcome
@@ -505,7 +508,9 @@ function persistExtraction(
       ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked),
       ...(manifestIdentity === undefined ? {} : {
         admission_identity: {
-          generation_sha256: extractionAdmissionGenerationSha256(manifestIdentity.manifest),
+          contract: EXTRACTION_ADMISSION_GENERATION_STATEMENT,
+          generation_sha256: extractionAdmissionGenerationSha256(
+            manifestIdentity.manifest, EXTRACTION_ADMISSION_GENERATION_STATEMENT),
           request_key: cacheKey,
           raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson)
         }

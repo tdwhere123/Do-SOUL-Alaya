@@ -10,7 +10,10 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeExtractionCacheKeyAlgoDigest,
   computeSystemPromptSha256,
+  extractionAdmissionGenerationSha256,
   extractionCacheManifestPath,
+  EXTRACTION_ADMISSION_GENERATION_STATEMENT,
+  EXTRACTION_ADMISSION_GENERATION_WINDOWED,
   readExtractionCacheManifest,
   readExtractionCacheManifestIdentity,
   resolveBenchExtractionModel,
@@ -513,6 +516,39 @@ describe("extraction-cache-manifest", () => {
     expect(() => resolveBenchExtractionModel({})).toThrow(
       /extraction model is unresolved/u
     );
+  });
+
+  it("versions statement admission generation without changing historical windowed material", () => {
+    const complete = scopedManifest();
+    const wider = scopedManifest({
+      window_limit: 2, expected_turns: 2, requested_turns: 2, cached_turns: 2,
+      expected_key_set_sha256: "c".repeat(64)
+    });
+    const revised = scopedManifest({ dataset_revision: "foreign-dataset" });
+    const packed: ExtractionCacheManifest = {
+      ...complete, schema_version: EXTRACTION_CACHE_MANIFEST_VERSION, source_packing: "session-statements"
+    };
+    const otherPacking: ExtractionCacheManifest = { ...packed, source_packing: "singleton" };
+    expect(extractionAdmissionGenerationSha256(complete)).toBe(
+      extractionAdmissionGenerationSha256(complete, EXTRACTION_ADMISSION_GENERATION_WINDOWED));
+    expect(extractionAdmissionGenerationSha256(complete)).not.toBe(
+      extractionAdmissionGenerationSha256(wider));
+    expect(extractionAdmissionGenerationSha256(complete, EXTRACTION_ADMISSION_GENERATION_STATEMENT)).toBe(
+      extractionAdmissionGenerationSha256(wider, EXTRACTION_ADMISSION_GENERATION_STATEMENT));
+    expect(extractionAdmissionGenerationSha256(complete)).not.toBe(
+      extractionAdmissionGenerationSha256(revised));
+    expect(extractionAdmissionGenerationSha256(complete, EXTRACTION_ADMISSION_GENERATION_STATEMENT)).not.toBe(
+      extractionAdmissionGenerationSha256(revised, EXTRACTION_ADMISSION_GENERATION_STATEMENT));
+    expect(extractionAdmissionGenerationSha256(complete)).not.toBe(
+      extractionAdmissionGenerationSha256(complete, EXTRACTION_ADMISSION_GENERATION_STATEMENT));
+    expect(extractionAdmissionGenerationSha256(packed, EXTRACTION_ADMISSION_GENERATION_STATEMENT)).not.toBe(
+      extractionAdmissionGenerationSha256(otherPacking, EXTRACTION_ADMISSION_GENERATION_STATEMENT));
+    expect(extractionAdmissionGenerationSha256(complete)).toBe(createHash("sha256").update(JSON.stringify([
+      complete.schema_version, complete.extraction_model, complete.model_family,
+      complete.request_profile, null, complete.provider_url, complete.system_prompt_sha256,
+      complete.cache_key_algo, complete.dataset, complete.dataset_revision, complete.window_offset,
+      complete.window_limit, complete.expected_key_set_sha256, null, null
+    ])).digest("hex"));
   });
 
   it("resolveBenchExtractionModel remaps display aliases to the vendor id", () => {

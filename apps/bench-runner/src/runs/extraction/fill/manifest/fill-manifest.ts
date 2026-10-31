@@ -10,6 +10,7 @@ import type {
   ExtractionFillStatus
 } from "./fill-manifest-contract.js";
 import {
+  EXTRACTION_ADMISSION_GENERATION_STATEMENT,
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
@@ -18,6 +19,9 @@ import {
   type ExtractionCacheManifest
 } from "../../cache/extraction-cache-manifest.js";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
+import {
+  listExtractionCacheShardKeys, readCachedEntry
+} from "../../../compile-seed/cache/cache-shard.js";
 import { assertManifestlessCacheIsEmpty } from "./fill-root-guard.js";
 import type { LongMemEvalExpansionSourceAnchor } from
   "../../../../datasets/longmemeval/promotion/expansion/lineage/expansion-source-anchor-schema.js";
@@ -190,6 +194,7 @@ export function pinExtractionCacheIdentity(input: {
   readonly expansionSourceAnchor?: LongMemEvalExpansionSourceAnchor;
 }): { readonly manifest: ExtractionCacheManifest; readonly manifestSha256: string } {
   const existingManifest = resolveExistingManifest(input);
+  assertUnversionedStatementWindowCompatible(input, existingManifest);
   writeExtractionCacheManifest(input.cacheRoot, buildFillManifest({
     config: input.config,
     variant: input.variant,
@@ -210,6 +215,30 @@ export function pinExtractionCacheIdentity(input: {
     );
   }
   return identity;
+}
+
+function assertUnversionedStatementWindowCompatible(
+  input: Parameters<typeof pinExtractionCacheIdentity>[0],
+  existingManifest: ExtractionCacheManifest | undefined
+): void {
+  if (existingManifest === undefined) return;
+  if (existingManifest.window_offset === input.windowOffset &&
+      existingManifest.window_limit === input.windowLimit &&
+      existingManifest.expected_key_set_sha256 === input.completion.expectedKeySetSha256) {
+    return;
+  }
+  for (const cacheKey of listExtractionCacheShardKeys(input.cacheRoot)) {
+    const cached = readCachedEntry(
+      input.cacheRoot, cacheKey, input.config.model, input.config.requestProfile
+    );
+    if (cached.status !== "hit" || cached.entry.source_statement === undefined) continue;
+    if (cached.entry.admission_identity?.contract === EXTRACTION_ADMISSION_GENERATION_STATEMENT) {
+      continue;
+    }
+    throw new ExtractionCacheInvariantError(
+      "unversioned statement cache cannot reframe the fill window"
+    );
+  }
 }
 
 function resolveExistingManifest(input: {

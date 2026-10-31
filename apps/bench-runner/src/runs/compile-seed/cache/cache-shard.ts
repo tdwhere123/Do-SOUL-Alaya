@@ -6,7 +6,7 @@ import { canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
 import { inspectCachedSourceSemantic, type CachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
 import type { ExtractionTypedArtifactMode } from "../../extraction/request-artifact.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   computeExtractionRawJsonSha256,
@@ -48,7 +48,11 @@ import { transportResponseDigest } from
 import type { GeminiBatchInvocation } from "../../extraction/fill/batch/contract.js";
 import { readRetainedBatchLine } from "../../extraction/fill/batch/retained-line.js";
 import { readRetainedBatchAuthority } from "../../extraction/fill/batch/retained-authority.js";
-import { readExtractionCacheManifestIdentity, extractionAdmissionGenerationSha256 } from "../../extraction/cache/extraction-cache-manifest.js";
+import {
+  readExtractionCacheManifestIdentity, extractionAdmissionGenerationSha256,
+  EXTRACTION_ADMISSION_GENERATION_STATEMENT, EXTRACTION_ADMISSION_GENERATION_WINDOWED,
+  type ExtractionAdmissionGenerationContract, type ExtractionCacheManifest
+} from "../../extraction/cache/extraction-cache-manifest.js";
 import { buildExtractionTransportProvenance } from "../../extraction/transport-route.js";
 import { inspectRetainedInteractiveResponses,
   type CachedProviderResponseWitness } from "./provider-response-witness.js";
@@ -66,7 +70,8 @@ export function retainedOnlyOrdinaryExtractionReason(
 }
 
 export type CachedExtractionAdmissionIdentity = NonNullable<
-  import("@do-soul/alaya-protocol").PublishedSourceInterpretationPacket["provenance"]["cache_admission"]>;
+  import("@do-soul/alaya-protocol").PublishedSourceInterpretationPacket["provenance"]["cache_admission"]
+> & { readonly contract?: typeof EXTRACTION_ADMISSION_GENERATION_STATEMENT };
 
 export interface CachedExtractionEntry {
   readonly source_statement?: Readonly<{ request: SourceStatementRequest;
@@ -161,6 +166,26 @@ export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
   return join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
 }
 
+export function listExtractionCacheShardKeys(cacheRoot: string): readonly string[] {
+  const keys: string[] = [];
+  for (const prefix of readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (!/^[0-9a-f]{2}$/u.test(prefix.name)) continue;
+    if (!prefix.isDirectory() || prefix.isSymbolicLink()) {
+      throw new AlayaError("CONFLICT", `extraction cache shard prefix ${prefix.name} is not a directory`);
+    }
+    for (const entry of readdirSync(join(cacheRoot, prefix.name), { withFileTypes: true })) {
+      if (!entry.name.endsWith(".json")) continue;
+      const match = /^([0-9a-f]{64})\.json$/u.exec(entry.name);
+      if (!entry.isFile() || entry.isSymbolicLink() || match === null ||
+          !match[1]!.startsWith(prefix.name)) {
+        throw new AlayaError("CONFLICT", `extraction cache shard name ${entry.name} is not a fixture path`);
+      }
+      keys.push(match[1]!);
+    }
+  }
+  return keys;
+}
+
 export function inspectCachedExtraction(
   cacheRoot: string,
   cacheKey: string,
@@ -225,12 +250,10 @@ function inspectRawExtraction(
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
     if (cached.entry.source_statement !== undefined) {
-      const manifest = readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
-      const identity = cached.entry.admission_identity;
-      if (manifest === undefined || identity?.generation_sha256 !== extractionAdmissionGenerationSha256(manifest) ||
-          identity.request_key !== cacheKey || identity.raw_json_sha256 !== rawJsonSha256) {
-        throw new AlayaError("CONFLICT", "statement cache admission generation binding mismatch");
-      }
+      assertStatementAdmissionGeneration(
+        readExtractionCacheManifestIdentity(cacheRoot)?.manifest,
+        cached.entry.admission_identity, cacheKey, rawJsonSha256
+      );
     }
     const attempt = cached.entry.provider_attempt;
     if (attempt !== undefined && (!Number.isSafeInteger(attempt.attempt_ordinal) ||
@@ -518,6 +541,23 @@ function inspectCachedIdentity(
   return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
 }
 
+function assertStatementAdmissionGeneration(
+  manifest: ExtractionCacheManifest | undefined,
+  identity: CachedExtractionAdmissionIdentity | undefined,
+  cacheKey: string,
+  rawJsonSha256: string
+): void {
+  if (manifest === undefined || identity === undefined ||
+      identity.request_key !== cacheKey || identity.raw_json_sha256 !== rawJsonSha256) {
+    throw new AlayaError("CONFLICT", "statement cache admission generation binding mismatch");
+  }
+  const contract: ExtractionAdmissionGenerationContract = identity.contract ??
+    EXTRACTION_ADMISSION_GENERATION_WINDOWED;
+  if (identity.generation_sha256 !== extractionAdmissionGenerationSha256(manifest, contract)) {
+    throw new AlayaError("CONFLICT", "statement cache admission generation binding mismatch");
+  }
+}
+
 function inspectStatementCacheReceipt(entry: CachedExtractionEntry): string | null {
   if (entry.source_statement === undefined) return null;
   try {
@@ -540,5 +580,6 @@ function isCachedExtractionAdmissionIdentity(
     typeof candidate.request_key === "string" &&
     /^[a-f0-9]{64}$/u.test(candidate.request_key) &&
     typeof candidate.raw_json_sha256 === "string" &&
-    /^[a-f0-9]{64}$/u.test(candidate.raw_json_sha256);
+    /^[a-f0-9]{64}$/u.test(candidate.raw_json_sha256) &&
+    (candidate.contract === undefined || candidate.contract === EXTRACTION_ADMISSION_GENERATION_STATEMENT);
 }

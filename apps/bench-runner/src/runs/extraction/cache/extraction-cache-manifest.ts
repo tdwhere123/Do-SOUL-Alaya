@@ -174,18 +174,49 @@ export interface ExtractionCacheManifestIdentity {
   readonly manifestSha256: string;
 }
 
+/** Historical packet/semantic admission. Fill-window fields stay in this material. */
+export const EXTRACTION_ADMISSION_GENERATION_WINDOWED =
+  "extraction-admission-generation-windowed-v1" as const;
+/** Current statements bind semantics and dataset revision, not fill-window population. */
+export const EXTRACTION_ADMISSION_GENERATION_STATEMENT =
+  "extraction-admission-generation-statement-v1" as const;
+export type ExtractionAdmissionGenerationContract =
+  | typeof EXTRACTION_ADMISSION_GENERATION_WINDOWED
+  | typeof EXTRACTION_ADMISSION_GENERATION_STATEMENT;
+
 /** Admission pins extraction semantics, not the mutable fill progress document. */
-export function extractionAdmissionGenerationSha256(manifest: ExtractionCacheManifest): string {
-  return createHash("sha256").update(JSON.stringify([
+export function extractionAdmissionGenerationSha256(
+  manifest: ExtractionCacheManifest,
+  contract: ExtractionAdmissionGenerationContract = EXTRACTION_ADMISSION_GENERATION_WINDOWED
+): string {
+  return createHash("sha256").update(JSON.stringify(
+    extractionAdmissionGenerationMaterial(manifest, contract)
+  )).digest("hex");
+}
+
+function extractionAdmissionGenerationMaterial(
+  manifest: ExtractionCacheManifest,
+  contract: ExtractionAdmissionGenerationContract
+): readonly unknown[] {
+  const semantics = [
     manifest.schema_version, manifest.extraction_model, manifest.model_family,
     manifest.request_profile, manifest.schema_version === 4 ? manifest.source_packing : null,
     manifest.provider_url, manifest.system_prompt_sha256, manifest.cache_key_algo,
-    manifest.dataset, manifest.dataset_revision, manifest.window_offset, manifest.window_limit,
-    manifest.expected_key_set_sha256, manifest.expansion_source_anchor ?? null,
-    manifest.expansion_lineage ?? null,
+    manifest.dataset, manifest.dataset_revision
+  ];
+  const authority = [
+    manifest.expansion_source_anchor ?? null, manifest.expansion_lineage ?? null,
     ...(manifest.source_interpretation_profile === undefined ? [] : [manifest.source_interpretation_profile]),
     ...(manifest.source_semantic_generation === undefined ? [] : [manifest.source_semantic_generation])
-  ])).digest("hex");
+  ];
+  if (contract === EXTRACTION_ADMISSION_GENERATION_WINDOWED) {
+    return [...semantics, manifest.window_offset, manifest.window_limit,
+      manifest.expected_key_set_sha256, ...authority];
+  }
+  if (contract === EXTRACTION_ADMISSION_GENERATION_STATEMENT) {
+    return [contract, ...semantics, ...authority];
+  }
+  throw new AlayaError("VALIDATION", "unknown extraction admission generation contract");
 }
 
 /**

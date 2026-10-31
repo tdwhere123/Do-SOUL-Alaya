@@ -101,7 +101,7 @@ async function seedFirstQuestion(): Promise<void> {
     dataDir,
     pinnedMetaRoot,
     authorityReceiptPath,
-    extractorFactory: authorizedHttpExtractor({ response: () => '{"interpretations":[]}' }).factory,
+    extractorFactory: authorizedHttpExtractor().factory,
     log: () => undefined
   });
 }
