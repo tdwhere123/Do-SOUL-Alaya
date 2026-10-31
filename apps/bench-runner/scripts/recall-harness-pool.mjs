@@ -32,8 +32,11 @@ export function readInventory(db, workspace) {
   }
   const byRoot = new Map();
   for (const root of roots) {
+    const source = JSON.parse(root.target_json);
+    // Statement keys are auxiliary rows of the same record; the inventory describes the raw root.
+    if (source.auxiliary !== undefined) continue;
     if (byRoot.has(root.record_id)) throw new AlayaError("CONFLICT", `ambiguous indexed root: ${root.record_id}`);
-    byRoot.set(root.record_id, JSON.parse(root.target_json));
+    byRoot.set(root.record_id, source);
   }
   const byId = new Map(records.flatMap(record => {
     const source = byRoot.get(record.record_id);
