@@ -70,7 +70,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-it("rolls back a wider generation that would unbind admitted shards before constructing a worker", async () => {
+it("widens a versioned statement window by dispatching only the new sessions and keeping admitted shards", async () => {
   const firstExpected = collectDistinctTurnContents(questions.slice(0, 1)).length;
   let firstWorkerManifest: unknown;
   const first = await runExtractionFill({
@@ -116,10 +116,10 @@ it("rolls back a wider generation that would unbind admitted shards before const
   expect(Object.keys(first.manifest.content_closure_index ?? {}))
     .toHaveLength(firstExpected);
 
-  const manifestBytes = readFileSync(join(cacheRoot, "manifest.json"));
   const shardPath = firstShardPath(), shardBytes = readFileSync(shardPath);
-  const extractorFactory = vi.fn(() => { throw new Error("changed generation must not dispatch"); });
-  const expanded = runExtractionFill({
+  const widenedExpected = collectDistinctTurnContents(questions).length;
+  const dispatched: string[] = [];
+  const widened = await runExtractionFill({
     variant: VARIANT,
     cacheRoot,
     dataDir,
@@ -127,15 +127,29 @@ it("rolls back a wider generation that would unbind admitted shards before const
     limit: 2,
     authorityReceiptPath: await authorize(2),
     concurrency: 1,
-    extractorFactory,
+    extractorFactory: () => ({
+      extract: async (input) => {
+        dispatched.push(input.userPrompt);
+        return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
+      }
+    }),
     log: () => undefined
   });
 
-  await expect(expanded).rejects.toThrow("extraction authority receipt cannot authorize invalid or orphan shards");
-  expect(extractorFactory).not.toHaveBeenCalled();
-  expect(readFileSync(join(cacheRoot, "manifest.json"))).toEqual(manifestBytes);
+  // The receipt authorizes only keys missing after the first window.
+  expect(widenedExpected).toBeGreaterThan(firstExpected);
+  expect(dispatched).toHaveLength(widenedExpected - firstExpected);
   expect(readFileSync(shardPath)).toEqual(shardBytes);
-  expect(readExtractionCacheManifest(cacheRoot)).toEqual(first.manifest);
+  expect(widened.manifest).toMatchObject({
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 2,
+    expected_turns: widenedExpected,
+    cached_turns: widenedExpected,
+    coverage: 1
+  });
+  expect(widened.manifest.expected_key_set_sha256).not.toBe(first.manifest.expected_key_set_sha256);
+  expect(Object.keys(widened.manifest.content_closure_index ?? {})).toHaveLength(widenedExpected);
 });
 
 it("refuses completion when an expected shard is replaced by an orphan", async () => {
