@@ -8,9 +8,9 @@ import { censusCompleteSourceRecords } from "../snapshot/source-records/census.j
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../recall-measurement/contract.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-cache/workset.js";
-import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset,
+import { parseLongMemEvalExperimentConfig, parseLongMemEvalExperimentFreeze, loadFrozenLongMemEvalDataset,
   longMemEvalFreezePath } from "./contract.js";
-import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from "./native-arm.js";
+import { NATIVE_SEMANTIC_ROUTE } from "./native-arm.js";
 
 /** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
 export async function freezeLongMemEvalSemanticRun(value: unknown, root: string) {
@@ -21,7 +21,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
 
 async function freezeBoundLongMemEvalSemanticRun(value: unknown, root: string) {
   refuseBenchWorkAfterCancel();
-  const config = LongMemEvalExperimentConfigSchema.parse(value);
+  const config = parseLongMemEvalExperimentConfig(value);
   if (new Set(config.question_ids).size !== config.question_ids.length) throw new AlayaError("VALIDATION", "development question IDs repeat");
   if (config.stage !== "formal" && config.question_ids.length > 50) throw new AlayaError("VALIDATION", "development selection exceeds 50 questions");
   if (config.stage === "formal" && config.previously_exposed_question_ids === undefined) {
@@ -32,10 +32,9 @@ async function freezeBoundLongMemEvalSemanticRun(value: unknown, root: string) {
     refuseBenchWorkAfterCancel();
     const existing = readChainArtifact(longMemEvalFreezePath(root));
     if (existing !== undefined) {
-      const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
+      const frozen = parseLongMemEvalExperimentFreeze(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
         || frozen.implementation_revision !== readCurrentExtractionAuthorityRevision()) throw new AlayaError("CONFLICT", "development freeze changed");
-      if (frozen.contract === "longmemeval-native-semantic-v3") assertSourceCaches(frozen.source_caches);
       writeChainJson(join(root, "query-workset.json"), frozen.query_workset);
       return frozen;
     }
@@ -75,11 +74,11 @@ async function freezeBoundLongMemEvalSemanticRun(value: unknown, root: string) {
     const arm = "arm" in config ? { contract: "longmemeval-native-semantic-v3",
       metric: "source-bearing-union-first-exposure-any-at-k-v1", mechanism: "native_source_interpretation_and_semantic_correspondence",
       order_policy: NATIVE_SEMANTIC_ROUTE.order.enumeration_policy,
-      native_route: NATIVE_SEMANTIC_ROUTE, source_caches: freezeSourceCaches(config.source_cache_roots) }
+      native_route: NATIVE_SEMANTIC_ROUTE }
       : { contract: "longmemeval-semantic-development-v3", metric: "session-bearing-source-round-mixed-any-at-5",
         order_policy: "native_canonical_source_root_order",
         mechanism: "source_only_interpretation_and_correspondence_not_exercised" };
-    const frozen = LongMemEvalExperimentFreezeSchema.parse({ ...arm, config,
+    const frozen = parseLongMemEvalExperimentFreeze({ ...arm, config,
       implementation_revision: readCurrentExtractionAuthorityRevision(),
       exposure: config.stage === "formal" ? "formal_with_recorded_development_exposure" : "development_exposed",
       inventory, selected: selected.map((row, index) => ({ ...row, query_key: lines[index]!.key })), query_workset });

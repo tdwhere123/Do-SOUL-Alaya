@@ -224,11 +224,11 @@ publication or exposure fails closed.
 
 The existing `arm: "native_semantic"` config freezes
 `longmemeval-native-semantic-v3`. It additionally requires `workspace_prefix`,
-`source_cache_roots`, `source_publication_associations`, `correspondence_cache_root`,
-`discovery_page_cap`, `correspondence_pair_cap` and `authorized_scopes`. Source
-cache manifests/shards are frozen by content, including invalid artifacts.
-Preparation uses native publication and retains sources with absent or rejected
-interpretations. Changed source-cache inputs require a new freeze. Its combined
+`correspondence_cache_root`, `discovery_page_cap`, `correspondence_pair_cap` and
+`authorized_scopes`. Configs and retained freezes that still carry the retired
+`source_cache_roots`, `source_publication_associations` or `source_caches`
+fields are refused; use a new freeze. Preparation uses native publication and
+retains sources with absent or rejected interpretations. Its combined
 correspondence workset records exact bounded request opportunities only; no
 producer or spending authority is available here. Replay uses `soul.interpretation`
 `recall` in a fresh daemon over the sealed snapshot and the first-exposure recorder.

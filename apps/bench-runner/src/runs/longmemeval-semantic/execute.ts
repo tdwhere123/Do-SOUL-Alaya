@@ -14,7 +14,6 @@ import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze,
   type LongMemEvalSemanticFreeze } from "./contract.js";
-import { assertSourceCaches } from "./native-arm.js";
 
 export const QuestionPublicationSchema = z.object({ workspace_id: z.string(), run_id: z.string(), recorded_at: z.string(),
   snapshot_path: z.string(), db_sha256: z.string(), census_count: z.number(), admitted_count: z.number(), published_count: z.number().int().nonnegative(),
@@ -68,7 +67,6 @@ async function prepareBoundLongMemEvalSemanticRun(root: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
   await loadFrozenLongMemEvalDataset(frozen.config);
   refuseBenchWorkAfterCancel();
-  if (frozen.contract === "longmemeval-native-semantic-v3") assertSourceCaches(frozen.source_caches);
   const results = readSemanticChainProposalResults(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens);
   const rows: z.infer<typeof LongMemEvalPreparedSchema>["rows"] = [];
   for (const [index, selected] of frozen.selected.entries()) {

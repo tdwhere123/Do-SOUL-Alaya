@@ -41,8 +41,7 @@ export async function prepareRefusalReportFixture(cases: readonly Case[] = REFUS
     producer_commit: "a".repeat(40), max_output_tokens: 4096, output_byte_limit: 1000000,
     budget: { schema_version: 1, work_units: 10000000, memory_bytes: 60000000, page_budget: 10000,
       finalization_reserve: 50000, min_envelope: 10 }, arm: "native_semantic", workspace_prefix: "refusal-report",
-    source_cache_roots: [], correspondence_cache_root: join(root, "unattempted-correspondence-cache"),
-    source_publication_associations: [], discovery_page_cap: 1, correspondence_pair_cap: 0,
+    correspondence_cache_root: join(root, "unattempted-correspondence-cache"), discovery_page_cap: 1, correspondence_pair_cap: 0,
     authorized_scopes: { mode: "named", scopes: ["project"] } }, experiment);
   const prepared = await prepareLongMemEvalSemanticRun(experiment);
   const rows = prepared.result.rows.map(row => {

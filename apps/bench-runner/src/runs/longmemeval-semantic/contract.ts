@@ -6,8 +6,7 @@ import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../recall-measurement/contract.js";
 import { SemanticProposalWorksetSchema } from "../semantic-cache/workset.js";
-import { NATIVE_SEMANTIC_ROUTE, NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
-import { SourcePublicationAssociationRowSchema } from "../snapshot/source-records/publish.js";
+import { NATIVE_SEMANTIC_ROUTE, NativeSemanticRouteSchema } from "./native-arm.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const LongMemEvalSemanticConfigSchema = z.object({
@@ -25,8 +24,7 @@ export const LongMemEvalSemanticConfigSchema = z.object({
 export type LongMemEvalSemanticConfig = z.infer<typeof LongMemEvalSemanticConfigSchema>;
 export const LongMemEvalNativeSemanticConfigSchema = LongMemEvalSemanticConfigSchema.extend({
   arm: z.literal("native_semantic"), workspace_prefix: z.string().min(1),
-  source_cache_roots: z.array(z.string().min(1)), correspondence_cache_root: z.string().min(1),
-  source_publication_associations: z.array(SourcePublicationAssociationRowSchema),
+  correspondence_cache_root: z.string().min(1),
   discovery_page_cap: SemanticChainConfigSchema.shape.discovery_page_cap,
   correspondence_pair_cap: SemanticChainConfigSchema.shape.correspondence_pair_cap,
   authorized_scopes: SemanticChainConfigSchema.shape.authorized_scopes,
@@ -40,7 +38,7 @@ export const LongMemEvalNativeSemanticConfigSchema = LongMemEvalSemanticConfigSc
     context.addIssue({ code: "custom", path: issue.path, message: issue.message });
   }
 });
-export const LongMemEvalExperimentConfigSchema = z.union([LongMemEvalSemanticConfigSchema, LongMemEvalNativeSemanticConfigSchema]);
+const LongMemEvalExperimentConfigSchema = z.union([LongMemEvalSemanticConfigSchema, LongMemEvalNativeSemanticConfigSchema]);
 const InventoryRow = z.object({ index: z.number().int().nonnegative(), question_id: z.string(),
   cohort: z.enum(["answerable", "abstention"]) }).strict();
 const SourceManifest = z.object({ source_id: z.string(), source_version: z.string(), content_digest: z.string(),
@@ -60,15 +58,36 @@ export const LongMemEvalNativeSemanticFreezeSchema = LongMemEvalSemanticFreezeSc
   metric: z.literal("source-bearing-union-first-exposure-any-at-k-v1"),
   order_policy: z.literal(NATIVE_SEMANTIC_ROUTE.order.enumeration_policy),
   mechanism: z.literal("native_source_interpretation_and_semantic_correspondence"),
-  native_route: NativeSemanticRouteSchema, source_caches: z.array(SourceCacheFreezeSchema)
+  native_route: NativeSemanticRouteSchema
 }).strict();
-export const LongMemEvalExperimentFreezeSchema = z.discriminatedUnion("contract", [LongMemEvalSemanticFreezeSchema, LongMemEvalNativeSemanticFreezeSchema]);
+const LongMemEvalExperimentFreezeSchema = z.discriminatedUnion("contract", [LongMemEvalSemanticFreezeSchema, LongMemEvalNativeSemanticFreezeSchema]);
 export type LongMemEvalSemanticFreeze = z.infer<typeof LongMemEvalExperimentFreezeSchema>;
+
+// Passive source interpretation caches do not feed native recall; historical inputs are refused, not ignored.
+const RETIRED_SOURCE_CACHE_FIELDS = ["source_cache_roots", "source_publication_associations", "source_caches"] as const;
+function refuseRetiredSourceCacheFields(value: unknown, label: string): void {
+  const records = [value, isRecord(value) ? value.config : undefined].filter(isRecord);
+  const retired = RETIRED_SOURCE_CACHE_FIELDS.filter(field => records.some(record => field in record));
+  if (retired.length > 0) {
+    throw new AlayaError("VALIDATION", `${label} uses the retired source interpretation cache format (${retired.join(", ")}); use a new experiment freeze`);
+  }
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+export function parseLongMemEvalExperimentConfig(value: unknown) {
+  refuseRetiredSourceCacheFields(value, "LongMemEval experiment config");
+  return LongMemEvalExperimentConfigSchema.parse(value);
+}
+export function parseLongMemEvalExperimentFreeze(value: unknown): LongMemEvalSemanticFreeze {
+  refuseRetiredSourceCacheFields(value, "LongMemEval experiment freeze");
+  return LongMemEvalExperimentFreezeSchema.parse(value);
+}
 
 export function longMemEvalFreezePath(root: string): string { return join(root, "freeze.json"); }
 
 export function readLongMemEvalSemanticFreeze(root: string): LongMemEvalSemanticFreeze {
-  const frozen = LongMemEvalExperimentFreezeSchema.parse(readChainArtifact(longMemEvalFreezePath(root)));
+  const frozen = parseLongMemEvalExperimentFreeze(readChainArtifact(longMemEvalFreezePath(root)));
   if (readCurrentExtractionAuthorityRevision() !== frozen.implementation_revision) throw new AlayaError("CONFLICT", "frozen implementation changed");
   return frozen;
 }

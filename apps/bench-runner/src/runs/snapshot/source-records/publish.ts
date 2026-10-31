@@ -1,12 +1,11 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
   deriveAddressableSpanViews,
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
-import { SourceSemanticUnsupportedSourceSchema,
-  type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
+import type { SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
 import { AlayaError, IsoDatetimeStringSchema, canonicalJson,
   sourceSemanticInterpretationIdentity,
   SourceRecordIdentitySchema, SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
@@ -35,29 +34,6 @@ export type SourcePublicationAssociation =
   | Readonly<{ source_id: string; source_version: string; generation_key: string; request_digest: string }>
   | Readonly<{ source_id: string; source_version: string; content_digest: string; corpus_digest: string;
       provider_attempts: 0 }> & UnsupportedPreparation;
-
-const ReadyAssociationSchema = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
-  generation_key: z.string().regex(/^[a-f0-9]{64}$/u), request_digest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-const UnsupportedOccurrenceSchema = z.object({ source_id: z.string().min(1), source_version: z.string().min(1),
-  content_digest: z.string().min(1), corpus_digest: z.string().min(1), provider_attempts: z.literal(0) }).passthrough();
-
-/** One row contract for source publication inputs and native LongMemEval config. */
-export const SourcePublicationAssociationRowSchema = z.unknown().transform((row, context): SourcePublicationAssociation => {
-  try {
-    return parseSourcePublicationAssociationRow(row);
-  } catch (error) {
-    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "invalid source association" });
-    return z.NEVER;
-  }
-});
-
-function parseSourcePublicationAssociationRow(row: unknown): SourcePublicationAssociation {
-  if (typeof row !== "object" || row === null || !("status" in row)) return ReadyAssociationSchema.parse(row);
-  const parsed = UnsupportedOccurrenceSchema.parse(row);
-  const { source_id, source_version, content_digest, corpus_digest, provider_attempts, ...host } = parsed;
-  const disposition = SourceSemanticUnsupportedSourceSchema.parse(host);
-  return { source_id, source_version, content_digest, corpus_digest, ...disposition, provider_attempts };
-}
 
 type SourcePublicationPopulationBase = Readonly<{
   name: string;
@@ -379,18 +355,6 @@ async function admitOneSource(
       source_interpretation: "absent", publication: "not_attempted"
     };
   }
-}
-
-export function listRetainedSourceSemanticKeys(cacheRoot: string): readonly string[] {
-  const keys: string[] = [];
-  if (!existsSync(cacheRoot)) return keys;
-  for (const bucket of readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (!bucket.isDirectory() || !/^[0-9a-f]{2}$/u.test(bucket.name)) continue;
-    for (const file of readdirSync(join(cacheRoot, bucket.name))) {
-      if (/^[0-9a-f]{64}\.json$/u.test(file)) keys.push(file.slice(0, 64));
-    }
-  }
-  return keys.sort();
 }
 
 export function sourceLookupStores(database: ReturnType<typeof initDatabase>): Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord"> {

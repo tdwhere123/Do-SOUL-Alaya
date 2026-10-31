@@ -350,7 +350,7 @@ describe("complete-source census and publication", () => {
     const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
     const root = join(f.root, "development"), evaluatorRoot = join(f.root, "evaluator");
     const frozen = await freezeLongMemEvalSemanticRun({ arm: "native_semantic", workspace_prefix: "admission-test",
-      source_cache_roots: [], source_publication_associations: [], correspondence_cache_root: join(f.root, "correspondence-cache"),
+      correspondence_cache_root: join(f.root, "correspondence-cache"),
       discovery_page_cap: 4, correspondence_pair_cap: 0, authorized_scopes: { mode: "named", scopes: ["project"] },
       data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
       dataset_sha256: census.dataset_sha256, dataset_question_count: 2, question_ids: ["admitted", rejectedId],
@@ -391,6 +391,31 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected).toHaveLength(2);
   }, 60000);
 
+  it("refuses native configs and retained freezes that carry retired source cache inputs", async () => {
+    const f = await fixture(false, false, [question("retired-cache", [[{ role: "user", content: "A retained source." }]])]);
+    const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    const config = { arm: "native_semantic", workspace_prefix: "retired-cache",
+      correspondence_cache_root: join(f.root, "correspondence-cache"),
+      discovery_page_cap: 4, correspondence_pair_cap: 0, authorized_scopes: { mode: "named", scopes: ["project"] },
+      data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+      dataset_sha256: census.dataset_sha256, dataset_question_count: 1, question_ids: ["retired-cache"],
+      model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1",
+      query_cache_root: join(f.root, "empty-query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+      max_output_tokens: 4096, output_byte_limit: 1000000,
+      budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+        finalization_reserve: 10000, min_envelope: 10 } };
+    await expect(freezeLongMemEvalSemanticRun({ ...config, source_cache_roots: [] }, join(f.root, "retired-config")))
+      .rejects.toThrow(/retired source interpretation cache format \(source_cache_roots\)/u);
+    const frozen = await freezeLongMemEvalSemanticRun(config, join(f.root, "current"));
+    expect(frozen).not.toHaveProperty("source_caches");
+    const historicalRoot = join(f.root, "historical");
+    writeChainArtifact(join(historicalRoot, "freeze.json"), { ...frozen, source_caches: [],
+      config: { ...frozen.config, source_cache_roots: [], source_publication_associations: [] } });
+    expect(() => experimentContract.readLongMemEvalSemanticFreeze(historicalRoot)).toThrow(
+      /freeze uses the retired source interpretation cache format \(source_cache_roots, source_publication_associations, source_caches\)/u);
+    await expect(freezeLongMemEvalSemanticRun(config, historicalRoot)).rejects.toThrow(/retired source interpretation cache format/u);
+  }, 60000);
+
   it("preserves identical text belonging to distinct source sessions", async () => {
     const f = await fixture(true);
     const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
@@ -422,8 +447,8 @@ describe("complete-source census and publication", () => {
     expect(census.records[0]!.corpus_digest).toBe(census.records[1]!.corpus_digest);
     const freezeRoot = join(f.root, "freeze");
     const frozen = await freezeLongMemEvalSemanticRun({
-      arm: "native_semantic", workspace_prefix: "source-occurrences", source_cache_roots: [],
-      source_publication_associations: [], correspondence_cache_root: join(f.root, "correspondence-cache"),
+      arm: "native_semantic", workspace_prefix: "source-occurrences",
+      correspondence_cache_root: join(f.root, "correspondence-cache"),
       discovery_page_cap: 4, correspondence_pair_cap: 2, authorized_scopes: { mode: "named", scopes: ["project"] },
       data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot, dataset_sha256: census.dataset_sha256,
       dataset_question_count: 1, question_ids: ["repeated-session"],
