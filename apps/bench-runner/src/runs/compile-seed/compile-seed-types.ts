@@ -498,10 +498,6 @@ export interface CompileSeedTurnInput {
   readonly sourceObservedAt?: string;
   // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
   readonly sourceMemoryRefs?: readonly string[];
-  /**
-   * Source-only objects are fail-closed unless a kind-aware caller opts in.
-   */
-  readonly sourceEvidenceFallback?: "trusted_source_turn" | "disabled";
 }
 
 export interface CompileSeedResult {

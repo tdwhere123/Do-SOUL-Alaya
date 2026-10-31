@@ -122,7 +122,6 @@ async function seedLocomoTurn(input: {
     seedIndex: input.seedIndex,
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
-    sourceEvidenceFallback: "disabled",
     ...(input.sessionSurfaceId === undefined ? {} : { surfaceId: input.sessionSurfaceId }),
     ...(input.previousTurnSeedMemoryIds.length === 0
       ? {}

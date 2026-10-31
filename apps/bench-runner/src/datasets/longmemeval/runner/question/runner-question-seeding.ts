@@ -167,7 +167,6 @@ async function seedQuestionRound(
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
     sourceObservedAt,
-    sourceEvidenceFallback: "trusted_source_turn",
     ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {}),
     ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
   });

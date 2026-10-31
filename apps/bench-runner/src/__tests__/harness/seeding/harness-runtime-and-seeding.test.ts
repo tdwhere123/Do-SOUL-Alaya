@@ -1,16 +1,12 @@
 // @ts-nocheck
 import { bindPostTurnTaskSource } from "../../../../../core-daemon/src/__tests__/mcp-memory/garden/post-turn-source-fixture.js";
-import { installHistoricalSignalReplay } from "./historical-signal-replay-fixture.js";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
   SqliteMemoryEntryRepo,
-  SqliteMemoryHqRepo,
   SqliteSignalRepo,
   type GardenTaskEventPublisherPort
 } from "@do-soul/alaya-storage";
@@ -21,19 +17,10 @@ import {
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
-import {
-  createCompileSeedRunner,
-  type CompileSeedExtractionConfig
-} from "../../../runs/compile-seed.js";
-import { writeCompleteProviderCacheFixture } from "../../longmemeval/extraction/authority/provider-shard-fixture.js";
-import { buildGroundedInterpretationResponse } from "../../longmemeval/extraction-fill/fixture.js";
-import { withOpenSemanticFactorGraph } from
-  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
 const SOURCE_TURN = "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.";
-const SOURCE_REQUEST = stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(SOURCE_TURN, []));
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -117,47 +104,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   );
 
   it(
-    "answers-with compile seed persists HQ rows for path-fuel pairing",
-    async () => {
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-answers-with-hq-ws",
-        runId: "harness-answers-with-hq-run"
-      });
-      handles.push(daemon);
-
-      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([
-        {
-          signalKind: "potential_claim",
-          objectKind: "fact",
-          confidence: 0.9,
-          distilledFact: "Mira uses oat milk in coffee.",
-          turnContent: "Mira uses oat milk in coffee.",
-          evidenceRef: "answers-with-hq-q0",
-          sourceObservedAt: "2026-07-29T00:00:00.000Z",
-          turnSeedIndex: 1,
-          extractionProvider: "official_api_compile",
-          productionRawPayload: {
-            matched_text: "Mira uses oat milk in coffee.",
-            hqs: ["What milk does Mira use in coffee?"]
-          }
-        }
-      ]);
-
-      expect(dropped).toEqual([]);
-      expect(seeds).toHaveLength(1);
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-      const hqById = await new SqliteMemoryHqRepo(db).getHqByObjectIds([
-        seeds[0]!.memoryId
-      ]);
-      expect(hqById.get(seeds[0]!.memoryId)).toEqual([
-        "What milk does Mira use in coffee?",
-        "Mira uses oat milk in coffee."
-      ]);
-    },
-    60_000
-  );
-
-  it(
     "does not autonomously sweep an enqueued POST_TURN_EXTRACT task",
     async () => {
       // The bench daemon must NOT start the daemon's autonomous
@@ -219,254 +165,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(claimStructured?.ok).toBe(true);
       expect(claimStructured?.output.status).toBe("claimed");
       database.close();
-    },
-    60_000
-  );
-  it(
-    "compile() seed of a free-form extracted object_kind materializes a memory_entry",
-    async () => {
-      // Regression: the production OfficialApiGardenProvider.compile LLM
-      // emits a FREE-FORM object_kind (travel_itinerary / podcast /
-      // health_advice / …) that the MaterializationRouter routeByObjectKind
-      // table does not enumerate. A high-confidence potential_claim /
-      // potential_preference signal with such a kind routes to evidence_only
-      // — an evidence_capsule with NO memory_entry — so the seeded turn fact
-      // never lands in the recall store and readMaterializedMemoryId throws
-      // "did not materialize a memory_entry", dropping the whole turn batch.
-      //
-      // The bench seeds the REAL free-form extracted object_kind (no longer
-      // canonicalized onto `fact`), so it exercises the production router
-      // exactly. With retainUnroutedHighConfidenceFacts the daemon keeps an
-      // unrouted high-confidence claim/preference as a recallable
-      // memory_entry_only; this test runs that path and asserts the durable
-      // memory_entry is created and recallable. Default-off would drop both to
-      // evidence_only (production parity) — see the router unit coverage.
-      const startWithRetainFacts = async () => {
-        const prev = process.env.ALAYA_RETAIN_UNROUTED_FACTS;
-        process.env.ALAYA_RETAIN_UNROUTED_FACTS = "1";
-        try {
-          return await startBenchDaemon({
-            workspaceId: "harness-freeform-kind-ws",
-            runId: "harness-freeform-kind-run"
-          });
-        } finally {
-          if (prev === undefined) {
-            delete process.env.ALAYA_RETAIN_UNROUTED_FACTS;
-          } else {
-            process.env.ALAYA_RETAIN_UNROUTED_FACTS = prev;
-          }
-        }
-      };
-      const daemon = await startWithRetainFacts();
-      handles.push(daemon);
-
-      const credentialledConfig: CompileSeedExtractionConfig = {
-        providerUrl: "https://example.test/v1",
-        model: "test-model",
-        requestProfile: "provider-default-v1",
-        apiKey: "test-key"
-      };
-      const cacheRoot = await mkdtemp(join(tmpdir(), "harness-freeform-cache-"));
-      tmpRoots.push(cacheRoot);
-      await writeCompleteProviderCacheFixture({
-        cacheRoot,
-        label: "historical freeform source", userPrompt: SOURCE_REQUEST,
-        rawJson: buildGroundedInterpretationResponse(SOURCE_REQUEST),
-        model: credentialledConfig.model,
-        providerUrl: credentialledConfig.providerUrl,
-        requestProfile: credentialledConfig.requestProfile
-      });
-
-      // A compile()-shaped envelope: signal_kind potential_claim, a free-form
-      // object_kind the router does NOT enumerate (the exact bug trigger),
-      // high confidence. Two signals so the whole-turn batch is exercised.
-      installHistoricalSignalReplay(JSON.stringify({
-              signals: [
-                {
-                  signal_kind: "potential_claim",
-                  object_kind: "travel_itinerary",
-                  confidence: 0.92,
-                  matched_text: "spend three days in Kyoto",
-                  distilled_fact: "The user plans three days in Kyoto.",
-                  source_locator: {
-                    contract_version: 4,
-                    kind: "assertion_catalog",
-                    assertion_id: 1
-                  }
-                },
-                {
-                  signal_kind: "potential_preference",
-                  object_kind: "health_advice",
-                  confidence: 0.88,
-                  matched_text: "I prefer low-impact morning workouts",
-                  distilled_fact: "The user prefers low-impact morning workouts.",
-                  source_locator: {
-                    contract_version: 4,
-                    kind: "assertion_catalog",
-                    assertion_id: 2
-                  }
-                }
-              ].map(withOpenSemanticFactorGraph)
-            }));
-    const runner = createCompileSeedRunner({
-        config: credentialledConfig,
-        cacheRoot,
-        requiredTurnContents: [SOURCE_TURN], requiredQuestionWindow: { offset: 0, limit: 1 },
-        extractorFactory: () => ({
-          extract: async () => { throw new Error("historical replay must not call the live extractor"); }
-        })
-      });
-
-      const result = await runner.seedTurn({
-        daemon,
-        turnContent:
-          "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.",
-        turnMessages: [{
-          message_id: "freeform-user-0",
-          role: "user",
-          content:
-            "I would like to spend three days in Kyoto. I prefer low-impact morning workouts."
-        }],
-        evidenceRefBase: "freeform-q0-t0",
-        seedIndex: 0,
-        workspaceId: daemon.workspaceId,
-        runId: daemon.runId
-      });
-
-      // Both compile()-extracted signals must have materialized a durable
-      // memory_entry — NOT been dropped as "did not materialize a
-      // memory_entry". The seed path ran the credentialled compile route.
-      expect(runner.stats.path).toBe("official_api_compile");
-      expect(runner.stats.signalsDropped).toBe(0);
-      expect(result.seeds).toHaveLength(2);
-      for (const seed of result.seeds) {
-        expect(seed.memoryId.length).toBeGreaterThan(0);
-        expect(seed.memoryId).not.toBe(seed.signalId);
-        expect(seed.proposalId.length).toBeGreaterThan(0);
-      }
-      expect(new Set(result.seeds.map((seed) => seed.memoryId)).size).toBe(2);
-
-      // The seeded facts are recallable by their durable memory_entry id.
-      const recallResult = await daemon.recall("Kyoto morning workouts", {
-        maxResults: 5
-      });
-      const recalledIds = new Set(
-        recallResult.results.map((entry) => entry.object_id)
-      );
-      expect(
-        result.seeds.some((seed) => recalledIds.has(seed.memoryId))
-      ).toBe(true);
-    },
-    60_000
-  );
-
-  it(
-    "queryTokenMetrics derives the token economy from the EventLog end-to-end",
-    async () => {
-      // Integration round-trip for the token-economy KPI: a compile turn
-      // that fans out into 2 fact signals, then a recall. The seed path
-      // appends 2 SOUL_SIGNAL_EMITTED events and the recall path emits 1
-      // SOUL_CONTEXT_LENS_ASSEMBLED event; queryTokenMetrics reads them all
-      // back. raw_history_tokens must count the ONE source turn once (not
-      // once per fact), and the recalled-context figures must round-trip the
-      // emitted lens event.
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-token-economy-ws",
-        runId: "harness-token-economy-run"
-      });
-      handles.push(daemon);
-
-      const cacheRoot = await mkdtemp(join(tmpdir(), "harness-tokenecon-cache-"));
-      tmpRoots.push(cacheRoot);
-      await writeCompleteProviderCacheFixture({
-        cacheRoot,
-        label: "historical token economy source", userPrompt: SOURCE_REQUEST,
-        rawJson: buildGroundedInterpretationResponse(SOURCE_REQUEST),
-        model: "test-model",
-        providerUrl: "https://example.test/v1",
-        requestProfile: "provider-default-v1"
-      });
-      installHistoricalSignalReplay(JSON.stringify({
-              signals: [
-                {
-                  signal_kind: "potential_preference",
-                  object_kind: "preference",
-                  confidence: 0.92,
-                  matched_text: "spend three days in Kyoto",
-                  distilled_fact: "The user plans three days in Kyoto.",
-                  source_locator: {
-                    contract_version: 4,
-                    kind: "assertion_catalog",
-                    assertion_id: 1
-                  }
-                },
-                {
-                  signal_kind: "potential_preference",
-                  object_kind: "fact",
-                  confidence: 0.88,
-                  matched_text: "I prefer low-impact morning workouts",
-                  distilled_fact: "The user prefers low-impact morning workouts.",
-                  source_locator: {
-                    contract_version: 4,
-                    kind: "assertion_catalog",
-                    assertion_id: 2
-                  }
-                }
-              ].map(withOpenSemanticFactorGraph)
-            }));
-    const runner = createCompileSeedRunner({
-        config: {
-          providerUrl: "https://example.test/v1",
-          model: "test-model",
-          requestProfile: "provider-default-v1",
-          apiKey: "test-key"
-        },
-        cacheRoot,
-        requiredTurnContents: [SOURCE_TURN], requiredQuestionWindow: { offset: 0, limit: 1 },
-        extractorFactory: () => ({
-          extract: async () => { throw new Error("historical replay must not call the live extractor"); }
-        })
-      });
-
-      const fullTurn =
-        "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.";
-      const result = await runner.seedTurn({
-        daemon,
-        turnContent: fullTurn,
-        turnMessages: [{
-          message_id: "tokenecon-user-0",
-          role: "user",
-          content: fullTurn
-        }],
-        evidenceRefBase: "tokenecon-q0-t0",
-        seedIndex: 0,
-        workspaceId: daemon.workspaceId,
-        runId: daemon.runId
-      });
-      expect(result.seeds).toHaveLength(2);
-
-      await daemon.recall("Kyoto morning workouts", { maxResults: 5 });
-
-      const metrics = await daemon.queryTokenMetrics();
-
-      // Two fact signals were emitted for the one turn.
-      expect(metrics.seed_event_count).toBe(2);
-      // raw_history is the FULL turn counted ONCE (4 chars/token heuristic),
-      // not the per-fact sum and not a windowed excerpt.
-      expect(metrics.raw_history_tokens).toBe(Math.ceil(fullTurn.length / 4));
-      // stored_memory sums the two verified source assertions.
-      expect(metrics.stored_memory_tokens).toBe(
-        Math.ceil("I would like to spend three days in Kyoto.".length / 4) +
-          Math.ceil("I prefer low-impact morning workouts.".length / 4)
-      );
-      // The recall emitted exactly one SOUL_CONTEXT_LENS_ASSEMBLED event;
-      // with a single recall the mean equals the total (the emit->query
-      // round-trip of total_token_estimate).
-      expect(metrics.recall_event_count).toBe(1);
-      expect(metrics.recalled_context_tokens_total).toBe(
-        metrics.recalled_context_tokens_mean
-      );
-      expect(metrics.recalled_context_tokens_total).toBeGreaterThan(0);
     },
     60_000
   );

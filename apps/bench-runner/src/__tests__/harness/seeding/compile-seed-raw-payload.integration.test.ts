@@ -78,7 +78,7 @@ describe("bound compile publication", () => {
     if (seed.kind !== "memory_entry") throw new Error("expected statement memory");
     const database = initDatabase({ filename: join(handle.dataDir, "alaya.db") });
     expect(await new SqliteSignalRepo(database).getById(seed.signalId)).toMatchObject({
-      interpretation_contract: "source-statements-v1", raw_payload: { source_statement: {
+      source: "garden_compile", interpretation_contract: "source-statements-v1", raw_payload: { source_statement: {
         source_root_id: admitted.record.identity, message: { text, recorded_at: null }, statement } } });
     expect(await new SqliteMemoryEntryRepo(database).findById(seed.memoryId)).toMatchObject({
       dimension: "observation", confidence: null, content: statement.text });

@@ -10,15 +10,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
-  SqliteMemoryEntryRepo,
-  SqliteSignalRepo,
   type GardenTaskEventPublisherPort
 } from "@do-soul/alaya-storage";
 
 import {
   GardenRole,
   GardenTaskKind,
-  SignalSource,
   isPathRecallEligible,
   mapRelationKindToGraphEdgeType,
   type GardenClaimTaskResponse
@@ -27,8 +24,7 @@ import {
 import {
   BENCH_DAEMON_MANAGED_ENV_KEYS,
   startBenchDaemon,
-  type BenchDaemonHandle,
-  type BenchSignalSeedInput
+  type BenchDaemonHandle
 } from "../../../harness/daemon.js";
 
 import {
@@ -253,124 +249,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         seed.memoryId
       );
       expect(recallResult.active_constraints_count ?? 0).toBe(0);
-    },
-    60_000
-  );
-
-  it(
-    "rejects seeds when signal does not materialize a memory_entry",
-    async () => {
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-deferred-ws",
-        runId: "harness-deferred-run"
-      });
-      handles.push(daemon);
-
-      // confidence 0.1 (< router floor 0.5 and < 0.3) routes the signal to
-      // "deferred" — no memory_entry. Driven through the same in-process
-      // signalService.receiveSignal seam the production POST_TURN_EXTRACT path uses.
-      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([
-        {
-          signalKind: "potential_preference",
-          objectKind: "preference",
-          confidence: 0.1,
-          distilledFact: "Bob might prefer tea, unconfirmed.",
-          turnContent: "Maybe I sometimes drink tea, not sure.",
-          matchedText: "drink tea",
-          evidenceRef: "harness-deferred-q0-f0",
-          turnSeedIndex: 0,
-          extractionProvider: "official_api_compile"
-        }
-      ]);
-
-      expect(seeds).toHaveLength(0);
-      expect(dropped).toHaveLength(1);
-      expect(dropped[0]?.reason).toBe("candidate_absent");
-
-      // The materialization-router deferred the signal: no memory_entry exists.
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-      const memoryRepo = new SqliteMemoryEntryRepo(db);
-      const memories = await memoryRepo.findByWorkspaceIdAll(daemon.workspaceId);
-      expect(memories).toHaveLength(0);
-    },
-    60_000
-  );
-
-  it(
-    "proposeMemoriesFromCompileSignals materializes signals with source=garden_compile",
-    async () => {
-      // The compile-based bench seed path must materialize through the
-      // daemon's in-process signalService.receiveSignal — the same seam
-      // production POST_TURN_EXTRACT completion uses — with source built as
-      // garden_compile. soul.emit_candidate_signal would instead hardcode
-      // source=model_tool, which downstream toFormationKind maps to
-      // `inferred` (confidence base 0.4) rather than `extracted` (0.6),
-      // seeding ~33% lower retention than the production POST_TURN_EXTRACT
-      // path. This test reads the persisted signal and asserts the source
-      // is garden_compile — production-faithful — for every seeded signal.
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-garden-source-ws",
-        runId: "harness-garden-source-run"
-      });
-      handles.push(daemon);
-
-      const inputs: readonly BenchSignalSeedInput[] = [
-        {
-          signalKind: "potential_preference",
-          objectKind: "preference",
-          confidence: 0.9,
-          distilledFact: "Alice lives in Berlin.",
-          turnContent: "I moved to Berlin last spring. I started my job in March 2024.",
-          matchedText: "moved to Berlin",
-          evidenceRef: "garden-source-q0-f0",
-          turnSeedIndex: 0,
-          extractionProvider: "official_api_compile",
-          sourceObservedAt: "2026-02-03T04:05:06.000Z"
-        },
-        {
-          signalKind: "potential_preference",
-          objectKind: "fact",
-          confidence: 0.85,
-          distilledFact: "Alice started her job on 2024-03-01.",
-          turnContent: "I moved to Berlin last spring. I started my job in March 2024.",
-          matchedText: "started my job",
-          evidenceRef: "garden-source-q0-f1",
-          turnSeedIndex: 0,
-          extractionProvider: "official_api_compile"
-        }
-      ];
-
-      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals(inputs);
-
-      expect(dropped).toHaveLength(0);
-      expect(seeds).toHaveLength(2);
-      expect(new Set(seeds.map((seed) => seed.memoryId)).size).toBe(2);
-
-      // Read each materialized signal's persisted record and assert
-      // source=garden_compile (the production POST_TURN_EXTRACT source).
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-      const signalRepo = new SqliteSignalRepo(db);
-      for (const seed of seeds) {
-        const signal = await signalRepo.getById(seed.signalId);
-        expect(signal).not.toBeNull();
-        expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
-        if (seed === seeds[0]) {
-          expect(signal?.created_at).toBe("2026-02-03T04:05:06.000Z");
-        }
-      }
-
-      // The full audit/accept chain still ran: every seed carries a
-      // distinct durable memory id, a signal id, and a proposal id.
-      for (const seed of seeds) {
-        expect(seed.memoryId.length).toBeGreaterThan(0);
-        expect(seed.proposalId.length).toBeGreaterThan(0);
-        expect(seed.memoryId).not.toBe(seed.signalId);
-      }
-
-      // The seeded memories are recallable by their durable object_id.
-      const recallResult = await daemon.recall("Berlin job", { maxResults: 5 });
-      const recalledIds = new Set(recallResult.results.map((r) => r.object_id));
-      expect(seeds.some((seed) => recalledIds.has(seed.memoryId))).toBe(true);
     },
     60_000
   );

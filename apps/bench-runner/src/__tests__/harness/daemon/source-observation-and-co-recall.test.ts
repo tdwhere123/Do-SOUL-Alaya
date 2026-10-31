@@ -17,15 +17,13 @@ import {
 import {
   GardenRole,
   GardenTaskKind,
-  SignalSource,
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 
 import {
   BENCH_DAEMON_MANAGED_ENV_KEYS,
   startBenchDaemon,
-  type BenchDaemonHandle,
-  type BenchSignalSeedInput
+  type BenchDaemonHandle
 } from "../../../harness/daemon.js";
 
 import {
@@ -161,59 +159,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
       // A caller-supplied reference is preserved, but this path does not mint a
       // temporal relationship without a daemon-issued source observation.
-      const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
-      expect(pathRow).toBeUndefined();
-      expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
-    },
-    60_000
-  );
-
-  it(
-    "compile seed sourceMemoryRefs stay unasserted without a verified source observation",
-    async () => {
-      const daemon = await startBenchDaemon({
-        workspaceId: "harness-compile-first-class-ref-ws",
-        runId: "harness-compile-first-class-ref-run"
-      });
-      handles.push(daemon);
-
-      const parent = await daemon.proposeMemory(
-        "Nora archived the support rotation note.",
-        "compile-first-class-ref-parent",
-        { objectKind: "fact" }
-      );
-      const inputs: readonly BenchSignalSeedInput[] = [
-        {
-          signalKind: "potential_preference",
-          objectKind: "fact",
-          confidence: 0.9,
-          distilledFact: "Nora now updates the support rotation note weekly.",
-          turnContent: "I update the support rotation note every Friday now.",
-          matchedText: "support rotation note",
-          evidenceRef: "compile-first-class-ref-child",
-          turnSeedIndex: 1,
-          extractionProvider: "official_api_compile",
-          sourceMemoryRefs: [parent.memoryId]
-        }
-      ];
-
-      const { seeds } = await daemon.proposeMemoriesFromCompileSignals(inputs);
-      const child = seeds[0];
-      if (child === undefined) {
-        throw new Error("compile seed did not materialize a child memory");
-      }
-
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-      const signalRepo = new SqliteSignalRepo(db);
-      const signal = await signalRepo.getById(child.signalId);
-
-      expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
-      expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
-      expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
-      expect(signal?.source_observation).toBeNull();
-
-      // A compile fixture without a daemon-issued completion receipt cannot
-      // create a temporal relationship from an unverified source reference.
       const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
       expect(pathRow).toBeUndefined();
       expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);

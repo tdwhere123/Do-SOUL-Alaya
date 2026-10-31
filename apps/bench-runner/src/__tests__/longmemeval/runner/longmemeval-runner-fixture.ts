@@ -14,6 +14,12 @@ import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.
 import { fixtureAttemptAuthority, providerBackedResponseResult, writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
 
+const RUNNER_EXTRACTION_CONFIG = Object.freeze({
+  model: "test-extraction-model", requestProfile: "provider-default-v1" as const,
+  providerUrl: "https://fixture-provider.invalid/v1", apiKey: "fixture-only",
+  sourcePacking: "session-statements" as const
+});
+
 /**
  * Admit the runner's current session-statement shards under the dataset revision
  * the run verifies. The revision is bound before admission because statement
@@ -24,11 +30,7 @@ export async function admitRunnerExtractionFixture(
   questions: readonly LongMemEvalQuestion[],
   dataset: Readonly<{ name: string; revision: string }>
 ): Promise<void> {
-  const config = {
-    model: "test-extraction-model", requestProfile: "provider-default-v1" as const,
-    providerUrl: "https://fixture-provider.invalid/v1", apiKey: "fixture-only",
-    sourcePacking: "session-statements" as const
-  };
+  const config = RUNNER_EXTRACTION_CONFIG;
   writeExtractionCacheTestManifest({ cacheRoot, model: config.model, providerUrl: config.providerUrl,
     systemPrompt: SOURCE_STATEMENTS_PROMPT, dataset: dataset.name, datasetRevision: dataset.revision });
   const turns = inspectTurnContentKeySpace(questions, config.sourcePacking);
