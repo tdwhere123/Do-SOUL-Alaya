@@ -1186,14 +1186,14 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 355,
-      "expected_sha256": "b9d0a62cb4d168f6959f1700976765d4bff0ff90ceb75c35713330fbcef936a9"
+      "expected_count": 358,
+      "expected_sha256": "8b539a42db3198ad4f9f3ce51919891187ad00c1683969b2aba67d2ce528f56a"
     },
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 328,
-      "expected_sha256": "bf9e1be02c2c01a3ed5ec42837474fea71d2a053a4f28d9afab52388a7e9a52d"
+      "expected_count": 331,
+      "expected_sha256": "5edbba6f20ec955f71382c52ffaba4a92c46f3737908d0543229c76d2412ece9"
     },
     {
       "specifier": "@do-soul/alaya",
