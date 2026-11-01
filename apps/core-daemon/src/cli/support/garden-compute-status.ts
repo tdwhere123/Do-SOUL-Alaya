@@ -68,7 +68,7 @@ async function compileFailureFields(
 }
 
 // Under the host_worker product default, surface whether recall-driven
-// host-worker work (POST_TURN_EXTRACT and EDGE_CLASSIFY) is waiting for an
+// host-worker work (SOURCE_STATEMENT_SESSION and EDGE_CLASSIFY) is waiting for an
 // attached CLI agent (LLM quality) or being left to the zero-cloud heuristic
 // fallback. Omitted for every other provider_kind, and omitted when no garden
 // task repo is wired (non-sqlite harness).

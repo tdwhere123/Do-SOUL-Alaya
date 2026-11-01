@@ -29,8 +29,9 @@ import {
   type UsageReport
 } from "@do-soul/alaya-protocol";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
-import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
+import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
+import type { StatementSessionClosurePort } from "../../garden/statement-session/statement-session-closure.js";
 import {
   sourceMetadataForRecallResult,
   resolveMcpDegradationReason,
@@ -152,8 +153,7 @@ export interface RecallUsageHandlerDependencies {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;
   };
-  readonly gardenTaskRepo?: {
-    enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
+  readonly gardenTaskRepo?: StatementSessionClosurePort & {
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: string,

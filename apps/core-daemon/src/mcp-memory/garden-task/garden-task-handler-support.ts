@@ -11,8 +11,11 @@ import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { stableStringify } from "@do-soul/alaya-core";
 import { buildGardenTaskSignalId } from "../../garden/support/task-signal-id.js";
 import { McpToolError } from "../tool/mcp-tool-error.js";
-import { parsePostTurnExtractTaskPayload } from "../../garden/post-turn-extract/task-payload.js";
-import { sourceStatementTaskRequests } from "../../garden/post-turn-extract/source-statement-task.js";
+import { parseStatementSessionTaskPayload, statementSessionHostWorkerPayload,
+  type StatementSessionSourcesPort } from "../../garden/statement-session/statement-session-task.js";
+
+/** Statement session payloads are rebuilt from their admitted roots, never from copied task text. */
+export type GardenTaskPayloadSources = Pick<StatementSessionSourcesPort, "root">;
 
 export type WarnPort = (message: string, meta: Record<string, unknown>) => void;
 export type GardenCompletionCandidateSignal = NonNullable<
@@ -79,27 +82,27 @@ export function mapGardenMcpWorkerRole(role: GardenMcpWorkerRole | undefined): G
   }
 }
 
-export function toGardenTaskSnapshot(row: GardenTaskRow) {
+export function toGardenTaskSnapshot(row: GardenTaskRow, sources: GardenTaskPayloadSources) {
   return {
     task_id: row.id,
     role: gardenWorkerRoleForRow(row),
     kind: row.kind,
     created_at: row.created_at,
-    payload: publicGardenTaskPayload(row)
+    payload: publicGardenTaskPayload(row, sources)
   };
 }
 
-export function toGardenClaimTaskPayload(row: GardenTaskRow) {
+export function toGardenClaimTaskPayload(row: GardenTaskRow, sources: GardenTaskPayloadSources) {
   return {
     task_id: row.id,
     role: gardenWorkerRoleForRow(row),
     kind: row.kind,
-    payload: publicGardenTaskPayload(row)
+    payload: publicGardenTaskPayload(row, sources)
   };
 }
 
 const HOST_WORKER_TASK_KINDS: ReadonlySet<string> = new Set([
-  GardenTaskKind.POST_TURN_EXTRACT,
+  GardenTaskKind.SOURCE_STATEMENT_SESSION,
   GardenTaskKind.EDGE_CLASSIFY
 ]);
 
@@ -107,7 +110,7 @@ function gardenWorkerRoleForRow(row: GardenTaskRow): string {
   return HOST_WORKER_TASK_KINDS.has(row.kind) ? "host_worker" : row.role;
 }
 
-function publicGardenTaskPayload(row: GardenTaskRow): unknown {
+function publicGardenTaskPayload(row: GardenTaskRow, sources: GardenTaskPayloadSources): unknown {
   if (!isUnknownRecord(row.payload)) {
     return row.payload;
   }
@@ -115,9 +118,11 @@ function publicGardenTaskPayload(row: GardenTaskRow): unknown {
     return {
       run_id: row.payload.run_id,
       turn_index: row.payload.turn_index,
-      workspace_id: row.payload.workspace_id,
-      source_statements: sourceStatementTaskRequests(parsePostTurnExtractTaskPayload(row.payload), row.id)
+      workspace_id: row.payload.workspace_id
     };
+  }
+  if (row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION) {
+    return statementSessionHostWorkerPayload(sources, parseStatementSessionTaskPayload(row.payload));
   }
   if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
     return {

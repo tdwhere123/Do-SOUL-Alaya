@@ -3,6 +3,7 @@ import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { createPostTurnExtractTaskProcessor } from "./host-worker-task-processors.js";
+import { createStatementSessionTaskProcessor } from "./statement-session-task-processor.js";
 import {
   createGardenClaimReclaimer,
   createHostWorkerTaskExpirer
@@ -11,6 +12,7 @@ import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receive
 
 export interface HostWorkerTaskRuntimeSupport {
   processPostTurnExtractTask(): Promise<void>;
+  processStatementSessionTask(): Promise<void>;
   reclaimAbandonedGardenClaims(): Promise<void>;
   expireUnclaimedHostWorkerTasks(): Promise<void>;
 }
@@ -28,11 +30,13 @@ export function createHostWorkerTaskRuntimeSupport(input: Readonly<{
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>): HostWorkerTaskRuntimeSupport {
   const processPostTurnExtractTask = createPostTurnExtractTaskProcessor(input);
+  const processStatementSessionTask = createStatementSessionTaskProcessor(input);
   const reclaimAbandonedGardenClaims = createGardenClaimReclaimer(input);
   const expireUnclaimedHostWorkerTasks = createHostWorkerTaskExpirer(input);
 
   return {
     processPostTurnExtractTask,
+    processStatementSessionTask,
     reclaimAbandonedGardenClaims,
     expireUnclaimedHostWorkerTasks
   };

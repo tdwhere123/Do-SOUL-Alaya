@@ -48,6 +48,7 @@ import {
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
 import { bindPostTurnTaskSource } from "../garden/post-turn-source-fixture.js";
+import { closeStatementSessionChunks } from "../../../garden/statement-session/statement-session-closure.js";
 
 import {
   createMcpMemoryToolHandler,
@@ -118,7 +119,8 @@ interface TrustworthyLoopHarness {
   readonly eventLogRepo: SqliteEventLogRepo;
   callTool<TOutput = unknown>(toolName: string, args: Record<string, unknown>): Promise<TOutput>;
   close(): Promise<void>;
-  enqueueGardenTask(taskId: string): void;
+  /** Admits one post-turn task and closes its run's statement session; returns the session task id. */
+  enqueueGardenTask(taskId: string): string;
 }
 
 async function createTrustworthyLoopHarness(
@@ -269,6 +271,9 @@ async function createTrustworthyLoopHarness(
         payload: bindPostTurnTaskSource(database, createPostTurnExtractPayload(), `post-turn:${taskId}`),
         created_at: "2026-05-11T00:00:00.000Z"
       });
+      closeStatementSessionChunks(gardenTaskRepo, { workspaceId: "workspace-1", runId: "run-1", closeTail: true,
+        now: () => "2026-05-11T00:20:00.000Z" });
+      return gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 1, GardenTaskKind.SOURCE_STATEMENT_SESSION)[0]!.id;
     }
   };
 
@@ -403,13 +408,13 @@ describe("trustworthy-loop-trace", () => {
   it("keeps Garden-originated signals unanchored and does not warn for GARDEN_COMPILE", async () => {
     const warn = vi.fn();
     const harness = await createTrustworthyLoopHarness({ warn });
-    harness.enqueueGardenTask("garden-task-1");
+    const sessionTaskId = harness.enqueueGardenTask("garden-task-1");
 
     const claimed = await harness.callTool<{ payload: { source_statements: {
       requests: readonly import("@do-soul/alaya-protocol").SourceStatementRequest[] } } }>(
-      "garden.claim_task", { task_id: "garden-task-1" });
+      "garden.claim_task", { task_id: sessionTaskId });
     await harness.callTool("garden.complete_task", {
-      task_id: "garden-task-1",
+      task_id: sessionTaskId,
       status: "completed",
       result_envelope: {
         source_statement_responses: claimed.payload.source_statements.requests.map(request => ({

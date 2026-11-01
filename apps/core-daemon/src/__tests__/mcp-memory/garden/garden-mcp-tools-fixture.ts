@@ -156,11 +156,12 @@ export async function createGardenMcpHarness(
   });
   const originalCompleteWithEvents = gardenTaskRepo.completeWithEvents.bind(gardenTaskRepo);
   const handlerGardenTaskRepo: NonNullable<McpMemoryToolHandlerDependencies["gardenTaskRepo"]> = {
+    statementSessions: gardenTaskRepo.statementSessions,
     enqueue: gardenTaskRepo.enqueue.bind(gardenTaskRepo),
     findByIdInWorkspace: gardenTaskRepo.findByIdInWorkspace.bind(gardenTaskRepo),
     peekPending: gardenTaskRepo.peekPending.bind(gardenTaskRepo),
     hasAvailableSource: gardenTaskRepo.hasAvailableSource.bind(gardenTaskRepo),
-    quarantineUnavailablePostTurnTasks: gardenTaskRepo.quarantineUnavailablePostTurnTasks.bind(gardenTaskRepo),
+    quarantineUnavailableSourceTasks: gardenTaskRepo.quarantineUnavailableSourceTasks.bind(gardenTaskRepo),
     claimAtomic: gardenTaskRepo.claimAtomic.bind(gardenTaskRepo),
     completeWithEvents: async (taskId, result, events, claimedBy, workspaceId) => {
       if (options.completeWithEvents !== undefined) {

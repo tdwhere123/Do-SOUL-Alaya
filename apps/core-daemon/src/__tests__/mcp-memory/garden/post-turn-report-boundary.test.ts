@@ -1,5 +1,7 @@
 import { afterEach, expect, it } from "vitest";
+import { GardenTaskKind } from "@do-soul/alaya-protocol";
 import { SqliteTrustStateRepo } from "@do-soul/alaya-storage";
+import { closeStatementSessionChunks } from "../../../garden/statement-session/statement-session-closure.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { TrustStateRecorder } from "../../../trust/state.js";
 import {
@@ -10,23 +12,26 @@ import {
 
 afterEach(cleanupPostTurnExtractHarnesses);
 
-it("lists and claims a valid digest larger than the generic JSON payload limit", async () => {
+it("lists and claims a session request over a digest larger than the generic JSON payload limit", async () => {
   const harness = await createHandlerHarness();
   const messages = [
     { role: "user", content_excerpt: "a".repeat(9000) },
     { role: "assistant", content_excerpt: "b".repeat(9000) }
   ];
   expect((await reportUsage(harness.handler, { turn_index: 120, last_messages: messages })).ok).toBe(true);
+  closeStatementSessionChunks(harness.gardenTaskRepo, { workspaceId: "workspace-1", runId: "run-1", closeTail: true,
+    now: () => "2026-05-07T00:30:00.000Z" });
   const listed = unwrapOk<GardenListPendingTasksOutput>(await harness.handler.call({
     toolName: "garden.list_pending_tasks", arguments: { role: "host_worker" }, context: defaultContext()
   }));
-  expect(listed.tasks).toHaveLength(1);
-  const taskId = listed.tasks[0]!.task_id;
+  const sessions = listed.tasks.filter(task => task.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION);
+  expect(sessions).toHaveLength(1);
+  const taskId = sessions[0]!.task_id;
   const claimed = await harness.handler.call({
     toolName: "garden.claim_task", arguments: { task_id: taskId }, context: defaultContext()
   });
   expect(claimed).toMatchObject({ ok: true, output: { status: "claimed", payload: {
-    source_statements: { raw_fallback_message_ids: [], requests: [{ chunk_index: 0,
+    source_statements: { requests: [{ chunk_index: 0, session_id: "run-1", context: [],
       messages: messages.map(message => ({ role: message.role, text: message.content_excerpt, recorded_at: null })) }] }
   } } });
   expect(harness.gardenTaskRepo.findById(taskId)?.status).toBe("claimed");

@@ -421,7 +421,10 @@ export {
   type GardenTaskReclaimInput,
   type GardenTaskRepoPort,
   type GardenTaskRow,
-  type GardenTaskStatus
+  type GardenTaskStatus,
+  type GardenStatementSessionSources,
+  type StatementSessionRoot,
+  type StatementSessionTurn
 } from "./repos/garden/index.js";
 
 export { SqliteSemanticArtifactRepo } from "./repos/garden/semantic-artifact-repo.js";

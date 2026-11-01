@@ -35,3 +35,8 @@ export {
   type GardenTaskRow,
   type GardenTaskStatus
 } from "./garden-task-repo.js";
+export {
+  type GardenStatementSessionSources,
+  type StatementSessionRoot,
+  type StatementSessionTurn
+} from "./garden-statement-session-sources.js";

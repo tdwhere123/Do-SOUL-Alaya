@@ -129,7 +129,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly recallService: Pick<RecallService, "recall">;
   // invariant: the bench harness seeds compile()-extracted signals through
   // the SAME in-process receiveSignal seam the production garden host-worker
-  // completion uses (garden-runtime.ts processPostTurnExtractTask), so a
+  // completion uses (statement-session-task-processor.ts), so a
   // bench-seeded signal materializes a memory_entry exactly as production.
   readonly signalService: Pick<
     SignalService,
@@ -165,10 +165,10 @@ export interface AlayaDaemonRuntimeServices {
     getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
     // Recall-driven host-worker backlog snapshot used by doctor/status to warn
     // under the host_worker product default when work is aging unclaimed (no
-    // attached CLI agent). `pending` counts unclaimed POST_TURN_EXTRACT tasks;
-    // `stale` counts POST_TURN_EXTRACT tasks a worker CLAIMED but whose claim is
+    // attached CLI agent). `pending` counts unclaimed SOURCE_STATEMENT_SESSION tasks;
+    // `stale` counts SOURCE_STATEMENT_SESSION tasks a worker CLAIMED but whose claim is
     // older than the wait window (claimed-and-aged, not pending-and-aged).
-    // `failed` counts POST_TURN_EXTRACT rows among the most recent compile
+    // `failed` counts SOURCE_STATEMENT_SESSION rows among the most recent compile
     // turns in the doctor workspace so a silent extract miss is visible.
     // edgeClassifyPending / edgeClassifyStale carry the same pending/stale split
     // for EDGE_CLASSIFY tasks so a no-agent deployment's unrefined heuristic-edge

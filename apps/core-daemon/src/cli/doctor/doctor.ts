@@ -58,7 +58,7 @@ export interface GardenComputeStatus {
   // Present only under the host_worker product default. Surfaces whether
   // recall-driven host-worker work is waiting for an attached CLI agent (LLM
   // quality) or being left to the zero-cloud heuristic fallback.
-  // pending_extract_tasks counts unclaimed POST_TURN_EXTRACT tasks;
+  // pending_extract_tasks counts unclaimed SOURCE_STATEMENT_SESSION tasks;
   // stale_claimed_extract_tasks counts tasks a worker claimed but abandoned past
   // the stale window (reclaimed back to pending on the next scheduler pass).
   // pending_edge_classify_tasks / stale_claimed_edge_classify_tasks carry the

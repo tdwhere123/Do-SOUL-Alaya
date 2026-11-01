@@ -58,7 +58,7 @@ it("admits actual multiple source roots and each contiguous targeted expansion f
   expect(capture.delivered).toEqual(capture.bodies);
   const admitted = admitOrdinaryRecallObservation(capture.root);
   expect(admitted.state).toBe("complete");
-  expect(admitted.binding).toMatchObject({ protocol_package_version: "31.0.0", reader_protocol_package_version: "31.0.0",
+  expect(admitted.binding).toMatchObject({ protocol_package_version: "32.0.0", reader_protocol_package_version: "32.0.0",
     public_semantics: "ordinary-native-field.v8", producer_revision: capture.config.implementation_revision });
   expect(capturedCalls(capture).every(call => call.output?.index?.result_version === "ordinary-native-field.v8")).toBe(true);
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenRole, GardenTaskKind, GardenTier } from "@do-soul/alaya-protocol";
-import { buildGardenTaskEvidenceFallbackSignalId, buildGardenTaskSignalId } from "../../../garden/support/task-signal-id.js";
-import { readRetainedPostTurnSource, recordedPostTurnResponses } from "./post-turn-source-fixture.js";
+import { buildGardenTaskEvidenceFallbackSignalId } from "../../../garden/support/task-signal-id.js";
+import { readRetainedPostTurnSource } from "./post-turn-source-fixture.js";
 import {
   cleanupGardenMcpHarnesses,
   createGardenMcpHarness
@@ -21,7 +21,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).resolves.toMatchObject({
+    await expect(completeTask(harness, taskId)).resolves.toMatchObject({
       status: "completed"
     });
 
@@ -29,23 +29,6 @@ describe("external post-turn evidence finalization", () => {
     expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
       .toBe("User: Remember that evidence must survive extraction.");
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "completed" });
-  });
-
-  it("keeps the admitted original when candidates create no additional durable evidence", async () => {
-    const taskId = "post-turn-deferred";
-    const fallbackId = buildGardenTaskEvidenceFallbackSignalId(taskId);
-    const harness = await createGardenMcpHarness({
-      hasCreatedEvidence: async (result) => result.signal.signal_id === fallbackId
-    });
-    enqueuePostTurnTask(harness, taskId);
-    await claimTask(harness, taskId);
-
-    await completeTask(harness, taskId, [candidateStatement()]);
-
-    await expect(harness.signalRepo.getById(buildGardenTaskSignalId(taskId, 0))).resolves.toBeTruthy();
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
-    expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
-      .toBe("User: Remember that evidence must survive extraction.");
   });
 
   it("completes from already retained evidence without claiming synthetic evidence was created", async () => {
@@ -56,13 +39,13 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).resolves.toMatchObject({ status: "completed" });
+    await expect(completeTask(harness, taskId)).resolves.toMatchObject({ status: "completed" });
     expect(readRetainedPostTurnSource(harness.database, taskId)?.source_body)
       .toBe("User: Remember that evidence must survive extraction.");
     expect(harness.database.connection.prepare("SELECT count(*) AS count FROM signals").get()).toEqual({ count: 0 });
   });
 
-  it("freezes an empty completion envelope before completion audit", async () => {
+  it("retries a post-turn completion after its completion audit failed", async () => {
     const taskId = "post-turn-empty-retry";
     let completionAttempts = 0;
     const harness = await createGardenMcpHarness({
@@ -75,11 +58,21 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).rejects.toThrow("MCP memory tool call failed.");
+    await expect(completeTask(harness, taskId)).rejects.toThrow("MCP memory tool call failed.");
     await claimTask(harness, taskId);
-    await expect(completeTask(harness, taskId, [candidateStatement()])).rejects.toThrow(
-      "source_statement_responses changed after a previous partial completion attempt"
-    );
+    await expect(completeTask(harness, taskId)).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("rejects model results on post-turn work, which only retains its admitted source", async () => {
+    const taskId = "post-turn-model-result";
+    const harness = await createGardenMcpHarness();
+    enqueuePostTurnTask(harness, taskId);
+    await claimTask(harness, taskId);
+
+    await expect(harness.callTool("garden.complete_task", { task_id: taskId, status: "completed",
+      result_envelope: { source_statement_responses: [{ chunk_index: 0, raw_json: "{\"messages\":[]}" }] } }))
+      .rejects.toThrow("source_statement_responses are only valid for SOURCE_STATEMENT_SESSION");
+    expect(harness.getGardenTask(taskId)).toMatchObject({ status: "claimed" });
   });
 
   it("fails closed when the durable receiver is unavailable", async () => {
@@ -88,29 +81,8 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).rejects.toThrow(
+    await expect(completeTask(harness, taskId)).rejects.toThrow(
       "without a durable signal receiver"
-    );
-    expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
-  });
-
-  it("detects a completion claim reclaimed during signal materialization", async () => {
-    const taskId = "post-turn-claim-reclaimed";
-    const harness = await createGardenMcpHarness({
-      receiveSignal: async (signal, context) => {
-        await context.gardenTaskRepo.releaseClaim(
-          taskId,
-          "garden-worker:complete:00000000-0000-4000-8000-000000000001"
-        );
-        return { signal };
-      },
-      hasCreatedEvidence: async () => true
-    });
-    enqueuePostTurnTask(harness, taskId);
-    await claimTask(harness, taskId);
-
-    await expect(completeTask(harness, taskId, [candidateStatement()])).rejects.toThrow(
-      "completion claim changed before candidate signal emission"
     );
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
   });
@@ -124,7 +96,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [], "failed")).resolves.toMatchObject({
+    await expect(completeTask(harness, taskId, "failed")).resolves.toMatchObject({
       status: "failed"
     });
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "failed" });
@@ -139,7 +111,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [], "failed")).rejects.toThrow(
+    await expect(completeTask(harness, taskId, "failed")).rejects.toThrow(
       "without a durable signal receiver"
     );
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
@@ -183,17 +155,7 @@ async function claimTask(
 async function completeTask(
   harness: Awaited<ReturnType<typeof createGardenMcpHarness>>,
   taskId: string,
-  statements: readonly ReturnType<typeof candidateStatement>[],
   status: "completed" | "failed" = "completed"
 ): Promise<unknown> {
-  return await harness.callTool("garden.complete_task", {
-    task_id: taskId,
-    status,
-    result_envelope: { source_statement_responses: recordedPostTurnResponses(taskId,
-      harness.gardenTaskRepo.findById(taskId)!.payload, statements) }
-  });
-}
-
-function candidateStatement() {
-  return { text: "Extraction produced a deferred memory candidate.", relation: "recorded observation" };
+  return await harness.callTool("garden.complete_task", { task_id: taskId, status });
 }

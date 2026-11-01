@@ -6,13 +6,18 @@ import { CURRENT_SOURCE_RECORD_ORDER, readSourceProjectionDependencies } from ".
 import { parseTimestamp } from "../shared/validators.js";
 import { parseGardenTaskRow, type GardenTaskDbRow } from "./mappers/garden-task-rows.js";
 import type { GardenTaskEventInput, GardenTaskEventPublisherPort, GardenTaskRow } from "./garden-task-types.js";
+import { GardenStatementSessionSources } from "./garden-statement-session-sources.js";
 
 /** Availability facts only; the daemon supplies the runtime failure transition's audit. */
 export class GardenTaskSourceProvenance {
   private readonly scanAfterByWorkspace = new Map<string, string>();
-  public constructor(private readonly connection: SqliteConnection) {}
+  private readonly sessionSources: GardenStatementSessionSources;
+  public constructor(private readonly connection: SqliteConnection) {
+    this.sessionSources = new GardenStatementSessionSources(connection);
+  }
 
   public unavailableReason(task: GardenTaskRow): string | null {
+    if (task.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION) return this.sessionUnavailableReason(task);
     if (task.kind !== GardenTaskKind.POST_TURN_EXTRACT) return null;
     const payload = record(task.payload);
     const rootId = payload?.admitted_source_root_id;
@@ -48,6 +53,21 @@ export class GardenTaskSourceProvenance {
     return null;
   }
 
+  /** Every model-visible member root must still be available; one erased root fails the whole request. */
+  private sessionUnavailableReason(task: GardenTaskRow): string | null {
+    const payload = record(task.payload);
+    if (payload?.workspace_id !== task.workspace_id) return "source workspace mismatch";
+    const members = [payload.context, payload.targets].flatMap(value => Array.isArray(value) ? value : [null]);
+    if (!Array.isArray(payload.targets) || payload.targets.length === 0) return "missing statement session roots";
+    for (const member of members) {
+      const rootId = record(member)?.root_id;
+      if (typeof rootId !== "string" || rootId.length === 0) return "missing statement session roots";
+      const read = this.sessionSources.root(task.workspace_id, rootId);
+      if (read.status === "unavailable") return read.reason;
+    }
+    return null;
+  }
+
   public available(task: GardenTaskRow | null): boolean {
     return task !== null && this.unavailableReason(task) === null;
   }
@@ -62,10 +82,11 @@ export class GardenTaskSourceProvenance {
     const timestamp = parseTimestamp(completedAt);
     const scanKey = workspaceId ?? "";
     const afterId = taskId === undefined ? this.scanAfterByWorkspace.get(scanKey) ?? "" : "";
-    const rows = this.connection.prepare(`SELECT * FROM garden_tasks WHERE kind = ?
+    const rows = this.connection.prepare(`SELECT * FROM garden_tasks WHERE kind IN (?, ?)
       AND status IN ('pending', 'claimed') AND (? IS NULL OR workspace_id = ?)
       AND (? IS NULL OR id = ?) AND id > ? ORDER BY id LIMIT 100`)
-      .all(GardenTaskKind.POST_TURN_EXTRACT, workspaceId ?? null, workspaceId ?? null, taskId ?? null, taskId ?? null, afterId);
+      .all(GardenTaskKind.POST_TURN_EXTRACT, GardenTaskKind.SOURCE_STATEMENT_SESSION, workspaceId ?? null, workspaceId ?? null,
+        taskId ?? null, taskId ?? null, afterId);
     // Valid active work must not pin maintenance to a permanently unchanged prefix.
     if (taskId === undefined) {
       if (rows.length === 100) this.scanAfterByWorkspace.set(scanKey, (rows.at(-1) as GardenTaskDbRow).id);
@@ -76,7 +97,7 @@ export class GardenTaskSourceProvenance {
       const row = parseGardenTaskRow(value as GardenTaskDbRow);
       const unavailable = this.unavailableReason(row);
       if (unavailable === null) continue;
-      const reason = `Post-turn source provenance unavailable: ${unavailable}`;
+      const reason = `${row.kind === GardenTaskKind.POST_TURN_EXTRACT ? "Post-turn" : "Statement session"} source provenance unavailable: ${unavailable}`;
       const event = eventForTask(row, reason);
       if (event.event_type !== GardenEventType.SOUL_GARDEN_TASK_COMPLETED || event.entity_id !== row.id ||
           event.workspace_id !== row.workspace_id || event.payload_json.success !== false) {

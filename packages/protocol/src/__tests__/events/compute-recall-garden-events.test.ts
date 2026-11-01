@@ -39,6 +39,7 @@ describe("compute-recall-garden events", () => {
       "embedding_backfill",
       "path_plasticity_update",
       "post_turn_extract",
+      "source_statement_session",
       "consolidation_cycle",
       "bulk_enrich",
       "edge_classify"

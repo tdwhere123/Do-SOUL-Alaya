@@ -360,7 +360,7 @@ function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: Doctor
     if (advisory.attach_worker_recommended) {
       stream.write(
         `garden compute WARNING: provider_kind=host_worker is the default and` +
-          ` ${advisory.pending_extract_tasks} recall-driven POST_TURN_EXTRACT task(s) are unclaimed` +
+          ` ${advisory.pending_extract_tasks} recall-driven SOURCE_STATEMENT_SESSION task(s) are unclaimed` +
           ` (${advisory.stale_claimed_extract_tasks} claimed-then-abandoned),` +
           ` ${advisory.pending_edge_classify_tasks} EDGE_CLASSIFY task(s) are unclaimed` +
           ` (${advisory.stale_claimed_edge_classify_tasks} claimed-then-abandoned). Attach Codex /` +
@@ -379,7 +379,7 @@ function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: Doctor
     report.garden_compute.compile_enqueue_failures !== undefined
   ) {
     stream.write(
-      `garden compile failures: ${report.garden_compute.failed_post_turn_extract_tasks ?? 0} failed POST_TURN_EXTRACT; ${report.garden_compute.compile_enqueue_failures ?? 0} enqueue never queued\n`
+      `garden compile failures: ${report.garden_compute.failed_post_turn_extract_tasks ?? 0} failed SOURCE_STATEMENT_SESSION; ${report.garden_compute.compile_enqueue_failures ?? 0} enqueue never queued\n`
     );
   }
 }

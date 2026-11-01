@@ -2,21 +2,23 @@ import { GardenEventType, GardenRole, GardenTaskKind, GardenTier, parseGardenEve
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 
 export type GardenTaskSourceGuardPort = Partial<Pick<SqliteGardenTaskRepo,
-  "hasAvailableSource" | "quarantineUnavailablePostTurnTasks">>;
+  "hasAvailableSource" | "quarantineUnavailableSourceTasks">>;
+
+const SOURCE_BOUND_TASK_KINDS: ReadonlySet<string> = new Set([GardenTaskKind.POST_TURN_EXTRACT, GardenTaskKind.SOURCE_STATEMENT_SESSION]);
 
 export function gardenTaskSourceAvailable(repo: GardenTaskSourceGuardPort, row: GardenTaskRow): boolean {
-  return row.kind !== GardenTaskKind.POST_TURN_EXTRACT || repo.hasAvailableSource?.(row.id, row.workspace_id) === true;
+  return !SOURCE_BOUND_TASK_KINDS.has(row.kind) || repo.hasAvailableSource?.(row.id, row.workspace_id) === true;
 }
 
 /** Source availability is rechecked by SQLite in the audit transaction. Historical payloads stay private. */
-export async function quarantineUnavailablePostTurnTasks(
+export async function quarantineUnavailableSourceTasks(
   repo: GardenTaskSourceGuardPort,
   now: () => string,
   workspaceId?: string,
   taskId?: string
 ): Promise<void> {
   const completedAt = now();
-  await repo.quarantineUnavailablePostTurnTasks?.(completedAt, row => ({
+  await repo.quarantineUnavailableSourceTasks?.(completedAt, row => ({
     event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
     entity_type: "garden_task",
     entity_id: row.id,
@@ -25,7 +27,7 @@ export async function quarantineUnavailablePostTurnTasks(
     caused_by: "garden-source-provenance",
     payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
       task_id: row.id,
-      task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+      task_kind: row.kind,
       role: GardenRole.LIBRARIAN,
       tier: GardenTier.TIER_2,
       workspace_id: row.workspace_id,

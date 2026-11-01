@@ -13,7 +13,10 @@ import {
   type ContextDeliveryRecord,
   type LegacyCandidateMemorySignal,
   type RuntimeGardenComputeConfig,
-  type SourceAdmissionPort
+  type SourceAdmissionPort,
+  type SourceStatement,
+  type SourceStatementMessage,
+  type SourceStatementRequest
 } from "@do-soul/alaya-protocol";
 import {
   createSourceAdmissionPort,
@@ -22,7 +25,7 @@ import {
   fieldContractSha256,
   SignalService
 } from "@do-soul/alaya-core";
-import type { GardenComputeProvider } from "@do-soul/alaya-soul";
+import { extractSourceStatementRequest, type GardenComputeProvider } from "@do-soul/alaya-soul";
 import {
   createGardenBackgroundDataPorts,
   initDatabase,
@@ -38,6 +41,7 @@ import {
   SqliteSignalRepo,
   SqliteSourceRootRecallReader,
   SqliteWorkspaceRepo,
+  type GardenTaskRow,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -106,6 +110,9 @@ export interface RoutingHarness extends ClosableHarness {
     readonly created_at?: string;
   }): void;
   runScheduler(): Promise<void>;
+  /** Moves the runtime clock forward, e.g. past the statement session idle interval. */
+  advance(ms: number): void;
+  sessionTasks(): readonly GardenTaskRow[];
 }
 
 export interface GardenListPendingTasksOutput {
@@ -160,26 +167,22 @@ export async function createHandlerHarness(options: {
 export async function createRoutingHarness(options: {
   readonly provider_kind: RuntimeGardenComputeConfig["provider_kind"];
   readonly now?: () => string;
-  readonly officialCompile?: GardenComputeProvider["compile"];
-  readonly localCompile?: GardenComputeProvider["compile"];
+  readonly officialExtract?: StatementExtract;
+  readonly localExtract?: StatementExtract;
   readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
   readonly receiveSignal?: PostTurnSignalReceiver["receiveSignal"];
 }): Promise<RoutingHarness> {
   const base = await createSqliteHarnessBase();
-  const now = options.now ?? (() => "2026-05-07T00:10:00.000Z");
+  const baseNow = options.now ?? (() => "2026-05-07T00:10:00.000Z");
+  let offsetMs = 0;
+  const now = () => offsetMs === 0 ? baseNow() : new Date(Date.parse(baseNow()) + offsetMs).toISOString();
   const signalService = new SignalService({
     eventLogRepo: base.eventLogRepo,
     signalRepo: base.signalRepo,
     runtimeNotifier: base.runtimeNotifier
   });
-  const officialProvider = createProvider(
-    "official_api",
-    options.officialCompile ?? vi.fn(async () => [])
-  );
-  const localProvider = createProvider(
-    "local_heuristics",
-    options.localCompile ?? vi.fn(async () => [])
-  );
+  const officialProvider = createProvider("official_api", options.officialExtract);
+  const localProvider = createProvider("local_heuristics", options.localExtract);
   const runtime = createGardenRuntime({
     now,
     databaseConnection: base.database.connection,
@@ -241,6 +244,14 @@ export async function createRoutingHarness(options: {
     },
     async runScheduler() {
       await getService(runtime, "GardenScheduler").task();
+    },
+    advance(ms) {
+      offsetMs += ms;
+    },
+    sessionTasks() {
+      return (base.database.connection.prepare(`SELECT id FROM garden_tasks WHERE kind = ?
+        ORDER BY json_extract(payload_json, '$.chunk_index'), id`).all(GardenTaskKind.SOURCE_STATEMENT_SESSION) as { id: string }[])
+        .map(row => base.gardenTaskRepo.findById(row.id)!);
     }
   };
   harnesses.add(harness);
@@ -425,11 +436,24 @@ export async function recall(
 
 export { postTurnRows, reportUsage } from "./post-turn-extract-usage-fixture.js";
 
+type StatementExtract = NonNullable<GardenComputeProvider["extractSourceStatementRequest"]>;
+
 function createProvider(
   provider_kind: GardenComputeProvider["provider_kind"],
-  compile: GardenComputeProvider["compile"]
+  extract: StatementExtract | undefined
 ): GardenComputeProvider {
-  return { provider_kind, compile };
+  return { provider_kind, compile: async () => { throw new Error("post-turn work never compiles"); },
+    ...(extract === undefined ? {} : { extractSourceStatementRequest: extract }) };
+}
+
+/** A recorded statement model: each target message yields the statements `respond` returns for it. */
+export function recordedStatementExtract(
+  respond: (message: SourceStatementMessage) => readonly SourceStatement[] = () => [],
+  rawJson?: (request: SourceStatementRequest) => string
+) {
+  return vi.fn<StatementExtract>(async request => (await extractSourceStatementRequest({ request,
+    transport: async () => ({ rawJson: rawJson?.(request) ?? JSON.stringify({ messages: request.messages.map(message => ({
+      message_id: message.message_id, statements: respond(message) })) }) }) })).receipt);
 }
 
 export function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}): PostTurnPayload {

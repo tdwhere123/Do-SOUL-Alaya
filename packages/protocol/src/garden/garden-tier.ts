@@ -32,6 +32,7 @@ const gardenTaskKindValues = [
   "embedding_backfill",
   "path_plasticity_update",
   "post_turn_extract",
+  "source_statement_session",
   "consolidation_cycle",
   "bulk_enrich",
   "edge_classify"
@@ -71,6 +72,8 @@ export const GardenTaskKind = {
   EMBEDDING_BACKFILL: "embedding_backfill",
   PATH_PLASTICITY_UPDATE: "path_plasticity_update",
   POST_TURN_EXTRACT: "post_turn_extract",
+  // One closed chunk of a run's statement session over its admitted post-turn roots.
+  SOURCE_STATEMENT_SESSION: "source_statement_session",
   CONSOLIDATION_CYCLE: "consolidation_cycle",
   BULK_ENRICH: "bulk_enrich",
   // invariant: EDGE_CLASSIFY is the host-worker form of the LLM-quality
@@ -138,11 +141,12 @@ const librarianTaskKinds = Object.freeze([
   GardenTaskKind.CONSOLIDATION_CYCLE,
   GardenTaskKind.BULK_ENRICH
 ] as const);
-// invariant: EDGE_CLASSIFY and POST_TURN_EXTRACT are host-worker-only kinds —
+// invariant: EDGE_CLASSIFY and SOURCE_STATEMENT_SESSION are host-worker kinds —
 // the attached CLI agent is the compute, so they are intentionally absent from
 // every in-process role permission set (an in-process librarian must not claim
 // them). They are enqueued under the LIBRARIAN role for queue tiering but
-// surface as role "host_worker" to the MCP worker loop.
+// surface as role "host_worker" to the MCP worker loop. POST_TURN_EXTRACT has no
+// model work; a dedicated in-process processor retains its admitted source.
 // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts gardenWorkerRoleForRow.
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({

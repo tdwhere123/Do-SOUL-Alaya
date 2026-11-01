@@ -44,10 +44,11 @@ export async function finalizePostTurnEvidence(
   return received.signalIds;
 }
 
-export async function receivePostTurnCandidates(
-  input: PostTurnEvidenceFinalizationInput
+/** Durable receipt of task-produced signals under a claim; no turn evidence fallback is involved. */
+export async function receiveGardenTaskSignals(
+  input: Pick<PostTurnEvidenceFinalizationInput, "candidates" | "signalReceiver" | "beforeReceive" | "failedSignalIds">
 ): Promise<readonly string[]> {
-  const received = await receiveCandidateSignals(input);
+  const received = await receiveCandidateSignals({ ...input, sourceObservation: null });
   await input.beforeReceive?.();
   return received.signalIds;
 }
@@ -65,7 +66,7 @@ function candidatesPreserveOriginalTurn(input: PostTurnEvidenceFinalizationInput
 }
 
 async function receiveCandidateSignals(
-  input: PostTurnEvidenceFinalizationInput
+  input: Pick<PostTurnEvidenceFinalizationInput, "candidates" | "signalReceiver" | "beforeReceive" | "failedSignalIds" | "sourceObservation">
 ): Promise<{ signalIds: string[]; createdEvidence: boolean }> {
   const signalIds: string[] = [];
   let createdEvidence = false;

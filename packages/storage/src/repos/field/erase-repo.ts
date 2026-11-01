@@ -299,6 +299,18 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         AND json_valid(payload_json)
         AND json_extract(payload_json, '$.admitted_source_root_id') = ?
     `);
+    // Session payloads hold root ids only; unfinished work over an erased member root fails.
+    const failSessionTask = connection.prepare(`
+      UPDATE garden_tasks
+      SET completion_envelope_json = NULL, status = 'failed', completed_at = ?,
+          claimed_by = NULL, claimed_at = NULL, last_error_text = 'Source erased'
+      WHERE workspace_id = ? AND kind = 'source_statement_session' AND status IN ('pending', 'claimed')
+        AND json_valid(payload_json) AND EXISTS (
+          SELECT 1 FROM (
+            SELECT value FROM json_each(garden_tasks.payload_json, '$.context')
+            UNION ALL SELECT value FROM json_each(garden_tasks.payload_json, '$.targets')
+          ) AS member WHERE json_extract(member.value, '$.root_id') = ?)
+    `);
     for (const subject of subjects) {
       if (subject.subject_kind === "incidence") {
         deletes.incidence.run(root.workspace_id, subject.subject_id);
@@ -308,6 +320,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         clearFactor.run(root.workspace_id, subject.subject_id);
       } else if (subject.subject_kind === "source_record") {
         scrubTask.run(root.erased_at, root.workspace_id, subject.subject_id);
+        failSessionTask.run(root.erased_at, root.workspace_id, subject.subject_id);
         clearRecord.run(root.workspace_id, subject.subject_id);
         connection.prepare("DELETE FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?")
           .run(root.workspace_id, subject.subject_id);

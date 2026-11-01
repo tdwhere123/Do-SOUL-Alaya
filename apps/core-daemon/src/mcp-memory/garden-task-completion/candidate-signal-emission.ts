@@ -1,6 +1,6 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
-import { finalizePostTurnEvidence } from "../../garden/post-turn-extract/evidence-finalizer.js";
+import { finalizePostTurnEvidence, receiveGardenTaskSignals } from "../../garden/post-turn-extract/evidence-finalizer.js";
 import { signalMaterializationFailed } from "../../garden/post-turn-extract/signal-receiver.js";
 import {
   buildPostTurnContent,
@@ -28,8 +28,14 @@ export async function emitTaskCandidateSignals(
   postTurnPayload: PostTurnExtractTaskPayload | null,
   candidateSignals: readonly CandidateMemorySignal[],
   completionClaimedBy: string,
-  failedSignalIds: Set<string>
+  failedSignalIds: Set<string>,
+  statementSession = false
 ): Promise<readonly string[]> {
+  if (statementSession) {
+    return await receiveGardenTaskSignals({ candidates: candidateSignals,
+      signalReceiver: requirePostTurnSignalReceiver(params), failedSignalIds,
+      beforeReceive: async () => refreshCompletionClaim(params, row, completionClaimedBy) });
+  }
   if (postTurnPayload !== null) {
     return await finalizeExternalPostTurnEvidence(
       params,
@@ -71,12 +77,6 @@ async function finalizeExternalPostTurnEvidence(
   completionClaimedBy: string,
   failedSignalIds: Set<string>
 ): Promise<readonly string[]> {
-  const receiver = params.deps.postTurnSignalReceiver;
-  if (receiver === undefined) {
-    throw new GardenTaskUnavailableError(
-      "garden.complete_task cannot finalize post-turn evidence without a durable signal receiver."
-    );
-  }
   return await finalizePostTurnEvidence({
     taskId: row.id,
     workspaceId: payload.workspace_id,
@@ -86,16 +86,28 @@ async function finalizeExternalPostTurnEvidence(
     turnMessages: buildPostTurnConversationMessages(payload, row.id),
     sourceObservation: null,
     candidates,
-    signalReceiver: receiver,
+    signalReceiver: requirePostTurnSignalReceiver(params),
     failedSignalIds,
     ...(payload.admitted_source_root_id === undefined
       ? {}
       : { admittedSourceRootId: payload.admitted_source_root_id }),
-    beforeReceive: async () => {
-      if (params.deps.gardenTaskRepo!.refreshClaim(row.id, completionClaimedBy, params.now())) return;
-      throw new GardenTaskValidationError(
-        `Garden task completion claim changed before candidate signal emission: ${row.id}`
-      );
-    }
+    beforeReceive: async () => refreshCompletionClaim(params, row, completionClaimedBy)
   });
+}
+
+function requirePostTurnSignalReceiver(params: CandidateSignalEmissionParams) {
+  const receiver = params.deps.postTurnSignalReceiver;
+  if (receiver === undefined) {
+    throw new GardenTaskUnavailableError(
+      "garden.complete_task cannot finalize post-turn evidence without a durable signal receiver."
+    );
+  }
+  return receiver;
+}
+
+function refreshCompletionClaim(params: CandidateSignalEmissionParams, row: GardenTaskRow, completionClaimedBy: string): void {
+  if (params.deps.gardenTaskRepo!.refreshClaim(row.id, completionClaimedBy, params.now())) return;
+  throw new GardenTaskValidationError(
+    `Garden task completion claim changed before candidate signal emission: ${row.id}`
+  );
 }

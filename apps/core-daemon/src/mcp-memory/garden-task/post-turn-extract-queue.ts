@@ -20,6 +20,7 @@ import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import {
   admitPostTurnSourceRoot, postTurnHostMessageId
 } from "../../garden/post-turn-extract/admitted-source-root.js";
+import { closeStatementSessionChunks } from "../../garden/statement-session/statement-session-closure.js";
 import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
@@ -48,9 +49,13 @@ export async function enqueuePostTurnExtractTask(
   const deliveredObjectIds = resolveDeliveredObjectIds(request);
   const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
-  const existing = params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId);
+  const repo = params.deps.gardenTaskRepo;
+  // Each admitted turn may close earlier statement chunks of its run; replay repeats it idempotently.
+  const closeChunks = () => { closeStatementSessionChunks(repo, { workspaceId, runId, closeTail: false, now: params.now }); };
+  const existing = repo.findByIdInWorkspace(taskId, workspaceId);
   if (existing !== null) {
     assertPostTurnReplay(existing.payload, lastMessages, deliveredObjectIds);
+    closeChunks();
     return;
   }
   const createdAt = params.now();
@@ -64,7 +69,7 @@ export async function enqueuePostTurnExtractTask(
   });
 
   try {
-    params.deps.gardenTaskRepo.enqueue({
+    repo.enqueue({
       id: taskId,
       workspace_id: workspaceId,
       role: GardenRole.LIBRARIAN,
@@ -84,15 +89,15 @@ export async function enqueuePostTurnExtractTask(
       created_at: createdAt
     });
   } catch (error) {
-    const raced = params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId);
-    if (raced !== null) {
-      assertPostTurnReplay(raced.payload, lastMessages, deliveredObjectIds);
-      return;
+    const raced = repo.findByIdInWorkspace(taskId, workspaceId);
+    if (raced === null) {
+      // report_context_usage is caller-driven; enqueue failure must surface
+      // rather than drop an explicit post-turn signal.
+      throw error;
     }
-    // report_context_usage is caller-driven; enqueue failure must surface
-    // rather than drop an explicit post-turn signal.
-    throw error;
+    assertPostTurnReplay(raced.payload, lastMessages, deliveredObjectIds);
   }
+  closeChunks();
 }
 
 function assertPostTurnReplay(

@@ -171,7 +171,7 @@ function createGardenStatusService(serviceExports: GardenCompileSnapshotExports)
       }
       const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const extract = serviceExports.gardenTaskRepo.countByKind(
-        GardenTaskKind.POST_TURN_EXTRACT,
+        GardenTaskKind.SOURCE_STATEMENT_SESSION,
         staleBefore,
         workspaceId,
         RECENT_GARDEN_COMPILE_TURN_LIMIT

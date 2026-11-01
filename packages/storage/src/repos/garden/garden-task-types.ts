@@ -77,7 +77,7 @@ export interface GardenTaskRepoPort {
   findById(taskId: string): GardenTaskRow | null;
   findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
   hasAvailableSource(taskId: string, workspaceId?: string): boolean;
-  quarantineUnavailablePostTurnTasks(
+  quarantineUnavailableSourceTasks(
     completedAt: string,
     eventForTask: (task: GardenTaskRow, reason: string) => GardenTaskEventInput,
     workspaceId?: string,

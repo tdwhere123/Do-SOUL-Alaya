@@ -296,7 +296,7 @@ describe("doctor CLI", () => {
     );
   });
 
-  it("writes a garden compile failure line when POST_TURN_EXTRACT tasks have failed", async () => {
+  it("writes a garden compile failure line when SOURCE_STATEMENT_SESSION tasks have failed", async () => {
     const harness = createDoctorHarness({
       getGardenCompute: async () => ({
         provider_kind: "local_heuristics",
@@ -319,7 +319,7 @@ describe("doctor CLI", () => {
     });
     expect(humanResult.exitCode).toBe(75);
     expect(harness.stdoutText()).toContain(
-      "garden compile failures: 3 failed POST_TURN_EXTRACT; 0 enqueue never queued"
+      "garden compile failures: 3 failed SOURCE_STATEMENT_SESSION; 0 enqueue never queued"
     );
   });
 
@@ -342,7 +342,7 @@ describe("doctor CLI", () => {
     });
     expect((await harness.bridge.dispatch(["doctor"])).exitCode).toBe(75);
     expect(harness.stdoutText()).toContain(
-      "garden compile failures: 0 failed POST_TURN_EXTRACT; 2 enqueue never queued"
+      "garden compile failures: 0 failed SOURCE_STATEMENT_SESSION; 2 enqueue never queued"
     );
   });
 

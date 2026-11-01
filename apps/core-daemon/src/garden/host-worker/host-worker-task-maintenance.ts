@@ -13,7 +13,8 @@ import type {
 const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
 const HOST_WORKER_TASK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const HOST_WORKER_TASK_EXPIRY_CAP_PER_PASS = 128;
-const HOST_WORKER_TTL_TASK_KINDS = ["edge_classify", "post_turn_extract"] as const;
+// Post-turn rows are the run inventory of statement sessions and are processed in-process; never expire them.
+const HOST_WORKER_TTL_TASK_KINDS = ["edge_classify", "source_statement_session"] as const;
 
 export function createGardenClaimReclaimer(input: Readonly<{
   readonly now: () => string;

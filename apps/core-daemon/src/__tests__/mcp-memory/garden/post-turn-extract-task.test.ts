@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   GardenEventType,
   GardenRole,
   GardenTaskKind,
 } from "@do-soul/alaya-protocol";
-import {
-  OfficialApiGardenCompileIncompleteError, extractSourceStatementSession,
-  type GardenComputeProvider
-} from "@do-soul/alaya-soul";
+import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
@@ -19,7 +16,7 @@ import {
   createHandlerHarness,
   createPostTurnPayload,
   createRoutingHarness,
-  createSignal,
+  recordedStatementExtract,
   defaultContext,
   gardenTaskSignalId,
   noRunContext,
@@ -39,7 +36,7 @@ afterEach(() => {
 
 describe("post-turn extract Garden task", () => {
 
-  it("used context usage enqueues one host-worker POST_TURN_EXTRACT task", async () => {
+  it("used context usage enqueues one in-process POST_TURN_EXTRACT task", async () => {
     const harness = await createHandlerHarness();
 
     const result = await reportUsage(harness.handler, {
@@ -95,7 +92,7 @@ describe("post-turn extract Garden task", () => {
     );
     expect(listed.tasks).toHaveLength(1);
     expect(listed.tasks[0]).toMatchObject({
-      role: "host_worker",
+      role: GardenRole.LIBRARIAN,
       kind: GardenTaskKind.POST_TURN_EXTRACT
     });
   });
@@ -348,21 +345,11 @@ describe("post-turn extract Garden task", () => {
     ).toEqual([]);
   });
 
-  it("official_api healthy routing claims, compiles, completes, and records two signals", async () => {
-    const signalA = createSignal({
-      signal_id: "signal-official-a",
-      source_observation: {
-        observed_at: "2026-05-01T00:00:00.000Z",
-        authority: "verified_delivery_observation",
-        source_event_id: "model-forged-event"
-      }
-    });
-    const signalB = createSignal({ signal_id: "signal-official-b" });
-    const compile = vi.fn(async () => [signalA, signalB]);
-    const harness = await createRoutingHarness({
-      provider_kind: "official_api",
-      officialCompile: compile
-    });
+  it("official_api routing completes post-turn work without a model and settles its closed session chunk", async () => {
+    const extract = recordedStatementExtract(message => message.role === "user"
+      ? [{ text: "The user prefers pnpm commands.", relation: "tooling preference" },
+        { text: "The repo uses pnpm.", relation: "tooling" }] : []);
+    const harness = await createRoutingHarness({ provider_kind: "official_api", officialExtract: extract });
     harness.enqueuePostTurnTask({
       payload: createPostTurnPayload({
         source_observation: {
@@ -374,128 +361,76 @@ describe("post-turn extract Garden task", () => {
     });
 
     await harness.runScheduler();
+    expect(extract).not.toHaveBeenCalled();
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed", claimed_by: "in-process" });
+    expect(harness.sessionTasks()).toEqual([]);
 
-    expect(compile).toHaveBeenCalledTimes(1);
-    expect(compile).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.not.objectContaining({ source_observed_at: expect.anything() })
-    );
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "completed",
-      claimed_by: "in-process"
-    });
-    const completedEvents = (await harness.eventLogRepo.queryByType(
-      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
-    )).events;
-    expect(completedEvents.at(-1)?.payload_json).toMatchObject({
-      task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-      success: true,
-      candidate_signals_count: 2
-    });
-    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
-      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
-      workspace_id: "workspace-1",
-      source_observation: null
-    });
-    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 1))).resolves.toMatchObject({
-      signal_id: gardenTaskSignalId("post-turn-task-1", 1),
-      workspace_id: "workspace-1"
-    });
+    harness.advance(STATEMENT_SESSION_IDLE_MS);
+    await harness.runScheduler();
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(extract.mock.calls[0]![0].messages.map(message => [message.message_id, message.recorded_at])).toEqual([
+      ["post-turn:post-turn-task-1:message:0", null], ["post-turn:post-turn-task-1:message:1", null]]);
+    const [session] = harness.sessionTasks();
+    expect(session).toMatchObject({ status: "completed", claimed_by: "in-process" });
+    const completedEvents = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
+    expect(completedEvents.map(event => event.payload_json)).toEqual([
+      expect.objectContaining({ task_kind: GardenTaskKind.POST_TURN_EXTRACT, success: true }),
+      expect.objectContaining({ task_kind: GardenTaskKind.SOURCE_STATEMENT_SESSION, success: true, candidate_signals_count: 2 })
+    ]);
+    for (const index of [0, 1]) {
+      await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, index))).resolves.toMatchObject({
+        workspace_id: "workspace-1", source_observation: null
+      });
+    }
   });
 
-  it("retains grounded candidates but fails the task when official compile is incomplete", async () => {
-    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
-      const receipt = await extractSourceStatementSession({ session_id: "recorded-session", request_ceiling: 1, messages: [
-        { message_id: "m1", role: "user", recorded_at: null, text: "Recorded event." },
-        { message_id: "m2", role: "user", recorded_at: null, text: "Another recorded event." }
-      ], transport: async () => ({ rawJson: JSON.stringify({ messages: [{ message_id: "m1",
-        statements: [{ text: "Recorded event.", relation: "recorded event" }] }] }) }) });
-      throw new OfficialApiGardenCompileIncompleteError(receipt, { signals: [createSignal()] });
-    });
-    const harness = await createRoutingHarness({
-      provider_kind: "official_api",
-      officialCompile: compile
-    });
+  it("retains valid statements but fails the session task when the receipt is incomplete", async () => {
+    const extract = recordedStatementExtract(() => [], request => JSON.stringify({ messages: [{
+      message_id: request.messages[0]!.message_id, statements: [{ text: "Recorded event.", relation: "recorded event" }] }] }));
+    const harness = await createRoutingHarness({ provider_kind: "official_api", officialExtract: extract });
     harness.enqueuePostTurnTask();
-
+    await harness.runScheduler();
+    harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 
-    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
-      signal_id: gardenTaskSignalId("post-turn-task-1", 0),
+    const [session] = harness.sessionTasks();
+    await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.toMatchObject({
       workspace_id: "workspace-1"
     });
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "failed",
-      claimed_by: "in-process"
-    });
+    expect(session).toMatchObject({ status: "failed", claimed_by: "in-process" });
     const completion = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
     expect(completion.at(-1)?.payload_json).toMatchObject({ success: false, candidate_signals_count: 1 });
   });
 
-  it("fails post-turn extract when incomplete compile has no candidate signals", async () => {
-    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => {
-      const receipt = await extractSourceStatementSession({ session_id: "recorded-session", request_ceiling: 1,
-        messages: [{ message_id: "m1", role: "user", recorded_at: null, text: "Recorded event." }],
-        transport: async () => ({ rawJson: "not-json" }) });
-      throw new OfficialApiGardenCompileIncompleteError(receipt, { signals: [] });
-    });
-    const harness = await createRoutingHarness({
-      provider_kind: "official_api",
-      officialCompile: compile
-    });
+  it("fails the session task when an unreadable receipt yields no statements", async () => {
+    const harness = await createRoutingHarness({ provider_kind: "official_api",
+      officialExtract: recordedStatementExtract(() => [], () => "not-json") });
+    harness.enqueuePostTurnTask();
+    await harness.runScheduler();
+    harness.advance(STATEMENT_SESSION_IDLE_MS);
+    await harness.runScheduler();
+
+    const [session] = harness.sessionTasks();
+    expect(session).toMatchObject({ status: "failed" });
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
+    await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.toBeNull();
+  });
+
+  it("host_worker routing completes post-turn work in process and leaves the session chunk for MCP workers", async () => {
+    const officialExtract = recordedStatementExtract();
+    const localExtract = recordedStatementExtract();
+    const harness = await createRoutingHarness({ provider_kind: "host_worker", officialExtract, localExtract });
     harness.enqueuePostTurnTask();
 
     await harness.runScheduler();
-
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "failed"
-    });
-    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toBeNull();
-  });
-
-  it("sets null source observation when a host-worker task has no persisted delivery proof", async () => {
-    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => [createSignal({
-      source_observation: {
-        observed_at: "1999-01-01T00:00:00.000Z",
-        authority: "verified_delivery_observation",
-        source_event_id: "model-forged-event"
-      }
-    })]);
-    const harness = await createRoutingHarness({
-      provider_kind: "official_api",
-      officialCompile: compile
-    });
-    harness.enqueuePostTurnTask({ payload: createPostTurnPayload({ source_observation: null }) });
-
+    harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 
-    expect(compile.mock.calls[0]?.[1]?.source_observed_at).toBeUndefined();
-    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
-      source_observation: null
-    });
-  });
-
-  it("host_worker routing leaves a freshly-enqueued task pending for MCP workers", async () => {
-    const officialCompile = vi.fn(async () => [createSignal()]);
-    const localCompile = vi.fn(async () => [createSignal()]);
-    const harness = await createRoutingHarness({
-      provider_kind: "host_worker",
-      officialCompile,
-      localCompile
-    });
-    // Just enqueued (default created_at = now) -> within the host-worker wait
-    // window, so the in-process runtime leaves it for an attached agent and
-    // does NOT run any provider inline.
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
-
-    expect(officialCompile).not.toHaveBeenCalled();
-    expect(localCompile).not.toHaveBeenCalled();
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "pending",
-      claimed_by: null
-    });
+    expect(officialExtract).not.toHaveBeenCalled();
+    expect(localExtract).not.toHaveBeenCalled();
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
+    const [session] = harness.sessionTasks();
+    expect(session).toMatchObject({ status: "pending", claimed_by: null });
     const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
     const listed = unwrapOk<GardenListPendingTasksOutput>(
       await handler.call({
@@ -506,9 +441,9 @@ describe("post-turn extract Garden task", () => {
     );
     expect(listed.tasks).toEqual([
       expect.objectContaining({
-        task_id: "post-turn-task-1",
+        task_id: session!.id,
         role: "host_worker",
-        kind: GardenTaskKind.POST_TURN_EXTRACT
+        kind: GardenTaskKind.SOURCE_STATEMENT_SESSION
       })
     ]);
   });

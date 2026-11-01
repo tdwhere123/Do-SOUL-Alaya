@@ -23,11 +23,12 @@ import {
   toGardenClaimTaskPayload,
   toGardenTaskSnapshot,
   toSilentAlreadyClaimed,
+  type GardenTaskPayloadSources,
   type WarnPort
 } from "./garden-task-handler-support.js";
 import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
-import { gardenTaskSourceAvailable, quarantineUnavailablePostTurnTasks,
+import { gardenTaskSourceAvailable, quarantineUnavailableSourceTasks,
   type GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
 export interface GardenTaskToolCallContext {
@@ -39,6 +40,7 @@ export interface GardenTaskToolCallContext {
 
 export interface GardenTaskHandlerDependencies {
   readonly gardenTaskRepo?: GardenTaskSourceGuardPort & {
+    readonly statementSessions: GardenTaskPayloadSources;
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
@@ -115,7 +117,7 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: 
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
     throwIfAborted(context.abortSignal);
-    await quarantineUnavailablePostTurnTasks(deps.gardenTaskRepo, now, context.workspaceId);
+    await quarantineUnavailableSourceTasks(deps.gardenTaskRepo, now, context.workspaceId);
     const rows = deps.gardenTaskRepo.peekPending(
       mapGardenMcpWorkerRole(request.role),
       context.workspaceId,
@@ -125,7 +127,7 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: 
     let payloadChars = 0;
     for (const row of rows) {
       if (!gardenTaskSourceAvailable(deps.gardenTaskRepo, row)) continue;
-      const snapshot = toGardenTaskSnapshot(row);
+      const snapshot = toGardenTaskSnapshot(row, deps.gardenTaskRepo.statementSessions);
       const size = JSON.stringify(snapshot).length;
       if (tasks.length > 0 && payloadChars + size > GARDEN_TASK_PAYLOAD_MAX_CHARS) break;
       tasks.push(snapshot);
@@ -148,13 +150,13 @@ function createClaimGardenTaskHandler(params: Readonly<{
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
     throwIfAborted(context.abortSignal);
-    await quarantineUnavailablePostTurnTasks(repo, params.now, context.workspaceId, request.task_id);
+    await quarantineUnavailableSourceTasks(repo, params.now, context.workspaceId, request.task_id);
     const beforeClaim = repo.findByIdInWorkspace(request.task_id, context.workspaceId);
     if (beforeClaim !== null && !gardenTaskSourceAvailable(repo, beforeClaim)) {
       return toSilentAlreadyClaimed(request.task_id);
     }
     if (beforeClaim !== null) {
-      GardenClaimTaskResponseSchema.parse({ status: "claimed", ...toGardenClaimTaskPayload(beforeClaim) });
+      GardenClaimTaskResponseSchema.parse({ status: "claimed", ...toGardenClaimTaskPayload(beforeClaim, repo.statementSessions) });
     }
     const claimResult = await repo.claimAtomic(
       request.task_id,
@@ -171,7 +173,7 @@ function createClaimGardenTaskHandler(params: Readonly<{
     }
     return GardenClaimTaskResponseSchema.parse({
       status: claimResult === "claimed" ? "claimed" : "already_claimed",
-      ...toGardenClaimTaskPayload(row)
+      ...toGardenClaimTaskPayload(row, repo.statementSessions)
     });
   };
 }

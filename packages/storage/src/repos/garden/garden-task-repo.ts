@@ -30,10 +30,12 @@ import {
 import type { GardenTaskBacklogCount, GardenTaskClaimResult, GardenTaskCompletionResult, GardenTaskEnqueueInput, GardenTaskEventInput, GardenTaskEventPublisherPort, GardenTaskExpiryInput, GardenTaskKindBacklogCount, GardenTaskReclaimInput, GardenTaskRepoPort, GardenTaskRow } from "./garden-task-types.js";
 import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import { GardenTaskSourceProvenance } from "./garden-task-source-provenance.js";
+import { GardenStatementSessionSources } from "./garden-statement-session-sources.js";
 
 export type * from "./garden-task-types.js";
 
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
+  public readonly statementSessions: GardenStatementSessionSources;
   private readonly sourceProvenance;
   private readonly enqueueStatement;
   private readonly findByIdStatement;
@@ -60,6 +62,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     private readonly eventPublisher: GardenTaskEventPublisherPort
   ) {
     this.sourceProvenance = new GardenTaskSourceProvenance(connection);
+    this.statementSessions = new GardenStatementSessionSources(connection);
     const statements = prepareGardenTaskStatements(connection);
     this.enqueueStatement = statements.enqueueStatement;
     this.findByIdStatement = statements.findByIdStatement;
@@ -601,7 +604,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     return this.connection.transaction(() => this.hasAvailableSource(taskId, workspaceId) ? action() : unavailable)();
   }
 
-  public async quarantineUnavailablePostTurnTasks(
+  public async quarantineUnavailableSourceTasks(
     completedAt: string,
     eventForTask: (task: GardenTaskRow, reason: string) => GardenTaskEventInput,
     workspaceId?: string,

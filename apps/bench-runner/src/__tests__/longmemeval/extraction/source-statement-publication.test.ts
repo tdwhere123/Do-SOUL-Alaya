@@ -15,21 +15,18 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   DynamicsService, EvidenceService, MemoryService, SignalService, EventPublisher, createSignalEmissionWriter,
-  createAuditedSourceAdmission, createSourceAdmissionPort, appendSourceRecordAdmitted, createSourceObservationPublication,
+  createAuditedSourceAdmission, createSourceObservationPublication,
   deriveAddressableSpanViews, fieldContractSha256, SourceIndexAcquisition
 } from "@do-soul/alaya-core";
 import { OfficialApiGardenProvider, OfficialApiGardenCompileIncompleteError, InMemoryHandoffGapHandler } from "@do-soul/alaya-soul";
 import {
   initDatabase, SqliteWorkspaceRepo, SqliteRunRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo,
   SqliteEvidenceCapsuleRepo, SqliteSignalRepo, SqliteKarmaEventRepo,
-  SqliteFieldEraseBarrierRepo, SqliteGardenTaskRepo, type StorageDatabase
+  SqliteFieldEraseBarrierRepo, type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createDaemonFieldComposition } from "../../../../../core-daemon/src/runtime/field/field-composition.js";
 import { createMaterializationRouter } from "../../../../../core-daemon/src/runtime/recall-materialization/recall-materialization-router.js";
 
-import { enqueueConversationGardenCompileTask } from "../../../../../core-daemon/src/mcp-memory/garden-task/post-turn-extract-queue.js";
-import { parsePostTurnExtractTaskPayload } from "../../../../../core-daemon/src/garden/post-turn-extract/task-payload.js";
-import { sourceStatementTaskRequests, receiveSourceStatementTask } from "../../../../../core-daemon/src/garden/post-turn-extract/source-statement-task.js";
 
 const CLOCK = "2026-09-14T12:00:00.000Z", WORKSPACE = "workspace-statement", RUN = "run-statement";
 const messages: readonly ConversationMessage[] = [
@@ -263,34 +260,6 @@ describe("audited source statements and auxiliary retrieval keys", () => {
     expect(environment.database.connection.prepare("SELECT COUNT(*) AS n FROM source_statement_artifacts").get()).toEqual({ n: 0 });
     expect(environment.database.connection.prepare("SELECT COUNT(*) AS n FROM source_index_text WHERE body LIKE '%attendance%'").get()).toEqual({ n: 0 });
     expect(environment.database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules WHERE gist LIKE '%Berlin%'").get()).toEqual({ n: 0 });
-  });
-
-  it("publishes host-worker responses against the queue's captured occurrence IDs and recorded times", async () => {
-    const environment = await fixture(), tasks = new SqliteGardenTaskRepo(environment.database.connection, environment.eventPublisher);
-    const sourceAdmission = createSourceAdmissionPort({ stores: environment.field.stores, sha256: fieldContractSha256,
-      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id, producer: "post-turn", basis: "reported_excerpt" }),
-      audit: async record => { await appendSourceRecordAdmitted(environment.eventLogRepo, record, environment.notifier); }
-    });
-    await enqueueConversationGardenCompileTask({ gardenTaskRepo: tasks, sourceAdmission, now: () => CLOCK }, {
-      workspaceId: WORKSPACE, runId: RUN, userMessage: messages[1]!, assistantMessage: messages[0]!
-    });
-    const task = tasks.peekPending("librarian")[0]!;
-    expect(task).toBeDefined();
-    const payload = parsePostTurnExtractTaskPayload(task.payload);
-    const planned = sourceStatementTaskRequests(payload, task.id);
-    expect(planned.requests[0]!.messages.map(row => row.recorded_at)).toEqual([CLOCK, CLOCK]);
-    const messageId = planned.requests[0]!.messages[0]!.message_id;
-    const completed = await receiveSourceStatementTask({ taskId: task.id, payload, now: () => CLOCK,
-      responses: [{ chunk_index: 0, raw_json: JSON.stringify({ messages: planned.requests[0]!.messages.map(message => ({
-        message_id: message.message_id, statements: message.message_id === messageId ? [statement] : []
-      })) }) }] });
-    expect(completed.incomplete).toBe(false);
-    expect(completed.signals).toHaveLength(1);
-    expect((await environment.signalService.receiveSignal(completed.signals[0]!)).materialization?.success).toBe(true);
-    const gist = environment.database.connection.prepare("SELECT gist FROM evidence_capsules").get() as { gist: string };
-    expect(BoundSourceStatementSchema.parse(JSON.parse(gist.gist))).toMatchObject({
-      message: { message_id: messageId, role: "user", recorded_at: CLOCK }, source_root_id: payload.admitted_source_root_id
-    });
   });
 
   it.each(["lookup", "memory_write"] as const)("rejects a source replacement at the %s boundary without compensating evidence", async boundary => {

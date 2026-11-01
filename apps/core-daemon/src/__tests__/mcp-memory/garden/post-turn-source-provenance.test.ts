@@ -4,7 +4,10 @@ import { GardenEventType, GardenRole, GardenTaskKind, type CandidateMemorySignal
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { cleanupGardenMcpHarnesses, createGardenMcpHarness } from "./garden-mcp-tools-fixture.js";
-import { cleanupPostTurnExtractHarnesses, createPostTurnPayload, createRoutingHarness } from "./post-turn-extract-task-fixture.js";
+import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
+import {
+  cleanupPostTurnExtractHarnesses, createPostTurnPayload, createRoutingHarness, recordedStatementExtract
+} from "./post-turn-extract-task-fixture.js";
 
 afterEach(async () => {
   await cleanupGardenMcpHarnesses();
@@ -89,19 +92,22 @@ it("keeps unavailable work private and unmodified when its quarantine audit cann
     .toEqual({ count: 0 });
 });
 
-it("does not compile unbound legacy work while a correctly admitted task still runs", async () => {
-  const compile = vi.fn(async () => []);
-  const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localCompile: compile });
+it("does not extract unbound legacy work while a correctly admitted turn still reaches its session", async () => {
+  const extract = recordedStatementExtract();
+  const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localExtract: extract });
   harness.gardenTaskRepo.enqueue({ id: "legacy-private-task", workspace_id: "workspace-1", role: GardenRole.LIBRARIAN,
     kind: GardenTaskKind.POST_TURN_EXTRACT, payload: createPostTurnPayload(), created_at: "2026-05-07T00:00:00.000Z" });
   await harness.runScheduler();
-  expect(compile).not.toHaveBeenCalled();
   expect(harness.gardenTaskRepo.findById("legacy-private-task")).toMatchObject({ status: "failed",
     last_error_text: expect.stringContaining("missing admitted source binding") });
   harness.enqueuePostTurnTask({ id: "admitted-task" });
   await harness.runScheduler();
-  expect(compile).toHaveBeenCalledTimes(1);
+  harness.advance(STATEMENT_SESSION_IDLE_MS);
+  await harness.runScheduler();
   expect(harness.gardenTaskRepo.findById("admitted-task")).toMatchObject({ status: "completed" });
+  expect(extract).toHaveBeenCalledTimes(1);
+  expect(extract.mock.calls[0]![0].messages.map(message => message.message_id))
+    .toEqual(["post-turn:admitted-task:message:0", "post-turn:admitted-task:message:1"]);
 });
 
 it("advances bounded quarantine past valid claimed work and exposes a later ready task", async () => {
@@ -132,10 +138,12 @@ it("advances bounded quarantine past valid claimed work and exposes a later read
   expect(await harness.callTool("garden.claim_task", { task_id: "z-ready" })).toMatchObject({ status: "claimed" });
 });
 
-it("does not compile a projection whose original source changes after dispatch audit", async () => {
-  const compile = vi.fn(async () => []);
-  const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localCompile: compile });
+it("does not extract a session whose original source changes after dispatch audit", async () => {
+  const extract = recordedStatementExtract();
+  const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localExtract: extract });
   harness.enqueuePostTurnTask();
+  await harness.runScheduler();
+  harness.advance(STATEMENT_SESSION_IDLE_MS);
   const row = harness.gardenTaskRepo.findById("post-turn-task-1")!;
   const rootId = (row.payload as { admitted_source_root_id: string }).admitted_source_root_id;
   const repos = createDaemonFieldRepos({ database: harness.database });
@@ -149,9 +157,9 @@ it("does not compile a projection whose original source changes after dispatch a
     return result;
   });
   await harness.runScheduler();
-  expect(compile).not.toHaveBeenCalled();
-  expect(harness.gardenTaskRepo.findById(row.id)).toMatchObject({ status: "failed", claimed_by: null,
-    last_error_text: expect.stringContaining("source projection dependency unavailable") });
+  expect(extract).not.toHaveBeenCalled();
+  expect(harness.sessionTasks()).toEqual([expect.objectContaining({ status: "failed", claimed_by: null,
+    last_error_text: expect.stringContaining("source projection dependency unavailable") })]);
   expect(harness.database.connection.prepare("SELECT count(*) AS count FROM signals").get()).toEqual({ count: 0 });
 });
 

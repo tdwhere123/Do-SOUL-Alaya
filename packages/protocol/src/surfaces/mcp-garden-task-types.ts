@@ -64,7 +64,7 @@ export const GardenClaimTaskResponseSchema = z
 
 // The garden.complete_task result envelope is the discriminated result type
 // for the two host-worker task kinds:
-//   - POST_TURN_EXTRACT reports recorded `source_statement_responses`. The shared
+//   - SOURCE_STATEMENT_SESSION reports recorded `source_statement_responses`. The shared
 //     session receiver validates text/relation siblings; the daemon owns all binding.
 //     Other candidate-signal tasks retain their explicit content-only ingress.
 //   - EDGE_CLASSIFY reports `edge_verdict` (the supports/derives_from/none
@@ -72,7 +72,7 @@ export const GardenClaimTaskResponseSchema = z
 //     verdict; a "none"/below-floor verdict refines nothing and the inline
 //     heuristic verdict stands.
 // invariant: exactly one result shape is meaningful per task kind. The handler
-// rejects candidate_signals on POST_TURN_EXTRACT and source_statement_responses
+// rejects candidate_signals on SOURCE_STATEMENT_SESSION and source_statement_responses
 // on other task kinds, so a host cannot smuggle
 // the wrong result type into a claimed task.
 export const GardenTaskResultEnvelopeSchema = z

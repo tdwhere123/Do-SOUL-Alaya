@@ -60,6 +60,7 @@ export function createGardenRuntimeBackgroundServices(input: Readonly<{
     reclaimAbandonedGardenClaims(): Promise<void>;
     expireUnclaimedHostWorkerTasks(): Promise<void>;
     processPostTurnExtractTask(): Promise<void>;
+    processStatementSessionTask(): Promise<void>;
   };
   readonly bulkEnrichRuntime: {
     reclaimStaleClaims(): void;
@@ -181,6 +182,7 @@ function createGardenSchedulerBackgroundService(input: Readonly<{
     reclaimAbandonedGardenClaims(): Promise<void>;
     expireUnclaimedHostWorkerTasks(): Promise<void>;
     processPostTurnExtractTask(): Promise<void>;
+    processStatementSessionTask(): Promise<void>;
   };
   readonly bulkEnrichRuntime: {
     reclaimStaleClaims(): void;
@@ -214,6 +216,7 @@ async function runGardenSchedulerMaintenance(input: Readonly<{
     reclaimAbandonedGardenClaims(): Promise<void>;
     expireUnclaimedHostWorkerTasks(): Promise<void>;
     processPostTurnExtractTask(): Promise<void>;
+    processStatementSessionTask(): Promise<void>;
   };
   readonly bulkEnrichRuntime: {
     reclaimStaleClaims(): void;
@@ -230,6 +233,7 @@ async function runGardenSchedulerMaintenance(input: Readonly<{
   await input.gardenSchedulerRuntime.reconcileStuckEdgeProposalAccepts();
   await input.gardenSchedulerRuntime.sweepExpiredEdgeProposals();
   await input.hostWorkerTaskRuntime.processPostTurnExtractTask();
+  await input.hostWorkerTaskRuntime.processStatementSessionTask();
   const bulkEnrichEnqueuedThisPass = new Set<string>();
   await input.bulkEnrichRuntime.enqueueForAllWorkspaces(bulkEnrichEnqueuedThisPass);
   await input.bulkEnrichRuntime.enqueueForCountThreshold(bulkEnrichEnqueuedThisPass);
