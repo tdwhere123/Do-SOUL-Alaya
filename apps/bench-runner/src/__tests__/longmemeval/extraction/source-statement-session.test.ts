@@ -123,16 +123,36 @@ describe("ordered source statement session", () => {
     expect(receipt.chunks).toEqual([{ chunk_index: 0, status: "failed", usage: null }]);
   });
 
-  it("makes omitted known history an explicit raw fallback rather than a context-free request", async () => {
+  it("gives a request whose full history exceeds context capacity the longest recent history that fits", async () => {
     const messages = [message("intro", "x".repeat(30017)), message("followup", "It was memorable. " + "y".repeat(4000))];
     const transport = vi.fn(async ({ userPrompt }: { userPrompt: string }) => ({ rawJson: JSON.stringify({
       messages: (JSON.parse(userPrompt) as SourceStatementRequest).messages.map(row => ({ message_id: row.message_id, statements: [] }))
     }) }));
     const receipt = await extractSourceStatementSession({ session_id: "session", messages, transport, request_ceiling: 2 });
-    expect(transport).toHaveBeenCalledTimes(1);
-    expect(receipt.status).toBe("partial");
-    expect(receipt.messages[1]).toMatchObject({ message: messages[1], status: "failed", statements: [],
-      rejections: [{ reason: "context_capacity" }] });
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(transport.mock.calls[1]![0].userPrompt)).toMatchObject({ chunk_index: 1, context: [],
+      messages: [{ message_id: "followup" }] });
+    expect(receipt).toMatchObject({ status: "complete", messages: [{ status: "complete" }, { status: "complete" }] });
+
+    const long = Array.from({ length: 70 }, (_, i) => message(`h${i}`, `${i} `.padEnd(400, "z")));
+    const requests = planSourceStatementSession("session", long).flatMap(chunk => "request" in chunk ? [chunk.request] : []);
+    const late = requests.at(-1)!, first = long.findIndex(row => row.message_id === late.messages[0]!.message_id);
+    expect(late.context.length).toBeGreaterThan(0);
+    expect(late.context).toEqual(long.slice(first - late.context.length, first));
+    expect(Buffer.byteLength(JSON.stringify(late.context))).toBeLessThanOrEqual(SOURCE_STATEMENT_LIMITS.contextBytes);
+    expect(Buffer.byteLength(JSON.stringify(long.slice(first - late.context.length - 1, first))))
+      .toBeGreaterThan(SOURCE_STATEMENT_LIMITS.contextBytes);
+  });
+
+  it("resumes a prefix-stable plan after its last closed chunk with identical later requests", () => {
+    const long = Array.from({ length: 200 }, (_, i) => message(`p${i}`, `${i} `.padEnd(300, "q")));
+    const whole = planSourceStatementSession("session", long).flatMap(chunk => "request" in chunk ? [chunk.request] : []);
+    const prefix = planSourceStatementSession("session", long.slice(0, 150)).flatMap(chunk => "request" in chunk ? [chunk.request] : []);
+    expect(prefix.slice(0, -1)).toEqual(whole.slice(0, prefix.length - 1));
+    const closed = prefix.at(-2)!, end = long.findIndex(row => row.message_id === closed.messages.at(-1)!.message_id) + 1;
+    const resumed = planSourceStatementSession("session", long.slice(end - 64), { message_index: 64, chunk_index: closed.chunk_index + 1 })
+      .flatMap(chunk => "request" in chunk ? [chunk.request] : []);
+    expect(resumed).toEqual(whole.slice(closed.chunk_index + 1));
   });
 
   it("captures the committed ceiling, identity and callbacks before yielding while cancellation stays live", async () => {

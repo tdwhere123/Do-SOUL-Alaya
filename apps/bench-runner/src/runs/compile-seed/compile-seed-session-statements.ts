@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { ConversationMessage, SourceStatementReceipt, SourceStatementContextSource } from "@do-soul/alaya-protocol";
-import { emitSourceStatementSignals, OfficialApiGardenCompileIncompleteError,
-  type GardenCompileContext, type OfficialApiGardenProvider } from "@do-soul/alaya-soul";
-import { sourceStatementSession } from "../extraction/source-statement-request.js";
+import type { ConversationMessage, SourceStatementReceipt } from "@do-soul/alaya-protocol";
+import { emitSourceStatementSessionSignals, OfficialApiGardenCompileIncompleteError, type GardenCompileContext,
+  type LocatedSourceStatementMessage, type OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { sourceStatementRequests, sourceStatementSession } from "../extraction/source-statement-request.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import type { CompileSeedExtractionStats, StatementSessionSeedResponse } from "./compile-seed-types.js";
 
@@ -24,7 +24,7 @@ export async function compileSessionSeedSignals(input: {
   readonly sessions: Map<string, Promise<CompiledStatementSession>>;
   readonly context: GardenCompileContext;
   readonly sourceSession: readonly ConversationMessage[];
-  readonly sourceContexts: ReadonlyMap<string, readonly SourceStatementContextSource[]>;
+  readonly sourceLocations: readonly LocatedSourceStatementMessage[];
   readonly stats: CompileSeedExtractionStats;
 }) {
   const source = sourceStatementSession(input.sourceSession), { context, stats } = input;
@@ -56,10 +56,10 @@ export async function compileSessionSeedSignals(input: {
   stats.lastTurnRawSignalCount = accepted + statementRejections(selectedReceipt) + (firstUse ? unassigned : 0);
   stats.lastStatementSession = { receipt: compiled.receipt, firstUse, unassignedRawStatements: unassigned,
     ...(firstUse ? { responses: compiled.responses } : {}) };
-  const signals = emitSourceStatementSignals({ receipt: selectedReceipt, messages: context.turn_messages,
-    artifactKey: context.artifact_key, sourceRootId: context.source_root_id, workspaceId: context.workspace_id,
-    runId: context.run_id, surfaceId: context.surface_id, createdAt: new Date().toISOString(),
-    sourceObservation: context.source_observation ?? null, generateSignalId: randomUUID, sourceContexts: input.sourceContexts });
+  const signals = emitSourceStatementSessionSignals({ receipt: selectedReceipt,
+    requests: sourceStatementRequests(input.sourceSession).map(request => request.source), located: input.sourceLocations,
+    workspaceId: context.workspace_id, runId: context.run_id, surfaceId: context.surface_id, createdAt: new Date().toISOString(),
+    sourceObservation: context.source_observation ?? null, generateSignalId: randomUUID });
   // Failure accounting and redacted diagnostics belong to the first session use,
   // while each raw round still receives its independently admitted siblings.
   if (firstUse && compiled.failure !== undefined) {

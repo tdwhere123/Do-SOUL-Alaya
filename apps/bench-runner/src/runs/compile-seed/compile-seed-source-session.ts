@@ -1,7 +1,8 @@
 import { canonicalJson, renderOfficialApiSourceCorpus, type ConversationMessage,
   type SourceStatementContextSource } from "@do-soul/alaya-protocol";
 import { deriveAddressableSpanViews, retainedSourceSpeaker } from "@do-soul/alaya-core";
-import { sourceStatementRequests } from "../extraction/source-statement-request.js";
+import type { LocatedSourceStatementMessage } from "@do-soul/alaya-soul";
+import { sourceStatementSession } from "../extraction/source-statement-request.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import type { CompileSeedTurnInput } from "./compile-seed-types.js";
 
@@ -9,7 +10,7 @@ export interface CapturedStatementSourceSession {
   readonly partition: string;
   readonly observedAt: string;
   readonly bySeed: ReadonlyMap<number, SourceStatementContextSource>;
-  readonly byMessage: ReadonlyMap<string, SourceStatementContextSource>;
+  readonly byMessage: ReadonlyMap<string, Readonly<{ source: SourceStatementContextSource; utf8_span: readonly [number, number] }>>;
 }
 
 /** Admit the existing raw partition before dispatch: later targets are model-visible too.
@@ -39,7 +40,8 @@ export async function captureStatementSourceSession(input: CompileSeedTurnInput,
 
 async function admitRawRounds(input: CompileSeedTurnInput, rounds: NonNullable<CompileSeedTurnInput["sourceSessionRounds"]>,
   partition: string): Promise<CapturedStatementSourceSession> {
-  const bySeed = new Map<number, SourceStatementContextSource>(), byMessage = new Map<string, SourceStatementContextSource>();
+  const bySeed = new Map<number, SourceStatementContextSource>();
+  const byMessage = new Map<string, Readonly<{ source: SourceStatementContextSource; utf8_span: readonly [number, number] }>>();
   const observedAt = input.sourceObservedAt ?? new Date().toISOString();
   for (const round of rounds) {
     const rendered = renderOfficialApiSourceCorpus(round.turnContent.trim(), round.turnMessages);
@@ -59,28 +61,21 @@ async function admitRawRounds(input: CompileSeedTurnInput, rounds: NonNullable<C
     const source: SourceStatementContextSource = { workspace_id: record.workspace_id, root_id: record.identity,
       source_id: record.source_id, source_version: record.source_version, content_digest: record.content_digest };
     bySeed.set(round.seedIndex, source);
-    for (const message of round.turnMessages) {
+    for (const occurrence of rendered.occurrences) {
+      const message = round.turnMessages[occurrence.message_index]!;
       if (byMessage.has(message.message_id)) throw new ExtractionCacheInvariantError("raw session message is duplicated");
-      byMessage.set(message.message_id, source);
+      byMessage.set(message.message_id, { source, utf8_span: occurrence.utf8_span });
     }
   }
   return { partition, observedAt, bySeed, byMessage };
 }
 
-/** Only actual request context and targets contribute dependencies, never unseen future chunks. */
-export function statementRequestSourceContexts(messages: readonly ConversationMessage[], captured: CapturedStatementSourceSession) {
-  const contexts = new Map<string, readonly SourceStatementContextSource[]>();
-  for (const { source: request } of sourceStatementRequests(messages)) {
-    const roots = new Map<string, SourceStatementContextSource>();
-    for (const message of [...request.context, ...request.messages]) {
-      const source = captured.byMessage.get(message.message_id);
-      if (source === undefined) throw new ExtractionCacheInvariantError("model-visible message has no captured raw root");
-      roots.set(source.root_id, source);
-    }
-    for (const target of request.messages) {
-      const own = captured.byMessage.get(target.message_id)!;
-      contexts.set(target.message_id, [...roots.values()].filter(source => source.root_id !== own.root_id));
-    }
-  }
-  return contexts;
+/** Each session message at its occurrence in its own captured raw round. */
+export function locateStatementSourceSession(messages: readonly ConversationMessage[],
+  captured: CapturedStatementSourceSession): readonly LocatedSourceStatementMessage[] {
+  return sourceStatementSession(messages).messages.map(message => {
+    const location = captured.byMessage.get(message.message_id);
+    if (location === undefined) throw new ExtractionCacheInvariantError("model-visible message has no captured raw root");
+    return { message, root: location.source, utf8_span: location.utf8_span };
+  });
 }

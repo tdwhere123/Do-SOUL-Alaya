@@ -20,33 +20,35 @@ export const SOURCE_STATEMENTS_PROMPT = [
 ].join("\n");
 
 type Chunk = Readonly<{ request: SourceStatementRequest }> | Readonly<{
-  message: SourceStatementMessage; reason: "message_capacity" | "context_capacity";
+  message: SourceStatementMessage; reason: "message_capacity";
 }>;
 const encodedBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
-/** One ordered whole-session planner. Oversize messages are explicit raw fallbacks, not truncated targets. */
-export function planSourceStatementSession(sessionId: string, input: readonly SourceStatementMessage[]): readonly Chunk[] {
+/** One ordered whole-session planner. Oversize messages are explicit raw fallbacks, not truncated targets.
+ * The plan is prefix-stable: a chunk is final once a later message exists. `resume` continues a plan
+ * after its last closed chunk; earlier messages then serve only as context.
+ */
+export function planSourceStatementSession(sessionId: string, input: readonly SourceStatementMessage[],
+  resume: Readonly<{ message_index: number; chunk_index: number }> = { message_index: 0, chunk_index: 0 }): readonly Chunk[] {
   const messages = input.map(message => SourceStatementMessageSchema.parse(message));
   if (new Set(messages.map(row => row.message_id)).size !== messages.length) throw new TypeError("duplicate session message ID");
+  if (![resume.message_index, resume.chunk_index].every(value => Number.isSafeInteger(value) && value >= 0) ||
+      resume.message_index > messages.length) throw new TypeError("invalid session plan resume point");
+  const sizes = messages.map(encodedBytes);
   const chunks: Chunk[] = [];
-  let index = 0, chunkIndex = 0;
+  let index = resume.message_index, chunkIndex = resume.chunk_index;
   while (index < messages.length) {
     const first = messages[index]!;
-    if (encodedBytes(first) > SOURCE_STATEMENT_LIMITS.targetBytes) {
+    if (sizes[index]! > SOURCE_STATEMENT_LIMITS.targetBytes) {
       chunks.push({ message: first, reason: "message_capacity" }); index++; continue;
     }
-    const context = messages.slice(0, index);
-    // A suffix cannot truthfully provide the session context needed to resolve references.
-    // Keep the known target as an explicit raw fallback rather than silently omit history.
-    if (context.length > SOURCE_STATEMENT_LIMITS.requestMessages || encodedBytes(context) > SOURCE_STATEMENT_LIMITS.contextBytes) {
-      chunks.push({ message: first, reason: "context_capacity" }); index++; continue;
-    }
+    const context = messages.slice(recentContextStart(sizes, index), index);
     const targets: SourceStatementMessage[] = [];
     let bytes = 2;
     while (index < messages.length && targets.length < SOURCE_STATEMENT_LIMITS.requestMessages) {
-      const message = messages[index]!, size = encodedBytes(message) + 1;
+      const size = sizes[index]! + 1;
       if (bytes + size > SOURCE_STATEMENT_LIMITS.targetBytes) break;
-      targets.push(message); bytes += size; index++;
+      targets.push(messages[index]!); bytes += size; index++;
     }
     // Account for the JSON list delimiters even for a message at the exact capacity edge.
     if (targets.length === 0) { chunks.push({ message: first, reason: "message_capacity" }); index++; continue; }
@@ -54,6 +56,19 @@ export function planSourceStatementSession(sessionId: string, input: readonly So
       session_id: sessionId, chunk_index: chunkIndex++, context, messages: targets }) });
   }
   return chunks;
+}
+
+/** The longest run of immediately preceding messages within context capacity. When the whole
+ * prefix fits this is the whole prefix; otherwise the request sees recent history, never a gap.
+ */
+function recentContextStart(sizes: readonly number[], end: number): number {
+  let start = end, bytes = 2;
+  while (start > 0 && end - start < SOURCE_STATEMENT_LIMITS.requestMessages) {
+    const next = bytes + sizes[start - 1]! + (start === end ? 0 : 1);
+    if (next > SOURCE_STATEMENT_LIMITS.contextBytes) break;
+    bytes = next; start--;
+  }
+  return start;
 }
 
 export function receiveSourceStatements(request: SourceStatementRequest, rawJson: string): Readonly<{
@@ -125,29 +140,47 @@ export async function extractSourceStatementSession(input: Readonly<{
       messages.push(...request.messages.map(message => failedMessage(message, reason))); continue;
     }
     dispatched++;
-    try {
-      const response = await transport({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
-        userPrompt: JSON.stringify(request), ...(signal === undefined ? {} : { signal }) });
-      if (response.skipped === true) {
-        messages.push(...request.messages.map(message => failedMessage(message, "not_dispatched")));
-        chunks.push({ chunk_index: request.chunk_index, status: "failed", usage: null });
-        continue;
-      }
-      const received = receiveSourceStatements(request, response.rawJson);
-      messages.push(...received.messages); rejections.push(...received.rejections);
-      chunks.push({ chunk_index: request.chunk_index, status: statusOf(received.messages, received.rejections),
-        usage: validUsage(response.usage) });
-    } catch {
-      messages.push(...request.messages.map(message => failedMessage(message, "transport_failure")));
-      chunks.push({ chunk_index: request.chunk_index, status: "failed", usage: null });
-      // A failing transport may have consumed work. Do not dispatch or retry more of this session.
-      stopped = true;
-    }
+    const settled = await dispatchSourceStatementRequest(request, transport, signal);
+    messages.push(...settled.messages); rejections.push(...settled.rejections); chunks.push(settled.chunk);
+    // A failing transport may have consumed work. Do not dispatch or retry more of this session.
+    stopped = settled.transportFailed;
   }
   const receipt: SourceStatementReceipt = { contract: SOURCE_STATEMENTS_CONTRACT, session_id,
     status: statusOf(messages, rejections), messages, rejections, chunks };
   await record?.({ kind: "settled", receipt });
   return receipt;
+}
+
+/** One already planned request of a statement session, settled exactly once without retries. */
+export async function extractSourceStatementRequest(input: Readonly<{
+  request: SourceStatementRequest; transport: SourceStatementTransport; signal?: AbortSignal;
+}>): Promise<Readonly<{ receipt: SourceStatementReceipt; transportFailed: boolean }>> {
+  const request = SourceStatementRequestSchema.parse(input.request);
+  const settled = await dispatchSourceStatementRequest(request, input.transport, input.signal);
+  return { transportFailed: settled.transportFailed, receipt: { contract: SOURCE_STATEMENTS_CONTRACT,
+    session_id: request.session_id, status: statusOf(settled.messages, settled.rejections),
+    messages: settled.messages, rejections: settled.rejections, chunks: [settled.chunk] } };
+}
+
+async function dispatchSourceStatementRequest(request: SourceStatementRequest, transport: SourceStatementTransport,
+  signal: AbortSignal | undefined): Promise<Readonly<{ messages: readonly SourceStatementMessageResult[];
+    rejections: readonly SourceStatementRejection[]; chunk: SourceStatementReceipt["chunks"][number]; transportFailed: boolean }>> {
+  if (signal?.aborted) return { messages: request.messages.map(message => failedMessage(message, "cancelled")), rejections: [],
+    chunk: { chunk_index: request.chunk_index, status: "failed", usage: null }, transportFailed: false };
+  try {
+    const response = await transport({ systemPrompt: SOURCE_STATEMENTS_PROMPT,
+      userPrompt: JSON.stringify(request), ...(signal === undefined ? {} : { signal }) });
+    if (response.skipped === true) {
+      return { messages: request.messages.map(message => failedMessage(message, "not_dispatched")), rejections: [],
+        chunk: { chunk_index: request.chunk_index, status: "failed", usage: null }, transportFailed: false };
+    }
+    const received = receiveSourceStatements(request, response.rawJson);
+    return { ...received, transportFailed: false, chunk: { chunk_index: request.chunk_index,
+      status: statusOf(received.messages, received.rejections), usage: validUsage(response.usage) } };
+  } catch {
+    return { messages: request.messages.map(message => failedMessage(message, "transport_failure")), rejections: [],
+      chunk: { chunk_index: request.chunk_index, status: "failed", usage: null }, transportFailed: true };
+  }
 }
 
 /** Read-only verification of a current receipt against retained request/response bytes.

@@ -46,7 +46,7 @@ export const SourceStatementResponseMessageSchema = z.object({
 }).strip();
 export type SourceStatementRejection = Readonly<{ message_id: string | null; statement_index: number | null;
   reason: "invalid_statement" | "unknown_message" | "duplicate_message" | "missing_message" |
-    "invalid_message" | "malformed_response" | "transport_failure" | "message_capacity" | "context_capacity" | "request_budget" |
+    "invalid_message" | "malformed_response" | "transport_failure" | "message_capacity" | "request_budget" |
     "cancelled" | "not_dispatched" | "empty_source" }>;
 export type SourceStatementMessageResult = Readonly<{
   message: SourceStatementMessage; status: "complete" | "partial" | "failed";

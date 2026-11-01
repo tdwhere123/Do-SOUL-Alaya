@@ -1,5 +1,6 @@
-export { sourceStatementSessionInput, emitSourceStatementSignals } from "./garden/ingestion/source-statement-signals.js";
-export { SOURCE_STATEMENTS_PROMPT, planSourceStatementSession, receiveSourceStatements,
+export { sourceStatementSessionInput, emitSourceStatementSessionSignals, type LocatedSourceStatementMessage,
+  type SourceStatementRoot } from "./garden/ingestion/source-statement-signals.js";
+export { SOURCE_STATEMENTS_PROMPT, planSourceStatementSession, receiveSourceStatements, extractSourceStatementRequest,
   extractSourceStatementSession, assertSourceStatementSessionReceipt, type SourceStatementTransport, type SourceStatementSessionEvent
 } from "./garden/ingestion/source-statements.js";
 export { selectObservedTemporalProjection } from "./garden/extraction/temporal/observed-projection.js";

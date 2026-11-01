@@ -1,8 +1,9 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { OfficialApiGardenCompileIncompleteError, type GardenCompileContext, type OfficialApiGardenProvider } from "@do-soul/alaya-soul";
-import { SourceStatementSignalSchema, type ConversationMessage, type SourceStatementContextSource } from "@do-soul/alaya-protocol";
+import { OfficialApiGardenCompileIncompleteError, type GardenCompileContext, type LocatedSourceStatementMessage,
+  type OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { SourceStatementSignalSchema, type ConversationMessage } from "@do-soul/alaya-protocol";
 import { compileSessionSeedSignals, type CompiledStatementSession } from "./compile-seed-session-statements.js";
 import type { BenchSignalSeedInput } from "../../harness/daemon.js";
 import type {
@@ -19,7 +20,7 @@ type ExtractSeedInputsInput = {
   readonly provider: OfficialApiGardenProvider | null;
   readonly statementSessions: Map<string, Promise<CompiledStatementSession>>;
   readonly sourceSession: readonly ConversationMessage[];
-  readonly sourceContexts: ReadonlyMap<string, readonly SourceStatementContextSource[]>;
+  readonly sourceLocations: readonly LocatedSourceStatementMessage[];
   readonly stats: CompileSeedExtractionStats;
   readonly turnContent: string;
   readonly seedIndex: number;
@@ -58,7 +59,7 @@ async function compileOfficialSeedSignals(
 ): Promise<OfficialCompileSignals> {
   try {
     return await compileSessionSeedSignals({ provider, sessions: input.statementSessions,
-      sourceSession: input.sourceSession, sourceContexts: input.sourceContexts, context: input.context, stats: input.stats });
+      sourceSession: input.sourceSession, sourceLocations: input.sourceLocations, context: input.context, stats: input.stats });
   } catch (error) {
     recordExtractionFailureSource(input.stats);
     await dumpSeedExtractionFailureDiagnostic({

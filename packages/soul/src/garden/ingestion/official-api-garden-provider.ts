@@ -2,15 +2,16 @@ import {
   AlayaError, GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue, type ExtractionSourcePacking,
   type CertifiedQueryOsfGraph, type OpenSemanticFactorGraphProposal, type QueryFactFrameOsfObligation,
-  type CandidateMemorySignal, type ConversationMessage, type SourceStatementReceipt
+  type CandidateMemorySignal, type ConversationMessage, type SourceStatementReceipt, type SourceStatementRequest
 } from "@do-soul/alaya-protocol";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SignalExtractor } from "../extraction/pi-mono-extractor.js";
 import { withWallClockTimeout } from "../scheduling/wall-clock-timeout.js";
 import { normalizeOptionalString, normalizePositiveTimeoutMs } from "./official-api-signal-parser.js";
 import { createOpenSemanticFactorQueryCompiler, type OpenSemanticFactorQueryCompiler } from "../extraction/semantic-factors/query-compiler.js";
-import { extractSourceStatementSession, type SourceStatementSessionEvent } from "./source-statements.js";
-import { emitSourceStatementSignals, sourceStatementSessionInput } from "./source-statement-signals.js";
+import { extractSourceStatementRequest, extractSourceStatementSession, planSourceStatementSession,
+  type SourceStatementSessionEvent, type SourceStatementTransport } from "./source-statements.js";
+import { emitSourceStatementSessionSignals, sourceStatementSessionInput } from "./source-statement-signals.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -28,6 +29,8 @@ export interface GardenCompileContext {
 export interface GardenComputeProvider {
   readonly provider_kind: GardenProviderKind;
   compile(turnContent: string, context: GardenCompileContext): Promise<readonly CandidateMemorySignal[]>;
+  /** One planned request of a host-bound statement session; the caller owns root binding and publication. */
+  extractSourceStatementRequest?(request: SourceStatementRequest): Promise<SourceStatementReceipt>;
   extractOpenSemanticFactors?(sourceKind: "evidence" | "query", sourceText: string): Promise<Readonly<OpenSemanticFactorGraphProposal> | null>;
   extractCertifiedQueryOpenSemanticFactors?(sourceText: string, obligation: Readonly<QueryFactFrameOsfObligation>): Promise<Readonly<CertifiedQueryOsfGraph> | null>;
 }
@@ -91,32 +94,46 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   }
 
   public async extractSourceStatements(_turnContent: string, context: GardenCompileContext): Promise<SourceStatementReceipt> {
-    if (!this.authorized || this.extractor === null) throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    if (!this.authorized) throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     if (context.turn_messages.length === 0) throw new GardenProviderError("Conversation extraction requires host message identities.", "invalid_response");
     const source = sourceStatementSessionInput(context.turn_messages);
-    const extract = this.extractor.extract.bind(this.extractor);
-    let transportFailure: unknown;
+    const transport = this.statementTransport(source.rendered.content);
     const receipt = await extractSourceStatementSession({ session_id: context.run_id, messages: source.messages,
-      request_ceiling: source.messages.length, record: this.recordSession,
-      transport: async request => {
-        let result: Awaited<ReturnType<SignalExtractor["extract"]>>;
-        try { result = await withWallClockTimeout(signal => extract({
-          systemPrompt: request.systemPrompt, userPrompt: request.userPrompt,
-          timeoutMs: this.requestTimeoutMs, abortSignal: signal, sourceCorpus: source.rendered.content,
-          rawResponse: true, retryMode: "disabled"
-        }), { budgetMs: this.wallClockBudgetMs }); }
-        catch (cause) { transportFailure = cause; throw cause; }
-        return { rawJson: result.rawJson,
-          ...("extractionSkip" in result && result.extractionSkip === "plan_skipped" ? { skipped: true } : {}),
-          ...(result.usage === undefined ? {} : {
-          usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens }
-        }) };
-      }
-    });
-    if (transportFailure !== undefined) throw new OfficialApiGardenCompileIncompleteError(receipt, { cause: transportFailure });
+      request_ceiling: source.messages.length, record: this.recordSession, transport: transport.send });
+    if (transport.failure !== undefined) throw new OfficialApiGardenCompileIncompleteError(receipt, { cause: transport.failure.cause });
     return receipt;
   }
 
+  public async extractSourceStatementRequest(request: SourceStatementRequest): Promise<SourceStatementReceipt> {
+    const transport = this.statementTransport(undefined);
+    const { receipt } = await extractSourceStatementRequest({ request, transport: transport.send });
+    if (transport.failure !== undefined) throw new OfficialApiGardenCompileIncompleteError(receipt, { cause: transport.failure.cause });
+    return receipt;
+  }
+
+  /** Transport bytes only; a failure is surfaced to the caller instead of becoming successful absence. */
+  private statementTransport(sourceCorpus: string | undefined) {
+    if (!this.authorized || this.extractor === null) throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    const extract = this.extractor.extract.bind(this.extractor);
+    const state: { failure?: { cause: unknown } } = {};
+    const send: SourceStatementTransport = async request => {
+      let result: Awaited<ReturnType<SignalExtractor["extract"]>>;
+      try { result = await withWallClockTimeout(signal => extract({
+        systemPrompt: request.systemPrompt, userPrompt: request.userPrompt,
+        timeoutMs: this.requestTimeoutMs, abortSignal: signal, ...(sourceCorpus === undefined ? {} : { sourceCorpus }),
+        rawResponse: true, retryMode: "disabled"
+      }), { budgetMs: this.wallClockBudgetMs }); }
+      catch (cause) { state.failure = { cause }; throw cause; }
+      return { rawJson: result.rawJson,
+        ...("extractionSkip" in result && result.extractionSkip === "plan_skipped" ? { skipped: true } : {}),
+        ...(result.usage === undefined ? {} : {
+        usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens }
+      }) };
+    };
+    return { send, get failure() { return state.failure; } };
+  }
+
+  /** A session held by one admitted root: no other root can be model-visible context. */
   public async compile(turnContent: string, callerContext: GardenCompileContext): Promise<readonly CandidateMemorySignal[]> {
     const context = { ...callerContext, turn_messages: structuredClone(callerContext.turn_messages),
       source_observation: callerContext.source_observation == null ? callerContext.source_observation : { ...callerContext.source_observation } };
@@ -130,8 +147,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       if (!(error instanceof OfficialApiGardenCompileIncompleteError)) throw error;
       receipt = error.receipt; cause = error.cause;
     }
-    const signals = emitSourceStatementSignals({ receipt, messages: context.turn_messages, artifactKey: context.artifact_key,
-      sourceRootId: context.source_root_id,
+    const source = sourceStatementSessionInput(context.turn_messages);
+    const root = { root_id: context.source_root_id, source_id: context.artifact_key,
+      content_digest: `sha256:${createHash("sha256").update(source.rendered.content, "utf8").digest("hex")}` };
+    const signals = emitSourceStatementSessionSignals({ receipt,
+      requests: planSourceStatementSession(context.run_id, source.messages).flatMap(chunk => "request" in chunk ? [chunk.request] : []),
+      located: source.messages.map((message, index) => ({ message, root, utf8_span: source.rendered.occurrences[index]!.utf8_span })),
       workspaceId: context.workspace_id, runId: context.run_id, surfaceId: context.surface_id, createdAt: this.now(),
       sourceObservation: context.source_observation ?? null, generateSignalId: this.generateSignalId });
     if (receipt.status !== "complete") throw new OfficialApiGardenCompileIncompleteError(receipt, { signals, cause });

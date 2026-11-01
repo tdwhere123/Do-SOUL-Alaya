@@ -1,5 +1,5 @@
 import type { BenchSignalSeedInput, CompileSeedBatchResult } from "../../harness/daemon.js";
-import { captureStatementSourceSession, statementRequestSourceContexts } from "./compile-seed-source-session.js";
+import { captureStatementSourceSession, locateStatementSourceSession } from "./compile-seed-source-session.js";
 import type { SeededObjectResult } from "../../harness/daemon/seed/daemon-seed-types.js";
 import { isUnscoredMaterializedSeedError } from "../../harness/seeding/seed-errors.js";
 import { extractSeedInputs, stringifyError } from "./compile-seed-extract.js";
@@ -37,7 +37,7 @@ async function buildTurnSignalInputs(context: CompileSeedRunnerContext, input: C
   const sourceSession = input.sourceSession ?? input.turnMessages ?? [];
   const seeds = await extractSeedInputs({
     provider: context.provider, statementSessions: context.statementSessions,
-    sourceSession, sourceContexts: statementRequestSourceContexts(sourceSession, captured), stats: context.stats,
+    sourceSession, sourceLocations: locateStatementSourceSession(sourceSession, captured), stats: context.stats,
     turnContent: normalized, seedIndex: input.seedIndex,
     context: { workspace_id: input.workspaceId, run_id: input.runId, surface_id: input.surfaceId ?? null,
       turn_messages: input.turnMessages ?? [], artifact_key: own.source_id, source_root_id: own.root_id,
