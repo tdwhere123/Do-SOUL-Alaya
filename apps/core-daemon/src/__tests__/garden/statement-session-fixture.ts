@@ -77,16 +77,18 @@ export async function createStatementSessionEnvironment() {
   const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
   const signalReceiver = createPostTurnSignalReceiver(signalService, eventLogRepo, evidenceRepo);
   const requests: SourceStatementRequest[] = [];
+  const warnings: { message: string; meta: Record<string, unknown> }[] = [];
   return {
     directory, filename, clock, now, field, eventLogRepo, eventPublisher, signalService, memoryService, gardenTaskRepo,
-    sourceAdmission, signalReceiver, requests,
+    sourceAdmission, signalReceiver, requests, warnings,
     get database() { return database; },
     advance(ms: number) { clock.now = new Date(Date.parse(clock.now) + ms).toISOString(); },
-    report: async (turnIndex: number, messages: readonly Message[]) => await enqueuePostTurnExtractTask(
-      { deps: { gardenTaskRepo, sourceAdmission }, now },
+    report: async (turnIndex: number, messages: readonly Message[], runId = RUN) => await enqueuePostTurnExtractTask(
+      { deps: { gardenTaskRepo, sourceAdmission }, now,
+        warn: (message: string, meta: Record<string, unknown>) => { warnings.push({ message, meta }); } },
       { delivery_id: "delivery-1", usage_state: "used", turn_index: turnIndex, turn_digest: { last_messages: [...messages] } },
-      { workspaceId: WORKSPACE, runId: RUN, agentTarget: "codex", sessionId: "session-1" },
-      createDeliveryRecord({ delivered_at: START })),
+      { workspaceId: WORKSPACE, runId, agentTarget: "codex", sessionId: "session-1" },
+      createDeliveryRecord({ delivered_at: START, run_id: runId })),
     /** A recorded model: each target message yields the statements `respond` returns for its text. */
     provider: (respond: (text: string) => readonly SourceStatement[]) => new OfficialApiGardenProvider({
       apiKey: "sk-test", now, extractor: { extract: async ({ userPrompt }) => {
@@ -99,7 +101,7 @@ export async function createStatementSessionEnvironment() {
     processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG) =>
       createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver,
         configService: { getRuntimeGardenComputeConfig: async () => config },
-        officialApiGardenProvider: provider, warn: () => undefined })(),
+        officialApiGardenProvider: provider, warn: (message, meta) => { warnings.push({ message, meta }); } })(),
     sessionTasks: () => database.connection.prepare(`SELECT id, status, payload_json, last_error_text FROM garden_tasks
       WHERE kind = 'source_statement_session' ORDER BY json_extract(payload_json, '$.chunk_index')`)
       .all() as { id: string; status: string; payload_json: string; last_error_text: string | null }[],

@@ -90,7 +90,7 @@ describe("conversation garden compile queue", () => {
   it("does not collide with a report_context_usage turn_index 0 task", async () => {
     const { gardenTaskRepo, sourceAdmission } = await createAdmittedQueueHarness();
     await enqueuePostTurnExtractTask(
-      { deps: { gardenTaskRepo, sourceAdmission }, now: () => "2026-09-16T00:00:00.000Z" },
+      { deps: { gardenTaskRepo, sourceAdmission }, now: () => "2026-09-16T00:00:00.000Z", warn: () => undefined },
       {
         delivery_id: "delivery-1",
         usage_state: "used",

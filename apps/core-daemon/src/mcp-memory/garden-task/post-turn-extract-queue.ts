@@ -23,11 +23,13 @@ import {
 import { closeStatementSessionChunks } from "../../garden/statement-session/statement-session-closure.js";
 import type {
   RecallUsageHandlerDependencies,
-  RecallUsageToolCallContext
+  RecallUsageToolCallContext,
+  WarnPort
 } from "../recall/recall-usage-handlers.js";
 
 export async function enqueuePostTurnExtractTask(
-  params: Readonly<{ readonly deps: Pick<RecallUsageHandlerDependencies, "gardenTaskRepo" | "sourceAdmission">; readonly now: () => string }>,
+  params: Readonly<{ readonly deps: Pick<RecallUsageHandlerDependencies, "gardenTaskRepo" | "sourceAdmission">;
+    readonly now: () => string; readonly warn: WarnPort }>,
   request: SoulReportContextUsageRequest,
   context: RecallUsageToolCallContext,
   linkedDelivery: Readonly<ContextDeliveryRecord> | null
@@ -51,7 +53,15 @@ export async function enqueuePostTurnExtractTask(
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
   const repo = params.deps.gardenTaskRepo;
   // Each admitted turn may close earlier statement chunks of its run; replay repeats it idempotently.
-  const closeChunks = () => { closeStatementSessionChunks(repo, { workspaceId, runId, closeTail: false, now: params.now }); };
+  const closeChunks = () => {
+    try {
+      closeStatementSessionChunks(repo, { workspaceId, runId, closeTail: false, now: params.now });
+    } catch (error) {
+      // The turn is already admitted; a closure failure leaves the run to the idle sweep, never fails the report.
+      params.warn("statement session chunk closure failed", { workspace_id: workspaceId, run_id: runId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
+  };
   const existing = repo.findByIdInWorkspace(taskId, workspaceId);
   if (existing !== null) {
     assertPostTurnReplay(existing.payload, lastMessages, deliveredObjectIds);

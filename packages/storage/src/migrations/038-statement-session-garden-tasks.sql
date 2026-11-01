@@ -31,3 +31,11 @@ WHEN NEW.kind = 'source_statement_session' AND (NOT json_valid(NEW.payload_json)
 BEGIN
   SELECT RAISE(ABORT, 'garden task source erased');
 END;
+
+-- Idle tail sweep checkpoint: a run qualifies again only after a newer turn is admitted.
+CREATE TABLE statement_session_sweeps (
+  workspace_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  swept_through INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, run_id)
+) WITHOUT ROWID;

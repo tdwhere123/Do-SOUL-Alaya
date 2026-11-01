@@ -2,7 +2,7 @@ import { GardenRole, GardenTaskKind, SOURCE_STATEMENT_LIMITS } from "@do-soul/al
 import { planSourceStatementSession, type LocatedSourceStatementMessage } from "@do-soul/alaya-soul";
 import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
 import {
-  parseStatementSessionTaskPayload, rootStatementMessages, statementSessionTaskId,
+  StatementSessionSourceUnavailableError, parseStatementSessionTaskPayload, rootStatementMessages, statementSessionTaskId,
   type StatementSessionMember, type StatementSessionSourcesPort, type StatementSessionTaskPayload
 } from "./statement-session-task.js";
 
@@ -33,8 +33,14 @@ export function closeStatementSessionChunks(repo: StatementSessionClosurePort, i
   const messagesOf = (rootId: string | null): readonly Located[] => {
     if (rootId === null) return [];
     const read = sources.root(input.workspaceId, rootId);
-    // An erased or withdrawn turn is neither a target nor model-visible context.
-    return read.status === "unavailable" ? [] : rootStatementMessages(read.root).map((row, index) => ({ ...row, index }));
+    // An unavailable or role-less turn is a raw-only gap: neither a target nor model-visible context.
+    if (read.status === "unavailable") return [];
+    try {
+      return rootStatementMessages(read.root).map((row, index) => ({ ...row, index }));
+    } catch (error) {
+      if (error instanceof StatementSessionSourceUnavailableError) return [];
+      throw error;
+    }
   };
   const cursorMessages = messagesOf(turns[at]?.root_id ?? null), split = cursor?.to ?? 0;
   const context: Located[] = [...cursorMessages.slice(0, split)];
@@ -79,6 +85,8 @@ export function sweepIdleStatementSessions(repo: StatementSessionClosurePort, in
       input.warn("statement session tail closure failed", { workspace_id: run.workspace_id, run_id: run.run_id,
         error: error instanceof Error ? error.message : String(error) });
     }
+    // A tail with nothing to close stops qualifying until a newer turn arrives.
+    repo.statementSessions.markSwept(run.workspace_id, run.run_id, run.newest_turn);
   }
 }
 

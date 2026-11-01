@@ -25,7 +25,7 @@ function failingGardenTaskRepo(): NonNullable<RecallUsageHandlerDependencies["ga
     findByIdInWorkspace: () => null,
     peekPending: () => [],
     statementSessions: {
-      turns: () => [], lastChunkPayload: () => null, idleOpenRuns: () => [],
+      turns: () => [], lastChunkPayload: () => null, idleOpenRuns: () => [], markSwept: () => undefined,
       root: () => ({ status: "unavailable", reason: "no source" })
     }
   };
@@ -63,7 +63,7 @@ describe("post-turn extract enqueue", () => {
 
     await expect(
       enqueuePostTurnExtractTask(
-        { deps, now: () => "2026-06-23T00:00:00.000Z" },
+        { deps, now: () => "2026-06-23T00:00:00.000Z", warn: () => undefined },
         reportRequest,
         context,
         linkedDelivery

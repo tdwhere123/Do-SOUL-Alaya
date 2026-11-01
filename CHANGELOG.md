@@ -29,8 +29,11 @@ their erase dependencies. Erasing any member root fails a pending chunk. The ben
 daemon share one soul emission owner. This is an invariant §25 major for host workers:
 `POST_TURN_EXTRACT` completes without model results, and `source_statement_responses`
 are accepted only for `SOURCE_STATEMENT_SESSION`. Recall semantics stay
-`ordinary-native-field.v8`. Migration 038 adds the session run index and member-root
-erase guards; keep a pre-038 database for older-binary rollback.
+`ordinary-native-field.v8`. Turns are ordered by daemon admission, never the caller's
+`turn_index`. Chunk closure never fails a usage report, and an unavailable turn is a raw-only
+gap. A chunk left unclaimed past the host-worker TTL fails visibly instead of disappearing.
+Migration 038 adds the session run index, member-root erase guards and an idle-sweep
+checkpoint; keep a pre-038 database for older-binary rollback.
 
 Protocol 31.0.0 introduces the `source-statements-v1` passive conversation contract:
 ordered host messages produce only self-contained `text` and general `relation` keys.

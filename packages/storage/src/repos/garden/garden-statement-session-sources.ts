@@ -6,6 +6,8 @@ import { CURRENT_SOURCE_RECORD_ORDER, readSourceProjectionDependencies } from ".
 // Must stay identical to the expression of idx_garden_tasks_statement_session_run.
 const RUN_ID = "(CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.run_id') END)";
 
+/** `newest_turn` is the run's newest post-turn rowid, the sweep checkpoint. */
+export type StatementSessionIdleRun = Readonly<{ workspace_id: string; run_id: string; newest_turn: number }>;
 export type StatementSessionTurn = Readonly<{
   task_id: string; root_id: string | null; created_at: string; source_observed_at: string | null;
 }>;
@@ -21,13 +23,13 @@ export type StatementSessionRootRead = Readonly<{ status: "available"; root: Sta
 export class GardenStatementSessionSources {
   public constructor(private readonly connection: SqliteConnection) {}
 
-  /** Admission order: caller turn index, then admission time, then task id. */
+  /** Daemon admission order; a caller turn index is untrusted for ordering and would let late turns sort behind the cursor. */
   public turns(workspaceId: string, runId: string): readonly StatementSessionTurn[] {
     return (this.connection.prepare(`SELECT id AS task_id, created_at,
         json_extract(payload_json, '$.admitted_source_root_id') AS root_id,
         json_extract(payload_json, '$.source_observed_at') AS source_observed_at
       FROM garden_tasks WHERE kind = 'post_turn_extract' AND workspace_id = ? AND ${RUN_ID} = ?
-      ORDER BY CAST(json_extract(payload_json, '$.turn_index') AS INTEGER), created_at, id`)
+      ORDER BY created_at, rowid`)
       .all(workspaceId, runId) as { task_id: string; created_at: string; root_id: unknown; source_observed_at: unknown }[])
       .map(row => ({ task_id: row.task_id, created_at: row.created_at,
         root_id: typeof row.root_id === "string" && row.root_id.length > 0 ? row.root_id : null,
@@ -43,19 +45,25 @@ export class GardenStatementSessionSources {
     return row === undefined ? null : JSON.parse(row.payload_json) as unknown;
   }
 
-  /** Runs whose newest turn is idle since `idleBefore` and whose tail has not been closed after it. */
-  public idleOpenRuns(idleBefore: string, admittedSince: string, limit: number): readonly Readonly<{ workspace_id: string; run_id: string }>[] {
+  /** Idle runs with a turn admitted after their last tail sweep, freshest first so dead runs never starve new ones. */
+  public idleOpenRuns(idleBefore: string, admittedSince: string, limit: number): readonly StatementSessionIdleRun[] {
     return this.connection.prepare(`WITH runs AS (
-        SELECT workspace_id, ${RUN_ID} AS run_id, MAX(created_at) AS newest FROM garden_tasks
+        SELECT workspace_id, ${RUN_ID} AS run_id, MAX(created_at) AS newest, MAX(rowid) AS newest_turn FROM garden_tasks
         WHERE kind = 'post_turn_extract' AND created_at >= ? AND ${RUN_ID} IS NOT NULL
         GROUP BY workspace_id, run_id HAVING newest <= ?
       )
-      SELECT runs.workspace_id, runs.run_id FROM runs WHERE NOT EXISTS (
-        SELECT 1 FROM garden_tasks WHERE kind = 'source_statement_session' AND workspace_id = runs.workspace_id
-          AND ${RUN_ID} = runs.run_id AND created_at >= runs.newest
-          AND json_extract(payload_json, '$.closes_tail') = 1)
-      ORDER BY runs.newest, runs.workspace_id, runs.run_id LIMIT ?`)
-      .all(admittedSince, idleBefore, limit) as { workspace_id: string; run_id: string }[];
+      SELECT runs.workspace_id, runs.run_id, runs.newest_turn FROM runs
+      LEFT JOIN statement_session_sweeps AS sweep ON sweep.workspace_id = runs.workspace_id AND sweep.run_id = runs.run_id
+      WHERE sweep.swept_through IS NULL OR sweep.swept_through < runs.newest_turn
+      ORDER BY runs.newest DESC, runs.workspace_id, runs.run_id LIMIT ?`)
+      .all(admittedSince, idleBefore, limit) as StatementSessionIdleRun[];
+  }
+
+  /** Records that the tail through `newestTurn` was examined, whether or not it formed a request. */
+  public markSwept(workspaceId: string, runId: string, newestTurn: number): void {
+    this.connection.prepare(`INSERT INTO statement_session_sweeps (workspace_id, run_id, swept_through) VALUES (?, ?, ?)
+      ON CONFLICT (workspace_id, run_id) DO UPDATE SET swept_through = MAX(swept_through, excluded.swept_through)`)
+      .run(workspaceId, runId, newestTurn);
   }
 
   /** A statement source must be current, retained, unerased with available projection dependencies,
@@ -84,10 +92,11 @@ export class GardenStatementSessionSources {
       source_representation: representation }, CURRENT_SOURCE_RECORD_ORDER).available) {
       return unavailable("source projection dependency unavailable");
     }
-    if (row.inventory === null) return unavailable("host message structure unavailable");
+    const inventory = row.inventory === null ? null : HostOccurrenceInventorySchema.safeParse(JSON.parse(row.inventory));
+    if (inventory === null || !inventory.success) return unavailable("host message structure unavailable");
     return { status: "available", root: { workspace_id: workspaceId, root_id: row.record_id, source_id: row.source_id,
       source_version: row.source_version, content_digest: row.content_digest, content: row.source_body,
-      occurrences: HostOccurrenceInventorySchema.parse(JSON.parse(row.inventory)).occurrences } };
+      occurrences: inventory.data.occurrences } };
   }
 }
 

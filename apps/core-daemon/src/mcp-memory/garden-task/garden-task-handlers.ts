@@ -28,6 +28,7 @@ import {
 } from "./garden-task-handler-support.js";
 import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
+import { StatementSessionSourceUnavailableError } from "../../garden/statement-session/statement-session-task.js";
 import { gardenTaskSourceAvailable, quarantineUnavailableSourceTasks,
   type GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
@@ -99,7 +100,7 @@ export function createGardenTaskHandlers(params: Readonly<{
 }>): GardenTaskOperations {
   const completion = createGardenTaskCompletionHandler(params);
   return {
-    listPendingGardenTasks: createListPendingGardenTasks(params.deps, params.now),
+    listPendingGardenTasks: createListPendingGardenTasks(params.deps, params.now, params.warn),
     claimGardenTask: createClaimGardenTaskHandler(params),
     completeGardenTask: async (request, context) => {
       throwIfAborted(context.abortSignal);
@@ -108,7 +109,7 @@ export function createGardenTaskHandlers(params: Readonly<{
   };
 }
 
-function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: () => string) {
+function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: () => string, warn: WarnPort) {
   return async function listPendingGardenTasks(
     request: GardenListPendingTasksRequest,
     context: GardenTaskToolCallContext
@@ -127,7 +128,15 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: 
     let payloadChars = 0;
     for (const row of rows) {
       if (!gardenTaskSourceAvailable(deps.gardenTaskRepo, row)) continue;
-      const snapshot = toGardenTaskSnapshot(row, deps.gardenTaskRepo.statementSessions);
+      let snapshot: ReturnType<typeof toGardenTaskSnapshot>;
+      try {
+        snapshot = toGardenTaskSnapshot(row, deps.gardenTaskRepo.statementSessions);
+      } catch (error) {
+        // One unreadable chunk must not hide the rest; claim, in-process fallback or TTL still settle it.
+        if (!(error instanceof StatementSessionSourceUnavailableError)) throw error;
+        warn("omitted statement session chunk with an unavailable member source", { task_id: row.id, reason: error.message });
+        continue;
+      }
       const size = JSON.stringify(snapshot).length;
       if (tasks.length > 0 && payloadChars + size > GARDEN_TASK_PAYLOAD_MAX_CHARS) break;
       tasks.push(snapshot);

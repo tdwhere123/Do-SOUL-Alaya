@@ -9,7 +9,8 @@ import { SOURCE_STATEMENTS_PROMPT, emitSourceStatementSessionSignals, extractSou
 import type { GardenStatementSessionSources, StatementSessionRoot } from "@do-soul/alaya-storage";
 import { buildGardenTaskSignalId } from "../support/task-signal-id.js";
 
-export type StatementSessionSourcesPort = Pick<GardenStatementSessionSources, "turns" | "lastChunkPayload" | "idleOpenRuns" | "root">;
+export type StatementSessionSourcesPort = Pick<GardenStatementSessionSources,
+  "turns" | "lastChunkPayload" | "idleOpenRuns" | "markSwept" | "root">;
 /** Consecutive host occurrences [from, to) of one admitted root. */
 export type StatementSessionMember = Readonly<{ root_id: string; source_id: string; from: number; to: number }>;
 /** Root ids and occurrence ranges only: messages are always re-read from their admitted roots. */

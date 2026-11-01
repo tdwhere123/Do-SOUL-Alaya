@@ -1,6 +1,7 @@
 import {
   GARDEN_ROLE_TIER_MAP,
   GardenEventType,
+  GardenTaskKind,
   parseGardenEventPayload
 } from "@do-soul/alaya-protocol";
 import type {
@@ -11,6 +12,7 @@ import type {
 } from "@do-soul/alaya-storage";
 
 const GARDEN_CLAIM_STALE_AFTER_MS = 10 * 60 * 1000;
+// Must exceed STATEMENT_SESSION_IDLE_MS so the in-process fallback runs before a session chunk expires.
 const HOST_WORKER_TASK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const HOST_WORKER_TASK_EXPIRY_CAP_PER_PASS = 128;
 // Post-turn rows are the run inventory of statement sessions and are processed in-process; never expire them.
@@ -117,7 +119,9 @@ async function expireUnclaimedHostWorkerTasksByKind(
   const expirations = expiredRows.map((row) =>
     buildHostWorkerTaskExpiry(row, occurredAt)
   );
-  const removed = await gardenTaskRepo.expireUnclaimedTasks(expirations);
+  const removed = kind === GardenTaskKind.SOURCE_STATEMENT_SESSION
+    ? await failExpiredStatementSessions(gardenTaskRepo, expiredRows, expirations, occurredAt)
+    : await gardenTaskRepo.expireUnclaimedTasks(expirations);
   if (removed > 0) {
     warn("expired never-claimed host-worker garden tasks past TTL", {
       task_kind: kind,
@@ -125,6 +129,41 @@ async function expireUnclaimedHostWorkerTasksByKind(
       ttl_ms: HOST_WORKER_TASK_TTL_MS
     });
   }
+}
+
+/** A session chunk fails rather than disappears: its row keeps the run cursor and doctor counts the lost chunk. */
+async function failExpiredStatementSessions(
+  gardenTaskRepo: SqliteGardenTaskRepo,
+  rows: readonly GardenTaskRow[],
+  expirations: readonly GardenTaskExpiryInput[],
+  occurredAt: string
+): Promise<number> {
+  let failed = 0;
+  for (const [index, row] of rows.entries()) {
+    const runId = extractGardenTaskRunId(row.payload);
+    if (await gardenTaskRepo.failPendingWithCompletionEvent(row.id, occurredAt,
+      "Statement session chunk expired unclaimed past the host-worker TTL; its raw source remains available.", {
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+        entity_type: "garden_task",
+        entity_id: row.id,
+        workspace_id: row.workspace_id,
+        run_id: runId,
+        caused_by: "garden-runtime",
+        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+          task_id: row.id,
+          task_kind: row.kind,
+          role: row.role,
+          tier: GARDEN_ROLE_TIER_MAP[row.role],
+          workspace_id: row.workspace_id,
+          run_id: runId,
+          success: false,
+          objects_affected: [],
+          candidate_signals_count: 0,
+          occurred_at: occurredAt
+        })
+      }, [expirations[index]!.event])) failed += 1;
+  }
+  return failed;
 }
 
 function buildHostWorkerTaskExpiry(
