@@ -629,13 +629,9 @@ class AcquisitionQuery {
     if (!candidates.some(row => row.source.auxiliary !== undefined)) return candidates;
     this.meter.charge(candidates.length, 0, "statement candidate collapse");
     const seen = new Set<string>();
-    return candidates.filter(row => {
-      if (row.source.auxiliary === undefined) return true;
-      const key = `${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    // The set grows only when this root and lane are first seen.
+    return candidates.filter(row => row.source.auxiliary === undefined ||
+      seen.size < seen.add(`${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`).size);
   }
 
   private nominatePrefix(stopAtRootLimit = false,
