@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 31.0.0, engine gateway 2.0.0
+## Unreleased — protocol 32.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,21 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+
+Protocol 32.0.0 moves passive statement generation out of `POST_TURN_EXTRACT` into the
+new `source_statement_session` Garden task kind. A session is one workspace run; its
+messages are the run's admitted post-turn roots in admission order, re-read from those
+roots and never from copied task text. A chunk is enqueued only once closed: when a later
+message starts the next chunk, or when the run has been idle for the 15-minute host-worker
+fallback interval. Each request's recent context is the longest suffix of preceding
+messages within 16 KB and 64 messages, so the `context_capacity` rejection reason is
+removed. Statements bind to each message's own root; request-scoped context roots are
+their erase dependencies. Erasing any member root fails a pending chunk. The bench and the
+daemon share one soul emission owner. This is an invariant §25 major for host workers:
+`POST_TURN_EXTRACT` completes without model results, and `source_statement_responses`
+are accepted only for `SOURCE_STATEMENT_SESSION`. Recall semantics stay
+`ordinary-native-field.v8`. Migration 038 adds the session run index and member-root
+erase guards; keep a pre-038 database for older-binary rollback.
 
 Protocol 31.0.0 introduces the `source-statements-v1` passive conversation contract:
 ordered host messages produce only self-contained `text` and general `relation` keys.

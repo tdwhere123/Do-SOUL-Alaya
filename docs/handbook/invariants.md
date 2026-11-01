@@ -159,7 +159,8 @@ These rules always win over lower-level docs and task-card convenience.
     on `soul.recall`, `turn_digest` on `soul.report_context_usage`) is
     *input*, not an agent claim of truth. Ordinary `soul.recall` does
     not enqueue ingestion; `recent_turn` is ignored. `soul.report_context_usage`
-    may enqueue `POST_TURN_EXTRACT` from `turn_digest`. Explicit post-turn
+    may enqueue `POST_TURN_EXTRACT` from `turn_digest`; closed run chunks of
+    those admitted turns become `SOURCE_STATEMENT_SESSION` work. Explicit post-turn
     events and A-track emission remain.
     Garden candidates still pass deterministic triage, evidence
     synthesis, and EventLog audit before any durable write — that

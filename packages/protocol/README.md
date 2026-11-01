@@ -53,6 +53,13 @@ vector profiles are unchanged. Protocol 26.0.0 makes `segmented-unicode61.v1`
 (`SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION`) the representation the daemon prepares
 for every workspace without an explicit selection (invariant §25 major: ordinary
 lexical candidates change once it publishes; until then the raw reader serves).
+Protocol 32.0.0 adds the `source_statement_session` Garden task kind: statement
+generation runs over a run's ordered admitted turns in closed chunks, with recent context
+bounded to the longest preceding suffix within 16 KB / 64 messages (no `context_capacity`
+rejection). `POST_TURN_EXTRACT` completes without model results; host workers return
+`source_statement_responses` only for session tasks. Ordinary results stay
+`ordinary-native-field.v8`. This is an invariant §25 major for host workers.
+
 Protocol 31.0.0 adds message-bound `source-statements-v1` artifacts shared by
 memory publication and lexical/vector SourceIndex navigation. Ordinary results are
 `ordinary-native-field.v8`; raw source and display identities do not become statement
@@ -107,7 +114,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `31.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `32.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

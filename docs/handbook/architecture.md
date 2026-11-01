@@ -214,7 +214,11 @@ reverse dependency order after live handlers settle.
 A-track explicit `soul.emit_*` signals and B-track post-turn Garden extraction
 produce candidates, not active truth. `soul.recall` does not enqueue
 extraction; its `recent_turn` is ignored. `soul.report_context_usage` may
-enqueue `POST_TURN_EXTRACT` from `turn_digest`. Source publication binds
+enqueue `POST_TURN_EXTRACT` from `turn_digest`, which only retains the admitted
+turn. Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a run's
+ordered admitted turns, enqueued when a later message closes a chunk or the run is
+idle for the host-worker fallback interval; a chunk payload names member roots and
+occurrence ranges only. Source publication binds
 current source, scope and audit before notifying; a failed later optional
 memory formation does not delete the source capsule (invariant §20a).
 Producer text, extraction cache and normalization never certify source or
@@ -223,9 +227,9 @@ role attribution, receipts and resource limits belong to their respective
 Protocol/SOUL/Core owners. Explicit revisions need fresh authority; failed or
 unknown provider attempts stay distinct from unattempted work.
 
-Queued post-turn text is eligible for listing, claiming, compilation and
-completion only while its exact admitted source and projection dependencies
-remain retained and current in the same workspace. The shared SQLite queue
+Queued post-turn text and statement session chunks are eligible for listing,
+claiming, compilation and completion only while every admitted member source and
+its projection dependencies remain retained and current in the same workspace. The shared SQLite queue
 checks those facts; the daemon owns the unsuccessful completion audit and
 quarantine transition. Legacy work with unavailable provenance retains its
 private payload and failure history, but exposes no turn text and cannot call

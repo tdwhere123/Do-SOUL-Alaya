@@ -219,6 +219,14 @@ no assistant relocation or new display selector is implied. Historical extractio
 records retain their own interpretation and erase dependencies, not new admission
 under the minimal contract.
 
+Protocol 32.0.0 produces these artifacts from `SOURCE_STATEMENT_SESSION` work: one
+session per workspace run, over the run's admitted post-turn roots in admission order.
+A chunk is planned only once closed (a later message starts the next chunk, or the run
+is idle for the 15-minute host-worker fallback interval), so a queued request never
+changes. Recent context is the longest suffix of preceding messages within 16 KB and
+64 messages. Each statement binds to its own message root; the other roots its request
+showed the model are its context dependencies and withdraw it on erasure.
+
 ## Question-time preference
 
 Protocol 28.0.0 admits `interpretation_proposal.question_time` from the narrow
