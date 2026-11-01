@@ -51,10 +51,6 @@
     "max": 2,
     "reason": "snapshot graph preflight still double-asserts sqlite rows"
   },
-  "apps/bench-runner/src/runs/snapshot/seed-ledger/direct-source-evidence-proof.ts": {
-    "max": 3,
-    "reason": "direct source evidence proof still double-asserts sqlite rows"
-  },
   "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-materialization-proof.ts": {
     "max": 5,
     "reason": "seed-ledger materialization proof still double-asserts sqlite rows"

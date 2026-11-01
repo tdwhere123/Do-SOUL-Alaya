@@ -1363,10 +1363,6 @@
     "max": 9,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/snapshot/seed-ledger/direct-source-evidence-proof.ts": {
-    "max": 6,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/snapshot/seed-ledger/seed-ledger-binding.ts": {
     "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -1500,10 +1496,6 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/garden/bulk-enrich/bulk-enrich-runtime-runner.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/garden/host-worker/host-worker-task-processors.ts": {
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
