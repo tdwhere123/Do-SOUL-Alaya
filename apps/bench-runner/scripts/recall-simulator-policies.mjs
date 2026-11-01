@@ -55,7 +55,10 @@ function readContext(row) {
       WHERE r.workspace_id=?`).all(row.workspace);
     const records = new Map(), messages = [], rounds = [];
     for (const source of sources) {
-      try { authorizeSourceIndexScope(source.scope_class, JSON.parse(source.target_json), ["project"]); } catch { continue; }
+      const target = JSON.parse(source.target_json);
+      // Statement keys are auxiliary rows of the same record; context describes the raw root.
+      if (target.auxiliary !== undefined) continue;
+      try { authorizeSourceIndexScope(source.scope_class, target, ["project"]); } catch { continue; }
       if (records.has(source.record_id)) throw new AlayaError("CONFLICT", `ambiguous indexed root: ${source.record_id}`);
       const occurrences = source.canonical_inventory === null ? [] : JSON.parse(source.canonical_inventory).occurrences;
       const container = projectHostContainer(occurrences).key;
