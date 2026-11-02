@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-core";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
+import type { GardenCaptureHealth } from "../../garden/host-session/capture-health.js";
 import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
 import { writeDoctorAuditSummary } from "./doctor-audit.js";
@@ -374,13 +375,21 @@ function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: Doctor
       );
     }
   }
-  if (
-    report.garden_compute.failed_post_turn_extract_tasks !== undefined ||
-    report.garden_compute.compile_enqueue_failures !== undefined
-  ) {
-    stream.write(
-      `garden compile failures: ${report.garden_compute.failed_post_turn_extract_tasks ?? 0} failed SOURCE_STATEMENT_SESSION; ${report.garden_compute.compile_enqueue_failures ?? 0} enqueue never queued\n`
-    );
+  const capture = report.garden_compute.capture;
+  if (capture !== undefined) writeCaptureSummary(stream, capture);
+}
+
+function writeCaptureSummary(stream: NodeJS.WritableStream, capture: GardenCaptureHealth): void {
+  const host = capture.host_session;
+  stream.write(host.captured_messages === 0
+    ? "host session capture: none — the host must call soul.capture_host_session (report_context_usage no longer captures)\n"
+    : `host session capture: messages=${host.captured_messages} excerpt=${host.excerpt_messages}` +
+      ` unbound=${host.unbound_messages} overdue_unbound=${host.overdue_unbound_messages} last=${host.last_captured_at}\n`);
+  const sessions = capture.statement_sessions;
+  stream.write(`statement sessions: ${sessions.failed} failed of the last ${sessions.recent_window}` +
+    (sessions.latest_error === null ? "" : ` (latest: ${sessions.latest_error})`) + "\n");
+  if (capture.legacy_post_turn_unprocessed > 0) {
+    stream.write(`legacy post-turn captures without statements: ${capture.legacy_post_turn_unprocessed}\n`);
   }
 }
 

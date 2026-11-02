@@ -16,6 +16,7 @@ vi.mock("../../secrets/index.js", async () => {
 
 import { resolveGardenComputeStatus } from "../../cli/register.js";
 import type { AlayaDaemonRuntime } from "../../index.js";
+import type { GardenCaptureHealth } from "../../garden/host-session/capture-health.js";
 
 afterEach(() => {
   hoisted.resolveSecretRef.mockReset();
@@ -123,32 +124,20 @@ describe("resolveGardenComputeStatus dedups secret resolution", () => {
       }
     });
   });
-  it("reads recent extract failures and enqueue-never-queued counts from garden status", async () => {
-    const getHostWorkerExtractBacklog = vi.fn((workspaceId?: string) => ({
-      pending: 0,
-      stale: 0,
-      failed: workspaceId === "workspace-1" ? 4 : 99,
-      edgeClassifyPending: 0,
-      edgeClassifyStale: 0
-    }));
-    const getRecentCompileEnqueueFailures = vi.fn(async (workspaceId: string) =>
-      workspaceId === "workspace-1" ? 2 : 7
-    );
-    const runtime = createRuntime({
-      secretRef: null,
-      providerKind: "local_heuristics",
-      gardenStatus: {
-        getHostWorkerExtractBacklog,
-        getRecentCompileEnqueueFailures
-      }
-    });
+  it("reads capture health of the doctor workspace from garden status", async () => {
+    const health = {
+      host_session: { captured_messages: 4, excerpt_messages: 0, last_captured_at: null, unbound_messages: 1,
+        overdue_unbound_messages: 0 },
+      statement_sessions: { recent_window: 50, failed: 1, latest_error: "Source erased" },
+      legacy_post_turn_unprocessed: 0
+    };
+    const getCaptureHealth = vi.fn((workspaceId: string) => workspaceId === "workspace-1" ? health : null);
+    const runtime = createRuntime({ secretRef: null, providerKind: "local_heuristics", gardenStatus: { getCaptureHealth } });
 
     const status = await resolveGardenComputeStatus(runtime, "workspace-1");
 
-    expect(getHostWorkerExtractBacklog).toHaveBeenCalledWith("workspace-1");
-    expect(getRecentCompileEnqueueFailures).toHaveBeenCalledWith("workspace-1");
-    expect(status.failed_post_turn_extract_tasks).toBe(4);
-    expect(status.compile_enqueue_failures).toBe(2);
+    expect(getCaptureHealth).toHaveBeenCalledWith("workspace-1");
+    expect(status.capture).toEqual(health);
   });
 });
 
@@ -157,14 +146,7 @@ function createRuntime(input: {
   readonly secretRef: string | null;
   readonly providerKind: "official_api" | "local_heuristics" | "host_worker";
   readonly gardenStatus?: {
-    getHostWorkerExtractBacklog: (workspaceId?: string) => {
-      readonly pending: number;
-      readonly stale: number;
-      readonly failed: number;
-      readonly edgeClassifyPending: number;
-      readonly edgeClassifyStale: number;
-    } | null;
-    getRecentCompileEnqueueFailures: (workspaceId: string) => Promise<number>;
+    getCaptureHealth: (workspaceId: string) => GardenCaptureHealth | null;
   };
 }): AlayaDaemonRuntime {
   return {

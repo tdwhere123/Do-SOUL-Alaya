@@ -24,13 +24,12 @@ import type {
   WorkspaceService
 } from "@do-soul/alaya-core";
 import type { MemoryHqRepo } from "@do-soul/alaya-storage";
+import type { GardenCaptureHealth } from "../../../garden/host-session/capture-health.js";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 import type { FieldProjectionCheckpointPort } from
   "../../field/admission-checkpoint.js";
 import type { RelationProjectionCheckpointPort } from
   "../../recall-materialization/relation-projection/checkpoint.js";
-
-export const RECENT_GARDEN_COMPILE_TURN_LIMIT = 50;
 
 export type StartupStep =
   | "database"
@@ -165,25 +164,17 @@ export interface AlayaDaemonRuntimeServices {
   >;
   readonly gardenStatus: Readonly<{
     getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
-    // Recall-driven host-worker backlog snapshot used by doctor/status to warn
-    // under the host_worker product default when work is aging unclaimed (no
-    // attached CLI agent). `pending` counts unclaimed SOURCE_STATEMENT_SESSION tasks;
-    // `stale` counts SOURCE_STATEMENT_SESSION tasks a worker CLAIMED but whose claim is
-    // older than the wait window (claimed-and-aged, not pending-and-aged).
-    // `failed` counts SOURCE_STATEMENT_SESSION rows among the most recent compile
-    // turns in the doctor workspace so a silent extract miss is visible.
-    // edgeClassifyPending / edgeClassifyStale carry the same pending/stale split
-    // for EDGE_CLASSIFY tasks so a no-agent deployment's unrefined heuristic-edge
-    // backlog is visible too. Returns null when no garden task repo is wired
-    // (e.g. a non-sqlite harness).
+    // Host-worker backlog for doctor/status under the host_worker default: `pending` is unclaimed
+    // SOURCE_STATEMENT_SESSION work, `stale` is claimed work older than the wait window; the edge pair
+    // is the same split for EDGE_CLASSIFY. Null when no garden task repo is wired.
     getHostWorkerExtractBacklog(workspaceId?: string): Readonly<{
       readonly pending: number;
       readonly stale: number;
-      readonly failed: number;
       readonly edgeClassifyPending: number;
       readonly edgeClassifyStale: number;
     }> | null;
-    getRecentCompileEnqueueFailures(workspaceId: string): Promise<number>;
+    // Capture health for doctor; null when no garden task repo is wired.
+    getCaptureHealth(workspaceId: string): GardenCaptureHealth | null;
   }>;
   readonly principalCodingEngineAvailable: boolean;
 }

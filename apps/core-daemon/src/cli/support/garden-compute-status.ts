@@ -45,26 +45,13 @@ export async function resolveGardenComputeStatus(
     routing_decision: deriveGardenRoutingDecision(config, resolved),
     ...keychainCheckField(config.secret_ref, resolved),
     ...hostWorkerAdvisoryField(config.provider_kind, runtime, workspaceId),
-    ...(await compileFailureFields(runtime, workspaceId))
+    ...captureField(runtime, workspaceId)
   };
 }
 
-async function compileFailureFields(
-  runtime: AlayaDaemonRuntime,
-  workspaceId: string
-): Promise<
-  Pick<GardenComputeStatus, "failed_post_turn_extract_tasks" | "compile_enqueue_failures">
-> {
-  const backlog = runtime.services.gardenStatus?.getHostWorkerExtractBacklog?.(workspaceId) ?? null;
-  const enqueueFailures =
-    (await runtime.services.gardenStatus?.getRecentCompileEnqueueFailures?.(workspaceId)) ?? 0;
-  if (backlog === null && enqueueFailures === 0) {
-    return {};
-  }
-  return {
-    ...(backlog === null ? {} : { failed_post_turn_extract_tasks: backlog.failed }),
-    compile_enqueue_failures: enqueueFailures
-  };
+function captureField(runtime: AlayaDaemonRuntime, workspaceId: string): Pick<GardenComputeStatus, "capture"> {
+  const capture = runtime.services.gardenStatus?.getCaptureHealth?.(workspaceId) ?? null;
+  return capture === null ? {} : { capture };
 }
 
 // Under the host_worker product default, surface whether recall-driven

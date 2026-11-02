@@ -5,6 +5,7 @@ import type {
   WorkspaceBootstrapReconcileResult
 } from "@do-soul/alaya-core";
 import type { DaemonStartupStepRecord } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
+import type { GardenCaptureHealth } from "../../garden/host-session/capture-health.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-plasticity/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { ResolveSecretError } from "../../secrets/index.js";
@@ -75,11 +76,8 @@ export interface GardenComputeStatus {
     readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
-  // Durable recent compile outcomes. Present when the garden task repo can
-  // count failed rows so a silent extract miss is visible in doctor.
-  readonly failed_post_turn_extract_tasks?: number;
-  // GARDEN_BACKLOG compile_enqueue records that never became a queue row.
-  readonly compile_enqueue_failures?: number;
+  // Present when the garden task repo is wired.
+  readonly capture?: GardenCaptureHealth;
 }
 
 export type GardenKeychainCheck =
@@ -520,8 +518,8 @@ function buildDoctorChecks(
       services.garden.status === "healthy" &&
       services.gardenCompute.keychain_check?.ok !== false &&
       services.gardenCompute.schema_ok !== false &&
-      (services.gardenCompute.failed_post_turn_extract_tasks ?? 0) === 0 &&
-      (services.gardenCompute.compile_enqueue_failures ?? 0) === 0
+      (services.gardenCompute.capture?.statement_sessions.failed ?? 0) === 0 &&
+      (services.gardenCompute.capture?.host_session.overdue_unbound_messages ?? 0) === 0
         ? "pass"
         : "fail",
     bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),

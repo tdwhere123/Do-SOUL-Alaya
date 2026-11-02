@@ -30,7 +30,6 @@ export type {
   MemoryContextAssemblyInput,
   MemoryContextAssemblyResult
 } from "./conversation-service-ports.js";
-export { GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE } from "./conversation-service-ports.js";
 
 export class ConversationService {
   public constructor(public readonly dependencies: ConversationServiceDependencies) {}

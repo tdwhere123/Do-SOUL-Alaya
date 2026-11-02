@@ -537,6 +537,15 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
+  /** The error text of the workspace's most recently failed task of `kind`, for doctor. */
+  public latestFailureText(kind: GardenTaskKindValue, workspace_id: string): string | null {
+    const row = this.connection.prepare(`SELECT last_error_text FROM garden_tasks
+      WHERE kind = ? AND workspace_id = ? AND status = 'failed' ORDER BY completed_at DESC, id DESC LIMIT 1`)
+      .get(GardenTaskKindSchema.parse(kind), parseNonEmptyString(workspace_id, "garden_task.workspace_id")) as
+      { last_error_text: string | null } | undefined;
+    return row?.last_error_text ?? null;
+  }
+
   private countRecentFailed(
     kind: GardenTaskKindValue,
     limit: number,

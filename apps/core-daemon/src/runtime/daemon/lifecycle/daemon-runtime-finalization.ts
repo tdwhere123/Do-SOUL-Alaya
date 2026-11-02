@@ -1,5 +1,4 @@
-import { GardenTaskKind, HealthEventKind } from "@do-soul/alaya-protocol";
-import { GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE } from "@do-soul/alaya-core";
+import { GardenTaskKind } from "@do-soul/alaya-protocol";
 import { createAttachSurfaceRegistrar } from "../../../attach/surface-registrar.js";
 import { getBuiltinConversationToolSpecs } from "../../../mcp/server/builtin-conversation-tool-specs.js";
 import { createDaemonMcpMemoryToolHandler } from "../../../mcp-memory/tool/daemon-handler.js";
@@ -14,7 +13,7 @@ import type {
   AlayaDaemonRuntimeServices,
   DaemonStartupStepRecord
 } from "./daemon-runtime-types.js";
-import { RECENT_GARDEN_COMPILE_TURN_LIMIT } from "./daemon-runtime-types.js";
+import { readCaptureHealth, type CaptureHealthRepo } from "../../../garden/host-session/capture-health.js";
 import type { RequestProtectionConfig } from "../../app.js";
 import type { AlayaRuntimeNotifier } from "../support/runtime-notifier.js";
 
@@ -25,22 +24,7 @@ type GardenCompileSnapshotExports = Readonly<{
   readonly gardenRuntime: Readonly<{
     getStatus(): Readonly<{ readonly last_pass_at: string | null }>;
   }>;
-  readonly gardenTaskRepo:
-    | Readonly<{
-        countByKind(
-          taskKind: string,
-          staleBefore: string,
-          workspaceId?: string,
-          recentFailedLimit?: number
-        ): Readonly<{ readonly pending: number; readonly stale: number; readonly failed: number }>;
-      }>
-    | undefined;
-  readonly healthJournalService?: Readonly<{
-    getRecentEvents(
-      workspaceId: string,
-      params?: { readonly kind?: string; readonly limit?: number; readonly phase?: string }
-    ): Promise<readonly { readonly event_kind: string; readonly detail_json: Record<string, unknown> }[]>;
-  }>;
+  readonly gardenTaskRepo: CaptureHealthRepo | undefined;
 }>;
 
 type DaemonRuntimeServiceExports = Omit<
@@ -173,8 +157,7 @@ function createGardenStatusService(serviceExports: GardenCompileSnapshotExports)
       const extract = serviceExports.gardenTaskRepo.countByKind(
         GardenTaskKind.SOURCE_STATEMENT_SESSION,
         staleBefore,
-        workspaceId,
-        RECENT_GARDEN_COMPILE_TURN_LIMIT
+        workspaceId
       );
       const edgeClassify = serviceExports.gardenTaskRepo.countByKind(
         GardenTaskKind.EDGE_CLASSIFY,
@@ -184,34 +167,15 @@ function createGardenStatusService(serviceExports: GardenCompileSnapshotExports)
       return {
         pending: extract.pending,
         stale: extract.stale,
-        failed: extract.failed,
         edgeClassifyPending: edgeClassify.pending,
         edgeClassifyStale: edgeClassify.stale
       };
     },
-    getRecentCompileEnqueueFailures: async (workspaceId: string) => {
-      if (serviceExports.healthJournalService === undefined) {
-        return 0;
-      }
-      const entries = await serviceExports.healthJournalService.getRecentEvents(workspaceId, {
-        kind: HealthEventKind.GARDEN_BACKLOG,
-        phase: GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE,
-        limit: RECENT_GARDEN_COMPILE_TURN_LIMIT
-      });
-      return entries.filter(isCompileEnqueueFailure).length;
+    getCaptureHealth: (workspaceId: string) => {
+      const repo = serviceExports.gardenTaskRepo;
+      return repo === undefined ? null : readCaptureHealth(repo, workspaceId, new Date().toISOString());
     }
   };
-}
-
-function isCompileEnqueueFailure(entry: {
-  readonly event_kind: string;
-  readonly detail_json: Record<string, unknown>;
-}): boolean {
-  return (
-    entry.event_kind === HealthEventKind.GARDEN_BACKLOG &&
-    entry.detail_json.phase === GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE &&
-    (entry.detail_json.status === "unavailable" || entry.detail_json.status === "failed")
-  );
 }
 
 function createFinalizedDaemonRuntime(

@@ -11,6 +11,11 @@ export type HostSessionLedgerMessage = Readonly<{
 }>;
 /** An admitted round root of a container, in round order, with the run that admitted its first message. */
 export type HostSessionRound = Readonly<{ round_index: number; root_id: string; run_id: string }>;
+/** Doctor view of a workspace's capture; an unbound message older than the overdue cutoff was missed by tail closure. */
+type HostSessionCaptureHealth = Readonly<{
+  captured_messages: number; excerpt_messages: number; last_captured_at: string | null;
+  unbound_messages: number; overdue_unbound_messages: number;
+}>;
 /** `newest_message` is the container's newest ledger rowid, the sweep checkpoint. */
 export type HostSessionIdleContainer = Readonly<{ workspace_id: string; container_key: string; newest_message: number }>;
 
@@ -105,6 +110,14 @@ export class HostSessionLedger {
       WHERE sweep.swept_through IS NULL OR sweep.swept_through < containers.newest_message
       ORDER BY containers.newest DESC, containers.workspace_id, containers.container_key LIMIT ?`)
       .all(admittedSince, idleBefore, limit) as HostSessionIdleContainer[];
+  }
+
+  public captureHealth(workspaceId: string, overdueBefore: string): HostSessionCaptureHealth {
+    return this.connection.prepare(`SELECT COUNT(*) AS captured_messages,
+        COALESCE(SUM(completeness = 'excerpt'), 0) AS excerpt_messages, MAX(admitted_at) AS last_captured_at,
+        COALESCE(SUM(round_root_id IS NULL), 0) AS unbound_messages,
+        COALESCE(SUM(round_root_id IS NULL AND admitted_at < ?), 0) AS overdue_unbound_messages
+      FROM host_session_messages WHERE workspace_id = ?`).get(overdueBefore, workspaceId) as HostSessionCaptureHealth;
   }
 
   /** Records that the tail through `newestMessage` was examined, whether or not it formed anything. */

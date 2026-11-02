@@ -57,8 +57,6 @@ export interface ConversationWarnPort {
   (message: string, meta: Record<string, unknown>): void;
 }
 
-export const GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE = "compile_enqueue";
-
 export interface ConversationContextLensAssemblerPort {
   assemble(params: {
     readonly run: Pick<Run, "run_id" | "workspace_id" | "run_mode" | "title">;

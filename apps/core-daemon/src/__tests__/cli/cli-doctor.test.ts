@@ -296,54 +296,49 @@ describe("doctor CLI", () => {
     );
   });
 
-  it("writes a garden compile failure line when SOURCE_STATEMENT_SESSION tasks have failed", async () => {
-    const harness = createDoctorHarness({
-      getGardenCompute: async () => ({
-        provider_kind: "local_heuristics",
-        model_id: null,
-        provider_url: null,
-        credential_source: { kind: "none" },
-        routing_decision: "local_heuristics",
-        failed_post_turn_extract_tasks: 3
-      })
+  it("fails garden and names the cause when statement sessions failed or captured tails were never closed", async () => {
+    const capture = (failed: number, overdue: number) => ({
+      host_session: { captured_messages: 9, excerpt_messages: 1, last_captured_at: "2026-11-02T10:00:00.000Z",
+        unbound_messages: overdue, overdue_unbound_messages: overdue },
+      statement_sessions: { recent_window: 50, failed, latest_error: failed === 0 ? null : "provider_failure" },
+      legacy_post_turn_unprocessed: 2
     });
-
-    const jsonResult = await harness.bridge.dispatch(["doctor", "--json"]);
-    const humanResult = await harness.bridge.dispatch(["doctor"]);
-    expect(jsonResult.exitCode).toBe(75);
-    expect(jsonResult.json).toMatchObject({
-      checks: { garden: "fail" },
-      garden_compute: {
-        failed_post_turn_extract_tasks: 3
-      }
-    });
-    expect(humanResult.exitCode).toBe(75);
-    expect(harness.stdoutText()).toContain(
-      "garden compile failures: 3 failed SOURCE_STATEMENT_SESSION; 0 enqueue never queued"
-    );
+    for (const [failed, overdue] of [[3, 0], [0, 1]] as const) {
+      const harness = createDoctorHarness({
+        getGardenCompute: async () => ({
+          provider_kind: "local_heuristics", model_id: null, provider_url: null,
+          credential_source: { kind: "none" }, routing_decision: "local_heuristics", capture: capture(failed, overdue)
+        })
+      });
+      const jsonResult = await harness.bridge.dispatch(["doctor", "--json"]);
+      expect(jsonResult.json).toMatchObject({ checks: { garden: "fail" }, garden_compute: { capture: capture(failed, overdue) } });
+      expect((await harness.bridge.dispatch(["doctor"])).exitCode).toBe(75);
+      expect(harness.stdoutText()).toContain(
+        `host session capture: messages=9 excerpt=1 unbound=${overdue} overdue_unbound=${overdue} last=2026-11-02T10:00:00.000Z`);
+      expect(harness.stdoutText()).toContain(failed === 0
+        ? "statement sessions: 0 failed of the last 50\n"
+        : "statement sessions: 3 failed of the last 50 (latest: provider_failure)");
+      expect(harness.stdoutText()).toContain("legacy post-turn captures without statements: 2");
+    }
   });
 
-  it("writes a garden compile enqueue failure line when compile never queued", async () => {
+  it("says when no host session was ever captured without failing garden", async () => {
     const harness = createDoctorHarness({
       getGardenCompute: async () => ({
-        provider_kind: "local_heuristics",
-        model_id: null,
-        provider_url: null,
-        credential_source: { kind: "none" },
-        routing_decision: "local_heuristics",
-        compile_enqueue_failures: 2
+        provider_kind: "local_heuristics", model_id: null, provider_url: null,
+        credential_source: { kind: "none" }, routing_decision: "local_heuristics",
+        capture: {
+          host_session: { captured_messages: 0, excerpt_messages: 0, last_captured_at: null,
+            unbound_messages: 0, overdue_unbound_messages: 0 },
+          statement_sessions: { recent_window: 50, failed: 0, latest_error: null },
+          legacy_post_turn_unprocessed: 0
+        }
       })
     });
-
-    const jsonResult = await harness.bridge.dispatch(["doctor", "--json"]);
-    expect(jsonResult.json).toMatchObject({
-      checks: { garden: "fail" },
-      garden_compute: { compile_enqueue_failures: 2 }
-    });
-    expect((await harness.bridge.dispatch(["doctor"])).exitCode).toBe(75);
+    await harness.bridge.dispatch(["doctor"]);
     expect(harness.stdoutText()).toContain(
-      "garden compile failures: 0 failed SOURCE_STATEMENT_SESSION; 2 enqueue never queued"
-    );
+      "host session capture: none — the host must call soul.capture_host_session (report_context_usage no longer captures)");
+    expect(harness.stdoutText()).not.toContain("legacy post-turn");
   });
 
   it("reports a successful Garden keychain check only when a keychain ref is configured", async () => {

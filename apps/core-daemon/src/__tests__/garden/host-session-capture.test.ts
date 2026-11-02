@@ -7,6 +7,7 @@ import { SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { createHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../../garden/statement-session/statement-session-closure.js";
 import { createGardenTaskHandlers } from "../../mcp-memory/garden-task/garden-task-handlers.js";
+import { readCaptureHealth } from "../../garden/host-session/capture-health.js";
 import { CONTAINER, CONTAINER_KEY, RUN, WORKSPACE, createStatementSessionEnvironment, hostMessages } from "./statement-session-fixture.js";
 
 type Environment = Awaited<ReturnType<typeof createStatementSessionEnvironment>>;
@@ -138,6 +139,34 @@ describe("host session capture contract", { timeout: 30_000 }, () => {
     expect(env.database.connection.prepare("SELECT pending_body FROM host_session_messages").all())
       .toEqual([{ pending_body: null }, { pending_body: null }]);
     expect(count(env, "source_records")).toBe(1);
+  });
+
+  it("reports capture health honestly: unbound tails turn overdue until swept, failures and legacy work are counted", async () => {
+    const env = await environment();
+    const health = () => readCaptureHealth(env.gardenTaskRepo, WORKSPACE, env.now());
+    expect(health()).toEqual({
+      host_session: { captured_messages: 0, excerpt_messages: 0, last_captured_at: null, unbound_messages: 0,
+        overdue_unbound_messages: 0 },
+      statement_sessions: { recent_window: 50, failed: 0, latest_error: null }, legacy_post_turn_unprocessed: 0 });
+
+    await env.capture({ container: CONTAINER, messages: [...SIX.slice(0, 2), { ...SIX[2]!, completeness: "excerpt" }] });
+    const capturedAt = env.now();
+    expect(health().host_session).toEqual({ captured_messages: 3, excerpt_messages: 1, last_captured_at: capturedAt,
+      unbound_messages: 1, overdue_unbound_messages: 0 });
+    env.advance(2 * STATEMENT_SESSION_IDLE_MS + 1);
+    expect(health().host_session).toMatchObject({ unbound_messages: 1, overdue_unbound_messages: 1 });
+    await env.sweep();
+    expect(health().host_session).toMatchObject({ unbound_messages: 0, overdue_unbound_messages: 0 });
+
+    const failing = env.provider(() => { throw new Error("recorded model refused"); });
+    await env.processSession(failing);
+    expect(env.sessionTasks().map(task => task.status)).toContain("failed");
+    expect(health().statement_sessions).toMatchObject({ failed: env.sessionTasks().filter(task => task.status === "failed").length });
+    expect(health().statement_sessions.latest_error).not.toBeNull();
+
+    env.gardenTaskRepo.enqueue({ id: "legacy-post-turn", workspace_id: WORKSPACE, role: "librarian",
+      kind: GardenTaskKind.POST_TURN_EXTRACT, payload: { workspace_id: WORKSPACE, run_id: RUN }, created_at: env.now() });
+    expect(health().legacy_post_turn_unprocessed).toBe(1);
   });
 
   it("fails historical post-turn work with an audited, private completion", async () => {
