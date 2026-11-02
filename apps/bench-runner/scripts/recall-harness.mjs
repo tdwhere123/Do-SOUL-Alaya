@@ -5,7 +5,7 @@
 //
 //   node apps/bench-runner/scripts/recall-harness.mjs --out DIR --arms ARMS.json [--limit N] [--ids a,b] [--shard i/n]
 //
-// ARMS.json: [{ "name": "line", "host": false }, { "name": "message", "host": true,
+// ARMS.json: [{ "name": "message", "host": true,
 //              "windowing": "recorded-message-windows.v1", "lexical": "segmented-unicode61.v1",
 //              "representation": { "kind": "paired-prefix.v1", "query_prefix": "query: ", "passage_prefix": "passage: " } }, ...]
 // Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
@@ -17,7 +17,7 @@
 // --warm-memory probes the Memory provider independently.
 // --source-lexical-work explicitly allocates model-free lexical preparation work per pass.
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -67,6 +67,8 @@ const lexicalPreparation = values["source-lexical-work"] === undefined ? undefin
 if (lexicalPreparation !== undefined && arms.some(arm => arm.lexical === undefined)) {
   throw new AlayaError("VALIDATION", "--source-lexical-work requires an explicit lexical representation on every arm");
 }
+// Round roots are host-session captures; line-only sources without host structure are retired.
+if (arms.some(arm => arm.host === false)) throw new AlayaError("VALIDATION", "arms without host capture are retired");
 if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new AlayaError("VALIDATION", "question_time requires --coordinates");
 const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
 const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
@@ -114,13 +116,6 @@ if (resolve(canonicalDataset) !== datasetPath) throw new AlayaError("VALIDATION"
 const metadata = await loadSelectedQuestionMetadata("longmemeval_s", { ...datasetOptions, questionIds: ids });
 const datasetSha = metadata.sha256;
 const byId = new Map(metadata.entries.map(entry => [entry.question.question_id, entry]));
-
-// Without the repository pin the loader withholds host capture, so sources fall back to lines.
-const unpinnedMeta = join(cacheRoot, "unpinned-meta");
-if (!existsSync(join(unpinnedMeta, "longmemeval_s.meta.json"))) {
-  mkdirSync(unpinnedMeta, { recursive: true });
-  copyFileSync(join(pinnedMeta, "longmemeval_s.meta.json"), join(unpinnedMeta, "longmemeval_s.meta.json"));
-}
 
 mkdirSync(out, { recursive: true });
 const rowsPath = join(out, "rows.jsonl");
@@ -178,7 +173,7 @@ async function prepared(question, index, arm) {
   const snapshot = join(dir, "source.sqlite");
   const publication = await publishSourceSemanticSnapshot({ snapshotPath: snapshot, dataDirRoot: join(dir, "publish"),
     populations: [{ name: "longmemeval_s", dataDir: dirname(datasetPath),
-      pinnedMetaRoot: arm.host === false ? unpinnedMeta : pinnedMeta,
+      pinnedMetaRoot: pinnedMeta,
       questionWindow: { offset: index, limit: 1 }, model: "gemini-3.1-flash-lite",
       requestProfile: "gemini-3.1-minimal-v1", cacheRoots: [] }],
     recordedAt: "2026-10-26T00:00:00.000Z", producerCommit: revision.split(":")[1], workspaceId: workspace, runId: workspace,

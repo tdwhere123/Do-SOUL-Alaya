@@ -1,8 +1,9 @@
 // Publishes cached production session statements into a harness raw snapshot through the
-// production statement owners (root reader, session planner, receiver, session emitter,
+// production statement owners (container rounds, root reader, session planner, receiver, session emitter,
 // source-observation publication) before SourceIndex preparation.
 //   STATEMENT_MAP=<session-map.jsonl>  rows {question_id, session_index, cache_file}
-// Cached model output is matched to each host message by role and normalized text.
+// Cached model output is matched to each host message by role and normalized text, so caches keyed by
+// dataset session stay valid whatever the round root ids are.
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -10,7 +11,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const tree = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const load = rel => import(pathToFileURL(join(tree, rel)).href);
-const { SOURCE_STATEMENTS_CONTRACT } = await load("packages/protocol/dist/index.js");
+const { SOURCE_STATEMENTS_CONTRACT, hostSessionContainerKey, hostSessionStatementSessionId } =
+  await load("packages/protocol/dist/index.js");
 const { createSourceObservationPublication, fieldContractSha256, EvidenceService, MemoryService, DynamicsService } =
   await load("packages/core/dist/index.js");
 const { initDatabase, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteEvidenceCapsuleRepo, SqliteKarmaEventRepo } =
@@ -20,6 +22,7 @@ const { planSourceStatementSession, receiveSourceStatements, emitSourceStatement
   await load("packages/soul/dist/index.js");
 const { rootStatementMessages } = await load("apps/core-daemon/dist/garden/statement-session/statement-session-task.js");
 const { createDaemonFieldComposition } = await load("apps/core-daemon/dist/runtime/field/field-composition.js");
+const { longMemEvalSessionContainer } = await load("apps/bench-runner/dist/datasets/longmemeval/ingestion/host-session-import.js");
 
 const norm = text => text.replace(/\s+/gu, " ").trim();
 let cached;
@@ -56,21 +59,21 @@ function environment(dbPath) {
   return { database, field, publication };
 }
 
-/** Session roots of one question in session and round order, from the snapshot's source ids. */
-function questionSessions(sql, workspace, questionId) {
-  const sessions = new Map();
-  for (const { record_id, source_id } of sql.prepare("SELECT record_id, source_id FROM source_records WHERE workspace_id = ?").all(workspace)) {
-    const match = /^longmemeval_s:(.+)-s(\d+)-r(\d+)$/u.exec(source_id);
-    if (match === null || match[1] !== questionId) continue;
-    const si = Number(match[2]);
-    sessions.set(si, [...(sessions.get(si) ?? []), { round: Number(match[3]), record_id, source_id }]);
-  }
-  for (const roots of sessions.values()) roots.sort((a, b) => a.round - b.round);
-  return [...sessions].sort((a, b) => a[0] - b[0]);
+/** Each published session's round roots in round order, read from its host container's capture ledger. */
+function questionSessions(sources, workspace, questionId, publication) {
+  const sessions = [...new Set(publication.sources.map(source => source.session_index))].sort((a, b) => a - b);
+  return sessions.map(si => {
+    const key = hostSessionContainerKey(longMemEvalSessionContainer(questionId, si), fieldContractSha256);
+    const roots = sources.rounds(workspace, key).map(round => round.root_id);
+    const published = publication.sources.filter(source => source.session_index === si)
+      .sort((a, b) => a.round_index - b.round_index).map(source => source.record_id);
+    if (JSON.stringify(roots) !== JSON.stringify(published)) throw new Error(`session ${si} rounds differ from its publication`);
+    return [si, key, roots];
+  });
 }
 
 /** Publishes statements for every recorded session of the question; returns counts. */
-export async function publishStatementKeys({ snapshot, workspace, question: { question_id } }) {
+export async function publishStatementKeys({ snapshot, workspace, question: { question_id }, publication }) {
   const report = { sessions: 0, rounds: 0, messages: 0, matched_messages: 0, keyed_messages: 0, statements: 0,
     unmapped_sessions: 0, raw_gaps: [], rejections: [] };
   const map = statementMap();
@@ -78,18 +81,18 @@ export async function publishStatementKeys({ snapshot, workspace, question: { qu
   const sql = env.database.connection ?? env.database.db ?? env.database;
   const sources = new GardenStatementSessionSources(sql);
   try {
-    for (const [si, roots] of questionSessions(sql, workspace, question_id)) {
-      const sessionId = `${question_id}-s${si}`;
-      const byText = map.get(sessionId);
+    for (const [si, key, roots] of questionSessions(sources, workspace, question_id, publication)) {
+      const sessionId = hostSessionStatementSessionId(key);
+      const byText = map.get(`${question_id}-s${si}`);
       if (byText === undefined) report.unmapped_sessions++;
       const located = [], observed = new Map();
-      for (const root of roots) {
-        const read = sources.root(workspace, root.record_id);
+      for (const rootId of roots) {
+        const read = sources.root(workspace, rootId);
         // Same rule as session closure: an unavailable or role-less root is a raw-only gap.
-        if (read.status === "unavailable") { report.raw_gaps.push({ sid: root.source_id, reason: read.reason }); continue; }
+        if (read.status === "unavailable") { report.raw_gaps.push({ root_id: rootId, reason: read.reason }); continue; }
         try { located.push(...rootStatementMessages(read.root)); }
-        catch (error) { report.raw_gaps.push({ sid: root.source_id, reason: String(error.message ?? error) }); continue; }
-        observed.set(root.record_id, env.field.stores.getRecord(workspace, root.record_id).recorded_at);
+        catch (error) { report.raw_gaps.push({ root_id: rootId, reason: String(error.message ?? error) }); continue; }
+        observed.set(rootId, env.field.stores.getRecord(workspace, rootId).recorded_at);
         report.rounds++;
       }
       report.sessions++;
