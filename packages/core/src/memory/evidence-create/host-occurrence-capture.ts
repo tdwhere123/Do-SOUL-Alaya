@@ -26,6 +26,13 @@ export function captureHostStructure(request: SourceAdmissionRequest, recordId: 
       row.upstream_message_ref !== null || row.upstream_position !== null)) {
       throw new CoreError("VALIDATION", "reported excerpts cannot assert upstream completeness or identity");
     }
+    if (issuer.basis === "reported_excerpt" && request.host_occurrences.some(row => row.host_reported_at !== undefined)) {
+      throw new CoreError("VALIDATION", "reported excerpts cannot assert host time");
+    }
+    if (issuer.basis === "host_session" && request.host_occurrences.some(row =>
+      row.container_ref === null || row.upstream_position === null)) {
+      throw new CoreError("VALIDATION", "host session capture requires container and position for every message");
+    }
     inventory = bindHostOccurrenceInventory({ contract: HOST_OCCURRENCE_CONTRACT, issuer,
       occurrences: request.host_occurrences }, request.content_bytes);
   } else if (request.host_structure !== undefined) {

@@ -49,6 +49,11 @@ import {
   SoulReportContextUsageRequestSchema,
   SoulReportContextUsageResponseSchema
 } from "./mcp-context-usage-types.js";
+import { HostSessionCaptureRequestSchema, HostSessionCaptureResponseSchema } from "../conversation/host-session.js";
+
+/** soul.capture_host_session: the host-session capture contract as an MCP request/response. */
+export const SoulCaptureHostSessionRequestSchema = HostSessionCaptureRequestSchema;
+export const SoulCaptureHostSessionResponseSchema = HostSessionCaptureResponseSchema;
 import { deriveJsonSchema } from "./mcp-json-schema.js";
 import {
   SoulMemorySearchRequestSchema,
@@ -359,6 +364,7 @@ type SoulToolName =
   | "soul.apply_override"
   | "soul.explore_graph"
   | "soul.report_context_usage"
+  | "soul.capture_host_session"
   | "soul.resolve"
   | "soul.interpretation"
   | "garden.list_pending_tasks"
@@ -378,6 +384,7 @@ const soulToolRequestSchemas: Record<SoulToolName, z.ZodTypeAny> = {
   "soul.apply_override": SoulApplyOverrideRequestSchema,
   "soul.explore_graph": SoulExploreGraphRequestSchema,
   "soul.report_context_usage": SoulReportContextUsageRequestSchema,
+  "soul.capture_host_session": SoulCaptureHostSessionRequestSchema,
   "soul.resolve": SoulResolveRequestSchema,
   "soul.interpretation": SoulInterpretationRequestSchema,
   "garden.list_pending_tasks": GardenListPendingTasksRequestSchema,

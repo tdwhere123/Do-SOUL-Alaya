@@ -102,6 +102,7 @@ export const SoulContextDeliveredObjectUsageSchema = z
   })
   .readonly();
 
+/** @deprecated Ignored since protocol 33.0.0; capture host messages with `soul.capture_host_session`. */
 export const SoulContextUsageTurnMessageSchema = z
   .object({
     role: BoundedLabelSchema,
@@ -110,6 +111,7 @@ export const SoulContextUsageTurnMessageSchema = z
   .strict()
   .readonly();
 
+/** @deprecated Ignored since protocol 33.0.0; capture host messages with `soul.capture_host_session`. */
 export const SoulContextUsageTurnDigestSchema = z
   .object({
     last_messages: z.array(SoulContextUsageTurnMessageSchema).max(50).readonly().default([])
@@ -128,10 +130,12 @@ export const SoulReportContextUsageRequestSchema = z
       .max(BOUNDED_DEFAULT_ARRAY_MAX)
       .readonly()
       .optional(),
+    // Usage feedback only: these still parse for older hosts but capture nothing.
+    /** @deprecated Ignored since protocol 33.0.0. */
     turn_index: NonNegativeIntSchema.optional(),
+    /** @deprecated Ignored since protocol 33.0.0; use `soul.capture_host_session`. */
     turn_digest: SoulContextUsageTurnDigestSchema.optional(),
-    // Host wall-clock for the reported turn. When present, Garden post-turn
-    // extract uses it as source_observed_at; otherwise the enqueue clock wins.
+    /** @deprecated Ignored since protocol 33.0.0. */
     source_observed_at: IsoDatetimeStringSchema.optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     // invariant (agents propose, Alaya decides): trust_mode is NOT a

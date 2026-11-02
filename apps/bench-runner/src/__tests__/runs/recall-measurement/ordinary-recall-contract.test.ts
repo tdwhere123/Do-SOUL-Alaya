@@ -19,7 +19,7 @@ const fixture = {
 it.each([
   ["27.0.0", "ordinary-native-field.v4"], ["28.0.0", "ordinary-native-field.v5"],
   ["29.0.0", "ordinary-native-field.v6"], ["30.0.0", "ordinary-native-field.v7"], ["31.0.0", "ordinary-native-field.v8"],
-  ["32.0.0", "ordinary-native-field.v8"]
+  ["32.0.0", "ordinary-native-field.v8"], ["33.0.0", "ordinary-native-field.v8"]
 ])("admits only the reviewed native archive version pair for %s", (version, semantics) => {
   expect(nativeRecallArchiveSemantics(version)).toBe(semantics);
   const config = { ...fixture, protocol_package_version: version, public_semantics: semantics };

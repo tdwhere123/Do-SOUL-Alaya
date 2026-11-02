@@ -59,6 +59,13 @@ bounded to the longest preceding suffix within 16 KB / 64 messages (no `context_
 rejection). `POST_TURN_EXTRACT` completes without model results; host workers return
 `source_statement_responses` only for session tasks. Ordinary results stay
 `ordinary-native-field.v8`. This is an invariant §25 major for host workers.
+Protocol 33.0.0 adds `soul.capture_host_session` (`conversation/host-session.ts`), the one
+host-session capture contract: messages are admitted idempotently by container and host
+message id with position, role, completeness, honest fidelity and optional host-reported time;
+rounds and statement sessions are keyed by container. `soul.report_context_usage` is usage
+feedback only: its `turn_index`, `turn_digest` and `source_observed_at` still parse but capture
+nothing (deprecated). Host-occurrence issuers gain the `host_session` basis. This redefines what
+an existing request does, so it is an invariant §25 major.
 
 Protocol 31.0.0 adds message-bound `source-statements-v1` artifacts shared by
 memory publication and lexical/vector SourceIndex navigation. Ordinary results are
@@ -114,7 +121,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `32.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `33.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than

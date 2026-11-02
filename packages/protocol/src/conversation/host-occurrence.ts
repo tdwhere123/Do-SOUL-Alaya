@@ -1,15 +1,19 @@
 import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
-import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
+import { BoundedIdSchema, BoundedLabelSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { FieldContractDigestSchema, formatFieldContractDigest, type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 
 export const HOST_OCCURRENCE_CONTRACT = "host-occurrence-v1" as const;
 export const HOST_OCCURRENCE_LIMITS = Object.freeze({ count: 256, inventoryBytes: 65_536, occurrenceBytes: 16_384 });
 const bytes = (text: string) => new TextEncoder().encode(text).length;
-const Id = BoundedIdSchema.refine(value => bytes(value) <= 1024, "host identifier exceeds byte limit");
+export const HostIdentifierSchema = BoundedIdSchema.refine(value => bytes(value) <= 1024, "host identifier exceeds byte limit");
+const Id = HostIdentifierSchema;
 const OpenLabel = BoundedLabelSchema.refine(value => bytes(value) <= 4096, "host label exceeds byte limit");
-const ScopedReference = z.object({ scope: Id, id: Id }).strict().readonly();
+/** A host-scoped identity: ids are only unique within their scope. */
+export const HostScopedReferenceSchema = z.object({ scope: Id, id: Id }).strict().readonly();
+export type HostScopedReference = z.infer<typeof HostScopedReferenceSchema>;
+const ScopedReference = HostScopedReferenceSchema;
 
 /** References are host assertions, never authenticated human identity. Array order is local order. */
 export const HostOccurrenceSchema = z.object({
@@ -20,7 +24,9 @@ export const HostOccurrenceSchema = z.object({
   upstream_message_ref: ScopedReference.nullable(),
   upstream_position: z.number().int().nonnegative().nullable(),
   completeness: z.enum(["complete", "excerpt", "unknown"]),
-  fidelity: z.enum(["original_bytes", "normalized", "unknown"])
+  fidelity: z.enum(["original_bytes", "normalized", "unknown"]),
+  // Host-asserted message time; its authority is the inventory issuer, never Alaya's receipt.
+  host_reported_at: IsoDatetimeStringSchema.optional()
 }).strict().superRefine((value, context) => {
   if (value.utf8_span[1] < value.utf8_span[0]) {
     context.addIssue({ code: "custom", message: "invalid host occurrence extent" });
@@ -39,7 +45,7 @@ export function hostOccurrenceIsMessage(row: Pick<HostOccurrence, "completeness"
 
 export const HostCaptureIssuerSchema = z.object({
   namespace: Id, workspace_id: Id, producer: Id,
-  basis: z.enum(["reported_excerpt", "pinned_dataset"])
+  basis: z.enum(["reported_excerpt", "pinned_dataset", "host_session"])
 }).strict().readonly();
 export type HostCaptureIssuer = z.infer<typeof HostCaptureIssuerSchema>;
 
