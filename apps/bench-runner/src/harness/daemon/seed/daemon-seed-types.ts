@@ -81,12 +81,5 @@ export interface BenchReportContextUsageInput {
   readonly usageState: "used" | "skipped" | "not_applicable";
   readonly usedObjectIds?: readonly string[];
   readonly deliveredObjects?: readonly BenchContextUsageObject[];
-  readonly turnIndex?: number;
-  readonly turnDigest?: {
-    readonly lastMessages: readonly {
-      readonly role: string;
-      readonly contentExcerpt: string;
-    }[];
-  };
   readonly reason?: string;
 }

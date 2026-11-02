@@ -144,7 +144,7 @@ function roleLabel(role: string): string {
   return role.trim().length === 0 ? "Message" : role.trim();
 }
 
-function conversationRole(role: string): "user" | "assistant" {
+export function conversationRole(role: string): "user" | "assistant" {
   const normalized = role.trim().toLowerCase();
   if (normalized === "user" || normalized === "assistant") return normalized;
   throw new Error(`unsupported LongMemEval conversation role: ${role}`);

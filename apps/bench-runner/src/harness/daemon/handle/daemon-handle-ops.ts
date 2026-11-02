@@ -105,6 +105,7 @@ export function createBenchDaemonOps(
   BenchDaemonHandle,
   | "recall"
   | "importSourceRecord"
+  | "captureHostSession"
   | "warmEmbeddingCache"
   | "warmQueryEmbeddingCache"
   | "runEdgePlanePassIfConfigured"
@@ -123,6 +124,12 @@ export function createBenchDaemonOps(
     importSourceRecord: (request, hostCapture) => input.activeRuntime.services.sourceRecordAdmission.admit({
       ...request, workspace_id: input.activeContext.workspaceId, evidence_object_id: null
     }, { workspaceId: input.activeContext.workspaceId, ...(hostCapture === undefined ? {} : { hostCapture }) }),
+    captureHostSession: async (request, issuer) => {
+      const capture = input.activeRuntime.services.hostSessionCapture;
+      if (capture === undefined) throw new Error("bench daemon has no host session capture");
+      return await capture.capture({ workspaceId: input.activeContext.workspaceId, runId: input.activeContext.runId,
+        request, issuer });
+    },
     recall: createBenchRecallOperation(input),
     warmEmbeddingCache: createWarmEmbeddingCacheOperation(input),
     warmQueryEmbeddingCache: createWarmQueryEmbeddingCacheOperation(input),

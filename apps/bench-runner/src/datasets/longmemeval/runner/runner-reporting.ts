@@ -232,15 +232,6 @@ function buildReportInput(input: {
               : "skipped"
         }]
     ),
-    turnIndex: input.turnIndex,
-    turnDigest: {
-      lastMessages: [
-        {
-          role: "user",
-          contentExcerpt: truncateExcerpt(input.questionText)
-        }
-      ]
-    },
     reason:
       usageState === "used"
         ? `LongMemEval simulate_report=${input.simulateReport}: reported delivered object usage.`
@@ -344,8 +335,4 @@ function requireEligibleIdentityKey(result: LongMemEvalDeliveredResult): string 
     throw new Error("ineligible LongMemEval object reached report selection");
   }
   return key;
-}
-
-function truncateExcerpt(value: string): string {
-  return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
 }

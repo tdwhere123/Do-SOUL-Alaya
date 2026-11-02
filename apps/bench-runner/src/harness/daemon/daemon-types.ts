@@ -119,6 +119,10 @@ export interface BenchDaemonHandle {
   readonly dataDir: string;
   importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">,
     hostCapture?: import("@do-soul/alaya-protocol").SourceAdmissionContext["hostCapture"]): Promise<import("@do-soul/alaya-protocol").SourceAdmissionResult>;
+  /** Admits host messages through the daemon's host-session capture owner under a composition-named issuer. */
+  captureHostSession(request: import("@do-soul/alaya-protocol").HostSessionCaptureRequest,
+    issuer: import("../../../../core-daemon/src/garden/host-session/host-session-capture.js").HostSessionIssuer):
+    Promise<import("@do-soul/alaya-protocol").HostSessionCaptureResponse>;
   dispatchCli(argv: readonly string[]): Promise<{ exitCode: number; json?: unknown }>;
   recall(
     query: string,
@@ -346,6 +350,7 @@ export interface BenchWorkspaceHandle {
   readonly workspaceId: string;
   readonly runId: string;
   importSourceRecord: BenchDaemonHandle["importSourceRecord"];
+  captureHostSession: BenchDaemonHandle["captureHostSession"];
   recall: BenchDaemonHandle["recall"];
   warmEmbeddingCache: BenchDaemonHandle["warmEmbeddingCache"];
   warmQueryEmbeddingCache: BenchDaemonHandle["warmQueryEmbeddingCache"];

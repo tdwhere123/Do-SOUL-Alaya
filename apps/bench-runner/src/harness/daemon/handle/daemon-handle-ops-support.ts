@@ -33,17 +33,6 @@ export function buildReportContextUsageArgs(
       : {
           delivered_objects: input.deliveredObjects.map(toReportedDeliveredObject)
         }),
-    ...(input.turnIndex === undefined ? {} : { turn_index: input.turnIndex }),
-    ...(input.turnDigest === undefined
-      ? {}
-      : {
-          turn_digest: {
-            last_messages: input.turnDigest.lastMessages.map((message) => ({
-              role: message.role,
-              content_excerpt: message.contentExcerpt
-            }))
-          }
-        }),
     ...(input.reason === undefined ? {} : { reason: input.reason })
   };
 }

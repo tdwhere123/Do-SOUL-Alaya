@@ -21,6 +21,7 @@ interface BenchWorkspaceManagerInput {
 
 interface BenchWorkspaceBindings {
   readonly importSourceRecord: BenchDaemonHandle["importSourceRecord"];
+  readonly captureHostSession: BenchDaemonHandle["captureHostSession"];
   readonly recall: BenchDaemonHandle["recall"];
   readonly warmEmbeddingCache: BenchDaemonHandle["warmEmbeddingCache"];
   readonly warmQueryEmbeddingCache: BenchDaemonHandle["warmQueryEmbeddingCache"];
@@ -161,6 +162,12 @@ function buildBenchWorkspaceHandle(
         throw new Error("source import workspace handle is no longer active");
       }
       return bindings.importSourceRecord(request, hostCapture);
+    },
+    captureHostSession: async (request, issuer) => {
+      if (activeContext.workspaceId !== workspace.workspaceId || activeContext.runId !== workspace.runId) {
+        throw new Error("host session workspace handle is no longer active");
+      }
+      return bindings.captureHostSession(request, issuer);
     },
     recall: bindings.recall,
     warmEmbeddingCache: bindings.warmEmbeddingCache,

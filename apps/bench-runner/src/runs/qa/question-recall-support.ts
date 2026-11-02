@@ -13,10 +13,6 @@ import type { LongMemEvalGoldObjectIdentity } from
   "../../diagnostics/gold-object-identities.js";
 import { isLongMemEvalGoldSource } from "../provenance/source-rounds.js";
 
-function truncateExcerpt(value: string): string {
-  return value.length <= 500 ? value : `${value.slice(0, 497)}...`;
-}
-
 export function buildDeliveredResults(
   results: readonly {
     readonly object_id?: string;
@@ -114,15 +110,6 @@ export function buildGoldUsageReport(input: {
         ? "used"
         : "skipped"
     })),
-    turnIndex: input.turnIndex,
-    turnDigest: {
-      lastMessages: [
-        {
-          role: "user",
-          contentExcerpt: truncateExcerpt(input.questionText)
-        }
-      ]
-    },
     reason: usageState === "used" ? input.successReason : input.failureReason
   };
 }

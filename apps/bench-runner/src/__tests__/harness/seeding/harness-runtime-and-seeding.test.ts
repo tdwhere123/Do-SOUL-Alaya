@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { bindPostTurnTaskSource } from "../../../../../core-daemon/src/__tests__/mcp-memory/garden/post-turn-source-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +14,7 @@ import {
 import {
   GardenRole,
   GardenTaskKind,
+  GardenTier,
   SignalSource,
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
@@ -109,9 +109,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     async () => {
       // The bench daemon must NOT start the daemon's autonomous
       // GardenScheduler (the 60s interval + startup pass). That scheduler
-      // peekPendings POST_TURN_EXTRACT tasks across all workspaces and would
+      // peekPendings Garden tasks across all workspaces and would
       // process tasks non-deterministically mid-run. This test enqueues a
-      // POST_TURN_EXTRACT task directly, then asserts it stays `pending` (no
+      // claimable task directly, then asserts it stays `pending` (no
       // background tick / startup pass swept it) and is still claimable.
       const daemon = await startBenchDaemon({
         workspaceId: "harness-no-autotick-ws",
@@ -133,13 +133,11 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       );
       const { task_id: taskId } = gardenTaskRepo.enqueue({
         workspace_id: daemon.workspaceId,
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.POST_TURN_EXTRACT,
-        // A claimable task must retain source provenance, just like the real producer.
-        payload: bindPostTurnTaskSource(database, {
-          run_id: daemon.runId, workspace_id: daemon.workspaceId, turn_index: 0,
-          turn_digest: { last_messages: [{ role: "user", content_excerpt: SOURCE_TURN }] }
-        }, "no-autotick-source")
+        role: GardenRole.JANITOR,
+        kind: GardenTaskKind.TTL_CLEANUP,
+        payload: { task_kind: GardenTaskKind.TTL_CLEANUP, required_tier: GardenTier.TIER_1,
+          workspace_id: daemon.workspaceId, run_id: daemon.runId, target_object_refs: [], priority: 20,
+          created_at: "2026-05-07T00:00:00.000Z" }
       });
 
       // Give any startup pass / interval tick a real window to fire. Without
