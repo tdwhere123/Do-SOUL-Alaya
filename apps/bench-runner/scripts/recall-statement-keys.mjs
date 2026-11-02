@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const tree = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const load = rel => import(pathToFileURL(join(tree, rel)).href);
-const { SOURCE_STATEMENTS_CONTRACT, hostSessionContainerKey, hostSessionStatementSessionId } =
+const { AlayaError, SOURCE_STATEMENTS_CONTRACT, hostSessionContainerKey, hostSessionStatementSessionId } =
   await load("packages/protocol/dist/index.js");
 const { createSourceObservationPublication, fieldContractSha256, EvidenceService, MemoryService, DynamicsService } =
   await load("packages/core/dist/index.js");
@@ -67,7 +67,7 @@ function questionSessions(sources, workspace, questionId, publication) {
     const roots = sources.rounds(workspace, key).map(round => round.root_id);
     const published = publication.sources.filter(source => source.session_index === si)
       .sort((a, b) => a.round_index - b.round_index).map(source => source.record_id);
-    if (JSON.stringify(roots) !== JSON.stringify(published)) throw new Error(`session ${si} rounds differ from its publication`);
+    if (JSON.stringify(roots) !== JSON.stringify(published)) throw new AlayaError("CONFLICT", `session ${si} rounds differ from its publication`);
     return [si, key, roots];
   });
 }
