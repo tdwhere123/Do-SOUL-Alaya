@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { openReadOnlyDatabase, SqliteFieldSourceRecordRepo, SqliteFieldSourceSpanRepo } from "@do-soul/alaya-storage";
-import { renderOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import * as datasetOwner from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { createLongMemEvalHostCapturePolicy } from "../../../datasets/longmemeval/ingestion/host-occurrences.js";
 import { createTestLongMemEvalDatasetAuthority } from "./test-dataset-authority.js";
@@ -16,7 +15,7 @@ import { prepareSourceRecordsSnapshot } from "../../../runs/snapshot/source-reco
 import { inspectSourceRecordsArtifact, type SourceRecordsMessage } from "../../../runs/snapshot/source-records/contract.js";
 import { admitRetainedNativeSourceSnapshot, readVerifiedNativeSourceSnapshot } from "../../../runs/snapshot/source-records/native.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
-import { censusCompleteSourceRecords, censusNativeSourceRecords } from "../../../runs/snapshot/source-records/census.js";
+import { censusNativeSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "../../../runs/extraction/fill/source-request-workset.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { startBenchDaemon } from "../../../harness/daemon.js";
@@ -86,29 +85,28 @@ it("captures original per-message bytes and complete empty occurrences through t
     .toEqual(nativeSourceRequestInventory(withoutHost, census.dataset_sha256, config));
 });
 
-it("binds round capture to opaque dataset membership and exact coordinates while preserving renderer bytes", async () => {
-  const loaded = dataset(); vi.spyOn(datasetOwner, "loadDatasetWindowWithIdentity").mockResolvedValue(loaded);
+it("binds per-message capture to opaque dataset membership and exact coordinates", async () => {
+  const loaded = dataset();
   expect(() => createLongMemEvalHostCapturePolicy({ ...loaded, promotionAuthority: null })).toThrow(/official dataset pin/);
-  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: "authored", pinnedMetaRoot: "authored" });
-  const source = census.records[0]!;
-  expect(source.content_bytes).toBe("User: café 雪\nAssistant: User: quoted Assistant: still quoted");
-  const rendered = renderOfficialApiSourceCorpus("", loaded.questions[0]!.haystack_sessions[0]!);
-  expect(rendered.content).toBe(source.content_bytes);
-  expect(source.host_capture!.occurrences.map(row => row.role)).toEqual(["user", " Assistant "]);
-  expect(source.host_capture!.occurrences.map(row => row.utf8_span)).toEqual([[6, 15], [27, 63]]);
-  const root = mkdtempSync(join(tmpdir(), "host-round-import-")); roots.push(root);
+  const capture = createLongMemEvalHostCapturePolicy(loaded)({ questionId: "authored", sessionIndex: 0, roundIndex: 0,
+    messageIndex: 1, sourceId: "authored-message", sourceVersion: loaded.sha256 });
+  expect(capture.occurrences.map(row => [row.occurrence_id, row.role, row.utf8_span, row.upstream_position])).toEqual([
+    ["authored:s0:m1", " Assistant ", [0, 36], 1]]);
+  expect(() => createLongMemEvalHostCapturePolicy(loaded)({ questionId: "authored", sessionIndex: 0, roundIndex: 0,
+    messageIndex: 2, sourceId: "authored-message", sourceVersion: loaded.sha256 })).toThrow(/message coordinate/);
+  const root = mkdtempSync(join(tmpdir(), "host-message-import-")); roots.push(root);
   const daemon = await startBenchDaemon({ dataDirRoot: join(root, "live"), workspaceId: "fixture-workspace", runId: "fixture-run",
     configDirectoryRoot: root, embeddingMode: "disabled", sqliteWriteQueue: "disabled", embeddingStartupProbe: "omit",
     gardenCompute: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
   try {
-    const input = { source_id: source.source_id, source_version: source.source_version, content_bytes: source.content_bytes,
-      recorded_at: "2026-09-13T00:00:00Z", event_time: source.source_observed_at, valid_from: null, valid_to: null,
-      scope_class: "project" as const, spans: [], host_occurrences: source.host_capture!.occurrences };
+    const content = "User: quoted\nAssistant: still quoted";
+    const input = { source_id: "authored-message", source_version: loaded.sha256, content_bytes: content,
+      recorded_at: "2026-09-13T00:00:00Z", event_time: null, valid_from: null, valid_to: null,
+      scope_class: "project" as const, spans: [], host_occurrences: capture.occurrences };
     await expect(daemon.importSourceRecord(input)).rejects.toThrow(/trusted/);
-    await expect(daemon.importSourceRecord({ ...input, content_bytes: "forged" }, source.host_capture!.authorize)).rejects.toThrow(/coordinates/);
-    const admitted = await daemon.importSourceRecord(input, source.host_capture!.authorize);
-    expect(admitted.spans.map(row => row.purpose)).toEqual(["message", "message"]);
-    expect(admitted.record.host_structure?.occurrence_count).toBe(2);
+    await expect(daemon.importSourceRecord({ ...input, content_bytes: "forged" }, capture.authorize)).rejects.toThrow(/coordinates/);
+    const admitted = await daemon.importSourceRecord(input, capture.authorize);
+    expect(admitted.record.host_structure?.occurrence_count).toBe(1);
     await daemon.checkpointFieldProjection();
   } finally { await daemon.shutdown(); }
 });

@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
+import { hostSessionContainerKey, hostSessionRoundSourceId } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { buildLongMemEvalRoundMessages, pairSessionIntoRounds,
   type LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
+import { longMemEvalSessionContainer } from "../../datasets/longmemeval/ingestion/host-session-import.js";
 import type { LongMemEvalSourceCensusRecord } from "../snapshot/source-records/census.js";
 import { sourceEvidencePreservationQuoteOccurrences } from "../source-evidence-preservation/original.js";
 import { SourceGoldUnitSchema, type SourceGoldUnit } from "../measurement/source-gold-join.js";
@@ -37,11 +40,11 @@ export function joinSnapshotAnswerSpans(
 ): AnswerTurnGold {
   const records: LongMemEvalSourceCensusRecord[] = [];
   const publicationSources: z.infer<typeof QuestionPublicationSchema>["sources"] = [];
+  const coordinates = roundCoordinates(question);
   for (const row of rows) {
-    const match = row.source_id.match(/-s(\d+)-r(\d+)$/u);
-    if (!match) continue;
-    const sessionIndex = parseInt(match[1]!, 10);
-    const roundIndex = parseInt(match[2]!, 10);
+    const coordinate = coordinates.get(row.source_id);
+    if (coordinate === undefined) continue;
+    const { sessionIndex, roundIndex } = coordinate;
     const sessionId = question.haystack_session_ids[sessionIndex];
     if (sessionId === undefined) continue;
     const corpusDigest = createHash("sha256").update(row.source_body, "utf8").digest("hex");
@@ -84,6 +87,18 @@ export function joinSnapshotAnswerSpans(
     sources: publicationSources
   };
   return joinLongMemEvalAnswerSpans(question, publication, records);
+}
+
+/** Round root ids the host-session owner assigns to each of the question's sessions. */
+function roundCoordinates(question: LongMemEvalQuestion): ReadonlyMap<string, Readonly<{ sessionIndex: number; roundIndex: number }>> {
+  const coordinates = new Map<string, Readonly<{ sessionIndex: number; roundIndex: number }>>();
+  for (const [sessionIndex, session] of question.haystack_sessions.entries()) {
+    const key = hostSessionContainerKey(longMemEvalSessionContainer(question.question_id, sessionIndex), fieldContractSha256);
+    for (const roundIndex of pairSessionIntoRounds(session).keys()) {
+      coordinates.set(hostSessionRoundSourceId(key, roundIndex), { sessionIndex, roundIndex });
+    }
+  }
+  return coordinates;
 }
 
 /** Evaluator-only: the dataset SHA freezes has_answer, not an answer substring or a full support set.

@@ -8,7 +8,10 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal, runOutsideBenchDaemonScope, settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import Database from "better-sqlite3";
-import { AlayaError, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { AlayaError, HOST_SESSION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, hostSessionContainerKey,
+  hostSessionRoundSourceId } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { longMemEvalSessionContainer } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import * as benchDaemon from "../../../harness/daemon.js";
 import { snapshotPublishLockPath } from "../../../runs/snapshot/freeze/publish-lock.js";
@@ -60,6 +63,11 @@ async function fixture(duplicate = false, abstention = false, authoredQuestions?
     size_bytes: Buffer.byteLength(source), question_count: questions.length
   }));
   return { root, dataDir, pinnedMetaRoot };
+}
+
+/** The round root id the host-session capture owner assigns to a LongMemEval session round. */
+function roundSourceId(questionId: string, sessionIndex: number, roundIndex = 0) {
+  return hostSessionRoundSourceId(hostSessionContainerKey(longMemEvalSessionContainer(questionId, sessionIndex), fieldContractSha256), roundIndex);
 }
 
 function question(id: string, sessions: { role: string; content: string }[][]) {
@@ -362,10 +370,10 @@ describe("complete-source census and publication", () => {
     const realStart = benchDaemon.startBenchDaemon;
     vi.spyOn(benchDaemon, "startBenchDaemon").mockImplementation(async (...args) => {
       const daemon = await realStart(...args);
-      const realImport = daemon.importSourceRecord;
-      return { ...daemon, importSourceRecord: async (input) => {
-        if (input.source_id.includes(rejectedId)) throw new Error("synthetic source admission failure");
-        return realImport(input);
+      const realCapture = daemon.captureHostSession;
+      return { ...daemon, captureHostSession: async (request, issuer) => {
+        if (request.container.id.startsWith(`${rejectedId}:`)) throw new Error("synthetic source admission failure");
+        return realCapture(request, issuer);
       } };
     });
     const prepared = await prepareLongMemEvalSemanticRun(root);
@@ -379,7 +387,7 @@ describe("complete-source census and publication", () => {
     const directory = join(root, "questions", "00001");
     const report = JSON.parse(readFileSync(join(directory, "library.sqlite.publication.json"), "utf8"));
     expect(report).toMatchObject({ census_count: 1, admitted_count: 0, rejected_count: 1,
-      sources: [{ admission: "rejected" }] });
+      sources: [{ admission: "rejected", admission_reason: "synthetic source admission failure" }] });
     expect(readdirSync(directory).some(name => name.startsWith("chain-"))).toBe(false);
     const replay = await replayLongMemEvalSemanticRun(root, prepared.path);
     expect(replay.result.rows[1]).toEqual(prepared.result.rows[1]);
@@ -436,12 +444,12 @@ describe("complete-source census and publication", () => {
       model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1" as const };
     const census = await censusCompleteSourceRecords({ population: population.name, ...population });
     const expected = [
-      { source_id: "longmemeval_s:repeated-session-s0-r0", session_index: 0, source_observed_at: "2023-09-10T00:00:00.000Z" },
-      { source_id: "longmemeval_s:repeated-session-s1-r0", session_index: 1, source_observed_at: "2023-09-12T00:00:00.000Z" }
+      { source_id: roundSourceId("repeated-session", 0), session_index: 0, source_observed_at: "2023-09-10T00:00:00.000Z" },
+      { source_id: roundSourceId("repeated-session", 1), session_index: 1, source_observed_at: "2023-09-12T00:00:00.000Z" }
     ];
     expect(census.records).toHaveLength(2);
     expect(census.records).toMatchObject(expected.map(row => ({ ...row, session_id: "shared-session", round_index: 0,
-      roles: ["user", "assistant"], source_version: census.dataset_sha256 })));
+      roles: ["user", "assistant"], source_version: HOST_SESSION_CONTRACT })));
     expect(census.records[0]!.content_bytes).toBe(census.records[1]!.content_bytes);
     expect(census.records[0]!.content_digest).toBe(census.records[1]!.content_digest);
     expect(census.records[0]!.corpus_digest).toBe(census.records[1]!.corpus_digest);
@@ -471,8 +479,8 @@ describe("complete-source census and publication", () => {
     for (let reopen = 0; reopen < 2; reopen += 1) {
       const db = new Database(report.snapshot_path, { readonly: true });
       try {
-        expect(db.prepare("SELECT source_id, source_version, source_body, event_time, recorded_at FROM source_records ORDER BY source_id").all())
-          .toEqual(expected.map(({ source_id, source_observed_at }) => ({ source_id, source_version: census.dataset_sha256,
+        expect(db.prepare("SELECT source_id, source_version, source_body, event_time, recorded_at FROM source_records ORDER BY rowid").all())
+          .toEqual(expected.map(({ source_id, source_observed_at }) => ({ source_id, source_version: HOST_SESSION_CONTRACT,
             source_body: census.records[0]!.content_bytes, event_time: source_observed_at, recorded_at: CLOCK })));
       } finally { db.close(); }
     }
@@ -495,10 +503,9 @@ describe("complete-source census and publication", () => {
     });
     expect(census.records).toHaveLength(3);
     expect(census.records.map((row) => row.source_id).every((id) => !/^[a-f0-9]{64}$/u.test(id))).toBe(true);
-    expect(census.records.map((row) => row.source_id).sort()).toEqual([
-      "fixture:absent-interpretation-s0-r0", "fixture:mixed-roles-s0-r0", "fixture:repeated-text-s0-r0"
-    ].sort());
-    expect(new Set(census.records.map((row) => row.source_version))).toEqual(new Set([census.dataset_sha256]));
+    expect(census.records.map((row) => row.source_id)).toEqual(
+      ["mixed-roles", "repeated-text", "absent-interpretation"].map(id => roundSourceId(id, 0)));
+    expect(new Set(census.records.map((row) => row.source_version))).toEqual(new Set([HOST_SESSION_CONTRACT]));
     const mixed = census.records.find((row) => row.question_id === "mixed-roles")!;
     expect(mixed.speaker).toBeUndefined();
     expect(mixed.roles).toEqual(["user", "assistant"]);
@@ -635,8 +642,8 @@ it("waits for an actual source admission body before cancelling publication and 
   const original = benchDaemon.startBenchDaemon;
   vi.spyOn(benchDaemon, "startBenchDaemon").mockImplementationOnce(async options => {
     const daemon = await original(options);
-    return { ...daemon, importSourceRecord: async (...args) => {
-      const result = await daemon.importSourceRecord(...args);
+    return { ...daemon, captureHostSession: async (...args) => {
+      const result = await daemon.captureHostSession(...args);
       entered.resolve(); await release.promise; return result;
     } };
   });

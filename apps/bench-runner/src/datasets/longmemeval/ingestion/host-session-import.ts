@@ -8,6 +8,7 @@ import { conversationRole, type LongMemEvalQuestion } from "./dataset.js";
 import { requireLongMemEvalTimestamp } from "./source-time.js";
 
 export const LONGMEMEVAL_HOST_SESSION_PRODUCER = "longmemeval-structured-source";
+const UNVERIFIED_LONGMEMEVAL_HOST_SESSION_PRODUCER = "longmemeval-unverified-source";
 
 /** A LongMemEval haystack session is one host container; scope and id together identify it. */
 export function longMemEvalSessionContainer(questionId: string, sessionIndex: number): HostScopedReference {
@@ -22,6 +23,13 @@ export function createLongMemEvalHostSessionIssuer(dataset: LoadedLongMemEvalDat
   const namespace = `longmemeval:${dataset.sha256}`;
   return Object.freeze({ producer: LONGMEMEVAL_HOST_SESSION_PRODUCER, binding: request => ({ namespace,
     workspace_id: request.workspace_id, producer: LONGMEMEVAL_HOST_SESSION_PRODUCER, basis: "pinned_dataset" as const }) });
+}
+
+/** A copy without the verified pin is captured like any host's conversation: its own structure, never dataset authority. */
+export function createUnverifiedLongMemEvalHostSessionIssuer(datasetSha256: string): HostSessionIssuer {
+  const namespace = `longmemeval-unverified:${datasetSha256}`;
+  return Object.freeze({ producer: UNVERIFIED_LONGMEMEVAL_HOST_SESSION_PRODUCER, binding: request => ({ namespace,
+    workspace_id: request.workspace_id, producer: UNVERIFIED_LONGMEMEVAL_HOST_SESSION_PRODUCER, basis: "host_session" as const }) });
 }
 
 /** Each session's complete messages in request-sized windows; the last window closes the session. */

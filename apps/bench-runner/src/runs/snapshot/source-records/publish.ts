@@ -1,16 +1,13 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import {
-  deriveAddressableSpanViews,
-  fieldContractSha256, type FieldFormationStores
-} from "@do-soul/alaya-core";
+import { fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import type { SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
-import { AlayaError, IsoDatetimeStringSchema, canonicalJson,
-  sourceSemanticInterpretationIdentity,
+import { AlayaError, HOST_SESSION_CONTRACT, IsoDatetimeStringSchema, canonicalJson,
+  sourceSemanticInterpretationIdentity, type HostScopedReference,
   SourceRecordIdentitySchema, SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
 import {
-  closeCachedDatabase, initDatabase, sourceRecordFromRow,
+  closeCachedDatabase, initDatabase, openReadOnlyDatabase, sourceRecordFromRow,
   SqliteFieldSourceRecordRepo
 } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
@@ -22,7 +19,7 @@ import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
 import { readVerifiedNativeSourceSnapshot } from "./native.js";
-import { assertLongMemEvalRoundSourceRevision } from "./round-projection.js";
+import { longMemEvalSessionContainer } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
 import { resolveSourceRecordsImportEffects, type SourceRecordsImportEffects } from "./import-effects.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
@@ -210,8 +207,10 @@ function assertPublicationCensus(census: readonly SourceCensus[], limits: Readon
   let sources = 0, contentBytes = 0;
   for (const population of census) for (const source of population.records) {
     sources += 1; contentBytes += Buffer.byteLength(source.content_bytes, "utf8");
-    if (source.question_id !== undefined) assertLongMemEvalRoundSourceRevision({ datasetSha256: population.dataset_sha256,
-      sourceVersion: source.source_version, hostCaptured: source.host_capture !== undefined });
+    // Only the host-session capture owner admits LongMemEval round roots.
+    if (source.question_id !== undefined && (population.host_sessions === undefined || source.source_version !== HOST_SESSION_CONTRACT)) {
+      throw new AlayaError("CONFLICT", "round source is not a host-session capture");
+    }
   }
   if (limits !== undefined && (!Number.isSafeInteger(limits.maxSources) || limits.maxSources < 1 ||
       !Number.isSafeInteger(limits.maxContentBytes) || limits.maxContentBytes < 1 ||
@@ -300,15 +299,24 @@ async function admitCensusSources(
 ): Promise<SourcePublicationDisposition[]> {
   const daemon = await startBenchDaemon({
     ...input.importEffects, dataDirRoot, workspaceId: input.workspaceId, runId: input.runId,
-    embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint"
+    embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint", hostSessionReceiptTime: input.recordedAt
   });
-  const dispositions: SourcePublicationDisposition[] = [];
+  const failures = new Map<string, string>();
   try {
     const admit = async () => {
       refuseBenchWorkAfterCancel();
-      for (const population of census) {
-        for (const source of population.records) {
-          dispositions.push(await admitOneSource(daemon, source, preparations.get(source.source_id)!, input.recordedAt));
+      for (const capture of census.flatMap(population => population.host_sessions ?? [])) {
+        for (const request of capture.requests) {
+          const container = containerLabel(request.container);
+          // A failed window admitted nothing; later windows of that session would only leave a gap.
+          if (failures.has(container)) continue;
+          try {
+            await daemon.captureHostSession(request, capture.issuer);
+          } catch (error) {
+            refuseBenchWorkAfterCancel();
+            if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
+            failures.set(container, error instanceof Error ? error.message.slice(0, 300) : String(error));
+          }
           refuseBenchWorkAfterCancel();
         }
       }
@@ -322,38 +330,40 @@ async function admitCensusSources(
   }
   refuseBenchWorkAfterCancel();
   checkpointAndCopyBenchDb(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME), snapshotPath);
-  return dispositions;
+  return capturedDispositions(snapshotPath, census, preparations, input.workspaceId, failures);
 }
 
-async function admitOneSource(
-  daemon: Awaited<ReturnType<typeof startBenchDaemon>>,
-  source: SourceCensusRecord, preparation: HostPreparation, recordedAt: string
-): Promise<SourcePublicationDisposition> {
-  const base = { ...dispositionBase(source), host_preparation: preparation,
-    ...(preparation.status === "unsupported_source" ? { provider_attempts: 0 as const } : {}) };
+function containerLabel(container: HostScopedReference): string {
+  return canonicalJson([container.scope, container.id]);
+}
+
+/** Each census round is the captured root of its session, or rejected with that session's capture failure. */
+function capturedDispositions(snapshotPath: string, census: readonly SourceCensus[],
+  preparations: ReadonlyMap<string, HostPreparation>, workspaceId: string,
+  failures: ReadonlyMap<string, string>): SourcePublicationDisposition[] {
+  const database = openReadOnlyDatabase(snapshotPath);
   try {
-    const admitted = await daemon.importSourceRecord({
-      source_id: source.source_id, source_version: source.source_version, content_bytes: source.content_bytes,
-      recorded_at: recordedAt, event_time: source.source_observed_at, valid_from: null, valid_to: null,
-      scope_class: "project", spans: deriveAddressableSpanViews(source.content_bytes),
-      ...(source.speaker === undefined ? {} : { speaker: source.speaker }),
-      ...(source.attribution_context === undefined ? {} : { attribution_context: source.attribution_context }),
-      ...(source.host_structure === undefined ? {} : { host_structure: source.host_structure }),
-      ...(source.host_capture === undefined ? {} : { host_occurrences: source.host_capture.occurrences })
-    }, source.host_capture?.authorize);
-    if (admitted.record.source_version !== source.source_version ||
-        (admitted.record.host_structure !== undefined) !== (source.host_capture !== undefined || source.host_structure !== undefined)) {
-      throw new AlayaError("CONFLICT", "admitted source differs from the declared source projection");
-    }
-    return { ...base, admission: "admitted", record_id: admitted.record.identity, source_record: admitted.record, source_interpretation: "absent", publication: "not_attempted" };
-  } catch (error) {
-    refuseBenchWorkAfterCancel();
-    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
-    return {
-      ...base, admission: "rejected",
-      admission_reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
-      source_interpretation: "absent", publication: "not_attempted"
-    };
+    const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
+    return census.flatMap(population => population.records.map((source): SourcePublicationDisposition => {
+      const preparation = preparations.get(source.source_id)!;
+      const base = { ...dispositionBase(source), host_preparation: preparation,
+        ...(preparation.status === "unsupported_source" ? { provider_attempts: 0 as const } : {}),
+        source_interpretation: "absent" as const, publication: "not_attempted" as const };
+      const row = records.findCurrent(workspaceId, source.source_id);
+      if (row === null) {
+        return { ...base, admission: "rejected", admission_reason: failures.get(containerLabel(
+          longMemEvalSessionContainer(source.question_id!, source.session_index!))) ?? "host session capture admitted no round root" };
+      }
+      const record = sourceRecordFromRow(row);
+      if (record.source_version !== source.source_version || record.content_digest !== source.content_digest ||
+          row.source_body !== source.content_bytes || record.event_time !== source.source_observed_at ||
+          record.host_structure === undefined) {
+        throw new AlayaError("CONFLICT", "captured round root differs from its census");
+      }
+      return { ...base, admission: "admitted", record_id: record.identity, source_record: record };
+    }));
+  } finally {
+    database.close({ optimize: false });
   }
 }
 

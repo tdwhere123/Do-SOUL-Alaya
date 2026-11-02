@@ -7,6 +7,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { hostSessionContainerKey, hostSessionRoundSourceId } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { longMemEvalSessionContainer } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
 import {
   clipDeliveredSlotsByBudget,
   scoreContiguousReadVisibility,
@@ -23,6 +26,9 @@ import {
 const { scoreRecallHarnessRow } = await import(
   new URL("../../../../scripts/recall-harness-score.mjs", import.meta.url).href
 );
+/** The round root id the host-session capture owner assigns to a LongMemEval session round. */
+const roundSourceId = (questionId: string, sessionIndex: number, roundIndex: number) => hostSessionRoundSourceId(
+  hostSessionContainerKey(longMemEvalSessionContainer(questionId, sessionIndex), fieldContractSha256), roundIndex);
 import type { SourceGoldUnit } from "../../../runs/measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
@@ -229,7 +235,7 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
       db.prepare("INSERT INTO source_records VALUES (?, ?, ?, ?, ?, ?)").run(
         "ws-fixture",
         recordId,
-        "longmemeval_s:q1-s0-r0",
+        roundSourceId("q1", 0, 0),
         "bench-v1",
         contentDigest,
         content
@@ -488,7 +494,7 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
       db.prepare("INSERT INTO source_records VALUES (?, ?, ?, ?, ?, ?)").run(
         "ws-gap",
         recordId1,
-        "longmemeval_s:q-gap-s1-r0",
+        roundSourceId("q-gap", 1, 0),
         "bench-v1",
         digest1,
         contentTurn1
@@ -577,7 +583,7 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
       // There is only 1 mapped message in diagnostics: Turn 1
       expect(result.source_diagnostics.messages).toHaveLength(1);
       const mappedMsg = result.source_diagnostics.messages[0]!;
-      expect(mappedMsg.source_id).toBe("longmemeval_s:q-gap-s1-r0");
+      expect(mappedMsg.source_id).toBe(roundSourceId("q-gap", 1, 0));
       expect(mappedMsg.session_index).toBe(1);
 
       // CRITICAL: Turn 1's text_chunk_match must be FALSE (not falsely inheriting Turn 0's true match at index 0)
