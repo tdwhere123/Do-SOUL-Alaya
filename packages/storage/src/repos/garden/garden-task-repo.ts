@@ -31,11 +31,13 @@ import type { GardenTaskBacklogCount, GardenTaskClaimResult, GardenTaskCompletio
 import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import { GardenTaskSourceProvenance } from "./garden-task-source-provenance.js";
 import { GardenStatementSessionSources } from "./garden-statement-session-sources.js";
+import { HostSessionLedger } from "./host-session-ledger.js";
 
 export type * from "./garden-task-types.js";
 
 export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   public readonly statementSessions: GardenStatementSessionSources;
+  public readonly hostSessions: HostSessionLedger;
   private readonly sourceProvenance;
   private readonly enqueueStatement;
   private readonly findByIdStatement;
@@ -63,6 +65,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   ) {
     this.sourceProvenance = new GardenTaskSourceProvenance(connection);
     this.statementSessions = new GardenStatementSessionSources(connection);
+    this.hostSessions = new HostSessionLedger(connection);
     const statements = prepareGardenTaskStatements(connection);
     this.enqueueStatement = statements.enqueueStatement;
     this.findByIdStatement = statements.findByIdStatement;

@@ -114,13 +114,6 @@ function publicGardenTaskPayload(row: GardenTaskRow, sources: GardenTaskPayloadS
   if (!isUnknownRecord(row.payload)) {
     return row.payload;
   }
-  if (row.kind === GardenTaskKind.POST_TURN_EXTRACT) {
-    return {
-      run_id: row.payload.run_id,
-      turn_index: row.payload.turn_index,
-      workspace_id: row.payload.workspace_id
-    };
-  }
   if (row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION) {
     return statementSessionHostWorkerPayload(sources, parseStatementSessionTaskPayload(row.payload));
   }

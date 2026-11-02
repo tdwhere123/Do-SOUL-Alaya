@@ -19,10 +19,7 @@ import { buildGardenTaskSignalId } from "../../garden/support/task-signal-id.js"
 import {
   readVerifiedDeliverySourceObservation
 } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
-import {
-  emitTaskCandidateSignals,
-  readExternalPostTurnPayload
-} from "../garden-task-completion/candidate-signal-emission.js";
+import { emitTaskCandidateSignals } from "../garden-task-completion/candidate-signal-emission.js";
 import {
   buildGardenCompletionEnvelopeJson,
   GardenTaskNotFoundError,
@@ -230,9 +227,6 @@ async function commitCandidateSignalCompletion(
   >,
   completionClaimedBy: string
 ): Promise<Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>> {
-  const postTurnPayload = row.kind === GardenTaskKind.POST_TURN_EXTRACT
-    ? readExternalPostTurnPayload(row, context, resolvedRunId)
-    : null;
   const sessionPayload = row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION
     ? readClaimedStatementSessionPayload(row, context, resolvedRunId)
     : null;
@@ -246,7 +240,7 @@ async function commitCandidateSignalCompletion(
   throwIfAborted(context.abortSignal);
   const failedSignalIds = new Set<string>();
   const emittedSignalIds = await emitTaskCandidateSignals(
-    params, row, postTurnPayload, candidateSignals, completionClaimedBy, failedSignalIds, sessionPayload !== null
+    params, row, candidateSignals, completionClaimedBy, failedSignalIds, sessionPayload !== null
   );
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(

@@ -6,8 +6,6 @@ import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
-  createSourceAdmissionPort,
-  appendSourceRecordAdmitted,
   createAuditedSourceAdmission,
   createAuditedSourceReplacement,
   fieldContractSha256,
@@ -15,21 +13,25 @@ import {
 } from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
+import { createDaemonHostSessionCapture, type HostSessionCapture } from "../../../garden/host-session/host-session-capture.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
 ): Promise<AlayaDaemonRuntime> {
+  const hostSessionCapture = input.gardenTaskRepo === undefined ? undefined : createDaemonHostSessionCapture({
+    stores: input.fieldComposition.stores, eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier,
+    gardenTaskRepo: input.gardenTaskRepo, now: () => new Date().toISOString(), warn: input.warnLogger.warn });
   return await finalizeAlayaDaemonRuntime({
     requestProtection: input.requestProtection,
     runtimeNotifier: input.runtimeNotifier,
     startupSteps: input.startupSteps,
     bootstrapMcpToolingInput: createBootstrapMcpToolingInput(input),
     attachSurfaceRegistrarInput: createAttachSurfaceRegistrarInput(input),
-    mcpMemoryToolHandlerInput: createMcpMemoryToolHandlerInput(input),
+    mcpMemoryToolHandlerInput: createMcpMemoryToolHandlerInput(input, hostSessionCapture),
     appInput: createDaemonAppInput(input),
     lifecycleControlsInput: createLifecycleControlsInput(input),
-    serviceExports: createDaemonServiceExports(input)
+    serviceExports: createDaemonServiceExports(input, hostSessionCapture)
   });
 }
 
@@ -52,7 +54,8 @@ function createAttachSurfaceRegistrarInput(input: FinalizeDaemonRuntimeWiringInp
   };
 }
 
-function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput) {
+function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput,
+  hostSessionCapture: HostSessionCapture | undefined) {
   return {
     ...(input.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: input.sourceSemanticInterpretationClock }),
     zeroDayToolAccess: input.zeroDaySecurityLayer,
@@ -68,22 +71,12 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService: input.evidenceService,
     fieldSource: new SqliteSourceRootRecallReader(input.fieldComposition.fieldRepos.records, input.evidenceCapsuleRepo),
-    sourceAdmission: createSourceAdmissionPort({
-      sha256: fieldContractSha256,
-      stores: input.fieldComposition.stores,
-      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
-        producer: "post-turn", basis: "reported_excerpt" }),
-      audit: record => appendSourceRecordAdmitted(input.eventLogRepo, record, input.runtimeNotifier)
-    }),
+    ...(hostSessionCapture === undefined ? {} : { hostSessionCapture }),
     objectAnchorGate: input.pathRelationProposalService,
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),
     signalService: input.signalService,
-    postTurnSignalReceiver: createPostTurnSignalReceiver(
-      input.signalService,
-      input.eventLogRepo,
-      input.evidenceCapsuleRepo
-    ),
+    postTurnSignalReceiver: createPostTurnSignalReceiver(input.signalService),
     graphExploreService: input.graphExploreService,
     edgeProposalService: input.edgeProposalService,
     graphEdgePort: input.graphEdgePort,
@@ -256,8 +249,10 @@ function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
   };
 }
 
-function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
+function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput,
+  hostSessionCapture: HostSessionCapture | undefined) {
   return {
+    ...(hostSessionCapture === undefined ? {} : { hostSessionCapture }),
     sourceRecordAdmission: createAuditedSourceAdmission({
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores,

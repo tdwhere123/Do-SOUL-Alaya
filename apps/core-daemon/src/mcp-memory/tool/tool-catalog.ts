@@ -14,6 +14,7 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.apply_override",
   "soul.explore_graph",
   "soul.report_context_usage",
+  "soul.capture_host_session",
   "soul.resolve",
   "soul.interpretation",
   "garden.list_pending_tasks",
@@ -77,6 +78,8 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
     "Inspection aid for related memories; keep write actions on proposal/candidate tools.",
   "soul.report_context_usage":
     "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit.",
+  "soul.capture_host_session":
+    "Captured messages are source input, not claims of truth; a repeated window admits nothing new.",
   "soul.resolve":
     "Apply a resolution against a staged warning surfaced by soul.recall; the audit event is the durable record of the decision.",
   "soul.interpretation": "",
@@ -122,6 +125,12 @@ const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinitio
     "soul.apply_override": writeAnnotation,
     "soul.explore_graph": readOnlyAnnotation,
     "soul.report_context_usage": writeAnnotation,
+    "soul.capture_host_session": Object.freeze({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }),
     "soul.resolve": writeAnnotation,
     "soul.interpretation": Object.freeze({
       readOnlyHint: false,

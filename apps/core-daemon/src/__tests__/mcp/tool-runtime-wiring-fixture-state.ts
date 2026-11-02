@@ -27,7 +27,7 @@ export type MockMcpBridgeDeps = Readonly<{
 
 export type MockConversationServiceDeps = Pick<
   ConversationServiceDependencies,
-  "contextLensAssembler" | "gardenCompileQueue"
+  "contextLensAssembler"
 >;
 
 const hoisted = vi.hoisted(() => {

@@ -1,3 +1,4 @@
+import type { HostSessionCapture } from "../../../garden/host-session/host-session-capture.js";
 import type { RequestProtectionConfig } from "../../app.js";
 import type { createCoreDaemonApp } from "../wiring/daemon-app-composition.js";
 import type { AlayaRuntimeNotifier } from "../support/runtime-notifier.js";
@@ -153,6 +154,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
   readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
   readonly sourceRecordAdmission: AuditedSourceAdmission;
+  readonly hostSessionCapture?: HostSessionCapture;
   readonly sourceRecordReplacement: AuditedSourceReplacement;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;

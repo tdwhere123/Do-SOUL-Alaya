@@ -1,21 +1,12 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
-import { finalizePostTurnEvidence, receiveGardenTaskSignals } from "../../garden/post-turn-extract/evidence-finalizer.js";
+import { receiveGardenTaskSignals } from "../../garden/post-turn-extract/evidence-finalizer.js";
 import { signalMaterializationFailed } from "../../garden/post-turn-extract/signal-receiver.js";
-import {
-  buildPostTurnContent,
-  buildPostTurnConversationMessages,
-  parsePostTurnExtractTaskPayload,
-  type PostTurnExtractTaskPayload
-} from "../../garden/post-turn-extract/task-payload.js";
 import {
   GardenTaskUnavailableError,
   GardenTaskValidationError
 } from "../garden-task/garden-task-handler-support.js";
-import type {
-  GardenTaskHandlerDependencies,
-  GardenTaskToolCallContext
-} from "../garden-task/garden-task-handlers.js";
+import type { GardenTaskHandlerDependencies } from "../garden-task/garden-task-handlers.js";
 
 interface CandidateSignalEmissionParams {
   readonly deps: GardenTaskHandlerDependencies;
@@ -25,7 +16,6 @@ interface CandidateSignalEmissionParams {
 export async function emitTaskCandidateSignals(
   params: CandidateSignalEmissionParams,
   row: GardenTaskRow,
-  postTurnPayload: PostTurnExtractTaskPayload | null,
   candidateSignals: readonly CandidateMemorySignal[],
   completionClaimedBy: string,
   failedSignalIds: Set<string>,
@@ -36,16 +26,6 @@ export async function emitTaskCandidateSignals(
       signalReceiver: requirePostTurnSignalReceiver(params), failedSignalIds,
       beforeReceive: async () => refreshCompletionClaim(params, row, completionClaimedBy) });
   }
-  if (postTurnPayload !== null) {
-    return await finalizeExternalPostTurnEvidence(
-      params,
-      row,
-      postTurnPayload,
-      candidateSignals,
-      completionClaimedBy,
-      failedSignalIds
-    );
-  }
   const emittedSignalIds: string[] = [];
   for (const signal of candidateSignals) {
     const received = await params.deps.signalService.receiveSignal(signal);
@@ -55,51 +35,11 @@ export async function emitTaskCandidateSignals(
   return emittedSignalIds;
 }
 
-export function readExternalPostTurnPayload(
-  row: GardenTaskRow,
-  context: GardenTaskToolCallContext,
-  resolvedRunId: string | null
-): PostTurnExtractTaskPayload {
-  const payload = parsePostTurnExtractTaskPayload(row.payload);
-  if (payload.workspace_id !== context.workspaceId || payload.run_id !== resolvedRunId) {
-    throw new GardenTaskValidationError(
-      `Garden task post-turn payload escaped the claimed workspace or run: ${row.id}`
-    );
-  }
-  return payload;
-}
-
-async function finalizeExternalPostTurnEvidence(
-  params: CandidateSignalEmissionParams,
-  row: GardenTaskRow,
-  payload: PostTurnExtractTaskPayload,
-  candidates: readonly CandidateMemorySignal[],
-  completionClaimedBy: string,
-  failedSignalIds: Set<string>
-): Promise<readonly string[]> {
-  return await finalizePostTurnEvidence({
-    taskId: row.id,
-    workspaceId: payload.workspace_id,
-    runId: payload.run_id,
-    createdAt: payload.created_at ?? row.created_at,
-    turnContent: buildPostTurnContent(payload),
-    turnMessages: buildPostTurnConversationMessages(payload, row.id),
-    sourceObservation: null,
-    candidates,
-    signalReceiver: requirePostTurnSignalReceiver(params),
-    failedSignalIds,
-    ...(payload.admitted_source_root_id === undefined
-      ? {}
-      : { admittedSourceRootId: payload.admitted_source_root_id }),
-    beforeReceive: async () => refreshCompletionClaim(params, row, completionClaimedBy)
-  });
-}
-
 function requirePostTurnSignalReceiver(params: CandidateSignalEmissionParams) {
   const receiver = params.deps.postTurnSignalReceiver;
   if (receiver === undefined) {
     throw new GardenTaskUnavailableError(
-      "garden.complete_task cannot finalize post-turn evidence without a durable signal receiver."
+      "garden.complete_task cannot receive statement signals without a durable signal receiver."
     );
   }
   return receiver;

@@ -7,47 +7,30 @@ import {
   GardenTier,
   SignalSource,
 } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
-import {
-  SqliteEvidenceCapsuleRepo,
-  SqliteFieldSourceRecordRepo,
-  SqliteSourceRootRecallReader
-} from "@do-soul/alaya-storage";
-import { buildGardenTaskEvidenceFallbackSignalId } from "../../../garden/support/task-signal-id.js";
 import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
-import { readRetainedPostTurnSource, recordedSessionResponses } from "./post-turn-source-fixture.js";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
 import {
-  cleanupPostTurnExtractHarnesses,
+  cleanupGardenRoutingHarnesses,
   createMcpDeps,
-  createDeliveryRecord,
-  createHandlerHarness,
-  createPostTurnPayload,
   createRoutingHarness,
+  recordedSessionResponses,
   recordedStatementExtract,
   defaultContext,
   gardenTaskSignalId,
-  noRunContext,
   pageWorkspaceSourceRoots,
-  postTurnRows,
-  recall,
-  reportUsage,
+  retainedSourceBody,
+  routingTurn,
   seedRun,
-  sessionRunContext,
-  unwrapOk,
-  type GardenListPendingTasksOutput,
-  type PostTurnPayload
-} from "./post-turn-extract-task-fixture.js";
+  unwrapOk
+} from "./garden-routing-fixture.js";
 
-afterEach(() => {
-  cleanupPostTurnExtractHarnesses();
-});
+afterEach(cleanupGardenRoutingHarnesses);
 
-describe("post-turn extract Garden task", () => {
-  it("processes post-turn and session work behind more than fifty unrelated librarian tasks", async () => {
+describe("statement session routing over captured host sessions", () => {
+  it("processes session work behind more than fifty unrelated librarian tasks", async () => {
     const extract = recordedStatementExtract(message => message.role === "user" ? [{ text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" }] : []);
     const harness = await createRoutingHarness({ provider_kind: "official_api", officialExtract: extract });
     for (let index = 0; index < 51; index += 1) {
@@ -58,77 +41,32 @@ describe("post-turn extract Garden task", () => {
           created_at: "2026-05-07T00:00:00.000Z" },
         created_at: "2026-05-07T00:00:00.000Z" });
     }
-    harness.enqueuePostTurnTask();
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
     expect(extract).toHaveBeenCalledTimes(1);
     expect(harness.gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 64, GardenTaskKind.EDGE_CLASSIFY)).toHaveLength(51);
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
     const [session] = harness.sessionTasks();
     expect(session).toMatchObject({ status: "completed" });
     await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.not.toBeNull();
   });
 
-  it("retains the admitted original when the session model returns no statements", async () => {
+  it("retains the admitted round when the session model returns no statements", async () => {
     const harness = await createRoutingHarness({ provider_kind: "official_api", officialExtract: recordedStatementExtract() });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
     expect(harness.sessionTasks()).toEqual([expect.objectContaining({ status: "completed" })]);
     expect(await harness.signalService.listByRun("run-1")).toHaveLength(0);
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
-      .toContain("I prefer pnpm commands in this repo.");
-  });
-
-  it("publishes session statements without a synthetic evidence fallback for the post-turn task", async () => {
-    const fallbackId = buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1");
-    const harness = await createRoutingHarness({
-      provider_kind: "local_heuristics",
-      localExtract: recordedStatementExtract(message => message.role === "user" ? [{ text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" }] : []),
-      hasCreatedEvidence: async (result) => result.signal.signal_id === fallbackId
-    });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
-    harness.advance(STATEMENT_SESSION_IDLE_MS);
-    await harness.runScheduler();
-
-    const [session] = harness.sessionTasks();
-    expect(session).toMatchObject({ status: "completed" });
-    await expect(harness.signalRepo.getById(fallbackId)).resolves.toBeNull();
-    await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.not.toBeNull();
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
-      .toContain("I prefer pnpm commands in this repo.");
-  });
-
-  it("completes post-turn work from retained evidence without synthetic evidence claims", async () => {
-    const harness = await createRoutingHarness({
-      provider_kind: "local_heuristics",
-      hasCreatedEvidence: async () => false
-    });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
-
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "completed"
-    });
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
-      .toContain("I prefer pnpm commands in this repo.");
-    expect(await harness.signalService.listByRun("run-1")).toEqual([]);
+    expect(retainedSourceBody(harness.database, harness.roundRoots()[0]!)).toContain("I prefer pnpm commands in this repo.");
   });
 
   it("host_worker routing falls back to the local provider after an unclaimed session chunk waits out the window", async () => {
     const officialExtract = recordedStatementExtract();
     const localExtract = recordedStatementExtract(() => [{ text: "A recorded statement.", relation: "recorded" }]);
     const harness = await createRoutingHarness({ provider_kind: "host_worker", officialExtract, localExtract });
-    harness.enqueuePostTurnTask();
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
     expect(harness.sessionTasks()).toEqual([expect.objectContaining({ status: "pending" })]);
@@ -149,9 +87,7 @@ describe("post-turn extract Garden task", () => {
   it("local_heuristics routing settles an idle session chunk inline", async () => {
     const localExtract = recordedStatementExtract(() => [{ text: "A recorded statement.", relation: "recorded" }]);
     const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localExtract });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 
@@ -163,25 +99,17 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("local_heuristics routing persists session signals for canonical attached session runs", async () => {
+  it("local_heuristics routing attributes session signals to the capturing attached session run", async () => {
     const harness = await createRoutingHarness({ provider_kind: "local_heuristics",
       localExtract: recordedStatementExtract(() => [{ text: "A recorded statement.", relation: "recorded" }]) });
     await seedRun(harness.runRepo, "mcp-session-run-1");
-    harness.enqueuePostTurnTask({
-      id: "post-turn-session-task",
-      payload: createPostTurnPayload({
-        task_id: "post-turn-session-task",
-        run_id: "mcp-session-run-1"
-      })
-    });
+    await harness.captureTurn({ runId: "mcp-session-run-1" });
 
-    await harness.runScheduler();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 
-    expect(harness.gardenTaskRepo.findById("post-turn-session-task")).toMatchObject({ status: "completed" });
     const [session] = harness.sessionTasks();
-    expect(session?.payload).toMatchObject({ run_id: "mcp-session-run-1", session_id: "mcp-session-run-1" });
+    expect(session?.payload).toMatchObject({ run_id: "mcp-session-run-1" });
     await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.toMatchObject({
       run_id: "mcp-session-run-1"
     });
@@ -192,14 +120,11 @@ describe("post-turn extract Garden task", () => {
       throw new Error("provider blew up");
     });
     const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localExtract: extract });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await expect(harness.runScheduler()).resolves.toBeUndefined();
 
     expect(extract).toHaveBeenCalledTimes(1);
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
     expect(harness.sessionTasks()).toEqual([expect.objectContaining({
       status: "failed",
       last_error_text: expect.stringContaining("provider blew up")
@@ -212,46 +137,31 @@ describe("post-turn extract Garden task", () => {
       success: false,
       candidate_signals_count: 0
     });
-    await expect(harness.signalRepo.getById(
-      buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
-    )).resolves.toBeNull();
-    const roots = new SqliteSourceRootRecallReader(
-      new SqliteFieldSourceRecordRepo(harness.database, fieldContractSha256),
-      new SqliteEvidenceCapsuleRepo(harness.database)
-    ).page({ workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null });
+    const roots = pageWorkspaceSourceRoots(harness.database);
     expect(roots.rows.some((row) =>
       row.kind === "source_record"
       && (row.content ?? "").includes("I prefer pnpm commands")
     )).toBe(true);
   });
 
-  it("enqueue of a turn longer than 800 chars keeps the unsliced root after a throwing provider", async () => {
+  it("keeps the unsliced round root of a message longer than 800 chars after a throwing provider", async () => {
     const tail = "BEYOND_EIGHT_HUNDRED_MARKER";
     const excerpt = `${"a".repeat(800)}${tail}`;
     const extract = vi.fn<NonNullable<GardenComputeProvider["extractSourceStatementRequest"]>>(async () => {
       throw new Error("provider blew up");
     });
     const harness = await createRoutingHarness({ provider_kind: "local_heuristics", localExtract: extract });
-    const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
+    const handler = createMcpMemoryToolHandler(createMcpDeps(harness, { hostSessionCapture: harness.hostSessionCapture }));
 
-    expect((await reportUsage(handler, {
-      turn_index: 21,
-      last_messages: [{ role: "user", content_excerpt: excerpt }]
-    })).ok).toBe(true);
+    expect((await handler.call({ toolName: "soul.capture_host_session", arguments: { container: { scope: "routing-host",
+      id: "conversation-1" }, messages: routingTurn({ user: excerpt }).slice(0, 1), closes_tail: true },
+      context: defaultContext() })).ok).toBe(true);
+    expect(harness.roundRoots()).toHaveLength(1);
 
-    const enqueued = postTurnRows(harness.gardenTaskRepo);
-    expect(enqueued).toHaveLength(1);
-    const taskId = enqueued[0]!.id;
-    const payload = enqueued[0]!.payload as PostTurnPayload;
-    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toBe(excerpt);
-    expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
-
-    await expect(harness.runScheduler()).resolves.toBeUndefined();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await expect(harness.runScheduler()).resolves.toBeUndefined();
     expect(extract).toHaveBeenCalledTimes(1);
     expect(extract.mock.calls[0]![0].messages[0]!.text).toBe(excerpt);
-    expect(harness.gardenTaskRepo.findById(taskId)).toMatchObject({ status: "completed" });
     expect(harness.sessionTasks()).toEqual([expect.objectContaining({
       status: "failed",
       last_error_text: expect.stringContaining("provider blew up")
@@ -260,7 +170,7 @@ describe("post-turn extract Garden task", () => {
     const roots = pageWorkspaceSourceRoots(harness.database);
     expect(roots.rows.some((row) =>
       row.kind === "source_record"
-      && row.original_complete === false
+      && row.root_id === harness.roundRoots()[0]
       && row.content_complete === true
       && (row.content ?? "").includes(tail)
       && (row.content ?? "").length > 800
@@ -277,10 +187,9 @@ describe("post-turn extract Garden task", () => {
     ).toBe(0);
   });
 
-  it("host_worker claim and completion bind session statement responses to the retained host messages", async () => {
+  it("host_worker claim and completion bind session statement responses to the captured host messages", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
-    harness.enqueuePostTurnTask();
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
     const [session] = harness.sessionTasks();
@@ -322,25 +231,24 @@ describe("post-turn extract Garden task", () => {
       interpretation_contract: "source-statements-v1", object_kind: null, confidence: null,
       source_memory_refs: [], incompatible_with_refs: [],
       raw_payload: { source_statement: {
-        source_root_id: readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.record_id,
-        message: { message_id: "post-turn:post-turn-task-1:message:0", role: "user" },
+        source_root_id: harness.roundRoots()[0],
+        message: { message_id: "message-0", role: "user" },
         statement: { text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" } } } });
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")?.source_body)
-      .toContain("I prefer pnpm commands in this repo.");
+    expect(retainedSourceBody(harness.database, harness.roundRoots()[0]!)).toContain("I prefer pnpm commands in this repo.");
   });
 
   it("preserves explicit graph refs on non-extraction tasks without promoting raw-payload arrays", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
-    harness.gardenTaskRepo.enqueue({ id: "post-turn-task-1", workspace_id: "workspace-1",
+    harness.gardenTaskRepo.enqueue({ id: "ttl-cleanup-task-1", workspace_id: "workspace-1",
       role: GardenRole.JANITOR, kind: GardenTaskKind.TTL_CLEANUP, created_at: "2026-05-07T00:10:00.000Z",
-      payload: { task_id: "post-turn-task-1", task_kind: GardenTaskKind.TTL_CLEANUP, required_tier: GardenTier.TIER_1,
+      payload: { task_id: "ttl-cleanup-task-1", task_kind: GardenTaskKind.TTL_CLEANUP, required_tier: GardenTier.TIER_1,
         workspace_id: "workspace-1", run_id: "run-1", target_object_refs: [], priority: 20,
         created_at: "2026-05-07T00:10:00.000Z" } });
 
     const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
     await handler.call({
       toolName: "garden.claim_task",
-      arguments: { task_id: "post-turn-task-1" },
+      arguments: { task_id: "ttl-cleanup-task-1" },
       context: defaultContext()
     });
 
@@ -351,7 +259,7 @@ describe("post-turn extract Garden task", () => {
       await handler.call({
         toolName: "garden.complete_task",
         arguments: {
-          task_id: "post-turn-task-1",
+          task_id: "ttl-cleanup-task-1",
           status: "completed",
           result_envelope: {
             candidate_signals: [
@@ -390,7 +298,6 @@ describe("post-turn extract Garden task", () => {
         incompatible_with_refs: ["raw-conflict"]
       }
     });
-    expect(readRetainedPostTurnSource(harness.database, "post-turn-task-1")).toBeUndefined();
   });
 
   it("scheduler reclaims abandoned claims (status=claimed older than stale TTL) for another claimant", async () => {
@@ -399,38 +306,24 @@ describe("post-turn extract Garden task", () => {
       provider_kind: "host_worker",
       now: () => now
     });
-    harness.enqueuePostTurnTask();
-    // Simulate an attached agent that claimed but never completed — row sits
-    // in claimed state with a claimed_at timestamp older than the runtime's
-    // GARDEN_CLAIM_STALE_AFTER_MS (10 min) ceiling. The scheduler tick must
-    // reclaim it back to pending so another agent (or the same agent after
-    // reconnect) can pick it up.
+    await harness.captureTurn({ closesTail: true });
+    const [session] = harness.sessionTasks();
+    // An attached agent claimed but never completed, past GARDEN_CLAIM_STALE_AFTER_MS (10 min).
     const staleClaimedAt = new Date(Date.parse(now) - 30 * 60 * 1000).toISOString();
-    await harness.gardenTaskRepo.claimAtomic(
-      "post-turn-task-1",
-      "abandoned-agent",
-      staleClaimedAt,
-      "workspace-1"
-    );
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "claimed",
-      claimed_by: "abandoned-agent"
-    });
+    await harness.gardenTaskRepo.claimAtomic(session!.id, "abandoned-agent", staleClaimedAt, "workspace-1");
+    expect(harness.gardenTaskRepo.findById(session!.id)).toMatchObject({ status: "claimed", claimed_by: "abandoned-agent" });
 
     await harness.runScheduler();
 
-    // Post-turn work is in-process only, so the same pass settles the reclaimed row.
-    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
-      status: "completed",
-      claimed_by: "in-process"
-    });
+    // A reclaimed host-worker chunk returns to MCP workers.
+    expect(harness.gardenTaskRepo.findById(session!.id)).toMatchObject({ status: "pending", claimed_by: null });
     await expect(
       harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)
     ).resolves.toEqual({
       truncated: false,
       events: [
       expect.objectContaining({
-        entity_id: "post-turn-task-1",
+        entity_id: session!.id,
         payload_json: expect.objectContaining({
           previous_claimed_by: "abandoned-agent",
           stale_after_ms: 10 * 60 * 1000
@@ -444,9 +337,7 @@ describe("post-turn extract Garden task", () => {
     const harness = await createRoutingHarness({ provider_kind: "official_api",
       officialExtract: recordedStatementExtract(message => message.role === "user"
         ? [{ text: "The user prefers pnpm commands in this repo.", relation: "tooling preference" }] : []) });
-    harness.enqueuePostTurnTask();
-
-    await harness.runScheduler();
+    await harness.captureTurn();
     harness.advance(STATEMENT_SESSION_IDLE_MS);
     await harness.runScheduler();
 

@@ -24,14 +24,10 @@ import {
   type SoulMemorySearchResponse,
   type SoulRecallHostContext,
   type SoulReportContextUsageRequest,
-  type SourceAdmissionPort,
   type UsageProofRecord,
   type UsageReport
 } from "@do-soul/alaya-protocol";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
-import type { GardenTaskRow } from "@do-soul/alaya-storage";
-import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
-import type { StatementSessionClosurePort } from "../../garden/statement-session/statement-session-closure.js";
 import {
   sourceMetadataForRecallResult,
   resolveMcpDegradationReason,
@@ -148,18 +144,9 @@ export interface RecallUsageHandlerDependencies {
       target: import("@do-soul/alaya-protocol").SourceEvidenceTarget
     ): Promise<boolean> | boolean;
   };
-  readonly sourceAdmission?: SourceAdmissionPort;
   readonly asyncSideEffectAudit?: {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;
-  };
-  readonly gardenTaskRepo?: StatementSessionClosurePort & {
-    findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
-    peekPending(
-      role: string,
-      workspace_id?: string,
-      limit?: number
-    ): readonly GardenTaskRow[];
   };
 }
 
@@ -388,7 +375,6 @@ export function createReportContextUsageHandler(params: Readonly<{
       }
     );
     throwIfAborted(context.abortSignal);
-    await enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,
       usageState,

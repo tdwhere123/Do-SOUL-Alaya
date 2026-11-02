@@ -1,7 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RuntimeGardenComputeConfig, SourceStatement, SourceStatementRequest } from "@do-soul/alaya-protocol";
+import {
+  hostSessionContainerKey, type HostScopedReference, type HostSessionCaptureRequest, type HostSessionMessage,
+  type RuntimeGardenComputeConfig, type SourceStatement, type SourceStatementRequest
+} from "@do-soul/alaya-protocol";
 import {
   DynamicsService, EventPublisher, EvidenceService, MemoryService, SignalService, appendSourceRecordAdmitted,
   createSignalEmissionWriter, createSourceAdmissionPort, fieldContractSha256
@@ -12,14 +15,13 @@ import {
   SqliteMemoryEntryRepo, SqliteRunRepo, SqliteSignalRepo, SqliteSourceGroundingDeferQueueRepo, SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createPostTurnExtractTaskProcessor } from "../../garden/host-worker/host-worker-task-processors.js";
 import { createStatementSessionTaskProcessor } from "../../garden/host-worker/statement-session-task-processor.js";
 import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
-import { enqueuePostTurnExtractTask } from "../../mcp-memory/garden-task/post-turn-extract-queue.js";
+import { createHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
+import { createHostSessionCaptureHandler } from "../../mcp-memory/tool/host-session-handler.js";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import { createMaterializationRouter } from "../../runtime/recall-materialization/recall-materialization-router.js";
 import { createSourceGroundingDeferTransitions } from "../../runtime/source-grounding-defer/transitions.js";
-import { createDeliveryRecord } from "../mcp-memory/garden/post-turn-extract-task-record-fixture.js";
 
 export const WORKSPACE = "workspace-1";
 export const RUN = "run-1";
@@ -27,9 +29,18 @@ export const START = "2026-09-14T12:00:00.000Z";
 export const OFFICIAL_CONFIG: RuntimeGardenComputeConfig = {
   provider_kind: "official_api", model_id: "test-model", provider_url: null, secret_ref: "env:TEST", enabled: true
 };
-type Message = Readonly<{ role: string; content_excerpt: string }>;
+export const CONTAINER: HostScopedReference = { scope: "test-host", id: "conversation-1" };
+export const CONTAINER_KEY = hostSessionContainerKey(CONTAINER, fieldContractSha256);
+type Turn = readonly Readonly<{ role: "user" | "assistant"; content: string }>[];
 
-/** Production post-turn admission, statement publication and SQLite reopen, with an injected model only. */
+/** Complete original host messages of consecutive turns, positioned from `first`. */
+export function hostMessages(turns: readonly Turn[], first = 0, hostReportedAt?: string): readonly HostSessionMessage[] {
+  return turns.flat().map((message, index) => ({ message_id: `message-${first + index}`, position: first + index,
+    role: message.role, content: message.content, completeness: "complete" as const, fidelity: "original_bytes" as const,
+    ...(hostReportedAt === undefined ? {} : { host_reported_at: hostReportedAt }) }));
+}
+
+/** Production host-session capture through the MCP entry, statement publication and SQLite reopen, with an injected model only. */
 export async function createStatementSessionEnvironment() {
   const directory = await mkdtemp(join(tmpdir(), "alaya-statement-session-"));
   const filename = join(directory, "memory.sqlite");
@@ -51,8 +62,6 @@ export async function createStatementSessionEnvironment() {
     runtimeNotifier: notifier, now, dynamicsService: new DynamicsService({ memoryRepo,
       karmaEventRepo: new SqliteKarmaEventRepo(database), eventLogRepo, runtimeNotifier: notifier }) });
   const sourceAdmission = createSourceAdmissionPort({ stores: field.stores, sha256: fieldContractSha256,
-    hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
-      producer: "post-turn", basis: "reported_excerpt" }),
     audit: record => appendSourceRecordAdmitted(eventLogRepo, record, notifier) });
   const router = createMaterializationRouter({
     wiring: { evidenceService, memoryService, fieldComposition: field, eventLogRepo, runtimeNotifier: notifier,
@@ -75,20 +84,25 @@ export async function createStatementSessionEnvironment() {
     sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({ eventLogRepo, signalRepo, queueRepo }),
     postTriageMaterializer: { materialize: async (signal, context) => await router.materializeSignal(signal, context) } });
   const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
-  const signalReceiver = createPostTurnSignalReceiver(signalService, eventLogRepo, evidenceRepo);
+  const signalReceiver = createPostTurnSignalReceiver(signalService);
   const requests: SourceStatementRequest[] = [];
   const warnings: { message: string; meta: Record<string, unknown> }[] = [];
+  const warn = (message: string, meta: Record<string, unknown>) => { warnings.push({ message, meta }); };
+  const hostSessionCapture = createHostSessionCapture({ admission: sourceAdmission, ledger: gardenTaskRepo.hostSessions,
+    statementSessions: gardenTaskRepo, now, warn });
+  const captureHandler = createHostSessionCaptureHandler({ hostSessionCapture });
   return {
     directory, filename, clock, now, field, eventLogRepo, eventPublisher, signalService, memoryService, gardenTaskRepo,
-    sourceAdmission, signalReceiver, requests, warnings,
+    sourceAdmission, signalReceiver, requests, warnings, hostSessionCapture,
     get database() { return database; },
     advance(ms: number) { clock.now = new Date(Date.parse(clock.now) + ms).toISOString(); },
-    report: async (turnIndex: number, messages: readonly Message[], runId = RUN) => await enqueuePostTurnExtractTask(
-      { deps: { gardenTaskRepo, sourceAdmission }, now,
-        warn: (message: string, meta: Record<string, unknown>) => { warnings.push({ message, meta }); } },
-      { delivery_id: "delivery-1", usage_state: "used", turn_index: turnIndex, turn_digest: { last_messages: [...messages] } },
-      { workspaceId: WORKSPACE, runId, agentTarget: "codex", sessionId: "session-1" },
-      createDeliveryRecord({ delivered_at: START, run_id: runId })),
+    /** The MCP host entry, as an attached host calls it. */
+    capture: async (request: HostSessionCaptureRequest, runId = RUN) => await captureHandler(request,
+      { workspaceId: WORKSPACE, runId, agentTarget: "codex", sessionId: "session-1" }),
+    sweep: async () => await hostSessionCapture.sweepIdle(MCP_HOST_SESSION_ISSUER),
+    /** Round roots of a container in round order. */
+    roots: (containerKey = CONTAINER_KEY) => gardenTaskRepo.statementSessions.rounds(WORKSPACE, containerKey)
+      .map(round => round.root_id),
     /** A recorded model: each target message yields the statements `respond` returns for its text. */
     provider: (respond: (text: string) => readonly SourceStatement[]) => new OfficialApiGardenProvider({
       apiKey: "sk-test", now, extractor: { extract: async ({ userPrompt }) => {
@@ -97,11 +111,10 @@ export async function createStatementSessionEnvironment() {
         return { rawJson: JSON.stringify({ messages: request.messages.map(message => ({
           message_id: message.message_id, statements: respond(message.text) })) }) };
       } } }),
-    processPostTurn: createPostTurnExtractTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver, warn: () => undefined }),
     processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG) =>
-      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver,
+      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver, hostSessionCapture,
         configService: { getRuntimeGardenComputeConfig: async () => config },
-        officialApiGardenProvider: provider, warn: (message, meta) => { warnings.push({ message, meta }); } })(),
+        officialApiGardenProvider: provider, warn })(),
     sessionTasks: () => database.connection.prepare(`SELECT id, status, payload_json, last_error_text FROM garden_tasks
       WHERE kind = 'source_statement_session' ORDER BY json_extract(payload_json, '$.chunk_index')`)
       .all() as { id: string; status: string; payload_json: string; last_error_text: string | null }[],

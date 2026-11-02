@@ -120,7 +120,6 @@ interface TrustworthyLoopHarness {
   callTool<TOutput = unknown>(toolName: string, args: Record<string, unknown>): Promise<TOutput>;
   useHumanReviewSurface(): void;
   close(): Promise<void>;
-  enqueueGardenTask(taskId: string): void;
 }
 
 async function createTrustworthyLoopHarness(
@@ -260,16 +259,6 @@ async function createTrustworthyLoopHarness(
       await client.close();
       await server.close();
       database.close();
-    },
-    enqueueGardenTask(taskId: string) {
-      gardenTaskRepo.enqueue({
-        id: taskId,
-        workspace_id: "workspace-1",
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: createGardenTaskDescriptor(taskId),
-        created_at: "2026-05-11T00:00:00.000Z"
-      });
     }
   };
 
@@ -365,19 +354,6 @@ function createRecallCandidate() {
     scope_class: ScopeClass.PROJECT,
     origin_plane: "workspace_local"
   } as const;
-}
-
-function createGardenTaskDescriptor(taskId: string): GardenTaskDescriptor {
-  return {
-    task_id: taskId,
-    task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-    required_tier: GardenTier.TIER_2,
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    target_object_refs: [PRIMARY_MEMORY_ID],
-    priority: 20,
-    created_at: "2026-05-11T00:00:00.000Z"
-  };
 }
 
 function createUuidGenerator(): () => string {

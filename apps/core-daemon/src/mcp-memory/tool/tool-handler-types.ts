@@ -1,4 +1,5 @@
 import type { DynamicsService } from "@do-soul/alaya-core";
+import type { HostSessionCapture } from "../../garden/host-session/host-session-capture.js";
 import {
   SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsResponseSchema,
@@ -30,6 +31,7 @@ import {
   type SoulProposeMemoryUpdateRequest,
   type SoulProposeMemoryUpdateResponse,
   type SoulReportContextUsageResponse,
+  type HostSessionCaptureResponse,
   type SoulResolveResponse,
   type SoulReviewMemoryProposalRequest,
   type SoulReviewMemoryProposalResponse,
@@ -132,7 +134,7 @@ export interface McpMemoryToolHandlerDependencies {
     }> | null>;
   };
   readonly fieldSource?: RecallUsageHandlerDependencies["fieldSource"];
-  readonly sourceAdmission?: RecallUsageHandlerDependencies["sourceAdmission"];
+  readonly hostSessionCapture?: HostSessionCapture;
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
       readonly signal: Readonly<CandidateMemorySignal>;
@@ -327,6 +329,7 @@ export type McpMemoryToolResponseByName = {
   readonly "soul.apply_override": SoulApplyOverrideResponse;
   readonly "soul.explore_graph": SoulExploreGraphResponse;
   readonly "soul.report_context_usage": SoulReportContextUsageResponse;
+  readonly "soul.capture_host_session": HostSessionCaptureResponse;
   readonly "soul.resolve": SoulResolveResponse;
   readonly "soul.interpretation": SoulInterpretationResponse;
   readonly "garden.list_pending_tasks": GardenListPendingTasksResponse;

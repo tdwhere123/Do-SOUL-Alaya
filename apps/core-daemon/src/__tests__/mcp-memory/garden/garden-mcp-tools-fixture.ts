@@ -35,11 +35,7 @@ import {
   type McpMemoryToolCallContext,
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
-import type {
-  PostTurnSignalReceiveResult,
-  PostTurnSignalReceiver
-} from "../../../garden/post-turn-extract/signal-receiver.js";
-import { bindPostTurnTaskSource } from "./post-turn-source-fixture.js";
+import type { PostTurnSignalReceiveResult } from "../../../garden/post-turn-extract/signal-receiver.js";
 
 const harnesses = new Set<GardenMcpHarness>();
 
@@ -95,7 +91,6 @@ export interface GardenMcpHarnessOptions {
     signal: CandidateMemorySignal,
     context: GardenMcpReceiveSignalContext
   ) => Promise<PostTurnSignalReceiveResult>;
-  readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
   readonly omitPostTurnSignalReceiver?: boolean;
   readonly completeWithEvents?: (
     taskId: string,
@@ -227,8 +222,7 @@ export async function createGardenMcpHarness(
       : {
           postTurnSignalReceiver: {
             receiveSignal: async (signal) =>
-              await receiveSignal(signal, { gardenTaskRepo, signalService }) as never,
-            hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
+              await receiveSignal(signal, { gardenTaskRepo, signalService }) as never
           }
         }),
     graphExploreService: {
@@ -302,8 +296,7 @@ export async function createGardenMcpHarness(
         workspace_id: workspaceId,
         role,
         kind,
-        payload: kind === GardenTaskKind.POST_TURN_EXTRACT
-          ? bindPostTurnTaskSource(database, payload, `post-turn:${taskId}`) : payload,
+        payload,
         created_at: overrides.created_at ?? "2026-05-07T00:00:00.000Z"
       });
     },

@@ -9,15 +9,17 @@ import { SOURCE_STATEMENTS_PROMPT, emitSourceStatementSessionSignals, extractSou
 import type { GardenStatementSessionSources, StatementSessionRoot } from "@do-soul/alaya-storage";
 import { buildGardenTaskSignalId } from "../support/task-signal-id.js";
 
-export type StatementSessionSourcesPort = Pick<GardenStatementSessionSources,
-  "turns" | "lastChunkPayload" | "idleOpenRuns" | "markSwept" | "root">;
+export type StatementSessionSourcesPort = Pick<GardenStatementSessionSources, "rounds" | "lastChunkPayload" | "root">;
 /** Consecutive host occurrences [from, to) of one admitted root. */
 export type StatementSessionMember = Readonly<{ root_id: string; source_id: string; from: number; to: number }>;
-/** Root ids and occurrence ranges only: messages are always re-read from their admitted roots. */
+/** Root ids and occurrence ranges only: messages are always re-read from their admitted roots.
+ * `container_key` is absent only on chunks queued before sessions were keyed by container; they still
+ * execute but no plan resumes after them. `run_id` is signal attribution, not the session key.
+ */
 export type StatementSessionTaskPayload = Readonly<{
-  task_kind: typeof GardenTaskKind.SOURCE_STATEMENT_SESSION; workspace_id: string; run_id: string; session_id: string;
-  chunk_index: number; context: readonly StatementSessionMember[]; targets: readonly StatementSessionMember[];
-  closes_tail: boolean;
+  task_kind: typeof GardenTaskKind.SOURCE_STATEMENT_SESSION; workspace_id: string; container_key?: string;
+  run_id: string; session_id: string; chunk_index: number;
+  context: readonly StatementSessionMember[]; targets: readonly StatementSessionMember[]; closes_tail: boolean;
 }>;
 type Responses = NonNullable<NonNullable<GardenCompleteTaskRequest["result_envelope"]>["source_statement_responses"]>;
 
@@ -29,7 +31,7 @@ export class StatementSessionSourceUnavailableError extends AlayaError {
 }
 
 export function statementSessionTaskId(payload: StatementSessionTaskPayload): string {
-  const digest = createHash("sha256").update(canonicalJson([payload.workspace_id, payload.run_id,
+  const digest = createHash("sha256").update(canonicalJson([payload.workspace_id, payload.container_key ?? null,
     payload.chunk_index, payload.targets])).digest("hex").slice(0, 32);
   return `source_statement_session_${digest}`;
 }
@@ -46,13 +48,16 @@ export function parseStatementSessionTaskPayload(value: unknown): StatementSessi
     });
   };
   if (row?.task_kind !== GardenTaskKind.SOURCE_STATEMENT_SESSION || !nonEmpty(row.workspace_id) || !nonEmpty(row.run_id) ||
-      !nonEmpty(row.session_id) || !isIndex(row.chunk_index) || typeof row.closes_tail !== "boolean") invalid();
+      !nonEmpty(row.session_id) || !isIndex(row.chunk_index) || typeof row.closes_tail !== "boolean" ||
+      (row.container_key !== undefined && !nonEmpty(row.container_key))) invalid();
   return { task_kind: GardenTaskKind.SOURCE_STATEMENT_SESSION, workspace_id: row!.workspace_id as string,
+    ...(row!.container_key === undefined ? {} : { container_key: row!.container_key as string }),
     run_id: row!.run_id as string, session_id: row!.session_id as string, chunk_index: row!.chunk_index as number,
     context: members(row!.context, true), targets: members(row!.targets, false), closes_tail: row!.closes_tail as boolean };
 }
 
-/** Occurrence-level messages of one admitted root; a message must name its host role. */
+/** Occurrence-level messages of one admitted root; a message must name its host role. Its recorded time is
+ * the host-reported time the issuer asserted, never Alaya's receipt. */
 export function rootStatementMessages(root: StatementSessionRoot): readonly LocatedSourceStatementMessage[] {
   const bytes = Buffer.from(root.content, "utf8");
   const binding = { root_id: root.root_id, source_id: root.source_id, source_version: root.source_version,
@@ -60,7 +65,7 @@ export function rootStatementMessages(root: StatementSessionRoot): readonly Loca
   return root.occurrences.map((occurrence): LocatedSourceStatementMessage => {
     if (occurrence.role === null) throw new StatementSessionSourceUnavailableError("host message role unknown");
     const message: SourceStatementMessage = { message_id: occurrence.occurrence_id, role: occurrence.role,
-      recorded_at: null, text: bytes.subarray(...occurrence.utf8_span).toString("utf8") };
+      recorded_at: occurrence.host_reported_at ?? null, text: bytes.subarray(...occurrence.utf8_span).toString("utf8") };
     return { message, root: binding, utf8_span: occurrence.utf8_span };
   });
 }

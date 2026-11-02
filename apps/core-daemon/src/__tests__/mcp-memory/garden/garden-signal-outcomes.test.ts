@@ -2,9 +2,9 @@ import { afterEach, expect, it } from "vitest";
 import { GardenEventType, GardenRole, GardenTaskKind, GardenTier } from "@do-soul/alaya-protocol";
 import { cleanupGardenMcpHarnesses, createGardenMcpHarness, createTaskDescriptor } from "./garden-mcp-tools-fixture.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
-import { cleanupPostTurnExtractHarnesses, createRoutingHarness, recordedStatementExtract } from "./post-turn-extract-task-fixture.js";
+import { cleanupGardenRoutingHarnesses, createRoutingHarness, recordedStatementExtract } from "./garden-routing-fixture.js";
 
-afterEach(async () => { await cleanupGardenMcpHarnesses(); cleanupPostTurnExtractHarnesses(); });
+afterEach(async () => { await cleanupGardenMcpHarnesses(); cleanupGardenRoutingHarnesses(); });
 
 it("reports failed signal materialization separately from successful external task completion", async () => {
   const harness = await createGardenMcpHarness({ receiveSignal: async signal => ({
@@ -29,8 +29,7 @@ it("records failed signal materialization separately from successful in-process 
       ? [{ text: "A recorded statement.", relation: "recorded" }] : []),
     receiveSignal: async signal => ({ signal: { ...signal, signal_state: "failed" },
       materialization: { success: false, created_objects: [] } }) });
-  harness.enqueuePostTurnTask();
-  await harness.runScheduler();
+  await harness.captureTurn();
   harness.advance(STATEMENT_SESSION_IDLE_MS);
   await harness.runScheduler();
   expect(harness.sessionTasks()[0]?.status).toBe("completed");

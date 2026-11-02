@@ -4,8 +4,6 @@ import {
   type ContextLens,
   type ConversationMessage,
   type EventLogEntry,
-  type ExecutionStanceModelRef,
-  type HealthJournalRecordPort,
   type Run,
   type RunInterruptResult,
   type RuntimeMode as RuntimeModeValue,
@@ -22,8 +20,6 @@ export type {
   ContextLens,
   ConversationMessage,
   EventLogEntry,
-  ExecutionStanceModelRef,
-  HealthJournalRecordPort,
   Run,
   RunInterruptResult,
   RuntimeModeValue,
@@ -63,29 +59,6 @@ export interface ConversationWarnPort {
 
 export const GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE = "compile_enqueue";
 
-export interface ConversationGardenCompileEnqueueInput {
-  readonly workspaceId: string;
-  readonly runId: string;
-  readonly userMessage: ConversationMessage;
-  readonly assistantMessage: ConversationMessage;
-}
-
-export type ConversationGardenCompileEnqueueResult =
-  | { readonly status: "enqueued" }
-  | { readonly status: "duplicate" };
-
-export interface ConversationGardenCompileQueuePort {
-  enqueue(input: ConversationGardenCompileEnqueueInput): ConversationGardenCompileEnqueueResult | Promise<ConversationGardenCompileEnqueueResult>;
-}
-
-export interface ConversationGovernanceLeasePort {
-  acquire(params: {
-    readonly runId: string;
-    readonly workspaceId: string;
-  }): Promise<unknown>;
-  release(runId: string): Promise<void>;
-}
-
 export interface ConversationContextLensAssemblerPort {
   assemble(params: {
     readonly run: Pick<Run, "run_id" | "workspace_id" | "run_mode" | "title">;
@@ -108,11 +81,8 @@ export interface ConversationServiceDependencies {
   readonly eventLogRepo: ConversationEventLogRepoPort;
   readonly eventPublisher?: EventPublisher;
   readonly signalReceiver: ConversationSignalReceiverPort;
-  readonly governanceLeaseService?: ConversationGovernanceLeasePort;
   readonly contextLensAssembler?: ConversationContextLensAssemblerPort;
   readonly budgetBankruptcyService?: ConversationBudgetBankruptcyPort;
-  readonly healthJournalRecorder?: HealthJournalRecordPort;
-  readonly gardenCompileQueue?: ConversationGardenCompileQueuePort;
   readonly warn: ConversationWarnPort;
 }
 
@@ -125,19 +95,6 @@ export interface MemoryContextAssemblyResult {
   readonly contextLens: Readonly<ContextLens> | null;
   readonly workingProjection: Readonly<WorkingProjection> | null;
   readonly recalledContextSection: string;
-}
-
-export interface MemoryTurnOrchestrationInput {
-  readonly runId: string;
-  readonly userMessage: ConversationMessage;
-  readonly assistantMessage: ConversationMessage;
-  readonly modelRef?: ExecutionStanceModelRef | null;
-  readonly displayName?: string;
-}
-
-export interface MemoryTurnOrchestrationResult extends MemoryContextAssemblyResult {
-  readonly run: Readonly<Run>;
-  readonly workspace: Readonly<Workspace>;
 }
 
 export const MAX_RECALLED_CONTEXT_CHARS = 4_000;

@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { RunMode, RunState, WorkspaceKind, WorkspaceState, type LegacyCandidateMemorySignal, type ContextLens, type ConversationMessage, type EventLogEntry, type Run, type Workspace, type WorkingProjection } from "@do-soul/alaya-protocol";
+import { RunMode, RunState, WorkspaceKind, WorkspaceState, type LegacyCandidateMemorySignal, type ContextLens, type EventLogEntry, type Run, type Workspace, type WorkingProjection } from "@do-soul/alaya-protocol";
 import { ConversationService, type ConversationServiceDependencies } from "../../conversation/conversation-service.js";
 
 export function createService(
@@ -25,9 +25,6 @@ export function createService(
         revision: 0,
         ...entry
       }))
-    },
-    gardenCompileQueue: {
-      enqueue: vi.fn(() => ({ status: "enqueued" as const }))
     },
     signalReceiver: {
       receiveSignal: vi.fn(async (signal: LegacyCandidateMemorySignal) => ({
@@ -119,51 +116,4 @@ export function createWorkingProjection(): WorkingProjection {
     total_token_estimate: 11,
     recall_policy_ref: "recall-policy-runtime-1"
   };
-}
-
-export function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
-  return {
-    signal_id: "signal-1",
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: "surface://cli/main",
-    source: "model_tool",
-    signal_kind: "potential_claim",
-    signal_state: "emitted",
-    object_kind: "constraint",
-    scope_hint: null,
-    domain_tags: ["memory"],
-    confidence: 0.8,
-    evidence_refs: ["msg-user"],
-    source_memory_refs: [],
-    supersedes_refs: [],
-    exception_to_refs: [],
-    contradicts_refs: [],
-    incompatible_with_refs: [],
-    raw_payload: {
-      excerpt: "Use explicit evidence before durable memory."
-    },
-    source_observation: null,
-    created_at: "2026-04-29T00:00:00.000Z",
-    ...overrides
-  };
-}
-
-export function createMessage(
-  messageId: string,
-  role: ConversationMessage["role"],
-  content: string,
-  createdAt: string | null = "2026-04-29T00:00:00.000Z"
-): ConversationMessage {
-  return {
-    message_id: messageId,
-    role,
-    content,
-    ...(createdAt === null ? {} : { created_at: createdAt })
-  };
-}
-
-export async function flushBackgroundTasks(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  await new Promise<void>((resolve) => setImmediate(resolve));
 }

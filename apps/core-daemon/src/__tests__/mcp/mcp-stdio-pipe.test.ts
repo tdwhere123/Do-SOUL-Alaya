@@ -67,6 +67,7 @@ describe("Alaya MCP stdio pipe", () => {
       } as unknown as GardenTaskOperations,
       recall: unused,
       reportContextUsage: unused,
+      captureHostSession: unused,
       interpretation: unused,
       operations: {
         listPendingProposals: async () => ({ proposals: [], total_count: 0 })

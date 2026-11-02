@@ -424,7 +424,9 @@ export {
   type GardenTaskStatus,
   type GardenStatementSessionSources,
   type StatementSessionRoot,
-  type StatementSessionTurn
+  type HostSessionLedger,
+  type HostSessionLedgerMessage,
+  type HostSessionRound
 } from "./repos/garden/index.js";
 
 export { SqliteSemanticArtifactRepo } from "./repos/garden/semantic-artifact-repo.js";

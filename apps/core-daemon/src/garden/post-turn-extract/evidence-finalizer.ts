@@ -1,77 +1,25 @@
 import {
   CandidateMemorySignalSchema,
-  type CandidateMemorySignal,
-  type ConversationMessage
+  type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
-import { CoreError } from "@do-soul/alaya-core";
-import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
-import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-id.js";
 import {
-  receivedEvidenceCapsule,
   isWritePathMaterializationDeferral,
   signalMaterializationFailed,
   type PostTurnSignalReceiver
 } from "./signal-receiver.js";
 
-export interface PostTurnEvidenceFinalizationInput {
-  readonly taskId: string;
-  readonly workspaceId: string;
-  readonly runId: string;
-  readonly createdAt: string;
-  readonly turnContent: string;
-  readonly turnMessages: readonly ConversationMessage[];
-  readonly sourceObservation: CandidateMemorySignal["source_observation"];
+type GardenTaskSignalReceiptInput = Readonly<{
   readonly candidates: readonly CandidateMemorySignal[];
   readonly signalReceiver: PostTurnSignalReceiver;
-  readonly admittedSourceRootId?: string;
   readonly beforeReceive?: () => Promise<void>;
   readonly failedSignalIds?: Set<string>;
-}
-
-export async function finalizePostTurnEvidence(
-  input: PostTurnEvidenceFinalizationInput
-): Promise<readonly string[]> {
-  const received = await receiveCandidateSignals(input);
-  if (
-    input.admittedSourceRootId === undefined &&
-    (!received.createdEvidence || !candidatesPreserveOriginalTurn(input))
-  ) {
-    // The extract-task digest is an 800-char slice. Rebuilding from it would
-    // admit a clipped body as if it were the complete original.
-    await receiveEvidenceFallback(input, received.signalIds);
-  }
-  await input.beforeReceive?.();
-  return received.signalIds;
-}
+}>;
 
 /** Durable receipt of task-produced signals under a claim; no turn evidence fallback is involved. */
-export async function receiveGardenTaskSignals(
-  input: Pick<PostTurnEvidenceFinalizationInput, "candidates" | "signalReceiver" | "beforeReceive" | "failedSignalIds">
-): Promise<readonly string[]> {
-  const received = await receiveCandidateSignals({ ...input, sourceObservation: null });
-  await input.beforeReceive?.();
-  return received.signalIds;
-}
-
-function candidatesPreserveOriginalTurn(input: PostTurnEvidenceFinalizationInput): boolean {
-  return input.candidates.some((candidate) => {
-    const payload = candidate.raw_payload;
-    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return false;
-    const record = payload as Record<string, unknown>;
-    if (typeof record.full_turn_content === "string" && record.full_turn_content === input.turnContent) {
-      return true;
-    }
-    return record.gist === input.turnContent || record.excerpt === input.turnContent;
-  });
-}
-
-async function receiveCandidateSignals(
-  input: Pick<PostTurnEvidenceFinalizationInput, "candidates" | "signalReceiver" | "beforeReceive" | "failedSignalIds" | "sourceObservation">
-): Promise<{ signalIds: string[]; createdEvidence: boolean }> {
+export async function receiveGardenTaskSignals(input: GardenTaskSignalReceiptInput): Promise<readonly string[]> {
   const signalIds: string[] = [];
-  let createdEvidence = false;
   for (const candidate of input.candidates) {
-    const signal = bindSourceObservation(candidate, input.sourceObservation);
+    const signal = bindSourceObservation(candidate);
     await input.beforeReceive?.();
     let received = await input.signalReceiver.receiveSignal(signal);
     if (isWritePathMaterializationDeferral(received)) {
@@ -80,53 +28,12 @@ async function receiveCandidateSignals(
     }
     signalIds.push(received.signal.signal_id);
     if (signalMaterializationFailed(received)) input.failedSignalIds?.add(received.signal.signal_id);
-    createdEvidence ||= receivedEvidenceCapsule(received) ||
-      await input.signalReceiver.hasCreatedEvidence(received);
-  }
-  return { signalIds, createdEvidence };
-}
-
-function bindSourceObservation(
-  signal: CandidateMemorySignal,
-  sourceObservation: CandidateMemorySignal["source_observation"]
-): CandidateMemorySignal {
-  if (sourceObservation !== null) {
-    return CandidateMemorySignalSchema.parse({ ...signal, source_observation: sourceObservation });
-  }
-  if (signal.interpretation_contract !== undefined) {
-    return signal;
-  }
-  return CandidateMemorySignalSchema.parse({ ...signal, source_observation: null });
-}
-
-async function receiveEvidenceFallback(
-  input: PostTurnEvidenceFinalizationInput,
-  signalIds: string[]
-): Promise<void> {
-  const signal = buildGardenTurnEvidenceFallback({
-    turnContent: input.turnContent,
-    reason: input.candidates.length === 0 ? "empty_extraction" : "no_evidence_created",
-    signalId: buildGardenTaskEvidenceFallbackSignalId(input.taskId),
-    workspaceId: input.workspaceId,
-    runId: input.runId,
-    surfaceId: null,
-    createdAt: input.createdAt,
-    sourceObservation: input.sourceObservation,
-    turnMessages: input.turnMessages
-  });
-  if (signal === null) {
-    throw new CoreError(
-      "VALIDATION",
-      `Garden task evidence fallback source content was empty: ${input.taskId}`
-    );
   }
   await input.beforeReceive?.();
-  const received = await input.signalReceiver.receiveSignal(signal);
-  if (!await input.signalReceiver.hasCreatedEvidence(received)) {
-    throw new CoreError(
-      "VALIDATION",
-      `Garden task evidence fallback did not create durable evidence: ${input.taskId}`
-    );
-  }
-  signalIds.push(received.signal.signal_id);
+  return signalIds;
+}
+
+function bindSourceObservation(signal: CandidateMemorySignal): CandidateMemorySignal {
+  if (signal.interpretation_contract !== undefined) return signal;
+  return CandidateMemorySignalSchema.parse({ ...signal, source_observation: null });
 }

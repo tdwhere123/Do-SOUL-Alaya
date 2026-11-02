@@ -7,7 +7,8 @@ import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
 import { receiveGardenTaskSignals } from "../post-turn-extract/evidence-finalizer.js";
 import { quarantineUnavailableSourceTasks } from "../post-turn-extract/source-provenance.js";
-import { STATEMENT_SESSION_IDLE_MS, sweepIdleStatementSessions } from "../statement-session/statement-session-closure.js";
+import { STATEMENT_SESSION_IDLE_MS } from "../statement-session/statement-session-closure.js";
+import { MCP_HOST_SESSION_ISSUER, type HostSessionCapture } from "../host-session/host-session-capture.js";
 import {
   emitStatementSessionTaskSignals, parseStatementSessionTaskPayload, readStatementSessionRequest,
   type StatementSessionTaskPayload
@@ -22,6 +23,7 @@ type StatementSessionRuntimeInput = Readonly<{
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly signalReceiver?: PostTurnSignalReceiver;
+  readonly hostSessionCapture?: HostSessionCapture;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>;
 type StatementSessionRuntime = StatementSessionRuntimeInput & {
@@ -30,13 +32,13 @@ type StatementSessionRuntime = StatementSessionRuntimeInput & {
   readonly configService: NonNullable<StatementSessionRuntimeInput["configService"]>;
 };
 
-/** Closes idle run tails, then settles one statement session chunk with the configured garden model. */
+/** Closes idle container tails, then settles one statement session chunk with the configured garden model. */
 export function createStatementSessionTaskProcessor(input: StatementSessionRuntimeInput): () => Promise<void> {
   return async (): Promise<void> => {
     if (input.gardenTaskRepo === undefined || input.signalReceiver === undefined || input.configService === undefined) return;
     const runtime: StatementSessionRuntime = { ...input, gardenTaskRepo: input.gardenTaskRepo,
       signalReceiver: input.signalReceiver, configService: input.configService };
-    sweepIdleStatementSessions(runtime.gardenTaskRepo, runtime);
+    await runtime.hostSessionCapture?.sweepIdle(MCP_HOST_SESSION_ISSUER);
     await quarantineUnavailableSourceTasks(runtime.gardenTaskRepo, runtime.now);
     const row = runtime.gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, undefined, 1, GardenTaskKind.SOURCE_STATEMENT_SESSION)[0];
     if (row === undefined) return;
@@ -59,8 +61,6 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
   }
   try {
     const dispatch = await publishInProcessTaskDispatch(row, payload.run_id, claimedAt, input.eventPublisher);
-    const observedAt = new Map(input.gardenTaskRepo.statementSessions.turns(payload.workspace_id, payload.run_id)
-      .map(turn => [turn.root_id, turn.source_observed_at]));
     const { request, located } = readStatementSessionRequest(input.gardenTaskRepo.statementSessions, payload);
     if (provider.extractSourceStatementRequest === undefined) {
       throw new GardenProviderError("Garden provider cannot extract statement sessions.", "provider_failure");
@@ -76,10 +76,10 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
     const emittedSignalIds = await receiveGardenTaskSignals({
       candidates: emitStatementSessionTaskSignals({ taskId: row.id, payload, request, located, receipt, createdAt: input.now(),
         sourceObservation: rootId => {
-          // Delivery time describes exposure to context, not when reported messages occurred.
-          const observed = observedAt.get(rootId);
-          return observed == null ? null
-            : { observed_at: observed, authority: "trusted_host_event", source_event_id: dispatch.event_id };
+          // Alaya's receipt of the root is the trusted observation; host-reported time never is.
+          const read = input.gardenTaskRepo.statementSessions.root(payload.workspace_id, rootId);
+          return read.status === "unavailable" ? null
+            : { observed_at: read.root.recorded_at, authority: "trusted_host_event", source_event_id: dispatch.event_id };
         } }),
       signalReceiver: input.signalReceiver, failedSignalIds,
       beforeReceive: async () => await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now)

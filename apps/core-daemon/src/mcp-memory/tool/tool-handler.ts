@@ -9,6 +9,7 @@ import {
 } from "./tool-handler-operations.js";
 import { createRecallHandler, createReportContextUsageHandler } from "../recall/recall-usage-handlers.js";
 import { createSourceSemanticInterpretationHandler } from "./interpretation-handler.js";
+import { createHostSessionCaptureHandler } from "./host-session-handler.js";
 import {
   classifyError,
   fail,
@@ -61,6 +62,7 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     gardenTasks,
     recall,
     reportContextUsage,
+    captureHostSession: createHostSessionCaptureHandler(deps),
     operations,
     interpretation
   });

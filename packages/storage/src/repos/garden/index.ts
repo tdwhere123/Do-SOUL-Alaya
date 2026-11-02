@@ -37,6 +37,11 @@ export {
 } from "./garden-task-repo.js";
 export {
   type GardenStatementSessionSources,
-  type StatementSessionRoot,
-  type StatementSessionTurn
+  type StatementSessionRoot
 } from "./garden-statement-session-sources.js";
+export {
+  HostSessionLedger,
+  type HostSessionIdleContainer,
+  type HostSessionLedgerMessage,
+  type HostSessionRound
+} from "./host-session-ledger.js";

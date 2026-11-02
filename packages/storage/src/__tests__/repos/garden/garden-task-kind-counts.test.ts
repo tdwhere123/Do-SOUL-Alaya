@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GardenEventType, GardenRole, GardenTaskKind, GardenTier, parseGardenEventPayload } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteGardenTaskRepo } from "../../../repos/garden/garden-task-repo.js";
-import { gardenTurnSourceId, retainGardenTurnSources } from "./garden-task-source-fixture.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -12,10 +11,9 @@ afterEach(() => {
 });
 
 describe("garden task kind counts", () => {
-  it("counts failed POST_TURN_EXTRACT rows separately from pending and stale", async () => {
+  it("counts failed rows of one kind separately from pending and stale", async () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);
-    retainGardenTurnSources(database);
     const repo = new SqliteGardenTaskRepo(database.connection, {
       appendManyWithMutation: async (events, mutate) =>
         mutate(events.map((event, index) => ({
@@ -27,22 +25,19 @@ describe("garden task kind counts", () => {
     });
     const payload = {
       task_id: "post-turn-failed-1",
-      task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+      task_kind: GardenTaskKind.TTL_CLEANUP,
       required_tier: GardenTier.TIER_2,
       workspace_id: "workspace-1",
-      admitted_source_root_id: gardenTurnSourceId("workspace-1"),
       run_id: "run-1",
       target_object_refs: [],
       priority: 20,
       created_at: "2026-09-16T00:00:00.000Z",
-      turn_index: 0,
-      turn_digest: { last_messages: [{ role: "user", content_excerpt: "remember this" }] }
     };
     repo.enqueue({
       id: "post-turn-failed-1",
       workspace_id: "workspace-1",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload,
       created_at: "2026-09-16T00:00:00.000Z"
     });
@@ -50,7 +45,7 @@ describe("garden task kind counts", () => {
       id: "post-turn-pending-1",
       workspace_id: "workspace-1",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload: { ...payload, task_id: "post-turn-pending-1" },
       created_at: "2026-09-16T00:00:00.000Z"
     });
@@ -76,7 +71,7 @@ describe("garden task kind counts", () => {
           caused_by: "garden-task-kind-count-test",
           payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
             task_id: "post-turn-failed-1",
-            task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+            task_kind: GardenTaskKind.TTL_CLEANUP,
             role: GardenRole.LIBRARIAN,
             tier: GardenTier.TIER_2,
             success: false,
@@ -89,8 +84,8 @@ describe("garden task kind counts", () => {
       "in-process"
     );
 
-    expect(repo.countByKind(GardenTaskKind.POST_TURN_EXTRACT, "2026-09-16T00:00:00.000Z")).toEqual({
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+    expect(repo.countByKind(GardenTaskKind.TTL_CLEANUP, "2026-09-16T00:00:00.000Z")).toEqual({
+      kind: GardenTaskKind.TTL_CLEANUP,
       pending: 1,
       stale: 0,
       failed: 1
@@ -104,8 +99,8 @@ describe("garden task kind counts", () => {
       appendManyWithMutation: async (_events, mutate) => mutate([])
     });
 
-    expect(repo.countByKind(GardenTaskKind.POST_TURN_EXTRACT, "2026-09-16T00:00:00.000Z")).toEqual({
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+    expect(repo.countByKind(GardenTaskKind.TTL_CLEANUP, "2026-09-16T00:00:00.000Z")).toEqual({
+      kind: GardenTaskKind.TTL_CLEANUP,
       pending: 0,
       stale: 0,
       failed: 0
@@ -118,7 +113,7 @@ describe("garden task kind counts", () => {
       id: "post-turn-ws1",
       workspace_id: "workspace-1",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload: extractPayload("post-turn-ws1", "workspace-1"),
       created_at: "2026-09-16T00:00:00.000Z"
     });
@@ -127,16 +122,16 @@ describe("garden task kind counts", () => {
       id: "post-turn-ws2",
       workspace_id: "workspace-2",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload: extractPayload("post-turn-ws2", "workspace-2"),
       created_at: "2026-09-16T00:00:00.000Z"
     });
     await failTask("workspace-2", "post-turn-ws2");
 
     expect(
-      repo.countByKind(GardenTaskKind.POST_TURN_EXTRACT, "2026-09-16T00:00:00.000Z", "workspace-1")
+      repo.countByKind(GardenTaskKind.TTL_CLEANUP, "2026-09-16T00:00:00.000Z", "workspace-1")
     ).toEqual({
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       pending: 0,
       stale: 0,
       failed: 1
@@ -149,7 +144,7 @@ describe("garden task kind counts", () => {
       id: "post-turn-old-failed",
       workspace_id: "workspace-1",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload: extractPayload("post-turn-old-failed", "workspace-1"),
       created_at: "2026-09-16T00:00:00.000Z"
     });
@@ -158,20 +153,20 @@ describe("garden task kind counts", () => {
       id: "post-turn-recent-pending",
       workspace_id: "workspace-1",
       role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       payload: extractPayload("post-turn-recent-pending", "workspace-1"),
       created_at: "2026-09-16T00:00:10.000Z"
     });
 
     expect(
       repo.countByKind(
-        GardenTaskKind.POST_TURN_EXTRACT,
+        GardenTaskKind.TTL_CLEANUP,
         "2026-09-16T00:00:00.000Z",
         "workspace-1",
         1
       )
     ).toEqual({
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
+      kind: GardenTaskKind.TTL_CLEANUP,
       pending: 1,
       stale: 0,
       failed: 0
@@ -181,17 +176,14 @@ describe("garden task kind counts", () => {
 
 function extractPayload(taskId: string, workspaceId: string) {
   return {
-    admitted_source_root_id: gardenTurnSourceId(workspaceId),
     task_id: taskId,
-    task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+    task_kind: GardenTaskKind.TTL_CLEANUP,
     required_tier: GardenTier.TIER_2,
     workspace_id: workspaceId,
     run_id: "run-1",
     target_object_refs: [],
     priority: 20,
     created_at: "2026-09-16T00:00:00.000Z",
-    turn_index: 0,
-    turn_digest: { last_messages: [{ role: "user", content_excerpt: "remember this" }] }
   };
 }
 
@@ -201,7 +193,6 @@ async function createCountedExtractRepo(): Promise<{
 }> {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
-  retainGardenTurnSources(database);
   const repo = new SqliteGardenTaskRepo(database.connection, {
     appendManyWithMutation: async (events, mutate) =>
       mutate(events.map((event, index) => ({
@@ -232,7 +223,7 @@ async function createCountedExtractRepo(): Promise<{
             caused_by: "garden-task-kind-count-test",
             payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
               task_id: taskId,
-              task_kind: GardenTaskKind.POST_TURN_EXTRACT,
+              task_kind: GardenTaskKind.TTL_CLEANUP,
               role: GardenRole.LIBRARIAN,
               tier: GardenTier.TIER_2,
               success: false,

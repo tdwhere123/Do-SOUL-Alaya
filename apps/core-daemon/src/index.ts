@@ -241,6 +241,7 @@ async function buildGardenWiring(
   return await createGardenRuntimeWiring({
     database: bootstrap.database,
     startupSteps: bootstrap.startupSteps,
+    fieldStores: repositories.fieldComposition.stores,
     eventLogRepo: repositories.eventLogRepo,
     evidenceCapsuleRepo: repositories.evidenceCapsuleRepo,
     eventPublisher: foundation.eventPublisher,

@@ -13,6 +13,7 @@ import {
   SoulProposeEdgeRequestSchema,
   SoulProposeMemoryUpdateRequestSchema,
   SoulReportContextUsageRequestSchema,
+  SoulCaptureHostSessionRequestSchema,
   SoulResolveRequestSchema,
   SoulReviewMemoryProposalRequestSchema,
   SoulInterpretationRequestSchema
@@ -100,8 +101,14 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.report_context_usage",
     description:
-      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Usage trust weight is server-derived: a self-reported usage is always treated as automatic attribution and carries the lower path-plasticity weight. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
+      "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Usage trust weight is server-derived: a self-reported usage is always treated as automatic attribution and carries the lower path-plasticity weight. Usage feedback only: `turn_index`, `turn_digest` and `source_observed_at` are deprecated and ignored; capture messages with soul.capture_host_session.",
     parametersSchema: SoulReportContextUsageRequestSchema
+  },
+  {
+    name: "soul.capture_host_session",
+    description:
+      "WHEN: after each turn (or with any window of the conversation) so Alaya retains the host conversation as source. Send each message with its host-stable `message_id`, its `position` in the conversation `container` (`scope` + `id`), `role` (user/assistant), `content`, `completeness` (complete or excerpt) and honest `fidelity`; add `host_reported_at` when the host knows the message time. Re-sending already captured messages admits nothing new; a different body for the same id is a conflict. Set `closes_tail` when the conversation has no further message for now.",
+    parametersSchema: SoulCaptureHostSessionRequestSchema
   },
   {
     name: "soul.resolve",

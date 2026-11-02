@@ -37,6 +37,8 @@ import type {
 } from "@do-soul/alaya-soul";
 import type { BackgroundServiceManager } from "../../background/bootstrap.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
+import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import type { HostSessionCapture } from "../host-session/host-session-capture.js";
 import type { EmbeddingBackfillMode } from "../scheduler/scheduler-runtime-types.js";
 
 export type RuntimeGardenScheduler = GardenScheduler & {
@@ -212,6 +214,7 @@ export type CreateGardenRuntimeInput = {
   readonly semanticExtractionProfile?: SemanticExtractionProfile;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly signalReceiver?: PostTurnSignalReceiver;
+  readonly hostSessionCaptureFor?: (gardenTaskRepo: SqliteGardenTaskRepo) => HostSessionCapture;
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
   readonly tombstoneDispositionSweepPort?: JanitorDispositionSweepPort;

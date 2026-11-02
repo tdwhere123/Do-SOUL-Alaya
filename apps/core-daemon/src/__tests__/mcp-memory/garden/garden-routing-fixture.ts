@@ -1,7 +1,6 @@
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { expect, vi } from "vitest";
 import {
-  GardenRole,
   GardenTaskKind,
   RunMode,
   RunState,
@@ -9,18 +8,18 @@ import {
   SignalSource,
   WorkspaceKind,
   WorkspaceState,
-  type CandidateMemorySignal,
+  SourceStatementRequestSchema,
   type ContextDeliveryRecord,
+  type HostScopedReference,
+  type HostSessionCaptureResponse,
+  type HostSessionMessage,
   type LegacyCandidateMemorySignal,
   type RuntimeGardenComputeConfig,
-  type SourceAdmissionPort,
   type SourceStatement,
   type SourceStatementMessage,
   type SourceStatementRequest
 } from "@do-soul/alaya-protocol";
 import {
-  createSourceAdmissionPort,
-  appendSourceRecordAdmitted,
   EventPublisher,
   fieldContractSha256,
   SignalService
@@ -44,12 +43,15 @@ import {
   type GardenTaskRow,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { hostSessionContainerKey } from "@do-soul/alaya-protocol";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import type { BackgroundServiceConfig } from "../../../background/bootstrap.js";
 import { createGardenRuntime } from "../../../garden/runtime/runtime.js";
-import { bindPostTurnTaskSource } from "./post-turn-source-fixture.js";
 import type { PostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
+import {
+  createDaemonHostSessionCapture, MCP_HOST_SESSION_ISSUER, type HostSessionCapture
+} from "../../../garden/host-session/host-session-capture.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
@@ -65,7 +67,7 @@ import {
   noRunContext,
   sessionRunContext,
   unwrapOk
-} from "./post-turn-extract-task-record-fixture.js";
+} from "./garden-routing-record-fixture.js";
 
 export {
   createDeliveryRecord,
@@ -74,11 +76,11 @@ export {
   noRunContext,
   sessionRunContext,
   unwrapOk
-} from "./post-turn-extract-task-record-fixture.js";
+} from "./garden-routing-record-fixture.js";
 
 const harnesses = new Set<ClosableHarness>();
 
-export function cleanupPostTurnExtractHarnesses(): void {
+export function cleanupGardenRoutingHarnesses(): void {
   for (const harness of harnesses) {
     harness.close();
   }
@@ -104,11 +106,12 @@ export interface RoutingHarness extends ClosableHarness {
   readonly signalRepo: SqliteSignalRepo;
   readonly signalService: SignalService;
   readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
-  enqueuePostTurnTask(overrides?: {
-    readonly id?: string;
-    readonly payload?: PostTurnPayload;
-    readonly created_at?: string;
-  }): void;
+  readonly hostSessionCapture: HostSessionCapture;
+  /** Captures one complete host turn through the MCP issuer; its round root is admitted at once. */
+  captureTurn(options?: Readonly<{ messages?: readonly HostSessionMessage[]; runId?: string;
+    container?: HostScopedReference; closesTail?: boolean }>): Promise<HostSessionCaptureResponse>;
+  /** Round root ids of the default container in round order. */
+  roundRoots(): readonly string[];
   runScheduler(): Promise<void>;
   /** Moves the runtime clock forward, e.g. past the statement session idle interval. */
   advance(ms: number): void;
@@ -124,35 +127,24 @@ export interface GardenListPendingTasksOutput {
   }[];
 }
 
-export interface PostTurnPayload {
-  readonly task_id?: string;
-  readonly task_kind?: string;
-  readonly required_tier?: string;
-  readonly run_id: string;
-  readonly target_object_refs?: readonly string[];
-  readonly priority?: number;
-  readonly created_at?: string;
-  readonly source_observed_at?: string;
-  readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]> | null;
-  readonly admitted_source_root_id?: string;
-  readonly turn_index: number;
-  readonly workspace_id: string;
-  readonly turn_digest: {
-    readonly last_messages: readonly {
-      readonly role: string;
-      readonly content_excerpt: string;
-    }[];
-    readonly context_manifest: {
-      readonly delivered_object_ids: readonly string[];
-    };
-  };
+export const ROUTING_CONTAINER: HostScopedReference = { scope: "routing-host", id: "conversation-1" };
+
+/** The default captured turn: a user preference and the assistant's acknowledgement. */
+export function routingTurn(overrides: Readonly<{ user?: string; first?: number; hostReportedAt?: string }> = {}):
+  readonly HostSessionMessage[] {
+  const first = overrides.first ?? 0;
+  const at = overrides.hostReportedAt === undefined ? {} : { host_reported_at: overrides.hostReportedAt };
+  return [
+    { message_id: `message-${first}`, position: first, role: "user", completeness: "complete", fidelity: "original_bytes",
+      content: overrides.user ?? "I prefer pnpm commands in this repo.", ...at },
+    { message_id: `message-${first + 1}`, position: first + 1, role: "assistant", completeness: "complete",
+      fidelity: "original_bytes", content: "Acknowledged and applied.", ...at }
+  ];
 }
 
 export async function createHandlerHarness(options: {
   readonly delivery?: ContextDeliveryRecord | null;
   readonly filename?: string;
-  readonly sourceAdmissionTransform?: (port: SourceAdmissionPort) => SourceAdmissionPort;
-  readonly beforeSourceAudit?: () => void;
 } = {}): Promise<HandlerHarness> {
   const base = await createSqliteHarnessBase(options.filename);
   const handler = createMcpMemoryToolHandler(createMcpDeps(base, options));
@@ -169,7 +161,6 @@ export async function createRoutingHarness(options: {
   readonly now?: () => string;
   readonly officialExtract?: StatementExtract;
   readonly localExtract?: StatementExtract;
-  readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
   readonly receiveSignal?: PostTurnSignalReceiver["receiveSignal"];
 }): Promise<RoutingHarness> {
   const base = await createSqliteHarnessBase();
@@ -183,6 +174,7 @@ export async function createRoutingHarness(options: {
   });
   const officialProvider = createProvider("official_api", options.officialExtract);
   const localProvider = createProvider("local_heuristics", options.localExtract);
+  const hostSessionCapture = hostSessionCaptureFor(base, now);
   const runtime = createGardenRuntime({
     now,
     databaseConnection: base.database.connection,
@@ -212,13 +204,11 @@ export async function createRoutingHarness(options: {
     },
     officialApiGardenProvider: officialProvider,
     localHeuristicsProvider: localProvider,
-    // The routing fixture isolates task dispatch from materialization. Its
-    // receiver models a successful evidence postcondition; production wiring
-    // verifies that postcondition against materialization events.
+    // The routing fixture isolates task dispatch from materialization.
     signalReceiver: {
-      receiveSignal: options.receiveSignal ?? ((signal) => signalService.receiveSignal(signal)),
-      hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
+      receiveSignal: options.receiveSignal ?? ((signal) => signalService.receiveSignal(signal))
     } satisfies PostTurnSignalReceiver,
+    hostSessionCaptureFor: () => hostSessionCapture,
     strongRefService: {
       isProtected: vi.fn(async () => false)
     } as unknown as Parameters<typeof createGardenRuntime>[0]["strongRefService"],
@@ -227,20 +217,16 @@ export async function createRoutingHarness(options: {
   const harness: RoutingHarness = {
     ...base,
     signalService,
-    enqueuePostTurnTask(overrides = {}) {
-      base.gardenTaskRepo.enqueue({
-        id: overrides.id ?? "post-turn-task-1",
-        workspace_id: "workspace-1",
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: bindPostTurnTaskSource(base.database, overrides.payload ?? createPostTurnPayload(),
-          `post-turn:${overrides.id ?? "post-turn-task-1"}`),
-        // Default to "just enqueued" so host_worker rows stay within the
-        // in-process fallback wait window — the host worker gets first claim.
-        // The bounded-fallback test below enqueues with an explicitly aged
-        // created_at to exercise the zero-cloud heuristic fallback path.
-        created_at: overrides.created_at ?? now()
-      });
+    hostSessionCapture,
+    async captureTurn(captureOptions = {}) {
+      return await hostSessionCapture.capture({ workspaceId: "workspace-1", runId: captureOptions.runId ?? "run-1",
+        issuer: MCP_HOST_SESSION_ISSUER, request: { container: captureOptions.container ?? ROUTING_CONTAINER,
+          messages: captureOptions.messages ?? routingTurn(),
+          ...(captureOptions.closesTail === undefined ? {} : { closes_tail: captureOptions.closesTail }) } });
+    },
+    roundRoots() {
+      return base.gardenTaskRepo.statementSessions.rounds("workspace-1", hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256))
+        .map(round => round.root_id);
     },
     async runScheduler() {
       await getService(runtime, "GardenScheduler").task();
@@ -256,6 +242,14 @@ export async function createRoutingHarness(options: {
   };
   harnesses.add(harness);
   return harness;
+}
+
+function hostSessionCaptureFor(base: Readonly<{ database: StorageDatabase; eventLogRepo: SqliteEventLogRepo;
+  gardenTaskRepo: SqliteGardenTaskRepo }>, now: () => string) {
+  return createDaemonHostSessionCapture({ eventLogRepo: base.eventLogRepo, runtimeNotifier: { notifyEntry: () => undefined },
+    gardenTaskRepo: base.gardenTaskRepo, now, warn: () => undefined,
+    stores: createSqliteFieldFormationStores({ repos: createDaemonFieldRepos({ database: base.database }),
+      database: base.database }) });
 }
 
 async function createSqliteHarnessBase(filename = ":memory:") {
@@ -328,8 +322,7 @@ export function createMcpDeps(base: {
   readonly runtimeNotifier: { notifyEntry(entry: unknown): void };
 }, options: {
   readonly delivery?: ContextDeliveryRecord | null;
-  readonly sourceAdmissionTransform?: (port: SourceAdmissionPort) => SourceAdmissionPort;
-  readonly beforeSourceAudit?: () => void;
+  readonly hostSessionCapture?: HostSessionCapture;
 } = {}): McpMemoryToolHandlerDependencies {
   const signalService = new SignalService({
     eventLogRepo: base.eventLogRepo,
@@ -360,8 +353,7 @@ export function createMcpDeps(base: {
       receiveSignal: async (signal) => await signalService.receiveSignal(signal)
     },
     postTurnSignalReceiver: {
-      receiveSignal: async (signal) => await signalService.receiveSignal(signal),
-      hasCreatedEvidence: async () => true
+      receiveSignal: async (signal) => await signalService.receiveSignal(signal)
     },
     graphExploreService: {
       exploreOneHop: async () => []
@@ -376,19 +368,7 @@ export function createMcpDeps(base: {
     },
     eventPublisher: base.eventPublisher,
     gardenTaskRepo: base.gardenTaskRepo,
-    sourceAdmission: (options.sourceAdmissionTransform ?? (port => port))(createSourceAdmissionPort({
-      sha256: fieldContractSha256,
-      hostCaptureBinding: request => ({ namespace: "alaya", workspace_id: request.workspace_id,
-        producer: "post-turn", basis: "reported_excerpt" }),
-      audit: async record => {
-        options.beforeSourceAudit?.();
-        await appendSourceRecordAdmitted(base.eventLogRepo, record, { notifyEntry: () => undefined });
-      },
-      stores: createSqliteFieldFormationStores({
-        repos: createDaemonFieldRepos({ database: base.database }),
-        database: base.database
-      })
-    }))
+    hostSessionCapture: options.hostSessionCapture ?? hostSessionCaptureFor(base, () => "2026-05-07T00:10:00.000Z")
   };
 }
 
@@ -434,7 +414,20 @@ export async function recall(
   });
 }
 
-export { postTurnRows, reportUsage } from "./post-turn-extract-usage-fixture.js";
+/** Recorded host-worker output echoes the claimed request's host message ids only. */
+export function recordedSessionResponses(claimedPayload: unknown,
+  respond: (message: SourceStatementMessage) => readonly SourceStatement[]) {
+  const request = SourceStatementRequestSchema.parse(
+    (claimedPayload as { source_statements: { requests: readonly unknown[] } }).source_statements.requests[0]);
+  return [{ chunk_index: request.chunk_index, raw_json: JSON.stringify({ messages: request.messages.map(message => ({
+    message_id: message.message_id, statements: respond(message) })) }) }];
+}
+
+/** Retained body of an admitted source record. */
+export function retainedSourceBody(database: StorageDatabase, recordId: string): string | null | undefined {
+  return (database.connection.prepare("SELECT source_body FROM source_records WHERE record_id = ?").get(recordId) as
+    { source_body: string | null } | undefined)?.source_body;
+}
 
 type StatementExtract = NonNullable<GardenComputeProvider["extractSourceStatementRequest"]>;
 
@@ -442,7 +435,7 @@ function createProvider(
   provider_kind: GardenComputeProvider["provider_kind"],
   extract: StatementExtract | undefined
 ): GardenComputeProvider {
-  return { provider_kind, compile: async () => { throw new Error("post-turn work never compiles"); },
+  return { provider_kind, compile: async () => { throw new Error("statement sessions never compile"); },
     ...(extract === undefined ? {} : { extractSourceStatementRequest: extract }) };
 }
 
@@ -454,30 +447,6 @@ export function recordedStatementExtract(
   return vi.fn<StatementExtract>(async request => (await extractSourceStatementRequest({ request,
     transport: async () => ({ rawJson: rawJson?.(request) ?? JSON.stringify({ messages: request.messages.map(message => ({
       message_id: message.message_id, statements: respond(message) })) }) }) })).receipt);
-}
-
-export function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}): PostTurnPayload {
-  const payload: PostTurnPayload = {
-    task_id: "post-turn-task-1",
-    task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-    required_tier: "tier_2",
-    run_id: "run-1",
-    target_object_refs: ["memory-a"],
-    priority: 20,
-    created_at: "2026-05-07T00:00:00.000Z",
-    turn_index: 3,
-    workspace_id: "workspace-1",
-    turn_digest: {
-      last_messages: [
-        { role: "user", content_excerpt: "I prefer pnpm commands in this repo." },
-        { role: "assistant", content_excerpt: "Acknowledged and applied." }
-      ],
-      context_manifest: {
-        delivered_object_ids: ["memory-a"]
-      }
-    }
-  };
-  return { ...payload, ...overrides };
 }
 
 export function createSignal(

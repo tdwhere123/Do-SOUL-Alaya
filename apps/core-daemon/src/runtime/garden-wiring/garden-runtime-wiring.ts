@@ -21,6 +21,7 @@ import {
 } from "../../garden/support/forget-disposition-ports.js";
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
+import { createDaemonHostSessionCapture } from "../../garden/host-session/host-session-capture.js";
 import type { WarnLogger } from "../daemon/lifecycle/daemon-runtime-helpers.js";
 import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
 import {
@@ -52,6 +53,7 @@ type GardenRuntimeWiringInput = Readonly<{
   runtimeNotifier: AlayaRuntimeNotifier;
   warnLogger: WarnLogger;
   dynamicsService?: DaemonServiceFoundation["dynamicsService"];
+  fieldStores: DaemonRepositories["fieldComposition"]["stores"];
 }> &
   Pick<
     DaemonRepositories,
@@ -234,11 +236,10 @@ function createGardenSchedulerRuntime(
     configService: input.configService,
     officialApiGardenProvider: input.officialGardenProvider,
     localHeuristicsProvider: input.localHeuristicsProvider,
-    signalReceiver: createPostTurnSignalReceiver(
-      input.signalService,
-      input.eventLogRepo,
-      input.evidenceCapsuleRepo
-    ),
+    signalReceiver: createPostTurnSignalReceiver(input.signalService),
+    hostSessionCaptureFor: gardenTaskRepo => createDaemonHostSessionCapture({ stores: input.fieldStores,
+      eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, gardenTaskRepo,
+      now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(

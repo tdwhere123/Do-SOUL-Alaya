@@ -1,6 +1,5 @@
 import { CoreError } from "../shared/errors.js";
 
-import { GardenComputeCoordinator } from "./garden-compute-coordinator.js";
 import { rebuildConversationMessages } from "./message-history.js";
 import {
   RuntimeMode,
@@ -12,8 +11,6 @@ import {
   type ConversationServiceDependencies,
   type MemoryContextAssemblyInput,
   type MemoryContextAssemblyResult,
-  type MemoryTurnOrchestrationInput,
-  type MemoryTurnOrchestrationResult,
   type Run,
   type RunInterruptResult,
   type RuntimeModeValue,
@@ -24,10 +21,6 @@ export type {
   ConversationBudgetBankruptcyPort,
   ConversationContextLensAssemblerPort,
   ConversationEventLogRepoPort,
-  ConversationGardenCompileEnqueueInput,
-  ConversationGardenCompileEnqueueResult,
-  ConversationGardenCompileQueuePort,
-  ConversationGovernanceLeasePort,
   ConversationListPageOptions,
   ConversationRunRepoPort,
   ConversationServiceDependencies,
@@ -35,28 +28,12 @@ export type {
   ConversationWarnPort,
   ConversationWorkspaceRepoPort,
   MemoryContextAssemblyInput,
-  MemoryContextAssemblyResult,
-  MemoryTurnOrchestrationInput,
-  MemoryTurnOrchestrationResult
+  MemoryContextAssemblyResult
 } from "./conversation-service-ports.js";
 export { GARDEN_COMPILE_ENQUEUE_HEALTH_PHASE } from "./conversation-service-ports.js";
 
 export class ConversationService {
-  private readonly gardenComputeCoordinator: GardenComputeCoordinator;
-
-  public constructor(public readonly dependencies: ConversationServiceDependencies) {
-    this.gardenComputeCoordinator = new GardenComputeCoordinator({
-      ...(dependencies.gardenCompileQueue === undefined
-        ? {}
-        : { gardenCompileQueue: dependencies.gardenCompileQueue }),
-      ...(dependencies.healthJournalRecorder === undefined
-        ? {}
-        : { healthJournalRecorder: dependencies.healthJournalRecorder }),
-      warn: dependencies.warn,
-      releaseGovernanceLeaseSafely: (runId, workspaceId, phase) =>
-        this.releaseGovernanceLeaseSafely(runId, workspaceId, phase)
-    });
-  }
+  public constructor(public readonly dependencies: ConversationServiceDependencies) {}
 
   public async listMessages(runId: string, page?: ConversationListPageOptions): Promise<readonly ConversationMessage[]> {
     const run = await this.requireRun(runId);
@@ -108,44 +85,6 @@ export class ConversationService {
       displayName: input.displayName,
       runtimeMode: input.runtimeMode
     });
-  }
-
-  public async orchestrateMemoryTurn(input: MemoryTurnOrchestrationInput): Promise<MemoryTurnOrchestrationResult> {
-    const run = await this.requireRun(input.runId);
-    const workspace = await this.requireWorkspace(run.workspace_id);
-
-    await this.dependencies.governanceLeaseService?.acquire({
-      runId: run.run_id,
-      workspaceId: workspace.workspace_id
-    });
-
-    let gardenTakesLease = false;
-    try {
-      const memoryContext = await this.assembleContextForTurn({
-        run,
-        workspace,
-        displayName: input.displayName ?? input.userMessage.content.slice(0, 80)
-      });
-
-      gardenTakesLease = true;
-      this.gardenComputeCoordinator.triggerCompile({
-        run,
-        workspace,
-        modelRef: input.modelRef ?? null,
-        userMessage: input.userMessage,
-        assistantMessage: input.assistantMessage
-      });
-
-      return {
-        run,
-        workspace,
-        ...memoryContext
-      };
-    } finally {
-      if (!gardenTakesLease) {
-        await this.releaseGovernanceLeaseSafely(run.run_id, workspace.workspace_id, "memory turn processing");
-      }
-    }
   }
 
   private async assembleContextForTurn(input: {
@@ -217,18 +156,6 @@ export class ConversationService {
         }
       );
       return RuntimeMode.MINIMAL;
-    }
-  }
-
-  private async releaseGovernanceLeaseSafely(runId: string, workspaceId: string, phase: string): Promise<void> {
-    try {
-      await this.dependencies.governanceLeaseService?.release(runId);
-    } catch (error) {
-      this.dependencies.warn(`Failed to release governance lease after ${phase}`, {
-        run_id: runId,
-        workspace_id: workspaceId,
-        error
-      });
     }
   }
 

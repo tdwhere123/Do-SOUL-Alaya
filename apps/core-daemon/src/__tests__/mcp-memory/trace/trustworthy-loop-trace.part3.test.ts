@@ -47,8 +47,9 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
-import { bindPostTurnTaskSource } from "../garden/post-turn-source-fixture.js";
-import { closeStatementSessionChunks } from "../../../garden/statement-session/statement-session-closure.js";
+import { createDaemonHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../../garden/host-session/host-session-capture.js";
+import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
+import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 
 import {
   createMcpMemoryToolHandler,
@@ -119,8 +120,8 @@ interface TrustworthyLoopHarness {
   readonly eventLogRepo: SqliteEventLogRepo;
   callTool<TOutput = unknown>(toolName: string, args: Record<string, unknown>): Promise<TOutput>;
   close(): Promise<void>;
-  /** Admits one post-turn task and closes its run's statement session; returns the session task id. */
-  enqueueGardenTask(taskId: string): string;
+  /** Captures one host message and closes its container's statement session; returns the session task id. */
+  captureClosedSession(): Promise<string>;
 }
 
 async function createTrustworthyLoopHarness(
@@ -220,8 +221,7 @@ async function createTrustworthyLoopHarness(
     memoryService,
     signalService,
     postTurnSignalReceiver: {
-      receiveSignal: async (signal) => await signalService.receiveSignal(signal),
-      hasCreatedEvidence: async () => true
+      receiveSignal: async (signal) => await signalService.receiveSignal(signal)
     },
     graphExploreService: { exploreOneHop: async () => [] },
     sessionOverrideService: { apply: async () => ({ runtime_id: "override-1" }) },
@@ -262,17 +262,14 @@ async function createTrustworthyLoopHarness(
       await server.close();
       database.close();
     },
-    enqueueGardenTask(taskId: string) {
-      gardenTaskRepo.enqueue({
-        id: taskId,
-        workspace_id: "workspace-1",
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: bindPostTurnTaskSource(database, createPostTurnExtractPayload(), `post-turn:${taskId}`),
-        created_at: "2026-05-11T00:00:00.000Z"
-      });
-      closeStatementSessionChunks(gardenTaskRepo, { workspaceId: "workspace-1", runId: "run-1", closeTail: true,
-        now: () => "2026-05-11T00:20:00.000Z" });
+    async captureClosedSession() {
+      const capture = createDaemonHostSessionCapture({ eventLogRepo, runtimeNotifier, gardenTaskRepo,
+        now: () => "2026-05-11T00:00:00.000Z", warn: () => undefined,
+        stores: createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) }) });
+      await capture.capture({ workspaceId: "workspace-1", runId: "run-1", issuer: MCP_HOST_SESSION_ISSUER,
+        request: { container: { scope: "trace-host", id: "conversation-1" }, closes_tail: true, messages: [{
+          message_id: "message-0", position: 0, role: "user", content: "Garden extracted an unanchored signal.",
+          completeness: "complete", fidelity: "original_bytes" }] } });
       return gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 1, GardenTaskKind.SOURCE_STATEMENT_SESSION)[0]!.id;
     }
   };
@@ -371,24 +368,6 @@ function createRecallCandidate() {
   } as const;
 }
 
-function createPostTurnExtractPayload(): Readonly<Record<string, unknown>> {
-  return {
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    created_at: "2026-05-11T00:00:00.000Z",
-    source_observation: null,
-    turn_index: 1,
-    turn_digest: {
-      last_messages: [
-        {
-          role: "user",
-          content_excerpt: "Garden extracted an unanchored signal."
-        }
-      ]
-    }
-  };
-}
-
 function createUuidGenerator(): () => string {
   let counter = 0;
   return () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
@@ -408,7 +387,7 @@ describe("trustworthy-loop-trace", () => {
   it("keeps Garden-originated signals unanchored and does not warn for GARDEN_COMPILE", async () => {
     const warn = vi.fn();
     const harness = await createTrustworthyLoopHarness({ warn });
-    const sessionTaskId = harness.enqueueGardenTask("garden-task-1");
+    const sessionTaskId = await harness.captureClosedSession();
 
     const claimed = await harness.callTool<{ payload: { source_statements: {
       requests: readonly import("@do-soul/alaya-protocol").SourceStatementRequest[] } } }>(

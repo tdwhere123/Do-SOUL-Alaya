@@ -20,7 +20,9 @@ import {
   type SoulReportContextUsageResponse,
   type SoulReviewMemoryProposalRequest,
   type SoulInterpretationRequest,
-  type SoulInterpretationResponse
+  type SoulInterpretationResponse,
+  type HostSessionCaptureRequest,
+  type HostSessionCaptureResponse
 } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
@@ -51,6 +53,10 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext
   ) => Promise<SoulReportContextUsageResponse>;
+  readonly captureHostSession: (
+    request: HostSessionCaptureRequest,
+    context: McpMemoryToolCallContext
+  ) => Promise<HostSessionCaptureResponse>;
   readonly operations: McpMemoryToolOperations;
   readonly interpretation: (
     request: SoulInterpretationRequest,
@@ -109,6 +115,8 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
         "soul.report_context_usage",
         await input.reportContextUsage(parsed as SoulReportContextUsageRequest, context)
       ),
+    "soul.capture_host_session": async (parsed, context) =>
+      ok("soul.capture_host_session", await input.captureHostSession(parsed as HostSessionCaptureRequest, context)),
     "soul.resolve": async (parsed, context) =>
       ok("soul.resolve", await input.operations.resolveStagedWarning(parsed, context)),
     "soul.interpretation": async (parsed, context) =>

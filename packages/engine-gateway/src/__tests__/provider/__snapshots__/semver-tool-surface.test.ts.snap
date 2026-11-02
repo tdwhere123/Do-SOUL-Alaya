@@ -6,6 +6,7 @@ garden.complete_task|desc16=37232cb39d88f6b7
 garden.list_pending_tasks|desc16=9d01d531d0993cc3
 soul.apply_override|desc16=31b52ed4f67e22cb
 soul.batch_review_edge_proposals|desc16=a022a7a97652f765
+soul.capture_host_session|desc16=c4197fc7b2b3e923
 soul.emit_candidate_signal|desc16=7bfca48731018d56
 soul.explore_graph|desc16=665b9dd170588605
 soul.interpretation|desc16=61d99238d9c8b743
@@ -15,7 +16,7 @@ soul.open_pointer|desc16=0997adbea3835160
 soul.propose_edge|desc16=7be94e6eecf641db
 soul.propose_memory_update|desc16=dabe6268e4b92c4b
 soul.recall|desc16=a885919a1fe3aba1
-soul.report_context_usage|desc16=8e2642c67c93f8db
+soul.report_context_usage|desc16=4aadf73daf4b426d
 soul.resolve|desc16=2855fb014ef5e5c4
 soul.review_memory_proposal|desc16=44e9bbbf9f8b2958"
 `;

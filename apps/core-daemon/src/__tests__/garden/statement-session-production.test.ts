@@ -1,23 +1,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  BoundSourceStatementSchema, SOURCE_STATEMENT_LIMITS, SourceStatementRequestSchema, hashLabeledIdentity, type SourceStatementRequest
+  BoundSourceStatementSchema, SOURCE_STATEMENT_LIMITS, SourceStatementRequestSchema, hashLabeledIdentity,
+  hostSessionRoundSourceId, hostSessionStatementSessionId, type SourceStatementRequest
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { STATEMENT_SESSION_IDLE_MS } from "../../garden/statement-session/statement-session-closure.js";
 import { createGardenTaskHandlers } from "../../mcp-memory/garden-task/garden-task-handlers.js";
 import { prepareRecordedStatementIndex } from "../../../../bench-runner/src/__tests__/support/recorded-statement-index.js";
 import { sourceStatementRequests } from "../../../../bench-runner/src/runs/extraction/source-statement-request.js";
-import { RUN, START, WORKSPACE, createStatementSessionEnvironment } from "./statement-session-fixture.js";
+import {
+  CONTAINER, CONTAINER_KEY, START, WORKSPACE, createStatementSessionEnvironment, hostMessages
+} from "./statement-session-fixture.js";
 
 type Environment = Awaited<ReturnType<typeof createStatementSessionEnvironment>>;
 const environments: Environment[] = [];
 afterEach(async () => { for (const environment of environments.splice(0)) await environment.close(); });
 const QUERY_BUDGET = { work_units: 1000000, memory_bytes: 16 * 1024 * 1024 };
 const THREE_TURNS = [
-  [{ role: "user", content_excerpt: "I adopted a greyhound named Comet." }, { role: "assistant", content_excerpt: "Congratulations on Comet." }],
-  [{ role: "user", content_excerpt: "He sleeps on the\nblue sofa." }, { role: "assistant", content_excerpt: "That sounds cosy." }],
-  [{ role: "user", content_excerpt: "Comet finished his first marathon walk." }, { role: "assistant", content_excerpt: "Great progress." }]
-];
+  [{ role: "user", content: "I adopted a greyhound named Comet." }, { role: "assistant", content: "Congratulations on Comet." }],
+  [{ role: "user", content: "He sleeps on the\nblue sofa." }, { role: "assistant", content: "That sounds cosy." }],
+  [{ role: "user", content: "Comet finished his first marathon walk." }, { role: "assistant", content: "Great progress." }]
+] as const;
 const userStatement = (text: string) => text.startsWith("I ") || text.startsWith("He ") || text.startsWith("Comet ")
   ? [{ text: `The user said: ${text}`, relation: "pet life" }] : [];
 
@@ -26,14 +29,14 @@ async function environment(): Promise<Environment> {
   environments.push(created);
   return created;
 }
-async function reportTurns(env: Environment, turns: readonly (readonly { role: string; content_excerpt: string }[])[],
-  retainEvidence = true) {
-  for (const [index, turn] of turns.entries()) { await env.report(index, turn); if (retainEvidence) await env.processPostTurn(); }
-}
-function projectionRoots(env: Environment): readonly string[] {
-  return (env.database.connection.prepare(`SELECT json_extract(payload_json, '$.admitted_source_root_id') AS root
-    FROM garden_tasks WHERE kind = 'post_turn_extract' ORDER BY json_extract(payload_json, '$.turn_index')`).all() as
-    { root: string }[]).map(row => row.root);
+type Turn = readonly Readonly<{ role: "user" | "assistant"; content: string }>[];
+/** One capture call per turn, as a host reports after each answer. */
+async function captureTurns(env: Environment, turns: readonly Turn[]) {
+  let position = 0;
+  for (const turn of turns) {
+    await env.capture({ container: CONTAINER, messages: hostMessages([turn], position) });
+    position += turn.length;
+  }
 }
 function boundStatements(env: Environment) {
   return (env.database.connection.prepare("SELECT gist FROM evidence_capsules WHERE gist LIKE '{%'").all() as { gist: string }[])
@@ -42,15 +45,15 @@ function boundStatements(env: Environment) {
 function orderedRequests(env: Environment): readonly SourceStatementRequest[] {
   return [...env.requests].sort((left, right) => left.chunk_index - right.chunk_index);
 }
-function longRun(count: number) {
-  return Array.from({ length: count }, (_, index) => [{ role: index % 2 === 0 ? "user" : "assistant",
-    content_excerpt: `Entry ${index} recorded the garden plan. `.padEnd(560, "x") }]);
+function longRun(count: number): readonly Turn[] {
+  return Array.from({ length: count }, (_, index) => [{ role: index % 2 === 0 ? "user" as const : "assistant" as const,
+    content: `Entry ${index} recorded the garden plan. `.padEnd(560, "x") }]);
 }
 
-describe("production statement sessions over post-turn roots", { timeout: 30_000 }, () => {
-  it("closes an idle three-turn run into one request bound per root and nominated through statement keys", async () => {
+describe("production statement sessions over host-session round roots", { timeout: 30_000 }, () => {
+  it("closes an idle three-turn container into one request bound per round root and nominated through statement keys", async () => {
     const env = await environment();
-    await reportTurns(env, THREE_TURNS);
+    await captureTurns(env, THREE_TURNS);
     expect(env.sessionTasks()).toEqual([]);
     env.advance(STATEMENT_SESSION_IDLE_MS - 1);
     await env.processSession(env.provider(userStatement));
@@ -60,15 +63,16 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
     expect(env.sessionTasks().map(row => row.status)).toEqual(["completed"]);
     expect(env.requests).toHaveLength(1);
     const request = env.requests[0]!;
-    expect(request).toMatchObject({ session_id: RUN, chunk_index: 0, context: [] });
-    expect(request.messages.map(message => [message.role, message.text, message.recorded_at])).toEqual(
-      THREE_TURNS.flat().map(message => [message.role, message.content_excerpt.replace("\n", " "), null]));
+    expect(request).toMatchObject({ session_id: hostSessionStatementSessionId(CONTAINER_KEY), chunk_index: 0, context: [] });
+    expect(request.messages.map(message => [message.message_id, message.role, message.text, message.recorded_at])).toEqual(
+      THREE_TURNS.flat().map((message, index) => [`message-${index}`, message.role, message.content.replace("\n", " "), null]));
 
-    const roots = projectionRoots(env), bound = boundStatements(env);
+    const roots = env.roots(), bound = boundStatements(env);
+    expect(roots).toHaveLength(3);
     expect(bound).toHaveLength(3);
     bound.forEach((statement, turn) => {
       expect(statement.source_root_id).toBe(roots[turn]);
-      expect(statement.artifact_key).toBe(`post-turn:${statement.message.message_id.split(":")[1]}`);
+      expect(statement.artifact_key).toBe(hostSessionRoundSourceId(CONTAINER_KEY, turn));
       expect(statement.source_context.map(source => source.root_id).sort()).toEqual(roots.filter((_, index) => index !== turn).sort());
     });
     const { index, targets } = prepareRecordedStatementIndex(env.database, WORKSPACE);
@@ -80,7 +84,7 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
 
   it("closes full chunks before idle and gives a later chunk the longest recent context, as the bench plans it", async () => {
     const env = await environment(), turns = longRun(70);
-    await reportTurns(env, turns, false);
+    await captureTurns(env, turns);
     const provider = env.provider(() => []);
     await env.processSession(provider);
     const closed = env.sessionTasks();
@@ -110,7 +114,7 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
 
   it("lets a host worker claim, answer and publish one session request against current roots", async () => {
     const env = await environment();
-    await reportTurns(env, THREE_TURNS);
+    await captureTurns(env, THREE_TURNS);
     env.advance(STATEMENT_SESSION_IDLE_MS);
     await env.processSession(env.provider(userStatement), { provider_kind: "host_worker", model_id: null,
       provider_url: null, secret_ref: null, enabled: true });
@@ -131,18 +135,18 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
         message => ({ message_id: message.message_id, statements: userStatement(message.text) })) }) }]
     } }, context)).resolves.toMatchObject({ status: "completed" });
     expect(env.sessionTasks()[0]!.status).toBe("completed");
-    expect(boundStatements(env).map(row => row.source_root_id)).toEqual(projectionRoots(env));
+    expect(boundStatements(env).map(row => row.source_root_id)).toEqual(env.roots());
   });
 
   it("fails a queued request whose member root is erased and withdraws completed statements on erasure", async () => {
     const env = await environment();
-    await reportTurns(env, THREE_TURNS);
+    await captureTurns(env, THREE_TURNS);
     env.advance(STATEMENT_SESSION_IDLE_MS);
     const erase = (rootId: string) => env.field.fieldRepos.erase.apply({
       identity: hashLabeledIdentity("erase_barrier", [WORKSPACE, "source_record", rootId, ""], fieldContractSha256),
       barrier_id: `erase-${rootId.slice(-12)}`, workspace_id: WORKSPACE, generation_id: null,
       subject_kind: "source_record", subject_id: rootId, erased_at: env.now() });
-    const roots = projectionRoots(env), provider = env.provider(userStatement);
+    const roots = env.roots(), provider = env.provider(userStatement);
     await env.processSession(provider, { provider_kind: "host_worker", model_id: null, provider_url: null, secret_ref: null, enabled: true });
     expect(env.sessionTasks()[0]!.status).toBe("pending");
     erase(roots[1]!);
@@ -157,11 +161,11 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
     expect(env.requests).toEqual([]);
 
     const completed = await environment();
-    await reportTurns(completed, THREE_TURNS);
+    await captureTurns(completed, THREE_TURNS);
     completed.advance(STATEMENT_SESSION_IDLE_MS);
     await completed.processSession(completed.provider(userStatement));
     expect(completed.database.connection.prepare("SELECT COUNT(*) AS n FROM source_statement_artifacts").get()).toEqual({ n: 3 });
-    const completedRoots = projectionRoots(completed);
+    const completedRoots = completed.roots();
     completed.field.fieldRepos.erase.apply({
       identity: hashLabeledIdentity("erase_barrier", [WORKSPACE, "source_record", completedRoots[0]!, ""], fieldContractSha256),
       barrier_id: "erase-first-turn", workspace_id: WORKSPACE, generation_id: null,
@@ -172,16 +176,16 @@ describe("production statement sessions over post-turn roots", { timeout: 30_000
       WHERE json_type(raw_payload_json, '$.source_statement_unavailable') IS NOT NULL`).get()).toEqual({ n: 3 });
   });
 
-  it("enqueues each chunk once across replayed reports and repeated idle sweeps", async () => {
+  it("enqueues each chunk once across replayed windows and repeated idle sweeps", async () => {
     const env = await environment(), turns = longRun(70);
-    await reportTurns(env, turns, false);
-    for (const [index, turn] of turns.entries()) await env.report(index, turn);
+    await captureTurns(env, turns);
+    await captureTurns(env, turns);
     const before = env.sessionTasks().map(row => row.id);
     expect(before.length).toBeGreaterThan(0);
     env.advance(STATEMENT_SESSION_IDLE_MS);
     const provider = env.provider(() => []);
     for (let pass = 0; pass < 4; pass++) await env.processSession(provider);
-    await env.report(0, turns[0]!);
+    await env.capture({ container: CONTAINER, messages: hostMessages([turns[0]!]) });
     const after = env.sessionTasks();
     expect(after.map(row => row.id).slice(0, before.length)).toEqual(before);
     expect(new Set(after.map(row => row.id)).size).toBe(after.length);

@@ -33,6 +33,7 @@ import {
 import { findEventLogOrphansForWorkspace, findOrphanedMemoriesForWorkspace } from "../support/orphan-query.js";
 import type { BulkEnrichRuntimeSupport } from "../bulk-enrich/bulk-enrich-runtime.js";
 import type { HostWorkerTaskRuntimeSupport } from "../host-worker/host-worker-runtime.js";
+import type { HostSessionCapture } from "../host-session/host-session-capture.js";
 import type { GardenSchedulerRuntimeSupport } from "../scheduler/scheduler-runtime-types.js";
 import type {
   ClockBoundGardenRuntimeInput,
@@ -65,6 +66,7 @@ export function createGardenRuntimeCore(
     readonly localHeuristicsProvider?: CreateGardenRuntimeInput["localHeuristicsProvider"];
     readonly officialApiGardenProvider?: CreateGardenRuntimeInput["officialApiGardenProvider"];
     readonly signalReceiver?: CreateGardenRuntimeInput["signalReceiver"];
+    readonly hostSessionCapture?: HostSessionCapture;
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
   }>) => HostWorkerTaskRuntimeSupport
 ): GardenRuntimeCore {
@@ -80,6 +82,8 @@ export function createGardenRuntimeCore(
     localHeuristicsProvider: input.localHeuristicsProvider,
     officialApiGardenProvider: input.officialApiGardenProvider,
     signalReceiver: input.signalReceiver,
+    ...(gardenTaskRepo === undefined || input.hostSessionCaptureFor === undefined ? {}
+      : { hostSessionCapture: input.hostSessionCaptureFor(gardenTaskRepo) }),
     warn
   });
   const gardenScheduler = createGardenScheduler(
