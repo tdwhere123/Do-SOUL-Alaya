@@ -19,9 +19,11 @@ import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/p
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
 ): Promise<AlayaDaemonRuntime> {
+  const receiptTime = input.hostSessionReceiptTime;
   const hostSessionCapture = input.gardenTaskRepo === undefined ? undefined : createDaemonHostSessionCapture({
     stores: input.fieldComposition.stores, eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier,
-    gardenTaskRepo: input.gardenTaskRepo, now: () => new Date().toISOString(), warn: input.warnLogger.warn });
+    gardenTaskRepo: input.gardenTaskRepo, warn: input.warnLogger.warn,
+    now: receiptTime === undefined ? () => new Date().toISOString() : () => receiptTime });
   return await finalizeAlayaDaemonRuntime({
     requestProtection: input.requestProtection,
     runtimeNotifier: input.runtimeNotifier,

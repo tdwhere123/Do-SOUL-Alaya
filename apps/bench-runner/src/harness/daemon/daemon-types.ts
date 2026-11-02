@@ -62,6 +62,8 @@ export interface BenchDaemonOptions {
   /** Private observation transport, opt-in only; never changes a public MCP response. */
   readonly sourceSemanticObservations?: boolean;
   readonly sourceSemanticInterpretationClock?: string;
+  /** Fixed Alaya receipt time of host-session capture, so a sealed import is reproducible. */
+  readonly hostSessionReceiptTime?: string;
   readonly dataDirRoot?: string;
   /** Execution placement only; the root must already exist. The owned child lease is removed on shutdown. */
   readonly configDirectoryRoot?: string;

@@ -75,9 +75,13 @@ export interface AlayaDaemonRuntimeOptions {
   /** Defaults to eager; "omit" skips the probe without establishing readiness. */
   readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly sourceSemanticInterpretationClock?: string;
+  /** Fixed Alaya receipt time of host-session capture for a sealed import; omitted, capture uses wall time. */
+  readonly hostSessionReceiptTime?: string;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }
+
+type RuntimeClockOptions = Pick<AlayaDaemonRuntimeOptions, "sourceSemanticInterpretationClock" | "hostSessionReceiptTime">;
 
 export async function createAlayaDaemonRuntime(
   options: AlayaDaemonRuntimeOptions = {}
@@ -102,7 +106,7 @@ export async function createAlayaDaemonRuntime(
       repositories,
       foundation,
       recallAndCore,
-      options.sourceSemanticInterpretationClock
+      options
     );
     installUnhandledRejectionHandler(bootstrap.warnLogger, process, {
       shutdown: runtime.shutdown
@@ -292,7 +296,7 @@ async function finalizeRuntime(
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
   gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>,
-  sourceSemanticInterpretationClock?: string
+  clocks: RuntimeClockOptions
 ) {
   return await finalizeDaemonRuntimeFromWiring(
     buildFinalizeDaemonRuntimeWiringInput(
@@ -301,7 +305,7 @@ async function finalizeRuntime(
       foundation,
       runtimeWiring,
       gardenWiring,
-      sourceSemanticInterpretationClock
+      clocks
     )
   );
 }
@@ -318,10 +322,11 @@ function buildFinalizeDaemonRuntimeWiringInput(
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
   gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>,
-  sourceSemanticInterpretationClock?: string
+  clocks: RuntimeClockOptions
 ) {
   return {
-    sourceSemanticInterpretationClock,
+    sourceSemanticInterpretationClock: clocks.sourceSemanticInterpretationClock,
+    hostSessionReceiptTime: clocks.hostSessionReceiptTime,
     ...buildFinalizeSurfaceRuntimeInput(bootstrap, repositories, foundation, runtimeWiring),
     ...buildFinalizeGovernanceRuntimeInput(
       bootstrap,
@@ -465,10 +470,10 @@ async function createGardenAndFinalRuntime(
   repositories: ReturnType<typeof createDaemonRepositoryWiring>,
   foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
-  sourceSemanticInterpretationClock?: string
+  clocks: RuntimeClockOptions
 ) {
   const gardenWiring = await buildGardenWiring(bootstrap, repositories, foundation, runtimeWiring);
-  return await finalizeRuntime(bootstrap, repositories, foundation, runtimeWiring, gardenWiring, sourceSemanticInterpretationClock);
+  return await finalizeRuntime(bootstrap, repositories, foundation, runtimeWiring, gardenWiring, clocks);
 }
 
 export async function startDaemon(options: AlayaDaemonListenOptions = {}): Promise<AlayaDaemonServer> {

@@ -28,6 +28,7 @@ export interface BenchDaemonStartupInput {
   readonly sourceSemanticObservations?: boolean;
   readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
   readonly sourceSemanticInterpretationClock?: string;
+  readonly hostSessionReceiptTime?: string;
   readonly dataDir: string;
   readonly defaultWorkspaceId: string;
   readonly defaultRunId: string;
@@ -76,10 +77,11 @@ export async function initializeBenchDaemon(
 
 async function createBenchRuntimeResources(input: BenchDaemonStartupInput): Promise<BenchDaemonStartupResources> {
   const { activeContext, expectedReconciliationBasis, relationProjectionAdmissionMode,
-    fieldProjectionAdmissionMode, sourceSemanticInterpretationClock, embeddingStartupProbe } = input;
+    fieldProjectionAdmissionMode, sourceSemanticInterpretationClock, hostSessionReceiptTime, embeddingStartupProbe } = input;
   const options: AlayaDaemonRuntimeOptions = {
     embeddingStartupProbe,
     ...(sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock }),
+    ...(hostSessionReceiptTime === undefined ? {} : { hostSessionReceiptTime }),
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode
   };

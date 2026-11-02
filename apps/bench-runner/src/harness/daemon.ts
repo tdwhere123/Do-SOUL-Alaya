@@ -101,6 +101,7 @@ interface BenchDaemonState {
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
   readonly relationProjectionAdmissionMode: BenchDaemonOptions["relationProjectionAdmissionMode"];
   readonly sourceSemanticInterpretationClock: string | undefined;
+  readonly hostSessionReceiptTime: string | undefined;
   readonly sourceSemanticObservations: boolean | undefined;
   readonly fieldProjectionAdmissionMode: BenchDaemonOptions["fieldProjectionAdmissionMode"];
   readonly dataDir: string;
@@ -174,6 +175,7 @@ async function createBenchDaemonState(
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode,
     sourceSemanticInterpretationClock: opts.sourceSemanticInterpretationClock,
+    hostSessionReceiptTime: opts.hostSessionReceiptTime,
     sourceSemanticObservations: opts.sourceSemanticObservations,
     dataDir,
     savedEnv,
@@ -212,6 +214,7 @@ async function bootBenchDaemon(
     relationProjectionAdmissionMode: state.relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,
     ...(state.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: state.sourceSemanticInterpretationClock }),
+    ...(state.hostSessionReceiptTime === undefined ? {} : { hostSessionReceiptTime: state.hostSessionReceiptTime }),
     ...(state.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: state.sourceSemanticObservations }),
     configDirectory: state.configDirectory,
     managedEnvKeys: state.managedEnvKeys,
