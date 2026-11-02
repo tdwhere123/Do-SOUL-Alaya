@@ -16,6 +16,7 @@
 // --model and --model-cache select Memory; --model-artifact-digest binds its sealed tree.
 // --warm-memory probes the Memory provider independently.
 // --source-lexical-work explicitly allocates model-free lexical preparation work per pass.
+// --reader end_continuation also reads each cut slot on after the membership window (scored separately).
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -55,8 +56,10 @@ const { values } = parseArgs({ options: {
   "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
   "source-model": { type: "string" }, "source-cache": { type: "string" },
   "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "warm-memory": { type: "boolean", default: false },
-  "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" }
+  "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
+  reader: { type: "string", default: "current" }
 } });
+if (!["current", "end_continuation"].includes(values.reader)) throw new AlayaError("VALIDATION", "--reader must be current or end_continuation");
 if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
 const captureRecallPool = values["capture-pool"] ? (await import("./recall-harness-pool.mjs")).captureRecallPool : undefined;
 const diagnosticVectors = await loadRecallVectorCache(values["diagnostic-vectors"]);
@@ -127,6 +130,9 @@ if (previous.some(row => row.source_execution_identity !== executionIdentity)) {
 }
 if (previous.some(row => (row.capture_requested === true) !== values["capture-pool"])) {
   throw new AlayaError("CONFLICT", "existing rows use a different pool-capture mode");
+}
+if (previous.some(row => (row.reader ?? "current") !== values.reader)) {
+  throw new AlayaError("CONFLICT", "existing rows use a different reader");
 }
 const done = new Set(previous.map(row => `${row.question_id}:${row.arm}`));
 
@@ -207,7 +213,8 @@ for (const id of ids) {
     const row = { question_id: id, question_type: question.question_type, arm: arm.name,
       arm_identity: chainIdentity(arm),
       ...(executionIdentity === undefined ? {} : { source_execution_identity: executionIdentity }),
-      ...(values["capture-pool"] ? { capture_requested: true } : {}) };
+      ...(values["capture-pool"] ? { capture_requested: true } : {}),
+      ...(values.reader === "current" ? {} : { reader: values.reader }) };
     try {
       const frozen = coordinates.get(id);
       if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
@@ -225,7 +232,8 @@ for (const id of ids) {
       try {
         result = await executeOrdinaryRecallEntry({ config, root,
           queries: [{ query_key: sha256(question.question), original_query: question.question,
-            ...(proposal === undefined ? {} : { interpretation_proposal: proposal }) }] },
+            ...(proposal === undefined ? {} : { interpretation_proposal: proposal }) }],
+          ...(values.reader === "current" ? {} : { reader: values.reader }) },
           captureRecallPool === undefined ? undefined : (_key, captured) => { observation = captured; });
       } finally {
         for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -236,7 +244,8 @@ for (const id of ids) {
         input_identity: result.input_identity, snapshot_identity: query.snapshot_identity,
         initial_request: query.pages[0]?.request ?? null,
         intervals: query.source_intervals, pages: query.page_count,
-        first_page_slots: query.pages[0]?.occupied_slots ?? null });
+        first_page_slots: query.pages[0]?.occupied_slots ?? null,
+        ...(query.end_continuation === undefined ? {} : { end_continuation: query.end_continuation }) });
       if (captureRecallPool !== undefined) {
         try { row.pool_capture = await captureRecallPool({ row, query, observation, generation: config.source_index?.index,
           coordinates: frozen, vectorCache: diagnosticVectors }); }

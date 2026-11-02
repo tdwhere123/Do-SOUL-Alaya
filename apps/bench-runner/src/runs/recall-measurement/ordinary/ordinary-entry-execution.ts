@@ -23,18 +23,20 @@ import { verifyExposure } from "./ordinary-recall-delivery.js";
 import { admitOrdinaryEntryCursor, ordinaryEntryStopCause, type OrdinaryEntryCursorSeen } from "./ordinary-entry-policy.js";
 import { admittedSourceDeliveryTail } from "../../measurement/source-delivery-visibility.js";
 import { observeOrdinaryEntry, type CaptureOrdinaryEntryObservation } from "./ordinary-entry-observation.js";
+import { readCutSlotsAtEnd } from "./ordinary-end-continuation.js";
 import {
   OrdinaryRecallEntryInputSchema, OrdinaryRecallExecutionSchema, OrdinaryRecallQueryRowSchema,
   OrdinaryRecallSourceIntervalSchema, ORDINARY_RECALL_ENTRY_CONTRACT, ORDINARY_RECALL_OBSERVED_SLOT_TARGET,
   ORDINARY_RECALL_PUBLIC_PAGE_LIMIT, ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, ORDINARY_RECALL_UNMAPPED_DIMENSIONS,
   UNOBSERVED_ORDINARY_COUNTERS, buildOrdinaryRecallRequest, mapOrdinaryRecallScope,
-  type OrdinaryRecallExecution, type OrdinaryRecallMapping, type OrdinaryRecallPublicRequest,
-  type OrdinaryRecallQueryRow
+  type OrdinaryRecallEntryInput, type OrdinaryRecallExecution, type OrdinaryRecallMapping,
+  type OrdinaryRecallPublicRequest, type OrdinaryRecallQueryRow
 } from "./ordinary-entry-contract.js";
 
 type SourceInterval = z.infer<typeof OrdinaryRecallSourceIntervalSchema>;
 type SnapshotIdentity = NonNullable<OrdinaryRecallQueryRow["snapshot_identity"]>;
 type EntryPage = OrdinaryRecallQueryRow["pages"][number];
+type OrdinaryRecallReader = NonNullable<OrdinaryRecallEntryInput["reader"]>;
 
 /**
  * Callable public `soul.recall` launcher (not a CLI, scorer, or gold join).
@@ -56,9 +58,9 @@ export async function executeOrdinaryRecallEntry(value: unknown, capture?: Captu
     const output = join(input.root, "ordinary-entry.json");
     return withSnapshotPublishLock(output, async () => {
       const mapped = mapConfig(config);
-      const identity = chainIdentity({
-        contract: ORDINARY_RECALL_ENTRY_CONTRACT, config, mapping: mapped, queries: input.queries
-      });
+      // The current reader keeps its historical identity; only a declared other reader binds.
+      const reader = input.reader ?? "current", identity = chainIdentity({ contract: ORDINARY_RECALL_ENTRY_CONTRACT,
+        config, mapping: mapped, queries: input.queries, ...(reader === "current" ? {} : { reader }) });
       const retained = readChainArtifact(output);
       if (retained !== undefined) {
         if (capture !== undefined) throw new AlayaError("CONFLICT", "observation requires a fresh ordinary entry root");
@@ -73,7 +75,7 @@ export async function executeOrdinaryRecallEntry(value: unknown, capture?: Captu
       }
       const execution = freezeOrdinaryArtifact(OrdinaryRecallExecutionSchema, mapped.status === "not_run"
         ? notRunExecution(config, mapped, identity, input.queries)
-        : await runMappedOrdinaryRecall(config, input.root, input.queries, mapped, identity, capture));
+        : await runMappedOrdinaryRecall(config, input.root, input.queries, mapped, identity, reader, capture));
       refuseBenchWorkAfterCancel();
       writeChainArtifact(output, execution);
       return execution;
@@ -109,7 +111,7 @@ async function runMappedOrdinaryRecall(
   config: SemanticChainConfig, root: string,
   queries: readonly { query_key: string; original_query: string }[],
   mapping: Extract<OrdinaryRecallMapping, { status: "mapped" }>, identity: string,
-  capture?: CaptureOrdinaryEntryObservation
+  reader: OrdinaryRecallReader, capture?: CaptureOrdinaryEntryObservation
 ): Promise<OrdinaryRecallExecution> {
   const rows: OrdinaryRecallQueryRow[] = [];
   assertMemoryEmbeddingRecovery(config, root, queries.map(query => join(root, "ordinary-entry", `${query.query_key}.json`)));
@@ -132,7 +134,9 @@ async function runMappedOrdinaryRecall(
         throw new AlayaError("CONFLICT", "ordinary public first exposure is unresolved after interruption; retained reservation forbids re-exposure");
       }
       writeChainArtifact(reservation, { entry_identity: identity, query_key: query.query_key });
-      const row = await observeOrdinaryEntry(daemon, query.query_key, () => executeOrdinaryQuery(daemon, config, mapping, query), capture);
+      const membership = await observeOrdinaryEntry(daemon, query.query_key, () => executeOrdinaryQuery(daemon, config, mapping, query), capture);
+      const row = reader === "end_continuation"
+        ? { ...membership, end_continuation: await readCutSlotsAtEnd(daemon, membership) } : membership;
       const frozen = freezeOrdinaryArtifact(OrdinaryRecallQueryRowSchema, row);
       writeChainArtifact(rowPath, frozen);
       rows.push(frozen);

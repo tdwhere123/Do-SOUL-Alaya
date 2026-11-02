@@ -5,6 +5,8 @@
 // root contains the gold message.
 // Additive source-bound diagnostics evaluate contiguous UTF-8 byte coverage without gaps, preserving
 // all published text-substring scores unchanged.
+// Rows read with the end-continuation reader are also scored as "<arm>+end-continuation": the
+// delivered slots, then each continued slot re-read from the last message end at or before its cut.
 //
 //   node apps/bench-runner/scripts/recall-harness-score.mjs --out DIR [--base ARM] [--dataset PATH]
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,8 +14,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createRequire } from "node:module";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, HostOccurrenceInventorySchema } from "@do-soul/alaya-protocol";
 import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answer-spans.js";
+import { endContinuationReading } from "../dist/runs/recall-measurement/ordinary/ordinary-end-continuation.js";
 import {
   scoreContiguousReadVisibility,
   unavailableRecallRowDiagnostics
@@ -35,6 +38,35 @@ export function loadSnapshotSources(snapshot, workspace) {
   } finally {
     db.close();
   }
+}
+
+/** Host message ends per root; a root without a host inventory re-reads from its start. */
+function loadMessageEnds(snapshot, workspace) {
+  const db = new Database(snapshot, { readonly: true, fileMustExist: true });
+  try {
+    const rows = db.prepare("SELECT record_id, canonical_inventory FROM source_host_inventories WHERE workspace_id=?").all(workspace);
+    return new Map(rows.map(row => [row.record_id,
+      HostOccurrenceInventorySchema.parse(JSON.parse(row.canonical_inventory)).occurrences.map(o => o.utf8_span[1])]));
+  } finally {
+    db.close();
+  }
+}
+
+/** Derives the end-continuation reading of each row that carries one, with its read records. */
+function endContinuationRows(rows) {
+  const read = [];
+  const stat = { rows: 0, cut: 0, completed: 0, payload_calls: 0, issues: 0, initial_bytes: 0, continuation_bytes: 0 };
+  for (const row of rows) {
+    if (row.end_continuation === undefined || !Array.isArray(row.intervals)) continue;
+    const ends = loadMessageEnds(row.snapshot, row.workspace);
+    const reading = endContinuationReading(row.intervals, row.end_continuation, root => ends.get(root) ?? []);
+    stat.rows += 1; stat.cut += reading.cut; stat.completed += reading.completed;
+    stat.payload_calls += row.end_continuation.payload_calls; stat.issues += row.end_continuation.issues.length;
+    stat.initial_bytes += reading.initial_bytes; stat.continuation_bytes += reading.continuation_bytes;
+    const { end_continuation: _record, ...rest } = row;
+    read.push({ ...rest, arm: `${row.arm}+end-continuation`, intervals: reading.intervals });
+  }
+  return { read, stat };
 }
 
 export function scoreRecallHarnessRow(row, dataset) {
@@ -150,7 +182,9 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
   const out = resolve(outDir);
   const resolvedDatasetPath = resolve(datasetPath ?? join(here, "../data/longmemeval/longmemeval_s.json"));
   const dataset = new Map(JSON.parse(readFileSync(resolvedDatasetPath, "utf8")).map(q => [q.question_id, q]));
-  const rows = readFileSync(join(out, "rows.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const captured = readFileSync(join(out, "rows.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const continued = endContinuationRows(captured);
+  const rows = [...captured, ...continued.read];
 
   const scored = rows.map(r => scoreRecallHarnessRow(r, dataset));
   writeFileSync(join(out, "scores.jsonl"), scored.map(s => JSON.stringify(s)).join("\n") + "\n");
@@ -185,6 +219,14 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
   console.log("Contiguous read Any/All counts per arm (diagnostic)");
   console.table(diagTable);
 
+  if (continued.stat.rows > 0) {
+    const n = continued.stat.rows;
+    console.log("End-continuation reading records", { ...continued.stat, per_question: {
+      payload_calls: (continued.stat.payload_calls / n).toFixed(1),
+      initial_kb: (continued.stat.initial_bytes / n / 1024).toFixed(2),
+      continuation_kb: (continued.stat.continuation_bytes / n / 1024).toFixed(2) } });
+  }
+
   const incompleteGaps = scored.filter(s => s.scored && !s.read_gold?.complete);
   if (incompleteGaps.length > 0) {
     console.log(`Source gold mapping gaps: ${incompleteGaps.length} scored row(s) had incomplete gold mapping`);
@@ -204,7 +246,7 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
     }
   }
 
-  return { scored, table, diagTable };
+  return { scored, table, diagTable, endContinuation: continued.stat };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

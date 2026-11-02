@@ -37,9 +37,14 @@ export const OrdinaryRecallEntryQuerySchema = z.object({
   query_key: Digest, original_query: z.string().min(1),
   interpretation_proposal: QueryInterpretationProposalSchema.optional()
 }).strict();
+/** Declared readers of one membership window; `current` reads only the delivered slots. */
+export const ORDINARY_RECALL_READERS = ["current", "end_continuation"] as const;
+/** Payload calls one cut slot may spend under the end-continuation reader. */
+export const ORDINARY_END_CONTINUATION_CALL_LIMIT = 12 as const;
 export const OrdinaryRecallEntryInputSchema = z.object({
   config: z.unknown(), root: z.string().min(1),
-  queries: z.array(OrdinaryRecallEntryQuerySchema).min(1)
+  queries: z.array(OrdinaryRecallEntryQuerySchema).min(1),
+  reader: z.enum(ORDINARY_RECALL_READERS).optional()
 }).strict();
 
 export const OrdinaryRecallSourceIntervalSchema = z.object({
@@ -47,6 +52,18 @@ export const OrdinaryRecallSourceIntervalSchema = z.object({
   target: RecallTargetRefSchema,
   span: SourceDeliveredSpanSchema.nullable()
 }).strict();
+/** After the membership window, each cut slot read on from its delivered end until complete. */
+export const OrdinaryEndContinuationSchema = z.object({
+  cut_slots: z.number().int().nonnegative(),
+  completed_slots: z.number().int().nonnegative(),
+  payload_calls: z.number().int().nonnegative(),
+  continuations: z.array(z.object({
+    slot_index: z.number().int().nonnegative(), target: RecallTargetRefSchema, span: SourceDeliveredSpanSchema
+  }).strict()),
+  issues: z.array(z.string().min(1)),
+  latency_ms: z.number().finite().nonnegative()
+}).strict();
+export type OrdinaryEndContinuation = z.infer<typeof OrdinaryEndContinuationSchema>;
 export const OrdinaryRecallEntryPageSchema = z.object({
   ordinal: z.number().int().min(1).max(ORDINARY_RECALL_PUBLIC_PAGE_LIMIT),
   phase: z.literal("membership"),
@@ -98,7 +115,8 @@ export const OrdinaryRecallQueryRowSchema = z.object({
   unobserved_counters: z.array(Unobserved).readonly(),
   costs: z.object({
     work_units: OrdinaryCostSchema, read_bytes: OrdinaryCostSchema, latency_ms: OrdinaryCostSchema
-  }).strict()
+  }).strict(),
+  end_continuation: OrdinaryEndContinuationSchema.optional()
 }).strict();
 export const OrdinaryRecallMappingSchema = z.discriminatedUnion("status", [
   z.object({
