@@ -286,6 +286,14 @@ successful empty span set. Framing retains the actual delivered end and
 completeness; payload continuation starts at that end. Replay reuses the fitted
 page and its recorded facts, not a new selection or uncharged source scan.
 
+Hosts read cut sources before answering: each source result of the first pages whose
+span is not `content_complete` is continued with `payload_continuation` from its
+`content_end` until complete (attach and server instructions, `soul.recall` description).
+The cut is a page-fitting boundary, not a relevance judgement; measured on LongMemEval,
+reading the first pages and then continuing their cut sources (≈ 9 KB more for the first
+five) is what reaches the recall floor, while reordering or deferring cut members loses
+the 2 KB guard.
+
 See [Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts).
 `RecallNavigationWitness` records original/hint view, native operator,
 ordinal, optional access rank and byte location; it is discovery provenance,
