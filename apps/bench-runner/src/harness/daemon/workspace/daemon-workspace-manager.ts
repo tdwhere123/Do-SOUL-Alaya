@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import {
   prepareBenchWorkspaceBinding,
@@ -165,7 +166,7 @@ function buildBenchWorkspaceHandle(
     },
     captureHostSession: async (request, issuer) => {
       if (activeContext.workspaceId !== workspace.workspaceId || activeContext.runId !== workspace.runId) {
-        throw new Error("host session workspace handle is no longer active");
+        throw new AlayaError("CONFLICT", "host session workspace handle is no longer active");
       }
       return bindings.captureHostSession(request, issuer);
     },

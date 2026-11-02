@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
+  AlayaError,
   ControlPlaneObjectKind,
   RetentionPolicy,
   TaskObjectSurfaceSchema,
@@ -126,7 +127,7 @@ export function createBenchDaemonOps(
     }, { workspaceId: input.activeContext.workspaceId, ...(hostCapture === undefined ? {} : { hostCapture }) }),
     captureHostSession: async (request, issuer) => {
       const capture = input.activeRuntime.services.hostSessionCapture;
-      if (capture === undefined) throw new Error("bench daemon has no host session capture");
+      if (capture === undefined) throw new AlayaError("UNAVAILABLE", "bench daemon has no host session capture");
       return await capture.capture({ workspaceId: input.activeContext.workspaceId, runId: input.activeContext.runId,
         request, issuer });
     },

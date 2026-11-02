@@ -1499,10 +1499,6 @@
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/core-daemon/src/garden/post-turn-extract/task-payload.ts": {
-    "max": 5,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/core-daemon/src/garden/runtime/runtime.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
