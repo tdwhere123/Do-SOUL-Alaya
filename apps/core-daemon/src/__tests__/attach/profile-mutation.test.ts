@@ -97,6 +97,7 @@ describe("profile mutation", () => {
       "soul.apply_override",
       "soul.explore_graph",
       "soul.report_context_usage",
+      "soul.capture_host_session",
       "soul.resolve",
       "soul.interpretation",
       "garden.list_pending_tasks",
