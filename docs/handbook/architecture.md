@@ -211,14 +211,25 @@ reverse dependency order after live handlers settle.
 
 ## Signal Ingestion
 
-A-track explicit `soul.emit_*` signals and B-track post-turn Garden extraction
+A-track explicit `soul.emit_*` signals and B-track Garden statement extraction
 produce candidates, not active truth. `soul.recall` does not enqueue
-extraction; its `recent_turn` is ignored. `soul.report_context_usage` may
-enqueue `POST_TURN_EXTRACT` from `turn_digest`, which only retains the admitted
-turn. Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a run's
-ordered admitted turns, enqueued when a later message closes a chunk or the run is
-idle for the host-worker fallback interval; a chunk payload names member roots and
-occurrence ranges only. Source publication binds
+extraction; its `recent_turn` is ignored. `soul.report_context_usage` is usage
+feedback only; its deprecated `turn_index`, `turn_digest` and `source_observed_at`
+capture nothing. Host conversation enters through one contract,
+`soul.capture_host_session` (Protocol `conversation/host-session.ts`): every
+producer, including the bench LongMemEval import, admits messages through the
+daemon's host-session capture owner, idempotently by workspace, container and host
+message id, with position, role, completeness, honest fidelity and optional
+host-reported time. A request conflicts as a whole (changed body, occupied or
+earlier position, another producer's container) and then admits nothing. The
+owner pairs a user message with the next consecutive reply into a round and admits
+each closed round receipt-first as one root; at most one trailing message per
+container waits until the host closes the tail or the idle sweep does. The issuer
+comes from composition, never request JSON. Statement generation runs as
+`SOURCE_STATEMENT_SESSION` chunks over a container's ordered rounds, enqueued when a
+later message closes a chunk or the container is idle for the host-worker fallback
+interval; a chunk payload names its container, member roots and occurrence ranges
+only. Source publication binds
 current source, scope and audit before notifying; a failed later optional
 memory formation does not delete the source capsule (invariant §20a).
 Producer text, extraction cache and normalization never certify source or
@@ -227,13 +238,13 @@ role attribution, receipts and resource limits belong to their respective
 Protocol/SOUL/Core owners. Explicit revisions need fresh authority; failed or
 unknown provider attempts stay distinct from unattempted work.
 
-Queued post-turn text and statement session chunks are eligible for listing,
+Statement session chunks are eligible for listing,
 claiming, compilation and completion only while every admitted member source and
 its projection dependencies remain retained and current in the same workspace. The shared SQLite queue
 checks those facts; the daemon owns the unsuccessful completion audit and
-quarantine transition. Legacy work with unavailable provenance retains its
-private payload and failure history, but exposes no turn text and cannot call
-an extraction provider. Maintenance checks at most 100 active tasks per pass
+quarantine transition. Historical `POST_TURN_EXTRACT` work always fails this way
+("post-turn capture retired"); it retains its private payload and failure history,
+but exposes no turn text and cannot call an extraction provider. Maintenance checks at most 100 active tasks per pass
 with a workspace-scoped cursor, so quarantine may take multiple calls or
 ticks; exact-task claim and completion checks always fail closed. Canonical
 source rendering lives in Protocol; SOUL retains its public renderer export

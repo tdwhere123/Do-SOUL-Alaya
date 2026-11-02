@@ -219,11 +219,13 @@ no assistant relocation or new display selector is implied. Historical extractio
 records retain their own interpretation and erase dependencies, not new admission
 under the minimal contract.
 
-Protocol 32.0.0 produces these artifacts from `SOURCE_STATEMENT_SESSION` work: one
-session per workspace run, over the run's admitted post-turn roots in admission order.
-A chunk is planned only once closed (a later message starts the next chunk, or the run
-is idle for the 15-minute host-worker fallback interval), so a queued request never
-changes. Recent context is the longest suffix of preceding messages within 16 KB and
+Protocol 33.0.0 produces these artifacts from `SOURCE_STATEMENT_SESSION` work: one
+session per host-session container (`host-session:<container key>`), over its round
+roots in round order, attributed to the run that captured the round. A chunk is planned
+only once closed (a later message starts the next chunk, or the container is idle for
+the 15-minute host-worker fallback interval), so a queued request never changes.
+Message time shown to the model is the host-reported time when the host gave one; the
+statement observation is the round root's receipt. Recent context is the longest suffix of preceding messages within 16 KB and
 64 messages. Each statement binds to its own message root; the other roots its request
 showed the model are its context dependencies and withdraw it on erasure.
 
@@ -355,22 +357,18 @@ complete normalized content is not original-byte fidelity or complete history.
 [Core admission](../../packages/core/src/memory/evidence-create/source-admission.ts)
 atomically captures source, inventory and nonempty `message` spans from complete
 occurrences only. Independently supplied message spans are refused. Trusted host
-composition binds issuer/workspace; product post-turn capture attests only reported
-excerpts, not authenticated humans or upstream identities. Structured benchmark
-capture uses its existing opaque pinned-membership capability and exact coordinates.
-The existing renderer returns intervals alongside unchanged bytes. Receipt-first
-source audit completes before product extraction enqueue; audit failure retains the
-committed source and does not enqueue. Both product producers recover the exact
-retained receipt before attempting optional capture, then re-admit through Core and
-retry audit/enqueue. Legacy committed unknown remains unknown; captured retries
-retain the original inventory and issuer. Recovery cannot restore erased bodies.
-
-Automatic product capture is optional independently of primary source admission.
-A canonical encoded-size refusal rolls back that capture; the producer admits the
-primary source without host facts and records an explicit `uncaptured` /
-`resource_limit` task diagnostic. It never truncates roles or records captured-empty.
-Only this resource refusal is optional: invalid facts, authority failures and storage
-errors escape. Explicit Core capture requests remain strict and atomic.
+composition binds issuer/workspace; MCP host-session capture (`host_session` basis)
+attests the attached host's container, positions, completeness and fidelity, not
+authenticated humans or upstream identities. The benchmark import uses the same
+capture owner with a pinned-dataset issuer minted from the verified dataset authority.
+The existing renderer returns intervals alongside unchanged bytes. Host-session round
+roots are admitted receipt-first with their occurrences atomically; audit failure
+retains the committed source, and the next capture of the same messages recovers the
+exact retained receipt (original recorded time and issuer) before binding the round.
+Erased round text is not re-admitted: the ledger keeps each message's digest, so a
+replayed window admits nothing and a changed body conflicts. A message over the
+contract's 16 KB limit is refused; a producer that holds longer text sends an honest
+`excerpt`.
 
 Exact retention requires the existing source and verified matching inventory;
 a descriptor cannot import provenance into an empty store. Lossless transfer uses
@@ -590,7 +588,7 @@ admission. Evidence pointers are not witness attribution.
 ## Governance, accounting and recovery
 
 Ordinary `soul.recall` ignores `recent_turn` and does not enqueue extraction.
-`soul.report_context_usage` may enqueue post-turn work; usage reporting is a
+`soul.report_context_usage` captures nothing; usage reporting is a
 soft read-side signal, not proof of memory truth. Delivery, inspection and
 index membership have zero weight as usage evidence. Verified exposure,
 principal and semantic identity bind any attribution. Active constraints are

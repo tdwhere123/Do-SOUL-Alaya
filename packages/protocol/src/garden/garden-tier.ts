@@ -71,8 +71,9 @@ export const GardenTaskKind = {
   SYNTHESIS_REVIEW: "synthesis_review",
   EMBEDDING_BACKFILL: "embedding_backfill",
   PATH_PLASTICITY_UPDATE: "path_plasticity_update",
+  // Retired: host messages are captured as host sessions; open historical work fails by quarantine.
   POST_TURN_EXTRACT: "post_turn_extract",
-  // One closed chunk of a run's statement session over its admitted post-turn roots.
+  // One closed chunk of a host-session container's statement session over its round roots.
   SOURCE_STATEMENT_SESSION: "source_statement_session",
   CONSOLIDATION_CYCLE: "consolidation_cycle",
   BULK_ENRICH: "bulk_enrich",
@@ -145,8 +146,8 @@ const librarianTaskKinds = Object.freeze([
 // the attached CLI agent is the compute, so they are intentionally absent from
 // every in-process role permission set (an in-process librarian must not claim
 // them). They are enqueued under the LIBRARIAN role for queue tiering but
-// surface as role "host_worker" to the MCP worker loop. POST_TURN_EXTRACT has no
-// model work; a dedicated in-process processor retains its admitted source.
+// surface as role "host_worker" to the MCP worker loop. Historical POST_TURN_EXTRACT
+// work is never listed or claimed.
 // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts gardenWorkerRoleForRow.
 
 export const GARDEN_ROLE_PERMISSIONS = Object.freeze({

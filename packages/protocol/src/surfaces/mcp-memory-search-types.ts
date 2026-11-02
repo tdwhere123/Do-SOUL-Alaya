@@ -178,7 +178,7 @@ export const SoulMemorySearchRequestSchema = z
     until: IsoDatetimeStringSchema.nullable().optional(),
     time_field: RecallTimeFieldSchema.optional(),
     host_context: SoulRecallHostContextSchema.optional(),
-    /** @deprecated Ignored by Recall; post-turn extraction uses report_context_usage. */
+    /** @deprecated Ignored by Recall; hosts capture messages with soul.capture_host_session. */
     recent_turn: BoundedQuerySchema.optional(),
     // Maps to the query interpretation clock.
     source_observed_at: IsoDatetimeStringSchema.optional(),

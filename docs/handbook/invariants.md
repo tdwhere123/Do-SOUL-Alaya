@@ -155,13 +155,12 @@ These rules always win over lower-level docs and task-card convenience.
 19. **LLMs and connected agents propose, Alaya decides.** Any agent
     output enters the system through the proposal route; durable
     promotion requires explicit evidence, governance, and audit.
-    Turn text an agent forwards for passive extraction (`recent_turn`
-    on `soul.recall`, `turn_digest` on `soul.report_context_usage`) is
-    *input*, not an agent claim of truth. Ordinary `soul.recall` does
+    Host messages an agent forwards through `soul.capture_host_session`
+    are *input*, not an agent claim of truth. Ordinary `soul.recall` does
     not enqueue ingestion; `recent_turn` is ignored. `soul.report_context_usage`
-    may enqueue `POST_TURN_EXTRACT` from `turn_digest`; closed run chunks of
-    those admitted turns become `SOURCE_STATEMENT_SESSION` work. Explicit post-turn
-    events and A-track emission remain.
+    is usage feedback only and captures nothing. Captured messages form
+    rounds per container; closed container chunks of those rounds become
+    `SOURCE_STATEMENT_SESSION` work. A-track emission remains.
     Garden candidates still pass deterministic triage, evidence
     synthesis, and EventLog audit before any durable write — that
     triage step is the "Alaya decides". When an attached MCP session has
