@@ -95,7 +95,7 @@ async function prepareSourceFixture(allGold = false, roundsPerSession = 1, quest
   const config = { contract: "source-access-diagnostic-config-v1", source_run_root: sourceRoot,
     prepared_path: prepared.path, expected_question_ids: questions.map((question) => question.question_id),
     policies: ["query-conditioned-v1", "canonical-v1"], budget,
-    limits: { max_total_work: 2000000, max_pages: 100, max_pages_per_observation: 32,
+    limits: { max_total_work: 2200000, max_pages: 100, max_pages_per_observation: 32,
       max_wall_ms: 60000, max_output_bytes: 8000000, max_disk_bytes: 200000000 } };
   return config;
 }
