@@ -89,39 +89,30 @@ step explicitly.
 
 ## Structured round-source publication
 
-The private benchmark round producer is
-[`census.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/census.ts) →
-[`publish.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/publish.ts).
-It admits records through Core and seals fresh SQLite, never enriching an old receipt
-or reusing an old index.
+The benchmark round producer is the product's host-session capture owner.
+[`census.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/census.ts) forms
+each question's round roots with the Protocol owner (one container
+`{ scope: "longmemeval_s", id: "<question>:s<session>" }` per haystack session,
+`pairHostSessionRounds`, `hostSessionRoundSource`) and the capture requests of
+[`host-session-import.ts`](../../apps/bench-runner/src/datasets/longmemeval/ingestion/host-session-import.ts);
+[`publish.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/publish.ts) admits
+every session through the daemon's `captureHostSession` (64-message windows, the last
+closing the tail) and seals fresh SQLite, never enriching an old receipt or reusing an
+old index.
 
-[`round-projection.ts`](../../apps/bench-runner/src/runs/snapshot/source-records/round-projection.ts)
-owns the deterministic revision. Captured rounds use
-`bench-round-host-v1:<dataset-sha256>`; unknown-host rounds retain the dataset hash.
-The prefix versions added structured facts, not the original bytes. The existing
-pin binds the structured inputs; no second content hash, registry or caller-selected
-revision is needed. The same projection owner supplies the version to the existing
-host-capture closure, which checks exact source ID/version, rendered bytes and
-occurrence coordinates under the opaque verified-dataset capability. Custom pins
-remain unknown-host; tests use the existing explicitly authored capability only.
-
-Logical IDs, rendered bytes, root speaker, unknown attribution, observation and
-validity times remain unchanged. Fresh publication has its own recorded time and
-new record identities requiring fresh preparation. The historical dataset-hash
-revision is the projection predecessor, not proof of an in-place database replacement.
-Comparisons must bind actual historical configuration/inventory and new receipts;
-existing-database replacement still belongs to Core's predecessor-bound owner.
-Retained native readers and separate per-message/persona source families retain
-their existing contracts. This is benchmark-private, with no invariant25 MCP,
-EventLog payload or runtime-config schema change and no Protocol version bump.
-
-Read-only evaluators intentionally have no capture capability for isolated dataset
-copies. `bindPublishedLongMemEvalRoundCensus` binds their complete, byte-identical
-census to the already verified publication's revisions and coordinates. It strips
-capture closures and grants no write authority. Callers also verify the publication
-against the actual sealed snapshot. Frozen metric owners can consume this same
-staged pure projection without changing scoring formulas or granting copied pins
-production capture authority.
+Round roots are `host-session:<container key>:r<round>` with version `host-session-v1`;
+occurrences are `<question>:s<session>:m<message>` with the container, position and the
+session date as host time; `event_time` is the session date and `recorded_at` the
+publication's declared receipt time. A message over 16 KB is admitted as an honest
+16 KB excerpt. Under the verified dataset pin the issuer is
+`longmemeval-structured-source` / `pinned_dataset`; an unverified copy is captured as an
+ordinary host session (`host_session` basis), never with dataset authority. Statement
+sessions, SourceIndex rows and answer-span gold read the same containers, so the bench
+and an MCP host that sends the same messages produce the same roots (only the issuer
+differs). Snapshots published before this owner (`longmemeval_s:<q>-s<si>-r<ri>`,
+`bench-round-host-v1:<sha>`) need their original commit to evaluate; rebuild instead.
+Retained native readers and the separate per-message/persona source families keep their
+existing contracts.
 
 Publication accepts explicit `sourceLimits: { maxSources, maxContentBytes }`, checked
 against the complete census before daemon startup/source writes. These are allocation
