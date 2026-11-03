@@ -2,6 +2,7 @@ import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, s
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
+  restrictStatementAssociation,
   authorizeSourceIndexScope,
   assertRecallConsumerCompatibility,
   authorizedScopesFromAdmission,
@@ -65,7 +66,8 @@ export function runConditionalFieldWorkerRecall(
     ...base, nominateSources: input => {
       const nomination = base.nominateSources!(input);
       observer.event("field_nomination", "observe", () => ({ result: nomination.result, witness: nomination.witness,
-        admitted_roots: nomination.admitted_roots, question_time_order: nomination.question_time_order }));
+        admitted_roots: nomination.admitted_roots, question_time_order: nomination.question_time_order,
+        association: nomination.association }));
       return nomination;
     }
   };
@@ -163,6 +165,7 @@ type AcquisitionFunding = "allowance" | "request";
 /** Native acquisition is the only source filter and cost owner. A prepared hint is a
  * second route under the same allowance, never a replacement for original work; a
  * query-lease source restriction narrows the acquired membership, not only identity.
+ * Only the allowance quote prices statement-key association, so request-funded pages never associate.
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
   queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver,
@@ -185,7 +188,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
       ...(invocation === "hint" ? { question_time: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
-        observer.sourceIndexAcquisition(invocation, "field", capture, kind));
+        observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined);
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
@@ -269,6 +272,8 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
     witness: membership.witness,
     ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
       captures[0].question_time_order.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
+    ...(captures[0]?.association === undefined ? {} : { association: restrictStatementAssociation(captures[0].association,
+      key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
     ...(digests.original === null ? {} : { navigation_digests: { original: digests.original,
       ...(digests.hint === undefined ? {} : { hint: digests.hint }) } }),
     ...(options?.catalog_positions === undefined ? {} : { catalog_positions: options.catalog_positions }),

@@ -159,6 +159,8 @@ export type NativeSourceNomination = Readonly<{
   witness: readonly SourceSemanticNominationOccurrence[];
   /** Bounded source permutation, separate from factual capture ranks. */
   question_time_order?: readonly string[];
+  /** Original-query statement-key observations over admitted roots; navigation only. */
+  association?: import("../../../source-index/statement-association.js").StatementAssociation;
   /** An explicitly bound source pool can include scoped or proved catalog roots. */
   admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
   catalog_positions?: Readonly<Record<string, number>>;

@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
-  BoundedIdSchema, QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceIndexProfileId, sourceIndexNativeRootKey,
   unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
@@ -15,6 +15,8 @@ import {
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
+import { validateInput } from "./source-index-acquisition-input.js";
+import { StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -283,14 +285,16 @@ export class SourceIndexAcquisition {
     const captured = SourceIndexAcquisition.quoteEnvelopeAndInputCapture({ navigation: input.navigation_text,
       vector: input.vector, max_roots: input.allowance.max_roots }, native.budget);
     const windows = native.vector_windows;
+    const association = quoteStatementAssociation(input.allowance.max_roots, windows, native.dimensions);
     return {
       work_units: native.budget.work_units + captured.work_units + native.resources.work
         + VECTOR_COST.ordering_work + windows * (VECTOR_COST.validation_per_dimension * native.dimensions
           + VECTOR_COST.lookup_work + VECTOR_COST.replacement_work + VECTOR_COST.rank_work)
-        + windows * windows * VECTOR_COST.comparison_work,
+        + windows * windows * VECTOR_COST.comparison_work + association.work_units,
       memory_bytes: native.budget.memory_bytes + captured.memory_bytes + native.resources.memory_bytes
         + VECTOR_COST.ordering_bytes + windows * (VECTOR_COST.replacement_bytes
           + VECTOR_COST.key_bytes_per_character * native.root_key_bytes + VECTOR_COST.rank_bytes + VECTOR_COST.ordering_reference_bytes)
+        + association.memory_bytes
     };
   }
 
@@ -307,17 +311,18 @@ export class SourceIndexAcquisition {
   }
 
   /** Runtime capture retains every admitted occurrence before root occupancy is projected.
-   * The caller owns the snapshot and the returned inventory's lifetime.
+   * The caller owns the snapshot and the returned inventory's lifetime. Statement-key association runs
+   * only on request for the original view, whose budget must include `quoteStatementAssociation`.
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
-    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver) {
+    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
-      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 } });
+      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original" });
     const result = query.run();
     return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
-      : { question_time_order: query.questionTimeOrder }) };
+      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }) };
   }
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -358,16 +363,20 @@ class AcquisitionQuery {
   private limited = false;
   private timeRoute = false;
   public questionTimeOrder?: readonly string[];
+  public association?: StatementAssociation;
+  private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
     private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission,
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number } }) {
+      progress: { lexical: number; vector: number }; associate?: boolean }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
+    if (candidate?.associate === true) this.statements = new StatementKeyRetention(this.meter,
+      phase => this.resourceRefusals.push({ stage: this.stage, phase }));
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
     this.vector = { completion: "not_run", state: null, reason: "validation_not_run", inspected_windows: 0,
@@ -434,6 +443,7 @@ class AcquisitionQuery {
             } });
           this.limited ||= partial;
         }
+        this.association = this.statements?.associate([...this.nominations.keys()]);
       }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -609,6 +619,7 @@ class AcquisitionQuery {
     }
     const cosine = this.scoreVector!(candidate.embedding);
     if (!Number.isFinite(cosine)) return;
+    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding);
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
     const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);
@@ -776,24 +787,4 @@ class AcquisitionQuery {
   }
 }
 
-
-function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission, rootCeiling = 16): void {
-  BoundedIdSchema.parse(input.workspace_id);
-  if (input.question_time !== undefined) QuestionTimePreferenceSchema.parse(input.question_time);
-  if (typeof admitScope !== "function" || typeof input.navigation_text !== "string") {
-    throw new CoreError("VALIDATION", "source index query requires captured text and scope admission");
-  }
-  const { max_attempts: attempts, max_roots: roots, max_vector_windows: windows } = input.allowance;
-  // These are safety ceilings, not adopted product defaults or independent channel resource envelopes.
-  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 128 ||
-      !Number.isSafeInteger(roots) || roots < 1 || roots > rootCeiling || roots > attempts ||
-      !Number.isSafeInteger(windows) || windows < 0 || windows > 4096 ||
-      !Number.isSafeInteger(input.budget.work_units) || input.budget.work_units < 0 ||
-      !Number.isSafeInteger(input.budget.memory_bytes) || input.budget.memory_bytes < 0 ||
-      input.vector.status !== "available" && input.vector.status !== "unavailable" ||
-      input.vector.status === "unavailable" && (typeof input.vector.reason !== "string" ||
-        input.vector.reason.length < 1 || input.vector.reason.length > 256)) {
-    throw new CoreError("VALIDATION", "invalid bounded source index query allowance");
-  }
-}
 function compareKey(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }

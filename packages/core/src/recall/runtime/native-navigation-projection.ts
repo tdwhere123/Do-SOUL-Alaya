@@ -102,6 +102,8 @@ function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticR
           : { state: "exact-captured" as const, occurrences: memory }) },
       pool: [...pool.values()], acquired_root_keys: [...new Set(associations.map(row => row.root_key))], associations,
       unvisited_sources: state.native_sources?.result?.completion !== "complete",
+      ...(state.native_sources?.association === undefined ? {} : { association: { ...state.native_sources.association,
+        roots: state.native_sources.association.roots.map(key => sourceKeys.get(key) ?? key) } }),
       ...(state.native_sources?.question_time_order === undefined ? {} : { question_time: {
         root_order: state.native_sources.question_time_order.map(key => sourceKeys.get(key) ?? key),
         capture: { lane: "question-time-lexical" as const, scope: digest,

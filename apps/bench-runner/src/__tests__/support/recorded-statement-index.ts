@@ -10,9 +10,11 @@ export const RECORDED_STATEMENT_CONFIGURATION: SourceIndexConfiguration = { revi
   windowing: "recorded-message-windows.v1", window_bytes: 65536
 } };
 const BUDGET = { work: 100000, native_bytes: 16 * 1024 * 1024 };
+type IndexedTarget = ReturnType<SqliteSourceIndexRepository["listTargets"]>[number];
 
 /** Exercise actual SQLite preparation with recorded vectors, never an embedding model. */
-export function prepareRecordedStatementIndex(database: StorageDatabase, workspace: string) {
+export function prepareRecordedStatementIndex(database: StorageDatabase, workspace: string,
+  embed: (source: IndexedTarget) => readonly number[] = source => source.auxiliary === undefined ? [0, 1, 0] : [1, 0, 0]) {
   const configuration = RECORDED_STATEMENT_CONFIGURATION;
   const index = new SqliteSourceIndexRepository(database, fieldContractSha256);
   const generation = index.begin(index.select(workspace, configuration));
@@ -26,7 +28,7 @@ export function prepareRecordedStatementIndex(database: StorageDatabase, workspa
     expect(index.writeDocument(workspace, generation.generation_id, document, BUDGET).status).toBe("accepted");
     for (const window of document.windows) expect(index.writeVector(workspace, generation.generation_id, {
       window_id: window.window_id, input_digest: window.content_digest,
-      embedding: new Float32Array(source.auxiliary === undefined ? [0, 1, 0] : [1, 0, 0]), token_count: 3, truncated: false
+      embedding: new Float32Array(embed(source)), token_count: 3, truncated: false
     }).status).toBe("accepted");
   }
   expect(index.activate(workspace, generation.generation_id)).toEqual({ status: "accepted" });

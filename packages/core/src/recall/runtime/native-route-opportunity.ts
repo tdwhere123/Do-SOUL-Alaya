@@ -1,4 +1,5 @@
 import { CoreError } from "../../shared/errors.js";
+import { preferAssociatedSlot, type StatementAssociation } from "../../source-index/statement-association.js";
 
 // One demand, four views/operators. This is not a caller-configurable strategy registry.
 const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"] as const;
@@ -238,7 +239,29 @@ export function orderNativeRouteAccess(input: AccessInput<NativeRouteLane>) {
 export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   memory: NativeMemoryLane;
   question_time?: Readonly<{ capture: NativeTimeCapture; root_order: readonly string[] }>;
+  association?: StatementAssociation;
 }) {
+  const ordered = orderTimedFieldAccess(input);
+  if (input.association === undefined) return ordered;
+  validateAssociation(input.association);
+  // Association may swap source slot 5 with a later source root; memory keeps its positions.
+  const memoryIds = new Set(ordered.trace.filter(row => row.lane === "memory-lexical").map(row => row.record_id));
+  const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
+    : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
+  const sources = preferAssociatedSlot(current.filter(id => !memoryIds.has(id)), input.association);
+  let cursor = 0;
+  const recordIds = current.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
+  return { ...ordered, preferred_record_ids: recordIds, ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
+}
+
+function validateAssociation({ roots, question, link }: StatementAssociation): void {
+  requireFact(roots.every(nonempty) && new Set(roots).size === roots.length, "association roots must be distinct identities");
+  requireFact(question.length === roots.length && question.every(Number.isFinite) && link.length === roots.length
+    && link.every((row, i) => row.length === roots.length && row.every((value, j) => Number.isFinite(value) && value === link[j]![i])),
+  "association must be one finite question value and one symmetric link row per root");
+}
+
+function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {
   const result = orderCapturedAccess<AnyNativeLane>({ ...input, lanes: [...input.lanes, input.memory] },
     [...OPPORTUNITY_CYCLE, "memory-lexical"], input.question_time?.capture);
   if (input.question_time === undefined) return result;
