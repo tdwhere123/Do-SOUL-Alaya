@@ -27,7 +27,10 @@ const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const SemanticChainConfigSchema = z.object({
   snapshot_path: z.string().min(1), snapshot_sha256: Digest,
   source_index: SemanticChainSourceIndexBindingSchema.optional(),
-  implementation_revision: z.string().refine(isAuthorityRevision), interpretation_clock: z.string().datetime(),
+  implementation_revision: z.string().refine(isAuthorityRevision),
+  /** Recall-only reader of a snapshot `implementation_revision` prepared; never prepares or reseals it. */
+  consumer_revision: z.string().refine(isAuthorityRevision).optional(),
+  interpretation_clock: z.string().datetime(),
   workspace_id: z.string().min(1), run_id: z.string().min(1),
   query_workset: SemanticProposalWorksetSchema.refine((value) => value.kind === "query", "query workset required"),
   query_cache_root: z.string().min(1), correspondence_cache_root: z.string().min(1),
@@ -152,7 +155,8 @@ export function writeChainJson(path: string, value: unknown): void {
 
 export function assertChainSnapshot(config: SemanticChainConfig): void {
   if (hashRegularFileNoFollow(config.snapshot_path) !== config.snapshot_sha256) throw new AlayaError("CONFLICT", "semantic chain snapshot changed");
-  if (readCurrentExtractionAuthorityRevision() !== config.implementation_revision) throw new AlayaError("CONFLICT", "semantic chain implementation changed");
+  const expected = config.consumer_revision ?? config.implementation_revision;
+  if (readCurrentExtractionAuthorityRevision() !== expected) throw new AlayaError("CONFLICT", "semantic chain implementation changed");
   assertSemanticChainSourceIndex(config);
 }
 

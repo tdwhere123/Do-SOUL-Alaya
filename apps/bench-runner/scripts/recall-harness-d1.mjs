@@ -17,6 +17,8 @@
 // --warm-memory probes the Memory provider independently.
 // --source-lexical-work explicitly allocates model-free lexical preparation work per pass.
 // --source-pass-limits JSON raises the preparation producer's per-pass caps (fewer, larger passes).
+// --prepared-cache DIR --prepared-revision REV only read preparations another checkout sealed; valid only
+// when that checkout's preparation path is unchanged here. Rows keep both revisions; nothing is prepared.
 // --reader end_continuation also reads each cut slot on after the membership window (scored separately).
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
@@ -56,7 +58,8 @@ const { values } = parseArgs({ options: {
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
   "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
   "source-model": { type: "string" }, "source-cache": { type: "string" },
-  "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "source-pass-limits": { type: "string" }, "warm-memory": { type: "boolean", default: false },
+  "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "source-pass-limits": { type: "string" },
+  "prepared-cache": { type: "string" }, "prepared-revision": { type: "string" }, "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
   reader: { type: "string", default: "current" }
 } });
@@ -108,6 +111,14 @@ const execution = sourceOptions.every(Boolean) ? { cache_root: resolve(values["s
   { ...memory, ...(values["model-artifact-digest"] ? { artifact_digest: values["model-artifact-digest"] } : {}),
     ...(values["warm-memory"] ? { memory_warmup: "eager" } : {}) };
 const revision = readCurrentExtractionAuthorityRevision();
+if ((values["prepared-cache"] === undefined) !== (values["prepared-revision"] === undefined)) {
+  throw new AlayaError("VALIDATION", "--prepared-cache and --prepared-revision are required together");
+}
+if (values["prepared-cache"] !== undefined && (values["source-pass-limits"] !== undefined || values.cache !== undefined)) {
+  throw new AlayaError("VALIDATION", "a recall-only consumer neither prepares nor owns a cache");
+}
+const preparationRevision = values["prepared-revision"] ?? revision;
+const consumer = preparationRevision !== revision;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
@@ -127,6 +138,10 @@ mkdirSync(out, { recursive: true });
 const rowsPath = join(out, "rows.jsonl");
 const previous = existsSync(rowsPath) ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
 const executionIdentity = recallExecutionIdentity(values, execution, revision, chainIdentity);
+const preparationIdentity = recallExecutionIdentity(values, execution, preparationRevision, chainIdentity);
+if (previous.some(row => (row.consumer_revision !== undefined) !== consumer)) {
+  throw new AlayaError("CONFLICT", "existing rows use a different preparation ownership");
+}
 if (previous.some(row => row.source_execution_identity !== executionIdentity)) {
   throw new AlayaError("CONFLICT", "existing rows use a different Source or Memory execution");
 }
@@ -164,18 +179,19 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 function prepKey(arm) {
-  return recallPreparationKey(revision, executionIdentity, execution, arm, lexicalPreparation);
+  return recallPreparationKey(preparationRevision, preparationIdentity, execution, arm, lexicalPreparation);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
 async function prepared(question, index, arm) {
-  const dir = join(cacheRoot, question.question_id, prepKey(arm));
+  const dir = join(consumer ? resolve(values["prepared-cache"]) : cacheRoot, question.question_id, prepKey(arm));
   const configPath = join(dir, "prepare", "chain-config.json");
   if (existsSync(configPath)) {
     const config = JSON.parse(readFileSync(configPath, "utf8"));
-    assertRecallCachedPreparation(config, revision, execution, arm);
-    return config;
+    assertRecallCachedPreparation(config, preparationRevision, execution, arm);
+    return consumer ? { ...config, consumer_revision: revision } : config;
   }
+  if (consumer) throw new AlayaError("UNAVAILABLE", `no sealed preparation for ${question.question_id} in --prepared-cache`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const workspace = `harness-${question.question_id}`;
@@ -244,6 +260,7 @@ for (const id of ids) {
       const query = result.rows[0];
       Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
         snapshot_sha256: config.snapshot_sha256, workspace: config.workspace_id, implementation_revision: config.implementation_revision,
+        ...(config.consumer_revision === undefined ? {} : { consumer_revision: config.consumer_revision }),
         input_identity: result.input_identity, snapshot_identity: query.snapshot_identity,
         initial_request: query.pages[0]?.request ?? null,
         intervals: query.source_intervals, pages: query.page_count,

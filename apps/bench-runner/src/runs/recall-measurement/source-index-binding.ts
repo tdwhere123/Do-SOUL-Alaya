@@ -200,6 +200,7 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
     throw new AlayaError("VALIDATION", "Source lexical allocation requires an explicit lexical representation");
   }
   if (config.source_index !== undefined) throw new AlayaError("CONFLICT", "Source setup requires an unbound input snapshot");
+  if (config.consumer_revision !== undefined) throw new AlayaError("CONFLICT", "Source setup cannot run as a recall-only consumer");
   assertChainSnapshot(config);
   const root = resolve(rootValue);
   // Setup also protects the configured default C root when per-key C owners are present.
