@@ -58,9 +58,9 @@ it("admits actual multiple source roots and each contiguous targeted expansion f
   expect(capture.delivered).toEqual(capture.bodies);
   const admitted = admitOrdinaryRecallObservation(capture.root);
   expect(admitted.state).toBe("complete");
-  expect(admitted.binding).toMatchObject({ protocol_package_version: "33.0.0", reader_protocol_package_version: "33.0.0",
-    public_semantics: "ordinary-native-field.v8", producer_revision: capture.config.implementation_revision });
-  expect(capturedCalls(capture).every(call => call.output?.index?.result_version === "ordinary-native-field.v8")).toBe(true);
+  expect(admitted.binding).toMatchObject({ protocol_package_version: "34.0.0", reader_protocol_package_version: "34.0.0",
+    public_semantics: "ordinary-native-field.v9", producer_revision: capture.config.implementation_revision });
+  expect(capturedCalls(capture).every(call => call.output?.index?.result_version === "ordinary-native-field.v9")).toBe(true);
 });
 
 it("defers the second large source to a new membership page and expands both through issued payload continuations", () => {

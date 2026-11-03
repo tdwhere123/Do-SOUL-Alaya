@@ -247,8 +247,10 @@ applies; a preferred candidate can displace a fallback root, never make it ineli
 There is no per-question FTS corpus or unbounded union. Under Protocol 29, restricted
 and unrestricted queries use the same selected generation's FTS statistics; an unbound
 or cold raw fallback explicitly retains database-wide statistics. Unknown source time
-is not inferred from ingestion time. Empty and outside-corpus windows preserve nomination
-order. Unavailable time reads remain explicit partial outcomes, not successful absence.
+is not inferred from ingestion time. Under Protocol 34 the preferred domain is a root whose
+recorded date lies from the window start to the interpretation clock (a past event is
+recorded at or after it happens). Empty windows and windows wholly after the clock yield
+no preference and preserve nomination order. Unavailable time reads remain explicit partial outcomes, not successful absence.
 Public `since`/`until` retain their hard-filter semantics independently of preference.
 
 Native navigation consumes the bounded source permutation separately from capture
@@ -259,11 +261,29 @@ permutes source positions in the mixed access schedule, preserving memory positi
 and native order within each source tier. Continuations retain that frozen order;
 public navigation exposes factual capture provenance and the separate access ordinal.
 
+## Statement-key association at slot 5
+
+Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
+that dominates it on two separate coordinates: question similarity (the best cosine between
+the original query and the root's statement keys) and link to slots 1–4 (the best cosine
+between any statement key of the two roots, same generation). Dominance means at least as
+high on both and higher on one; the earliest dominating root in access order swaps with slot
+5. The coordinates are compared, never combined into a score, and there is no threshold.
+A root without observed statement keys sits at -1, the floor of both coordinates: it never
+displaces the root at slot 5, and at slot 5 it yields to the earliest later root with any observed key.
+Acquisition retains at most 16 statement-key vectors per root seen by the original query's
+vector scan. Only allowance-funded ordinary acquisition associates: its quoted allowance
+includes the worst case of retention and pairwise links, so association never consumes the
+scan's share. Request-funded Source library pages do not associate. An unfunded charge drops
+the association with a recorded resource refusal, never the scan or nomination. Memory
+positions and slots 1–4 are unchanged. The association is retained with the field's native
+sources, so every continuation page re-derives the same order without reacquisition.
+
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v8`, Protocol
-31.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v9`, Protocol
+34.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -673,7 +693,7 @@ Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
 14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5,
-29.0.0/v6, 30.0.0/v7 and current 31.0.0/v8 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8 and current 34.0.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
 canonical request policy. Every native pair requires its matching
 `ordinary-native-field.vN` public semantics and result/continuation version,
 `native_query`, and current compact disclosures; cross-pairs are refused. This is offline

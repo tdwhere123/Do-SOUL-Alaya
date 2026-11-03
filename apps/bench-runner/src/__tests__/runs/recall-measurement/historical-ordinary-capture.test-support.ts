@@ -20,7 +20,8 @@ export function authorHistoricalOrdinaryCapture(capture: Awaited<ReturnType<type
     : protocolVersion === "28.0.0" ? "ordinary-native-field.v5"
     : protocolVersion === "29.0.0" ? "ordinary-native-field.v6"
     : protocolVersion === "30.0.0" ? "ordinary-native-field.v7"
-    : protocolVersion === "31.0.0" || protocolVersion === "32.0.0" ? "ordinary-native-field.v8" : undefined;
+    : protocolVersion === "31.0.0" || protocolVersion === "32.0.0" || protocolVersion === "33.0.0"
+      ? "ordinary-native-field.v8" : undefined;
   const native = nativeSemantics !== undefined;
   const config = { ...capture.config, protocol_package_version: protocolVersion,
     public_semantics: nativeSemantics ?? "conditional-field-source-only-v1", candidate: "a".repeat(40), tree: "b".repeat(40),

@@ -8,14 +8,40 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 32.0.0, engine gateway 2.0.0
+## Unreleased — protocol 34.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
-`@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 34.0.0 changes ordinary native delivery (`ordinary-native-field.v9`, invariant §25
+major). Question-time preference now prefers roots whose recorded date lies from the
+frozen window start to the interpretation clock: a past event is recorded at or after it
+happens, and a window wholly after the clock yields no preference (byte-identical to no
+window). Source slot 5 may swap with the earliest later source root that dominates it on
+both question similarity (best statement key against the original query) and link to
+slots 1–4 (best statement-key cosine between two roots, same generation). The two
+coordinates are compared, never combined. A root without observed statement keys sits at
+the floor of both, so it never displaces slot 5 and at slot 5 yields to any later keyed root.
+Memory positions and slots 1–4 are unchanged. Only allowance-funded ordinary acquisition
+associates, priced in its quoted allowance; request-funded Source library pages do not.
+An unfunded association charge drops the association with a recorded resource refusal,
+never the vector scan. Old continuations
+cannot execute the new order; restart queries after upgrading clients and daemon
+together. No migration; rollback uses the previous binary with fresh handles.
+
+Protocol 33.0.0 adds `soul.capture_host_session`, the one host-session capture contract:
+messages are admitted idempotently by container and host message id with position, role,
+completeness, honest fidelity and optional host-reported time; rounds and statement
+sessions are keyed by container. `soul.report_context_usage` is usage feedback only; its
+`turn_index`, `turn_digest` and `source_observed_at` still parse but capture nothing
+(deprecated). Host-occurrence issuers gain the `host_session` basis. This redefines what an
+existing request does, so it is an invariant §25 major. Ordinary results stay
+`ordinary-native-field.v8`. Engine gateway 3.0.0 exposes `soul.capture_host_session` to
+provider tools and re-describes `soul.report_context_usage` as usage feedback only.
 
 Protocol 32.0.0 moves passive statement generation out of `POST_TURN_EXTRACT` into the
 new `source_statement_session` Garden task kind. A session is one workspace run; its

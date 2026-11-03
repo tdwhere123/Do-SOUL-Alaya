@@ -66,6 +66,11 @@ rounds and statement sessions are keyed by container. `soul.report_context_usage
 feedback only: its `turn_index`, `turn_digest` and `source_observed_at` still parse but capture
 nothing (deprecated). Host-occurrence issuers gain the `host_session` basis. This redefines what
 an existing request does, so it is an invariant §25 major.
+Protocol 34.0.0 identifies ordinary results as `ordinary-native-field.v9`: question-time
+preference spans the recorded window from its start to the interpretation clock, and source
+slot 5 may yield to a later root that dominates it on statement-key question similarity and
+link to slots 1–4 ([recall handbook](../../docs/handbook/recall.md#statement-key-association-at-slot-5)).
+Old continuations cannot execute the new order (invariant §25 major).
 
 Protocol 31.0.0 adds message-bound `source-statements-v1` artifacts shared by
 memory publication and lexical/vector SourceIndex navigation. Ordinary results are
@@ -121,7 +126,7 @@ with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
 [handbook invariant §25](../../docs/handbook/invariants.md); the package is
-now `33.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
+now `34.0.0` and `src/__tests__/contracts/semver-surface.sidecar.json` pins the current
 surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than
