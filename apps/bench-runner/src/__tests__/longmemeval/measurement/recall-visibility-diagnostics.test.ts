@@ -596,4 +596,42 @@ describe("recall-harness-score scorer invocation boundary and column preservatio
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("scores byte budgets over the ranked ten-slot prefix, not slots a later page boundary added", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "recall-score-test-"));
+    try {
+      const dbPath = join(tempDir, "source-index.sqlite");
+      const db = new Database(dbPath);
+      db.exec("CREATE TABLE source_records (workspace_id TEXT, record_id TEXT, source_id TEXT, source_version TEXT, content_digest TEXT, source_body TEXT)");
+      const content = "User: filler\nUser: The coupon is at the store.";
+      const contentDigest = "sha256:2222000000000000000000000000000000000000000000000000000000000002";
+      const recordId = "sha256:bbbb000000000000000000000000000000000000000000000000000000000002";
+      db.prepare("INSERT INTO source_records VALUES (?, ?, ?, ?, ?, ?)")
+        .run("ws-fixture", recordId, roundSourceId("q-ten", 0, 0), "bench-v1", contentDigest, content);
+      db.close();
+      const question: LongMemEvalQuestion = {
+        question_id: "q-ten", question_type: "single-session-user", question: "Where is the coupon?", answer: "store",
+        question_date: "2023/04/01 00:00", haystack_session_ids: ["s0"], haystack_dates: ["2023/04/01 00:00"],
+        answer_session_ids: ["s0"],
+        haystack_sessions: [[{ role: "user", content: "filler" }, { role: "user", content: "The coupon is at the store.", has_answer: true }]]
+      };
+      const dataset = new Map([["q-ten", question]]);
+      const goldStart = content.indexOf("The coupon");
+      const interval = (slot: number, start: number, end: number) => ({ slot_index: slot,
+        target: { kind: "source_evidence", workspace_id: "ws-fixture", root_kind: "source_record", root_id: recordId,
+          source_version: "bench-v1", content_digest: contentDigest, span: { content_start: start, content_end: end } },
+        span: { content_start: start, content_end: end } });
+      const row = (goldSlot: number) => ({ question_id: "q-ten", question_type: "single-session-user", arm: "a",
+        status: "complete", snapshot: dbPath, workspace: "ws-fixture",
+        intervals: [...Array.from({ length: goldSlot }, (_, slot) => interval(slot, 0, 12)),
+          interval(goldSlot, goldStart, content.length)] });
+
+      expect(scoreRecallHarnessRow(row(9), dataset).b8192).toEqual({ any: true, all: true });
+      const past = scoreRecallHarnessRow(row(10), dataset);
+      expect(past.b8192).toEqual({ any: false, all: false });
+      expect(past.slots).toBe(10);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

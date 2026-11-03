@@ -2,7 +2,8 @@
 // Scores recall-harness rows against LongMemEval answer turns. A gold message is visible when its
 // whitespace-normalized content lies inside one delivered interval; Any/All@k use the first k slots,
 // Any/All@B the delivered stream cut at B bytes in slot order. Root@k only asks whether a delivered
-// root contains the gold message.
+// root contains the gold message. Only the ranked ten-slot prefix is scored: paging stops at the first
+// page boundary past ten slots, so later slots depend on page sizes, not on ranking.
 // Additive source-bound diagnostics evaluate contiguous UTF-8 byte coverage without gaps, preserving
 // all published text-substring scores unchanged.
 // Rows read with the end-continuation reader are also scored as "<arm>+end-continuation": the
@@ -17,6 +18,7 @@ import { createRequire } from "node:module";
 import { AlayaError, HostOccurrenceInventorySchema } from "@do-soul/alaya-protocol";
 import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answer-spans.js";
 import { endContinuationReading } from "../dist/runs/recall-measurement/ordinary/ordinary-end-continuation.js";
+import { ORDINARY_RECALL_OBSERVED_SLOT_TARGET } from "../dist/runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import {
   scoreContiguousReadVisibility,
   unavailableRecallRowDiagnostics
@@ -92,7 +94,7 @@ export function scoreRecallHarnessRow(row, dataset) {
   }
 
   const { bodyMap, sourceRows } = loadSnapshotSources(row.snapshot, row.workspace);
-  const slots = row.intervals.filter(i => i.span !== null).map(i => {
+  const slots = row.intervals.filter(i => i.span !== null && i.slot_index < ORDINARY_RECALL_OBSERVED_SLOT_TARGET).map(i => {
     const bytes = bodyMap.get(i.target.root_id) ?? Buffer.alloc(0);
     const text = bytes.subarray(i.span.content_start, i.span.content_end);
     return {
