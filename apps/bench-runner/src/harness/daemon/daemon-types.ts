@@ -86,6 +86,8 @@ export interface BenchDaemonOptions {
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
+  /** Raises Source producer pass caps for explicit preparation only; omitted, production defaults apply. */
+  readonly sourceIndexProducerLimits?: AlayaDaemonRuntimeOptions["sourceIndexProducerLimits"];
   readonly reviewerIdentity?: string;
   readonly reviewerToken?: string;
 }

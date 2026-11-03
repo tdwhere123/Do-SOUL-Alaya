@@ -88,7 +88,8 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
     const sourceIndexProducer = createSourceIndexProducer({
       database: input.database,
       bindSourceEmbedding: (options) => sharedEmbeddingRuntime!.bindLocalSourceIndex(options),
-      warn: input.warn
+      warn: input.warn,
+      ...(input.sourceIndexProducerLimits === undefined ? {} : { limits: input.sourceIndexProducerLimits })
     });
     const recallReadRuntime = createRecallReadRuntime(
       input,

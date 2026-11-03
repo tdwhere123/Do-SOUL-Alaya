@@ -16,6 +16,7 @@
 // --model and --model-cache select Memory; --model-artifact-digest binds its sealed tree.
 // --warm-memory probes the Memory provider independently.
 // --source-lexical-work explicitly allocates model-free lexical preparation work per pass.
+// --source-pass-limits JSON raises the preparation producer's per-pass caps (fewer, larger passes).
 // --reader end_continuation also reads each cut slot on after the membership window (scored separately).
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
@@ -55,10 +56,11 @@ const { values } = parseArgs({ options: {
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
   "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
   "source-model": { type: "string" }, "source-cache": { type: "string" },
-  "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "warm-memory": { type: "boolean", default: false },
+  "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "source-pass-limits": { type: "string" }, "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
   reader: { type: "string", default: "current" }
 } });
+const producerPassLimits = values["source-pass-limits"] === undefined ? undefined : JSON.parse(values["source-pass-limits"]);
 if (!["current", "end_continuation"].includes(values.reader)) throw new AlayaError("VALIDATION", "--reader must be current or end_continuation");
 if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
 const captureRecallPool = values["capture-pool"] ? (await import("./recall-harness-pool.mjs")).captureRecallPool : undefined;
@@ -198,7 +200,8 @@ async function prepared(question, index, arm) {
   const exec = { ...execution, ...(arm.windowing ? { windowing: arm.windowing } : {}),
     ...(arm.lexical ? { lexical: arm.lexical } : {}), ...(arm.representation ? { representation: arm.representation } : {}) };
   const result = await prepareSemanticChainSourceIndex(config, exec, join(dir, "prepare"), undefined,
-    { maxPasses: 10_000, ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }) });
+    { maxPasses: 10_000, ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }),
+      ...(producerPassLimits === undefined ? {} : { producerPassLimits }) });
   if (result.config === null) throw new AlayaError("UNAVAILABLE", `preparation failed: ${result.report.reason}`);
   return result.config;
 }

@@ -76,7 +76,7 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
   vi.mocked(startBenchDaemon).mockImplementation(async options => {
     const database = initDatabase({ filename: join(options!.dataDirRoot!, "alaya.db") });
     let submitted = 0;
-    const producer = createSourceIndexProducer({ database, warn: vi.fn(), limits: { modelInputs },
+    const producer = createSourceIndexProducer({ database, warn: vi.fn(), limits: { modelInputs, ...options!.sourceIndexProducerLimits },
       bindSourceEmbedding: async input => {
         if (fault === "binding_failed") throw new Error("fixture_binding_transport_failed");
         if (unsupported) return { status: "unsupported", reason: "cached_model_unavailable" };
@@ -428,6 +428,22 @@ it.each([[3, 2], [9, 8]] as const)(
     expect(config.budget).toEqual(enabled.config!.budget);
   });
 
+it("raises the setup producer's pass caps only through explicit producerPassLimits, settling 9 sources in one pass", async () => {
+  const { root, config, execution } = setupSources(9);
+  bindProducer(false, 8);
+  config.implementation_revision = readCurrentExtractionAuthorityRevision();
+  const raised = await prepareSemanticChainSourceIndex(config, execution, join(root, "raised"), undefined,
+    { maxPasses: 1, producerPassLimits: { modelInputs: 16, maxRootsPerPass: 32 } });
+  expect(vi.mocked(startBenchDaemon).mock.calls[0]![0]).toMatchObject({ sourceIndexProducerLimits: { modelInputs: 16, maxRootsPerPass: 32 } });
+  expect(raised.config).not.toBeNull();
+  expect(raised.report).toMatchObject({ setup_passes: 1, setup: { status: "settled", limits: { modelInputs: 16, maxRootsPerPass: 32 } },
+    setup_resources: { model_inputs: 9 }, setup_allowance: { maxPasses: 1, producerPassLimits: { modelInputs: 16, maxRootsPerPass: 32 } } });
+  vi.mocked(startBenchDaemon).mockClear();
+  const omitted = await prepareSemanticChainSourceIndex(config, execution, join(root, "omitted"), undefined, { maxPasses: 1 });
+  expect(vi.mocked(startBenchDaemon).mock.calls[0]![0]).not.toHaveProperty("sourceIndexProducerLimits");
+  expect(omitted.report).toMatchObject({ reason: "pending_targets", setup: { limits: { modelInputs: 8, maxRootsPerPass: 16 } } });
+});
+
 it("debits remaining modelInputs onto the second pass and does not consume a fourth input", async () => {
   const { root, config, execution } = setupSources(4);
   bindProducer(false, 2);
@@ -516,6 +532,10 @@ it("rejects invalid setup allowances before starting a daemon", async () => {
     { maxPasses: -1 })).rejects.toThrow(/invalid Source setup allowance/u);
   await expect(prepareSemanticChainSourceIndex(config, execution, join(root, "nan"), undefined,
     { maxPasses: 1, modelInputs: Number.NaN })).rejects.toThrow(/invalid Source setup allowance/u);
+  for (const producerPassLimits of [{ intervalMs: 1 }, { stepDeadlineMs: 60_000 }, { modelInputs: 0 }, { work: 1.5 }, []]) {
+    await expect(prepareSemanticChainSourceIndex(config, execution, join(root, "limits"), undefined,
+      { maxPasses: 1, producerPassLimits: producerPassLimits as never })).rejects.toThrow(/invalid Source producer pass limits/u);
+  }
   expect(startBenchDaemon).not.toHaveBeenCalled();
 });
 

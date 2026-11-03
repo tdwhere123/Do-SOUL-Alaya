@@ -104,6 +104,7 @@ interface BenchDaemonState {
   readonly hostSessionReceiptTime: string | undefined;
   readonly sourceSemanticObservations: boolean | undefined;
   readonly fieldProjectionAdmissionMode: BenchDaemonOptions["fieldProjectionAdmissionMode"];
+  readonly sourceIndexProducerLimits: BenchDaemonOptions["sourceIndexProducerLimits"];
   readonly dataDir: string;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
   readonly managedEnvKeys: readonly string[];
@@ -177,6 +178,7 @@ async function createBenchDaemonState(
     sourceSemanticInterpretationClock: opts.sourceSemanticInterpretationClock,
     hostSessionReceiptTime: opts.hostSessionReceiptTime,
     sourceSemanticObservations: opts.sourceSemanticObservations,
+    sourceIndexProducerLimits: opts.sourceIndexProducerLimits,
     dataDir,
     savedEnv,
     managedEnvKeys,
@@ -213,6 +215,7 @@ async function bootBenchDaemon(
     expectedReconciliationBasis: state.expectedReconciliationBasis,
     relationProjectionAdmissionMode: state.relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,
+    sourceIndexProducerLimits: state.sourceIndexProducerLimits,
     ...(state.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: state.sourceSemanticInterpretationClock }),
     ...(state.hostSessionReceiptTime === undefined ? {} : { hostSessionReceiptTime: state.hostSessionReceiptTime }),
     ...(state.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: state.sourceSemanticObservations }),

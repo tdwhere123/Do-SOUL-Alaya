@@ -24,7 +24,7 @@ import { semanticChainCacheInputPaths } from "./inputs.js";
 import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProgressBindingMatches,
   type SourceIndexProgressSnapshot, type SourceIndexProgressComparison } from "./source-index-progress.js";
 import type {
-  SourceIndexProducerPassReceipt, SourceIndexProducerPassRemaining
+  SourceIndexProducerLimitsOverride, SourceIndexProducerPassReceipt, SourceIndexProducerPassRemaining
 } from "../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
 import { runSourceIndexLexicalPreparation, type SourceIndexLexicalPreparationReport } from "./source-index-lexical-preparation.js";
 
@@ -113,10 +113,15 @@ export function assertSemanticChainSourceIndex(config: SemanticChainConfig, file
 
 const SETUP_METER_KEYS = ["work", "nativeBytes", "modelInputs", "inputBytes",
   "maxCapturePages", "maxRootsPerPass"] as const;
+const PRODUCER_PASS_LIMIT_KEYS: Readonly<Record<keyof SourceIndexProducerLimitsOverride, true>> = {
+  capturePage: true, maxCapturePages: true, maxRootsPerPass: true, work: true, nativeBytes: true, modelInputs: true, inputBytes: true
+};
+/** `producerPassLimits` sizes each pass of the setup daemon's producer; meters only restrict the whole setup. */
 export type SemanticChainSourceSetupAllowance = Readonly<{ maxPasses: number; softElapsedMs?: number;
-  lexicalPreparation?: SourceIndexLexicalPreparationAllocation } & SourceIndexProducerPassRemaining>;
+  lexicalPreparation?: SourceIndexLexicalPreparationAllocation; producerPassLimits?: SourceIndexProducerLimitsOverride }
+  & SourceIndexProducerPassRemaining>;
 type CapturedAllowance = { maxPasses: number; softElapsedMs?: number; leftover?: SourceIndexProducerPassRemaining;
-  lexicalPreparation?: SourceIndexLexicalPreparationAllocation };
+  lexicalPreparation?: SourceIndexLexicalPreparationAllocation; producerPassLimits?: SourceIndexProducerLimitsOverride };
 type SourceIndexPassRemainingBuilder = { [K in typeof SETUP_METER_KEYS[number]]?: number };
 
 type SourceIndexSetupReceipt = SourceIndexProducerPassReceipt | Readonly<{
@@ -220,6 +225,7 @@ export async function prepareSemanticChainSourceIndex(value: unknown, executionV
         cachedLocalEmbedding: execution.source_scope === "separate" ? execution.memory! : execution,
         ...(execution.source_scope === "separate" ? { cachedLocalSourceEmbedding: execution } : {}),
         embeddingStartupProbe: execution.memory_warmup ?? "omit",
+        ...(allowance.producerPassLimits === undefined ? {} : { sourceIndexProducerLimits: allowance.producerPassLimits }),
         sourceSemanticInterpretationClock: config.interpretation_clock, fieldProjectionAdmissionMode: "explicit_checkpoint" });
       removeDataDirWhenBenchDaemonCancelled(directory);
       const scope = currentBenchScope();
@@ -394,7 +400,8 @@ function parseSetupAllowance(value: SemanticChainSourceSetupAllowance | undefine
     throw new AlayaError("VALIDATION", "invalid Source setup allowance");
   }
   for (const key of Object.keys(value)) {
-    if (key !== "maxPasses" && key !== "softElapsedMs" && key !== "lexicalPreparation" && !(SETUP_METER_KEYS as readonly string[]).includes(key)) {
+    if (key !== "maxPasses" && key !== "softElapsedMs" && key !== "lexicalPreparation" && key !== "producerPassLimits" &&
+        !(SETUP_METER_KEYS as readonly string[]).includes(key)) {
       throw new AlayaError("VALIDATION", "invalid Source setup allowance");
     }
   }
@@ -416,8 +423,25 @@ function parseSetupAllowance(value: SemanticChainSourceSetupAllowance | undefine
   }
   const lexicalPreparation = Object.hasOwn(value, "lexicalPreparation")
     ? captureSourceIndexLexicalPreparationAllocation(value.lexicalPreparation) : undefined;
+  const producerPassLimits = Object.hasOwn(value, "producerPassLimits")
+    ? parseProducerPassLimits(value.producerPassLimits) : undefined;
   return { maxPasses, ...(restricted ? { leftover } : {}), ...(softElapsedMs === undefined ? {} : { softElapsedMs }),
-    ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }) };
+    ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }),
+    ...(producerPassLimits === undefined ? {} : { producerPassLimits }) };
+}
+
+function parseProducerPassLimits(value: unknown): SourceIndexProducerLimitsOverride {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new AlayaError("VALIDATION", "invalid Source producer pass limits");
+  }
+  const limits: { -readonly [K in keyof SourceIndexProducerLimitsOverride]: number } = {};
+  for (const [key, limit] of Object.entries(value)) {
+    if (!Object.hasOwn(PRODUCER_PASS_LIMIT_KEYS, key) || typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new AlayaError("VALIDATION", "invalid Source producer pass limits");
+    }
+    limits[key as keyof SourceIndexProducerLimitsOverride] = limit;
+  }
+  return Object.freeze(limits);
 }
 
 function setupMetersExhausted(leftover: SourceIndexProducerPassRemaining): boolean {

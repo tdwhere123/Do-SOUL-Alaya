@@ -48,6 +48,10 @@ export type SourceIndexProducerLimits = Readonly<{
   stepDeadlineMs: number;
 }>;
 
+/** Pass-size caps an explicit preparation may raise; pacing, body and deadline caps stay at their defaults. */
+export type SourceIndexProducerLimitsOverride = Partial<Pick<SourceIndexProducerLimits,
+  "capturePage" | "maxCapturePages" | "maxRootsPerPass" | "work" | "nativeBytes" | "modelInputs" | "inputBytes">>;
+
 export interface SourceIndexProducerInput {
   readonly database: StorageDatabase;
   readonly bindSourceEmbedding: SourceIndexProducerBind;

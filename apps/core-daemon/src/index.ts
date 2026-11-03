@@ -41,6 +41,7 @@ import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
 import type { EmbeddingStartupProbe } from "./ai/daemon-embedding-runtime.js";
+import type { SourceIndexProducerLimitsOverride } from "./runtime/source-index/source-index-producer.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
@@ -79,6 +80,8 @@ export interface AlayaDaemonRuntimeOptions {
   readonly hostSessionReceiptTime?: string;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
+  /** Per-pass Source producer caps for timer and explicit passes alike; omitted, the defaults apply. */
+  readonly sourceIndexProducerLimits?: SourceIndexProducerLimitsOverride;
 }
 
 type RuntimeClockOptions = Pick<AlayaDaemonRuntimeOptions, "sourceSemanticInterpretationClock" | "hostSessionReceiptTime">;
@@ -99,7 +102,8 @@ export async function createAlayaDaemonRuntime(
         recallReadWorkerClient = client;
       },
       relationProjectionAdmissionMode: options.relationProjectionAdmissionMode,
-      embeddingStartupProbe: options.embeddingStartupProbe
+      embeddingStartupProbe: options.embeddingStartupProbe,
+      sourceIndexProducerLimits: options.sourceIndexProducerLimits
     });
     const runtime = await createGardenAndFinalRuntime(
       bootstrap,

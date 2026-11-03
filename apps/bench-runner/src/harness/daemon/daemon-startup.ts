@@ -37,6 +37,7 @@ export interface BenchDaemonStartupInput {
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
+  readonly sourceIndexProducerLimits?: AlayaDaemonRuntimeOptions["sourceIndexProducerLimits"];
   readonly configDirectory: BenchDaemonConfigDirectoryLease;
   readonly managedEnvKeys: readonly string[];
   readonly createManagedWorkspaceRoot: (workspaceId: string) => Promise<string>;
@@ -77,13 +78,15 @@ export async function initializeBenchDaemon(
 
 async function createBenchRuntimeResources(input: BenchDaemonStartupInput): Promise<BenchDaemonStartupResources> {
   const { activeContext, expectedReconciliationBasis, relationProjectionAdmissionMode,
-    fieldProjectionAdmissionMode, sourceSemanticInterpretationClock, hostSessionReceiptTime, embeddingStartupProbe } = input;
+    fieldProjectionAdmissionMode, sourceSemanticInterpretationClock, hostSessionReceiptTime, embeddingStartupProbe,
+    sourceIndexProducerLimits } = input;
   const options: AlayaDaemonRuntimeOptions = {
     embeddingStartupProbe,
     ...(sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock }),
     ...(hostSessionReceiptTime === undefined ? {} : { hostSessionReceiptTime }),
     relationProjectionAdmissionMode,
-    fieldProjectionAdmissionMode
+    fieldProjectionAdmissionMode,
+    ...(sourceIndexProducerLimits === undefined ? {} : { sourceIndexProducerLimits })
   };
   // The private friend owns both construction and registry lookup so source/dist
   // test aliases cannot split them. Ordinary startup keeps its existing entry.
