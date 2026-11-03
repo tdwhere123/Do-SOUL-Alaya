@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
+import { sharedSourceRecordRepo, type SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { encodeEmbeddingBlob, isFiniteNonzeroEmbedding } from "../memory/embedding-vector-validity.js";
 import { readBufferField, readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
 import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit, guardSourceIndexTarget, readSourceIndexDocument, readSourceIndexMessageStructure,
@@ -40,7 +40,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     options: Readonly<{ captureReadTargets?: boolean }> = {}) {
     this.lexical = new SqliteSourceIndexLexicalStore(database, sha256);
     this.targetCapture = options.captureReadTargets ? new SourceIndexTargetCapture() : undefined;
-    this.records = new SqliteFieldSourceRecordRepo(database, sha256);
+    this.records = sharedSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
   }
 
@@ -410,7 +410,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   private atomic<T>(operation: () => T, mode: "read" | "write" = "write"): T {
     this.database.reopenIfClosed();
     if (this.connectionVersion !== this.database.getConnectionVersion()) {
-      this.records = new SqliteFieldSourceRecordRepo(this.database, this.sha256);
+      this.records = sharedSourceRecordRepo(this.database, this.sha256);
       this.connectionVersion = this.database.getConnectionVersion();
     }
     // A read inside the caller's snapshot needs no nested savepoint: it writes nothing to undo.

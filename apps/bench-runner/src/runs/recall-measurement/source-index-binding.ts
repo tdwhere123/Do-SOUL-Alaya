@@ -453,14 +453,20 @@ async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance:
   let leftover = allowance.leftover === undefined ? undefined : { ...allowance.leftover };
   let last: SourceIndexSetupReceipt | undefined;
   const resources = { ...SETUP_RESOURCE_ZERO }, history: SourceIndexSetupPass[] = [], diagnostics = { ...SETUP_DIAGNOSTIC_ZERO };
+  // Nothing writes between one pass's after-capture and the next pass's before-capture, so it is reused.
+  let lastAfter: SourceIndexProgressSnapshot | undefined;
   const observe = (pass: number, phase: "before" | "after") => {
-    const snapshot = captureSourceIndexProgress(filename, workspace, currentBenchScope()?.signal);
-    diagnostics.snapshots++;
-    diagnostics.metadata_transactions += snapshot.cost.metadata_transactions;
-    diagnostics.target_rows += snapshot.cost.target_rows;
-    diagnostics.pending_reads += snapshot.cost.pending_reads;
-    diagnostics.work += snapshot.cost.work;
-    diagnostics.native_bytes += snapshot.cost.native_bytes;
+    const reused = phase === "before" ? lastAfter : undefined;
+    const snapshot = reused ?? captureSourceIndexProgress(filename, workspace, currentBenchScope()?.signal);
+    if (phase === "after") lastAfter = snapshot;
+    if (reused === undefined) {
+      diagnostics.snapshots++;
+      diagnostics.metadata_transactions += snapshot.cost.metadata_transactions;
+      diagnostics.target_rows += snapshot.cost.target_rows;
+      diagnostics.pending_reads += snapshot.cost.pending_reads;
+      diagnostics.work += snapshot.cost.work;
+      diagnostics.native_bytes += snapshot.cost.native_bytes;
+    }
     // Retain even a diagnostic followed by a deadline/throw before the native pass starts.
     writeChainArtifact(join(root, "diagnostics", `${phase}-${pass}.json`), snapshot);
     return snapshot;

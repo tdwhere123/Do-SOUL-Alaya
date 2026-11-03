@@ -2,7 +2,7 @@ import { AlayaError, SourceIndexLexicalSelectionSchema, type SourceIndexTarget, 
   type SourceIndexGeneration, type SourceIndexSelection, type SourceIndexLexicalSelection, type FieldContractSha256 } from "@do-soul/alaya-protocol";
 import { readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
-import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
+import { sharedSourceRecordRepo } from "../field/source-repo.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, readSourceIndexQueryState, sourceIndexEpoch, SOURCE_INDEX_LEXICAL_CURRENT } from "./generation-state.js";
 import { guardSourceIndexTarget, sourceTargetFromRead, SOURCE_INDEX_STANDALONE_BUDGET } from "./native-source.js";
 import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js";
@@ -58,7 +58,7 @@ export function readSourceIndexRootQualification(database: StorageDatabase, sha2
     lexical: { status: "unknown", start_byte: null, end_byte: null },
     vector: { status: "unknown", generation_member: null, expected_windows: null, coverage_complete: null,
       windows: [], capture: "unknown", next_ordinal: null } };
-  const records = new SqliteFieldSourceRecordRepo(database, sha256);
+  const records = sharedSourceRecordRepo(database, sha256);
   const read = records.findCurrentBounded(workspaceId, sourceId, 4, 0,
     { workLimit: SOURCE_INDEX_STANDALONE_BUDGET.work, nativeByteLimit: SOURCE_INDEX_STANDALONE_BUDGET.native_bytes });
   if (read === null) return { ...result, status: "stale", currentness: "stale", reason: "missing_source" };

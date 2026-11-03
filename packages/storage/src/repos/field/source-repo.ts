@@ -428,6 +428,19 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   }
 }
 
+const sharedRecordRepos = new WeakMap<StorageDatabase, Readonly<{
+  version: number; sha256: FieldContractSha256; repo: SqliteFieldSourceRecordRepo;
+}>>();
+/** The record repository is stateless; one per connection compiles its statements once instead of per call.
+ * Migrations run before a connection is wrapped, so its column presence is fixed per connection version. */
+export function sharedSourceRecordRepo(database: StorageDatabase, sha256: FieldContractSha256): SqliteFieldSourceRecordRepo {
+  const version = database.getConnectionVersion(), cached = sharedRecordRepos.get(database);
+  if (cached !== undefined && cached.version === version && cached.sha256 === sha256) return cached.repo;
+  const repo = new SqliteFieldSourceRecordRepo(database, sha256);
+  sharedRecordRepos.set(database, { version, sha256, repo });
+  return repo;
+}
+
 export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
   private readonly insertStatement;
   private readonly selectStatement;

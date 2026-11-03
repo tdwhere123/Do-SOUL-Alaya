@@ -13,7 +13,7 @@ import { advanceSegmentedLexicalDocument } from "./lexical-progress.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
-import { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
+import { sharedSourceRecordRepo, type SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { readIntegerField, readJsonColumn, readNullableStringField, readRecord, readStringField } from "../shared/parse-row.js";
 import { enumerateSourceIndexTargets, persistSourceIndexLexical } from "./capture-targets.js";
 import { sourceIndexEpoch } from "./generation-state.js";
@@ -297,7 +297,7 @@ export class SqliteSourceIndexLexicalStore implements SourceIndexLexicalReposito
     if (generation === null) throw new StorageError("NOT_FOUND", "source lexical generation not found");
     return generation;
   }
-  private records(): SqliteFieldSourceRecordRepo { return new SqliteFieldSourceRecordRepo(this.database, this.sha256); }
+  private records(): SqliteFieldSourceRecordRepo { return sharedSourceRecordRepo(this.database, this.sha256); }
   private atomic<T>(operation: () => T, read = false): T {
     this.database.reopenIfClosed();
     const transaction = this.database.connection.transaction(operation);

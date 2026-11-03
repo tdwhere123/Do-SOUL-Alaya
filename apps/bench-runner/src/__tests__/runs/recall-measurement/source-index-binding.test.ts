@@ -569,8 +569,11 @@ it("captures the allocation before startup awaits and retains each receipt befor
     expect(entry.after.pending.every(row => row.result.status !== "ready" || row.result.ordinals.length <= 1)).toBe(true);
   }
   expect(total).toEqual(result.report.setup_resources);
-  const diagnosticWork = result.report.setup_history.reduce((sum, entry) => sum + entry.before.cost.work + entry.after.cost.work, 0);
-  expect(result.report.setup_diagnostics).toMatchObject({ snapshots: 4, work: diagnosticWork, sql_internal_work: "unknown" });
+  // A later pass reuses the previous after-capture as its before-capture: 2 passes, 3 captures.
+  const [first, second] = result.report.setup_history;
+  expect(second!.before).toEqual(first!.after);
+  const diagnosticWork = first!.before.cost.work + first!.after.cost.work + second!.after.cost.work;
+  expect(result.report.setup_diagnostics).toMatchObject({ snapshots: 3, work: diagnosticWork, sql_internal_work: "unknown" });
   expect(result.report.setup_history[1]!.remaining_after!.modelInputs).toBe(0); // exact-limit complete success
 });
 
