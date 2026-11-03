@@ -14,7 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { preferQuestionTime } from "./question-time-preference.js";
+import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -365,8 +365,8 @@ class AcquisitionQuery {
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
       progress: { lexical: number; vector: number } }) {
-    this.input = { ...input, ...(input.question_time === undefined ? {}
-      : { question_time: QuestionTimePreferenceSchema.parse(input.question_time) }) };
+    const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
+    this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.

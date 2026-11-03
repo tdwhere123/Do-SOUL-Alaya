@@ -59,7 +59,8 @@ it("delivers a time-preferred mixed SQLite pool through the built worker and MCP
     expect(sourceIds(preferred)).toEqual([root("preferred"), ...sourceIds(baseline).filter(id => id !== root("preferred"))]);
     expect(preferred.index!.entries.map(entry => entry.target.kind)).toEqual(baseline.index!.entries.map(entry => entry.target.kind));
     expect(preferred.index!.entries.some(entry => entry.target.kind === "memory_entry")).toBe(true);
-    for (const intervals of [[], [{ start: "1900-01-01", end: "1900-01-01" }]]) {
+    // A window wholly after the clock dates no recordable past event, so it leaves no preference.
+    for (const intervals of [[], [{ start: "2999-01-01", end: "2999-01-01" }]]) {
       const unchanged = await call({ ...request, interpretation_proposal: { ...proposal,
         question_time: { ...proposal.question_time, intervals } } });
       expect(unchanged.index!.entries.map(entry => [entry.target, entry.navigation]))

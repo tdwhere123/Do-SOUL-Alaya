@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionTimePreference } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
+import { recordedQuestionTime } from "../../source-index/question-time-preference.js";
 import { fixture, configuration, fieldSha256, WORKSPACE, type Fixture } from
   "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { publishIndex, queryInput, query, admitScope, expectBounded } from "./source-index-acquisition-fixture.js";
@@ -48,7 +49,29 @@ describe("question time bounded preference through SQLite acquisition", () => {
       .toBe(all.candidates.find(candidate => candidate.source.root_key === row.source.root_key)!.lexical.bm25);
   });
 
-  it("keeps empty windows and outside-corpus windows nomination-identical, including witnesses", () => {
+  it("maps the event window to the recorded domain from its earliest start to the question date", () => {
+    const clock = "2023-05-30T18:45:00.000Z";
+    expect(recordedQuestionTime({ interpretation_clock: clock, intervals: [{ start: "2023-02-01", end: "2023-02-28" },
+      { start: "2023-01-15", end: "2023-01-20" }] })).toEqual({ interpretation_clock: clock,
+      intervals: [{ start: "2023-01-15", end: "2023-05-30" }] });
+    expect(recordedQuestionTime({ interpretation_clock: clock, intervals: [{ start: "2023-05-27", end: "2023-06-04" }] }))
+      .toEqual({ interpretation_clock: clock, intervals: [{ start: "2023-05-27", end: "2023-05-30" }] });
+    expect(recordedQuestionTime({ interpretation_clock: clock, intervals: [{ start: "2023-06-03", end: "2023-06-04" }] }))
+      .toBeUndefined();
+    expect(recordedQuestionTime({ interpretation_clock: clock, intervals: [] })).toBeUndefined();
+  });
+
+  it("prefers roots recorded after the event window ends", () => {
+    const { env, input } = setup();
+    const event = query(env, { ...input, question_time: { ...preference,
+      intervals: [{ start: "2020-01-01", end: "2020-01-01" }] } }, admitScope);
+    const recorded = query(env, { ...input, question_time: { ...preference,
+      intervals: [{ start: "2020-01-01", end: "2026-09-07" }] } }, admitScope);
+    expect(ids(event)).toEqual(ids(recorded));
+    expect(ids(event)).toContain("native-0");
+  });
+
+  it("keeps empty windows and windows after the question clock nomination-identical, including witnesses", () => {
     const { env, input } = setup();
     const acquire = (question_time?: QuestionTimePreference) => env.database.connection.transaction(() =>
       new SourceIndexAcquisition(env.index, fieldSha256).nominateWithWitness({ ...input,
@@ -56,14 +79,14 @@ describe("question time bounded preference through SQLite acquisition", () => {
     const baseline = acquire();
     const empty = acquire({ ...preference, intervals: [] });
     expect(empty).toEqual(baseline);
-    const outside = acquire({ ...preference, intervals: [{ start: "1900-01-01", end: "1900-01-02" }] });
+    const outside = acquire({ ...preference, intervals: [{ start: "2027-01-01", end: "2027-01-02" }] });
     expect(outside.result.nominations).toEqual(baseline.result.nominations);
     expect(outside.witness).toEqual(baseline.witness);
     expect(outside.result.accounting).toEqual(baseline.result.accounting);
     const tight = { ...input, budget: { work_units: baseline.result.resources.work,
       memory_bytes: baseline.result.resources.memory_bytes } };
     expect(ids(query(env, { ...tight, question_time: { ...preference,
-      intervals: [{ start: "1900-01-01", end: "1900-01-02" }] } }, admitScope)))
+      intervals: [{ start: "2027-01-01", end: "2027-01-02" }] } }, admitScope)))
       .toEqual(ids(query(env, tight, admitScope)));
   });
 

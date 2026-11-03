@@ -3,6 +3,16 @@ import type { QuestionTimePreference, SourceIndexAcquisitionResult, SourceIndexL
   SourceSemanticNominationOccurrence, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceIndexNativeRootKey } from "@do-soul/alaya-protocol";
 
+/** The window dates the asked event. A past event is recorded at or after its start and never after the
+ * question clock, so the recorded-time domain is [earliest start, clock date]; a window wholly after the
+ * clock leaves no domain and no preference. */
+export function recordedQuestionTime(preference: QuestionTimePreference): QuestionTimePreference | undefined {
+  const clock = preference.interpretation_clock.slice(0, 10);
+  const starts = preference.intervals.map(interval => interval.start).filter(start => start <= clock).sort();
+  return starts.length === 0 ? undefined
+    : { interpretation_clock: preference.interpretation_clock, intervals: [{ start: starts[0]!, end: clock }] };
+}
+
 type MutableAccounting = { -readonly [K in keyof SourceIndexNominationAccounting]: SourceIndexNominationAccounting[K] };
 
 /** Replace the bounded prefix only after preparation succeeds. Original admitted
