@@ -178,8 +178,12 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
   };
 }
 
+// Statements are published into the sealed snapshot, so the map and its caches are preparation input.
+const statementMap = process.env.STATEMENT_MAP === undefined ? undefined
+  : (await import("./recall-statement-keys.mjs")).statementMapDigest();
+
 function prepKey(arm) {
-  return recallPreparationKey(preparationRevision, preparationIdentity, execution, arm, lexicalPreparation);
+  return recallPreparationKey(preparationRevision, preparationIdentity, execution, arm, lexicalPreparation, statementMap);
 }
 
 /** Returns a prepared chain config, reusing a cached preparation for the same inputs. */

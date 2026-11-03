@@ -23,6 +23,17 @@ it("keeps lexical preparation work in cache identity without changing semantic e
   expect(selection.recallExecutionIdentity({ ...values, "source-lexical-work": "131072" }, execution, revision, chainIdentity)).toBe(identity);
 });
 
+it("binds the statement map that published a preparation's statements into its cache key", async () => {
+  const selection = await import(pathToFileURL(fileURLToPath(new URL("../../../scripts/recall-harness-selection.mjs", import.meta.url))).href);
+  const execution = { cache_root: "/fixture/models", model_id: "fixture-model" }, revision = "fixture-revision";
+  const arm = { name: "time", host: true };
+  const unmapped = selection.recallPreparationKey(revision, undefined, execution, arm);
+  const mapped = selection.recallPreparationKey(revision, undefined, execution, arm, undefined, "a".repeat(64));
+  expect(selection.recallPreparationKey(revision, undefined, execution, arm, undefined, undefined)).toBe(unmapped);
+  expect(mapped).not.toBe(unmapped);
+  expect(selection.recallPreparationKey(revision, undefined, execution, arm, undefined, "b".repeat(64))).not.toBe(mapped);
+});
+
 it("keeps explicit Memory cache changes out of cached preparations and resumed harness rows", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-harness-selection-"));
   const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));

@@ -11,24 +11,22 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const tree = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const load = rel => import(pathToFileURL(join(tree, rel)).href);
-const { AlayaError, SOURCE_STATEMENTS_CONTRACT, hostSessionContainerKey, hostSessionStatementSessionId } =
-  await load("packages/protocol/dist/index.js");
-const { createSourceObservationPublication, fieldContractSha256, EvidenceService, MemoryService, DynamicsService } =
-  await load("packages/core/dist/index.js");
-const { initDatabase, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteEvidenceCapsuleRepo, SqliteKarmaEventRepo } =
-  await load("packages/storage/dist/index.js");
-const { GardenStatementSessionSources } = await load("packages/storage/dist/repos/garden/garden-statement-session-sources.js");
-const { planSourceStatementSession, receiveSourceStatements, emitSourceStatementSessionSignals } =
-  await load("packages/soul/dist/index.js");
-const { rootStatementMessages } = await load("apps/core-daemon/dist/garden/statement-session/statement-session-task.js");
-const { createDaemonFieldComposition } = await load("apps/core-daemon/dist/runtime/field/field-composition.js");
-const { longMemEvalSessionContainer } = await load("apps/bench-runner/dist/datasets/longmemeval/ingestion/host-session-import.js");
+// Loaded only to publish: digesting the map must not pull in the built packages.
+let owners;
+const production = () => owners ??= Promise.all([
+  "packages/protocol/dist/index.js", "packages/core/dist/index.js", "packages/storage/dist/index.js",
+  "packages/storage/dist/repos/garden/garden-statement-session-sources.js", "packages/soul/dist/index.js",
+  "apps/core-daemon/dist/garden/statement-session/statement-session-task.js",
+  "apps/core-daemon/dist/runtime/field/field-composition.js",
+  "apps/bench-runner/dist/datasets/longmemeval/ingestion/host-session-import.js"
+].map(load)).then(modules => Object.assign({}, ...modules));
 
 const norm = text => text.replace(/\s+/gu, " ").trim();
 let cached;
 function statementMap() {
   if (cached !== undefined) return cached;
-  cached = new Map();
+  // Published only once complete: a partial map would publish later questions as silently unmapped.
+  const map = new Map();
   for (const line of readFileSync(process.env.STATEMENT_MAP, "utf8").split("\n").filter(Boolean)) {
     const row = JSON.parse(line);
     const file = JSON.parse(readFileSync(row.cache_file, "utf8"));
@@ -38,12 +36,26 @@ function statementMap() {
       const statements = out.get(m.message_id);
       if (Array.isArray(statements)) byText.set(`${m.role}\0${norm(m.text)}`, statements);
     }
-    cached.set(`${row.question_id}-s${row.session_index}`, byText);
+    map.set(`${row.question_id}-s${row.session_index}`, byText);
   }
+  cached = map;
   return cached;
 }
 
-function environment(dbPath) {
+/** The map and every cache file it names, in map order: either can change the published statements. */
+export function statementMapDigest() {
+  const hash = createHash("sha256"), index = readFileSync(process.env.STATEMENT_MAP);
+  hash.update(index);
+  for (const line of index.toString("utf8").split("\n").filter(Boolean)) {
+    const bytes = readFileSync(JSON.parse(line).cache_file);
+    hash.update(`\0${bytes.length}\0`).update(bytes);
+  }
+  return hash.digest("hex");
+}
+
+function environment(dbPath, { initDatabase, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteEvidenceCapsuleRepo,
+  SqliteKarmaEventRepo, createDaemonFieldComposition, EvidenceService, MemoryService, DynamicsService,
+  createSourceObservationPublication, fieldContractSha256 }) {
   const database = initDatabase({ filename: dbPath });
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo });
@@ -60,7 +72,8 @@ function environment(dbPath) {
 }
 
 /** Each published session's round roots in round order, read from its host container's capture ledger. */
-function questionSessions(sources, workspace, questionId, publication) {
+function questionSessions(sources, workspace, questionId, publication,
+  { AlayaError, hostSessionContainerKey, longMemEvalSessionContainer, fieldContractSha256 }) {
   const sessions = [...new Set(publication.sources.map(source => source.session_index))].sort((a, b) => a - b);
   return sessions.map(si => {
     const key = hostSessionContainerKey(longMemEvalSessionContainer(questionId, si), fieldContractSha256);
@@ -76,12 +89,14 @@ function questionSessions(sources, workspace, questionId, publication) {
 export async function publishStatementKeys({ snapshot, workspace, question: { question_id }, publication }) {
   const report = { sessions: 0, rounds: 0, messages: 0, matched_messages: 0, keyed_messages: 0, statements: 0,
     unmapped_sessions: 0, raw_gaps: [], rejections: [] };
-  const map = statementMap();
-  const env = environment(snapshot);
+  const map = statementMap(), owners = await production();
+  const { SOURCE_STATEMENTS_CONTRACT, hostSessionStatementSessionId, GardenStatementSessionSources, rootStatementMessages,
+    planSourceStatementSession, receiveSourceStatements, emitSourceStatementSessionSignals } = owners;
+  const env = environment(snapshot, owners);
   const sql = env.database.connection ?? env.database.db ?? env.database;
   const sources = new GardenStatementSessionSources(sql);
   try {
-    for (const [si, key, roots] of questionSessions(sources, workspace, question_id, publication)) {
+    for (const [si, key, roots] of questionSessions(sources, workspace, question_id, publication, owners)) {
       const sessionId = hostSessionStatementSessionId(key);
       const byText = map.get(`${question_id}-s${si}`);
       if (byText === undefined) report.unmapped_sessions++;
