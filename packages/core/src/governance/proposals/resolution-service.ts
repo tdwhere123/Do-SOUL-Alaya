@@ -1,4 +1,5 @@
 import {
+  admitSoulResolutionFields,
   ClaimLifecycleState,
   GovernanceResolutionPayloadSchema,
   KeyedMutex,
@@ -45,20 +46,27 @@ export class ResolutionService {
   public async resolve(input: ResolveInput): Promise<ResolveOutcome> {
     this.validateInput(input);
     await requireDeliveryAuthority(this.deps.deliveryAuthority, input);
-    if (input.resolution === SoulResolutionKind.CONFIRM) {
+    const admission = admitSoulResolutionFields({
+      resolution: input.resolution,
+      ...(input.correction === undefined ? {} : { correction: input.correction }),
+      ...(input.deferUntil === undefined ? {} : { defer_until: input.deferUntil })
+    });
+    if (!admission.valid) throw new CoreError("VALIDATION", admission.message);
+    const fields = admission.fields;
+    if (fields.resolution === SoulResolutionKind.CONFIRM) {
       return await this.confirmationMutex.runExclusive(JSON.stringify([input.workspaceId, input.targetObjectId]),
         async () => await this.applyConfirm(input, this.now()));
     }
     const resolvedAt = this.now();
-    switch (input.resolution) {
+    switch (fields.resolution) {
       case SoulResolutionKind.REJECT:
         return await this.applyReject(input, resolvedAt);
       case SoulResolutionKind.CORRECT:
-        return await this.applyCorrect(input, resolvedAt);
+        return await this.applyCorrect(input, resolvedAt, fields.correction);
       case SoulResolutionKind.STALE:
         return await this.applyStale(input, resolvedAt);
       case SoulResolutionKind.DEFER:
-        return await this.applyDefer(input, resolvedAt);
+        return await this.applyDefer(input, resolvedAt, fields.defer_until);
       case SoulResolutionKind.NOT_RELEVANT:
         return await this.applyNotRelevant(input, resolvedAt);
     }
@@ -206,19 +214,13 @@ export class ResolutionService {
   }
 
   // invariant: correction receipts and their payload commit through the proof-effect owner.
-  private async applyCorrect(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
-    if (input.correction === undefined || input.correction.trim().length === 0) {
-      throw new CoreError(
-        "VALIDATION",
-        "resolution=correct requires a non-empty correction"
-      );
-    }
+  private async applyCorrect(input: ResolveInput, effectiveAsOf: string, correction: string): Promise<ResolveOutcome> {
     await this.requireTargetExists(input);
     const decision = await this.decideEffect(
       input,
       GovernedEffectAction.CORRECT,
       effectiveAsOf,
-      input.correction
+      correction
     );
     if (decision.decision !== "allow") {
       return await this.persistNonAllowDecision(input, decision);
@@ -235,7 +237,7 @@ export class ResolutionService {
     const entry = await this.deps.claimService.recordEffectDecision(
       decision,
       this.buildAuditEventInput(input, effectiveAsOf, {
-        correction: input.correction,
+        correction,
         predecessorReceiptId: predecessor.receipt_id,
         successorReceiptId: successor.receipt_id
       })
@@ -290,13 +292,7 @@ export class ResolutionService {
   // invariant: defer creates a DeferredObligation kind=evidence_refresh
   // bound to the target entity. The obligation_id is echoed back so
   // the caller can fulfil / expire it through DeferredObligationService.
-  private async applyDefer(input: ResolveInput, resolvedAt: string): Promise<ResolveOutcome> {
-    if (input.deferUntil === undefined || input.deferUntil.trim().length === 0) {
-      throw new CoreError(
-        "VALIDATION",
-        "resolution=defer requires a defer_until ISO datetime"
-      );
-    }
+  private async applyDefer(input: ResolveInput, resolvedAt: string, deferUntil: string): Promise<ResolveOutcome> {
     if (input.runId === null) {
       throw new CoreError(
         "VALIDATION",
@@ -311,7 +307,7 @@ export class ResolutionService {
       sourceRunId: input.runId,
       workspaceId: input.workspaceId,
       targetEntityId: input.targetObjectId,
-      expiresAt: input.deferUntil
+      expiresAt: deferUntil
     }, {
       buildAdditionalEventInputs: (created) => [this.buildAuditEventInput(input, resolvedAt, {
         obligationId: created.obligation_id
