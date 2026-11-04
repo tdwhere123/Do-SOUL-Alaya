@@ -8,6 +8,7 @@ CREATE TABLE host_session_rounds (
   PRIMARY KEY (workspace_id, container_key, round_index),
   UNIQUE (workspace_id, container_key, root_id)
 ) WITHOUT ROWID;
+CREATE INDEX idx_host_session_rounds_pending ON host_session_rounds(workspace_id, container_key, state, round_index);
 
 INSERT INTO host_session_rounds
 SELECT workspace_id, container_key, round_index, round_root_id, 'done'
@@ -50,7 +51,8 @@ CREATE TABLE host_session_messages_new (
   round_root_id TEXT, erased INTEGER NOT NULL DEFAULT 0 CHECK (erased IN (0, 1)),
   PRIMARY KEY (workspace_id, container_key, message_id), UNIQUE (workspace_id, container_key, position),
   CHECK ((round_root_id IS NULL) = (round_index IS NULL)),
-  CHECK (erased = 0 OR pending_body IS NULL)
+  CHECK (erased = 0 OR pending_body IS NULL),
+  CHECK (round_root_id IS NOT NULL OR pending_body IS NOT NULL OR erased = 1)
 );
 INSERT INTO host_session_messages_new
 SELECT m.*, 0 FROM host_session_messages m;
@@ -101,10 +103,32 @@ WHERE m.round_index IS NULL AND EXISTS (SELECT 1 FROM host_session_rounds r JOIN
   WHERE r.workspace_id = m.workspace_id AND r.container_key = m.container_key AND r.state = 'pending'
     AND json_extract(o.value, '$.occurrence_id') = m.message_id);
 
+-- A host/idle tail closure remains fixed even while a later capture arrives.
+CREATE TABLE host_session_tail_boundaries (
+  workspace_id TEXT NOT NULL, container_key TEXT NOT NULL, round_index INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'done')),
+  PRIMARY KEY (workspace_id, container_key, round_index)
+) WITHOUT ROWID;
+-- A stranded single-user receipt with no successor, or an adjacent assistant
+-- appended later, proves that the original tail was explicitly or idly closed.
+INSERT INTO host_session_tail_boundaries
+SELECT r.workspace_id, r.container_key, r.round_index, 'pending'
+FROM host_session_rounds r JOIN host_session_messages m ON m.workspace_id = r.workspace_id
+  AND m.container_key = r.container_key AND m.round_index = r.round_index
+WHERE r.state = 'pending' AND m.role = 'user'
+  AND 1 = (SELECT COUNT(*) FROM host_session_messages member WHERE member.workspace_id = r.workspace_id
+    AND member.container_key = r.container_key AND member.round_index = r.round_index)
+  AND (NOT EXISTS (SELECT 1 FROM host_session_messages later WHERE later.workspace_id = m.workspace_id
+        AND later.container_key = m.container_key AND later.position > m.position)
+    OR EXISTS (SELECT 1 FROM host_session_messages later WHERE later.workspace_id = m.workspace_id
+        AND later.container_key = m.container_key AND later.position = m.position + 1 AND later.role = 'assistant'));
+
 -- Planning progress includes raw-only gaps, and commits with any queued chunks.
 CREATE TABLE host_session_planning (
   workspace_id TEXT NOT NULL, container_key TEXT NOT NULL,
   round_index INTEGER NOT NULL, occurrence_end INTEGER NOT NULL,
+  scan_round INTEGER NOT NULL, pending_json TEXT NOT NULL CHECK (json_valid(pending_json)),
+  context_before INTEGER, context_json TEXT NOT NULL CHECK (json_valid(context_json)),
   PRIMARY KEY (workspace_id, container_key)
 ) WITHOUT ROWID;
 

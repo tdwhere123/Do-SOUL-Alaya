@@ -95,7 +95,7 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
       const closesTail = request.closes_tail === true;
       const counts = admitMessages(ports, { ...input, key, container: request.container, messages: request.messages, closesTail });
       const rounds = await formRounds(ports, { workspaceId: input.workspaceId, key, issuer: input.issuer });
-      closeStatementChunks(ports, input.workspaceId, key, closesTail);
+      closeStatementChunks(ports, input.workspaceId, key);
       return { container_key: key, admitted_message_count: counts.admitted, replayed_message_count: counts.replayed,
         pending_message_count: ports.ledger.openTail(input.workspaceId, key).length, admitted_round_count: rounds };
     },
@@ -106,13 +106,17 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
       for (const container of idle) {
         try {
           // Another producer's pending round needs that producer's own issuer capability.
-          if (ports.ledger.producer(container.workspace_id, container.container_key) === issuer.producer) {
-            ports.ledger.transaction(() => reserveRounds(ports, container.workspace_id, container.container_key, true));
-            await formRounds(ports, { workspaceId: container.workspace_id, key: container.container_key, issuer });
-          }
-          closeStatementSessionChunks(ports.statementSessions, { workspaceId: container.workspace_id,
-            containerKey: container.container_key, closeTail: true, now: ports.now });
-          ports.ledger.markSwept(container.workspace_id, container.container_key, issuer.producer, container.newest_message);
+          const owns = ports.ledger.producer(container.workspace_id, container.container_key) === issuer.producer;
+          ports.ledger.transaction(() => {
+            if (owns) reserveRounds(ports, container.workspace_id, container.container_key, true);
+            ports.ledger.reserveTailBoundary(container.workspace_id, container.container_key, owns);
+          });
+          if (owns) await formRounds(ports, { workspaceId: container.workspace_id, key: container.container_key, issuer });
+          const closure = closeStatementSessionChunks(ports.statementSessions, { workspaceId: container.workspace_id,
+            containerKey: container.container_key, closeTail: false, now: ports.now });
+          if (closure.more) ports.ledger.retrySweep(container.workspace_id, container.container_key, issuer.producer,
+            closure.blocked ? new Date(nowMs + SWEEP_RETRY_MS).toISOString() : ports.now());
+          else ports.ledger.markSwept(container.workspace_id, container.container_key, issuer.producer, container.newest_message);
         } catch (error) {
           // A failed container keeps its obligation but yields the pass to other containers.
           ports.ledger.retrySweep(container.workspace_id, container.container_key, issuer.producer,
@@ -164,6 +168,7 @@ function admitMessages(ports: HostSessionCapturePorts, input: Readonly<{
       admitted += 1;
     }
     reserveRounds(ports, input.workspaceId, input.key, input.closesTail);
+    if (input.closesTail) ports.ledger.reserveTailBoundary(input.workspaceId, input.key, true);
     return { admitted, replayed };
   });
 }
@@ -228,9 +233,9 @@ async function admitRoundRoot(ports: HostSessionCapturePorts, workspaceId: strin
   return record;
 }
 
-function closeStatementChunks(ports: HostSessionCapturePorts, workspaceId: string, containerKey: string, closeTail: boolean): void {
+function closeStatementChunks(ports: HostSessionCapturePorts, workspaceId: string, containerKey: string): void {
   try {
-    closeStatementSessionChunks(ports.statementSessions, { workspaceId, containerKey, closeTail, now: ports.now });
+    closeStatementSessionChunks(ports.statementSessions, { workspaceId, containerKey, closeTail: false, now: ports.now });
   } catch (error) {
     // The messages are already captured; a closure failure leaves the container to the idle sweep.
     ports.warn("statement session chunk closure failed", { workspace_id: workspaceId, container_key: containerKey,

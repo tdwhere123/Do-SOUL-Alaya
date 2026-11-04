@@ -69,6 +69,15 @@ export class HostSessionLedger {
     return row.round_index === null ? 0 : row.round_index + 1;
   }
 
+  /** Called under the same lock as admission so later appends cannot change a closed tail. */
+  public reserveTailBoundary(workspaceId: string, containerKey: string, includePending: boolean): void {
+    const row = this.connection.prepare(`SELECT MAX(round_index) AS round_index FROM host_session_rounds
+      WHERE workspace_id = ? AND container_key = ? AND (? OR state IN ('done', 'erased'))`)
+      .get(workspaceId, containerKey, includePending ? 1 : 0) as { round_index: number | null };
+    if (row.round_index !== null) this.connection.prepare(`INSERT OR IGNORE INTO host_session_tail_boundaries
+      VALUES (?, ?, ?, 'pending')`).run(workspaceId, containerKey, row.round_index);
+  }
+
   /** Called inside the admission transaction, before any source write. */
   public reserveRound(workspaceId: string, containerKey: string, index: number, rootId: string, ids: readonly string[]): void {
     this.connection.prepare(`INSERT INTO host_session_rounds VALUES (?, ?, ?, ?, 'pending')`)
@@ -107,14 +116,15 @@ export class HostSessionLedger {
   }
 
   /** Logical round pages; the first message supplies the run attribution. */
-  public roundPage(workspaceId: string, containerKey: string, after: number, limit: number): readonly HostSessionRound[] {
+  public roundPage(workspaceId: string, containerKey: string, after: number, limit: number,
+    through = Number.MAX_SAFE_INTEGER): readonly HostSessionRound[] {
     if (!Number.isInteger(limit) || limit < 1 || limit > 64) throw new RangeError("invalid host session round page size");
     return this.connection.prepare(`SELECT r.round_index, r.root_id,
         (SELECT run_id FROM host_session_messages m WHERE m.workspace_id = r.workspace_id
           AND m.container_key = r.container_key AND m.round_index = r.round_index ORDER BY m.position LIMIT 1) AS run_id
       FROM host_session_rounds r WHERE r.workspace_id = ? AND r.container_key = ? AND r.state IN ('done', 'erased_pending', 'erased')
-        AND r.round_index > ? ORDER BY r.round_index LIMIT ?`)
-      .all(workspaceId, containerKey, after, limit) as HostSessionRound[];
+        AND r.round_index > ? AND r.round_index <= ? ORDER BY r.round_index LIMIT ?`)
+      .all(workspaceId, containerKey, after, through, limit) as HostSessionRound[];
   }
 
   public roundForRoot(workspaceId: string, containerKey: string, rootId: string): HostSessionRound | null {

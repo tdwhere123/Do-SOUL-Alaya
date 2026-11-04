@@ -233,9 +233,12 @@ eligible for retry, and the issuer comes from composition, never request JSON.
 Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a container's
 ordered rounds, enqueued when a later message closes a chunk or the container is idle
 for the host-worker fallback interval; a chunk payload names its container, member
-roots and occurrence ranges only. Incremental planning commits its logical cursor
-with the queued chunks and reads prior context and pending rounds in bounded pages.
-Source publication binds current source, scope and audit before notifying; a failed later optional
+roots and occurrence ranges only. A tail closure fixes its round boundary before
+source admission, even if later captures overtake its audit. Incremental planning
+commits its logical cursor, reference-only pending state and queued chunks together;
+each pass reads at most one pending and one prior-context page, leaving unfinished
+work eligible for another pass. Source publication binds current source, scope and
+audit before notifying; a failed later optional
 memory formation does not delete the source capsule (invariant §20a).
 Producer text, extraction cache and normalization never certify source or
 model fidelity. Exact source and request identities, complete source corpus,

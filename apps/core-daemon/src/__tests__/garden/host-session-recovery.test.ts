@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "vitest";
-import { hashLabeledIdentity, hostSessionContainerKey, type SourceAdmissionPort } from "@do-soul/alaya-protocol";
+import { hashLabeledIdentity, hostSessionContainerKey, type SourceAdmissionPort, type SourceAdmissionRequest } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import { createDaemonHostSessionCapture, createHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../../garden/statement-session/statement-session-closure.js";
@@ -62,8 +63,13 @@ for (const failure of ["before audit", "after audit"] as const) {
     ]);
     expect(auditCount(env)).toEqual(rows.map(row => ({ entity_id: row.round_root_id, n: 1 }))
       .sort((a, b) => a.entity_id.localeCompare(b.entity_id)));
+    expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+      { targets: [{ root_id: rows[0]!.round_root_id }], closes_tail: true }]);
     await resumed.capture({ ...context, request: request(0) });
     expect(auditCount(env)).toHaveLength(2);
+    expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+      { targets: [{ root_id: rows[0]!.round_root_id }], closes_tail: true },
+      { targets: [{ root_id: rows[1]!.round_root_id }], closes_tail: true }]);
   });
 }
 
@@ -72,9 +78,16 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
   await expect(injectedCapture(env, { ...env.sourceAdmission, audit: async () => { throw new Error("interrupted"); } })
     .capture({ ...context, request: request(0) })).rejects.toThrow("interrupted");
   const originalRoot = (env.database.connection.prepare("SELECT record_id FROM source_records").get() as { record_id: string }).record_id;
+  const later = messages[1]!;
+  env.gardenTaskRepo.hostSessions.insert({ workspace_id: WORKSPACE, container_key: CONTAINER_KEY, message_id: later.message_id,
+    position: later.position, container_scope: CONTAINER.scope, container_id: CONTAINER.id, role: later.role,
+    completeness: later.completeness, fidelity: later.fidelity, host_reported_at: null,
+    content_digest: `sha256:${createHash("sha256").update(later.content).digest("hex")}`,
+    run_id: RUN, producer: MCP_HOST_SESSION_ISSUER.producer, admitted_at: env.now(), pending_body: later.content });
   const sql039 = readFileSync("packages/storage/src/migrations/039-host-session-capture.sql", "utf8");
   const oldTable = sql039.slice(0, sql039.indexOf("CREATE INDEX idx_host_session_messages_admitted"));
-  env.database.connection.exec(`DROP TABLE host_session_rounds; DROP TABLE host_session_planning; DROP TABLE host_session_sweeps;
+  env.database.connection.exec(`DROP TABLE host_session_rounds; DROP TABLE host_session_planning; DROP TABLE host_session_tail_boundaries;
+    DROP TABLE host_session_sweeps;
     DROP TRIGGER host_session_message_container_insert; DROP TABLE host_session_containers;
     ALTER TABLE host_session_messages RENAME TO upgraded_messages; ${oldTable}
     INSERT INTO host_session_messages SELECT workspace_id, container_key, message_id, position, container_scope, container_id,
@@ -85,11 +98,15 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
       PRIMARY KEY (workspace_id, container_key)) WITHOUT ROWID;
     DELETE FROM schema_version WHERE version = 40;`);
   const resumed = restartedCapture(env);
-  expect(persisted(env)).toEqual([expect.objectContaining({ round_index: 0, round_root_id: originalRoot, pending_body: "secret first" })]);
+  expect(persisted(env)).toEqual([
+    expect.objectContaining({ round_index: 0, round_root_id: originalRoot, pending_body: "secret first" }),
+    expect.objectContaining({ message_id: "message-1", round_index: null, pending_body: "later reply" })]);
   await resumed.capture({ ...context, request: request(1) });
   expect(persisted(env)).toEqual([
     expect.objectContaining({ message_id: "message-0", round_index: 0, round_root_id: originalRoot, source_body: "User: secret first" }),
     expect.objectContaining({ message_id: "message-1", round_index: 1, source_body: "Assistant: later reply" })]);
+  expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+    { targets: [{ root_id: originalRoot }], closes_tail: true }]);
 });
 
 it("serializes competing captures through immutable membership and one audit per source", async () => {
@@ -106,10 +123,37 @@ it("serializes competing captures through immutable membership and one audit per
   await started;
   const second = capture.capture({ ...context, request: request(1) });
   await second; release(); await first;
-  const rows = persisted(env) as { round_index: number; source_body: string; pending_body: string | null }[];
+  const rows = persisted(env) as { round_index: number; round_root_id: string; source_body: string; pending_body: string | null }[];
   expect(rows.map(row => [row.round_index, row.source_body, row.pending_body])).toEqual([
     [0, "User: secret first", null], [1, "Assistant: later reply", null]]);
   expect(auditCount(env)).toEqual([expect.objectContaining({ n: 1 }), expect.objectContaining({ n: 1 })]);
+  expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+    { targets: [{ root_id: rows[0]!.round_root_id }], closes_tail: true },
+    { targets: [{ root_id: rows[1]!.round_root_id }], closes_tail: true }]);
+});
+
+it("keeps a requested statement tail closed when a later open-tail capture overtakes its audit", async () => {
+  const env = await environment();
+  let release!: () => void, entered!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  let calls = 0;
+  const capture = injectedCapture(env, { ...env.sourceAdmission, audit: async record => {
+    if (++calls === 1) { entered(); await blocked; }
+    await env.sourceAdmission.audit!(record);
+  } });
+  const first = capture.capture({ ...context, request: request(0) });
+  await started;
+  await capture.capture({ ...context, request: { container: CONTAINER, messages: [messages[1]!] } });
+  release(); await first;
+  const rows = persisted(env) as { round_root_id: string }[];
+  expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+    { targets: [{ root_id: rows[0]!.round_root_id }], closes_tail: true }]);
+  env.advance(STATEMENT_SESSION_IDLE_MS);
+  await capture.sweepIdle(MCP_HOST_SESSION_ISSUER);
+  expect(env.sessionTasks().map(row => JSON.parse(row.payload_json))).toMatchObject([
+    { targets: [{ root_id: rows[0]!.round_root_id }], closes_tail: true },
+    { targets: [{ root_id: rows[1]!.round_root_id }], closes_tail: true }]);
 });
 
 it("lets erase win over an admission paused inside its asynchronous audit", async () => {
@@ -201,6 +245,32 @@ it("yields after 32 failing owned containers so an untried healthy one is not st
   await capture.sweepIdle(MCP_HOST_SESSION_ISSUER);
   expect(env.sessionTasks()).toHaveLength(1);
   expect(JSON.parse(env.sessionTasks()[0]!.payload_json)).toMatchObject({ container_key: healthyKey });
+});
+
+it("backs off foreign pending boundaries so another foreign container's completed source can close", async () => {
+  const env = await environment();
+  const issuer = { producer: "external-host", binding: (request: SourceAdmissionRequest) => ({ namespace: "external",
+    workspace_id: request.workspace_id, producer: "external-host", basis: "host_session" as const }) };
+  const containers = Array.from({ length: 36 }, (_, index) => ({ scope: "external-host", id: `foreign-${index}` }))
+    .sort((a, b) => hostSessionContainerKey(a, fieldContractSha256).localeCompare(hostSessionContainerKey(b, fieldContractSha256)));
+  const failing = injectedCapture(env, { ...env.sourceAdmission, admit: () => { throw new Error("source unavailable"); } });
+  for (const container of containers.slice(0, -1)) {
+    await expect(failing.capture({ workspaceId: WORKSPACE, runId: RUN, issuer,
+      request: { container, messages: [messages[0]!], closes_tail: true } })).rejects.toThrow("source unavailable");
+  }
+  const healthy = containers.at(-1)!;
+  const healthyCapture = injectedCapture(env, env.sourceAdmission);
+  await healthyCapture.capture({ workspaceId: WORKSPACE, runId: RUN, issuer,
+    request: { container: healthy, messages } });
+  env.advance(STATEMENT_SESSION_IDLE_MS);
+  await env.sweep();
+  expect(env.sessionTasks()).toHaveLength(0);
+  await env.sweep();
+  expect(env.sessionTasks()).toHaveLength(1);
+  expect(JSON.parse(env.sessionTasks()[0]!.payload_json))
+    .toMatchObject({ container_key: hostSessionContainerKey(healthy, fieldContractSha256) });
+  expect(env.database.connection.prepare("SELECT COUNT(*) AS n FROM host_session_rounds WHERE state = 'pending'").get())
+    .toEqual({ n: 35 });
 });
 
 it("keeps logical sweep progress after a workspace-only physical copy and restart", async () => {

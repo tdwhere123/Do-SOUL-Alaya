@@ -23,8 +23,31 @@ export class GardenStatementSessionSources {
   }
 
   /** Round roots in logical order, limited to one page. */
-  public roundPage(workspaceId: string, containerKey: string, after: number, limit: number): readonly HostSessionRound[] {
-    return this.ledger.roundPage(workspaceId, containerKey, after, limit);
+  public roundPage(workspaceId: string, containerKey: string, after: number, limit: number,
+    through?: number): readonly HostSessionRound[] {
+    return this.ledger.roundPage(workspaceId, containerKey, after, limit, through);
+  }
+
+  public reserveTailBoundary(workspaceId: string, containerKey: string): void {
+    this.ledger.reserveTailBoundary(workspaceId, containerKey, false);
+  }
+
+  public nextTailBoundary(workspaceId: string, containerKey: string): number | null {
+    const row = this.connection.prepare(`SELECT round_index FROM host_session_tail_boundaries
+      WHERE workspace_id = ? AND container_key = ? AND state = 'pending' ORDER BY round_index LIMIT 1`)
+      .get(workspaceId, containerKey) as { round_index: number } | undefined;
+    return row?.round_index ?? null;
+  }
+
+  public tailBoundaryReady(workspaceId: string, containerKey: string, boundary: number): boolean {
+    return this.connection.prepare(`SELECT 1 FROM host_session_rounds WHERE workspace_id = ? AND container_key = ?
+      AND state IN ('pending', 'erased_pending') AND round_index <= ? LIMIT 1`).get(workspaceId, containerKey, boundary) === undefined;
+  }
+
+  public completeTailBoundary(workspaceId: string, containerKey: string, boundary: number): void {
+    this.connection.prepare(`UPDATE host_session_tail_boundaries SET state = 'done'
+      WHERE workspace_id = ? AND container_key = ? AND round_index = ? AND state = 'pending'`)
+      .run(workspaceId, containerKey, boundary);
   }
 
   public roundForRoot(workspaceId: string, containerKey: string, rootId: string): HostSessionRound | null {
@@ -44,7 +67,12 @@ export class GardenStatementSessionSources {
       FROM host_session_rounds r JOIN source_records s ON s.workspace_id = r.workspace_id AND s.record_id = r.root_id
       JOIN source_host_inventories i ON i.workspace_id = r.workspace_id AND i.record_id = r.root_id
       WHERE r.workspace_id = ? AND r.container_key = ? AND r.round_index < ? AND r.state = 'done'
-        AND s.source_body IS NOT NULL AND json_valid(i.canonical_inventory)
+        AND s.source_body IS NOT NULL AND s.source_representation_json IS NULL AND json_valid(i.canonical_inventory)
+        AND json_extract(i.canonical_inventory, '$.contract') = 'host-occurrence-v1'
+        AND json_type(i.canonical_inventory, '$.occurrences') = 'array'
+        AND json_array_length(i.canonical_inventory, '$.occurrences') BETWEEN 1 AND 256
+        AND s.record_id = (SELECT record_id FROM source_records INDEXED BY idx_source_records_current
+          WHERE workspace_id = s.workspace_id AND source_id = s.source_id ORDER BY ${CURRENT_SOURCE_RECORD_ORDER} LIMIT 1)
         AND NOT EXISTS (SELECT 1 FROM projection_erase_barriers b WHERE b.workspace_id = r.workspace_id
           AND b.subject_kind = 'source_record' AND b.subject_id = r.root_id)
         AND NOT EXISTS (SELECT 1 FROM json_each(i.canonical_inventory, '$.occurrences') o
@@ -52,16 +80,26 @@ export class GardenStatementSessionSources {
       ORDER BY r.round_index DESC LIMIT ?`).all(workspaceId, containerKey, before, limit) as HostSessionRound[];
   }
 
-  public planningCursor(workspaceId: string, containerKey: string): Readonly<{ round_index: number; occurrence_end: number }> | null {
-    return (this.connection.prepare(`SELECT round_index, occurrence_end FROM host_session_planning
-      WHERE workspace_id = ? AND container_key = ?`).get(workspaceId, containerKey) as
-      { round_index: number; occurrence_end: number } | undefined) ?? null;
+  public planningState(workspaceId: string, containerKey: string): Readonly<{
+    round_index: number; occurrence_end: number; scan_round: number; pending_json: string;
+    context_before: number | null; context_json: string;
+  }> | null {
+    return (this.connection.prepare(`SELECT round_index, occurrence_end, scan_round, pending_json, context_before, context_json
+      FROM host_session_planning WHERE workspace_id = ? AND container_key = ?`).get(workspaceId, containerKey) as
+      { round_index: number; occurrence_end: number; scan_round: number; pending_json: string;
+        context_before: number | null; context_json: string } | undefined) ?? null;
   }
 
-  public savePlanningCursor(workspaceId: string, containerKey: string, index: number, end: number): void {
-    this.connection.prepare(`INSERT INTO host_session_planning VALUES (?, ?, ?, ?)
+  public savePlanningState(workspaceId: string, containerKey: string, state: Readonly<{
+    round_index: number; occurrence_end: number; scan_round: number; pending_json: string;
+    context_before: number | null; context_json: string;
+  }>): void {
+    this.connection.prepare(`INSERT INTO host_session_planning VALUES
+      (@workspace_id, @container_key, @round_index, @occurrence_end, @scan_round, @pending_json, @context_before, @context_json)
       ON CONFLICT (workspace_id, container_key) DO UPDATE SET round_index = excluded.round_index,
-        occurrence_end = excluded.occurrence_end`).run(workspaceId, containerKey, index, end);
+        occurrence_end = excluded.occurrence_end, scan_round = excluded.scan_round, pending_json = excluded.pending_json,
+        context_before = excluded.context_before, context_json = excluded.context_json`)
+      .run({ workspace_id: workspaceId, container_key: containerKey, ...state });
   }
 
   public transaction<T>(work: () => T): T { return this.ledger.transaction(work); }

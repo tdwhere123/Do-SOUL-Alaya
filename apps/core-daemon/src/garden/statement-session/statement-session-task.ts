@@ -10,7 +10,8 @@ import type { GardenStatementSessionSources, StatementSessionRoot } from "@do-so
 import { buildGardenTaskSignalId } from "../support/task-signal-id.js";
 
 export type StatementSessionSourcesPort = Pick<GardenStatementSessionSources, "roundPage" | "roundForRoot" | "roundAt" |
-  "contextPage" | "planningCursor" | "savePlanningCursor" | "transaction" | "lastChunkPayload" | "root">;
+  "contextPage" | "planningState" | "savePlanningState" | "transaction" | "lastChunkPayload" | "root" |
+  "reserveTailBoundary" | "nextTailBoundary" | "tailBoundaryReady" | "completeTailBoundary">;
 /** Consecutive host occurrences [from, to) of one admitted root. */
 export type StatementSessionMember = Readonly<{ root_id: string; source_id: string; from: number; to: number }>;
 /** Root ids and occurrence ranges only: messages are always re-read from their admitted roots.
