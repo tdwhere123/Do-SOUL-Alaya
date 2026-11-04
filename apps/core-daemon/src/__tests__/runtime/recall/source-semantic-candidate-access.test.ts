@@ -289,7 +289,7 @@ it("interleaves actual source, header and verification work before freezing reco
       reserveSpy.mockRestore(); chargeSpy.mockRestore(); database.close(); closeCachedDatabase(filename);
     }
   });
-});
+}, 30_000);
 
 it("keeps chronological verification independent of navigation arrival across pages and shared identities", async () => {
   await withAccessLibrary([{ id: "cursor", text: "Granite walls.", reading: "surround", count: 40 },

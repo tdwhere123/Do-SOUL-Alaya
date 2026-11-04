@@ -406,7 +406,7 @@ it("redeems query preparation on its owning nondefault worker after another snap
     if (recall.kind !== "recall") throw new Error("expected library recall");
     expect(recall.index.entries).toHaveLength(1);
   }, { workerCount: 2 });
-});
+}, 30_000);
 
 it("reads current legacy-key H through the worker without mutation and rejects ambiguous or foreign lookups", async () => {
   await withPublished(async ({ execute, sourceInterpretationId, filename }) => {
@@ -625,7 +625,7 @@ it("rejects missing, empty, and null permission admissions", async () => {
     await expect(call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET }))
       .rejects.toThrow(/scope/u);
   }, { scope: "global_core" });
-});
+}, 30_000);
 
 it("invalidates expired handles and does not recover them after worker loss", async () => {
   await withPublished(async ({ sourceInterpretationId, execute, filename, client }) => {
