@@ -10,6 +10,7 @@ import {
   statSync
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
+import { readGoldObjectIds } from "../apps/bench-runner/dist/diagnostics/gold-object-identities.js";
 import {
   asArray,
   asStringArray,
@@ -218,7 +219,12 @@ function accumulateQuestionStats(questions) {
       }
     }
 
-    const goldSet = new Set(asStringArray(question?.gold_memory_ids));
+    const goldSet = new Set(readGoldObjectIds({
+      gold_memory_ids: asStringArray(question?.gold_memory_ids),
+      gold_evidence_ids: asStringArray(question?.gold_evidence_ids),
+      ...(Array.isArray(question?.gold_object_ids)
+        ? { gold_object_ids: asStringArray(question.gold_object_ids) } : {})
+    }));
     const goldByObjectId = new Map();
     for (const item of gold) {
       const objectId = readString(item?.object_id);

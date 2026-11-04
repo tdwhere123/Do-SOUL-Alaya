@@ -4,6 +4,7 @@
 // archives fall back to gold[] plane fields for gold-hit attribution.
 // Usage: node scripts/compute-cohort-from-archive.mjs <path-to-diagnostics.json>
 import { readFileSync } from "node:fs";
+import { readGoldObjectIds } from "../apps/bench-runner/dist/diagnostics/gold-object-identities.js";
 
 const argv = process.argv.slice(2);
 if (argv.length === 0) {
@@ -20,7 +21,7 @@ const firstAdmitted = createPlaneCounters();
 const winningAdmission = createPlaneCounters();
 
 for (const q of questions) {
-  const goldSet = new Set(q.gold_memory_ids ?? []);
+  const goldSet = new Set(readGoldObjectIds({ ...q, gold_memory_ids: q.gold_memory_ids ?? [] }));
   const goldByObjectId = new Map(
     (q.gold ?? [])
       .filter((gold) => typeof gold?.object_id === "string")
