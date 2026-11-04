@@ -56,7 +56,7 @@ export type {
 } from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
 export type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
-export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+export { startCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export {
   resolveEffectiveEmbeddingPosture,
   type EffectiveEmbeddingPosture,

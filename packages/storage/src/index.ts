@@ -1,4 +1,3 @@
-export { measureSqliteBlockingOnEventLoop, type SqliteBlockingProbeResult } from "./diagnostics/sqlite-blocking-probe.js";
 export { SqliteSourceIndexRepository } from "./repos/source-index/source-index-repo.js";
 export { putSourceStatementArtifact } from "./repos/source-index/statement-artifact.js";
 export { putSourceStatementMemoryBinding } from "./repos/source-index/statement-dependencies.js";
