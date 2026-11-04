@@ -51,6 +51,21 @@ describe("prepareTemporalCandidate migration ledger", () => {
     }
   }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
 
+  it("preserves a competing receipt that appears before its publication link", async () => {
+    const fixture = createFixture();
+    seedLegacySource(fixture.sourceFilename);
+    const link = fs.linkSync.bind(fs);
+    vi.spyOn(fs, "linkSync").mockImplementation((source, destination) => {
+      if (destination === fixture.receiptFilename) {
+        fs.writeFileSync(destination, "another owner's receipt", { flag: "wx" });
+      }
+      link(source, destination);
+    });
+    await expect(prepareTemporalCandidate(fixture)).rejects.toMatchObject({ code: "EEXIST" });
+    expect(fs.readFileSync(fixture.receiptFilename, "utf8")).toBe("another owner's receipt");
+    expect(fs.existsSync(fixture.candidateFilename)).toBe(false);
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
+
   it("keeps exactly one complete prepared output when callers compete for the same paths", async () => {
     const fixture = createFixture();
     seedLegacySource(fixture.sourceFilename);

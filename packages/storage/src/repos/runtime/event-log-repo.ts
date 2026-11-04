@@ -8,6 +8,7 @@ import {
   wrapAppendError
 } from "./event-log/writes/event-log-append.js";
 import { appendEventLogViaWriteQueue } from "./event-log/writes/queue-append.js";
+import { assertEventLogWriteScope, runSynchronousEventLogTransaction } from "./event-log/writes/synchronous-transaction.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   CreatedAtRowParser,
@@ -70,6 +71,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public append(event: EventLogAppendInput): EventLogEntry | Promise<EventLogEntry> {
+    assertEventLogWriteScope();
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // The SELECT MAX + INSERT pair must be one write transaction even when callers append
@@ -91,6 +93,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public deleteById(eventId: string): void {
+    assertEventLogWriteScope();
     try {
       this.activeStatements().deleteByIdStatement.run(eventId);
     } catch (error) {
@@ -99,11 +102,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public transactional<T>(fn: () => T): T {
-    // better-sqlite3 transactions are synchronous; if `fn` returns a Promise the
-    // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
-    // Callers that need async work must do it outside the transaction.
-    const txn = this.activeConnection().transaction(fn);
-    return txn.immediate();
+    return runSynchronousEventLogTransaction(this.activeConnection(), fn);
   }
 
   public async queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
