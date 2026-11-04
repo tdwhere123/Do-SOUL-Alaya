@@ -26,6 +26,10 @@ export interface SignalRepo {
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
   listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
+  listByState(
+    state: SignalStateType,
+    page?: SignalListPageOptions
+  ): Promise<readonly CandidateMemorySignal[]>;
   countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
   updateStateInCurrentTransaction(signalId: string, state: SignalStateType): CandidateMemorySignal;
@@ -142,6 +146,7 @@ interface SignalStatements {
   readonly getByIdStatement: SqliteStatement;
   readonly listByRunStatement: SqliteStatement;
   readonly listByRunPagedStatement: SqliteStatement;
+  readonly listByStatePagedStatement: SqliteStatement;
   readonly countByRunStatement: SqliteStatement;
   readonly updateStateStatement: SqliteStatement;
   readonly compareAndSwapStateStatement: SqliteStatement;
@@ -152,6 +157,7 @@ export class SqliteSignalRepo implements SignalRepo {
   private readonly getByIdStatement;
   private readonly listByRunStatement;
   private readonly listByRunPagedStatement;
+  private readonly listByStatePagedStatement;
   private readonly countByRunStatement;
   private readonly updateStateStatement;
   private readonly compareAndSwapStateStatement;
@@ -162,6 +168,7 @@ export class SqliteSignalRepo implements SignalRepo {
     this.getByIdStatement = statements.getByIdStatement;
     this.listByRunStatement = statements.listByRunStatement;
     this.listByRunPagedStatement = statements.listByRunPagedStatement;
+    this.listByStatePagedStatement = statements.listByStatePagedStatement;
     this.countByRunStatement = statements.countByRunStatement;
     this.updateStateStatement = statements.updateStateStatement;
     this.compareAndSwapStateStatement = statements.compareAndSwapStateStatement;
@@ -242,6 +249,23 @@ export class SqliteSignalRepo implements SignalRepo {
       return parseRows(this.listByRunStatement.all(runId), SignalRowParser, "signal row");
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list all signals for run ${runId}.`, error);
+    }
+  }
+
+  public async listByState(
+    state: SignalStateType,
+    page?: SignalListPageOptions
+  ): Promise<readonly CandidateMemorySignal[]> {
+    const parsedState = parseSignalState(state);
+    const parsedPage = parseSignalPage(page ?? DEFAULT_SIGNAL_PAGE);
+    try {
+      return parseRows(
+        this.listByStatePagedStatement.all(parsedState, parsedPage.limit, parsedPage.offset),
+        SignalRowParser,
+        "signal row"
+      );
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", `Failed to list signals in state ${parsedState}.`, error);
     }
   }
 
@@ -339,6 +363,13 @@ function prepareSignalStatements(db: StorageDatabase): SignalStatements {
       SELECT${SIGNAL_SELECT_COLUMNS}
       FROM signals
       WHERE run_id = ?
+      ORDER BY created_at ASC, signal_id ASC
+      LIMIT ? OFFSET ?
+    `),
+    listByStatePagedStatement: db.connection.prepare(`
+      SELECT${SIGNAL_SELECT_COLUMNS}
+      FROM signals
+      WHERE signal_state = ?
       ORDER BY created_at ASC, signal_id ASC
       LIMIT ? OFFSET ?
     `),

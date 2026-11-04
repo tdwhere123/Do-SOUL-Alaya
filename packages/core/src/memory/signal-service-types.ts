@@ -24,12 +24,28 @@ export interface SignalServiceSignalRepoPort {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
+  listByState?(
+    state: SignalStateValue,
+    page?: SignalListPageOptions
+  ): Promise<readonly CandidateMemorySignal[]>;
   countByRun?(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
   updateStateInCurrentTransaction?(
     signalId: string,
     state: SignalStateValue
   ): CandidateMemorySignal;
+  /**
+   * Storage authority for exclusive signal-state transitions. Absent on
+   * isolated fakes that never materialize; production SQLite implements it.
+   */
+  compareAndSwapState?(input: SignalServiceStateCasInput): CandidateMemorySignal | null;
+}
+
+export interface SignalServiceStateCasInput {
+  readonly signalId: string;
+  readonly workspaceId: string;
+  readonly expectedState: SignalStateValue;
+  readonly nextState: SignalStateValue;
 }
 
 /**
@@ -88,7 +104,8 @@ export type SignalMaterializationTargetKind =
   | "synthesis"
   | "handoff_gap"
   | "evidence_only"
-  | "deferred";
+  | "deferred"
+  | "unknown";
 
 export interface SignalMaterializedObject {
   readonly object_kind: string;

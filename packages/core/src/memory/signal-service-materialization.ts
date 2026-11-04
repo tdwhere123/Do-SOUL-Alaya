@@ -23,15 +23,18 @@ import type {
   SignalServiceDependencies,
   SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
+  SignalServiceStateCasInput,
   SignalServiceWarnPort,
   SignalTriageResult
 } from "./signal-service-types.js";
+import { CoreError } from "../shared/errors.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 export interface MaterializationAttempt {
   readonly materializingSignal: CandidateMemorySignal;
   readonly materialization: SignalMaterializationResult;
   readonly caughtMaterializationError: boolean;
+  readonly lostCompiledFence: boolean;
 }
 
 const INTERRUPTED_MATERIALIZATION_REASON = "materialization_interrupted";
@@ -62,6 +65,9 @@ export async function materializeAcceptedSignal(
     context,
     claimToken !== undefined
   );
+  if (attempt.lostCompiledFence) {
+    return await resumeAfterLostCompiledFence(dependencies, warn, triagedSignal);
+  }
   return await completeMaterializationAttempt(
     dependencies,
     warn,
@@ -135,13 +141,29 @@ async function runMaterializationAttempt(
 ): Promise<MaterializationAttempt> {
   const materializingSignal = alreadyClaimed
     ? triagedSignal
-    : await dependencies.signalRepo.updateState(triagedSignal.signal_id, SignalState.COMPILED);
+    : claimCompiledFence(dependencies, triagedSignal);
+  if (materializingSignal === null) {
+    return {
+      materializingSignal: triagedSignal,
+      materialization: {
+        signal_id: triagedSignal.signal_id,
+        target_kind: "unknown",
+        routing_reason: "compiled_fence_lost",
+        created_objects: [],
+        success: false,
+        error: "Another receiver already owns compiled materialization."
+      },
+      caughtMaterializationError: true,
+      lostCompiledFence: true
+    };
+  }
 
   try {
     return {
       materializingSignal,
       materialization: await materializer.materialize(materializingSignal, context),
-      caughtMaterializationError: false
+      caughtMaterializationError: false,
+      lostCompiledFence: false
     };
   } catch (error) {
     const materialization = {
@@ -165,7 +187,8 @@ async function runMaterializationAttempt(
     return {
       materializingSignal,
       materialization,
-      caughtMaterializationError: true
+      caughtMaterializationError: true,
+      lostCompiledFence: false
     };
   }
 }
@@ -188,8 +211,9 @@ async function completeFailedMaterialization(
   triageResult: SignalTriageResult,
   attempt: MaterializationAttempt
 ): Promise<SignalServiceReceiveResult> {
-  const failedSignal = await dependencies.signalRepo.updateState(
-    attempt.materializingSignal.signal_id,
+  const failedSignal = await completeCompiledTransition(
+    dependencies,
+    attempt.materializingSignal,
     SignalState.FAILED
   );
 
@@ -219,8 +243,9 @@ async function completeSuccessfulMaterialization(
   triageResult: SignalTriageResult,
   attempt: MaterializationAttempt
 ): Promise<SignalServiceReceiveResult> {
-  const materializedSignal = await dependencies.signalRepo.updateState(
-    attempt.materializingSignal.signal_id,
+  const materializedSignal = await completeCompiledTransition(
+    dependencies,
+    attempt.materializingSignal,
     SignalState.MATERIALIZED
   );
 
@@ -232,8 +257,9 @@ async function completeSuccessfulMaterialization(
 }
 
 /**
- * COMPILED means the materializer may already have started. Resume from the
- * signal's EventLog instead of calling it again.
+ * COMPILED is the durable in-flight fence, claimed by CAS from TRIAGED or
+ * DEFERRED. Resume must not call the materializer and must not invent FAILED
+ * while that fence can still belong to a live owner.
  */
 export async function resumeCompiledSignal(
   dependencies: SignalServiceDependencies,
@@ -244,39 +270,23 @@ export async function resumeCompiledSignal(
     "candidate_memory_signal",
     existingSignal.signal_id
   );
-  if (events.some(isDeferredTriageEvent)) {
-    const deferred = await dependencies.signalRepo.updateState(
-      existingSignal.signal_id,
-      SignalState.DEFERRED
-    );
+  const witness = latestApplicableTerminalWitness(events);
+  if (witness?.kind === "materialized_success") {
     return {
-      signal: deferred,
-      triage_result: "deferred",
-      materialization: null
+      signal: await completeCompiledTransition(
+        dependencies,
+        existingSignal,
+        SignalState.MATERIALIZED
+      ),
+      triage_result: "accepted",
+      materialization: materializationFromAudit(existingSignal, witness.payload, true)
     };
   }
-
-  const audit = latestMaterializationAudit(events);
-  if (audit !== null && audit.success) {
-    const materialized = await dependencies.signalRepo.updateState(
-      existingSignal.signal_id,
-      SignalState.MATERIALIZED
-    );
+  if (witness?.kind === "materialized_failure") {
     return {
-      signal: materialized,
+      signal: await completeCompiledTransition(dependencies, existingSignal, SignalState.FAILED),
       triage_result: "accepted",
-      materialization: materializationFromAudit(existingSignal, audit.payload, true)
-    };
-  }
-  if (audit !== null) {
-    const failed = await dependencies.signalRepo.updateState(
-      existingSignal.signal_id,
-      SignalState.FAILED
-    );
-    return {
-      signal: failed,
-      triage_result: "accepted",
-      materialization: materializationFromAudit(existingSignal, audit.payload, false)
+      materialization: materializationFromAudit(existingSignal, witness.payload, false)
     };
   }
 
@@ -288,13 +298,11 @@ export async function resumeCompiledSignal(
       detail: `${existingSignal.signal_id}:${existingSignal.signal_state}`
     })
   );
-  const interrupted = interruptedMaterialization(existingSignal);
-  await appendMaterializationEvent(dependencies, existingSignal, interrupted);
-  return await completeFailedMaterialization(dependencies, warn, "accepted", {
-    materializingSignal: existingSignal,
-    materialization: interrupted,
-    caughtMaterializationError: true
-  });
+  return {
+    signal: existingSignal,
+    triage_result: "deferred",
+    materialization: null
+  };
 }
 
 export async function resumeFailedSignal(
@@ -305,22 +313,113 @@ export async function resumeFailedSignal(
     "candidate_memory_signal",
     existingSignal.signal_id
   );
-  const audit = latestMaterializationAudit(events);
+  const witness = latestApplicableTerminalWitness(events);
   return {
     signal: existingSignal,
     triage_result: "accepted",
-    materialization: audit === null || audit.success
-      ? interruptedMaterialization(existingSignal)
-      : materializationFromAudit(existingSignal, audit.payload, false)
+    materialization: witness?.kind === "materialized_failure"
+      ? materializationFromAudit(existingSignal, witness.payload, false)
+      : recoveredUnknownFailure(existingSignal)
   };
 }
 
-function interruptedMaterialization(
+async function resumeAfterLostCompiledFence(
+  dependencies: SignalServiceDependencies,
+  warn: SignalServiceWarnPort,
+  signal: CandidateMemorySignal
+): Promise<SignalServiceReceiveResult> {
+  const current = await dependencies.signalRepo.getById(signal.signal_id);
+  if (current === null) {
+    throw new CoreError("NOT_FOUND", `Signal ${signal.signal_id} was not found after compiled CAS.`)
+  }
+  if (current.signal_state === SignalState.COMPILED) {
+    return await resumeCompiledSignal(dependencies, warn, current);
+  }
+  if (current.signal_state === SignalState.FAILED) {
+    return await resumeFailedSignal(dependencies, current);
+  }
+  if (current.signal_state === SignalState.DEFERRED) {
+    return {
+      signal: current,
+      triage_result: "deferred",
+      materialization: null
+    };
+  }
+  if (current.signal_state === SignalState.MATERIALIZED) {
+    return {
+      signal: current,
+      triage_result: "accepted",
+      materialization: null
+    };
+  }
+  return {
+    signal: current,
+    triage_result: "deferred",
+    materialization: null
+  };
+}
+
+function claimCompiledFence(
+  dependencies: SignalServiceDependencies,
+  signal: CandidateMemorySignal
+): CandidateMemorySignal | null {
+  const compareAndSwap = requireCompareAndSwap(dependencies);
+  return compareAndSwap({
+    signalId: signal.signal_id,
+    workspaceId: signal.workspace_id,
+    expectedState: SignalState.TRIAGED,
+    nextState: SignalState.COMPILED
+  }) ?? compareAndSwap({
+    signalId: signal.signal_id,
+    workspaceId: signal.workspace_id,
+    expectedState: SignalState.DEFERRED,
+    nextState: SignalState.COMPILED
+  });
+}
+
+async function completeCompiledTransition(
+  dependencies: SignalServiceDependencies,
+  signal: CandidateMemorySignal,
+  nextState: typeof SignalState.MATERIALIZED | typeof SignalState.FAILED
+): Promise<CandidateMemorySignal> {
+  const swapped = requireCompareAndSwap(dependencies)({
+    signalId: signal.signal_id,
+    workspaceId: signal.workspace_id,
+    expectedState: SignalState.COMPILED,
+    nextState
+  });
+  if (swapped !== null) {
+    return swapped;
+  }
+  const current = await dependencies.signalRepo.getById(signal.signal_id);
+  if (current?.signal_state === nextState) {
+    return current;
+  }
+  throw new CoreError(
+    "CONFLICT",
+    `Signal ${signal.signal_id} left compiled before ${nextState} could be committed.`,
+    { subCode: "CONCURRENT_MODIFICATION" }
+  );
+}
+
+function requireCompareAndSwap(
+  dependencies: SignalServiceDependencies
+): (input: SignalServiceStateCasInput) => CandidateMemorySignal | null {
+  const compareAndSwapState = dependencies.signalRepo.compareAndSwapState;
+  if (compareAndSwapState === undefined) {
+    throw new CoreError("CONFLICT", "Signal materialization CAS port is not available", {
+      subCode: "PORT_UNAVAILABLE"
+    });
+  }
+  return (input) => compareAndSwapState.call(dependencies.signalRepo, input);
+}
+
+function recoveredUnknownFailure(
   signal: CandidateMemorySignal
 ): SignalMaterializationFailureResult {
   return {
     signal_id: signal.signal_id,
-    target_kind: "evidence_only",
+    target_kind: "unknown",
     routing_reason: INTERRUPTED_MATERIALIZATION_REASON,
     created_objects: [],
     success: false,
@@ -335,8 +434,8 @@ function materializationFromAudit(
 ): SignalMaterializationResult {
   const fields = {
     signal_id: signal.signal_id,
-    target_kind: "evidence_only" as const,
-    routing_reason: success ? RESUMED_MATERIALIZATION_REASON : INTERRUPTED_MATERIALIZATION_REASON,
+    target_kind: "unknown" as const,
+    routing_reason: RESUMED_MATERIALIZATION_REASON,
     created_objects: payload.created_objects
   };
   if (success) {
@@ -349,13 +448,28 @@ function materializationFromAudit(
   };
 }
 
-function latestMaterializationAudit(events: readonly EventLogEntry[]): {
-  readonly success: boolean;
-  readonly payload: ReturnType<typeof SoulSignalMaterializedPayloadSchema.parse>;
-} | null {
+type TerminalMaterializationWitness =
+  | {
+      readonly kind: "materialized_success" | "materialized_failure";
+      readonly payload: ReturnType<typeof SoulSignalMaterializedPayloadSchema.parse>;
+    }
+  | { readonly kind: "deferred_triage" };
+
+function latestApplicableTerminalWitness(
+  events: readonly EventLogEntry[]
+): TerminalMaterializationWitness | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event === undefined) continue;
+    if (event.event_type === SignalEventType.SOUL_SIGNAL_TRIAGED) {
+      const triaged = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
+      if (triaged.success && triaged.data.triage_result === "deferred") {
+        // Historical write-path / source-grounding deferral is not the current
+        // compiled attempt. A later materialized success (redrive) wins above.
+        return { kind: "deferred_triage" };
+      }
+      continue;
+    }
     if (
       event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED &&
       event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED
@@ -364,19 +478,12 @@ function latestMaterializationAudit(events: readonly EventLogEntry[]): {
     }
     const parsed = SoulSignalMaterializedPayloadSchema.safeParse(event.payload_json);
     if (!parsed.success) continue;
+    const success =
+      event.event_type === SignalEventType.SOUL_SIGNAL_MATERIALIZED && parsed.data.success === true;
     return {
-      success:
-        event.event_type === SignalEventType.SOUL_SIGNAL_MATERIALIZED && parsed.data.success === true,
+      kind: success ? "materialized_success" : "materialized_failure",
       payload: parsed.data
     };
   }
   return null;
-}
-
-function isDeferredTriageEvent(event: EventLogEntry): boolean {
-  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
-    return false;
-  }
-  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
-  return parsed.success && parsed.data.triage_result === "deferred";
 }

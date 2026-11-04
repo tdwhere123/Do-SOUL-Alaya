@@ -43,7 +43,11 @@ export function atomicUpdateState(
     signalId: string,
     state: LegacyCandidateMemorySignal["signal_state"]
   ) => impl(signalId, state));
-  return { updateState, updateStateInCurrentTransaction };
+  const compareAndSwapState = vi.fn((input: {
+    readonly signalId: string;
+    readonly nextState: LegacyCandidateMemorySignal["signal_state"];
+  }) => impl(input.signalId, input.nextState));
+  return { updateState, updateStateInCurrentTransaction, compareAndSwapState };
 }
 
 export function signalServiceDependencies(

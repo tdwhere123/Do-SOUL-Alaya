@@ -209,6 +209,13 @@ async function createRecallMaterializationRuntime(
     reconciliationService: edgeRuntime.reconciliationService,
     handoffGapHandler: new SqliteHandoffGapAdapter(input.sqliteHandoffGapRepo)
   });
+  try {
+    await materializationRuntime.signalService.resumeInterruptedMaterialization();
+  } catch (error) {
+    input.warn("interrupted signal materialization resume failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
   return {
     graphEdgePort: createGraphEdgePort(input),
     edgeRuntime,

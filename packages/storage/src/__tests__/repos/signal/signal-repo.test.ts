@@ -97,6 +97,17 @@ describe("SqliteSignalRepo", () => {
     await expect(signalRepo.countByRun("run-1")).resolves.toBe(3);
   });
 
+  it("lists signals by persisted state", async () => {
+    const { signalRepo } = await createSignalRepo();
+    await signalRepo.create(createSignal({ signal_id: "signal-emitted", run_id: "run-1" }));
+    await signalRepo.create(createSignal({ signal_id: "signal-compiled", run_id: "run-1" }));
+    await signalRepo.updateState("signal-compiled", "compiled");
+
+    const compiled = await signalRepo.listByState("compiled");
+    expect(compiled.map((signal) => signal.signal_id)).toEqual(["signal-compiled"]);
+    await expect(signalRepo.listByState("triaged")).resolves.toEqual([]);
+  });
+
   it("updates signal_state on the public signal shape", async () => {
     const { database, signalRepo } = await createSignalRepo();
     const signal = createSignal();

@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe("compiled signal resume through storage and signal routes", () => {
-  it("lists a compiled crash as failed after reopen and receiveSignal", async () => {
+  it("lists a compiled crash as still compiled after restart resume without a materialization witness", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-signal-route-compiled-"));
     directories.push(directory);
     const filename = join(directory, "alaya.db");
@@ -83,11 +83,12 @@ describe("compiled signal resume through storage and signal routes", () => {
       }
     });
 
-    const result = await signalService.receiveSignal(signal);
+    const results = await signalService.resumeInterruptedMaterialization();
     expect(materialize).not.toHaveBeenCalled();
-    expect(result.signal.signal_state).toBe("failed");
-    expect(result.materialization).toMatchObject({ success: false, created_objects: [] });
-    expect(result.materialization).not.toBeNull();
+    expect(results).toHaveLength(1);
+    expect(results[0]?.signal.signal_state).toBe("compiled");
+    expect(results[0]?.triage_result).toBe("deferred");
+    expect(results[0]?.materialization).toBeNull();
 
     const app = new Hono();
     registerSignalRoutes(app, {
@@ -109,10 +110,10 @@ describe("compiled signal resume through storage and signal routes", () => {
     };
     expect(body).toMatchObject({
       success: true,
-      data: [{ signal_id: signal.signal_id, signal_state: "failed" }]
+      data: [{ signal_id: signal.signal_id, signal_state: "compiled" }]
     });
     await expect(signalRepo.getById(signal.signal_id)).resolves.toMatchObject({
-      signal_state: "failed"
+      signal_state: "compiled"
     });
   });
 });

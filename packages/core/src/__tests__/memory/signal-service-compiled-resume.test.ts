@@ -122,13 +122,9 @@ describe("SignalService compiled and triaged resume", () => {
 
     const result = await service.receiveSignal(createSignal());
 
-    expect(result.signal.signal_state).toBe("failed");
-    expect(result.triage_result).toBe("accepted");
-    expect(result.materialization).toMatchObject({
-      success: false,
-      created_objects: [],
-      routing_reason: "materialization_interrupted"
-    });
+    expect(result.signal.signal_state).toBe("compiled");
+    expect(result.triage_result).toBe("deferred");
+    expect(result.materialization).toBeNull();
     expect(materialize).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Signal replay found a post-triage signal; not replaying materialization side effects.",
@@ -210,7 +206,37 @@ describe("SignalService compiled and triaged resume", () => {
     expect(result.triage_result).toBe("accepted");
     expect(result.materialization).toMatchObject({
       success: true,
+      target_kind: "unknown",
       created_objects: [{ object_kind: "memory_entry", object_id: "memory-1" }]
+    });
+  });
+
+  it("completes from a later redrive success rather than an earlier deferred triage", async () => {
+    const existing = createSignal({ signal_state: "compiled" });
+    const materialize = vi.fn(async () => {
+      throw new Error("should not rematerialize after a later successful redrive audit");
+    });
+    const service = createResumeService({
+      existing,
+      events: [
+        emittedEvent(existing),
+        deferredTriageEvent(existing),
+        materializedEvent(existing, {
+          success: true,
+          created_objects: [{ object_kind: "memory_entry", object_id: "memory-redrive" }]
+        })
+      ],
+      materialize
+    });
+
+    const result = await service.receiveSignal(createSignal());
+
+    expect(materialize).not.toHaveBeenCalled();
+    expect(result.signal.signal_state).toBe("materialized");
+    expect(result.materialization).toMatchObject({
+      success: true,
+      target_kind: "unknown",
+      created_objects: [{ object_kind: "memory_entry", object_id: "memory-redrive" }]
     });
   });
 
@@ -237,14 +263,15 @@ describe("SignalService compiled and triaged resume", () => {
     expect(result.signal.signal_state).toBe("failed");
     expect(result.materialization).toMatchObject({
       success: false,
+      target_kind: "unknown",
       created_objects: []
     });
   });
 
-  it("defers a compiled signal that already has a deferred triage audit", async () => {
+  it("does not apply a historical deferred triage while compiled has no later materialization witness", async () => {
     const existing = createSignal({ signal_state: "compiled" });
     const materialize = vi.fn(async () => {
-      throw new Error("should not rematerialize a deferred compiled signal");
+      throw new Error("should not rematerialize a compiled signal with only a historical deferral");
     });
     const service = createResumeService({
       existing,
@@ -255,7 +282,7 @@ describe("SignalService compiled and triaged resume", () => {
     const result = await service.receiveSignal(createSignal());
 
     expect(materialize).not.toHaveBeenCalled();
-    expect(result.signal.signal_state).toBe("deferred");
+    expect(result.signal.signal_state).toBe("compiled");
     expect(result.triage_result).toBe("deferred");
     expect(result.materialization).toBeNull();
   });

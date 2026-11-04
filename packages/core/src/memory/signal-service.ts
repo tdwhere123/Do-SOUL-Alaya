@@ -66,6 +66,7 @@ export type {
   SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
   SignalServiceSignalRepoPort,
+  SignalServiceStateCasInput,
   SignalSourceEventAnchor,
   SignalServiceWarnPort,
   SignalTriageResult,
@@ -146,6 +147,35 @@ export class SignalService {
       return await countByRun.call(this.dependencies.signalRepo, runId);
     }
     return (await this.dependencies.signalRepo.listByRun(runId)).length;
+  }
+
+  /**
+   * Restart ingress for in-flight materialization. HTTP/MCP mint new ids, so
+   * same-id receive is not a daemon-restart path. Lists COMPILED then TRIAGED
+   * through SignalRepo and resumes each; COMPILED without a terminal audit
+   * stays pending and is not rematerialized.
+   */
+  public async resumeInterruptedMaterialization(): Promise<readonly SignalServiceReceiveResult[]> {
+    const listByState = this.dependencies.signalRepo.listByState;
+    if (listByState === undefined) {
+      return [];
+    }
+    const compiled = await listByState.call(
+      this.dependencies.signalRepo,
+      SignalState.COMPILED
+    );
+    const triaged = await listByState.call(
+      this.dependencies.signalRepo,
+      SignalState.TRIAGED
+    );
+    const results: SignalServiceReceiveResult[] = [];
+    for (const signal of compiled) {
+      results.push(await resumeCompiledSignal(this.dependencies, this.warn, signal));
+    }
+    for (const signal of triaged) {
+      results.push(await this.resumeExistingSignal(signal));
+    }
+    return results;
   }
 
   public getSourceGroundingDeferStats(workspaceId?: string): SourceGroundingDeferStats {
