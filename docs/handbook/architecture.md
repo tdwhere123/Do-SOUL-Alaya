@@ -284,10 +284,22 @@ this state, both audited with the configured reviewer-identity trust mode:
    pass their typed governance and proof/effect barriers. Rejection is not an
    erase or a durable memory change.
 
-Garden task completion reports extraction and emission completion. When a
-candidate signal fails materialization, the completion audit and external
-completion response expose `failed_candidate_signals_count`; the signal's own
-audit retains its detailed outcome. An absent count on older records is unknown.
+Garden task completion reports extraction and emission completion, not successful
+memory creation. HTTP/MCP `emitted` is candidate admission. Materialization audit
+and state commit atomically, including generic and source-grounding deferrals.
+A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
+At daemon startup, the OS-released runtime lease is held before opening the DB and
+before activating any writer. Its one-shot recovery records interrupted COMPILED
+signals as `materialization_unknown` with an inspection-required audit. Historical
+success-shaped audits do not distinguish deferral or prove a current attempt;
+unknown effects cannot be automatically replayed. Shutdown drains SignalService
+executions and retains the lease if background drain or storage close fails.
+
+When a candidate fails materialization, completion audit and response expose
+`failed_candidate_signals_count`; `unknown_candidate_signals_count` separately
+exposes inspection-required effects. Unknown is neither failed nor retryable
+DEFERRED. The signal audit retains the detailed outcome. Absent counts on older
+records are unknown.
 
 Inspector originates a review request, never directly persists a promotion.
 A warning names its target; agents should not infer it from array position.

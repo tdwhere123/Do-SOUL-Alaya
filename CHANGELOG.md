@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 34.0.0, engine gateway 3.0.0
+## Unreleased — protocol 34.1.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -24,6 +24,14 @@ with their misleading P99 diagnostic. No MCP, EventLog or runtime-config field
 is removed by this cleanup; the corresponding internal export snapshots are
 updated. EventLog transactions now reject asynchronous callbacks and prevent
 late EventLog writes from escaping a completed or rolled-back callback scope.
+
+Protocol 34.1.0 adds the non-retryable `materialization_unknown` signal state,
+optional materialization audit disposition/route fields, and optional
+`unknown_candidate_signals_count` in Garden completion audits and MCP results
+(invariant §25 minor). Interrupted COMPILED effects are audited as unknown only
+under the daemon's pre-activation OS runtime lease. They require inspection;
+neither historical success-shaped audits nor missing audits authorize replay.
+New materialization outcomes commit audit and state together. No data migration.
 
 Protocol 34.0.0 changes ordinary native delivery (`ordinary-native-field.v9`, invariant §25
 major). Question-time preference now prefers roots whose recorded date lies from the

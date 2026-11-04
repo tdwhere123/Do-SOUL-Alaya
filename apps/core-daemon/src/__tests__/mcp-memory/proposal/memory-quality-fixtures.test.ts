@@ -167,6 +167,13 @@ function createHarness(initialMemories: MemoryEntry[]) {
       listByRun: vi.fn(async (runId: string) =>
         [...signalRows.values()].filter((signal) => signal.run_id === runId)
       ),
+      compareAndSwapState: input => {
+        const current = signalRows.get(input.signalId);
+        if (current?.workspace_id !== input.workspaceId || current.signal_state !== input.expectedState) return null;
+        const updated = { ...current, signal_state: input.nextState };
+        signalRows.set(input.signalId, updated);
+        return updated;
+      },
       updateState: vi.fn(async (signalId: string, state: SignalState) => {
         const current = signalRows.get(signalId);
         if (current === undefined) {

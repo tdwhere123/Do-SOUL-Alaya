@@ -37,7 +37,8 @@ const signalStateValues = [
   "rejected",
   "superseded",
   "expired",
-  "failed"
+  "failed",
+  "materialization_unknown"
 ] as const;
 
 export const SignalKind = {
@@ -71,7 +72,9 @@ export const SignalState = {
   REJECTED: "rejected",
   SUPERSEDED: "superseded",
   EXPIRED: "expired",
-  FAILED: "failed"
+  FAILED: "failed",
+  /** Prior execution ended; effects require inspection and must not be replayed. */
+  MATERIALIZATION_UNKNOWN: "materialization_unknown"
 } as const;
 
 export const SignalKindSchema = z.enum(signalKindValues);

@@ -50,6 +50,7 @@ type GardenTaskCompletionResult = Readonly<{
   readonly status: string;
   readonly events_appended: 1;
   readonly failed_candidate_signals_count?: number;
+  readonly unknown_candidate_signals_count?: number;
 }>;
 
 export function createGardenTaskCompletionHandler(params: GardenTaskCompletionParams): Readonly<{
@@ -201,7 +202,7 @@ async function completeCandidateSignalTask(
   throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
-  let completion: Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>;
+  let completion: Readonly<{ failedCount: number; unknownCount: number; status: GardenCompleteTaskRequest["status"] }>;
   try {
     completion = await commitCandidateSignalCompletion(
       params, request, context, row, resolvedRunId, contentOnlySignals, completionClaimedBy
@@ -213,7 +214,8 @@ async function completeCandidateSignalTask(
   }
 
   return { task_id: row.id, status: completion.status, events_appended: 1,
-    ...(completion.failedCount === 0 ? {} : { failed_candidate_signals_count: completion.failedCount }) };
+    ...(completion.failedCount === 0 ? {} : { failed_candidate_signals_count: completion.failedCount }),
+    ...(completion.unknownCount === 0 ? {} : { unknown_candidate_signals_count: completion.unknownCount }) };
 }
 
 async function commitCandidateSignalCompletion(
@@ -226,7 +228,7 @@ async function commitCandidateSignalCompletion(
     NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
   >,
   completionClaimedBy: string
-): Promise<Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>> {
+): Promise<Readonly<{ failedCount: number; unknownCount: number; status: GardenCompleteTaskRequest["status"] }>> {
   const sessionPayload = row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION
     ? readClaimedStatementSessionPayload(row, context, resolvedRunId)
     : null;
@@ -239,8 +241,9 @@ async function commitCandidateSignalCompletion(
   const lastError = statements?.incomplete === true ? "Source statement extraction is incomplete; valid siblings and raw source were retained." : request.last_error_text;
   throwIfAborted(context.abortSignal);
   const failedSignalIds = new Set<string>();
+  const unknownSignalIds = new Set<string>();
   const emittedSignalIds = await emitTaskCandidateSignals(
-    params, row, candidateSignals, completionClaimedBy, failedSignalIds, sessionPayload !== null
+    params, row, candidateSignals, completionClaimedBy, failedSignalIds, sessionPayload !== null, unknownSignalIds
   );
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
@@ -250,11 +253,11 @@ async function commitCandidateSignalCompletion(
       completed_at: params.now(),
       ...(lastError === undefined ? {} : { last_error_text: lastError })
     },
-    [buildCompletedTaskEvent(row, context, resolvedRunId, status, emittedSignalIds, params.now(), failedSignalIds.size)],
+    [buildCompletedTaskEvent(row, context, resolvedRunId, status, emittedSignalIds, params.now(), failedSignalIds.size, unknownSignalIds.size)],
     completionClaimedBy,
     context.workspaceId
   );
-  return { failedCount: failedSignalIds.size, status };
+  return { failedCount: failedSignalIds.size, unknownCount: unknownSignalIds.size, status };
 }
 
 function readClaimedStatementSessionPayload(
@@ -454,7 +457,8 @@ function buildCompletedTaskEvent(
   status: GardenCompleteTaskRequest["status"],
   objectsAffected: readonly string[],
   completedAt: string,
-  failedSignalCount = 0
+  failedSignalCount = 0,
+  unknownSignalCount = 0
 ): GardenTaskEventInput {
   return {
     event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
@@ -472,6 +476,7 @@ function buildCompletedTaskEvent(
       objects_affected: [...objectsAffected],
       candidate_signals_count: row.kind === GardenTaskKind.EDGE_CLASSIFY ? 0 : objectsAffected.length,
       ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
+      ...(unknownSignalCount === 0 ? {} : { unknown_candidate_signals_count: unknownSignalCount }),
       workspace_id: context.workspaceId,
       occurred_at: completedAt
     })

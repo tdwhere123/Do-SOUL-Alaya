@@ -238,6 +238,7 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
     temporalRuntimeLease: input.temporalRuntimeLease,
     recallReadWorkerClient: input.recallReadWorkerClient,
     closeEmbeddingProvider: input.closeEmbeddingProvider,
+    closeSignalService: () => input.signalService.close(),
     sourceIndexProducer: input.sourceIndexProducer,
     intervalsToClear: [input.pathRelationEvictionTimer]
   };

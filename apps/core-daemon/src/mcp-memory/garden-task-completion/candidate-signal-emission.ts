@@ -1,7 +1,7 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { receiveGardenTaskSignals } from "../../garden/post-turn-extract/evidence-finalizer.js";
-import { signalMaterializationFailed } from "../../garden/post-turn-extract/signal-receiver.js";
+import { signalMaterializationFailed, signalMaterializationUnknown } from "../../garden/post-turn-extract/signal-receiver.js";
 import {
   GardenTaskUnavailableError,
   GardenTaskValidationError
@@ -19,11 +19,12 @@ export async function emitTaskCandidateSignals(
   candidateSignals: readonly CandidateMemorySignal[],
   completionClaimedBy: string,
   failedSignalIds: Set<string>,
-  statementSession = false
+  statementSession = false,
+  unknownSignalIds?: Set<string>
 ): Promise<readonly string[]> {
   if (statementSession) {
     return await receiveGardenTaskSignals({ candidates: candidateSignals,
-      signalReceiver: requirePostTurnSignalReceiver(params), failedSignalIds,
+      signalReceiver: requirePostTurnSignalReceiver(params), failedSignalIds, unknownSignalIds,
       beforeReceive: async () => refreshCompletionClaim(params, row, completionClaimedBy) });
   }
   const emittedSignalIds: string[] = [];
@@ -31,6 +32,7 @@ export async function emitTaskCandidateSignals(
     const received = await params.deps.signalService.receiveSignal(signal);
     emittedSignalIds.push(received.signal.signal_id);
     if (signalMaterializationFailed(received)) failedSignalIds.add(received.signal.signal_id);
+    if (signalMaterializationUnknown(received)) unknownSignalIds?.add(received.signal.signal_id);
   }
   return emittedSignalIds;
 }

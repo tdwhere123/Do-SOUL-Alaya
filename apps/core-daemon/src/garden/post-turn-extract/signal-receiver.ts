@@ -6,7 +6,7 @@ export interface PostTurnSignalReceiveResult {
     readonly workspace_id: string;
     readonly signal_state?: CandidateMemorySignal["signal_state"];
   }>;
-  readonly triage_result?: "accepted" | "dropped" | "deferred";
+  readonly triage_result?: "accepted" | "dropped" | "deferred" | "unknown";
   readonly materialization?: Readonly<{
     readonly created_objects: readonly Readonly<{
       readonly object_kind: string;
@@ -21,6 +21,10 @@ export interface PostTurnSignalReceiveResult {
 
 export function signalMaterializationFailed(result: PostTurnSignalReceiveResult): boolean {
   return result.signal.signal_state === "failed" || result.materialization?.success === false;
+}
+
+export function signalMaterializationUnknown(result: PostTurnSignalReceiveResult): boolean {
+  return result.signal.signal_state === "materialization_unknown";
 }
 
 export interface PostTurnSignalReceiver {

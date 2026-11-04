@@ -1,8 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { Hono } from "hono";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/lease.js";
 import {
   CandidateMemorySignalSchema,
   RunMode,
@@ -24,8 +31,10 @@ import { registerSignalRoutes, type SignalRouteServices } from "../../routes/wor
 
 const directories: string[] = [];
 const databases: StorageDatabase[] = [];
+afterAll(() => isolation.restore());
 
 afterEach(() => {
+  expect(isolation.violations).toEqual([]);
   for (const database of databases.splice(0)) {
     if (!database.isClosed()) database.close();
   }
@@ -35,7 +44,7 @@ afterEach(() => {
 });
 
 describe("compiled signal resume through storage and signal routes", () => {
-  it("lists a compiled crash as still compiled after restart resume without a materialization witness", async () => {
+  it("lists explicit unknown after restart under the real runtime lease, never replays effects", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-signal-route-compiled-"));
     directories.push(directory);
     const filename = join(directory, "alaya.db");
@@ -65,6 +74,23 @@ describe("compiled signal resume through storage and signal routes", () => {
     const seeded = initDatabase({ filename });
     await seedCompiledCrash(seeded, signal);
     seeded.close();
+    // The child owns the exact production lease. OS process death, not a PID
+    // heuristic or caller flag, establishes release before startup recovery.
+    const leaseModule = new URL("../../../dist/runtime/temporal-cutover/lease.js", import.meta.url).href;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", `
+      const { acquireTemporalRuntimeLease } = await import(${JSON.stringify(leaseModule)});
+      await acquireTemporalRuntimeLease(${JSON.stringify(filename)});
+      console.log('owned'); setInterval(() => {}, 1000);
+    `], { stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      await Promise.race([once(child.stdout!, "data"), once(child, "exit").then(() => { throw new Error("lease owner exited early"); })]);
+      await expect(acquireTemporalRuntimeLease(filename)).rejects.toThrow("must be stopped");
+    } finally {
+      const exited = once(child, "exit");
+      child.kill("SIGKILL");
+      await exited;
+    }
+    const restartLease = await acquireTemporalRuntimeLease(filename);
 
     const reopened = initDatabase({ filename });
     databases.push(reopened);
@@ -78,17 +104,14 @@ describe("compiled signal resume through storage and signal routes", () => {
       eventLogRepo,
       signalRepo,
       runtimeNotifier: { notifyEntry: vi.fn(async () => {}) },
-      postTriageMaterializer: {
-        materialize: async (candidate, context) => await materialize(candidate, context)
-      }
+      postTriageMaterializer: { materialize }
     });
 
-    const results = await signalService.resumeInterruptedMaterialization();
+    await restartLease.recoverSignalsBeforeActivation(signalService);
     expect(materialize).not.toHaveBeenCalled();
-    expect(results).toHaveLength(1);
-    expect(results[0]?.signal.signal_state).toBe("compiled");
-    expect(results[0]?.triage_result).toBe("deferred");
-    expect(results[0]?.materialization).toBeNull();
+    expect(await signalService.receiveSignal(signal)).toMatchObject({
+      signal: { signal_state: "materialization_unknown" }, triage_result: "unknown", materialization: null
+    });
 
     const app = new Hono();
     registerSignalRoutes(app, {
@@ -110,11 +133,19 @@ describe("compiled signal resume through storage and signal routes", () => {
     };
     expect(body).toMatchObject({
       success: true,
-      data: [{ signal_id: signal.signal_id, signal_state: "compiled" }]
+      data: [{ signal_id: signal.signal_id, signal_state: "materialization_unknown" }]
     });
     await expect(signalRepo.getById(signal.signal_id)).resolves.toMatchObject({
-      signal_state: "compiled"
+      signal_state: "materialization_unknown"
     });
+    const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id);
+    expect(events.at(-1)?.payload_json).toMatchObject({ normalized_fields: {
+      materialization_recovery: { disposition: "effects_unknown", requires_inspection: true, automatic_replay: false }
+    } });
+    await signalService.close();
+    reopened.close();
+    await restartLease.release();
+    expect(isolation.violations).toEqual([]);
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   EventLogEntry,
   ReconciliationDeferral,
   SignalDeferClass,
+  SignalEventPayloadMap,
   SignalState as SignalStateValue,
   SourceGroundingDeferReason
 } from "@do-soul/alaya-protocol";
@@ -17,6 +18,7 @@ export type { SourceGroundingDeferStats };
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryByEntityAll?(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   transactional?<T>(fn: () => T): T;
 }
 
@@ -24,10 +26,11 @@ export interface SignalServiceSignalRepoPort {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
-  listByState?(
+  listIdsByStateAfter?(
     state: SignalStateValue,
-    page?: SignalListPageOptions
-  ): Promise<readonly CandidateMemorySignal[]>;
+    afterSignalId: string | null,
+    limit: number
+  ): Promise<readonly string[]>;
   countByRun?(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
   updateStateInCurrentTransaction?(
@@ -98,14 +101,10 @@ export interface SignalMaterializationContext {
   readonly source_event_anchor: SignalSourceEventAnchor | null;
 }
 
-export type SignalTriageResult = "accepted" | "dropped" | "deferred";
-export type SignalMaterializationTargetKind =
-  | "memory_and_claim"
-  | "synthesis"
-  | "handoff_gap"
-  | "evidence_only"
-  | "deferred"
-  | "unknown";
+export type SignalTriageResult = "accepted" | "dropped" | "deferred" | "unknown";
+export type SignalMaterializationTargetKind = NonNullable<
+  SignalEventPayloadMap["soul.signal.materialized"]["target_kind"]
+>;
 
 export interface SignalMaterializedObject {
   readonly object_kind: string;

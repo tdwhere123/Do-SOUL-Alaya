@@ -73,6 +73,7 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
     }
     await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now);
     const failedSignalIds = new Set<string>();
+    const unknownSignalIds = new Set<string>();
     const emittedSignalIds = await receiveGardenTaskSignals({
       candidates: emitStatementSessionTaskSignals({ taskId: row.id, payload, request, located, receipt, createdAt: input.now(),
         sourceObservation: rootId => {
@@ -81,10 +82,11 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
           return read.status === "unavailable" ? null
             : { observed_at: read.root.recorded_at, authority: "trusted_host_event", source_event_id: dispatch.event_id };
         } }),
-      signalReceiver: input.signalReceiver, failedSignalIds,
+      signalReceiver: input.signalReceiver, failedSignalIds, unknownSignalIds,
       beforeReceive: async () => await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now)
     });
-    const outcome = { emittedSignalIds, failedSignalCount: failedSignalIds.size };
+    const outcome = { emittedSignalIds, failedSignalCount: failedSignalIds.size,
+      unknownSignalCount: unknownSignalIds.size };
     await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { success: true, ...outcome }
       : { success: false, error: cause ?? new GardenProviderError(
         "Source statement extraction is incomplete; valid siblings and raw source were retained.", "invalid_response"), ...outcome },

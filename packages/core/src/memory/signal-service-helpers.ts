@@ -4,6 +4,7 @@ import {
   SignalEventType,
   SignalState,
   SoulSignalEmittedPayloadSchema,
+  SoulSignalMaterializedPayloadSchema,
   validateSchemaGroundingForSignal,
   type CandidateMemorySignal,
   type EventLogEntry,
@@ -13,6 +14,7 @@ import { stableStringify } from "../shared/stable-stringify.js";
 import type {
   SignalEmittedEventInput,
   SignalMaterializationContext,
+  SignalMaterializationResult,
   SignalTriageResult
 } from "./signal-service-types.js";
 
@@ -41,6 +43,8 @@ export function mapTriageResultToSignalState(
       return SignalState.DEFERRED;
     case "dropped":
       return SignalState.DROPPED;
+    case "unknown":
+      return SignalState.MATERIALIZATION_UNKNOWN;
     default: {
       const exhaustiveCheck: never = triageResult;
       return exhaustiveCheck;
@@ -56,6 +60,8 @@ export function mapExistingSignalStateToTriage(
       return "dropped";
     case SignalState.DEFERRED:
       return "deferred";
+    case SignalState.MATERIALIZATION_UNKNOWN:
+      return "unknown";
     default:
       return "accepted";
   }
@@ -155,6 +161,33 @@ export function resolveSignalMaterializationContext(
       event_id: event.event_id,
       occurred_at: sourceObservation.observed_at
     }
+  };
+}
+
+export function resolveSignalMaterializationDisposition(
+  result: SignalMaterializationResult
+): "failed" | "deferred" | "materialized" {
+  return !result.success ? "failed" : result.target_kind === "deferred" ? "deferred" : "materialized";
+}
+
+export function buildSignalMaterializationEvent(
+  signal: CandidateMemorySignal,
+  materialization: SignalMaterializationResult
+): SignalEmittedEventInput {
+  return {
+    event_type: materialization.success
+      ? SignalEventType.SOUL_SIGNAL_MATERIALIZED : SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED,
+    entity_type: "candidate_memory_signal", entity_id: signal.signal_id,
+    workspace_id: signal.workspace_id, run_id: signal.run_id, caused_by: "materialization_router",
+    payload_json: SoulSignalMaterializedPayloadSchema.parse({
+      signal_id: signal.signal_id, workspace_id: signal.workspace_id, run_id: signal.run_id,
+      created_objects: materialization.created_objects, success: materialization.success,
+      disposition: resolveSignalMaterializationDisposition(materialization),
+      target_kind: materialization.target_kind, routing_reason: materialization.routing_reason,
+      ...(materialization.success ? {} : {
+        error: `materialization_error:${hashAuditText(materialization.error)}:chars:${materialization.error.length}`
+      })
+    })
   };
 }
 

@@ -55,6 +55,7 @@ export async function settleInProcessTask(
   outcome: Readonly<{ success: true } | { success: false; error: unknown }> & Readonly<{
     emittedSignalIds?: readonly string[];
     failedSignalCount?: number;
+    unknownSignalCount?: number;
   }>,
   gardenTaskRepo: SqliteGardenTaskRepo,
   now: () => string
@@ -62,6 +63,7 @@ export async function settleInProcessTask(
   const completedAt = now();
   const objectsAffected = outcome.emittedSignalIds ?? [];
   const failedSignalCount = outcome.failedSignalCount ?? 0;
+  const unknownSignalCount = outcome.unknownSignalCount ?? 0;
   await gardenTaskRepo.completeWithEvents(
     row.id,
     outcome.success
@@ -85,6 +87,7 @@ export async function settleInProcessTask(
           objects_affected: [...objectsAffected],
           candidate_signals_count: objectsAffected.length,
           ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
+          ...(unknownSignalCount === 0 ? {} : { unknown_candidate_signals_count: unknownSignalCount }),
           workspace_id: row.workspace_id,
           occurred_at: completedAt
         })

@@ -25,7 +25,7 @@ describe("daemon startup cleanup", () => {
     expect(order).toEqual(["worker", "write-queue", "database", "lease"]);
   });
 
-  it("continues cleanup and preserves the startup error when cleanup fails", async () => {
+  it("retains the runtime lease when startup database close fails", async () => {
     const startupError = new Error("core startup failed");
     const release = vi.fn(async () => undefined);
     const warn = vi.fn();
@@ -36,9 +36,9 @@ describe("daemon startup cleanup", () => {
       temporalRuntimeLease: { release },
       warn,
       error: startupError
-    })).rejects.toBe(startupError);
+    })).rejects.toThrow("database close failed");
 
-    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(2);
   });
 });

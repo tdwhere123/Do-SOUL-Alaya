@@ -16,6 +16,7 @@ import type { QueryFactFrameOsfObligation } from "@do-soul/alaya-protocol";
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
 type Bootstrap = Readonly<{
+  readonly temporalRuntimeLease: import("../temporal-cutover/lease.js").TemporalRuntimeLease;
   readonly database: CreateRecallMaterializationWiringInput["database"];
   readonly configEnv: CreateRecallMaterializationWiringInput["configEnv"];
   readonly runtimeNotifier: CreateRecallMaterializationWiringInput["runtimeNotifier"];
@@ -43,6 +44,8 @@ export async function createRecallAndCoreWiring(input: RecallCoreStartupInput) {
     ...buildRecallServiceInput(input, gardenComputeRuntime)
   });
   input.registerRecallReadWorker(recallWiring.recallReadWorkerClient);
+  // Runtime lease predates DB open; no HTTP/MCP/Garden writer is activated yet.
+  await input.bootstrap.temporalRuntimeLease.recoverSignalsBeforeActivation(recallWiring.signalService);
   input.foundation.pathRelationProposalServiceRef.current =
     recallWiring.pathRelationProposalService;
   const coreWiring = await createDaemonCoreServices(

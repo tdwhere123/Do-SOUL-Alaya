@@ -64,6 +64,14 @@ async function emitCanonicalSignalEnvelope(signal: CandidateMemorySignal): Promi
     }),
     getById: vi.fn(async (signalId: string) => signals.get(signalId) ?? null),
     listByRun: vi.fn(async () => []),
+    compareAndSwapState: (input: { signalId: string; workspaceId: string;
+      expectedState: CandidateMemorySignal["signal_state"]; nextState: CandidateMemorySignal["signal_state"] }) => {
+      const current = signals.get(input.signalId);
+      if (current?.workspace_id !== input.workspaceId || current.signal_state !== input.expectedState) return null;
+      const updated = { ...current, signal_state: input.nextState };
+      signals.set(input.signalId, updated);
+      return updated;
+    },
     updateState: vi.fn(async (signalId: string, signalState: CandidateMemorySignal["signal_state"]) => {
       const prior = signals.get(signalId);
       if (prior === undefined) throw new Error("missing signal");

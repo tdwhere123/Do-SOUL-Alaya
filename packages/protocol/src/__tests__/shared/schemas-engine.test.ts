@@ -115,7 +115,8 @@ describe("enum coverage", () => {
       "rejected",
       "superseded",
       "expired",
-      "failed"
+      "failed",
+      "materialization_unknown"
     ]);
     expect(Object.values(EngineProvider)).toEqual(["openai", "anthropic", "custom"]);
     expect(Object.values(EngineErrorKind)).toEqual(["network", "auth", "rate_limit", "model_error"]);

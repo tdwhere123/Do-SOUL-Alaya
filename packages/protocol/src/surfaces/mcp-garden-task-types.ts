@@ -114,7 +114,8 @@ export const GardenCompleteTaskResponseSchema = z
     task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
     events_appended: NonNegativeIntSchema,
-    failed_candidate_signals_count: NonNegativeIntSchema.optional()
+    failed_candidate_signals_count: NonNegativeIntSchema.optional(),
+    unknown_candidate_signals_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

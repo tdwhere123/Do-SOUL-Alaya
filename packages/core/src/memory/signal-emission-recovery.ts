@@ -1,8 +1,11 @@
 import {
   SignalEventType,
   SignalState,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
+import { requireSignalStateCas } from "./signal-materialization-outcome.js";
+import { CoreError } from "../shared/errors.js";
 import {
   buildSignalWarningMeta,
   resolveSignalMaterializationContext
@@ -18,15 +21,20 @@ export async function resolveStoredSignalEmissionContext(
   dependencies: Pick<SignalServiceDependencies, "eventLogRepo">,
   signal: CandidateMemorySignal
 ): Promise<SignalMaterializationContext | null> {
-  const entries = await dependencies.eventLogRepo.queryByEntity(
-    "candidate_memory_signal",
-    signal.signal_id
-  );
+  const entries = await readSignalEvents(dependencies, signal.signal_id);
   const emissions = entries.filter(
     (entry) => entry.event_type === SignalEventType.SOUL_SIGNAL_EMITTED
   );
   if (emissions.length !== 1) return null;
   return resolveSignalMaterializationContext(signal, emissions[0]!);
+}
+
+export async function readSignalEvents(
+  dependencies: Pick<SignalServiceDependencies, "eventLogRepo">, signalId: string
+): Promise<readonly EventLogEntry[]> {
+  const repo = dependencies.eventLogRepo;
+  const query = repo.queryByEntityAll ?? repo.queryByEntity;
+  return await query.call(repo, "candidate_memory_signal", signalId);
 }
 
 export async function deferUnverifiableSignalEmission(input: {
@@ -36,7 +44,11 @@ export async function deferUnverifiableSignalEmission(input: {
 }): Promise<SignalServiceReceiveResult> {
   const deferredSignal = input.signal.signal_state === SignalState.DEFERRED
     ? input.signal
-    : await input.dependencies.signalRepo.updateState(input.signal.signal_id, SignalState.DEFERRED);
+    : requireSignalStateCas(input.dependencies)({ signalId: input.signal.signal_id,
+        workspaceId: input.signal.workspace_id, expectedState: input.signal.signal_state,
+        nextState: SignalState.DEFERRED });
+  if (deferredSignal === null) throw new CoreError("CONFLICT", "Signal changed before unverifiable-emission deferral.",
+    { subCode: "CONCURRENT_MODIFICATION" });
   input.warn(
     "Signal materialization deferred because its immutable admission envelope is missing or mismatched.",
     buildSignalWarningMeta({

@@ -62,6 +62,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
+  closeSignalService?: () => Promise<void>;
   sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void>;
     runPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
       representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
@@ -248,6 +249,7 @@ function createShutdownHandler(
           }
         }
         const backgroundStop = await stopBackgroundServices(input, state);
+        await input.closeSignalService?.();
         await closeRuntimeResources(input, state);
         await closeSqliteAfterBackgroundStop(input, backgroundStop);
       } finally {
@@ -478,7 +480,7 @@ async function stopBackgroundServices(
       error: error instanceof Error ? error.message : String(error)
     });
   }
-  state.backgroundStarted = false;
+  if (stopResult !== "failed") state.backgroundStarted = false;
   return stopResult;
 }
 
@@ -486,16 +488,19 @@ async function closeSqliteAfterBackgroundStop(
   input: CreateDaemonLifecycleControlsInput,
   backgroundStop: "drained" | "timed_out" | "not_started" | "failed"
 ): Promise<void> {
+  if (backgroundStop === "failed") {
+    throw new Error("Garden background shutdown failed; retaining database and runtime lease.");
+  }
   if (backgroundStop === "timed_out") {
     input.warnLogger.warn("waiting for garden background drain before sqlite close", {});
-    await input.gardenRuntime.backgroundManager.whenIdle?.();
+    if (input.gardenRuntime.backgroundManager.whenIdle === undefined) {
+      throw new Error("Garden drain cannot be verified; retaining database and runtime lease.");
+    }
+    await input.gardenRuntime.backgroundManager.whenIdle();
   }
-  try {
-    await closeDaemonSqliteWriteQueue();
-    input.database.close();
-  } finally {
-    await input.temporalRuntimeLease?.release();
-  }
+  await closeDaemonSqliteWriteQueue();
+  input.database.close();
+  await input.temporalRuntimeLease?.release();
 }
 
 async function closeRuntimeResources(

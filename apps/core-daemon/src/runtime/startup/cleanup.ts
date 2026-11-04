@@ -32,6 +32,7 @@ async function closeWriteQueue(input: StartupCleanupInput): Promise<void> {
     await closeDaemonSqliteWriteQueue();
   } catch (error) {
     warnCleanupFailure(input, "sqlite write queue", error);
+    throw error;
   }
 }
 
@@ -40,6 +41,7 @@ function closeDatabase(input: StartupCleanupInput): void {
     input.database.close();
   } catch (error) {
     warnCleanupFailure(input, "database", error);
+    throw error;
   }
 }
 

@@ -5,6 +5,7 @@ import {
 import {
   isWritePathMaterializationDeferral,
   signalMaterializationFailed,
+  signalMaterializationUnknown,
   type PostTurnSignalReceiver
 } from "./signal-receiver.js";
 
@@ -13,6 +14,7 @@ type GardenTaskSignalReceiptInput = Readonly<{
   readonly signalReceiver: PostTurnSignalReceiver;
   readonly beforeReceive?: () => Promise<void>;
   readonly failedSignalIds?: Set<string>;
+  readonly unknownSignalIds?: Set<string>;
 }>;
 
 /** Durable receipt of task-produced signals under a claim; no turn evidence fallback is involved. */
@@ -28,6 +30,7 @@ export async function receiveGardenTaskSignals(input: GardenTaskSignalReceiptInp
     }
     signalIds.push(received.signal.signal_id);
     if (signalMaterializationFailed(received)) input.failedSignalIds?.add(received.signal.signal_id);
+    if (signalMaterializationUnknown(received)) input.unknownSignalIds?.add(received.signal.signal_id);
   }
   await input.beforeReceive?.();
   return signalIds;

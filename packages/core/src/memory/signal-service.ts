@@ -18,6 +18,7 @@ import {
 } from "./signal-service-helpers.js";
 import {
   deferUnverifiableSignalEmission,
+  readSignalEvents,
   resolveStoredSignalEmissionContext
 } from "./signal-emission-recovery.js";
 import {
@@ -42,11 +43,9 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
+import { recoverInterruptedMaterialization } from "./signal-materialization-recovery.js";
+import { persistTriagedSignal } from "./signal-triage-admission.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
-import {
-  appendMemoryEventLogSynchronously,
-  runEventLogTransaction
-} from "./memory-service/memory-audit-append.js";
 export type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
@@ -66,7 +65,6 @@ export type {
   SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
   SignalServiceSignalRepoPort,
-  SignalServiceStateCasInput,
   SignalSourceEventAnchor,
   SignalServiceWarnPort,
   SignalTriageResult,
@@ -93,6 +91,22 @@ export { resolveStoredSignalEmissionContext } from "./signal-emission-recovery.j
 
 export class SignalService {
   private readonly warn: SignalServiceWarnPort;
+  private closing = false;
+  private readonly executions = new Set<Promise<unknown>>();
+
+  /** Drain all accepted signal effects before SQLite and the OS runtime lease release. */
+  public async close(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled([...this.executions]);
+  }
+
+  private track<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new CoreError("CONFLICT", "Signal service is closing."));
+    const result = operation();
+    this.executions.add(result);
+    void result.finally(() => this.executions.delete(result)).catch(() => undefined);
+    return result;
+  }
 
   public constructor(private readonly dependencies: SignalServiceDependencies) {
     this.warn = dependencies.warn ?? ((message, meta) => diagnosticWarn(message, meta));
@@ -107,7 +121,11 @@ export class SignalService {
     }
   }
 
-  public async receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
+  public receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
+    return this.track(() => this.receiveSignalOwned(signal));
+  }
+
+  private async receiveSignalOwned(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
     if (UnavailableSourceStatementSignalSchema.safeParse(parsedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals are read-only historical identities.");
@@ -149,33 +167,9 @@ export class SignalService {
     return (await this.dependencies.signalRepo.listByRun(runId)).length;
   }
 
-  /**
-   * Restart ingress for in-flight materialization. HTTP/MCP mint new ids, so
-   * same-id receive is not a daemon-restart path. Lists COMPILED then TRIAGED
-   * through SignalRepo and resumes each; COMPILED without a terminal audit
-   * stays pending and is not rematerialized.
-   */
-  public async resumeInterruptedMaterialization(): Promise<readonly SignalServiceReceiveResult[]> {
-    const listByState = this.dependencies.signalRepo.listByState;
-    if (listByState === undefined) {
-      return [];
-    }
-    const compiled = await listByState.call(
-      this.dependencies.signalRepo,
-      SignalState.COMPILED
-    );
-    const triaged = await listByState.call(
-      this.dependencies.signalRepo,
-      SignalState.TRIAGED
-    );
-    const results: SignalServiceReceiveResult[] = [];
-    for (const signal of compiled) {
-      results.push(await resumeCompiledSignal(this.dependencies, this.warn, signal));
-    }
-    for (const signal of triaged) {
-      results.push(await this.resumeExistingSignal(signal));
-    }
-    return results;
+  /** Called only under the daemon's captured pre-activation runtime lease. */
+  public async recoverInterruptedMaterialization(): Promise<{ readonly unknown: number; readonly unreadable: number }> {
+    return await recoverInterruptedMaterialization(this.dependencies, this.warn);
   }
 
   public getSourceGroundingDeferStats(workspaceId?: string): SourceGroundingDeferStats {
@@ -199,6 +193,11 @@ export class SignalService {
     signalId: string,
     patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }
   ): Promise<SignalServiceReceiveResult> {
+    return await this.track(() => this.redriveSourceGroundingOwned(workspaceId, signalId, patch));
+  }
+
+  private async redriveSourceGroundingOwned(workspaceId: string, signalId: string,
+    patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }): Promise<SignalServiceReceiveResult> {
     const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
     if (UnavailableSourceStatementSignalSchema.safeParse(persistedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals cannot be redriven.");
@@ -292,10 +291,7 @@ export class SignalService {
   private async resumeWritePathDeferredSignal(
     existingSignal: CandidateMemorySignal
   ): Promise<SignalServiceReceiveResult> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(
-      "candidate_memory_signal",
-      existingSignal.signal_id
-    );
+    const events = await readSignalEvents(this.dependencies, existingSignal.signal_id);
     if (
       this.dependencies.postTriageMaterializer === undefined ||
       !this.isWritePathDeferredRetryEligible(existingSignal, events)
@@ -334,10 +330,10 @@ export class SignalService {
     ) {
       return false;
     }
-    if (events.some(isSourceGroundingDeferTriageEvent)) {
-      return false;
-    }
-    return events.some(isWritePathDeferTriageEvent) && events.some(isSuccessfulMaterializationEvent);
+    const latestTriage = events.filter(event => event.event_type === SignalEventType.SOUL_SIGNAL_TRIAGED)
+      .sort((left, right) => left.revision - right.revision).at(-1);
+    if (latestTriage === undefined || isSourceGroundingDeferTriageEvent(latestTriage)) return false;
+    return isWritePathDeferTriageEvent(latestTriage) && events.some(isSuccessfulMaterializationEvent);
   }
 
   private async triageAndMaybeMaterialize(
@@ -346,11 +342,13 @@ export class SignalService {
   ): Promise<SignalServiceReceiveResult> {
     const triageResult = evaluateSignalTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
-    const { triagedEvent, triagedSignal } = this.persistTriagedSignal(
-      storedSignal,
-      triagedState,
-      triageResult
-    );
+    const persisted = persistTriagedSignal(this.dependencies, storedSignal, triagedState, triageResult);
+    if (persisted === null) {
+      const current = await this.dependencies.signalRepo.getById(storedSignal.signal_id);
+      if (current === null) throw new CoreError("NOT_FOUND", "Signal disappeared during triage.");
+      return await this.resumeExistingSignal(current);
+    }
+    const { triagedEvent, triagedSignal } = persisted;
 
     if (triagedEvent.run_id !== null) {
       await bindEventPublisher({
@@ -374,52 +372,6 @@ export class SignalService {
       triagedSignal,
       triageResult,
       context
-    );
-  }
-
-  private persistTriagedSignal(
-    storedSignal: CandidateMemorySignal,
-    triagedState: CandidateMemorySignal["signal_state"],
-    triageResult: ReturnType<typeof evaluateSignalTriage>
-  ): {
-    readonly triagedEvent: EventLogEntry;
-    readonly triagedSignal: CandidateMemorySignal;
-  } {
-    const updateStateInCurrentTransaction = this.dependencies.signalRepo.updateStateInCurrentTransaction;
-    if (updateStateInCurrentTransaction === undefined) {
-      throw new CoreError("CONFLICT", "Signal triage transaction port is not available", {
-        subCode: "PORT_UNAVAILABLE"
-      });
-    }
-    return runEventLogTransaction(
-      this.dependencies.eventLogRepo,
-      () => {
-        const triagedEvent = appendMemoryEventLogSynchronously(
-          this.dependencies.eventLogRepo,
-          {
-            event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-            entity_type: "candidate_memory_signal",
-            entity_id: storedSignal.signal_id,
-            workspace_id: storedSignal.workspace_id,
-            run_id: storedSignal.run_id,
-            caused_by: "deterministic_rule",
-            payload_json: SoulSignalTriagedPayloadSchema.parse({
-              signal_id: storedSignal.signal_id,
-              workspace_id: storedSignal.workspace_id,
-              run_id: storedSignal.run_id,
-              triage_result: triageResult
-            })
-          },
-          "Signal triage transaction requires a synchronous EventLog append port."
-        );
-        const triagedSignal = updateStateInCurrentTransaction.call(
-          this.dependencies.signalRepo,
-          storedSignal.signal_id,
-          triagedState
-        );
-        return { triagedEvent, triagedSignal };
-      },
-      "Signal triage requires a transactional EventLog port"
     );
   }
 
