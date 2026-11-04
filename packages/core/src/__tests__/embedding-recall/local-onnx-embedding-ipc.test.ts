@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   LOCAL_ONNX_EMBEDDING_DIMENSIONS,
+  LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS,
   LocalOnnxEmbeddingClient
 } from "../../embedding-recall/local-onnx-embedding-client.js";
 import {
@@ -36,6 +37,35 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     expect(vectors).toHaveLength(1);
     expect(vectors[0]!.length).toBe(LOCAL_ONNX_EMBEDDING_DIMENSIONS);
     expect(parentMapsOnnxRuntime()).toBe(false);
+  });
+
+  it("backs off real child IPC load errors and retries only after the deadline", async () => {
+    const fork = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    let warmups = 0, now = 1_000;
+    const host: LocalOnnxEmbeddingIpcHost = { spawn() {
+      const child = fork.spawn();
+      return new Proxy(child, { get(target, property, receiver) {
+        if (property === "send") return (message: unknown, callback?: (error: Error | null) => void) => {
+          if ((message as { op?: string }).op === "warmup") warmups++;
+          return target.send(message, callback);
+        };
+        return Reflect.get(target, property, receiver);
+      } });
+    } };
+    const client = new LocalOnnxEmbeddingClient({ modelId: "fixture-transient-load", ipcHost: host, now: () => now });
+    clients.push(client);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await expect(client.bindSourceEmbedding({ window_bytes: 1024 })).rejects.toThrow("authored child load failure");
+      expect(client.isAvailable).toBe(attempt < 3);
+    }
+    expect(warmups).toBe(3);
+    await expect(client.warmup()).rejects.toThrow(/unavailable/);
+    expect(warmups).toBe(3);
+    now += LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS;
+    expect(client.isAvailable).toBe(true);
+    await expect(client.bindSourceEmbedding({ window_bytes: 1024 })).resolves.toMatchObject({ status: "ready" });
+    expect(warmups).toBe(4);
+    expect(client.isAvailable).toBe(true);
   });
 
   it("reaps the isolated child on close", async () => {
@@ -257,9 +287,7 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     await expect(client.embedTexts(["__crash__"], { timeoutMs: 5_000 })).rejects.toBeInstanceOf(
       LocalOnnxEmbeddingChildExitedError
     );
-    await expect(client.embedTexts(["ok"], { timeoutMs: 5_000 })).rejects.toBeInstanceOf(
-      LocalOnnxEmbeddingChildExitedError
-    );
+    await expect(client.embedTexts(["ok"], { timeoutMs: 5_000 })).rejects.toThrow(/unavailable/);
   });
 
   it("fail-closes when the child never replies", async () => {

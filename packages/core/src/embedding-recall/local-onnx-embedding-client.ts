@@ -305,24 +305,38 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   private ensureIsolatedReady(parent?: AbortSignal): Promise<void> {
     if (this.closed || this.isolated === null) return Promise.resolve();
     if (this.isolatedReady !== null) return this.isolatedReady;
+    const backoff = this.loadBackoffError();
+    if (backoff !== null) return Promise.reject(backoff);
     const isolated = this.isolated;
     const loadDeadline = createEmbeddingDeadline(LOCAL_ONNX_LOAD_TIMEOUT_MS, parent);
     this.isolatedReady = isolated.warmup(loadDeadline.signal).then(
-      () => undefined,
+      () => { this.currentlyAvailable = true; this.consecutiveLoadFailures = 0; },
       (error: unknown) => {
         this.isolatedReady = null;
-        this.noteIsolatedFailure(error);
+        if (!parent?.aborted && !this.closed) this.noteIsolatedFailure(error, true);
         throw error;
       }
     ).finally(() => loadDeadline.close());
     return this.isolatedReady;
   }
 
-  private noteIsolatedFailure(error: unknown): void {
-    if (!isLocalOnnxEmbeddingChildExitedError(error)) return;
-    this.currentlyAvailable = false;
-    this.consecutiveLoadFailures = LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD;
-    this.nextLoadAttemptAt = this.now() + LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS;
+  private noteIsolatedFailure(error: unknown, loading = false): void {
+    if (isLocalOnnxEmbeddingChildExitedError(error)) {
+      // Preserve the existing fail-closed behavior for a lost isolate.
+      this.consecutiveLoadFailures = LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD;
+    } else if (loading) {
+      this.consecutiveLoadFailures += 1;
+    } else return;
+    if (this.consecutiveLoadFailures >= LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD) {
+      this.currentlyAvailable = false;
+      this.nextLoadAttemptAt = this.now() + LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS;
+    }
+  }
+
+  private loadBackoffError(): Error | null {
+    if (this.currentlyAvailable || this.now() >= this.nextLoadAttemptAt) return null;
+    return new Error(`Local ONNX embedding provider is unavailable after ${this.consecutiveLoadFailures} ` +
+      `consecutive load failures; retry after ${this.nextLoadAttemptAt - this.now()} ms.`);
   }
 
   private readVectors(
@@ -361,20 +375,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     if (this.extractorPromise !== null) {
       return this.extractorPromise;
     }
-    if (
-      !this.currentlyAvailable &&
-      this.consecutiveLoadFailures >= LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD &&
-      this.now() < this.nextLoadAttemptAt
-    ) {
-      // Refuse to dial the pipeline loader until the backoff window has
-      // elapsed; the recall path treats this as a transient unavailability.
-      return Promise.reject(
-        new Error(
-          `Local ONNX embedding provider is unavailable after ${this.consecutiveLoadFailures} ` +
-            `consecutive load failures; retry after ${this.nextLoadAttemptAt - this.now()} ms.`
-        )
-      );
-    }
+    // Refuse direct calls as well as availability-gated callers during backoff.
+    const backoff = this.loadBackoffError();
+    if (backoff !== null) return Promise.reject(backoff);
     this.extractorPromise = this.pipelineLoader(
       this.modelId,
       this.cacheDir,
