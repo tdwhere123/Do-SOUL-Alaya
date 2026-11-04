@@ -526,6 +526,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     publishSource(environment, "second", "b");
     publishSource(environment, "third", "a", { workspace_id: "workspace-2" });
     const operations = [
+      vi.spyOn(SqliteSourceIndexRepository.prototype, "reclaimVectorPage"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "capturePage"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "pendingWindows"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "readDocument"),

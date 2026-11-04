@@ -561,9 +561,18 @@ retains its old schema and rows until release; SQLite prevents physical page rec
 past that snapshot. The writer refuses a caller-owned transaction rather than mutating
 its own frozen read. Reclamation receipts report committed pages/rows separately from
 native root visits and census calls; SQL-internal deletion and disk cost remain unmeasured.
-There is no query-time maintenance or vector/raw-source deletion. Current-binary rollback
+There is no query-time maintenance or raw-source deletion. Current-binary rollback
 selects and prepares raw lexical anew, still with generation-scoped statistics. Restoring
 the old ranking/binary requires a retained pre-028 database, never downgrading the live DB.
+
+The idle producer also reclaims retired vector generations, at most one bounded page per visited
+workspace and pass, charged to the same work/byte allowance. Each transaction deletes vector rows,
+then windows, then targets, and generation metadata last; the current pointer and current-epoch builds
+are excluded. An unpointed older-epoch build is first retired because the existing source-epoch guard
+already prevents its recovery. Shared root/dependency material and erase barriers remain owned by source invalidation.
+An old WAL reader retains its snapshot until release; SQLite's physical pages may remain occupied until
+checkpoint. Remaining rows are restartable progress; reclamation keeps pace only when maintenance has
+sufficient allowance and execution opportunities relative to newly retired payload.
 
 Migration 025 is additive, with no automatic backfill. Selection/epoch CAS fences
 superseded producers; durable pending targets allow bounded restart and payload repair.

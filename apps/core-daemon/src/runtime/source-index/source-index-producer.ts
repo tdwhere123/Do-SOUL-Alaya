@@ -84,6 +84,7 @@ export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
   visited_roots: number;
   capture_pages: number;
   reclamation: Readonly<{ pages: number; projections: number; targets: number; generations: number }>;
+  vector_reclamation: Readonly<{ pages: number; vectors: number; windows: number; targets: number; generations: number }>;
   limits: SourceIndexProducerLimits;
 }>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
@@ -96,6 +97,7 @@ type Pass = {
   capturePages: number;
   visitedRoots: number;
   reclamation: { pages: number; projections: number; targets: number; generations: number };
+  vectorReclamation: { pages: number; vectors: number; windows: number; targets: number; generations: number };
   limits: SourceIndexProducerLimits;
 };
 
@@ -174,7 +176,8 @@ export class SourceIndexProducer {
         binding: { status: "not_run" },
         resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
         accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
-        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
+        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
+        vector_reclamation: { pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
@@ -225,7 +228,8 @@ export class SourceIndexProducer {
       deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
       outcome: { status: "settled", reason: "pass_complete" },
       spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0,
-      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
+      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
+      vectorReclamation: { pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     try {
       await this.reconcilePass(pass, representation, windowing);
     } catch (error) {
@@ -242,7 +246,7 @@ export class SourceIndexProducer {
       : deadline.signal.aborted || Date.now() >= pass.deadline ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
     return { ...outcome, binding: pass.binding, resources: { ...pass.spent }, accounting: "lower_bound", limits,
       visited_roots: pass.visitedRoots, capture_pages: pass.capturePages, reclamation: pass.reclamation,
-      model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
+      vector_reclamation: pass.vectorReclamation, model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
   }
 
   private async reconcilePass(pass: Pass, representation?: SourceEmbeddingRepresentation, windowing?: SourceIndexWindowing): Promise<void> {
@@ -269,6 +273,7 @@ export class SourceIndexProducer {
       seen.add(workspace);
       // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
       this.afterWorkspace = workspace;
+      this.reclaimVectors(workspace, pass);
       const singleSlot = pass.limits.maxRootsPerPass - pass.visitedRoots === 1
         || pass.limits.maxCapturePages - pass.capturePages === 1;
       const vectorFirst = pending !== null && singleSlot && this.vectorFirstOnSingleSlot;
@@ -298,6 +303,17 @@ export class SourceIndexProducer {
         if (!this.hasBudget(pass)) return;
       }
     }
+  }
+
+  /** One retired-only page per visited workspace, charged before preparation from the shared allowance. */
+  private reclaimVectors(workspaceId: string, pass: Pass): void {
+    const left = remainingBudget(pass.limits, pass.spent);
+    if (pass.limits.maxCapturePages === 0 || left.work < 24 || left.native_bytes < 316) return;
+    const result = this.lifecycle.reclaimVectorPage(workspaceId, pass.limits.capturePage,
+      { work: Math.floor(left.work / 4), native_bytes: Math.floor(left.native_bytes / 4) });
+    pass.spent.work += result.resources.work; pass.spent.native_bytes += result.resources.native_bytes;
+    pass.vectorReclamation.pages++;
+    for (const key of ["vectors", "windows", "targets", "generations"] as const) pass.vectorReclamation[key] += result[key];
   }
 
   /** Takes at most half of what the pass has left so vector preparation after it is never starved. */

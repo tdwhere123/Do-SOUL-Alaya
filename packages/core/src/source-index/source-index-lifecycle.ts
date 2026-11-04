@@ -18,6 +18,11 @@ const LEXICAL_REUSE_BATCH_ROWS = 64, LEXICAL_REUSE_BATCHES_PER_PAGE = 16;
 export class SourceIndexLifecycle {
   public constructor(private readonly repository: SourceIndexRepository, private readonly sha256: FieldContractSha256) {}
 
+  /** Reclaims only retired vector payloads; the page is bounded by the caller's remaining budget. */
+  public reclaimVectorPage(workspaceId: string, limit: number, budget: SourceIndexBudget) {
+    return this.repository.reclaimVectorPage(workspaceId, limit, structuredClone(budget));
+  }
+
   /** A changed selection immediately unbinds vectors; lexical text is model-independent. */
   public select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection {
     const captured = structuredClone({ workspaceId, configuration });
