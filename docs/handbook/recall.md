@@ -118,7 +118,10 @@ reservations, currentness guards and exact scoring. It does not spend the first
 delivery page's exploration work. The `acquire` receipt phase records actual work,
 native bytes and elapsed time, while retained nominations consume field memory.
 An over-cap window-id prefix stays partial and is not an exact whole-generation
-ranking. Missing/unbound generations remain unavailable, independently of lexical
+ranking. Exact vector scan still visits every admitted window in that prefix; each native page sizes
+metadata once per previously unowned root and validates each candidate while computing cosine in one pass.
+The existing conservative logical work charge is retained, so the optimization does not buy extra
+windows or silently change a budget-limited result. Missing/unbound generations remain unavailable, independently of lexical
 discovery. Protocol 24.0.0 versions this ordinary membership/ranking change under
 invariant §25; existing queries must restart after upgrading.
 The complete source census and current-source ordering are

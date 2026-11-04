@@ -112,6 +112,22 @@ export function createCosineBatchScorer(
   return (right) => cosineWithLeftMagnitude(left, leftMagnitude, right);
 }
 
+/** Validate the right magnitude while calculating cosine, without a separate dimension scan. */
+export function createValidatedCosineBatchScorer(left: Float32Array): (right: Float32Array) => number | null {
+  const leftMagnitude = nonzeroFiniteMagnitude(left);
+  if (leftMagnitude === null) return () => null;
+  return right => {
+    if (right.length !== left.length || right.length === 0) return null;
+    let dot = 0, squared = 0;
+    for (let index = 0; index < left.length; index++) {
+      const value = right[index]!;
+      dot += left[index]! * value;
+      squared += value * value;
+    }
+    return squared === 0 || !Number.isFinite(squared) ? null : dot / (leftMagnitude * Math.sqrt(squared));
+  };
+}
+
 function cosineWithLeftMagnitude(
   left: Float32Array,
   leftMagnitude: number,
