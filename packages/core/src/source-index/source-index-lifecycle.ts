@@ -20,7 +20,9 @@ export class SourceIndexLifecycle {
 
   /** Reclaims only retired vector payloads; the page is bounded by the caller's remaining budget. */
   public reclaimVectorPage(workspaceId: string, limit: number, budget: SourceIndexBudget) {
-    return this.repository.reclaimVectorPage(workspaceId, limit, structuredClone(budget));
+    if (this.repository.reclaimVectorPage === undefined) return { status: "unavailable" as const,
+      reason: "vector_reclamation_not_supported" as const, resources: { work: 0, native_bytes: 0 } };
+    return { status: "available" as const, ...this.repository.reclaimVectorPage(workspaceId, limit, structuredClone(budget)) };
   }
 
   /** A changed selection immediately unbinds vectors; lexical text is model-independent. */

@@ -84,7 +84,8 @@ export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
   visited_roots: number;
   capture_pages: number;
   reclamation: Readonly<{ pages: number; projections: number; targets: number; generations: number }>;
-  vector_reclamation: Readonly<{ pages: number; vectors: number; windows: number; targets: number; generations: number }>;
+  vector_reclamation: Readonly<{ status: "not_run" | "available" | "unavailable";
+    pages: number; vectors: number; windows: number; targets: number; generations: number }>;
   limits: SourceIndexProducerLimits;
 }>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
@@ -97,7 +98,8 @@ type Pass = {
   capturePages: number;
   visitedRoots: number;
   reclamation: { pages: number; projections: number; targets: number; generations: number };
-  vectorReclamation: { pages: number; vectors: number; windows: number; targets: number; generations: number };
+  vectorReclamation: { status: "not_run" | "available" | "unavailable";
+    pages: number; vectors: number; windows: number; targets: number; generations: number };
   limits: SourceIndexProducerLimits;
 };
 
@@ -177,7 +179,7 @@ export class SourceIndexProducer {
         resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
         accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
         visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
-        vector_reclamation: { pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
+        vector_reclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
@@ -229,7 +231,7 @@ export class SourceIndexProducer {
       outcome: { status: "settled", reason: "pass_complete" },
       spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0,
       reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
-      vectorReclamation: { pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
+      vectorReclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     try {
       await this.reconcilePass(pass, representation, windowing);
     } catch (error) {
@@ -312,6 +314,11 @@ export class SourceIndexProducer {
     const result = this.lifecycle.reclaimVectorPage(workspaceId, pass.limits.capturePage,
       { work: Math.floor(left.work / 4), native_bytes: Math.floor(left.native_bytes / 4) });
     pass.spent.work += result.resources.work; pass.spent.native_bytes += result.resources.native_bytes;
+    pass.vectorReclamation.status = result.status;
+    if (result.status === "unavailable") {
+      this.input.warn("source index vector reclamation unavailable", { workspace_id: workspaceId, reason: result.reason });
+      return;
+    }
     pass.vectorReclamation.pages++;
     for (const key of ["vectors", "windows", "targets", "generations"] as const) pass.vectorReclamation[key] += result[key];
   }

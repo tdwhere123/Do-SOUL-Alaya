@@ -161,7 +161,8 @@ export class SourceIndexOperationError extends AlayaError {
 export interface SourceIndexRepository {
   /** Opt-in preparation port. Existing raw/vector consumers do not require this capability. */
   readonly lexical?: SourceIndexLexicalRepository;
-  reclaimVectorPage(workspaceId: string, limit: number, budget: SourceIndexBudget): SourceIndexVectorReclamationResult;
+  /** Optional maintenance capability; absence says nothing about the retired queue. */
+  reclaimVectorPage?(workspaceId: string, limit: number, budget: SourceIndexBudget): SourceIndexVectorReclamationResult;
   select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection;
   state(workspaceId: string): SourceIndexState;
   /** Revoke configuration eligibility without declaring a build failure. Retains history and fences old work. */
