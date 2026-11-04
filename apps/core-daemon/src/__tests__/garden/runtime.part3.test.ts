@@ -319,4 +319,34 @@ describe("garden runtime consolidation cycle", () => {
       })
     );
   });
+
+  it("fails a consolidation cycle when the durable budget table is missing", async () => {
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        legacyTopologyMutationsEnabled: true
+      })
+    );
+    const scheduler = currentScheduler();
+    scheduler.queue.push({
+      task_id: "missing-budget-table",
+      task_kind: GardenTaskKind.CONSOLIDATION_CYCLE,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_refs: ["workspace-1"],
+      priority: 10,
+      created_at: "2026-07-17T00:00:00.000Z"
+    });
+
+    await getService(runtime, "GardenScheduler").task();
+
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({
+        task_id: "missing-budget-table",
+        success: false,
+        audit_entries: ["consolidation_failed:no_durable_budget_table"],
+        error_message: "consolidation executor unavailable"
+      })
+    );
+  });
 });

@@ -19,6 +19,10 @@ const PATH_FOLLOW_UP_DEFERRED_AUDIT =
   "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required";
 const CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT =
   "embedding_backfill_topology_follow_up_skipped:cache_only";
+const COHERENCE_FOLLOW_UP_FAILED_AUDIT =
+  "embedding_backfill_coherence_follow_up_failed";
+const ANSWERS_WITH_FOLLOW_UP_FAILED_AUDIT =
+  "embedding_backfill_answers_with_follow_up_failed";
 
 interface SafeCausalError {
   readonly name: string;
@@ -165,12 +169,12 @@ async function runEmbeddingPathFollowUps(
   if (objectsAffected.length < 2) {
     return [];
   }
-  await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
+  const answersWithAudit = await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
   if (input.legacyTopologyMutationsEnabled !== true) {
-    return [PATH_FOLLOW_UP_DEFERRED_AUDIT];
+    return [...answersWithAudit, PATH_FOLLOW_UP_DEFERRED_AUDIT];
   }
-  await runEmbeddingCoherenceFollowUp(input, task, objectsAffected);
-  return [];
+  const coherenceAudit = await runEmbeddingCoherenceFollowUp(input, task, objectsAffected);
+  return [...answersWithAudit, ...coherenceAudit];
 }
 
 function appendUniqueAuditEntries(
@@ -255,9 +259,9 @@ async function runEmbeddingCoherenceFollowUp(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>,
   objectsAffected: readonly string[]
-): Promise<void> {
+): Promise<readonly string[]> {
   if (input.coherenceEdgeProducerPort === undefined || objectsAffected.length < 2) {
-    return;
+    return [];
   }
   try {
     await input.coherenceEdgeProducerPort.crystallizeForBackfill({
@@ -265,12 +269,14 @@ async function runEmbeddingCoherenceFollowUp(
       runId: null,
       objectIds: objectsAffected
     });
+    return [];
   } catch (coherenceError) {
     input.warn("coherence crystallization failed after embedding backfill", {
       workspace_id: task.workspace_id,
       phase: "coherence",
       error: serializeCausalError(coherenceError)
     });
+    return [COHERENCE_FOLLOW_UP_FAILED_AUDIT];
   }
 }
 
@@ -278,9 +284,9 @@ async function runEmbeddingAnswersWithFollowUp(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>,
   objectsAffected: readonly string[]
-): Promise<void> {
+): Promise<readonly string[]> {
   if (input.answersWithEdgeProducerPort === undefined || objectsAffected.length < 2) {
-    return;
+    return [];
   }
   try {
     await input.answersWithEdgeProducerPort.crystallizeForBackfill({
@@ -288,12 +294,14 @@ async function runEmbeddingAnswersWithFollowUp(
       runId: null,
       objectIds: objectsAffected
     });
+    return [];
   } catch (answersWithError) {
     input.warn("answers_with crystallization failed after embedding backfill", {
       workspace_id: task.workspace_id,
       phase: "answers_with",
       error: serializeCausalError(answersWithError)
     });
+    return [ANSWERS_WITH_FOLLOW_UP_FAILED_AUDIT];
   }
 }
 

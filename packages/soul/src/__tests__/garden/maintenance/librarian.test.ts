@@ -17,6 +17,7 @@ import {
   type NeighborGroup
 } from "../../../garden/maintenance/librarian.js";
 import type { PathPlasticityComputePort } from "../../../garden/materialization/path-plasticity-task.js";
+import type { GraphEdgeCreationPort } from "../../../garden/materialization/materialization-router.js";
 import * as soulExports from "../../../index.js";
 
 describe("Librarian", () => {
@@ -75,6 +76,34 @@ describe("Librarian", () => {
 
     expect(healthJournal.record).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual([]);
+  });
+
+  it("keeps neighbor detection successful while omitting ids whose edge create failed", async () => {
+    const createEdge = vi.fn(async (params: { readonly targetMemoryId: string }) => {
+      if (params.targetMemoryId === "memory-2") {
+        throw new Error("edge persist failed");
+      }
+    });
+    const { librarian } = createLibrarian({
+      neighborGroups: [
+        {
+          subject: "workspace.memory.theme",
+          object_ids: ["memory-1", "memory-2", "memory-3"],
+          overlap_basis: "governance_subject"
+        }
+      ],
+      graphEdgePort: { createEdge } as GraphEdgeCreationPort
+    });
+
+    const result = await librarian.run(createTask({ task_kind: GardenTaskKind.SUBJECT_NEIGHBOR_DETECT }));
+
+    expect(result.success).toBe(true);
+    expect(result.objects_affected).toEqual(["memory-1", "memory-3"]);
+    expect(result.audit_entries).toEqual([
+      "subject_neighbor_detect: detected 1 overlapping subject groups",
+      "subject_neighbor_edge_create_failed: 1"
+    ]);
+    expect(createEdge).toHaveBeenCalledTimes(2);
   });
 
   it("throttles synthesis review by subject before creating candidates", async () => {
@@ -289,6 +318,7 @@ function createLibrarian(options: {
   readonly findSynthesisClusters?: (workspaceId: string) => Promise<readonly { subject: string; evidence_ids: readonly string[] }[]>;
   readonly pathPlasticityPort?: PathPlasticityComputePort;
   readonly clearPendingWorkspace?: (workspaceId: string) => Promise<void>;
+  readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly schedulerOverride?: {
     reportCompletion: Mock<(result: Awaited<ReturnType<Librarian["run"]>>) => Promise<void>>;
   };
@@ -322,6 +352,7 @@ function createLibrarian(options: {
       ...(options.clearPendingWorkspace === undefined
         ? {}
         : { pathPlasticityPendingPort: { clearPendingWorkspace: options.clearPendingWorkspace } }),
+      ...(options.graphEdgePort === undefined ? {} : { graphEdgePort: options.graphEdgePort }),
       scheduler,
       healthJournal,
       now: () => "2026-03-27T00:00:00.000Z"

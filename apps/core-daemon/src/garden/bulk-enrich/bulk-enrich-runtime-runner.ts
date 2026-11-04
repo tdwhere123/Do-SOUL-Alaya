@@ -105,9 +105,9 @@ export async function runBulkEnrichTask(input: Readonly<{
     return;
   }
   if (input.availability.kind === "missing_repo") {
-    await input.reporter.reportCompletion(input.task, completedAt, true, [
-      "bulk_enrich_skipped:no_enrich_pending_table"
-    ]);
+    await input.reporter.reportCompletion(input.task, completedAt, false, [
+      "bulk_enrich_failed:no_enrich_pending_table"
+    ], new Error("bulk enrich pending table is not configured"));
     return;
   }
   if (input.availability.kind === "disabled") {

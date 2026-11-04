@@ -427,7 +427,13 @@ describe("garden runtime targeted embedding backfill pass", () => {
       "completion"
     ]);
     expect(scheduler.completions).toContainEqual(
-      expect.objectContaining({ success: true })
+      expect.objectContaining({
+        success: true,
+        audit_entries: expect.arrayContaining([
+          "embedding_backfill_answers_with_follow_up_failed",
+          "embedding_backfill_coherence_follow_up_failed"
+        ])
+      })
     );
   });
 

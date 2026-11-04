@@ -143,50 +143,69 @@ export class Librarian {
           }))
         }
       });
+    }
 
-      // Connect structurally related memories with recalls edges.
-      // Edge creation is supplementary, but failures must still be visible.
-      if (this.graphEdgePort !== null) {
-        for (const group of groups) {
-          if (group.object_ids.length < 2) {
-            continue;
-          }
+    const edgeMaterialization = await this.materializeSubjectNeighborEdges(task, groups);
+    const detectedObjectIds = Array.from(new Set(groups.flatMap((group) => group.object_ids)));
+    // Detection-only (no port) reports scanned ids. When edges are attempted,
+    // objects_affected is only the ids whose createEdge succeeded — failed
+    // materializations are not claimed as done. The pass stays best-effort.
+    const affectedObjectIds =
+      this.graphEdgePort === null ? detectedObjectIds : edgeMaterialization.materializedIds;
+    const auditEntries = [
+      `subject_neighbor_detect: detected ${groups.length} overlapping subject groups`,
+      ...(edgeMaterialization.failedCount > 0
+        ? [`subject_neighbor_edge_create_failed: ${edgeMaterialization.failedCount}`]
+        : [])
+    ];
+    const result = this.createSuccessResult(task, completedAt, affectedObjectIds, auditEntries);
+    await this.scheduler.reportCompletion(result);
+    return result;
+  }
 
-          const [anchor, ...rest] = group.object_ids;
-          if (anchor === undefined) {
-            continue;
-          }
-          for (const neighborId of rest) {
-            try {
-              await this.graphEdgePort.createEdge({
-                sourceMemoryId: anchor,
-                targetMemoryId: neighborId,
-                edgeType: MemoryGraphEdgeType.RECALLS,
-                workspaceId: task.workspace_id,
-                runId: task.run_id,
-                triggerSource: EdgeProposalTriggerSource.SYSTEM,
-                confidence: 0.5,
-                reason: "librarian subject neighbor proposal"
-              });
-            } catch (error) {
-              emitLibrarianProjectionWarning("subject_neighbor_edge_create", error, {
-                workspace_id: task.workspace_id,
-                run_id: task.run_id,
-                source_memory_id: anchor,
-                target_memory_id: neighborId
-              });
-            }
-          }
+  private async materializeSubjectNeighborEdges(
+    task: GardenTaskDescriptor,
+    groups: readonly NeighborGroup[]
+  ): Promise<Readonly<{ materializedIds: readonly string[]; failedCount: number }>> {
+    const materializedIds = new Set<string>();
+    let failedCount = 0;
+    if (this.graphEdgePort === null) {
+      return { materializedIds: [], failedCount: 0 };
+    }
+    for (const group of groups) {
+      if (group.object_ids.length < 2) {
+        continue;
+      }
+      const [anchor, ...rest] = group.object_ids;
+      if (anchor === undefined) {
+        continue;
+      }
+      for (const neighborId of rest) {
+        try {
+          await this.graphEdgePort.createEdge({
+            sourceMemoryId: anchor,
+            targetMemoryId: neighborId,
+            edgeType: MemoryGraphEdgeType.RECALLS,
+            workspaceId: task.workspace_id,
+            runId: task.run_id,
+            triggerSource: EdgeProposalTriggerSource.SYSTEM,
+            confidence: 0.5,
+            reason: "librarian subject neighbor proposal"
+          });
+          materializedIds.add(anchor);
+          materializedIds.add(neighborId);
+        } catch (error) {
+          failedCount += 1;
+          emitLibrarianProjectionWarning("subject_neighbor_edge_create", error, {
+            workspace_id: task.workspace_id,
+            run_id: task.run_id,
+            source_memory_id: anchor,
+            target_memory_id: neighborId
+          });
         }
       }
     }
-
-    const affectedObjectIds = Array.from(new Set(groups.flatMap((group) => group.object_ids)));
-    const result = this.createSuccessResult(task, completedAt, affectedObjectIds, [
-      `subject_neighbor_detect: detected ${groups.length} overlapping subject groups`
-    ]);
-    await this.scheduler.reportCompletion(result);
-    return result;
+    return { materializedIds: Array.from(materializedIds), failedCount };
   }
 
   private async executeSynthesisReview(

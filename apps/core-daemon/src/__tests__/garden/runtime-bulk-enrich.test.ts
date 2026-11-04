@@ -114,6 +114,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
 });
 
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
+import { runBulkEnrichTask } from "../../garden/bulk-enrich/bulk-enrich-runtime-runner.js";
 
 type Runtime = ReturnType<typeof createGardenRuntime>;
 
@@ -434,5 +435,46 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ).toHaveLength(0);
     expect(enrichPendingRepo.countPending("workspace-B")).toBe(1);
     expect(currentScheduler().completions).toHaveLength(0);
+  });
+
+  it("fails bulk enrich when the pending table is not configured", async () => {
+    const reportCompletion = vi.fn(async () => undefined);
+    await runBulkEnrichTask({
+      now: () => BULK_ENRICH_TEST_NOW,
+      task: bulkEnrichTask(),
+      availability: { kind: "missing_repo" },
+      reporter: {
+        emitEnrichAbandoned: async () => undefined,
+        reportCompletion,
+        warn: vi.fn()
+      }
+    });
+    expect(reportCompletion).toHaveBeenCalledWith(
+      expect.anything(),
+      BULK_ENRICH_TEST_NOW,
+      false,
+      ["bulk_enrich_failed:no_enrich_pending_table"],
+      expect.any(Error)
+    );
+  });
+
+  it("skips bulk enrich when enrichment is intentionally disabled", async () => {
+    const reportCompletion = vi.fn(async () => undefined);
+    await runBulkEnrichTask({
+      now: () => BULK_ENRICH_TEST_NOW,
+      task: bulkEnrichTask(),
+      availability: { kind: "disabled" },
+      reporter: {
+        emitEnrichAbandoned: async () => undefined,
+        reportCompletion,
+        warn: vi.fn()
+      }
+    });
+    expect(reportCompletion).toHaveBeenCalledWith(
+      expect.anything(),
+      BULK_ENRICH_TEST_NOW,
+      true,
+      ["bulk_enrich_skipped:enrichment_disabled"]
+    );
   });
 });

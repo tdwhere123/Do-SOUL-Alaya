@@ -28,6 +28,17 @@ async function runConsolidationCycleTask(
       await reportConsolidationCompletion(input, task, completedAt, true, [skipAuditEntry], null);
       return;
     }
+    if (input.consolidationExecutor === null) {
+      await reportConsolidationCompletion(
+        input,
+        task,
+        completedAt,
+        false,
+        ["consolidation_failed:no_durable_budget_table"],
+        "consolidation executor unavailable"
+      );
+      return;
+    }
     const result = await runConsolidationPlan(input, task.workspace_id, completedAt);
     await reportConsolidationCompletion(
       input,
@@ -53,9 +64,6 @@ async function resolveConsolidationSkipAuditEntry(
 ): Promise<string | null> {
   if (input.legacyTopologyMutationsEnabled !== true) {
     return "consolidation_deferred:temporal_assertion_provenance_required";
-  }
-  if (input.consolidationExecutor === null) {
-    return "consolidation_skipped:no_durable_budget_table";
   }
   const soulConfig = await input.configService?.getSoulConfig?.(workspaceId);
   return soulConfig !== undefined && !soulConfig.memory_consolidation_enabled
