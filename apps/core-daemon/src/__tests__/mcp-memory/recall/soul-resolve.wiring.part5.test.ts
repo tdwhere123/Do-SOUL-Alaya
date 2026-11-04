@@ -49,4 +49,43 @@ describe("soul.resolve handler fixture wiring", () => {
       )
     ).toBe(false);
   });
+
+  it("treats a foreign-workspace claim as missing rather than a claim_form target", async () => {
+    const harness = createHarness();
+    harness.claims.set(
+      "claim-foreign",
+      buildClaim({
+        object_id: "claim-foreign",
+        workspace_id: "other-workspace",
+        source_object_refs: ["mem-source-1"]
+      })
+    );
+    harness.deliveries.set("delivery-local", {
+      delivery_id: "delivery-local",
+      agent_target: context.agentTarget,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      delivered_object_ids: ["mem-source-1"],
+      delivered_objects: [{ object_id: "mem-source-1", object_kind: "memory_entry" }],
+      delivered_at: FIXED_NOW,
+      audit_event_id: "delivery-evt-local"
+    });
+
+    const result = await harness.handler.call({
+      toolName: "soul.resolve",
+      arguments: {
+        target_object_id: "claim-foreign",
+        resolution: SoulResolutionKind.CONFIRM,
+        delivery_id: "delivery-local"
+      },
+      context
+    });
+
+    expect(result.ok).toBe(false);
+    expect(
+      harness.events.some(
+        (event) => event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED
+      )
+    ).toBe(false);
+  });
 });

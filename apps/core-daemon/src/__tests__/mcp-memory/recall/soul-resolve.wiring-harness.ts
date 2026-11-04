@@ -244,9 +244,11 @@ export function createHarness(): SoulResolveWiringHarness {
       findDeliveryById: async (id) => deliveries.get(id) ?? null
     },
     claimSourceReader: {
-      findSourceObjectRefs: async (targetObjectId) => {
+      findSourceObjectRefs: async (targetObjectId, workspaceId) => {
         const claim = claims.get(targetObjectId);
-        return claim === undefined ? null : claim.source_object_refs;
+        return claim === undefined || claim.workspace_id !== workspaceId
+          ? null
+          : claim.source_object_refs;
       }
     }
   });

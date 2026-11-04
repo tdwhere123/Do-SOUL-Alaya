@@ -388,6 +388,47 @@ describe("BudgetBankruptcyService", () => {
       pending_proposal: { resolution_state: ProposalResolutionState.AUTO_APPLIED }
     });
   });
+
+  it("rejects declare and resolve when the workspace does not own the run", async () => {
+    const dependencies = createDependencies();
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
+
+    await expect(
+      service.declare(createDeclareParams({ workspaceId: "workspace-other" }))
+    ).rejects.toMatchObject({
+      code: "VALIDATION"
+    });
+    await expect(
+      service.resolve({
+        runId: "run-1",
+        workspaceId: "workspace-other",
+        optionId: "option-1",
+        action: "accept"
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION"
+    });
+    expect(dependencies.runLookup.getById).toHaveBeenCalledWith("run-1");
+  });
+
+  it("does not report a declaration without a proposal as not bankrupt", async () => {
+    const eventLogRepo = createEventLogRepo();
+    const dependencies = createDependencies({ eventLogRepo });
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
+    await eventLogRepo.append({
+      event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
+      entity_type: "bankruptcy_dossier",
+      entity_id: "dossier-lost",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: { bankruptcy_id: "lost" }
+    });
+
+    await expect(service.getSnapshot("run-1", "2026-03-26T00:00:00.000Z")).rejects.toMatchObject({
+      code: "CONFLICT"
+    });
+  });
 });
 
 function asBudgetDeps(

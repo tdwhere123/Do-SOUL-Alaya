@@ -155,8 +155,8 @@ describe("EdgeProposalService", () => {
       })
     ).rejects.toMatchObject({
       name: "CoreError",
-      code: "VALIDATION",
-      message: "Target memory does not belong to workspace workspace-1: memory-b"
+      code: "NOT_FOUND",
+      message: "Target memory not found: memory-b"
     });
   });
 

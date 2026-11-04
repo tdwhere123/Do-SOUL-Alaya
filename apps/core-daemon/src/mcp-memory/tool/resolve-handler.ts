@@ -58,7 +58,10 @@ export interface SoulResolveHandlerDependencies {
   // see also: packages/protocol/src/recall/recall-candidate.ts
   //   (object_kind = "memory_entry")
   readonly claimSourceReader?: {
-    findSourceObjectRefs(targetObjectId: string): Promise<readonly string[] | null>;
+    findSourceObjectRefs(
+      targetObjectId: string,
+      workspaceId: string
+    ): Promise<readonly string[] | null>;
   };
   readonly causalUsageRecorder?: {
     record(input: Readonly<{
@@ -162,7 +165,7 @@ async function resolveCausalUsageSourcesInScope(
   const sourceRefs =
     claimSourceReader === undefined
       ? null
-      : await claimSourceReader.findSourceObjectRefs(targetObjectId);
+      : await claimSourceReader.findSourceObjectRefs(targetObjectId, context.workspaceId);
   const targetObjectKind = sourceRefs === null ? "memory_entry" : "claim_form";
 
   const deliveredSources = resolveDeliveredTargetSources(

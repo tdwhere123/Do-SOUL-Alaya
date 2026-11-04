@@ -127,7 +127,12 @@ describe("soul.resolve causal usage", () => {
       causalUsageRecorder: { record }
     });
 
-    await handler.resolve({ ...request(), resolution }, context);
+    await handler.resolve({
+      ...request(),
+      resolution,
+      ...(resolution === SoulResolutionKind.CORRECT ? { correction: "use the workspace package manager" } : {}),
+      ...(resolution === SoulResolutionKind.DEFER ? { defer_until: "2026-05-18T00:00:00.000Z" } : {})
+    }, context);
 
     expect(record).not.toHaveBeenCalled();
   });

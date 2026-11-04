@@ -13,7 +13,8 @@ describe("budget wiring", () => {
       const notifyEntry = vi.fn();
       const now = () => "2026-03-26T00:00:00.000Z";
       const service = new BudgetBankruptcyService({ eventLogRepo,
-        proposalService: createBudgetProposalPort({ proposalRepo, now }), runtimeNotifier: { notifyEntry }, now });
+        proposalService: createBudgetProposalPort({ proposalRepo, now }), runtimeNotifier: { notifyEntry },
+        runLookup: { getById: async () => ({ workspace_id: "workspace-1" }) }, now });
       const input = { runId: "run-1", workspaceId: "workspace-1", triggerKind: BankruptcyTriggerKind.SAFETY_GUARD,
         triggerSummary: "Protected constraint requires confirmation", taskSurfaceRef: null, taskSurfaceExpiresAt: null,
         currentMode: RuntimeMode.FULL, protectedConstraints: ["claim-1"], droppedCandidates: [],
