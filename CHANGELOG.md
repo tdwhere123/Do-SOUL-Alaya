@@ -17,6 +17,14 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
 
+Internal repair removes unused exports from the private workspace packages:
+`awaitCjkSegmentationWarmup` stays behind the nonblocking startup owner, while
+`measureSqliteBlockingOnEventLoop` and `SqliteBlockingProbeResult` are retired
+with their misleading P99 diagnostic. No MCP, EventLog or runtime-config field
+is removed by this cleanup; the corresponding internal export snapshots are
+updated. EventLog transactions now reject asynchronous callbacks and prevent
+late EventLog writes from escaping a completed or rolled-back callback scope.
+
 Protocol 34.0.0 changes ordinary native delivery (`ordinary-native-field.v9`, invariant §25
 major). Question-time preference now prefers roots whose recorded date lies from the
 frozen window start to the interpretation clock: a past event is recorded at or after it
