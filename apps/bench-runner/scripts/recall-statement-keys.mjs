@@ -77,7 +77,14 @@ function questionSessions(sources, workspace, questionId, publication,
   const sessions = [...new Set(publication.sources.map(source => source.session_index))].sort((a, b) => a - b);
   return sessions.map(si => {
     const key = hostSessionContainerKey(longMemEvalSessionContainer(questionId, si), fieldContractSha256);
-    const roots = sources.rounds(workspace, key).map(round => round.root_id);
+    // Offline publication checks complete membership, fetching each logical page within the storage limit.
+    const roots = [];
+    for (let after = -1;;) {
+      const page = sources.roundPage(workspace, key, after, 64);
+      roots.push(...page.map(round => round.root_id));
+      if (page.length < 64) break;
+      after = page.at(-1).round_index;
+    }
     const published = publication.sources.filter(source => source.session_index === si)
       .sort((a, b) => a.round_index - b.round_index).map(source => source.record_id);
     if (JSON.stringify(roots) !== JSON.stringify(published)) throw new AlayaError("CONFLICT", `session ${si} rounds differ from its publication`);
