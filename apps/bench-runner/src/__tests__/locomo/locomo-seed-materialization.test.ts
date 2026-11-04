@@ -160,8 +160,17 @@ describe("LoCoMo runner", () => {
           };
         })
       } as ReturnType<typeof compileSeedModule.createCompileSeedRunner>);
-    const samples = await loadLocomoMock();
-    samples[0].qa.push({ question: "What does Bob discuss?", answer: "Weather", evidence: ["d2"], category: 1 });
+    loadLocomoMock.mockResolvedValue([{
+      sample_id: "sample-1",
+      conversation: { speaker_a: "Alice", speaker_b: "Bob", session_1_date_time: "2026-05-20", session_1: [
+        { speaker: "Alice", dia_id: "d1", text: "Alice keeps the violin receipt." },
+        { speaker: "Bob", dia_id: "d2", text: "Bob talks about weather." }
+      ] },
+      qa: [
+        { question: "Who keeps the violin receipt?", answer: "Alice", evidence: ["d1"], category: 1 },
+        { question: "What does Bob discuss?", answer: "Weather", evidence: ["d2"], category: 1 }
+      ]
+    }]);
     const recall = vi.fn(async () => buildRecallResult("memory-d2"));
     startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
