@@ -91,6 +91,42 @@ it("swaps a dominated source slot 5 from published statement keys through SQLite
   expect(sourceOrder(env, readers)).toEqual(swapped);
 });
 
+it("preserves a legacy-fundable tight SQLite acquisition and nomination-retention grant", async () => {
+  const env = await createStatementSessionEnvironment(); environments.push(env);
+  await env.capture({ container: CONTAINER, messages: hostMessages(Array.from({ length: 2 }, (_, k) => [
+    { role: "user" as const, content: `Round ${k}: I planted bed ${k}.` },
+    { role: "assistant" as const, content: "Noted." }])) });
+  env.advance(STATEMENT_SESSION_IDLE_MS);
+  await env.processSession(env.provider(text => text.startsWith("Round ")
+    ? [{ text: `Garden statement for ${text.slice(0, 8)}.`, relation: "garden" }] : []));
+  const configuration = { ...RECORDED_STATEMENT_CONFIGURATION,
+    profile: { ...RECORDED_STATEMENT_CONFIGURATION.profile, dimensions: 4 } };
+  prepareRecordedStatementIndex(env.database, WORKSPACE, source => source.auxiliary === undefined ? [1, 1, 0, 0] : [1, 0, 0, 0], configuration);
+  const query = { ...vector, profile: configuration.profile,
+    profile_id: sourceIndexProfileId(configuration.profile, fieldContractSha256), embedding: Float32Array.of(1, 0, 0, 0) };
+  const nominate = () => env.database.connection.transaction(() => nominateNativeSources(env.database,
+    { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 } }, query))();
+  const baseline = nominate(), packed = baseline.association!;
+  expect(packed.roots).toHaveLength(2);
+  const dense = { ...packed, link: [[-1, packed.link[1]![0]!], [packed.link[1]![0]!, -1]] };
+  const allowance = { work_units: 1_000_000, memory_bytes: 1_000_000 };
+  const retainedSavings = SourceSemanticResourceLedger.measureRetain(dense, allowance).memory_bytes
+    - SourceSemanticResourceLedger.measureRetain(packed, allowance).memory_bytes;
+  // Legacy association allocation: two question values plus four link values (48 bytes).
+  // Packed allocation: two question values plus one link value (24 bytes).
+  const legacyFundableBytes = baseline.result!.resources.memory_bytes + retainedSavings + 24;
+  const quote = SourceIndexAcquisition.quoteAllowanceBudget;
+  const spy = vi.spyOn(SourceIndexAcquisition, "quoteAllowanceBudget").mockImplementation((input, capacity) => ({
+    ...quote(input, capacity), memory_bytes: legacyFundableBytes }));
+  try {
+    const tight = nominate();
+    expect(tight.result?.resource_refusals).toEqual([]);
+    expect(tight.result?.nominations).toEqual(baseline.result?.nominations);
+    expect(tight.association).toEqual(packed);
+    expect(tight.result!.resources.memory_bytes).toBeLessThanOrEqual(legacyFundableBytes);
+  } finally { spy.mockRestore(); }
+});
+
 it("delivers the same slot swap and continuation through the built worker with multi-key SQLite roots", async () => {
   assertBuiltWorker();
   const env = await createStatementSessionEnvironment(); environments.push(env);

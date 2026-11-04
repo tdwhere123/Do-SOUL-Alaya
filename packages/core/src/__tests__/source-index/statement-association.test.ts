@@ -71,6 +71,28 @@ describe("statement key retention", () => {
     expect(ledger.spentBytes).toBe(bytes);
     expect(refused).toEqual([]);
   });
+  it("leaves a tight shared grant sufficient for retaining the completed association", () => {
+    const ledger = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1220 });
+    const retention = new StatementKeyRetention(ledger, () => { throw new Error("unexpected refusal"); });
+    retention.consider("a", 0.2, Float32Array.of(1, 0, 0, 0));
+    retention.consider("b", 0.3, Float32Array.of(1, 0, 0, 0));
+    const value = retention.associate(["a", "b"]);
+    expect(value).toBeDefined();
+    ledger.retain(value, "retained association");
+    expect(ledger.spentBytes).toBeLessThanOrEqual(1220);
+  });
+  it("does not spend optional inspection work before mixed-dimension exact fallback", () => {
+    const ledger = new SourceSemanticResourceLedger({ work_units: 24588, memory_bytes: 100_000 });
+    const refused: string[] = [], retention = new StatementKeyRetention(ledger, phase => refused.push(phase));
+    retention.consider("a", 0.2, new Float32Array(4).fill(1));
+    retention.consider("b", 0.3, new Float32Array(8192).fill(1));
+    retention.consider("c", 0.4, new Float32Array(8192).fill(1));
+    const value = retention.associate(["a", "b", "c"]);
+    expect(value?.link).toHaveLength(3);
+    expect(value?.link[2]?.[1]).toBeCloseTo(1);
+    expect(ledger.spentWork).toBe(24588);
+    expect(refused).toEqual([]);
+  });
   it("reports a link refusal without returning partial associations", () => {
     const dimensions = 4, ledger = new SourceSemanticResourceLedger({ work_units: dimensions * 2,
       memory_bytes: 2 * (dimensions * 4 + 48) + 3 * 8 });
@@ -111,5 +133,14 @@ describe("field access with association", () => {
     expect(result.record_ids).toEqual(["a", "m", "b", "c", "d", "f", "e"]);
     const malformed = { ...value, link: value.link.map((row, i) => i === 0 ? [0.9] : row) };
     expect(() => orderNativeFieldAccess({ ...input, association: malformed })).toThrow(/triangular link/u);
+    const missingSlot = structuredClone(value);
+    delete (missingSlot.link[5] as number[])[0];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingSlot })).toThrow(/triangular link/u);
+    const missingRow = structuredClone(value);
+    delete (missingRow.link as number[][])[5];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingRow })).toThrow(/triangular link/u);
+    const missingQuestion = structuredClone(value);
+    delete (missingQuestion.question as number[])[5];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingQuestion })).toThrow(/triangular link/u);
   });
 });

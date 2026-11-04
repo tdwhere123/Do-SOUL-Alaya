@@ -255,10 +255,19 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
 }
 
 function validateAssociation({ roots, question, link }: StatementAssociation): void {
-  requireFact(roots.every(nonempty) && new Set(roots).size === roots.length, "association roots must be distinct identities");
-  requireFact(question.length === roots.length && question.every(Number.isFinite) && link.length === roots.length
-    && link.every((row, i) => Array.isArray(row) && row.length === i && row.every(Number.isFinite)),
-  "association must be one finite question value and one triangular link row per root");
+  requireFact(Array.isArray(roots) && Array.isArray(question) && Array.isArray(link)
+    && new Set(roots).size === roots.length, "association roots must be distinct identities");
+  requireFact(question.length === roots.length && link.length === roots.length,
+    "association must be one finite question value and one triangular link row per root");
+  for (let i = 0; i < roots.length; i++) {
+    requireFact(Object.hasOwn(roots, i) && nonempty(roots[i]!), "association roots must be distinct identities");
+    const row = link[i];
+    requireFact(Object.hasOwn(question, i) && Number.isFinite(question[i]) && Object.hasOwn(link, i)
+      && Array.isArray(row) && row.length === i,
+    "association must be one finite question value and one triangular link row per root");
+    for (let j = 0; j < i; j++) requireFact(Object.hasOwn(row, j) && Number.isFinite(row[j]),
+      "association must be one finite question value and one triangular link row per root");
+  }
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

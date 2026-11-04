@@ -36,6 +36,8 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
 export class StatementKeyRetention {
   private readonly byRoot = new Map<string, Retained[]>();
   private abandoned = false;
+  private dimensions: number | undefined;
+  private compatible = true;
 
   public constructor(private readonly meter: SourceSemanticResourceLedger,
     private readonly refused: (phase: string) => void) {}
@@ -48,6 +50,8 @@ export class StatementKeyRetention {
     let norm = 0;
     for (const value of embedding) norm += value * value;
     const row = { cosine, embedding: embedding.slice(), norm: Math.sqrt(norm) };
+    this.dimensions ??= embedding.length;
+    this.compatible &&= embedding.length === this.dimensions && Number.isFinite(row.norm);
     const at = kept.findIndex(other => other.cosine < cosine);
     kept.splice(at === -1 ? kept.length : at, 0, row);
     if (kept.length > STATEMENT_ASSOCIATION_KEYS_PER_ROOT) kept.pop();
@@ -104,31 +108,20 @@ export class StatementKeyRetention {
   /** Preflight the whole optional optimization, leaving enough work for every worst-case dot product.
    * If it doesn't fit, the original exact loop still has its existing quote and refusal behavior. */
   private comparisonScratch(kept: readonly Retained[][]): Float64Array | undefined {
-    const first = kept.find(rows => rows.length > 0)?.[0], dimensions = first?.embedding.length ?? 0;
-    const roots = kept.length, cap = STATEMENT_ASSOCIATION_KEYS_PER_ROOT;
-    if (dimensions < 4 || dimensions > 65536 || roots < 2) return undefined;
+    const dimensions = this.dimensions ?? 0, roots = kept.length, cap = STATEMENT_ASSOCIATION_KEYS_PER_ROOT;
+    if (!this.compatible || dimensions < 4 || dimensions > 65536 || roots < 2) return undefined;
     const rootPairs = roots * (roots - 1) / 2;
     const comparisons = rootPairs * cap * cap, scans = (roots + rootPairs) * cap;
-    const inspection = roots + roots * cap;
     const bytes = 2 * cap * 3 * 8 + 64;
-    // This conservative preflight also covers the inspection itself. It never consumes the
-    // full-comparison allowance when the optional path cannot be funded.
-    try { this.meter.reserve(inspection + scans * dimensions + comparisons * (dimensions + 3), bytes,
+    // Current free bytes also fund hint acquisition and retained nominations. Only reuse the
+    // matrix allocation eliminated by packing: optional scratch must not reduce their grant.
+    if (bytes > roots * (roots + 1) * 8 - observationBytes(roots)) return undefined;
+    try { this.meter.reserve(scans * dimensions + comparisons * (dimensions + 3), bytes,
       "statement key association bounds"); }
     catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       return undefined;
     }
-    let keyedRoots = 0;
-    for (const rows of kept) {
-      this.meter.charge(1, 0, "statement key association bounds");
-      if (rows.length > 0) keyedRoots++;
-      for (const row of rows) {
-        this.meter.charge(1, 0, "statement key association bounds");
-        if (row.embedding.length !== dimensions || !Number.isFinite(row.norm)) return undefined;
-      }
-    }
-    if (keyedRoots < 2) return undefined;
     this.meter.charge(0, bytes, "statement key association bounds");
     return new Float64Array(2 * cap * 3);
   }
