@@ -1,12 +1,8 @@
 import { execFile } from "node:child_process";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
-import {
-  readFile as fsReadFile,
-  realpath
-} from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import type { ExecShellToolInput, FileToolError } from "@do-soul/alaya-protocol";
-import type { GitBindingValidationOptions } from "./tool-runtime-files.js";
 import {
   DEFAULT_EXEC_TIMEOUT_MS,
   EXEC_CHILD_ENV_ALLOWLIST,
@@ -23,8 +19,7 @@ import {
   readFileSystemEntry,
   resolveContainedPath,
   resolveRealWritableRoots,
-  swallowBestEffortCleanup,
-  type WorkspaceGitBindingStatus
+  swallowBestEffortCleanup
 } from "./tool-runtime-file-common.js";
 export { writeFile } from "./tool-runtime-file-write.js";
 
@@ -236,66 +231,4 @@ function createExecChildProcessEnv(): NodeJS.ProcessEnv {
   }
 
   return childEnv;
-}
-
-export async function resolveWorkspaceGitBindingStatus(
-  repoPath: string,
-  _validation: GitBindingValidationOptions | undefined
-): Promise<WorkspaceGitBindingStatus> {
-  const resolvedRepoPath = path.resolve(repoPath);
-  const gitMarkerPath = path.join(resolvedRepoPath, ".git");
-  const markerEntry = await readFileSystemEntry(gitMarkerPath);
-
-  if (!markerEntry.ok) {
-    return {
-      status: "unbound",
-      reason: "missing_git_marker"
-    };
-  }
-
-  if (markerEntry.stats.isDirectory()) {
-    return {
-      status: "bound",
-      repo_path: resolvedRepoPath
-    };
-  }
-
-  if (!markerEntry.stats.isFile()) {
-    return {
-      status: "unbound",
-      reason: "unsupported_git_marker"
-    };
-  }
-
-  const gitMarkerContent = await fsReadFile(gitMarkerPath, "utf8").catch(() => null);
-  if (gitMarkerContent === null) {
-    return {
-      status: "unbound",
-      reason: "unreadable_git_marker"
-    };
-  }
-
-  const match = /^\s*gitdir:\s*(.+)\s*$/i.exec(gitMarkerContent);
-  if (match === null) {
-    return {
-      status: "unbound",
-      reason: "invalid_git_marker"
-    };
-  }
-
-  const rawGitDir = match[1]!;
-  const resolvedGitDir = path.isAbsolute(rawGitDir)
-    ? path.resolve(rawGitDir)
-    : path.resolve(resolvedRepoPath, rawGitDir);
-  if (!isPathWithinRoot(resolvedGitDir, resolvedRepoPath)) {
-    return {
-      status: "unbound",
-      reason: "gitdir_outside_repo_root"
-    };
-  }
-
-  return {
-    status: "bound",
-    repo_path: resolvedRepoPath
-  };
 }
