@@ -302,42 +302,6 @@ it("resumes an existing emitted signal through triage and materialization", asyn
     );
   });
 
-it("does not replay materialization side effects for post-triage signal states", async () => {
-    for (const state of ["triaged", "compiled"] as const) {
-      const materialize = vi.fn(async () => {
-        throw new Error("should not rerun materialization");
-      });
-      const warn = vi.fn();
-      const service = new SignalService(signalServiceDependencies({
-        signalRepo: {
-          create: vi.fn(),
-          getById: vi.fn(async () => createSignal({ signal_state: state })),
-          listByRun: vi.fn(async () => []),
-          updateState: vi.fn()
-        },
-        postTriageMaterializer: {
-          materialize
-        },
-        warn
-      }));
-
-      const result = await service.receiveSignal(createSignal());
-
-      expect(result.signal.signal_state).toBe(state);
-      expect(result.materialization).toBeNull();
-      expect(materialize).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith(
-        "Signal replay found a post-triage signal; not replaying materialization side effects.",
-        {
-          phase: "signal_replay",
-          code: "POST_TRIAGE_REPLAY_SKIPPED",
-          detail_sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-          detail_char_count: expect.any(Number)
-        }
-      );
-    }
-  });
-
 it("rejects an idempotent replay whose candidate content changed", async () => {
     const service = new SignalService(signalServiceDependencies({
       signalRepo: {

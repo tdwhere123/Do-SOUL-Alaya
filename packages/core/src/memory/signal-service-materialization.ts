@@ -1,6 +1,9 @@
 import {
   readErrorMessage,
+  SignalEventType,
   SignalState,
+  SoulSignalMaterializedPayloadSchema,
+  SoulSignalTriagedPayloadSchema,
   type CandidateMemorySignal,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -30,6 +33,9 @@ export interface MaterializationAttempt {
   readonly materialization: SignalMaterializationResult;
   readonly caughtMaterializationError: boolean;
 }
+
+const INTERRUPTED_MATERIALIZATION_REASON = "materialization_interrupted";
+const RESUMED_MATERIALIZATION_REASON = "resumed_from_materialization_audit";
 
 export async function materializeAcceptedSignal(
   dependencies: SignalServiceDependencies,
@@ -223,4 +229,154 @@ async function completeSuccessfulMaterialization(
     triage_result: triageResult,
     materialization: attempt.materialization
   };
+}
+
+/**
+ * COMPILED means the materializer may already have started. Resume from the
+ * signal's EventLog instead of calling it again.
+ */
+export async function resumeCompiledSignal(
+  dependencies: SignalServiceDependencies,
+  warn: SignalServiceWarnPort,
+  existingSignal: CandidateMemorySignal
+): Promise<SignalServiceReceiveResult> {
+  const events = await dependencies.eventLogRepo.queryByEntity(
+    "candidate_memory_signal",
+    existingSignal.signal_id
+  );
+  if (events.some(isDeferredTriageEvent)) {
+    const deferred = await dependencies.signalRepo.updateState(
+      existingSignal.signal_id,
+      SignalState.DEFERRED
+    );
+    return {
+      signal: deferred,
+      triage_result: "deferred",
+      materialization: null
+    };
+  }
+
+  const audit = latestMaterializationAudit(events);
+  if (audit !== null && audit.success) {
+    const materialized = await dependencies.signalRepo.updateState(
+      existingSignal.signal_id,
+      SignalState.MATERIALIZED
+    );
+    return {
+      signal: materialized,
+      triage_result: "accepted",
+      materialization: materializationFromAudit(existingSignal, audit.payload, true)
+    };
+  }
+  if (audit !== null) {
+    const failed = await dependencies.signalRepo.updateState(
+      existingSignal.signal_id,
+      SignalState.FAILED
+    );
+    return {
+      signal: failed,
+      triage_result: "accepted",
+      materialization: materializationFromAudit(existingSignal, audit.payload, false)
+    };
+  }
+
+  warn(
+    "Signal replay found a post-triage signal; not replaying materialization side effects.",
+    buildSignalWarningMeta({
+      phase: "signal_replay",
+      code: "POST_TRIAGE_REPLAY_SKIPPED",
+      detail: `${existingSignal.signal_id}:${existingSignal.signal_state}`
+    })
+  );
+  const interrupted = interruptedMaterialization(existingSignal);
+  await appendMaterializationEvent(dependencies, existingSignal, interrupted);
+  return await completeFailedMaterialization(dependencies, warn, "accepted", {
+    materializingSignal: existingSignal,
+    materialization: interrupted,
+    caughtMaterializationError: true
+  });
+}
+
+export async function resumeFailedSignal(
+  dependencies: SignalServiceDependencies,
+  existingSignal: CandidateMemorySignal
+): Promise<SignalServiceReceiveResult> {
+  const events = await dependencies.eventLogRepo.queryByEntity(
+    "candidate_memory_signal",
+    existingSignal.signal_id
+  );
+  const audit = latestMaterializationAudit(events);
+  return {
+    signal: existingSignal,
+    triage_result: "accepted",
+    materialization: audit === null || audit.success
+      ? interruptedMaterialization(existingSignal)
+      : materializationFromAudit(existingSignal, audit.payload, false)
+  };
+}
+
+function interruptedMaterialization(
+  signal: CandidateMemorySignal
+): SignalMaterializationFailureResult {
+  return {
+    signal_id: signal.signal_id,
+    target_kind: "evidence_only",
+    routing_reason: INTERRUPTED_MATERIALIZATION_REASON,
+    created_objects: [],
+    success: false,
+    error: "Compiled signal has no materialization result."
+  };
+}
+
+function materializationFromAudit(
+  signal: CandidateMemorySignal,
+  payload: ReturnType<typeof SoulSignalMaterializedPayloadSchema.parse>,
+  success: boolean
+): SignalMaterializationResult {
+  const fields = {
+    signal_id: signal.signal_id,
+    target_kind: "evidence_only" as const,
+    routing_reason: success ? RESUMED_MATERIALIZATION_REASON : INTERRUPTED_MATERIALIZATION_REASON,
+    created_objects: payload.created_objects
+  };
+  if (success) {
+    return { ...fields, success: true };
+  }
+  return {
+    ...fields,
+    success: false,
+    error: payload.error ?? "Compiled signal has no materialization result."
+  };
+}
+
+function latestMaterializationAudit(events: readonly EventLogEntry[]): {
+  readonly success: boolean;
+  readonly payload: ReturnType<typeof SoulSignalMaterializedPayloadSchema.parse>;
+} | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event === undefined) continue;
+    if (
+      event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED &&
+      event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED
+    ) {
+      continue;
+    }
+    const parsed = SoulSignalMaterializedPayloadSchema.safeParse(event.payload_json);
+    if (!parsed.success) continue;
+    return {
+      success:
+        event.event_type === SignalEventType.SOUL_SIGNAL_MATERIALIZED && parsed.data.success === true,
+      payload: parsed.data
+    };
+  }
+  return null;
+}
+
+function isDeferredTriageEvent(event: EventLogEntry): boolean {
+  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
+    return false;
+  }
+  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
+  return parsed.success && parsed.data.triage_result === "deferred";
 }

@@ -11,7 +11,6 @@ import {
 import {
   assertReplayMatchesExistingSignal,
   buildSignalEmittedEventInput,
-  buildSignalWarningMeta,
   evaluateSignalTriage,
   mapExistingSignalStateToTriage,
   mapTriageResultToSignalState,
@@ -26,7 +25,11 @@ import {
   emptySourceGroundingDeferStats,
   reconcileStaleSourceGroundingClaim
 } from "./signal-service-grounding-defer.js";
-import { materializeAcceptedSignal } from "./signal-service-materialization.js";
+import {
+  materializeAcceptedSignal,
+  resumeCompiledSignal,
+  resumeFailedSignal
+} from "./signal-service-materialization.js";
 import {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
   type SourceGroundingDeferStats
@@ -225,19 +228,28 @@ export class SignalService {
       return await this.resumeWritePathDeferredSignal(existingSignal);
     }
 
+    if (existingSignal.signal_state === SignalState.COMPILED) {
+      return await resumeCompiledSignal(this.dependencies, this.warn, existingSignal);
+    }
+
+    if (existingSignal.signal_state === SignalState.FAILED) {
+      return await resumeFailedSignal(this.dependencies, existingSignal);
+    }
+
     if (
-      (existingSignal.signal_state === SignalState.TRIAGED ||
-        existingSignal.signal_state === SignalState.COMPILED) &&
+      existingSignal.signal_state === SignalState.TRIAGED &&
       this.dependencies.postTriageMaterializer !== undefined
     ) {
-      this.warn(
-        "Signal replay found a post-triage signal; not replaying materialization side effects.",
-        buildSignalWarningMeta({
-          phase: "signal_replay",
-          code: "POST_TRIAGE_REPLAY_SKIPPED",
-          detail: `${existingSignal.signal_id}:${existingSignal.signal_state}`
-        })
-      );
+      const context = await this.resolveStoredEmissionContext(existingSignal);
+      return context === null
+        ? await this.deferUnverifiableEmission(existingSignal)
+        : await materializeAcceptedSignal(
+            this.dependencies,
+            this.warn,
+            existingSignal,
+            "accepted",
+            context
+          );
     }
 
     return {
