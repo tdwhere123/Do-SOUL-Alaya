@@ -25,7 +25,7 @@ export class PromptAssetRegistry {
       return;
     }
 
-    if (this.assets.size >= this.maxAssets) {
+    if (existing === undefined && this.assets.size >= this.maxAssets) {
       throw new CoreError(
         "CONFLICT",
         `Prompt asset registry capacity exceeded (${this.maxAssets}).`
