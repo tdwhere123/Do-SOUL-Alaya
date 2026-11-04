@@ -97,6 +97,11 @@ it.skipIf(offline.isolation === null)("binds the cached native Source/query prof
   const { createHash } = await import("node:crypto");
   const { createRequire } = await import("node:module");
   const { readFile } = await import("node:fs/promises");
+  const { resolveLocalArtifactTreeSha256 } = await import("../../embedding-recall/local-onnx-artifacts.js");
+  const expectedTree = "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436";
+  // A restored/downloaded cache is untrusted until its complete tree is checked before ORT loads it.
+  expect(`sha256:${await resolveLocalArtifactTreeSha256(offline.cacheDir!, "Xenova/paraphrase-multilingual-MiniLM-L12-v2")}`)
+    .toBe(expectedTree);
   const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
   const digest = (text: string) => `sha256:${sha256(text)}`;
   const require = createRequire(import.meta.url);
@@ -112,8 +117,8 @@ it.skipIf(offline.isolation === null)("binds the cached native Source/query prof
     const expectedProfile = {
       provider_kind: "local_onnx", model_id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
       model_revision: "sha256:66fc00f5f29afcaff34092e1bdd20008ca3918265a82fb9695a551e510cc4ebc",
-      artifact_digest: "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436",
-      tokenizer_revision: "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436",
+      artifact_digest: expectedTree,
+      tokenizer_revision: expectedTree,
       dimensions: 384, preprocessing: `raw-string.special-tokens.no-truncation.v1;transformers-4.3.1.ort-${ort.version}.cpu`,
       normalization: "attention-mask-mean.l2.q8.v1", max_input_tokens: 512,
       windowing: "recorded-message-windows.v1" as const, window_bytes: 256

@@ -100,8 +100,10 @@ Release installs print the same provisioning command using the installed path.
 `pnpm-workspace.yaml` overrides `onnxruntime-web` away; the Node embedding path
 does not use it.
 
-The runtime is required in CI and default developer installs. Model artifacts
-are provisioned separately and are needed only for on-device embeddings.
+The runtime is required in CI and default developer installs; default installs
+do not download model weights. CI provisions a pinned model for one Linux native
+canary, verifies its artifact tree before loading, and runs inference offline;
+the other platform shards do not require that cache.
 
 Inspector SPA is compiled by `pnpm build` (`apps/inspector/web`) unless
 `ALAYA_BUILD_INSPECTOR_WEB=0` and `apps/inspector/web/dist/index.html`
