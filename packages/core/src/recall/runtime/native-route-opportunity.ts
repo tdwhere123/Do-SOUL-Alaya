@@ -257,8 +257,8 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
 function validateAssociation({ roots, question, link }: StatementAssociation): void {
   requireFact(roots.every(nonempty) && new Set(roots).size === roots.length, "association roots must be distinct identities");
   requireFact(question.length === roots.length && question.every(Number.isFinite) && link.length === roots.length
-    && link.every((row, i) => row.length === roots.length && row.every((value, j) => Number.isFinite(value) && value === link[j]![i])),
-  "association must be one finite question value and one symmetric link row per root");
+    && link.every((row, i) => Array.isArray(row) && row.length === i && row.every(Number.isFinite)),
+  "association must be one finite question value and one triangular link row per root");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

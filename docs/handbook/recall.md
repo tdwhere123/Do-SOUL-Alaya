@@ -279,8 +279,14 @@ vector scan. Only allowance-funded ordinary acquisition associates: its quoted a
 includes the worst case of retention and pairwise links, so association never consumes the
 scan's share. Request-funded Source library pages do not associate. An unfunded charge drops
 the association with a recorded resource refusal, never the scan or nomination. Memory
-positions and slots 1–4 are unchanged. The association is retained with the field's native
-sources, so every continuation page re-derives the same order without reacquisition.
+positions and slots 1–4 are unchanged. Symmetric links retain one value per root pair. During
+acquisition, a conservative floating-point upper bound may prove that a key-pair dot product's
+remaining dimensions cannot improve its root-pair maximum; every evaluated dimension and bound
+preparation is charged. The optimization uses spare capacity within the existing quote and falls
+back to the exact full comparison when its worst case cannot be reserved or the work spent on bounds
+has not paid for itself. Receipts report executed work, not this reservation. The association is
+retained with the field's native sources, so every continuation page re-derives the same order
+without reacquisition.
 
 ## Ordinary native field delivery
 
