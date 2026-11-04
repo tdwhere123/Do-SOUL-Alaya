@@ -1,73 +1,106 @@
 import { GardenRole, GardenTaskKind, SOURCE_STATEMENT_LIMITS, hostSessionStatementSessionId } from "@do-soul/alaya-protocol";
 import { planSourceStatementSession, type LocatedSourceStatementMessage } from "@do-soul/alaya-soul";
-import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
+import type { GardenTaskEnqueueInput, HostSessionRound } from "@do-soul/alaya-storage";
 import {
   StatementSessionSourceUnavailableError, parseStatementSessionTaskPayload, rootStatementMessages, statementSessionTaskId,
   type StatementSessionMember, type StatementSessionSourcesPort, type StatementSessionTaskPayload
 } from "./statement-session-task.js";
 
-/** A container's open tail closes after the same idle interval the host-worker fallback waits. */
 export const STATEMENT_SESSION_IDLE_MS = 15 * 60 * 1000;
+const ROUND_PAGE_SIZE = 64;
 
 export type StatementSessionClosurePort = Readonly<{
   statementSessions: StatementSessionSourcesPort;
   enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
 }>;
-type Located = LocatedSourceStatementMessage & Readonly<{ index: number }>;
+type Located = LocatedSourceStatementMessage & Readonly<{ index: number; roundIndex: number; runId: string }>;
 
-/** Enqueues every chunk of a container's statement session that a later message has closed, or the open
- * tail too when the container is idle. The plan resumes after the last queued chunk, so a closed chunk never changes.
- */
+/** Resume at the last chunk's logical round, with bounded context and paged pending rounds. */
 export function closeStatementSessionChunks(repo: StatementSessionClosurePort, input: Readonly<{
   workspaceId: string; containerKey: string; closeTail: boolean; now: () => string;
 }>): number {
+  return repo.statementSessions.transaction(() => planChunks(repo, input));
+}
+
+function planChunks(repo: StatementSessionClosurePort, input: Readonly<{
+  workspaceId: string; containerKey: string; closeTail: boolean; now: () => string;
+}>): number {
   const sources = repo.statementSessions;
-  const turns = sources.rounds(input.workspaceId, input.containerKey);
   const lastPayload = sources.lastChunkPayload(input.workspaceId, input.containerKey);
   const last = lastPayload === null ? null : parseStatementSessionTaskPayload(lastPayload);
-  const cursor = last === null ? null : last.targets.at(-1)!;
-  const at = cursor === null ? 0 : turns.findIndex(turn => turn.root_id === cursor.root_id);
-  if (at < 0) throw new TypeError("statement session cursor root left its container");
-  const messagesOf = (rootId: string | null): readonly Located[] => {
-    if (rootId === null) return [];
-    const read = sources.root(input.workspaceId, rootId);
-    // An unavailable or role-less turn is a raw-only gap: neither a target nor model-visible context.
-    if (read.status === "unavailable") return [];
-    try {
-      return rootStatementMessages(read.root).map((row, index) => ({ ...row, index }));
-    } catch (error) {
-      if (error instanceof StatementSessionSourceUnavailableError) return [];
-      throw error;
-    }
-  };
-  const cursorMessages = messagesOf(turns[at]?.root_id ?? null), split = cursor?.to ?? 0;
-  const context: Located[] = [...cursorMessages.slice(0, split)];
-  for (let turn = at - 1; turn >= 0 && context.length < SOURCE_STATEMENT_LIMITS.requestMessages; turn--) {
-    context.unshift(...messagesOf(turns[turn]!.root_id));
+  const cursor = last?.targets.at(-1) ?? null;
+  const saved = sources.planningCursor(input.workspaceId, input.containerKey);
+  const cursorRound = saved !== null ? sources.roundAt(input.workspaceId, input.containerKey, saved.round_index)
+    : cursor === null ? null : sources.roundForRoot(input.workspaceId, input.containerKey, cursor.root_id);
+  if ((saved !== null || cursor !== null) && cursorRound === null) {
+    throw new TypeError("statement session cursor root left its container");
   }
-  const recent = context.slice(-SOURCE_STATEMENT_LIMITS.requestMessages);
-  const pending = [...cursorMessages.slice(split), ...turns.slice(at + 1).flatMap(turn => messagesOf(turn.root_id))];
-  const located = [...recent, ...pending];
-  const plan = planSourceStatementSession(hostSessionStatementSessionId(input.containerKey), located.map(row => row.message),
-    { message_index: recent.length, chunk_index: last === null ? 0 : last.chunk_index + 1 });
-  const byId = new Map(located.map(row => [row.message.message_id, row]));
-  const runOfRoot = new Map(turns.map(turn => [turn.root_id, turn.run_id]));
+  const split = saved?.occurrence_end ?? cursor?.to ?? 0;
+  const read = (turn: HostSessionRound): readonly Located[] => {
+    const result = sources.root(input.workspaceId, turn.root_id);
+    if (result.status === "unavailable") return [];
+    try { return rootStatementMessages(result.root).map((row, index) => ({ ...row, index, roundIndex: turn.round_index, runId: turn.run_id })); }
+    catch (error) { if (error instanceof StatementSessionSourceUnavailableError) return []; throw error; }
+  };
+  const cursorMessages = cursorRound === null ? [] : read(cursorRound);
+  let recent = cursorMessages.slice(0, split);
+  let before = cursorRound?.round_index ?? -1;
+  while (cursorRound !== null && recent.length < SOURCE_STATEMENT_LIMITS.requestMessages) {
+    const page = sources.contextPage(input.workspaceId, input.containerKey, before, ROUND_PAGE_SIZE);
+    if (page.length === 0) break;
+    for (const turn of page) {
+      recent.unshift(...read(turn));
+      if (recent.length >= SOURCE_STATEMENT_LIMITS.requestMessages) break;
+    }
+    before = page.at(-1)!.round_index;
+    if (page.length < ROUND_PAGE_SIZE) break;
+  }
+  recent = recent.slice(-SOURCE_STATEMENT_LIMITS.requestMessages);
+  let pending = cursorMessages.slice(split);
+  let after = cursorRound?.round_index ?? -1;
+  let chunkIndex = last === null ? 0 : last.chunk_index + 1;
   let enqueued = 0;
-  plan.forEach((chunk, position) => {
-    const closed = input.closeTail || position < plan.length - 1;
-    if (!closed || !("request" in chunk)) return;
-    const targets = members(chunk.request.messages.map(message => byId.get(message.message_id)!));
-    const payload: StatementSessionTaskPayload = { task_kind: GardenTaskKind.SOURCE_STATEMENT_SESSION,
-      workspace_id: input.workspaceId, container_key: input.containerKey,
-      // Signals are attributed to the run that captured the chunk's first target.
-      run_id: runOfRoot.get(targets[0]!.root_id)!, session_id: chunk.request.session_id,
-      chunk_index: chunk.request.chunk_index,
-      context: members(chunk.request.context.map(message => byId.get(message.message_id)!)), targets,
-      closes_tail: input.closeTail && !plan.slice(position + 1).some(next => "request" in next) };
-    repo.enqueue({ id: statementSessionTaskId(payload), workspace_id: input.workspaceId, role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.SOURCE_STATEMENT_SESSION, payload, created_at: input.now() });
-    enqueued++;
-  });
+  let page = sources.roundPage(input.workspaceId, input.containerKey, after, ROUND_PAGE_SIZE);
+  do {
+    if (page.length > 0) {
+      pending.push(...page.flatMap(read));
+      after = page.at(-1)!.round_index;
+    }
+    const next = page.length === ROUND_PAGE_SIZE
+      ? sources.roundPage(input.workspaceId, input.containerKey, after, ROUND_PAGE_SIZE) : [];
+    const located = [...recent, ...pending];
+    const plan = planSourceStatementSession(hostSessionStatementSessionId(input.containerKey), located.map(row => row.message),
+      { message_index: recent.length, chunk_index: chunkIndex });
+    const byId = new Map(located.map(row => [row.message.message_id, row]));
+    let consumed = 0;
+    for (let position = 0; position < plan.length; position++) {
+      const chunk = plan[position]!;
+      if (!("request" in chunk)) { consumed++; continue; }
+      const closed = (input.closeTail && next.length === 0) || position < plan.length - 1;
+      if (!closed) break;
+      const targets = members(chunk.request.messages.map(message => byId.get(message.message_id)!));
+      const payload: StatementSessionTaskPayload = { task_kind: GardenTaskKind.SOURCE_STATEMENT_SESSION,
+        workspace_id: input.workspaceId, container_key: input.containerKey,
+        run_id: byId.get(chunk.request.messages[0]!.message_id)!.runId, session_id: chunk.request.session_id,
+        chunk_index: chunk.request.chunk_index,
+        context: members(chunk.request.context.map(message => byId.get(message.message_id)!)), targets,
+        closes_tail: input.closeTail && next.length === 0 && !plan.slice(position + 1).some(item => "request" in item) };
+      repo.enqueue({ id: statementSessionTaskId(payload), workspace_id: input.workspaceId, role: GardenRole.LIBRARIAN,
+        kind: GardenTaskKind.SOURCE_STATEMENT_SESSION, payload, created_at: input.now() });
+      consumed += chunk.request.messages.length;
+      chunkIndex++;
+      enqueued++;
+    }
+    const consumedLast = consumed === 0 ? undefined : located[recent.length + consumed - 1];
+    recent = located.slice(0, recent.length + consumed).slice(-SOURCE_STATEMENT_LIMITS.requestMessages);
+    pending = pending.slice(consumed);
+    if (pending.length === 0 && page.length > 0) {
+      sources.savePlanningCursor(input.workspaceId, input.containerKey, page.at(-1)!.round_index, Number.MAX_SAFE_INTEGER);
+    } else if (consumedLast !== undefined) {
+      sources.savePlanningCursor(input.workspaceId, input.containerKey, consumedLast.roundIndex, consumedLast.index + 1);
+    }
+    page = next;
+  } while (page.length > 0);
   return enqueued;
 }
 

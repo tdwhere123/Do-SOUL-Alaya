@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AlayaError, HostSessionCaptureRequestSchema, hostSessionContainerKey, hostSessionRoundSource, pairHostSessionRounds,
+  hashContentDigest, hashSourceRecordId, canonicalJson,
   type HostScopedReference, type HostSessionCaptureResponse, type HostSessionMessage, type SourceAdmissionContext,
   type SourceAdmissionPort, type SourceAdmissionRequest, type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
@@ -8,7 +9,7 @@ import {
   appendSourceRecordAdmitted, createSourceAdmissionPort, deriveAddressableSpanViews, fieldContractSha256,
   retainedSourceSpeaker, type FieldFormationStores
 } from "@do-soul/alaya-core";
-import type { HostSessionLedger, HostSessionLedgerMessage, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import type { HostSessionLedger, HostSessionLedgerMessage, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import {
   STATEMENT_SESSION_IDLE_MS, closeStatementSessionChunks, type StatementSessionClosurePort
 } from "../statement-session/statement-session-closure.js";
@@ -44,7 +45,7 @@ export type HostSessionCapture = Readonly<{
 /** Daemon composition: receipt-first admission over the field stores, the garden ledger and closure. */
 export function createDaemonHostSessionCapture(input: Readonly<{
   stores: FieldFormationStores;
-  eventLogRepo: Parameters<typeof appendSourceRecordAdmitted>[0];
+  eventLogRepo: SqliteEventLogRepo;
   runtimeNotifier: Parameters<typeof appendSourceRecordAdmitted>[2];
   gardenTaskRepo: SqliteGardenTaskRepo;
   now: () => string;
@@ -52,25 +53,48 @@ export function createDaemonHostSessionCapture(input: Readonly<{
 }>): HostSessionCapture {
   return createHostSessionCapture({
     admission: createSourceAdmissionPort({ sha256: fieldContractSha256, stores: input.stores,
-      audit: record => appendSourceRecordAdmitted(input.eventLogRepo, record, input.runtimeNotifier) }),
+      audit: createHostSessionSourceAudit(input.eventLogRepo, input.runtimeNotifier) }),
     ledger: input.gardenTaskRepo.hostSessions, statementSessions: input.gardenTaskRepo, now: input.now, warn: input.warn
   });
 }
 
-const SWEEP_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Ensure replay after an uncertain append or competing capture cannot append the same audit twice. */
+export function createHostSessionSourceAudit(eventLogRepo: SqliteEventLogRepo,
+  notifier: Parameters<typeof appendSourceRecordAdmitted>[2]): NonNullable<SourceAdmissionPort["audit"]> {
+  return (record, options) => appendSourceRecordAdmitted({ append: event => eventLogRepo.transactional(() => {
+    const existing = eventLogRepo.queryByEntityInCurrentTransaction(event.entity_type, event.entity_id)
+      .find(row => row.workspace_id === event.workspace_id && row.event_type === event.event_type);
+    if (existing !== undefined) {
+      if (canonicalJson(existing.payload_json) !== canonicalJson(event.payload_json)) {
+        throw new AlayaError("CONFLICT", "host session source audit differs from its retained receipt");
+      }
+      return existing;
+    }
+    const appended = eventLogRepo.append(event);
+    if (appended instanceof Promise) throw new AlayaError("UNAVAILABLE", "transactional source audit must be synchronous");
+    return appended;
+  }) }, record, { notifyEntry: entry => {
+    if (options?.notify === false || eventLogRepo.getStorageConnectionIdentity().connection.prepare(`SELECT 1
+      FROM projection_erase_barriers WHERE workspace_id = ? AND subject_kind = 'source_record' AND subject_id = ?`)
+      .get(record.workspace_id, record.identity) !== undefined) return;
+    return notifier.notifyEntry(entry);
+  } });
+}
+
 const SWEEP_CONTAINERS_PER_PASS = 32;
+const SWEEP_RETRY_MS = 1000;
 
 export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSessionCapture {
-  if (ports.admission.audit === undefined || ports.admission.findRetained === undefined) {
+  if (ports.admission.audit === undefined || ports.admission.findRetained === undefined || ports.admission.findReceipt === undefined) {
     throw new AlayaError("UNAVAILABLE", "host session capture requires receipt-first audited admission with replay recovery");
   }
   return {
     async capture(input) {
       const request = HostSessionCaptureRequestSchema.parse(input.request);
       const key = hostSessionContainerKey(request.container, fieldContractSha256);
-      const counts = admitMessages(ports, { ...input, key, container: request.container, messages: request.messages });
       const closesTail = request.closes_tail === true;
-      const rounds = await formRounds(ports, { workspaceId: input.workspaceId, key, closesTail, issuer: input.issuer });
+      const counts = admitMessages(ports, { ...input, key, container: request.container, messages: request.messages, closesTail });
+      const rounds = await formRounds(ports, { workspaceId: input.workspaceId, key, issuer: input.issuer });
       closeStatementChunks(ports, input.workspaceId, key, closesTail);
       return { container_key: key, admitted_message_count: counts.admitted, replayed_message_count: counts.replayed,
         pending_message_count: ports.ledger.openTail(input.workspaceId, key).length, admitted_round_count: rounds };
@@ -78,23 +102,24 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
     async sweepIdle(issuer) {
       const nowMs = Date.parse(ports.now());
       const idle = ports.ledger.idleContainers(new Date(nowMs - STATEMENT_SESSION_IDLE_MS).toISOString(),
-        new Date(nowMs - SWEEP_WINDOW_MS).toISOString(), SWEEP_CONTAINERS_PER_PASS);
+        ports.now(), issuer.producer, SWEEP_CONTAINERS_PER_PASS);
       for (const container of idle) {
         try {
-          const tail = ports.ledger.openTail(container.workspace_id, container.container_key);
           // Another producer's pending round needs that producer's own issuer capability.
-          if (tail.every(message => message.producer === issuer.producer)) {
-            await formRounds(ports, { workspaceId: container.workspace_id, key: container.container_key, closesTail: true, issuer });
+          if (ports.ledger.producer(container.workspace_id, container.container_key) === issuer.producer) {
+            ports.ledger.transaction(() => reserveRounds(ports, container.workspace_id, container.container_key, true));
+            await formRounds(ports, { workspaceId: container.workspace_id, key: container.container_key, issuer });
           }
           closeStatementSessionChunks(ports.statementSessions, { workspaceId: container.workspace_id,
             containerKey: container.container_key, closeTail: true, now: ports.now });
+          ports.ledger.markSwept(container.workspace_id, container.container_key, issuer.producer, container.newest_message);
         } catch (error) {
-          // One container's failure must not stop other idle containers from closing.
+          // A failed container keeps its obligation but yields the pass to other containers.
+          ports.ledger.retrySweep(container.workspace_id, container.container_key, issuer.producer,
+            new Date(nowMs + SWEEP_RETRY_MS).toISOString());
           ports.warn("host session tail closure failed", { workspace_id: container.workspace_id,
             container_key: container.container_key, error: error instanceof Error ? error.message : String(error) });
         }
-        // A tail with nothing to close stops qualifying until a newer message arrives.
-        ports.ledger.markSwept(container.workspace_id, container.container_key, container.newest_message);
       }
     }
   };
@@ -103,7 +128,7 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
 /** Validates the whole request against the ledger, then records new messages; any conflict admits nothing. */
 function admitMessages(ports: HostSessionCapturePorts, input: Readonly<{
   workspaceId: string; runId: string; key: string; container: HostScopedReference;
-  messages: readonly HostSessionMessage[]; issuer: HostSessionIssuer;
+  messages: readonly HostSessionMessage[]; issuer: HostSessionIssuer; closesTail: boolean;
 }>): Readonly<{ admitted: number; replayed: number }> {
   const admittedAt = ports.now();
   return ports.ledger.transaction(() => {
@@ -138,31 +163,55 @@ function admitMessages(ports: HostSessionCapturePorts, input: Readonly<{
       highest = message.position;
       admitted += 1;
     }
+    reserveRounds(ports, input.workspaceId, input.key, input.closesTail);
     return { admitted, replayed };
   });
 }
 
-/** Admits every closed round of the open tail in order, then binds its messages to the admitted root. */
-async function formRounds(ports: HostSessionCapturePorts, input: Readonly<{
-  workspaceId: string; key: string; closesTail: boolean; issuer: HostSessionIssuer;
-}>): Promise<number> {
-  const tail = ports.ledger.openTail(input.workspaceId, input.key);
-  const { rounds } = pairHostSessionRounds(tail, input.closesTail);
-  let roundIndex = ports.ledger.nextRoundIndex(input.workspaceId, input.key);
+/** Reserve identities and exact members under the same write lock as message admission. */
+function reserveRounds(ports: HostSessionCapturePorts, workspaceId: string, key: string, closesTail: boolean): void {
+  const tail = ports.ledger.openTail(workspaceId, key);
+  const { rounds } = pairHostSessionRounds(tail, closesTail);
+  let roundIndex = ports.ledger.nextRoundIndex(workspaceId, key);
   for (const indices of rounds) {
     const members = indices.map(index => tail[index]!);
-    const record = await admitRoundRoot(ports, input.workspaceId, roundIndex, members, input.issuer);
-    ports.ledger.bindRound(input.workspaceId, input.key, members.map(member => member.message_id), roundIndex, record.identity);
-    roundIndex += 1;
+    const first = members[0]!;
+    const source = hostSessionRoundSource({ scope: first.container_scope, id: first.container_id }, key, roundIndex,
+      members.map(ledgerMessage));
+    const rootId = sourceRootId(source);
+    ports.ledger.reserveRound(workspaceId, key, roundIndex, rootId, members.map(member => member.message_id));
+    roundIndex++;
   }
-  return rounds.length;
 }
 
-async function admitRoundRoot(ports: HostSessionCapturePorts, workspaceId: string, roundIndex: number,
+/** Resume only previously reserved membership, including after restart or a competing capture. */
+async function formRounds(ports: HostSessionCapturePorts, input: Readonly<{
+  workspaceId: string; key: string; issuer: HostSessionIssuer;
+}>): Promise<number> {
+  let completed = 0;
+  for (const intent of ports.ledger.pendingRounds(input.workspaceId, input.key)) {
+    if (intent.members.length === 0 || intent.members.some(member => member.producer !== input.issuer.producer)) {
+      throw new AlayaError("CONFLICT", "host session round intent has invalid members or producer");
+    }
+    if (intent.state === "erased_pending") {
+      const record = ports.admission.findReceipt!(input.workspaceId, intent.root_id, { workspaceId: input.workspaceId });
+      if (record === null) throw new AlayaError("CONFLICT", "erased host session audit receipt is unavailable");
+      await ports.admission.audit!(record, { notify: false });
+    } else {
+      const record = await admitRoundRoot(ports, input.workspaceId, intent.round_index, intent.root_id, intent.members, input.issuer);
+      if (record.identity !== intent.root_id) throw new AlayaError("CONFLICT", "host session round identity changed");
+    }
+    if (ports.ledger.completeRound(input.workspaceId, input.key, intent.round_index, intent.root_id) === "done") completed++;
+  }
+  return completed;
+}
+
+async function admitRoundRoot(ports: HostSessionCapturePorts, workspaceId: string, roundIndex: number, rootId: string,
   members: readonly HostSessionLedgerMessage[], issuer: HostSessionIssuer): Promise<SourceRecordIdentity> {
   const first = members[0]!;
   const source = hostSessionRoundSource({ scope: first.container_scope, id: first.container_id }, first.container_key, roundIndex,
     members.map(ledgerMessage));
+  if (sourceRootId(source) !== rootId) throw new AlayaError("CONFLICT", "host session round intent differs from its members");
   const speaker = retainedSourceSpeaker(members.map(member => member.role));
   const request: SourceAdmissionRequest = {
     workspace_id: workspaceId, source_id: source.source_id, source_version: source.source_version,
@@ -171,7 +220,7 @@ async function admitRoundRoot(ports: HostSessionCapturePorts, workspaceId: strin
     spans: deriveAddressableSpanViews(source.content), host_occurrences: source.occurrences
   };
   const context = { workspaceId, hostCapture: issuer.binding };
-  // Recovery after a crash between admission and binding replays the exact retained receipt.
+  // The durable intent fixes members before admission; recover the exact retained receipt.
   const retained = ports.admission.findRetained!(request, context);
   const record = ports.admission.admit(retained === null ? request
     : { ...request, recorded_at: retained.recorded_at, attribution_context: retained.attribution_context ?? null }, context).record;
@@ -200,6 +249,11 @@ function sameMessage(row: HostSessionLedgerMessage, message: HostSessionMessage,
   return row.position === message.position && row.role === message.role && row.completeness === message.completeness &&
     row.fidelity === message.fidelity && row.host_reported_at === (message.host_reported_at ?? null) &&
     row.content_digest === digest;
+}
+
+function sourceRootId(source: ReturnType<typeof hostSessionRoundSource>): string {
+  return hashSourceRecordId({ source_id: source.source_id, source_version: source.source_version,
+    content_digest: hashContentDigest(source.content, fieldContractSha256) }, fieldContractSha256);
 }
 
 function contentDigest(content: string): string {

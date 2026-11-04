@@ -22,16 +22,56 @@ export class GardenStatementSessionSources {
     this.ledger = new HostSessionLedger(connection);
   }
 
-  /** Round roots in host position order; arrival order never reorders a container. */
-  public rounds(workspaceId: string, containerKey: string): readonly HostSessionRound[] {
-    return this.ledger.rounds(workspaceId, containerKey);
+  /** Round roots in logical order, limited to one page. */
+  public roundPage(workspaceId: string, containerKey: string, after: number, limit: number): readonly HostSessionRound[] {
+    return this.ledger.roundPage(workspaceId, containerKey, after, limit);
   }
+
+  public roundForRoot(workspaceId: string, containerKey: string, rootId: string): HostSessionRound | null {
+    return this.ledger.roundForRoot(workspaceId, containerKey, rootId);
+  }
+
+  public roundAt(workspaceId: string, containerKey: string, index: number): HostSessionRound | null {
+    const round = this.ledger.roundPage(workspaceId, containerKey, index - 1, 1)[0];
+    return round?.round_index === index ? round : null;
+  }
+
+  /** Skip known raw-only gaps in SQL while finding the bounded model-visible suffix. */
+  public contextPage(workspaceId: string, containerKey: string, before: number, limit: number): readonly HostSessionRound[] {
+    return this.connection.prepare(`SELECT r.round_index, r.root_id,
+      (SELECT run_id FROM host_session_messages m WHERE m.workspace_id = r.workspace_id
+        AND m.container_key = r.container_key AND m.round_index = r.round_index ORDER BY m.position LIMIT 1) AS run_id
+      FROM host_session_rounds r JOIN source_records s ON s.workspace_id = r.workspace_id AND s.record_id = r.root_id
+      JOIN source_host_inventories i ON i.workspace_id = r.workspace_id AND i.record_id = r.root_id
+      WHERE r.workspace_id = ? AND r.container_key = ? AND r.round_index < ? AND r.state = 'done'
+        AND s.source_body IS NOT NULL AND json_valid(i.canonical_inventory)
+        AND NOT EXISTS (SELECT 1 FROM projection_erase_barriers b WHERE b.workspace_id = r.workspace_id
+          AND b.subject_kind = 'source_record' AND b.subject_id = r.root_id)
+        AND NOT EXISTS (SELECT 1 FROM json_each(i.canonical_inventory, '$.occurrences') o
+          WHERE COALESCE(json_type(o.value, '$.role'), '') != 'text')
+      ORDER BY r.round_index DESC LIMIT ?`).all(workspaceId, containerKey, before, limit) as HostSessionRound[];
+  }
+
+  public planningCursor(workspaceId: string, containerKey: string): Readonly<{ round_index: number; occurrence_end: number }> | null {
+    return (this.connection.prepare(`SELECT round_index, occurrence_end FROM host_session_planning
+      WHERE workspace_id = ? AND container_key = ?`).get(workspaceId, containerKey) as
+      { round_index: number; occurrence_end: number } | undefined) ?? null;
+  }
+
+  public savePlanningCursor(workspaceId: string, containerKey: string, index: number, end: number): void {
+    this.connection.prepare(`INSERT INTO host_session_planning VALUES (?, ?, ?, ?)
+      ON CONFLICT (workspace_id, container_key) DO UPDATE SET round_index = excluded.round_index,
+        occurrence_end = excluded.occurrence_end`).run(workspaceId, containerKey, index, end);
+  }
+
+  public transaction<T>(work: () => T): T { return this.ledger.transaction(work); }
 
   /** Payload of the container's highest planned chunk, or null before the first chunk closes. */
   public lastChunkPayload(workspaceId: string, containerKey: string): unknown {
     const row = this.connection.prepare(`SELECT payload_json FROM garden_tasks
       WHERE kind = 'source_statement_session' AND workspace_id = ? AND ${CONTAINER_KEY} = ?
-      ORDER BY CAST(json_extract(payload_json, '$.chunk_index') AS INTEGER) DESC, id DESC LIMIT 1`)
+      ORDER BY (CASE WHEN json_valid(payload_json) THEN CAST(json_extract(payload_json, '$.chunk_index') AS INTEGER) END) DESC,
+        id DESC LIMIT 1`)
       .get(workspaceId, containerKey) as { payload_json: string } | undefined;
     return row === undefined ? null : JSON.parse(row.payload_json) as unknown;
   }

@@ -65,9 +65,11 @@ export interface SourceAdmissionPort {
   /** Exact receipt lookup for producer recovery, not permission to enrich or bypass admission. */
   findRetained?(input: Pick<SourceAdmissionRequest, "workspace_id" | "source_id" | "source_version" |
     "content_bytes" | "source_representation">, context: SourceAdmissionContext): SourceRecordIdentity | null;
+  /** Metadata-only receipt lookup for recovery of an already erased source; never restores its body. */
+  findReceipt?(workspaceId: string, recordId: string, context: SourceAdmissionContext): SourceRecordIdentity | null;
   hostCaptureResourceLimited?(record: SourceRecordIdentity, context: SourceAdmissionContext): boolean;
-  /** Receipt-first orchestration must await this before publishing/enqueuing captured sources. */
-  audit?(record: SourceRecordIdentity): Promise<void>;
+  /** Await before publication. `notify: false` records audit only and must not announce an erased source. */
+  audit?(record: SourceRecordIdentity, options?: Readonly<{ notify: boolean }>): Promise<void>;
 }
 
 export interface FactorIncidencePort {

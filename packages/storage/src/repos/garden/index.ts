@@ -41,7 +41,6 @@ export {
 } from "./garden-statement-session-sources.js";
 export {
   HostSessionLedger,
-  type HostSessionIdleContainer,
   type HostSessionLedgerMessage,
   type HostSessionRound
 } from "./host-session-ledger.js";

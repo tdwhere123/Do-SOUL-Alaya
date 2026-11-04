@@ -6,7 +6,7 @@ import {
   type RuntimeGardenComputeConfig, type SourceStatement, type SourceStatementRequest
 } from "@do-soul/alaya-protocol";
 import {
-  DynamicsService, EventPublisher, EvidenceService, MemoryService, SignalService, appendSourceRecordAdmitted,
+  DynamicsService, EventPublisher, EvidenceService, MemoryService, SignalService,
   createSignalEmissionWriter, createSourceAdmissionPort, fieldContractSha256
 } from "@do-soul/alaya-core";
 import { InMemoryHandoffGapHandler, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
@@ -17,7 +17,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { createStatementSessionTaskProcessor } from "../../garden/host-worker/statement-session-task-processor.js";
 import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
-import { createHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
+import { createHostSessionCapture, createHostSessionSourceAudit, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
 import { createHostSessionCaptureHandler } from "../../mcp-memory/tool/host-session-handler.js";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import { createMaterializationRouter } from "../../runtime/recall-materialization/recall-materialization-router.js";
@@ -62,7 +62,7 @@ export async function createStatementSessionEnvironment() {
     runtimeNotifier: notifier, now, dynamicsService: new DynamicsService({ memoryRepo,
       karmaEventRepo: new SqliteKarmaEventRepo(database), eventLogRepo, runtimeNotifier: notifier }) });
   const sourceAdmission = createSourceAdmissionPort({ stores: field.stores, sha256: fieldContractSha256,
-    audit: record => appendSourceRecordAdmitted(eventLogRepo, record, notifier) });
+    audit: createHostSessionSourceAudit(eventLogRepo, notifier) });
   const router = createMaterializationRouter({
     wiring: { evidenceService, memoryService, fieldComposition: field, eventLogRepo, runtimeNotifier: notifier,
       synthesisService: { create: async () => { throw new Error("unexpected synthesis route"); } },
@@ -101,8 +101,9 @@ export async function createStatementSessionEnvironment() {
       { workspaceId: WORKSPACE, runId, agentTarget: "codex", sessionId: "session-1" }),
     sweep: async () => await hostSessionCapture.sweepIdle(MCP_HOST_SESSION_ISSUER),
     /** Round roots of a container in round order. */
-    roots: (containerKey = CONTAINER_KEY) => gardenTaskRepo.statementSessions.rounds(WORKSPACE, containerKey)
-      .map(round => round.root_id),
+    roots: (containerKey = CONTAINER_KEY) => (database.connection.prepare(`SELECT root_id FROM host_session_rounds
+      WHERE workspace_id = ? AND container_key = ? AND state IN ('done', 'erased') ORDER BY round_index`)
+      .all(WORKSPACE, containerKey) as { root_id: string }[]).map(round => round.root_id),
     /** A recorded model: each target message yields the statements `respond` returns for its text. */
     provider: (respond: (text: string) => readonly SourceStatement[]) => new OfficialApiGardenProvider({
       apiKey: "sk-test", now, extractor: { extract: async ({ userPrompt }) => {

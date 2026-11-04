@@ -225,7 +225,9 @@ export async function createRoutingHarness(options: {
           ...(captureOptions.closesTail === undefined ? {} : { closes_tail: captureOptions.closesTail }) } });
     },
     roundRoots() {
-      return base.gardenTaskRepo.statementSessions.rounds("workspace-1", hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256))
+      return (base.database.connection.prepare(`SELECT root_id FROM host_session_rounds WHERE workspace_id = ? AND container_key = ?
+        AND state IN ('done', 'erased') ORDER BY round_index`)
+        .all("workspace-1", hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256)) as { root_id: string }[])
         .map(round => round.root_id);
     },
     async runScheduler() {

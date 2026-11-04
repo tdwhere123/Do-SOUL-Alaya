@@ -222,15 +222,20 @@ daemon's host-session capture owner, idempotently by workspace, container and ho
 message id, with position, role, completeness, honest fidelity and optional
 host-reported time. A request conflicts as a whole (changed body, occupied or
 earlier position, another producer's container) and then admits nothing. The
-owner pairs a user message with the next consecutive reply into a round and admits
-each closed round receipt-first as one root; at most one trailing message per
-container waits until the host closes the tail or the idle sweep does. The issuer
-comes from composition, never request JSON. Statement generation runs as
-`SOURCE_STATEMENT_SESSION` chunks over a container's ordered rounds, enqueued when a
-later message closes a chunk or the container is idle for the host-worker fallback
-interval; a chunk payload names its container, member roots and occurrence ranges
-only. Source publication binds
-current source, scope and audit before notifying; a failed later optional
+owner pairs a user message with the next consecutive reply into a round and persists
+its immutable member and source identity before admitting the root receipt-first.
+The retained intent carries unfinished audit and binding work across retries; an
+authorized source erase also clears attributable pending message bodies while
+retaining their idempotency identities and any committed receipt's unfinished audit.
+Recovery of an erased receipt appends its audit without publishing it as an available source. At most one trailing message per container
+waits until the host closes the tail or the idle sweep does. Failed idle work remains
+eligible for retry, and the issuer comes from composition, never request JSON.
+Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a container's
+ordered rounds, enqueued when a later message closes a chunk or the container is idle
+for the host-worker fallback interval; a chunk payload names its container, member
+roots and occurrence ranges only. Incremental planning commits its logical cursor
+with the queued chunks and reads prior context and pending rounds in bounded pages.
+Source publication binds current source, scope and audit before notifying; a failed later optional
 memory formation does not delete the source capsule (invariant §20a).
 Producer text, extraction cache and normalization never certify source or
 model fidelity. Exact source and request identities, complete source corpus,
