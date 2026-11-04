@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import { SqliteSourceIndexRepository } from "../../../../storage/src/repos/source-index/source-index-repo.js";
-import { BUDGET, WORKSPACE, captureDocuments, configuration, fieldSha256, fixture, publishSource } from
+import { WORKSPACE, captureDocuments, configuration, fieldSha256, fixture, publishSource } from
   "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { digest } from "./source-index-acquisition-fixture.js";
 
