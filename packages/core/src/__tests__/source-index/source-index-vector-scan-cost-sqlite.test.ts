@@ -50,5 +50,15 @@ it("sizes shared metadata once while preserving exact scores, scope decisions, a
     expect(result.resources.memory_bytes).toBeLessThanOrEqual(input.budget.memory_bytes);
     // SQL evaluates the target's UTF-8 length once per root instead of once per window.
     expect(targetLengths).toBe(3);
+    targetLengths = 0;
+    const formerPage = database.connection.prepare(`SELECT v.window_id,octet_length(r.target_json) AS target_bytes
+      FROM source_index_vectors v JOIN source_index_windows w ON w.workspace_id=v.workspace_id
+        AND w.generation_id=v.generation_id AND w.root_key=v.root_key AND w.window_id=v.window_id
+      JOIN source_index_targets t ON t.workspace_id=v.workspace_id AND t.generation_id=v.generation_id AND t.root_key=v.root_key
+      JOIN source_index_roots r ON r.workspace_id=v.workspace_id AND r.root_key=v.root_key
+      WHERE v.workspace_id=? AND v.generation_id=? AND v.window_id>? ORDER BY v.window_id ASC LIMIT ?`)
+      .all(WORKSPACE, generation.generation_id, "", 1024);
+    expect(formerPage).toHaveLength(768);
+    expect(targetLengths).toBe(768);
   } finally { database.close({ optimize: false }); }
 }, 60_000);
