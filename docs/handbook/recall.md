@@ -491,7 +491,12 @@ visits that has no explicit selection, whether or not an embedding binding exist
 explicit selection (for example a raw rollback) is prepared as selected. Lexical takes at
 most half of each pass's remaining work and native bytes, and half of discrete roots and
 capture pages rounded up. When only one discrete slot remains, ready vector and lexical
-work alternate priority on each workspace-ring traversal. Until the first generation of the selected representation publishes, the reader
+work alternate priority on each workspace-ring traversal. The first lexical visit normally precedes
+waiting for model binding, and explicit lexical preparation has its own occupancy. A locally timed-out
+binding or inference still fences new model work until it settles, while later bounded lexical passes
+can proceed. Automatic lexical and vector work debit the same pass allowance; explicit passes retain
+their own limits. SQLite transactions and selection/epoch guards still fence every write. Until the
+first generation of the selected representation publishes, the reader
 serves the raw `source_index_fts` exactly as for an absent selector, so preparation never
 causes a lexical outage. The raw reader remains the named consumer of historical
 exact-text rows. Explicit `raw-unicode61.v1`, `segmented-unicode61.v1` and
