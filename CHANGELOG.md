@@ -31,7 +31,20 @@ optional materialization audit disposition/route fields, and optional
 (invariant §25 minor). Interrupted COMPILED effects are audited as unknown only
 under the daemon's pre-activation OS runtime lease. They require inspection;
 neither historical success-shaped audits nor missing audits authorize replay.
-New materialization outcomes commit audit and state together. No data migration.
+New materialization outcomes commit audit and state together. No signal data migration.
+
+Storage migration 040 freezes host-round membership before source admission and
+retains logical sweep/planning progress and attributable erase obligations.
+Migration 039 is unchanged. Keep a pre-040 database backup: an older binary must
+use that backup rather than dropping the new tables or editing schema versions.
+Legacy receipt reassociation requires retained occurrence identity; already-lost
+inventory is not reconstructed from text similarity or cross-workspace guesses.
+
+Source indexing keeps lexical preparation available during model occupancy and
+reclaims obsolete vector payloads in bounded pages. Exact vector scans share
+metadata and cosine work; statement association uses packed symmetric links and
+metered exact pruning with fallback. Ranking rules, candidate caps and budget
+limits are unchanged. Linux CI now requires verified offline ONNX inference.
 
 Protocol 34.0.0 changes ordinary native delivery (`ordinary-native-field.v9`, invariant §25
 major). Question-time preference now prefers roots whose recorded date lies from the
