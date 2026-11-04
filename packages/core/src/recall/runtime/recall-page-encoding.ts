@@ -1,5 +1,6 @@
 import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulMemorySearchResponseSchema, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
   type InformationIndex, type MemorySearchResult, type RecallCandidate, type StagedWarningArray } from "@do-soul/alaya-protocol";
+import { RECALL_CONSUMER_PROTOCOL_VERSION } from "./recall-consumer-compatibility.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
 import { completeSourceDeliveryEnd, sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
 import { displayRecallPreview, projectPayloadCompleteness } from "./recall-result-encoding.js";
@@ -11,7 +12,7 @@ export function encodeRecallPageResponse(input: Readonly<{
   active_constraints_count: number | null; active_constraints_completeness?: "complete" | "incomplete";
   degradation_reason: import("@do-soul/alaya-protocol").SoulMemorySearchDegradationReason | null;
 }>) {
-  return SoulMemorySearchResponseSchema.parse({ ...input, protocol_version: 1, total_count: input.results.length,
+  return SoulMemorySearchResponseSchema.parse({ ...input, protocol_version: RECALL_CONSUMER_PROTOCOL_VERSION, total_count: input.results.length,
     ...(input.index.order_status === undefined ? {} : { order_status: input.index.order_status }),
     ...(input.index.page_purpose === undefined ? {} : { page_purpose: input.index.page_purpose }),
     ...(input.index.product_updates === undefined ? {} : { product_updates: input.index.product_updates }) });

@@ -61,7 +61,33 @@ export const SoulResolveRequestSchema = z
     defer_until: IsoDatetimeStringSchema.optional()
   })
   .strict()
-  .readonly();
+  .readonly()
+  .superRefine((value, context) => {
+    // invariant §25 patch: runtime parser matches ResolutionService.applyCorrect /
+    // applyDefer. Published MCP JSON Schema cannot represent this superRefine;
+    // the Zod parse is authoritative. Existing invalid requests were already
+    // rejected at the service, so this is not a new acceptance rule.
+    if (
+      value.resolution === SoulResolutionKind.CORRECT &&
+      (value.correction === undefined || value.correction.trim().length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["correction"],
+        message: "resolution=correct requires a non-empty correction"
+      });
+    }
+    if (
+      value.resolution === SoulResolutionKind.DEFER &&
+      (value.defer_until === undefined || value.defer_until.trim().length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["defer_until"],
+        message: "resolution=defer requires a defer_until ISO datetime"
+      });
+    }
+  });
 
 // invariant: maps the agent-facing StagedWarningResolutionOption
 // (recall sidecar surface) to the soul.resolve verb's SoulResolutionKind.

@@ -1,4 +1,5 @@
 import {
+  ACTIVE_CONSTRAINT_CLAIM_STATUSES,
   ScopeClass,
   ToolGovernanceDecisionSchema,
   type ClaimForm,
@@ -8,7 +9,7 @@ import {
   type ToolGovernanceQuery
 } from "@do-soul/alaya-protocol";
 
-const GOVERNED_CLAIM_STATUSES = new Set<ClaimForm["claim_status"]>(["active", "contested", "winner"]);
+const GOVERNED_CLAIM_STATUSES = new Set<ClaimForm["claim_status"]>(ACTIVE_CONSTRAINT_CLAIM_STATUSES);
 
 export interface SoulStructureRegistryReader {
   listClaimsForProject(projectRef: string): Promise<readonly Readonly<ClaimForm>[]>;

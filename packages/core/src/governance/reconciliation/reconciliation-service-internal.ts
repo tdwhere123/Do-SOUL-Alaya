@@ -36,6 +36,8 @@ export interface ReconciliationInput {
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
 }
 
+// Merge-owned projection fields. Storage update also accepts creation-only
+// `facet_tags`; do not add that column here to look consistent with the writer.
 export type ReconciliationMemoryProjectionFields = Pick<
   MemoryEntry,
   | "projection_schema_version"

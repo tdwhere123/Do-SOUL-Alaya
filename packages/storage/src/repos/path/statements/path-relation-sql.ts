@@ -115,6 +115,7 @@ export function findByBackingObjectIdsSql(objectIdCount: number): string {
     `;
 }
 
+// SQL projection of protocol isPathActiveForRecall: missing status is active.
 export const ACTIVE_PATH_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL

@@ -473,5 +473,32 @@ describe("applyVerdict (host-worker verdict upgrade)", () => {
       expect(outcome).toBe("applied");
       expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
     });
+
+    it("directional-dedup: a path with unset lifecycle status is already present for recall", async () => {
+      const { deps, pathCandidatePort } = createDeps([]);
+      const existing = makePositiveAssociativePath("supports", "memory-new", "memory-existing");
+      const existingPathReader = {
+        findByBackingObjectId: vi.fn(async () => [
+          { ...existing, lifecycle: { ...existing.lifecycle, status: undefined } }
+        ])
+      };
+      const service = new EdgeAutoProducerService({ ...deps, existingPathReader });
+
+      const outcome = await service.applyVerdict({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        verdict: {
+          source_object_id: "memory-new",
+          neighbor_object_id: "memory-existing",
+          edge_type: "supports",
+          confidence: 0.95,
+          rationale: "host worker says supports"
+        }
+      });
+
+      expect(outcome).toBe("already_present");
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
   });
 });

@@ -3,6 +3,7 @@ import {
   EdgeProposalTriggerSource,
   MemoryGraphEdgeType,
   getPathAnchorBackingObjectId,
+  isPathActiveForRecall,
   type EdgeClassifyVerdict,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
@@ -174,7 +175,7 @@ export class EdgeAutoProducerService {
       if (relation.effect_vector.recall_bias <= 0) {
         return false;
       }
-      if (relation.lifecycle.status !== "active") {
+      if (!isPathActiveForRecall(relation.lifecycle.status)) {
         return false;
       }
       const relationSource = getPathAnchorBackingObjectId(relation.anchors.source_anchor);

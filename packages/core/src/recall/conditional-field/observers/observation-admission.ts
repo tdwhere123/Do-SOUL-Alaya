@@ -34,6 +34,9 @@ type ScopePrincipal =
   | { readonly kind: "denied" }
   | { readonly kind: "named"; readonly scopes: readonly string[] };
 
+// invariant: null is the encoder round-trip sentinel for unrestricted. It is
+// not an untrusted-ingress value. Worker/MCP parsers use
+// AuthorizedScopesAdmissionSchema and reject raw null; undefined and [] deny.
 export function encodeAuthorizedScopesAdmission(
   authorized: readonly string[] | null | undefined
 ): AuthorizedScopesAdmission {
