@@ -21,20 +21,20 @@ export async function resolveStoredSignalEmissionContext(
   dependencies: Pick<SignalServiceDependencies, "eventLogRepo">,
   signal: CandidateMemorySignal
 ): Promise<SignalMaterializationContext | null> {
-  const entries = await readSignalEvents(dependencies, signal.signal_id);
-  const emissions = entries.filter(
-    (entry) => entry.event_type === SignalEventType.SOUL_SIGNAL_EMITTED
-  );
+  const emissions = await readSignalEventsByType(dependencies, signal.signal_id,
+    SignalEventType.SOUL_SIGNAL_EMITTED, null, 2);
   if (emissions.length !== 1) return null;
   return resolveSignalMaterializationContext(signal, emissions[0]!);
 }
 
-export async function readSignalEvents(
-  dependencies: Pick<SignalServiceDependencies, "eventLogRepo">, signalId: string
+export async function readSignalEventsByType(
+  dependencies: Pick<SignalServiceDependencies, "eventLogRepo">, signalId: string,
+  eventType: string, beforeRevision: number | null, limit: number
 ): Promise<readonly EventLogEntry[]> {
-  const repo = dependencies.eventLogRepo;
-  const query = repo.queryByEntityAll ?? repo.queryByEntity;
-  return await query.call(repo, "candidate_memory_signal", signalId);
+  const query = dependencies.eventLogRepo.queryByEntityTypeBefore;
+  if (query === undefined) throw new CoreError("CONFLICT", "Bounded signal audit query is unavailable.",
+    { subCode: "PORT_UNAVAILABLE" });
+  return await query.call(dependencies.eventLogRepo, "candidate_memory_signal", signalId, eventType, beforeRevision, limit);
 }
 
 export async function deferUnverifiableSignalEmission(input: {

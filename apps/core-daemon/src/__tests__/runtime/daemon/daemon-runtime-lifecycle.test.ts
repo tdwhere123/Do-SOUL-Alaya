@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireTemporalRuntimeLease } from "../../../runtime/temporal-cutover/lease.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary({ descendantPreload: new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
+});
 import { createDaemonLifecycleControls } from "../../../runtime/daemon/lifecycle/daemon-runtime-lifecycle.js";
 import { serveDaemonUnixSocket } from "../../../runtime/unix-socket-serve.js";
 
@@ -27,8 +31,10 @@ function createFakeSignalProcess(): FakeSignalProcess {
 }
 
 afterEach(() => {
+  expect(isolation.violations).toEqual([]);
   vi.useRealTimers();
 });
+afterAll(() => isolation.restore());
 
 function createControls(
   tokenSource: "env" | "ephemeral",

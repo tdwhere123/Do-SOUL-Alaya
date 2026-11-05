@@ -117,6 +117,7 @@ async function runTask(
       ports: {
         enrichPendingRepo: {
           claimBatch,
+          markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
           markProcessed: vi.fn(),
           recordFailedAttempt: vi.fn(),
           delete: vi.fn(),
@@ -201,6 +202,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
@@ -306,6 +308,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
@@ -348,6 +351,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),

@@ -116,6 +116,21 @@ export class SqliteEventLogRepo implements EventLogRepo {
     ));
   }
 
+  /** Bounded keyset read for a single entity/event kind, newest revision first. */
+  public async queryByEntityTypeBefore(
+    entityType: string, entityId: string, eventType: string, beforeRevision: number | null, limit: number
+  ): Promise<readonly EventLogEntry[]> {
+    const parsedPage = parseEventLogPage({ limit, offset: 0 });
+    if (beforeRevision !== null && (!Number.isSafeInteger(beforeRevision) || beforeRevision < 0)) {
+      throw new StorageError("VALIDATION_FAILED", "Invalid event-log revision cursor.");
+    }
+    return this.readable(queryEventLogRows(
+      this.activeStatements().queryByEntityTypeBeforeStatement.all(
+        entityType, entityId, eventType, beforeRevision, beforeRevision, parsedPage.limit
+      ), "Failed to query event log by entity and event type."
+    ));
+  }
+
   public async queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
     return this.readable(queryEventLogScopeAll(() => this.activeStatements(), {
       kind: "entity",

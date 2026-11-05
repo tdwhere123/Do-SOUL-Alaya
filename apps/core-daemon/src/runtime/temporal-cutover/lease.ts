@@ -29,10 +29,6 @@ export interface TemporalCutoverLeaseInput {
 
 export interface TemporalRuntimeLease {
   release(): Promise<void>;
-  /** One pre-activation recovery, while this OS-held database lease is owned. */
-  recoverSignalsBeforeActivation(service: {
-    recoverInterruptedMaterialization(): Promise<unknown>;
-  }): Promise<void>;
 }
 
 /**
@@ -86,20 +82,11 @@ export function assertTemporalCutoverLease(
 export async function acquireTemporalRuntimeLease(databaseFilename: string): Promise<TemporalRuntimeLease> {
   if (databaseFilename === ":memory:") {
     // An in-memory database cannot contain a previous daemon's interrupted work.
-    return Object.freeze({ release: async () => undefined,
-      recoverSignalsBeforeActivation: async () => undefined });
+    return Object.freeze({ release: async () => undefined });
   }
   const filename = runtimeLockFilename(normalizePath(databaseFilename));
   const lease = acquireLock(filename);
-  let released = false, recovered = false;
-  return Object.freeze({
-    release: async () => { releaseLocks([{ filename, lease }]); released = true; },
-    recoverSignalsBeforeActivation: async (service: { recoverInterruptedMaterialization(): Promise<unknown> }) => {
-      if (released || recovered) throw new Error("Signal recovery requires the unconsumed startup runtime lease.");
-      recovered = true;
-      await service.recoverInterruptedMaterialization();
-    }
-  });
+  return Object.freeze({ release: async () => { releaseLocks([{ filename, lease }]); } });
 }
 
 function createLease(input: TemporalCutoverLeaseInput): TemporalCutoverLease {

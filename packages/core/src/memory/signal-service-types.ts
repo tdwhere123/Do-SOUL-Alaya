@@ -18,7 +18,8 @@ export type { SourceGroundingDeferStats };
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
-  queryByEntityAll?(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryByEntityTypeBefore?(entityType: string, entityId: string, eventType: string,
+    beforeRevision: number | null, limit: number): Promise<readonly EventLogEntry[]>;
   transactional?<T>(fn: () => T): T;
 }
 
@@ -32,6 +33,8 @@ export interface SignalServiceSignalRepoPort {
     limit: number
   ): Promise<readonly string[]>;
   countByRun?(runId: string): Promise<number>;
+  /** Persisted witness from the atomic pre-effect triage transition, never an input assertion. */
+  hasMaterializationLineage?(signalId: string): boolean;
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
   updateStateInCurrentTransaction?(
     signalId: string,
@@ -49,6 +52,7 @@ export interface SignalServiceStateCasInput {
   readonly workspaceId: string;
   readonly expectedState: SignalStateValue;
   readonly nextState: SignalStateValue;
+  readonly expectedTriageRevision?: number;
 }
 
 /**

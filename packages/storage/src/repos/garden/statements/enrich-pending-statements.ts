@@ -14,6 +14,8 @@ export interface EnrichPendingStatements {
   readonly selectClaimableStatement: SqliteStatement;
   readonly claimStatement: SqliteStatement;
   readonly markProcessedStatement: SqliteStatement;
+  readonly markIndependentProcessedStatement: SqliteStatement;
+  readonly parkSignalRefsStatement: SqliteStatement;
   readonly incrementAttemptStatement: SqliteStatement;
   readonly selectAttemptStatement: SqliteStatement;
   readonly releaseClaimStatement: SqliteStatement;
@@ -38,17 +40,23 @@ const ENRICH_PENDING_SQL: SqlDefinitionMap<EnrichPendingStatements> = {
         run_id = excluded.run_id,
         source_signal_id = excluded.source_signal_id,
         claimed_at = NULL,
-        processed_at = NULL
+        processed_at = NULL,
+        independent_processed_at = NULL,
+        signal_ref_waiting = 0
       WHERE enrich_pending.processed_at IS NOT NULL
     `,
   selectClaimableStatement: `
-      SELECT workspace_id, memory_id, run_id, source_signal_id, enqueued_at
+      SELECT workspace_id, memory_id, run_id, source_signal_id, enqueued_at, independent_processed_at
       FROM enrich_pending
       WHERE workspace_id = ?
         AND processed_at IS NULL
         AND claimed_at IS NULL
         AND abandoned_at IS NULL
         AND attempt_count < ?
+        AND (signal_ref_waiting = 0 OR ? IS NULL OR EXISTS (
+          SELECT 1 FROM signals s WHERE s.signal_id = enrich_pending.source_signal_id
+            AND s.workspace_id = enrich_pending.workspace_id AND s.signal_state = ?
+        ))
       ORDER BY enqueued_at ASC, memory_id ASC
       LIMIT ?
     `,
@@ -61,6 +69,14 @@ const ENRICH_PENDING_SQL: SqlDefinitionMap<EnrichPendingStatements> = {
       UPDATE enrich_pending
       SET processed_at = ?
       WHERE workspace_id = ? AND memory_id = ?
+    `,
+  markIndependentProcessedStatement: `
+      UPDATE enrich_pending SET independent_processed_at = ?
+      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND claimed_at IS NOT NULL
+    `,
+  parkSignalRefsStatement: `
+      UPDATE enrich_pending SET signal_ref_waiting = 1, claimed_at = NULL
+      WHERE workspace_id = ? AND memory_id = ? AND processed_at IS NULL AND claimed_at IS NOT NULL
     `,
   incrementAttemptStatement: `
       UPDATE enrich_pending

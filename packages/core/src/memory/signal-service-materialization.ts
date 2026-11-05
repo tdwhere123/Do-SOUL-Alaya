@@ -22,7 +22,8 @@ export async function materializeAcceptedSignal(
   signal: CandidateMemorySignal,
   triageResult: SignalTriageResult,
   context: SignalMaterializationContext,
-  claimToken?: string
+  claimToken?: string,
+  expectedTriageRevision?: number
 ): Promise<SignalServiceReceiveResult> {
   const materializer = dependencies.postTriageMaterializer;
   if (materializer === undefined) return { signal, triage_result: triageResult, materialization: null };
@@ -32,7 +33,8 @@ export async function materializeAcceptedSignal(
   // The source-grounding redrive has its own durable claim and stays DEFERRED.
   const claimed = claimToken !== undefined ? signal : requireSignalStateCas(dependencies)({
     signalId: signal.signal_id, workspaceId: signal.workspace_id,
-    expectedState: signal.signal_state, nextState: SignalState.COMPILED
+    expectedState: signal.signal_state, nextState: SignalState.COMPILED,
+    ...(expectedTriageRevision === undefined ? {} : { expectedTriageRevision })
   });
   if (claimed === null) return await resumeLostClaim(dependencies, warn, signal);
 

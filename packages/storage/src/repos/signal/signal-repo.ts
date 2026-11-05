@@ -27,6 +27,7 @@ export interface SignalRepo {
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
   listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
   listIdsByStateAfter(state: SignalStateType, afterSignalId: string | null, limit: number): Promise<readonly string[]>;
+  hasMaterializationLineage(signalId: string): boolean;
   countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
   updateStateInCurrentTransaction(signalId: string, state: SignalStateType): CandidateMemorySignal;
@@ -38,6 +39,7 @@ export interface SignalStateCasInput {
   readonly workspaceId: string;
   readonly expectedState: SignalStateType;
   readonly nextState: SignalStateType;
+  readonly expectedTriageRevision?: number;
   readonly rawPayload?: CandidateMemorySignal["raw_payload"];
 }
 
@@ -144,6 +146,7 @@ interface SignalStatements {
   readonly listByRunStatement: SqliteStatement;
   readonly listByRunPagedStatement: SqliteStatement;
   readonly listIdsByStateAfterStatement: SqliteStatement;
+  readonly hasMaterializationLineageStatement: SqliteStatement;
   readonly countByRunStatement: SqliteStatement;
   readonly updateStateStatement: SqliteStatement;
   readonly compareAndSwapStateStatement: SqliteStatement;
@@ -155,6 +158,7 @@ export class SqliteSignalRepo implements SignalRepo {
   private readonly listByRunStatement;
   private readonly listByRunPagedStatement;
   private readonly listIdsByStateAfterStatement;
+  private readonly hasMaterializationLineageStatement;
   private readonly countByRunStatement;
   private readonly updateStateStatement;
   private readonly compareAndSwapStateStatement;
@@ -166,6 +170,7 @@ export class SqliteSignalRepo implements SignalRepo {
     this.listByRunStatement = statements.listByRunStatement;
     this.listByRunPagedStatement = statements.listByRunPagedStatement;
     this.listIdsByStateAfterStatement = statements.listIdsByStateAfterStatement;
+    this.hasMaterializationLineageStatement = statements.hasMaterializationLineageStatement;
     this.countByRunStatement = statements.countByRunStatement;
     this.updateStateStatement = statements.updateStateStatement;
     this.compareAndSwapStateStatement = statements.compareAndSwapStateStatement;
@@ -263,6 +268,10 @@ export class SqliteSignalRepo implements SignalRepo {
     }
   }
 
+  public hasMaterializationLineage(signalId: string): boolean {
+    return this.hasMaterializationLineageStatement.get(signalId) !== undefined;
+  }
+
   public async countByRun(runId: string): Promise<number> {
     try {
       const row = this.countByRunStatement.get(runId) as CountRow | undefined;
@@ -309,6 +318,10 @@ export class SqliteSignalRepo implements SignalRepo {
   public compareAndSwapState(input: SignalStateCasInput): CandidateMemorySignal | null {
     const expectedState = parseSignalState(input.expectedState);
     const nextState = parseSignalState(input.nextState);
+    if (input.expectedTriageRevision !== undefined &&
+        (!Number.isSafeInteger(input.expectedTriageRevision) || input.expectedTriageRevision < 0)) {
+      throw new StorageError("VALIDATION_FAILED", "Invalid signal triage revision.");
+    }
     const rawPayload = input.rawPayload === undefined
       ? null
       : JSON.stringify(BoundedJsonObjectSchema.parse(input.rawPayload));
@@ -316,9 +329,14 @@ export class SqliteSignalRepo implements SignalRepo {
       const result = this.compareAndSwapStateStatement.run(
         nextState,
         rawPayload,
+        nextState,
         input.signalId,
         input.workspaceId,
-        expectedState
+        expectedState,
+        nextState,
+        nextState,
+        input.expectedTriageRevision ?? null,
+        input.expectedTriageRevision ?? null
       );
       if (result.changes === 0) return null;
       return this.getByIdInCurrentTransaction(input.signalId);
@@ -365,6 +383,9 @@ function prepareSignalStatements(db: StorageDatabase): SignalStatements {
       WHERE signal_state = ? AND signal_id > ?
       ORDER BY signal_id ASC LIMIT ?
     `),
+    hasMaterializationLineageStatement: db.connection.prepare(`
+      SELECT 1 FROM signals WHERE signal_id = ? AND materialization_lineage_proven = 1
+    `),
     countByRunStatement: db.connection.prepare(`
       SELECT COUNT(*) AS total
       FROM signals
@@ -372,16 +393,27 @@ function prepareSignalStatements(db: StorageDatabase): SignalStatements {
     `),
     updateStateStatement: db.connection.prepare(`
       UPDATE signals
-      SET signal_state = ?
+      SET signal_state = ?, materialization_lineage_proven = 0
       WHERE signal_id = ?
     `),
     compareAndSwapStateStatement: db.connection.prepare(`
       UPDATE signals
       SET signal_state = ?,
-          raw_payload_json = COALESCE(?, raw_payload_json)
+          raw_payload_json = COALESCE(?, raw_payload_json),
+          materialization_lineage_proven = CASE
+            WHEN signal_state IN ('emitted', 'normalized') AND ? = 'triaged' THEN 1
+            ELSE materialization_lineage_proven END
       WHERE signal_id = ?
         AND workspace_id = ?
         AND signal_state = ?
+        AND (signal_state NOT IN ('triaged', 'deferred') OR ? <> 'compiled' OR materialization_lineage_proven = 1)
+        AND (signal_state <> 'deferred' OR ? <> 'compiled' OR (
+          ? IS NOT NULL AND ? = (SELECT MAX(revision) FROM event_log
+            WHERE entity_type = 'candidate_memory_signal' AND entity_id = signals.signal_id
+              AND event_type = 'soul.signal.triaged')
+          AND NOT EXISTS (SELECT 1 FROM source_grounding_defer_queue q
+            WHERE q.signal_id = signals.signal_id AND q.workspace_id = signals.workspace_id)
+        ))
     `)
   };
 }

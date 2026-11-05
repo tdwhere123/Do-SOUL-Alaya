@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { closeDaemonStartupResourcesAfterFailure } from "../../../runtime/startup/cleanup.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary({ descendantPreload: new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
+});
+import { closeDaemonStartupResourcesAfterFailure, retryDaemonStartupCleanups } from "../../../runtime/startup/cleanup.js";
 import * as daemonDatabase from "../../../runtime/startup/database.js";
 
 afterEach(() => {
+  expect(isolation.violations).toEqual([]);
   vi.restoreAllMocks();
 });
+afterAll(() => isolation.restore());
 
 describe("daemon startup cleanup", () => {
   it("closes the recall worker then write-queue before the database and temporal lease", async () => {
@@ -29,16 +35,24 @@ describe("daemon startup cleanup", () => {
     const startupError = new Error("core startup failed");
     const release = vi.fn(async () => undefined);
     const warn = vi.fn();
+    let workerFails = true;
+    let databaseFails = true;
+    const worker = { close: vi.fn(async () => { if (workerFails) throw new Error("worker close failed"); }) };
+    const database = { close: vi.fn(() => { if (databaseFails) throw new Error("database close failed"); }) };
 
     await expect(closeDaemonStartupResourcesAfterFailure({
-      recallReadWorkerClient: { close: vi.fn(async () => { throw new Error("worker close failed"); }) },
-      database: { close: vi.fn(() => { throw new Error("database close failed"); }) },
-      temporalRuntimeLease: { release },
-      warn,
-      error: startupError
-    })).rejects.toThrow("database close failed");
-
+      recallReadWorkerClient: worker, database,
+      temporalRuntimeLease: { release }, warn, error: startupError
+    })).rejects.toThrow("worker close failed");
     expect(release).not.toHaveBeenCalled();
+    workerFails = false;
+    await expect(retryDaemonStartupCleanups()).rejects.toThrow("database close failed");
+    expect(release).not.toHaveBeenCalled();
+    databaseFails = false;
+    await retryDaemonStartupCleanups();
+    expect(worker.close).toHaveBeenCalledTimes(2);
+    expect(database.close).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledTimes(2);
   });
 });

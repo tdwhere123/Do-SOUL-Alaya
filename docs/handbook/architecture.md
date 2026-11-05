@@ -288,18 +288,29 @@ Garden task completion reports extraction and emission completion, not successfu
 memory creation. HTTP/MCP `emitted` is candidate admission. Materialization audit
 and state commit atomically, including generic and source-grounding deferrals.
 A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
-At daemon startup, the OS-released runtime lease is held before opening the DB and
-before activating any writer. Its one-shot recovery records interrupted COMPILED
-signals as `materialization_unknown` with an inspection-required audit. Historical
-success-shaped audits do not distinguish deferral or prove a current attempt;
-unknown effects cannot be automatically replayed. Shutdown drains SignalService
-executions and retains the lease if background drain or storage close fails.
+At daemon startup, one owner acquires the OS-released runtime lease, opens its
+matching database and completes recovery before handing either to any writer.
+Interrupted COMPILED, historically ambiguous TRIAGED, and historical write-path
+DEFERRED states with missing or ambiguous historical evidence of an attempt,
+and grounding redrives without a completion witness, become
+`materialization_unknown` with an inspection-required audit. Expiry alone cannot
+release a live grounding claim; an explicit reconciliation requires a later
+outcome audit. The durable lineage
+is established only by the atomic pre-effect transition; migration never invents
+it for existing rows. New proven deferrals remain retryable. Historical
+success-shaped audits do not prove quiescence or the current attempt. Unknown
+effects cannot be automatically replayed. Signal-reference replay waits for a
+known MATERIALIZED disposition while independent memory enrichment continues;
+its unfinished obligation remains durable and does not starve later work.
+Shutdown refuses new Garden passes, drains accepted writers and retains the lease
+until background drains and storage close are confirmed, including across retries.
 
 When a candidate fails materialization, completion audit and response expose
 `failed_candidate_signals_count`; `unknown_candidate_signals_count` separately
-exposes inspection-required effects. Unknown is neither failed nor retryable
-DEFERRED. The signal audit retains the detailed outcome. Absent counts on older
-records are unknown.
+exposes inspection-required effects; `inflight_candidate_signals_count` counts
+live claimed attempts. Fresh measured completions include zero counts, while
+absent counts on older or unmeasured records remain unknown. Unknown is neither
+failed nor retryable DEFERRED. The signal audit retains the detailed outcome.
 
 Inspector originates a review request, never directly persists a promotion.
 A warning names its target; agents should not infer it from array position.

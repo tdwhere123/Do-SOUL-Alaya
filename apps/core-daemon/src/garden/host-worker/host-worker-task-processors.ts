@@ -8,6 +8,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import type { SignalOutcomeCounts } from "../post-turn-extract/signal-receiver.js";
 
 export const IN_PROCESS_CLAIMANT = "in-process";
 
@@ -54,16 +55,13 @@ export async function settleInProcessTask(
   runId: string,
   outcome: Readonly<{ success: true } | { success: false; error: unknown }> & Readonly<{
     emittedSignalIds?: readonly string[];
-    failedSignalCount?: number;
-    unknownSignalCount?: number;
+    signalCounts?: SignalOutcomeCounts;
   }>,
   gardenTaskRepo: SqliteGardenTaskRepo,
   now: () => string
 ): Promise<void> {
   const completedAt = now();
   const objectsAffected = outcome.emittedSignalIds ?? [];
-  const failedSignalCount = outcome.failedSignalCount ?? 0;
-  const unknownSignalCount = outcome.unknownSignalCount ?? 0;
   await gardenTaskRepo.completeWithEvents(
     row.id,
     outcome.success
@@ -86,8 +84,7 @@ export async function settleInProcessTask(
           success: outcome.success,
           objects_affected: [...objectsAffected],
           candidate_signals_count: objectsAffected.length,
-          ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
-          ...(unknownSignalCount === 0 ? {} : { unknown_candidate_signals_count: unknownSignalCount }),
+          ...(outcome.signalCounts ?? {}),
           workspace_id: row.workspace_id,
           occurred_at: completedAt
         })

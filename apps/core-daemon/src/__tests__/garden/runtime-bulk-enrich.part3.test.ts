@@ -251,7 +251,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   // budget, draining once the poison marker is dead-lettered.
   it("an always-transient-failing marker dead-letters after MAX_ATTEMPTS, emits SOUL_ENRICH_ABANDONED, and frees the budget for a healthy marker behind it", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-poison");
+    enrichPendingRepo.enqueue("workspace-1", "memory-poison", "signal-memory-poison");
     enrichPendingRepo.enqueue("workspace-1", "memory-healthy");
     // 1-slot effective budget: the oldest (poison) marker consumes the only slot
     // each claim until it is dead-lettered, starving the healthy marker behind it.
@@ -418,7 +418,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
 
   it("replays first-class signal refs from the persisted source signal before marking the row processed", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-signal-ref");
+    enrichPendingRepo.enqueue("workspace-1", "memory-signal-ref", "signal-memory-signal-ref");
 
     const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
     const sourceSignal = buildSignal("signal-memory-signal-ref");

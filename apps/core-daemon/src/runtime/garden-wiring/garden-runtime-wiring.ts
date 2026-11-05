@@ -289,6 +289,7 @@ function createGardenEnrichmentPorts(
     },
     enrichSignalRefReplayPort: createGardenSignalRefReplayPort({
       eventLogRepo: input.eventLogRepo,
+      signalLookup: input.signalRepo,
       evidenceCapsuleLookup: input.evidenceCapsuleRepo,
       materializationRouter: input.materializationRouter
     }),

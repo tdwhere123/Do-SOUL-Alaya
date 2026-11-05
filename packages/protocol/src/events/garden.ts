@@ -73,6 +73,7 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     // Counts signals whose materialization failed; task success describes extraction/completion.
     failed_candidate_signals_count: NonNegativeIntSchema.optional(),
     unknown_candidate_signals_count: NonNegativeIntSchema.optional(),
+    inflight_candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })

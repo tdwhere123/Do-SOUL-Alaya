@@ -126,6 +126,9 @@ function reconcileStaleClaim(
 ): SourceGroundingDeferCommittedTransition {
   return repos.eventLogRepo.transactional(() => {
     const claim = readExpectedExpiredClaim(repos, input);
+    if (repos.queueRepo.hasUnfinishedClaim(input.workspace_id, input.signal_id)) {
+      throw transitionConflict("Source-grounding redrive has no completion witness; inspection is required.");
+    }
     const event = appendEventLogSynchronously(repos.eventLogRepo, input.event);
     const signal = requireSignalCas(repos, {
       signalId: input.signal_id,

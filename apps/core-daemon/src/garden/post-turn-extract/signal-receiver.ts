@@ -19,13 +19,31 @@ export interface PostTurnSignalReceiveResult {
   }> | null;
 }
 
-export function signalMaterializationFailed(result: PostTurnSignalReceiveResult): boolean {
-  return result.signal.signal_state === "failed" || result.materialization?.success === false;
+/** A snapshot is measured only after every candidate receipt is observed. */
+export type SignalOutcomeCounts = Readonly<{
+  failed_candidate_signals_count: number;
+  unknown_candidate_signals_count: number;
+  inflight_candidate_signals_count: number;
+}>;
+
+export function createSignalOutcomeCounter() {
+  const failed = new Set<string>(), unknown = new Set<string>(), inflight = new Set<string>();
+  return {
+    observe(result: PostTurnSignalReceiveResult): void {
+      const id = result.signal.signal_id;
+      failed.delete(id); unknown.delete(id); inflight.delete(id);
+      if (result.signal.signal_state === "materialization_unknown") unknown.add(id);
+      else if (result.signal.signal_state === "compiled" && result.materialization === null) inflight.add(id);
+      else if (result.signal.signal_state === "failed" || result.materialization?.success === false) failed.add(id);
+    },
+    snapshot(): SignalOutcomeCounts {
+      return { failed_candidate_signals_count: failed.size, unknown_candidate_signals_count: unknown.size,
+        inflight_candidate_signals_count: inflight.size };
+    }
+  };
 }
 
-export function signalMaterializationUnknown(result: PostTurnSignalReceiveResult): boolean {
-  return result.signal.signal_state === "materialization_unknown";
-}
+export type SignalOutcomeCounter = ReturnType<typeof createSignalOutcomeCounter>;
 
 export interface PostTurnSignalReceiver {
   receiveSignal(signal: CandidateMemorySignal): Promise<PostTurnSignalReceiveResult>;

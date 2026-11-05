@@ -71,13 +71,17 @@ export interface BulkEnrichPendingPort {
     workspaceId: string,
     limit: number,
     claimedAt: string,
-    maxAttempts: number
+    maxAttempts: number,
+    replayReadyState?: string
   ): readonly {
     readonly workspaceId: string;
     readonly memoryId: string;
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
+    readonly independentProcessedAt?: string | null;
   }[];
+  markIndependentProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
+  parkSignalRefs(workspaceId: string, memoryId: string): void;
   markProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
   recordFailedAttempt(
     workspaceId: string,
@@ -148,7 +152,7 @@ export interface BulkEnrichSignalRefReplayPort {
     readonly newMemoryId: string;
     readonly memoryEvidenceIds: readonly string[];
     readonly signal: CandidateMemorySignal;
-  }): Promise<void>;
+  }): Promise<void | "withheld">;
 }
 
 export interface EdgeProposalReconcilePort {

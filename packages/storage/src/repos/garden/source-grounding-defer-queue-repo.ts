@@ -35,6 +35,7 @@ export interface SourceGroundingDeferQueueRepo {
     claimExpiresAt: string
   ): SourceGroundingDeferEntry | null;
   ownsClaim(workspaceId: string, signalId: string, claimToken: string): boolean;
+  hasUnfinishedClaim(workspaceId: string, signalId: string): boolean;
   readClaimCapability(workspaceId: string, signalId: string): {
     readonly claimToken: string;
     readonly claimExpiresAt: string;
@@ -89,6 +90,7 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
   private readonly aggregateReasonsStatement;
   private readonly claimStatement;
   private readonly ownsClaimStatement;
+  private readonly hasUnfinishedClaimStatement;
   private readonly readClaimCapabilityStatement;
   private readonly clearExpiredClaimStatement;
   private readonly deleteClaimedStatement;
@@ -108,6 +110,7 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
     this.aggregateReasonsStatement = statements.aggregateReasons;
     this.claimStatement = statements.claim;
     this.ownsClaimStatement = statements.ownsClaim;
+    this.hasUnfinishedClaimStatement = statements.hasUnfinishedClaim;
     this.readClaimCapabilityStatement = statements.readClaimCapability;
     this.clearExpiredClaimStatement = statements.clearExpiredClaim;
     this.deleteClaimedStatement = statements.deleteClaimed;
@@ -262,6 +265,10 @@ export class SqliteSourceGroundingDeferQueueRepo implements SourceGroundingDefer
     return this.ownsClaimStatement.get(workspaceId, signalId, claimToken) !== undefined;
   }
 
+  public hasUnfinishedClaim(workspaceId: string, signalId: string): boolean {
+    return this.hasUnfinishedClaimStatement.get(workspaceId, signalId) !== undefined;
+  }
+
   public readClaimCapability(workspaceId: string, signalId: string) {
     const row = this.readClaimCapabilityStatement.get(
       workspaceId,
@@ -329,7 +336,8 @@ function prepareEntryStatements(connection: StorageDatabase["connection"]) {
       capacity_blocked = excluded.capacity_blocked,
       claim_token = NULL,
       claim_token_fingerprint = NULL,
-      claim_expires_at = NULL
+      claim_expires_at = NULL,
+      claim_started_revision = NULL
   `);
   const deleteStatement = connection.prepare(
     `DELETE FROM source_grounding_defer_queue WHERE workspace_id = ? AND signal_id = ?`
@@ -385,10 +393,19 @@ function prepareReasonStatements(connection: StorageDatabase["connection"]) {
   return { bumpReason, listReasons, aggregateReasons };
 }
 
+const CLAIM_HAS_OUTCOME_SQL = `claim_started_revision IS NOT NULL AND EXISTS (
+  SELECT 1 FROM event_log e WHERE e.entity_type = 'candidate_memory_signal'
+    AND e.entity_id = source_grounding_defer_queue.signal_id AND e.workspace_id = source_grounding_defer_queue.workspace_id
+    AND e.revision > source_grounding_defer_queue.claim_started_revision
+    AND e.event_type IN ('soul.signal.materialized', 'soul.signal.materialization_failed')
+)`;
+
 function prepareClaimStatements(connection: StorageDatabase["connection"]) {
   const claim = connection.prepare(`
     UPDATE source_grounding_defer_queue
-    SET claim_token = ?, claim_token_fingerprint = ?, claim_expires_at = ?, capacity_blocked = 0
+    SET claim_token = ?, claim_token_fingerprint = ?, claim_expires_at = ?, capacity_blocked = 0,
+        claim_started_revision = COALESCE((SELECT MAX(e.revision) FROM event_log e
+          WHERE e.entity_type = 'candidate_memory_signal' AND e.entity_id = source_grounding_defer_queue.signal_id), -1)
     WHERE workspace_id = ? AND signal_id = ? AND claim_token IS NULL
       AND (
         capacity_blocked = 0 OR
@@ -400,6 +417,12 @@ function prepareClaimStatements(connection: StorageDatabase["connection"]) {
     SELECT 1 FROM source_grounding_defer_queue
     WHERE workspace_id = ? AND signal_id = ? AND claim_token = ?
   `);
+  const hasUnfinishedClaim = connection.prepare(`
+    SELECT 1 FROM source_grounding_defer_queue
+    WHERE workspace_id = ? AND signal_id = ?
+      AND (claim_token IS NOT NULL OR claim_token_fingerprint IS NOT NULL OR claim_expires_at IS NOT NULL OR claim_started_revision IS NOT NULL)
+      AND (claim_token IS NULL OR claim_token_fingerprint IS NULL OR claim_expires_at IS NULL OR NOT (${CLAIM_HAS_OUTCOME_SQL}))
+  `);
   const readClaimCapability = connection.prepare(`
     SELECT claim_token, claim_expires_at FROM source_grounding_defer_queue
     WHERE workspace_id = ? AND signal_id = ?
@@ -407,7 +430,7 @@ function prepareClaimStatements(connection: StorageDatabase["connection"]) {
   `);
   const clearExpiredClaim = connection.prepare(`
     UPDATE source_grounding_defer_queue
-    SET claim_token = NULL, claim_token_fingerprint = NULL, claim_expires_at = NULL
+    SET claim_token = NULL, claim_token_fingerprint = NULL, claim_expires_at = NULL, claim_started_revision = NULL
     WHERE workspace_id = ? AND signal_id = ? AND claim_token = ?
       AND claim_expires_at = ?
       AND alaya_utc_compare(claim_expires_at, ?) <= 0
@@ -431,7 +454,8 @@ function prepareClaimStatements(connection: StorageDatabase["connection"]) {
         WHERE workspace_id = ?
       ) <= ?
   `);
-  return { claim, ownsClaim, readClaimCapability, clearExpiredClaim, deleteClaimed, promoteBlocked };
+  return { claim, ownsClaim, hasUnfinishedClaim, readClaimCapability,
+    clearExpiredClaim, deleteClaimed, promoteBlocked };
 }
 
 function buildStats(

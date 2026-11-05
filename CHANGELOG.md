@@ -27,11 +27,21 @@ late EventLog writes from escaping a completed or rolled-back callback scope.
 
 Protocol 34.1.0 adds the non-retryable `materialization_unknown` signal state,
 optional materialization audit disposition/route fields, and optional
-`unknown_candidate_signals_count` in Garden completion audits and MCP results
-(invariant §25 minor). Interrupted COMPILED effects are audited as unknown only
-under the daemon's pre-activation OS runtime lease. They require inspection;
-neither historical success-shaped audits nor missing audits authorize replay.
-New materialization outcomes commit audit and state together. No signal data migration.
+`unknown_candidate_signals_count` and `inflight_candidate_signals_count` in
+Garden completion audits and MCP results (invariant §25 minor). Interrupted
+COMPILED and historically ambiguous TRIAGED or ambiguously attempted DEFERRED
+effects are audited as unknown by the pre-activation database and OS-lease owner.
+An unfinished grounding redrive is also unknown; its expiry cannot authorize
+reconciliation while the attempt may still be running. Unknown effects require
+inspection; historical audit shapes cannot prove quiescence. New proven
+pre-effect deferrals remain retryable. New outcomes commit audit and state
+together, and signal-derived enrichment waits without dropping independent work.
+
+Migration 041 adds durable admission lineage, grounding-claim audit boundaries,
+and separate signal-reference versus independent-enrichment progress. Existing
+rows receive no invented provenance. Keep a pre-041 database for older-binary
+rollback: older binaries must not reopen a 041 database because they do not
+honor the signal-reference replay hold.
 
 Storage migration 040 freezes host-round membership before source admission and
 retains logical sweep/planning progress and attributable erase obligations.

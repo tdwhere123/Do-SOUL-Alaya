@@ -299,7 +299,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     const runtime = createGardenRuntime(
       createRuntimeInput({
         enrichPendingRepo,
-        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId, memoryId.replace("memory-", "workspace-"))),
         produceForNewMemory: vi.fn(async () => undefined),
         workspaceIds: ["workspace-1", "workspace-2"]
       })

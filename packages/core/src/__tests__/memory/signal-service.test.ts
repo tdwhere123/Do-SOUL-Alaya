@@ -3,7 +3,7 @@ import { SignalService } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 
-import { atomicUpdateState, createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalEventPage, signalServiceDependencies } from "./signal-service.test-support.js";
 
 describe("SignalService", () => {
 it("writes emitted/triaged events in order and moves accepted signals to triaged", async () => {
@@ -276,6 +276,7 @@ it("resumes an existing emitted signal through triage and materialization", asyn
           };
         }),
         queryByEntity: vi.fn(async () => [emittedEvent]),
+        queryByEntityTypeBefore: signalEventPage(() => [emittedEvent]),
         transactional: <T>(fn: () => T) => fn()
       },
       signalRepo,

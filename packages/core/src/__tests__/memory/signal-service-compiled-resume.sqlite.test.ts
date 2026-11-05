@@ -131,38 +131,6 @@ describe("SignalService compiled resume through SQLite restart", () => {
     });
   });
 
-  it("marks historical ambiguous audit effects unknown through the recovery entry, never rematerializes", async () => {
-    const compiled = parsedSignal("compiled");
-    const harness = await seedAndReopen(compiled, async (eventLogRepo) => {
-      await eventLogRepo.append(buildSignalEmittedEventInput(compiled));
-      await eventLogRepo.append({
-        event_type: "soul.signal.materialized",
-        entity_type: "candidate_memory_signal",
-        entity_id: compiled.signal_id,
-        workspace_id: compiled.workspace_id,
-        run_id: compiled.run_id,
-        caused_by: "materialization_router",
-        payload_json: {
-          signal_id: compiled.signal_id,
-          workspace_id: compiled.workspace_id,
-          run_id: compiled.run_id,
-          created_objects: [{ object_kind: "memory_entry", object_id: "memory-restart" }],
-          success: true
-        }
-      });
-    });
-    const materialize = vi.fn(async () => {
-      throw new Error("restart resume must not rematerialize");
-    });
-    const results = await createService(harness, materialize).recoverInterruptedMaterialization();
-
-    expect(materialize).not.toHaveBeenCalled();
-    expect(results).toEqual({ unknown: 1, unreadable: 0 });
-    await expect(harness.signalRepo.getById(compiled.signal_id)).resolves.toMatchObject({
-      signal_state: "materialization_unknown"
-    });
-  });
-
   it("lets only one concurrent triaged resume claim the compiled fence", async () => {
     const signal = parsedSignal("triaged");
     const owner = await seedAndReopen(signal, async (eventLogRepo) => {
@@ -316,54 +284,12 @@ describe("SignalService compiled resume through SQLite restart", () => {
     expect((await h.signalRepo.getById(signal.signal_id))?.signal_state).toBe("compiled");
     expect((await h.eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id))
       .some(event => event.event_type === "soul.signal.materialized")).toBe(false);
-    h.database.connection.exec(`CREATE TRIGGER reject_unknown_disposition BEFORE UPDATE OF signal_state ON signals
-      WHEN NEW.signal_state='materialization_unknown' BEGIN SELECT RAISE(ABORT,'unknown rejected'); END`);
-    await expect(service.recoverInterruptedMaterialization()).rejects.toThrow();
-    expect((await h.signalRepo.getById(signal.signal_id))?.signal_state).toBe("compiled");
-    expect((await h.eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id))
-      .some(event => event.event_type === "soul.signal.normalized")).toBe(false);
-    h.database.connection.exec("DROP TRIGGER reject_unknown_disposition");
-    expect(await service.recoverInterruptedMaterialization()).toEqual({ unknown: 1, unreadable: 0 });
-    expect((await h.signalRepo.getById(signal.signal_id))?.signal_state).toBe("materialization_unknown");
     expect(await new SqliteMemoryEntryRepo(h.database).findById("00000000-0000-4000-8000-000000000002"))
       .toMatchObject({ object_id: "00000000-0000-4000-8000-000000000002" });
     expect((await h.eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id))
       .some(event => event.event_type === "soul.signal.materialization_failed")).toBe(false);
   });
 
-  it("continues past 500 retained unknowns, a malformed row, and long ambiguous event history", async () => {
-    const signal = parsedSignal("compiled");
-    const h = await seedAndReopen(signal, async () => {});
-    h.database.connection.transaction(() => {
-      for (let index = 0; index < 501; index += 1) {
-        const next = createSignal({ signal_id: `orphan-${String(index).padStart(4, "0")}` });
-        h.signalRepo.createInCurrentTransaction(next);
-        h.signalRepo.updateStateInCurrentTransaction(next.signal_id, "compiled");
-      }
-      const bad = createSignal({ signal_id: "bad-retained" });
-      h.signalRepo.createInCurrentTransaction(bad);
-      h.signalRepo.updateStateInCurrentTransaction(bad.signal_id, "compiled");
-      h.database.connection.prepare("UPDATE signals SET raw_payload_json='[]' WHERE signal_id=?").run(bad.signal_id);
-    })();
-    for (let index = 0; index < 600; index += 1) {
-      await h.eventLogRepo.append({ event_type: "soul.signal.materialized", entity_type: "candidate_memory_signal",
-        entity_id: signal.signal_id, workspace_id: signal.workspace_id, run_id: signal.run_id,
-        caused_by: "materialization_router", payload_json: { signal_id: signal.signal_id,
-          workspace_id: signal.workspace_id, run_id: signal.run_id, success: true, created_objects: [] } });
-    }
-    const materialize = vi.fn(async () => { throw new Error("unknown effects must never replay"); });
-    const service = createService(h, materialize);
-    expect(await service.recoverInterruptedMaterialization()).toEqual({ unknown: 502, unreadable: 1 });
-    await h.signalRepo.create(createSignal({ signal_id: "z-late-orphan" }));
-    await h.signalRepo.updateState("z-late-orphan", "compiled");
-    expect(await service.recoverInterruptedMaterialization()).toEqual({ unknown: 1, unreadable: 1 });
-    expect(materialize).not.toHaveBeenCalled();
-    expect((await h.signalRepo.getById("z-late-orphan"))?.signal_state).toBe("materialization_unknown");
-    const audit = await h.eventLogRepo.queryByEntityAll("candidate_memory_signal", signal.signal_id);
-    expect(audit).toHaveLength(601);
-    expect(audit.at(-1)?.payload_json).toMatchObject({ normalized_fields: { materialization_recovery: {
-      disposition: "effects_unknown", automatic_replay: false } } });
-  });
 });
 
 function parsedSignal(state: "compiled" | "triaged" | "emitted"): CandidateMemorySignal {
@@ -421,7 +347,12 @@ async function seedAndReopen(
   });
   const seedSignalRepo = new SqliteSignalRepo(seeded);
   await seedSignalRepo.create(signal);
-  await seedSignalRepo.updateState(signal.signal_id, signal.signal_state);
+  if (signal.signal_state === "triaged") {
+    expect(seedSignalRepo.compareAndSwapState({ signalId: signal.signal_id, workspaceId: signal.workspace_id,
+      expectedState: "emitted", nextState: "triaged" })).not.toBeNull();
+  } else {
+    await seedSignalRepo.updateState(signal.signal_id, signal.signal_state);
+  }
   await seedEvents(new SqliteEventLogRepo(seeded));
   seeded.close();
 

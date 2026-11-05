@@ -12,6 +12,7 @@ interface ClaimRow {
   readonly run_id: string | null;
   readonly source_signal_id: string | null;
   readonly enqueued_at: string;
+  readonly independent_processed_at: string | null;
 }
 
 interface AttemptRow {
@@ -25,18 +26,22 @@ export function createClaimBatchTransaction(
   workspaceId: string,
   limit: number,
   claimedAt: string,
-  maxAttempts: number
+  maxAttempts: number,
+  replayReadyState: string | null
 ) => readonly EnrichPendingClaim[] {
   return db.connection.transaction(
     (
       workspaceId: string,
       limit: number,
       claimedAt: string,
-      maxAttempts: number
+      maxAttempts: number,
+      replayReadyState: string | null
     ): readonly EnrichPendingClaim[] => {
       const candidates = parseRows(statements.selectClaimableStatement.all(
         workspaceId,
         maxAttempts,
+        replayReadyState,
+        replayReadyState,
         limit
       ), { parse: (value: unknown) => value as ClaimRow }, "claim row");
       const claimed: EnrichPendingClaim[] = [];
@@ -48,7 +53,8 @@ export function createClaimBatchTransaction(
             memoryId: row.memory_id,
             runId: row.run_id,
             sourceSignalId: row.source_signal_id,
-            enqueuedAt: row.enqueued_at
+            enqueuedAt: row.enqueued_at,
+            independentProcessedAt: row.independent_processed_at
           });
         }
       }

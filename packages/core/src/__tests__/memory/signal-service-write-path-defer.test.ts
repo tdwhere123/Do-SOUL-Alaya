@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 import { SignalService, type SignalServicePostTriageMaterializer } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
-import { atomicUpdateState, createSignal } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalEventPage } from "./signal-service.test-support.js";
 
 function emittedEvent(signal: CandidateMemorySignal): EventLogEntry {
   return {
@@ -29,7 +29,9 @@ function materializedSuccessEvent(signal: CandidateMemorySignal): EventLogEntry 
       workspace_id: signal.workspace_id,
       run_id: signal.run_id,
       created_objects: [],
-      success: true
+      success: true,
+      disposition: "deferred",
+      target_kind: "deferred"
     }
   };
 }
@@ -84,11 +86,13 @@ function createResumeService(input: {
       queryByEntity: vi.fn(async (entityType, entityId) =>
         storedEvents.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
       ),
+      queryByEntityTypeBefore: signalEventPage(() => storedEvents),
       transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {
       create: vi.fn(),
       getById: vi.fn(async () => input.existing),
+      hasMaterializationLineage: () => true,
       listByRun: vi.fn(async () => []),
       ...atomicUpdateState((signalId, state) =>
         createSignal({ signal_id: signalId, signal_state: state })

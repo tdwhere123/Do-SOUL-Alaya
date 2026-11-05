@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 import { SignalService } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
-import { atomicUpdateState, createSignal } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalEventPage } from "./signal-service.test-support.js";
 
 function serviceFor(state: CandidateMemorySignal["signal_state"], events: readonly EventLogEntry[] = []) {
   const signal = createSignal({ signal_state: state });
@@ -15,9 +15,10 @@ function serviceFor(state: CandidateMemorySignal["signal_state"], events: readon
   const service = new SignalService({
     eventLogRepo: {
       append: vi.fn(event => ({ ...event, event_id: "evt-next", revision: 3, created_at: "2026-03-18T00:00:04.000Z" })),
-      queryByEntity: vi.fn(async () => events), transactional: fn => fn()
+      queryByEntity: vi.fn(async () => events), queryByEntityTypeBefore: signalEventPage(() => events), transactional: fn => fn()
     },
     signalRepo: { create: vi.fn(), getById: vi.fn(async () => signal), listByRun: vi.fn(async () => []),
+      hasMaterializationLineage: () => true,
       ...atomicUpdateState((signalId, nextState) => createSignal({ signal_id: signalId, signal_state: nextState })) },
     runtimeNotifier: { notifyEntry: vi.fn() }, postTriageMaterializer: { materialize }, warn
   });

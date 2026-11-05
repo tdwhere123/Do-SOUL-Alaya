@@ -8,7 +8,7 @@ import {
   parseGardenEventPayload,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "@do-soul/alaya-core";
+import { SignalService, type EventPublisher } from "@do-soul/alaya-core";
 import {
   isPerSourceEnrichmentTask,
   type BulkEnrichAvailability,
@@ -238,7 +238,8 @@ function claimBulkEnrichBatch(
     workspaceId,
     DYNAMICS_CONSTANTS.enrich.claim_batch_size,
     claimedAt,
-    DYNAMICS_CONSTANTS.enrich.max_attempts
+    DYNAMICS_CONSTANTS.enrich.max_attempts,
+    SignalService.referenceReplayReadyState
   );
 }
 
@@ -252,11 +253,13 @@ async function processClaimedBatch(
   readonly missingCount: number;
   readonly failedCount: number;
   readonly abandonedCount: number;
+  readonly withheldCount: number;
 }>> {
   let processedCount = 0;
   let missingCount = 0;
   let failedCount = 0;
   let abandonedCount = 0;
+  let withheldCount = 0;
 
   for (const pending of claimed) {
     try {
@@ -266,9 +269,18 @@ async function processClaimedBatch(
         missingCount += 1;
         continue;
       }
-      await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
-      await produceBulkEnrichEdges(pending, memory, ports);
-      await detectBulkEnrichConflicts(memory, ports);
+      if (memory.workspace_id !== pending.workspaceId) throw new Error("BULK_ENRICH memory workspace does not match its obligation.");
+      if (pending.independentProcessedAt == null) {
+        await produceBulkEnrichEdges(pending, memory, ports);
+        await detectBulkEnrichConflicts(memory, ports);
+        ports.enrichPendingRepo.markIndependentProcessed(pending.workspaceId, pending.memoryId, processedAt);
+      }
+      const replay = await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
+      if (replay === "withheld") {
+        ports.enrichPendingRepo.parkSignalRefs(pending.workspaceId, pending.memoryId);
+        withheldCount += 1;
+        continue;
+      }
       ports.enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, processedAt);
       processedCount += 1;
     } catch (error) {
@@ -290,7 +302,8 @@ async function processClaimedBatch(
     processedCount,
     missingCount,
     failedCount,
-    abandonedCount
+    abandonedCount,
+    withheldCount
   };
 }
 
@@ -299,20 +312,19 @@ async function replayBulkEnrichSignalRefs(
   memoryId: string,
   evidenceIds: readonly string[],
   ports: BulkEnrichReadyPorts
-): Promise<void> {
-  if (ports.signalRefReplay === undefined || pending.sourceSignalId === null) {
-    return;
-  }
-  if (ports.signalLookup === undefined) {
-    throw new Error("BULK_ENRICH signal-ref replay is wired without a source signal lookup port.");
-  }
+): Promise<void | "withheld"> {
+  if (pending.sourceSignalId === null) return;
+  if (ports.signalRefReplay === undefined || ports.signalLookup === undefined) return "withheld";
   const sourceSignal = await ports.signalLookup.getById(pending.sourceSignalId);
   if (sourceSignal === null) {
     throw new Error(
       `BULK_ENRICH signal-ref replay could not load source signal ${pending.sourceSignalId}.`
     );
   }
-  await ports.signalRefReplay.replaySignalRefs({
+  if (sourceSignal.workspace_id !== pending.workspaceId) {
+    throw new Error("BULK_ENRICH source signal workspace does not match its obligation.");
+  }
+  return await ports.signalRefReplay.replaySignalRefs({
     newMemoryId: memoryId,
     memoryEvidenceIds: evidenceIds,
     signal: sourceSignal
@@ -409,11 +421,13 @@ function summarizeClaimedBatch(summary: Readonly<{
   readonly missingCount: number;
   readonly failedCount: number;
   readonly abandonedCount: number;
+  readonly withheldCount: number;
 }>): readonly string[] {
   return [
     `bulk_enrich:processed_${summary.processedCount}`,
     `bulk_enrich:missing_${summary.missingCount}`,
     `bulk_enrich:failed_${summary.failedCount}`,
-    `bulk_enrich:abandoned_${summary.abandonedCount}`
+    `bulk_enrich:abandoned_${summary.abandonedCount}`,
+    `bulk_enrich:withheld_${summary.withheldCount}`
   ];
 }

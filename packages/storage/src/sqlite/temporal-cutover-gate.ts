@@ -16,7 +16,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 import { parseRows } from "../repos/shared/parse-row.js";
 import { PathRelationRowParser } from "../repos/path/mappers/path-relation-rows.js";
-import { openSqliteConnection } from "./open-sqlite-connection.js";
+import { openSqliteConnection, SqliteConnectionCleanupError } from "./open-sqlite-connection.js";
 import { markTemporalDatabaseEstablished, temporalEstablishedMarker } from "./temporal-file-publication.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
@@ -73,6 +73,7 @@ function assertTemporalDatabaseReady(
   requireSelected: boolean
 ): void {
   let database: SqliteConnection | undefined;
+  let operationError: unknown;
   try {
     database = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
     assertCanonicalSchemaVersionTable(database);
@@ -135,6 +136,7 @@ function assertTemporalDatabaseReady(
       markTemporalDatabaseEstablished(filename);
     }
   } catch (error) {
+    operationError = error;
     if (error instanceof StorageError) throw error;
     throw new StorageError(
       "CONFLICT",
@@ -142,7 +144,10 @@ function assertTemporalDatabaseReady(
       error
     );
   } finally {
-    database?.close();
+    if (database !== undefined) {
+      try { database.close(); }
+      catch (closeError) { throw new SqliteConnectionCleanupError(database, operationError, closeError); }
+    }
   }
 }
 

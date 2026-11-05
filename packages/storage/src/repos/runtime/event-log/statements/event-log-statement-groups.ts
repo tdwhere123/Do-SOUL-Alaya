@@ -17,6 +17,7 @@ export interface EventLogMutationStatements {
 
 export interface EventLogEntityQueryStatements {
   readonly queryByEntityPagedStatement: SqliteStatement;
+  readonly queryByEntityTypeBeforeStatement: SqliteStatement;
   readonly queryByTypeStatement: SqliteStatement;
 }
 
@@ -66,6 +67,14 @@ const EVENT_LOG_ENTITY_QUERY_SQL: SqlDefinitionMap<EventLogEntityQueryStatements
       WHERE entity_type = ? AND entity_id = ?
       ORDER BY created_at ASC, rowid ASC
       LIMIT ? OFFSET ?
+    `,
+  queryByEntityTypeBeforeStatement: `
+      SELECT${EVENT_LOG_SELECT_COLUMNS}
+      FROM event_log
+      WHERE entity_type = ? AND entity_id = ? AND event_type = ?
+        AND (? IS NULL OR revision < ?)
+      ORDER BY revision DESC
+      LIMIT ?
     `,
   queryByTypeStatement: `
       SELECT${EVENT_LOG_SELECT_COLUMNS}

@@ -49,7 +49,9 @@ describe("SqliteEnrichPendingRepo", () => {
       "claimed_at",
       "processed_at",
       "attempt_count",
-      "abandoned_at"
+      "abandoned_at",
+      "independent_processed_at",
+      "signal_ref_waiting"
     ]);
   });
 

@@ -7,9 +7,12 @@ import { once } from "node:events";
 import { Hono } from "hono";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  return installProviderFreeBoundary({ ownedTemporaryFixtures: true,
+    descendantPreload: new URL("../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
 });
 import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/lease.js";
+import { openRuntimeDatabase } from "../../runtime/startup/runtime-database.js";
+import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
 import {
   CandidateMemorySignalSchema,
   RunMode,
@@ -90,9 +93,9 @@ describe("compiled signal resume through storage and signal routes", () => {
       child.kill("SIGKILL");
       await exited;
     }
-    const restartLease = await acquireTemporalRuntimeLease(filename);
-
-    const reopened = initDatabase({ filename });
+    const { database: reopened, temporalRuntimeLease: restartLease } = await openRuntimeDatabase(
+      filename, createRuntimeNotifier(), () => undefined
+    );
     databases.push(reopened);
     const eventLogRepo = new SqliteEventLogRepo(reopened);
     const signalRepo = new SqliteSignalRepo(reopened);
@@ -107,7 +110,6 @@ describe("compiled signal resume through storage and signal routes", () => {
       postTriageMaterializer: { materialize }
     });
 
-    await restartLease.recoverSignalsBeforeActivation(signalService);
     expect(materialize).not.toHaveBeenCalled();
     expect(await signalService.receiveSignal(signal)).toMatchObject({
       signal: { signal_state: "materialization_unknown" }, triage_result: "unknown", materialization: null

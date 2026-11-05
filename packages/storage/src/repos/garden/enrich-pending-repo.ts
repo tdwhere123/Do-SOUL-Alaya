@@ -37,6 +37,7 @@ export interface EnrichPendingClaim {
   readonly runId: string | null;
   readonly sourceSignalId: string | null;
   readonly enqueuedAt: string;
+  readonly independentProcessedAt: string | null;
 }
 
 /**
@@ -63,8 +64,11 @@ export interface EnrichPendingRepo {
     workspaceId: string,
     limit: number,
     claimedAt: string,
-    maxAttempts: number
+    maxAttempts: number,
+    replayReadyState?: string
   ): readonly EnrichPendingClaim[];
+  markIndependentProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
+  parkSignalRefs(workspaceId: string, memoryId: string): void;
   /** Mark a claimed memory processed (idempotent: a re-mark is a no-op). */
   markProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
   /**
@@ -102,6 +106,8 @@ interface CountRow {
 export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
   private readonly enqueueStatement;
   private readonly markProcessedStatement;
+  private readonly markIndependentProcessedStatement;
+  private readonly parkSignalRefsStatement;
   private readonly deleteStatement;
   private readonly countPendingStatement;
   private readonly reclaimStaleStatement;
@@ -109,7 +115,8 @@ export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
     workspaceId: string,
     limit: number,
     claimedAt: string,
-    maxAttempts: number
+    maxAttempts: number,
+    replayReadyState: string | null
   ) => readonly EnrichPendingClaim[];
   private readonly recordFailedAttemptTransaction: (
     workspaceId: string,
@@ -122,6 +129,8 @@ export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
     const statements = prepareEnrichPendingStatements(db);
     this.enqueueStatement = statements.enqueueStatement;
     this.markProcessedStatement = statements.markProcessedStatement;
+    this.markIndependentProcessedStatement = statements.markIndependentProcessedStatement;
+    this.parkSignalRefsStatement = statements.parkSignalRefsStatement;
     this.deleteStatement = statements.deleteStatement;
     this.countPendingStatement = statements.countPendingStatement;
     this.reclaimStaleStatement = statements.reclaimStaleStatement;
@@ -147,15 +156,28 @@ export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
     workspaceId: string,
     limit: number,
     claimedAt: string,
-    maxAttempts: number
+    maxAttempts: number,
+    replayReadyState?: string
   ): readonly EnrichPendingClaim[] {
     if (limit <= 0) {
       return [];
     }
     try {
-      return this.claimBatchTransaction(workspaceId, limit, claimedAt, maxAttempts);
+      return this.claimBatchTransaction(workspaceId, limit, claimedAt, maxAttempts, replayReadyState ?? null);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to claim enrich_pending batch.", error);
+    }
+  }
+
+  public markIndependentProcessed(workspaceId: string, memoryId: string, processedAt: string): void {
+    if (this.markIndependentProcessedStatement.run(processedAt, workspaceId, memoryId).changes !== 1) {
+      throw new StorageError("QUERY_FAILED", "Failed to record independent enrichment completion.");
+    }
+  }
+
+  public parkSignalRefs(workspaceId: string, memoryId: string): void {
+    if (this.parkSignalRefsStatement.run(workspaceId, memoryId).changes !== 1) {
+      throw new StorageError("QUERY_FAILED", "Failed to retain withheld signal-reference replay.");
     }
   }
 

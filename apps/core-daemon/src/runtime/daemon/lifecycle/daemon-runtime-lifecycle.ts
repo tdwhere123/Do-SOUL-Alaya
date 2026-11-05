@@ -86,6 +86,8 @@ type LifecycleState = {
   server: CloseableHttpServer | null;
   unixServer: CloseableHttpServer | null;
   backgroundStarted: boolean;
+  backgroundDrainOwed: boolean;
+  manualGardenPasses: Set<Promise<unknown>>;
   startupBackgroundPass: Promise<void> | null;
   startupBackgroundPassFailure: unknown | null;
   shuttingDown: Promise<void> | null;
@@ -121,6 +123,8 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     server: null,
     unixServer: null,
     backgroundStarted: false,
+    backgroundDrainOwed: false,
+    manualGardenPasses: new Set(),
     startupBackgroundPass: null,
     startupBackgroundPassFailure: null,
     shuttingDown: null,
@@ -149,7 +153,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
       }
       return await input.sourceIndexProducer.runLexicalPass(workspaceId, representation, remaining, allocation);
     },
-    runGardenBackgroundPass: async () => {
+    runGardenBackgroundPass: () => trackManualGardenPass(input, state, async () => {
       await awaitStartupBackgroundPassInFlight(state);
       try {
         await input.gardenRuntime.runBackgroundPass();
@@ -161,27 +165,41 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
         state.startupBackgroundPassFailure = error;
         throw error;
       }
-    },
+    }),
     // invariant: targeted BULK_ENRICH drain (bench edge-plane readiness), not
     // a full Garden maintenance pass. Waits for any in-flight startup pass so
     // the workspace-scoped drain sees a settled queue and does not race the
     // initial all-workspace background sweep.
-    runGardenBulkEnrichPass: async (workspaceId: string) => {
+    runGardenBulkEnrichPass: (workspaceId: string) => trackManualGardenPass(input, state, async () => {
       await awaitStartupBackgroundPass(state);
       await input.gardenRuntime.runBulkEnrichPass(workspaceId);
-    },
+    }),
     // invariant: targeted embedding-backfill drain (bench/warmup readiness),
     // not a full Garden maintenance pass. Waits for any in-flight startup pass
     // first (same ordering guard as runGardenBackgroundPass) so the drain sees
     // a settled queue, then dispatches ONLY EMBEDDING_BACKFILL.
     // see also: garden-runtime.ts runEmbeddingBackfillPass.
-    runGardenEmbeddingBackfillPass: async (workspaceId, mode) => {
+    runGardenEmbeddingBackfillPass: (workspaceId, mode) => trackManualGardenPass(input, state, async () => {
       await awaitStartupBackgroundPass(state);
       await input.gardenRuntime.runEmbeddingBackfillPass(workspaceId, mode);
-    },
+    }),
     startHttpServer,
     shutdown
   });
+}
+
+function trackManualGardenPass<T>(
+  input: CreateDaemonLifecycleControlsInput,
+  state: LifecycleState,
+  operation: () => Promise<T>
+): Promise<T> {
+  if (input.lifecycleState.drainState.isDraining) {
+    return Promise.reject(new AlayaError("UNAVAILABLE", "Daemon shutdown has started"));
+  }
+  const pass = Promise.resolve().then(operation);
+  state.manualGardenPasses.add(pass);
+  void pass.finally(() => state.manualGardenPasses.delete(pass)).catch(() => undefined);
+  return pass;
 }
 
 function createBackgroundServiceStarter(
@@ -249,9 +267,10 @@ function createShutdownHandler(
           }
         }
         const backgroundStop = await stopBackgroundServices(input, state);
+        await Promise.allSettled([...state.manualGardenPasses]);
         await input.closeSignalService?.();
         await closeRuntimeResources(input, state);
-        await closeSqliteAfterBackgroundStop(input, backgroundStop);
+        await closeSqliteAfterBackgroundStop(input, state, backgroundStop);
       } finally {
         // Unregister only after sqlite close so a hung whenIdle() still has
         // the 60s SIGTERM backstop and second-signal force-exit.
@@ -452,6 +471,7 @@ async function stopBackgroundServices(
       });
       if (result === "timed_out") {
         input.warnLogger.warn("garden background manager shutdown timed out", {});
+        state.backgroundDrainOwed = true;
         stopResult = "timed_out";
       }
     } catch (error) {
@@ -486,17 +506,19 @@ async function stopBackgroundServices(
 
 async function closeSqliteAfterBackgroundStop(
   input: CreateDaemonLifecycleControlsInput,
+  state: LifecycleState,
   backgroundStop: "drained" | "timed_out" | "not_started" | "failed"
 ): Promise<void> {
   if (backgroundStop === "failed") {
     throw new Error("Garden background shutdown failed; retaining database and runtime lease.");
   }
-  if (backgroundStop === "timed_out") {
+  if (state.backgroundDrainOwed) {
     input.warnLogger.warn("waiting for garden background drain before sqlite close", {});
     if (input.gardenRuntime.backgroundManager.whenIdle === undefined) {
       throw new Error("Garden drain cannot be verified; retaining database and runtime lease.");
     }
     await input.gardenRuntime.backgroundManager.whenIdle();
+    state.backgroundDrainOwed = false;
   }
   await closeDaemonSqliteWriteQueue();
   input.database.close();
