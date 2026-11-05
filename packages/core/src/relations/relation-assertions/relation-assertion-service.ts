@@ -55,18 +55,20 @@ export class RelationAssertionService {
     request: RelationAssertionAdmissionRequest
   ): Promise<RelationAssertionAdmissionResult> {
     const prepared = prepareAdmission(request, request.admittedAt ?? this.now());
-    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
-      this.decideAdmission(request, prepared)
-    );
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() => {
+      assertSynchronousPrecondition(request);
+      return this.decideAdmission(request, prepared);
+    });
   }
 
   public async admitDeferredProjection(
     request: RelationAssertionAdmissionRequest
   ): Promise<RelationAssertionDeferredAdmissionResult> {
     const prepared = prepareAdmission(request, request.admittedAt ?? this.now());
-    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
-      this.decideDeferredProjectionAdmission(request, prepared)
-    );
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() => {
+      assertSynchronousPrecondition(request);
+      return this.decideDeferredProjectionAdmission(request, prepared);
+    });
   }
 
   public async refreshProjection(): Promise<RelationAssertionReplayResult> {
@@ -338,6 +340,12 @@ export class RelationAssertionService {
   }
 }
 
+
+function assertSynchronousPrecondition(request: RelationAssertionAdmissionRequest): void {
+  if (request.assertCurrentInTransaction?.() !== undefined) {
+    throw new CoreError("CONFLICT", "Relation formation precondition must complete synchronously.");
+  }
+}
 
 function assertSharedStorageBoundary(dependencies: RelationAssertionServiceDependencies): void {
   const publisherIdentity = dependencies.eventPublisher.getStorageConnectionIdentity?.();

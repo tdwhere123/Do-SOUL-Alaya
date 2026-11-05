@@ -1,6 +1,12 @@
 import { vi } from "vitest";
-import type { LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { EventLogEntry, LegacyCandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { SignalServiceDependencies } from "../../memory/signal-service-types.js";
+
+export function signalEventPage(read: () => readonly EventLogEntry[]) {
+  return async (entityType: string, entityId: string, eventType: string, before: number | null, limit: number) =>
+    [...read()].filter(event => event.entity_type === entityType && event.entity_id === entityId && event.event_type === eventType &&
+      (before === null || event.revision < before)).sort((a, b) => b.revision - a.revision).slice(0, limit);
+}
 
 export function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): LegacyCandidateMemorySignal {
   const { signal_state, ...restOverrides } = overrides;
@@ -43,7 +49,11 @@ export function atomicUpdateState(
     signalId: string,
     state: LegacyCandidateMemorySignal["signal_state"]
   ) => impl(signalId, state));
-  return { updateState, updateStateInCurrentTransaction };
+  const compareAndSwapState = vi.fn((input: {
+    readonly signalId: string;
+    readonly nextState: LegacyCandidateMemorySignal["signal_state"];
+  }) => impl(input.signalId, input.nextState));
+  return { updateState, updateStateInCurrentTransaction, compareAndSwapState };
 }
 
 export function signalServiceDependencies(
@@ -54,6 +64,7 @@ export function signalServiceDependencies(
     eventLogRepo: {
       append: vi.fn(),
       queryByEntity: vi.fn(async () => []),
+      queryByEntityTypeBefore: signalEventPage(() => []),
       transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {

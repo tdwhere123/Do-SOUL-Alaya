@@ -60,7 +60,8 @@ export class EvidenceDocumentEmbeddingEngine {
     private readonly capacity: number,
     private readonly store?: EvidenceDocumentEmbeddingRepoPort,
     private readonly now: () => string = () => new Date().toISOString(),
-    warn?: (message: string, meta: Record<string, unknown>) => void
+    warn?: (message: string, meta: Record<string, unknown>) => void,
+    private readonly requireStoredRead = false
   ) {
     this.warn = warn ?? (() => undefined);
   }
@@ -136,6 +137,7 @@ export class EvidenceDocumentEmbeddingEngine {
       }
     } catch (error) {
       this.warnStoreFailure("read", workspaceId, error);
+      if (this.requireStoredRead) throw error;
     }
   }
 

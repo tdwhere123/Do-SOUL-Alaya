@@ -207,6 +207,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("surfaces item-level provider failure reasons to targeted warmup callers", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => ({
+        outcome: "failed" as const, errorMessage: "embedding_failed:provider:memory-bad:provider rejected input",
         objectsAffected: [],
         auditEntries: ["embedding_failed:provider:memory-bad:provider rejected input"]
       }))
@@ -224,7 +225,8 @@ describe("garden runtime targeted embedding backfill pass", () => {
     expect(scheduler.completions).toHaveLength(1);
     expect(scheduler.completions[0]).toEqual(
       expect.objectContaining({
-        success: true,
+        success: false,
+        outcome: "failed",
         audit_entries: ["embedding_failed:provider:memory-bad:provider rejected input"]
       })
     );
@@ -271,11 +273,11 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
   });
 
-  it("is a no-op when no embedding backfill handler is configured", async () => {
+  it("reports missing embedding backfill configuration to a targeted caller", async () => {
     const runtime = createGardenRuntime(createRuntimeInput());
     const scheduler = currentScheduler();
 
-    await runtime.runEmbeddingBackfillPass("workspace-1");
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(/handler is not configured/);
 
     expect(scheduler.queue).toHaveLength(0);
     expect(scheduler.completions).toHaveLength(0);
@@ -314,7 +316,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("stops at eight backfill dispatches with requeued work retained", async () => {
     const handle = vi.fn(async (task: GardenTaskDescriptor) => {
       currentScheduler().queue.push({ ...task, task_id: `${task.task_id}-next` });
-      return { objectsAffected: [], auditEntries: [] };
+      return { outcome: "skipped" as const, errorMessage: null, objectsAffected: [], auditEntries: [] };
     });
     const runtime = createGardenRuntime(createRuntimeInput({ embeddingBackfillHandler: { handle } }));
     await runtime.runEmbeddingBackfillPass("workspace-1");
@@ -324,7 +326,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   });
 
   it("allows a later backfill after enqueue fails", async () => {
-    const handle = vi.fn(async () => ({ objectsAffected: [], auditEntries: [] }));
+    const handle = vi.fn(async () => ({ outcome: "skipped" as const, errorMessage: null, objectsAffected: [], auditEntries: [] }));
     const runtime = createGardenRuntime(createRuntimeInput({ embeddingBackfillHandler: { handle } }));
     const scheduler = currentScheduler() as InstanceType<typeof hoisted.FakeGardenScheduler>;
     vi.spyOn(scheduler, "enqueue").mockImplementationOnce(() => { throw new Error("queue unavailable"); });

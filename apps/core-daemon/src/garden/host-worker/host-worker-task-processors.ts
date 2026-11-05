@@ -1,6 +1,7 @@
 import type { EventPublisher } from "@do-soul/alaya-core";
 import {
   AlayaError,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   GardenRole,
   GardenTier,
@@ -8,6 +9,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import type { SignalOutcomeCounts } from "../post-turn-extract/signal-receiver.js";
 
 export const IN_PROCESS_CLAIMANT = "in-process";
 
@@ -52,21 +54,20 @@ export async function refreshInProcessClaim(
 export async function settleInProcessTask(
   row: GardenTaskRow,
   runId: string,
-  outcome: Readonly<{ success: true } | { success: false; error: unknown }> & Readonly<{
+  outcome: Readonly<{ status: "completed" } | { status: "failed"; error: unknown }> & Readonly<{
     emittedSignalIds?: readonly string[];
-    failedSignalCount?: number;
+    signalCounts?: SignalOutcomeCounts;
   }>,
   gardenTaskRepo: SqliteGardenTaskRepo,
   now: () => string
 ): Promise<void> {
   const completedAt = now();
   const objectsAffected = outcome.emittedSignalIds ?? [];
-  const failedSignalCount = outcome.failedSignalCount ?? 0;
   await gardenTaskRepo.completeWithEvents(
     row.id,
-    outcome.success
-      ? { status: "completed", completed_at: completedAt }
-      : { status: "failed", completed_at: completedAt,
+    outcome.status === "completed"
+      ? { status: "completed", outcome: outcome.status, completed_at: completedAt }
+      : { status: "failed", outcome: outcome.status, completed_at: completedAt,
         last_error_text: outcome.error instanceof Error ? outcome.error.message : String(outcome.error) },
     [
       {
@@ -81,10 +82,11 @@ export async function settleInProcessTask(
           task_kind: row.kind,
           role: GardenRole.LIBRARIAN,
           tier: GardenTier.TIER_2,
-          success: outcome.success,
+          success: gardenTaskOutcomeSuccess(outcome.status),
+          outcome: outcome.status,
           objects_affected: [...objectsAffected],
           candidate_signals_count: objectsAffected.length,
-          ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
+          ...(outcome.signalCounts ?? {}),
           workspace_id: row.workspace_id,
           occurred_at: completedAt
         })

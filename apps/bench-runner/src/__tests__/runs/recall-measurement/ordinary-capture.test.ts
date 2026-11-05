@@ -11,7 +11,7 @@ import { z } from "zod";
 import { encodeSourceDisclosure, sourceDisclosure, SourceDisclosureSchema, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "../../../runs/recall-measurement/contract.js";
 import { admitOrdinaryRecallObservation, inspectOrdinaryRecallObservation } from "../../../runs/recall-measurement/ordinary/ordinary-recall.js";
-import { installedRecallProtocolVersion, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema, OrdinaryRecallObservationSchema,
+import { installedRecallProtocolVersion, ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema, OrdinaryRecallObservationSchema,
   OrdinaryRecallPreparationSchema, OrdinaryRecallRequestRecordSchema,
   OrdinaryRecallWireRecordSchema } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
@@ -51,8 +51,8 @@ function rewriteCapturedEnvelope(root: string, ordinal: number,
 it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ordered %s public envelopes without consumer execution", mode => {
   const capture = captures[mode], observation = admitOrdinaryRecallObservation(capture.root);
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
-  expect(installedRecallProtocolVersion()).toBe("34.0.0");
-  expect(observation.binding).toMatchObject({ protocol_package_version: "34.0.0", reader_protocol_package_version: "34.0.0",
+  expect(installedRecallProtocolVersion()).toBe(ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION);
+  expect(observation.binding).toMatchObject({ protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, reader_protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION,
     public_semantics: "ordinary-native-field.v9", producer_revision: capture.config.implementation_revision });
   expect(capture.config.first_request.enumeration_policy).toBe("native_query");
   expect(observation.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
@@ -67,7 +67,7 @@ it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0", "
   const original = readFileSync(join(root, "config.json"), "utf8");
   const originalEnvelope = readFileSync(join(root, "execution/01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "34.0.0",
+  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION,
     producer_candidate: config.candidate, producer_revision: config.implementation_revision });
   expect(observation.state).toBe("partial");
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);

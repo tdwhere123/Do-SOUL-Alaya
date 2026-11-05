@@ -6,20 +6,54 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-it("rejects missing workload arguments with a typed validation failure and exit one", async () => {
-  const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));
-  const result = await promisify(execFile)(process.execPath, [harness], { timeout: 15_000 })
-    .then(() => { throw new Error("missing workload arguments must fail the harness"); },
-      (error: Error & { code: number; stdout: string; stderr: string }) => error);
-  expect(result.code).toBe(1);
-  expect(result.stdout).toBe("");
-  expect(result.stderr).toContain("--out and --arms are required");
-  expect(result.stderr).toMatch(/code:\s*['"]VALIDATION['"]/u);
-});
+const entries = ["recall-harness.mjs", "recall-harness-d1.mjs"];
+const required = ["--out", "unused-out", "--arms", "unused-arms.json"];
+const invalidInvocations = [
+  { name: "missing workload arguments", args: [], message: "--out and --arms are required" },
+  { name: "missing workload with diagnostic options", args: ["--capture-pool", "--diagnostic-vectors", "unused-vectors.jsonl"],
+    message: "--out and --arms are required" },
+  { name: "invalid reader", args: [...required, "--reader", "invalid"], message: "--reader must be current or end_continuation" },
+  { name: "incomplete Source selection", args: [...required, "--source-model", "fixture-model"],
+    message: "separate Source execution requires model, cache and artifact digest" }
+];
 
-it("guards the harness main thread, explicit-argv recall workers and child processes before native imports", async () => {
+it.each(entries.flatMap(entry => [
+  ...invalidInvocations,
+  ...(entry === "recall-harness-d1.mjs" ? [{ name: "unpaired prepared cache", args: [...required, "--prepared-cache", "unused-cache"],
+    message: "--prepared-cache and --prepared-revision are required together" }] : [])
+].map(input => ({ entry, ...input }))))(
+  "$entry rejects $name before runtime imports with typed validation and exit one", async ({ entry, args, message }) => {
+    const root = mkdtempSync(join(tmpdir(), "recall-harness-validation # -"));
+    const harness = fileURLToPath(new URL(`../../../scripts/${entry}`, import.meta.url));
+    const runtimeRoot = new URL("../../../dist/", import.meta.url).href;
+    const hook = join(root, "refuse-runtime.mjs");
+    writeFileSync(hook, `import { registerHooks } from 'node:module';
+      registerHooks({ resolve(specifier, context, nextResolve) {
+        const result = nextResolve(specifier, context);
+        if (result.url.startsWith(${JSON.stringify(runtimeRoot)}) || result.url.endsWith('/recall-harness-pool.mjs')) {
+          throw new Error('runtime imported before argument validation');
+        }
+        return result;
+      }});`);
+    try {
+      const result = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, ...args], { timeout: 15_000 })
+        .then(() => { throw new Error("invalid workload arguments must fail the harness"); },
+          (error: Error & { code: number | null; stdout: string; stderr: string; killed: boolean; signal: NodeJS.Signals | null }) => error);
+      expect({ code: result.code, killed: result.killed, signal: result.signal }, result.stderr)
+        .toEqual({ code: 1, killed: false, signal: null });
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(message);
+      expect(result.stderr).toMatch(/code:\s*['"]VALIDATION['"]/u);
+      expect(result.stderr).not.toContain("runtime imported before argument validation");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+);
+
+it.each(entries)("%s guards the main thread, explicit-argv recall workers and child processes before native imports", async entry => {
   const root = mkdtempSync(join(tmpdir(), "recall-harness-isolation # -"));
-  const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));
+  const harness = fileURLToPath(new URL(`../../../scripts/${entry}`, import.meta.url));
+  const arms = join(root, "arms.json");
+  writeFileSync(arms, "[]");
   const childProgram = join(root, "guard-probe.cjs");
   const source = "try { require('node:fs').readFileSync('/nonexistent-authored-harness/auth.json'); } catch (error) { console.log(error.message); }";
   writeFileSync(childProgram, source);
@@ -61,7 +95,7 @@ it("guards the harness main thread, explicit-argv recall workers and child proce
       return nextResolve(specifier, context);
     }});`);
   try {
-    const result = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness], { timeout: 15_000 })
+    const result = await promisify(execFile)(process.execPath, [`--import=${pathToFileURL(hook).href}`, harness, "--out", join(root, "out"), "--arms", arms], { timeout: 15_000 })
       .then(() => { throw new Error("caught guard violations must still fail the harness"); },
         (error: Error & { code: number; stdout: string }) => error);
     expect(result.code).toBe(1);

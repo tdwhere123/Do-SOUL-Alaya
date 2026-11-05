@@ -143,8 +143,8 @@ export function createSynthesisMemberResolver(input: {
 
 function createClaimSourceReader(input: FinalizeDaemonRuntimeWiringInput) {
   return {
-    findSourceObjectRefs: async (targetObjectId: string) => {
-      const claim = await input.claimFormRepo.findById(targetObjectId);
+    findSourceObjectRefs: async (targetObjectId: string, workspaceId: string) => {
+      const claim = await input.claimService.findByIdScoped(targetObjectId, workspaceId);
       return claim === null ? null : claim.source_object_refs;
     }
   };
@@ -238,6 +238,7 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
     temporalRuntimeLease: input.temporalRuntimeLease,
     recallReadWorkerClient: input.recallReadWorkerClient,
     closeEmbeddingProvider: input.closeEmbeddingProvider,
+    closeSignalService: () => input.signalService.close(),
     sourceIndexProducer: input.sourceIndexProducer,
     intervalsToClear: [input.pathRelationEvictionTimer]
   };

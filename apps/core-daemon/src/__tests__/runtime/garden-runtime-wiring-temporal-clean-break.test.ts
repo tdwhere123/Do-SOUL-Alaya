@@ -255,6 +255,7 @@ describe("Garden production temporal clean break", () => {
         expect.objectContaining({
           task_kind: GardenTaskKind.TOMBSTONE_GC,
           success: true,
+          outcome: "skipped",
           audit_entries: expect.arrayContaining([
             "[DEFERRED] tombstone_gc: temporal_assertion_provenance_required"
           ])
@@ -271,7 +272,8 @@ describe("Garden production temporal clean break", () => {
 
       scheduler.queue.splice(0, scheduler.queue.length);
       await getService(wiring.gardenRuntime, "Librarian").task();
-      await wiring.gardenRuntime.runEmbeddingBackfillPass("workspace-1");
+      // The fake scheduler does not claim a SQLite task, so durable backfill must fail closed.
+      await expect(wiring.gardenRuntime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(/claim is not current/);
       expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE)).toBe(false);
       const pathPlasticityTask = scheduler.queue.find(task => task.task_kind === GardenTaskKind.PATH_PLASTICITY_UPDATE);
       expect(pathPlasticityTask).toBeDefined();
@@ -281,17 +283,8 @@ describe("Garden production temporal clean break", () => {
       expect((await input.pathGraphSnapshotRepo.findHistory("workspace-1", 2))).toHaveLength(1);
 
       expect(coherentPairKeys).not.toHaveBeenCalled();
-      expect(scheduler.completions).toContainEqual(
-        expect.objectContaining({
-          task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
-          success: true,
-          objects_affected: ["memory-1", "memory-2"],
-          audit_entries: [
-            "embedding_backfill:2",
-            "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required"
-          ]
-        })
-      );
+      expect(scheduler.completions.some(result => result.task_kind === GardenTaskKind.EMBEDDING_BACKFILL)).toBe(false);
+      expect(input.embeddingBackfillHandler?.handle).not.toHaveBeenCalled();
 
       // Garden wiring does not accept a path-plasticity writer. A scheduled
       // residual task must complete as a skip instead of updating a legacy row.
@@ -304,6 +297,7 @@ describe("Garden production temporal clean break", () => {
         expect.objectContaining({
           task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
           success: true,
+          outcome: "skipped",
           audit_entries: [
             "path_plasticity_update: skipped because path plasticity port is not configured"
           ]

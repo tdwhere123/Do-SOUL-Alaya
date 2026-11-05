@@ -1,7 +1,9 @@
 /**
- * Derives MCP JSON Schema from Zod. Tool catalogs must publish this output
- * so clients see the same bounds the runtime parsers enforce. Do not
- * hand-write a second MCP schema dialect.
+ * Derives MCP JSON Schema from Zod. This catalog is a lossy projection of
+ * representable Zod constraints (maxLength, enums, required keys). Runtime
+ * `superRefine` / custom refinements do not appear here; the Zod parse at
+ * the tool handler is the authority. Do not hand-write a second MCP schema
+ * dialect. See invariant §25.
  */
 import { z } from "zod";
 

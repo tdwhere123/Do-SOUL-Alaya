@@ -8,6 +8,7 @@ import {
   PROOF_EFFECT_OPERATOR_VERSION,
   ScopeClass,
   SoulResolutionKind,
+  SoulResolveRequestSchema,
   hashEffectGovernanceFrontier,
   type ClaimForm,
   type DeferredObligation,
@@ -316,6 +317,68 @@ const baseInput = {
 };
 
 describe("ResolutionService dispatch", () => {
+  it.each([
+    { resolution: "correct", correction: undefined, valid: false },
+    { resolution: "correct", correction: "", valid: false },
+    { resolution: "correct", correction: " \n\t", valid: false },
+    { resolution: "correct", correction: "  preserve this prose  ", deferUntil: "2026-05-18T00:00:00.000Z", valid: true },
+    { resolution: "defer", deferUntil: undefined, valid: false },
+    { resolution: "defer", deferUntil: "", valid: false },
+    { resolution: "defer", deferUntil: " \n\t", valid: false },
+    { resolution: "defer", deferUntil: "2026-05-18T00:00Z", correction: "  ", valid: true },
+    { resolution: "not_relevant", correction: "unused prose", deferUntil: "2026-05-18T00:00:00.000Z", valid: true }
+  ] as const)("MCP and direct core agree on conditional fields: $resolution $correction $deferUntil", async (test) => {
+    const correction = "correction" in test ? test.correction : undefined;
+    const deferUntil = "deferUntil" in test ? test.deferUntil : undefined;
+    const parsed = SoulResolveRequestSchema.safeParse({
+      target_object_id: "claim-1", delivery_id: "delivery-1", resolution: test.resolution,
+      ...(correction === undefined ? {} : { correction }),
+      ...(deferUntil === undefined ? {} : { defer_until: deferUntil })
+    });
+    expect(parsed.success).toBe(test.valid);
+    const harness = createHarness();
+    harness.claimRepo.findById.mockResolvedValue(buildClaim({ claim_status: "active" }));
+    const outcome = harness.service.resolve({ ...baseInput, resolution: test.resolution,
+      ...(correction === undefined ? {} : { correction }),
+      ...(deferUntil === undefined ? {} : { deferUntil }) });
+    if (!test.valid) {
+      await expect(outcome).rejects.toMatchObject({ name: "CoreError", code: "VALIDATION",
+        message: test.resolution === "correct"
+          ? "resolution=correct requires a non-empty correction"
+          : "resolution=defer requires a defer_until ISO datetime" });
+      expect(harness.deliveryAuthority.authorize).toHaveBeenCalledOnce();
+      expect(harness.claimRepo.findById).not.toHaveBeenCalled();
+      expect(harness.effectAuthority.decide).not.toHaveBeenCalled();
+      expect(harness.deferredObligationService.create).not.toHaveBeenCalled();
+      expect(harness.published).toEqual([]);
+      return;
+    }
+    await expect(outcome).resolves.toMatchObject({ status: test.resolution === "correct" ? "applied"
+      : test.resolution === "defer" ? "deferred" : "noop" });
+    if (test.resolution === "correct") {
+      expect(harness.effectAuthority.decide).toHaveBeenCalledWith(expect.objectContaining({ correction }));
+      expect(firstDefined(harness.published).payload_json).toMatchObject({ correction });
+    } else if (test.resolution === "defer") {
+      expect(harness.deferredObligationService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ expiresAt: deferUntil }), expect.anything());
+    } else {
+      expect(harness.effectAuthority.decide).not.toHaveBeenCalled();
+      expect(harness.deferredObligationService.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["correct", "defer"] as const)("checks delivery authority before %s field requirements", async (resolution) => {
+    const harness = createHarness();
+    harness.deliveryAuthority.authorize.mockResolvedValueOnce(null);
+    await expect(harness.service.resolve({ ...baseInput, resolution })).rejects.toMatchObject({
+      name: "CoreError", code: "VALIDATION", message: "Delivery authority does not match the resolution context"
+    });
+    expect(harness.claimRepo.findById).not.toHaveBeenCalled();
+    expect(harness.effectAuthority.decide).not.toHaveBeenCalled();
+    expect(harness.deferredObligationService.create).not.toHaveBeenCalled();
+    expect(harness.published).toEqual([]);
+  });
+
   it("rejects a direct service call when delivery authority does not match", async () => {
     const harness = createHarness();
     harness.deliveryAuthority.authorize.mockResolvedValueOnce(null);

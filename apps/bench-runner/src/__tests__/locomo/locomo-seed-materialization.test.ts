@@ -5,6 +5,7 @@ import {
   describe,
   expect,
   it,
+  loadLocomoMock,
   startBenchDaemonMock,
   tmpDir,
   vi,
@@ -159,18 +160,34 @@ describe("LoCoMo runner", () => {
           };
         })
       } as ReturnType<typeof compileSeedModule.createCompileSeedRunner>);
-    const recall = vi.fn(async () => buildRecallResult());
+    loadLocomoMock.mockResolvedValue([{
+      sample_id: "sample-1",
+      conversation: { speaker_a: "Alice", speaker_b: "Bob", session_1_date_time: "2026-05-20", session_1: [
+        { speaker: "Alice", dia_id: "d1", text: "Alice keeps the violin receipt." },
+        { speaker: "Bob", dia_id: "d2", text: "Bob talks about weather." }
+      ] },
+      qa: [
+        { question: "Who keeps the violin receipt?", answer: "Alice", evidence: ["d1"], category: 1 },
+        { question: "What does Bob discuss?", answer: "Weather", evidence: ["d2"], category: 1 }
+      ]
+    }]);
+    const recall = vi.fn(async () => buildRecallResult("memory-d2"));
     startBenchDaemonMock.mockResolvedValue(buildMockDaemon({ recall }));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     try {
-      // LoCoMo gold references unmaterializable dia_ids; the run completes,
-      // recall still runs, and the unscorable question drops out of the denominator.
+      // Only d2 materializes: its hit must be scored without counting the missing d1.
       const result = await runLocomo({
         variant: "locomo10",
         historyRoot: tmpDir
       });
-      expect(recall).toHaveBeenCalled();
-      expect(Number.isFinite(result.payload.kpi.r_at_5)).toBe(true);
+      expect(recall).toHaveBeenCalledTimes(2);
+      expect(result.payload.sample_size).toBe(2);
+      expect(result.payload.evaluated_count).toBe(1);
+      expect(result.payload.kpi.r_at_5).toBe(1);
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toContain(
+        "1 unmaterialized gold dia_id(s); scoring on present gold (d1)"
+      );
     } finally {
       createCompileSeedRunnerSpy.mockRestore();
     }

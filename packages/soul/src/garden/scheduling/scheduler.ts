@@ -1,4 +1,6 @@
 import {
+  AlayaError,
+  gardenTaskOutcomeSuccess,
   GARDEN_ROLE_PERMISSIONS,
   GARDEN_ROLE_TIER_MAP,
   GardenTier,
@@ -286,12 +288,17 @@ export class GardenScheduler {
   }
 
   public async reportCompletion(result: GardenTaskResult): Promise<void> {
+    if (result.outcome !== undefined && result.success !== gardenTaskOutcomeSuccess(result.outcome)) {
+      throw new AlayaError("VALIDATION_FAILED", "Garden task outcome conflicts with its compatibility success field.");
+    }
     const nowIso = this.now();
+    const success = result.outcome === undefined ? result.success : gardenTaskOutcomeSuccess(result.outcome);
 
     await this.taskRepo.completeWithEvents(
       result.task_id,
       {
-        status: result.success ? "completed" : "failed",
+        status: success ? "completed" : "failed",
+        ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
         completed_at: result.completed_at,
         last_error_text: result.error_message ?? undefined
       },
@@ -309,12 +316,16 @@ export class GardenScheduler {
       IN_PROCESS_GARDEN_CLAIMANT
     );
 
-    if (result.success && result.tier === GardenTier.TIER_1) {
+    if (success && result.tier === GardenTier.TIER_1) {
       this.pruneExpiredCoolingEntries(nowIso);
       for (const ref of result.objects_affected) {
         this.coolingMap.set(buildCoolingKey(result.task_kind, ref), nowIso);
       }
     }
+  }
+
+  public async releaseInProcessClaim(taskId: string): Promise<boolean> {
+    return await this.taskRepo.releaseClaim(taskId, IN_PROCESS_GARDEN_CLAIMANT);
   }
 
   public get queueDepth(): number {

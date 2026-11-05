@@ -1,17 +1,12 @@
 import {
   diagnosticWarn,
   CandidateMemorySignalSchema, UnavailableSourceStatementSignalSchema,
-  SignalEventType,
-  SignalState,
-  SoulSignalMaterializedPayloadSchema,
-  SoulSignalTriagedPayloadSchema,
-  type CandidateMemorySignal,
-  type EventLogEntry
+  SignalEventType, SignalState, SoulSignalMaterializedPayloadSchema, SoulSignalTriagedPayloadSchema,
+  type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import {
   assertReplayMatchesExistingSignal,
   buildSignalEmittedEventInput,
-  buildSignalWarningMeta,
   evaluateSignalTriage,
   mapExistingSignalStateToTriage,
   mapTriageResultToSignalState,
@@ -19,6 +14,7 @@ import {
 } from "./signal-service-helpers.js";
 import {
   deferUnverifiableSignalEmission,
+  readSignalEventsByType,
   resolveStoredSignalEmissionContext
 } from "./signal-emission-recovery.js";
 import {
@@ -26,7 +22,11 @@ import {
   emptySourceGroundingDeferStats,
   reconcileStaleSourceGroundingClaim
 } from "./signal-service-grounding-defer.js";
-import { materializeAcceptedSignal } from "./signal-service-materialization.js";
+import {
+  materializeAcceptedSignal,
+  resumeCompiledSignal,
+  resumeFailedSignal
+} from "./signal-service-materialization.js";
 import {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
   type SourceGroundingDeferStats
@@ -39,11 +39,8 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
+import { persistTriagedSignal } from "./signal-triage-admission.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
-import {
-  appendMemoryEventLogSynchronously,
-  runEventLogTransaction
-} from "./memory-service/memory-audit-append.js";
 export type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
@@ -86,9 +83,77 @@ export {
   type SourceGroundingDeferTransitionPort
 } from "./source-grounding-defer-queue.js";
 export { resolveStoredSignalEmissionContext } from "./signal-emission-recovery.js";
-
 export class SignalService {
+  /** Only a completed signal can authorize later replay of its signal-derived effects. */
+  public static readonly referenceReplayReadyState = SignalState.MATERIALIZED;
+
+  /** Audit eligibility is distinct from proof that the attempt lineage has no hidden effects. */
+  public static async readWritePathDeferredRetryEvidence(
+    dependencies: Pick<SignalServiceDependencies, "eventLogRepo" | "sourceGroundingDeferQueue">,
+    signal: CandidateMemorySignal
+  ): Promise<number | null> {
+    if (dependencies.sourceGroundingDeferQueue?.get(signal.workspace_id, signal.signal_id) != null) return null;
+    const [triage] = await readSignalEventsByType(dependencies, signal.signal_id,
+      SignalEventType.SOUL_SIGNAL_TRIAGED, null, 1);
+    if (triage === undefined) return null;
+    const parsed = SoulSignalTriagedPayloadSchema.safeParse(triage.payload_json);
+    if (!parsed.success || triage.workspace_id !== signal.workspace_id || triage.run_id !== signal.run_id ||
+        parsed.data.signal_id !== signal.signal_id || parsed.data.workspace_id !== signal.workspace_id ||
+        parsed.data.run_id !== signal.run_id) throw new CoreError("CONFLICT", "Signal triage audit is malformed.");
+    if (parsed.data.defer_class !== "write_path" || parsed.data.deferral === undefined) return null;
+    const [outcome] = await readSignalEventsByType(dependencies, signal.signal_id,
+      SignalEventType.SOUL_SIGNAL_MATERIALIZED, triage.revision, 1);
+    if (outcome === undefined || outcome.revision !== triage.revision - 1) return null;
+    const materialized = SoulSignalMaterializedPayloadSchema.safeParse(outcome.payload_json);
+    if (!materialized.success || outcome.workspace_id !== signal.workspace_id || outcome.run_id !== signal.run_id ||
+        materialized.data.signal_id !== signal.signal_id || materialized.data.workspace_id !== signal.workspace_id ||
+        materialized.data.run_id !== signal.run_id) throw new CoreError("CONFLICT", "Signal materialization audit is malformed.");
+    return materialized.data.success && materialized.data.disposition === "deferred" &&
+      materialized.data.target_kind === "deferred" ? triage.revision : null;
+  }
+
+  /** Old concurrent attempts can hide behind DEFERRED even after another attempt completed. */
+  public static async legacyMaterializationMayHaveRun(
+    dependencies: Pick<SignalServiceDependencies, "eventLogRepo" | "sourceGroundingDeferQueue">,
+    signal: CandidateMemorySignal
+  ): Promise<boolean> {
+    if (dependencies.sourceGroundingDeferQueue?.get(signal.workspace_id, signal.signal_id) != null) return true;
+    for (const type of [SignalEventType.SOUL_SIGNAL_MATERIALIZED, SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED]) {
+      if ((await readSignalEventsByType(dependencies, signal.signal_id, type, null, 1)).length > 0) return true;
+    }
+    let before: number | null = null;
+    for (;;) {
+      const page = await readSignalEventsByType(dependencies, signal.signal_id, SignalEventType.SOUL_SIGNAL_TRIAGED, before, 100);
+      if (before === null && page.length === 0) return true;
+      for (const event of page) {
+        const triage = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
+        if (!triage.success || event.workspace_id !== signal.workspace_id || event.run_id !== signal.run_id ||
+            triage.data.signal_id !== signal.signal_id || triage.data.workspace_id !== signal.workspace_id ||
+            triage.data.run_id !== signal.run_id) return true;
+        if (triage.data.triage_result === "accepted") return true;
+      }
+      if (page.length < 100) return false;
+      before = page[page.length - 1]!.revision;
+    }
+  }
+
   private readonly warn: SignalServiceWarnPort;
+  private closing = false;
+  private readonly executions = new Set<Promise<unknown>>();
+
+  /** Drain all accepted signal effects before SQLite and the OS runtime lease release. */
+  public async close(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled([...this.executions]);
+  }
+
+  private track<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new CoreError("CONFLICT", "Signal service is closing."));
+    const result = operation();
+    this.executions.add(result);
+    void result.finally(() => this.executions.delete(result)).catch(() => undefined);
+    return result;
+  }
 
   public constructor(private readonly dependencies: SignalServiceDependencies) {
     this.warn = dependencies.warn ?? ((message, meta) => diagnosticWarn(message, meta));
@@ -103,7 +168,11 @@ export class SignalService {
     }
   }
 
-  public async receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
+  public receiveSignal(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
+    return this.track(() => this.receiveSignalOwned(signal));
+  }
+
+  private async receiveSignalOwned(signal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
     if (UnavailableSourceStatementSignalSchema.safeParse(parsedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals are read-only historical identities.");
@@ -166,6 +235,11 @@ export class SignalService {
     signalId: string,
     patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }
   ): Promise<SignalServiceReceiveResult> {
+    return await this.track(() => this.redriveSourceGroundingOwned(workspaceId, signalId, patch));
+  }
+
+  private async redriveSourceGroundingOwned(workspaceId: string, signalId: string,
+    patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }): Promise<SignalServiceReceiveResult> {
     const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
     if (UnavailableSourceStatementSignalSchema.safeParse(persistedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals cannot be redriven.");
@@ -196,18 +270,18 @@ export class SignalService {
     );
   }
 
-  public async reconcileStaleSourceGroundingRedrive(input: {
+  public reconcileStaleSourceGroundingRedrive(input: {
     readonly workspaceId: string;
     readonly signalId: string;
     readonly claimTokenFingerprint: string;
     readonly expectedClaimExpiresAt: string;
     readonly reason: string;
   }): Promise<CandidateMemorySignal> {
-    return await reconcileStaleSourceGroundingClaim({
+    return this.track(() => reconcileStaleSourceGroundingClaim({
       dependencies: this.dependencies,
       warn: this.warn,
       ...input
-    });
+    }));
   }
 
   private async resumeExistingSignal(existingSignal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
@@ -225,19 +299,31 @@ export class SignalService {
       return await this.resumeWritePathDeferredSignal(existingSignal);
     }
 
+    if (existingSignal.signal_state === SignalState.COMPILED) {
+      return await resumeCompiledSignal(this.dependencies, this.warn, existingSignal);
+    }
+
+    if (existingSignal.signal_state === SignalState.FAILED) {
+      return await resumeFailedSignal(this.dependencies, existingSignal);
+    }
+
     if (
-      (existingSignal.signal_state === SignalState.TRIAGED ||
-        existingSignal.signal_state === SignalState.COMPILED) &&
+      existingSignal.signal_state === SignalState.TRIAGED &&
       this.dependencies.postTriageMaterializer !== undefined
     ) {
-      this.warn(
-        "Signal replay found a post-triage signal; not replaying materialization side effects.",
-        buildSignalWarningMeta({
-          phase: "signal_replay",
-          code: "POST_TRIAGE_REPLAY_SKIPPED",
-          detail: `${existingSignal.signal_id}:${existingSignal.signal_state}`
-        })
-      );
+      if (this.dependencies.signalRepo.hasMaterializationLineage?.(existingSignal.signal_id) !== true) {
+        return await resumeCompiledSignal(this.dependencies, this.warn, existingSignal);
+      }
+      const context = await this.resolveStoredEmissionContext(existingSignal);
+      return context === null
+        ? await this.deferUnverifiableEmission(existingSignal)
+        : await materializeAcceptedSignal(
+            this.dependencies,
+            this.warn,
+            existingSignal,
+            "accepted",
+            context
+          );
     }
 
     return {
@@ -250,13 +336,9 @@ export class SignalService {
   private async resumeWritePathDeferredSignal(
     existingSignal: CandidateMemorySignal
   ): Promise<SignalServiceReceiveResult> {
-    const events = await this.dependencies.eventLogRepo.queryByEntity(
-      "candidate_memory_signal",
-      existingSignal.signal_id
-    );
     if (
       this.dependencies.postTriageMaterializer === undefined ||
-      !this.isWritePathDeferredRetryEligible(existingSignal, events)
+      this.dependencies.signalRepo.hasMaterializationLineage?.(existingSignal.signal_id) !== true
     ) {
       return {
         signal: existingSignal,
@@ -264,13 +346,11 @@ export class SignalService {
         materialization: null
       };
     }
-    const emissions = events.filter(
-      (event) => event.event_type === SignalEventType.SOUL_SIGNAL_EMITTED
-    );
-    if (emissions.length !== 1) {
-      return await this.deferUnverifiableEmission(existingSignal);
+    const triageRevision = await SignalService.readWritePathDeferredRetryEvidence(this.dependencies, existingSignal);
+    if (triageRevision === null) {
+      return { signal: existingSignal, triage_result: "deferred", materialization: null };
     }
-    const context = resolveSignalMaterializationContext(existingSignal, emissions[0]!);
+    const context = await this.resolveStoredEmissionContext(existingSignal);
     if (context === null) {
       return await this.deferUnverifiableEmission(existingSignal);
     }
@@ -279,23 +359,10 @@ export class SignalService {
       this.warn,
       existingSignal,
       "accepted",
-      context
+      context,
+      undefined,
+      triageRevision
     );
-  }
-
-  private isWritePathDeferredRetryEligible(
-    signal: CandidateMemorySignal,
-    events: readonly EventLogEntry[]
-  ): boolean {
-    if (
-      this.dependencies.sourceGroundingDeferQueue?.get(signal.workspace_id, signal.signal_id) != null
-    ) {
-      return false;
-    }
-    if (events.some(isSourceGroundingDeferTriageEvent)) {
-      return false;
-    }
-    return events.some(isWritePathDeferTriageEvent) && events.some(isSuccessfulMaterializationEvent);
   }
 
   private async triageAndMaybeMaterialize(
@@ -304,11 +371,13 @@ export class SignalService {
   ): Promise<SignalServiceReceiveResult> {
     const triageResult = evaluateSignalTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
-    const { triagedEvent, triagedSignal } = this.persistTriagedSignal(
-      storedSignal,
-      triagedState,
-      triageResult
-    );
+    const persisted = persistTriagedSignal(this.dependencies, storedSignal, triagedState, triageResult);
+    if (persisted === null) {
+      const current = await this.dependencies.signalRepo.getById(storedSignal.signal_id);
+      if (current === null) throw new CoreError("NOT_FOUND", "Signal disappeared during triage.");
+      return await this.resumeExistingSignal(current);
+    }
+    const { triagedEvent, triagedSignal } = persisted;
 
     if (triagedEvent.run_id !== null) {
       await bindEventPublisher({
@@ -332,52 +401,6 @@ export class SignalService {
       triagedSignal,
       triageResult,
       context
-    );
-  }
-
-  private persistTriagedSignal(
-    storedSignal: CandidateMemorySignal,
-    triagedState: CandidateMemorySignal["signal_state"],
-    triageResult: ReturnType<typeof evaluateSignalTriage>
-  ): {
-    readonly triagedEvent: EventLogEntry;
-    readonly triagedSignal: CandidateMemorySignal;
-  } {
-    const updateStateInCurrentTransaction = this.dependencies.signalRepo.updateStateInCurrentTransaction;
-    if (updateStateInCurrentTransaction === undefined) {
-      throw new CoreError("CONFLICT", "Signal triage transaction port is not available", {
-        subCode: "PORT_UNAVAILABLE"
-      });
-    }
-    return runEventLogTransaction(
-      this.dependencies.eventLogRepo,
-      () => {
-        const triagedEvent = appendMemoryEventLogSynchronously(
-          this.dependencies.eventLogRepo,
-          {
-            event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-            entity_type: "candidate_memory_signal",
-            entity_id: storedSignal.signal_id,
-            workspace_id: storedSignal.workspace_id,
-            run_id: storedSignal.run_id,
-            caused_by: "deterministic_rule",
-            payload_json: SoulSignalTriagedPayloadSchema.parse({
-              signal_id: storedSignal.signal_id,
-              workspace_id: storedSignal.workspace_id,
-              run_id: storedSignal.run_id,
-              triage_result: triageResult
-            })
-          },
-          "Signal triage transaction requires a synchronous EventLog append port."
-        );
-        const triagedSignal = updateStateInCurrentTransaction.call(
-          this.dependencies.signalRepo,
-          storedSignal.signal_id,
-          triagedState
-        );
-        return { triagedEvent, triagedSignal };
-      },
-      "Signal triage requires a transactional EventLog port"
     );
   }
 
@@ -413,32 +436,4 @@ export class SignalService {
       signal
     });
   }
-}
-
-function isSourceGroundingDeferTriageEvent(event: EventLogEntry): boolean {
-  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
-    return false;
-  }
-  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
-  return parsed.success && parsed.data.defer_class === "source_grounding";
-}
-
-function isWritePathDeferTriageEvent(event: EventLogEntry): boolean {
-  if (event.event_type !== SignalEventType.SOUL_SIGNAL_TRIAGED) {
-    return false;
-  }
-  const parsed = SoulSignalTriagedPayloadSchema.safeParse(event.payload_json);
-  return (
-    parsed.success &&
-    parsed.data.defer_class === "write_path" &&
-    parsed.data.deferral !== undefined
-  );
-}
-
-function isSuccessfulMaterializationEvent(event: EventLogEntry): boolean {
-  if (event.event_type !== SignalEventType.SOUL_SIGNAL_MATERIALIZED) {
-    return false;
-  }
-  const parsed = SoulSignalMaterializedPayloadSchema.safeParse(event.payload_json);
-  return parsed.success && parsed.data.success === true;
 }

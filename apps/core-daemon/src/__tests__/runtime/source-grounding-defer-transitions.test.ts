@@ -234,7 +234,7 @@ describe("source-grounding defer transitions", () => {
     ]);
   });
 
-  it("never steals an expired claim and clears it only through audited reconciliation", async () => {
+  it("keeps an expired unfinished claim and reconciles only a witnessed completed attempt", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true);
     expect(harness.transitions.claimRedrive({
       workspace_id: "workspace-1",
@@ -262,6 +262,14 @@ describe("source-grounding defer transitions", () => {
     );
     expect(await signalEvents(harness)).toHaveLength(0);
 
+    expect(() => harness.transitions.reconcileStaleClaim({
+      workspace_id: "workspace-1", signal_id: "signal-1", claim_token_fingerprint: fingerprint("crashed-claim"),
+      claim_expires_at: "2000-01-01T00:00:00.000Z", expired_before: "2026-07-15T00:00:00.000Z",
+      event: normalizedEvent({ reconciliation: "unfinished" })
+    })).toThrow("no completion witness");
+    expect(await signalEvents(harness)).toHaveLength(0);
+    harness.transitions.failRedrive({ workspace_id: "workspace-1", signal_id: "signal-1",
+      claim_token: "crashed-claim", event: failedMaterializationEvent() });
     harness.transitions.reconcileStaleClaim({
       workspace_id: "workspace-1",
       signal_id: "signal-1",
@@ -272,7 +280,7 @@ describe("source-grounding defer transitions", () => {
     });
 
     expect(harness.queueRepo.get("workspace-1", "signal-1")?.claim_token_fingerprint).toBeNull();
-    expect(await signalEvents(harness)).toHaveLength(1);
+    expect(await signalEvents(harness)).toHaveLength(2);
   });
 
   it("rejects a stale reconciler across two file-backed SQLite connections", async () => {
@@ -285,7 +293,8 @@ describe("source-grounding defer transitions", () => {
         claim_expires_at: "2000-01-01T00:00:00.000Z"
       })).not.toBeNull();
       const staleView = harness.second.queueRepo.get("workspace-1", "signal-1")!;
-
+      harness.first.transitions.failRedrive({ workspace_id: "workspace-1", signal_id: "signal-1",
+        claim_token: "first-claim", event: failedMaterializationEvent() });
       reconcile(harness.first.transitions, staleView, "first-claim-cleared");
       expect(harness.first.transitions.claimRedrive({
         workspace_id: "workspace-1",
@@ -305,7 +314,7 @@ describe("source-grounding defer transitions", () => {
       await expect(harness.second.eventLogRepo.queryByEntityAll(
         "candidate_memory_signal",
         "signal-1"
-      )).resolves.toHaveLength(1);
+      )).resolves.toHaveLength(2);
     } finally {
       await harness.close();
     }

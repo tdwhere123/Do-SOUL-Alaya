@@ -7,7 +7,7 @@ import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runti
 const roots = ["a", "b", "c", "d", "e", "f", "g"];
 function association(question: Record<string, number>, links: Record<string, number>): StatementAssociation {
   return { roots, question: roots.map(root => question[root] ?? 0.1),
-    link: roots.map(left => roots.map(right => left === right ? -1 : links[[left, right].sort().join("")] ?? 0.1)) };
+    link: roots.map((left, i) => roots.slice(0, i).map(right => links[[left, right].sort().join("")] ?? 0.1)) };
 }
 
 describe("statement association slot 5", () => {
@@ -34,7 +34,7 @@ describe("statement association slot 5", () => {
   });
   it("restricts by membership without reindexing errors", () => {
     const value = restrictStatementAssociation(association({ a: 0.7, c: 0.2 }, { ac: 0.4 }), root => root === "a" || root === "c");
-    expect(value).toEqual({ roots: ["a", "c"], question: [0.7, 0.2], link: [[-1, 0.4], [0.4, -1]] });
+    expect(value).toEqual({ roots: ["a", "c"], question: [0.7, 0.2], link: [[], [0.4]] });
   });
 });
 
@@ -47,8 +47,8 @@ describe("statement key retention", () => {
     retention.consider("b", 0.4, Float32Array.of(1, 1));
     const value = retention.associate(["a", "b", "c"])!;
     expect(value.question).toEqual([0.19, 0.5, -1]);
-    expect(value.link[0]![1]).toBeCloseTo(Math.SQRT1_2);
-    expect(value.link[0]![2]).toBe(-1);
+    expect(value.link[1]![0]).toBeCloseTo(Math.SQRT1_2);
+    expect(value.link[2]![0]).toBe(-1);
   });
   it("abandons the association and reports the refused phase once when retention is unfunded", () => {
     const refused: string[] = [];
@@ -58,6 +58,50 @@ describe("statement key retention", () => {
     retention.consider("b", 0.5, Float32Array.of(1, 0));
     expect(retention.associate(["a"])).toBeUndefined();
     expect(refused).toEqual(["statement key association retention"]);
+  });
+  it("falls back to exact links if optional comparison scratch cannot be funded", () => {
+    const dimensions = 64, bytes = 2 * (dimensions * 4 + 48) + 3 * 8;
+    const ledger = new SourceSemanticResourceLedger({ work_units: dimensions * 3, memory_bytes: bytes });
+    const refused: string[] = [];
+    const retention = new StatementKeyRetention(ledger, phase => refused.push(phase));
+    retention.consider("a", 0.2, new Float32Array(dimensions).fill(1));
+    retention.consider("b", 0.3, new Float32Array(dimensions).fill(1));
+    expect(retention.associate(["a", "b"])?.link).toEqual([[], [1]]);
+    expect(ledger.spentWork).toBe(dimensions * 3);
+    expect(ledger.spentBytes).toBe(bytes);
+    expect(refused).toEqual([]);
+  });
+  it("leaves a tight shared grant sufficient for retaining the completed association", () => {
+    const ledger = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1220 });
+    const retention = new StatementKeyRetention(ledger, () => { throw new Error("unexpected refusal"); });
+    retention.consider("a", 0.2, Float32Array.of(1, 0, 0, 0));
+    retention.consider("b", 0.3, Float32Array.of(1, 0, 0, 0));
+    const value = retention.associate(["a", "b"]);
+    expect(value).toBeDefined();
+    ledger.retain(value, "retained association");
+    expect(ledger.spentBytes).toBeLessThanOrEqual(1220);
+  });
+  it("does not spend optional inspection work before mixed-dimension exact fallback", () => {
+    const ledger = new SourceSemanticResourceLedger({ work_units: 24588, memory_bytes: 100_000 });
+    const refused: string[] = [], retention = new StatementKeyRetention(ledger, phase => refused.push(phase));
+    retention.consider("a", 0.2, new Float32Array(4).fill(1));
+    retention.consider("b", 0.3, new Float32Array(8192).fill(1));
+    retention.consider("c", 0.4, new Float32Array(8192).fill(1));
+    const value = retention.associate(["a", "b", "c"]);
+    expect(value?.link).toHaveLength(3);
+    expect(value?.link[2]?.[1]).toBeCloseTo(1);
+    expect(ledger.spentWork).toBe(24588);
+    expect(refused).toEqual([]);
+  });
+  it("reports a link refusal without returning partial associations", () => {
+    const dimensions = 4, ledger = new SourceSemanticResourceLedger({ work_units: dimensions * 2,
+      memory_bytes: 2 * (dimensions * 4 + 48) + 3 * 8 });
+    const refused: string[] = [], retention = new StatementKeyRetention(ledger, phase => refused.push(phase));
+    retention.consider("a", 0.2, Float32Array.of(1, 0, 0, 0));
+    retention.consider("b", 0.3, Float32Array.of(1, 0, 0, 0));
+    expect(retention.associate(["a", "b"])).toBeUndefined();
+    expect(ledger.spentWork).toBe(dimensions * 2);
+    expect(refused).toEqual(["statement key association link"]);
   });
   it("stays within its quote when every window is retained and every root pair linked", () => {
     const dimensions = 4, windows = 40, rootKeys = ["a", "b", "c"];
@@ -77,7 +121,7 @@ describe("field access with association", () => {
       lane: lane as NativeRouteLane["lane"], scope: "q",
       ...(i === 0 ? { state: "exact-captured" as const, occurrences } : { state: "measured-empty" as const }) }));
     const value: StatementAssociation = { roots: ["a", "b", "c", "d", "e", "f"], question: [0.5, 0.5, 0.5, 0.5, 0.1, 0.2],
-      link: Array.from({ length: 6 }, (_, i) => Array.from({ length: 6 }, (_, j) => i === j ? -1 : 0.3)) };
+      link: Array.from({ length: 6 }, (_, i) => Array<number>(i).fill(0.3)) };
     const input = { lanes, memory: { lane: "memory-lexical" as const, scope: "q", state: "exact-captured" as const, occurrences: memory },
       pool: [...occurrences.map(row => row.root_key), "m"].map(record_id => ({ record_id, catalog_position: null })),
       acquired_root_keys: [...occurrences.map(row => row.root_key), "m"],
@@ -87,7 +131,16 @@ describe("field access with association", () => {
     expect(result.status).toBe("ordered");
     if (result.status !== "ordered") throw new Error("expected total order");
     expect(result.record_ids).toEqual(["a", "m", "b", "c", "d", "f", "e"]);
-    const asymmetric = { ...value, link: value.link.map((row, i) => i === 0 ? row.map((v, j) => j === 1 ? 0.9 : v) : row) };
-    expect(() => orderNativeFieldAccess({ ...input, association: asymmetric })).toThrow(/symmetric link/u);
+    const malformed = { ...value, link: value.link.map((row, i) => i === 0 ? [0.9] : row) };
+    expect(() => orderNativeFieldAccess({ ...input, association: malformed })).toThrow(/triangular link/u);
+    const missingSlot = structuredClone(value);
+    delete (missingSlot.link[5] as number[])[0];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingSlot })).toThrow(/triangular link/u);
+    const missingRow = structuredClone(value);
+    delete (missingRow.link as number[][])[5];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingRow })).toThrow(/triangular link/u);
+    const missingQuestion = structuredClone(value);
+    delete (missingQuestion.question as number[])[5];
+    expect(() => orderNativeFieldAccess({ ...input, association: missingQuestion })).toThrow(/triangular link/u);
   });
 });

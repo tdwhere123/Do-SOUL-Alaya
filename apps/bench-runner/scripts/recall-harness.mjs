@@ -41,14 +41,6 @@ process.on("exit", () => {
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "../dist");
 const repo = resolve(here, "../../..");
-const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
-const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
-const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
-const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
-const { chainIdentity } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
-const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
-const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
-
 const { values } = parseArgs({ options: {
   out: { type: "string" }, arms: { type: "string" }, limit: { type: "string" }, ids: { type: "string" },
   coordinates: { type: "string" }, cache: { type: "string" }, dataset: { type: "string" }, model: { type: "string" }, shard: { type: "string" },
@@ -58,30 +50,11 @@ const { values } = parseArgs({ options: {
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
   reader: { type: "string", default: "current" }
 } });
+if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
 if (!["current", "end_continuation"].includes(values.reader)) throw new AlayaError("VALIDATION", "--reader must be current or end_continuation");
 if (values["diagnostic-vectors"] && !values["capture-pool"]) throw new AlayaError("VALIDATION", "--diagnostic-vectors requires --capture-pool");
-const captureRecallPool = values["capture-pool"] ? (await import("./recall-harness-pool.mjs")).captureRecallPool : undefined;
-const diagnosticVectors = await loadRecallVectorCache(values["diagnostic-vectors"]);
-if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
-const out = resolve(values.out);
-const arms = JSON.parse(readFileSync(values.arms, "utf8"));
 const lexicalPreparation = values["source-lexical-work"] === undefined ? undefined
   : captureSourceIndexLexicalPreparationAllocation({ work: Number(values["source-lexical-work"]) });
-if (lexicalPreparation !== undefined && arms.some(arm => arm.lexical === undefined)) {
-  throw new AlayaError("VALIDATION", "--source-lexical-work requires an explicit lexical representation on every arm");
-}
-// Round roots are host-session captures; line-only sources without host structure are retired.
-if (arms.some(arm => arm.host === false)) throw new AlayaError("VALIDATION", "arms without host capture are retired");
-if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new AlayaError("VALIDATION", "question_time requires --coordinates");
-const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
-const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
-if (coordinates.size !== coordinateRows.length) throw new AlayaError("VALIDATION", "duplicate frozen question coordinates");
-const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data/longmemeval/longmemeval_s.json"));
-const pinnedMeta = join(repo, "docs/bench-history/datasets");
-const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
-const cacheRoot = resolve(values.cache ?? join(repo, "../../.do-it/bench-runs/recall-harness/cache"));
-const memory = { cache_root: resolve(values["model-cache"] ?? join(process.env.HOME, ".cache/do-soul-alaya/models")),
-  model_id: values.model ?? "Xenova/paraphrase-multilingual-MiniLM-L12-v2" };
 for (const name of ["model", "model-cache", "model-artifact-digest", "source-model", "source-cache", "source-artifact-digest"]) {
   if (values[name] === "") throw new AlayaError("VALIDATION", `--${name} must not be empty`);
 }
@@ -98,6 +71,35 @@ if (values["model-artifact-digest"] && !/^sha256:[a-f0-9]{64}$/u.test(values["mo
 if (sourceOptions.every(Boolean) && !values["model-artifact-digest"]) {
   throw new AlayaError("VALIDATION", "separate Source execution requires the Memory artifact digest");
 }
+
+// Reject invalid invocations before loading the daemon and native runtime graph.
+const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
+const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
+const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
+const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
+const { chainIdentity } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
+const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
+const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
+
+const captureRecallPool = values["capture-pool"] ? (await import("./recall-harness-pool.mjs")).captureRecallPool : undefined;
+const diagnosticVectors = await loadRecallVectorCache(values["diagnostic-vectors"]);
+const out = resolve(values.out);
+const arms = JSON.parse(readFileSync(values.arms, "utf8"));
+if (lexicalPreparation !== undefined && arms.some(arm => arm.lexical === undefined)) {
+  throw new AlayaError("VALIDATION", "--source-lexical-work requires an explicit lexical representation on every arm");
+}
+// Round roots are host-session captures; line-only sources without host structure are retired.
+if (arms.some(arm => arm.host === false)) throw new AlayaError("VALIDATION", "arms without host capture are retired");
+if (arms.some(arm => arm.question_time === true) && !values.coordinates) throw new AlayaError("VALIDATION", "question_time requires --coordinates");
+const coordinateRows = values.coordinates ? readFileSync(resolve(values.coordinates), "utf8").trim().split("\n").map(JSON.parse) : [];
+const coordinates = new Map(coordinateRows.map(row => [row.question_id, row]));
+if (coordinates.size !== coordinateRows.length) throw new AlayaError("VALIDATION", "duplicate frozen question coordinates");
+const datasetPath = resolve(values.dataset ?? join(repo, "apps/bench-runner/data/longmemeval/longmemeval_s.json"));
+const pinnedMeta = join(repo, "docs/bench-history/datasets");
+const cohort = JSON.parse(readFileSync(join(pinnedMeta, "longmemeval_s.stratified-100.v1.json"), "utf8"));
+const cacheRoot = resolve(values.cache ?? join(repo, "../../.do-it/bench-runs/recall-harness/cache"));
+const memory = { cache_root: resolve(values["model-cache"] ?? join(process.env.HOME, ".cache/do-soul-alaya/models")),
+  model_id: values.model ?? "Xenova/paraphrase-multilingual-MiniLM-L12-v2" };
 const execution = sourceOptions.every(Boolean) ? { cache_root: resolve(values["source-cache"]),
   model_id: values["source-model"], source_scope: "separate", artifact_digest: values["source-artifact-digest"],
   memory: { ...memory, artifact_digest: values["model-artifact-digest"] },

@@ -364,7 +364,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       apply: vi.fn(async () => undefined)
     }),
     SignalService: makeClass({
-      receiveSignal: vi.fn(async () => undefined)
+      receiveSignal: vi.fn(async () => undefined),
+      // Shutdown drains accepted effects before SQLite and the runtime lease release.
+      close: vi.fn(async () => undefined)
     }),
     SlashCommandService: makeClass(),
     SlotService: makeClass(),

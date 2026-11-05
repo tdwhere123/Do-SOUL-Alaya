@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CandidateMemorySignalContentSchema } from "../signals/candidate-memory-signal.js";
 import { BoundedIdSchema, BoundedJsonObjectSchema, BoundedLabelSchema, BoundedReasonSchema, IsoDatetimeStringSchema, NonNegativeIntSchema, boundedJsonObjectSchema } from "../shared/schema-primitives.js";
-import { EdgeClassifyVerdictSchema } from "../garden/garden-tier.js";
+import { EdgeClassifyVerdictSchema, GardenTaskOutcomeSchema } from "../garden/garden-tier.js";
 import { SOURCE_STATEMENT_LIMITS } from "../garden/source-statements.js";
 
 const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
@@ -37,9 +37,21 @@ export const GardenPendingTaskSnapshotSchema = z
   .strict()
   .readonly();
 
+const GardenEmbeddingFollowUpSnapshotSchema = z.object({
+  task_id: BoundedIdSchema,
+  state: z.enum(["pending", "blocked"]),
+  in_flight: z.boolean(),
+  attempt_count: NonNegativeIntSchema,
+  reason: BoundedLabelSchema.nullable(),
+  parent_outcome: GardenTaskOutcomeSchema.nullable()
+}).strict().readonly();
+
 export const GardenListPendingTasksResponseSchema = z
   .object({
-    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly()
+    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly(),
+    // Omitted by an older or unmeasured implementation; [] is a measured empty list.
+    embedding_follow_ups: z.array(GardenEmbeddingFollowUpSnapshotSchema).readonly().optional(),
+    embedding_follow_ups_truncated: z.boolean().optional()
   })
   .strict()
   .readonly();
@@ -113,8 +125,11 @@ export const GardenCompleteTaskResponseSchema = z
   .object({
     task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
+    outcome: GardenTaskOutcomeSchema.optional(),
     events_appended: NonNegativeIntSchema,
-    failed_candidate_signals_count: NonNegativeIntSchema.optional()
+    failed_candidate_signals_count: NonNegativeIntSchema.optional(),
+    unknown_candidate_signals_count: NonNegativeIntSchema.optional(),
+    inflight_candidate_signals_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

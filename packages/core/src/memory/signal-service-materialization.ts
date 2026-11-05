@@ -1,226 +1,85 @@
 import {
-  readErrorMessage,
-  SignalState,
-  type CandidateMemorySignal,
-  type EventLogEntry
+  readErrorMessage, SignalState, type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
+import { buildSignalWarningMeta } from "./signal-service-helpers.js";
 import {
-  buildSignalWarningMeta
-} from "./signal-service-helpers.js";
-import {
-  buildSignalMaterializationEvent,
   completeDeferredMaterialization,
   completeSuccessfulSourceGroundingRedrive,
   recordFailedSourceGroundingRedrive
 } from "./signal-service-grounding-defer.js";
 import type {
-  SignalMaterializationContext,
-  SignalMaterializationFailureResult,
-  SignalMaterializationResult,
-  SignalServiceDependencies,
-  SignalServicePostTriageMaterializer,
-  SignalServiceReceiveResult,
-  SignalServiceWarnPort,
-  SignalTriageResult
+  SignalMaterializationContext, SignalMaterializationResult, SignalServiceDependencies,
+  SignalServiceReceiveResult, SignalServiceWarnPort, SignalTriageResult
 } from "./signal-service-types.js";
-import { bindEventPublisher } from "../runtime/event-publisher.js";
-
-export interface MaterializationAttempt {
-  readonly materializingSignal: CandidateMemorySignal;
-  readonly materialization: SignalMaterializationResult;
-  readonly caughtMaterializationError: boolean;
-}
+import { commitSignalMaterializationOutcome, requireSignalStateCas } from "./signal-materialization-outcome.js";
+import { CoreError } from "../shared/errors.js";
+export { resumeCompiledSignal, resumeFailedSignal } from "./signal-materialization-recovery.js";
+import { resumeCompiledSignal, resumeFailedSignal } from "./signal-materialization-recovery.js";
 
 export async function materializeAcceptedSignal(
   dependencies: SignalServiceDependencies,
   warn: SignalServiceWarnPort,
-  triagedSignal: CandidateMemorySignal,
+  signal: CandidateMemorySignal,
   triageResult: SignalTriageResult,
   context: SignalMaterializationContext,
-  claimToken?: string
+  claimToken?: string,
+  expectedTriageRevision?: number
 ): Promise<SignalServiceReceiveResult> {
   const materializer = dependencies.postTriageMaterializer;
-  if (materializer === undefined) {
-    return {
-      signal: triagedSignal,
-      triage_result: triageResult,
-      materialization: null
-    };
+  if (materializer === undefined) return { signal, triage_result: triageResult, materialization: null };
+  if (claimToken === undefined && signal.signal_state !== SignalState.TRIAGED && signal.signal_state !== SignalState.DEFERRED) {
+    throw new CoreError("CONFLICT", "Materialization requires an unclaimed triaged or eligible deferred signal.");
   }
+  // The source-grounding redrive has its own durable claim and stays DEFERRED.
+  const claimed = claimToken !== undefined ? signal : requireSignalStateCas(dependencies)({
+    signalId: signal.signal_id, workspaceId: signal.workspace_id,
+    expectedState: signal.signal_state, nextState: SignalState.COMPILED,
+    ...(expectedTriageRevision === undefined ? {} : { expectedTriageRevision })
+  });
+  if (claimed === null) return await resumeLostClaim(dependencies, warn, signal);
 
-  const attempt = await runMaterializationAttempt(
-    dependencies,
-    warn,
-    triagedSignal,
-    materializer,
-    context,
-    claimToken !== undefined
-  );
-  return await completeMaterializationAttempt(
-    dependencies,
-    warn,
-    triagedSignal,
-    triageResult,
-    attempt,
-    claimToken
-  );
-}
-
-async function completeMaterializationAttempt(
-  dependencies: SignalServiceDependencies,
-  warn: SignalServiceWarnPort,
-  triagedSignal: CandidateMemorySignal,
-  triageResult: SignalTriageResult,
-  attempt: MaterializationAttempt,
-  claimToken?: string
-): Promise<SignalServiceReceiveResult> {
-  if (attempt.materialization.success !== true) {
-    if (claimToken !== undefined) {
-      return await recordFailedSourceGroundingRedrive({
-        dependencies,
-        warn,
-        signal: attempt.materializingSignal,
-        materialization: attempt.materialization,
-        claimToken
-      });
-    }
-    await appendMaterializationEvent(
-      dependencies,
-      triagedSignal,
-      attempt.materialization
-    );
-    return await completeFailedMaterialization(dependencies, warn, triageResult, attempt);
-  }
-
-  if (attempt.materialization.target_kind === "deferred") {
-    return await completeDeferredMaterialization({
-      dependencies,
-      warn,
-      signal: attempt.materializingSignal,
-      materialization: attempt.materialization,
-      ...(claimToken === undefined ? {} : { claimToken })
-    });
-  }
-
-  if (claimToken !== undefined) {
-    return await completeSuccessfulSourceGroundingRedrive({
-      dependencies,
-      warn,
-      signal: attempt.materializingSignal,
-      materialization: attempt.materialization,
-      claimToken
-    });
-  }
-  await appendMaterializationEvent(
-    dependencies,
-    triagedSignal,
-    attempt.materialization
-  );
-  return await completeSuccessfulMaterialization(dependencies, triageResult, attempt);
-}
-
-async function runMaterializationAttempt(
-  dependencies: SignalServiceDependencies,
-  warn: SignalServiceWarnPort,
-  triagedSignal: CandidateMemorySignal,
-  materializer: SignalServicePostTriageMaterializer,
-  context: SignalMaterializationContext,
-  alreadyClaimed: boolean
-): Promise<MaterializationAttempt> {
-  const materializingSignal = alreadyClaimed
-    ? triagedSignal
-    : await dependencies.signalRepo.updateState(triagedSignal.signal_id, SignalState.COMPILED);
-
+  let result: SignalMaterializationResult;
   try {
-    return {
-      materializingSignal,
-      materialization: await materializer.materialize(materializingSignal, context),
-      caughtMaterializationError: false
-    };
+    result = await materializer.materialize(claimed, context);
   } catch (error) {
-    const materialization = {
-      signal_id: triagedSignal.signal_id,
-      target_kind: "evidence_only",
-      routing_reason: "materialization_exception",
-      created_objects: [],
-      success: false,
-      error: readErrorMessage(error, "Unknown materialization error")
-    } satisfies SignalMaterializationFailureResult;
-
-    warn(
-      "Signal materialization failed.",
-      buildSignalWarningMeta({
-        phase: "materialization",
-        code: "MATERIALIZER_THROW",
-        detail: readErrorMessage(error, "Unknown materialization error")
-      })
-    );
-
-    return {
-      materializingSignal,
-      materialization,
-      caughtMaterializationError: true
+    result = {
+      signal_id: signal.signal_id, target_kind: "unknown", routing_reason: "materialization_exception",
+      created_objects: [], success: false, error: readErrorMessage(error, "Unknown materialization error")
     };
+    warn("Signal materialization failed.", buildSignalWarningMeta({
+      phase: "materialization", code: "MATERIALIZER_THROW", detail: result.error
+    }));
   }
+  if (claimToken !== undefined && !result.success) {
+    return await recordFailedSourceGroundingRedrive({ dependencies, warn, signal: claimed,
+      materialization: result, claimToken });
+  }
+  if (result.success && result.target_kind === "deferred") {
+    return await completeDeferredMaterialization({ dependencies, warn, signal: claimed,
+      materialization: result, ...(claimToken === undefined ? {} : { claimToken }) });
+  }
+  if (claimToken !== undefined) {
+    return await completeSuccessfulSourceGroundingRedrive({ dependencies, warn, signal: claimed,
+      materialization: result, claimToken });
+  }
+  if (!result.success && result.routing_reason !== "materialization_exception") {
+    warn("Signal materialization returned unsuccessful result.", buildSignalWarningMeta({
+      phase: "materialization", code: "MATERIALIZATION_UNSUCCESSFUL",
+      detail: result.error, itemCount: result.created_objects.length
+    }));
+  }
+  return await commitSignalMaterializationOutcome(dependencies, claimed, result);
 }
 
-async function appendMaterializationEvent(
-  dependencies: SignalServiceDependencies,
-  triagedSignal: CandidateMemorySignal,
-  materialization: SignalMaterializationResult
-): Promise<EventLogEntry> {
-  return await bindEventPublisher({
-    eventLogRepo: dependencies.eventLogRepo,
-    runtimeNotifier: dependencies.runtimeNotifier,
-    purpose: "SignalService"
-  }).publish(buildSignalMaterializationEvent(triagedSignal, materialization));
-}
-
-async function completeFailedMaterialization(
+async function resumeLostClaim(
   dependencies: SignalServiceDependencies,
   warn: SignalServiceWarnPort,
-  triageResult: SignalTriageResult,
-  attempt: MaterializationAttempt
+  signal: CandidateMemorySignal
 ): Promise<SignalServiceReceiveResult> {
-  const failedSignal = await dependencies.signalRepo.updateState(
-    attempt.materializingSignal.signal_id,
-    SignalState.FAILED
-  );
-
-  if (!attempt.caughtMaterializationError) {
-    warn(
-      "Signal materialization returned unsuccessful result.",
-      buildSignalWarningMeta({
-        phase: "materialization",
-        code: "MATERIALIZATION_UNSUCCESSFUL",
-        detail: attempt.materialization.success
-          ? attempt.materialization.routing_reason
-          : attempt.materialization.error,
-        itemCount: attempt.materialization.created_objects.length
-      })
-    );
-  }
-
-  return {
-    signal: failedSignal,
-    triage_result: triageResult,
-    materialization: attempt.materialization
-  };
-}
-
-async function completeSuccessfulMaterialization(
-  dependencies: SignalServiceDependencies,
-  triageResult: SignalTriageResult,
-  attempt: MaterializationAttempt
-): Promise<SignalServiceReceiveResult> {
-  const materializedSignal = await dependencies.signalRepo.updateState(
-    attempt.materializingSignal.signal_id,
-    SignalState.MATERIALIZED
-  );
-
-  return {
-    signal: materializedSignal,
-    triage_result: triageResult,
-    materialization: attempt.materialization
-  };
+  const current = await dependencies.signalRepo.getById(signal.signal_id);
+  if (current?.signal_state === SignalState.COMPILED) return await resumeCompiledSignal(dependencies, warn, current);
+  if (current?.signal_state === SignalState.FAILED) return await resumeFailedSignal(dependencies, current);
+  return { signal: current ?? signal,
+    triage_result: current?.signal_state === SignalState.MATERIALIZED ? "accepted" : "deferred",
+    materialization: null };
 }

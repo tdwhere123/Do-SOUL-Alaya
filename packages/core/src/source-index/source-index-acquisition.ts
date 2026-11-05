@@ -12,7 +12,7 @@ import {
   type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest,
   type SourceSemanticNominationOccurrence
 } from "@do-soul/alaya-protocol";
-import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
+import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
@@ -345,7 +345,7 @@ class AcquisitionQuery {
   private nativeBytes = 0;
   private navigationDigest: string | null = null;
   private queryVector: Float32Array | null = null;
-  private scoreVector: ((right: Float32Array) => number) | null = null;
+  private scoreVector: ((right: Float32Array) => number | null) | null = null;
   private vectorBinding: SourceIndexVectorBinding | null = null;
   private lexicalCandidates: readonly SourceIndexLexicalCandidate[] = [];
   private vectorCandidates: readonly ScoredRoot[] = [];
@@ -523,7 +523,7 @@ class AcquisitionQuery {
       this.unavailableVector("invalid_query_vector"); return;
     }
     this.queryVector = new Float32Array(vector.embedding);
-    this.scoreVector = createCosineBatchScorer(this.queryVector);
+    this.scoreVector = createValidatedCosineBatchScorer(this.queryVector);
     this.vector = { ...this.vector, reason: null, validation: "validated" };
   }
 
@@ -613,11 +613,11 @@ class AcquisitionQuery {
   private considerVector(best: Map<string, ScoredRoot>, candidate: SourceIndexVectorCandidate): void {
     const dimensions = this.queryVector!.length;
     this.meter.charge(VECTOR_COST.validation_per_dimension * dimensions, 0, "source vector validation and cosine");
-    if (candidate.embedding.length !== dimensions || !isFiniteNonzeroVector(candidate.embedding)) {
+    const cosine = this.scoreVector!(candidate.embedding);
+    if (cosine === null) {
       this.vector = { ...this.vector, completion: "partial", reason: "invalid_vectors",
         invalid_windows: this.vector.invalid_windows + 1 }; return;
     }
-    const cosine = this.scoreVector!(candidate.embedding);
     if (!Number.isFinite(cosine)) return;
     if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding);
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),

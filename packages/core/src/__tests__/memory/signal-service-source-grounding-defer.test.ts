@@ -10,7 +10,7 @@ import {
   type SourceGroundingDeferTransitionPort
 } from "../../memory/signal-service.js";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { atomicUpdateState, createSignal } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalEventPage } from "./signal-service.test-support.js";
 function createDeferredMaterialization(reason: string) {
   return {
     signal_id: "signal-1",
@@ -145,6 +145,7 @@ function createHarness(options?: {
           (event) => event.entity_type === entityType && event.entity_id === entityId
         )
       ),
+      queryByEntityTypeBefore: signalEventPage(() => appendedEvents),
       transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {

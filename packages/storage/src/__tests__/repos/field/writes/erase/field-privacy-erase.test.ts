@@ -248,6 +248,30 @@ describe("field privacy erase", () => {
     }
   );
 
+  it("blocks a pending embedding follow-up and erases its source-derived digests with the source", () => {
+    const environment = createEnvironment(openFieldDatabase());
+    const graph = seedSourceGraph(environment);
+    seedDerivedPrivacyClosure(environment.database, graph.evidenceId);
+    const db = environment.database.connection;
+    db.prepare(`INSERT INTO garden_tasks (id, workspace_id, role, kind, payload_json, status, created_at)
+      VALUES ('embedding-task', 'workspace-1', 'librarian', 'embedding_backfill', '{}', 'failed', ?)` ).run(CLOCK);
+    db.prepare(`INSERT INTO garden_embedding_backfill_runs
+      (task_id, workspace_id, state, mode, plan_digest, updated_at)
+      VALUES ('embedding-task', 'workspace-1', 'pending', 'production', ?, ?)` ).run("a".repeat(64), CLOCK);
+    db.prepare(`INSERT INTO garden_embedding_backfill_objects (task_id, object_id, content_hash)
+      VALUES ('embedding-task', ?, 'sha256:private')`).run(DERIVED_MEMORY_ID);
+
+    environment.erase.apply(barrier(graph.record.record_id));
+
+    expect(db.prepare("SELECT state, plan_digest, last_error FROM garden_embedding_backfill_runs WHERE task_id = ?")
+      .get("embedding-task")).toEqual({ state: "blocked", plan_digest: null, last_error: "source_unavailable" });
+    expect(db.prepare("SELECT content_hash FROM garden_embedding_backfill_objects WHERE task_id = ?")
+      .get("embedding-task")).toEqual({ content_hash: "erased" });
+    expect(readDerivedPrivacyState(environment.database)).toMatchObject({
+      memory: { content: "erased", lifecycle_state: "tombstone" }
+    });
+  });
+
   it("rolls back the barrier and every scrub when a derived delete fails", () => {
     const environment = createEnvironment(openFieldDatabase());
     const graph = seedSourceGraph(environment);

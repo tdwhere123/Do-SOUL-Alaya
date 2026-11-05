@@ -84,6 +84,8 @@ export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
   visited_roots: number;
   capture_pages: number;
   reclamation: Readonly<{ pages: number; projections: number; targets: number; generations: number }>;
+  vector_reclamation: Readonly<{ status: "not_run" | "available" | "unavailable";
+    pages: number; vectors: number; windows: number; targets: number; generations: number }>;
   limits: SourceIndexProducerLimits;
 }>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
@@ -96,6 +98,8 @@ type Pass = {
   capturePages: number;
   visitedRoots: number;
   reclamation: { pages: number; projections: number; targets: number; generations: number };
+  vectorReclamation: { status: "not_run" | "available" | "unavailable";
+    pages: number; vectors: number; windows: number; targets: number; generations: number };
   limits: SourceIndexProducerLimits;
 };
 
@@ -117,7 +121,8 @@ export class SourceIndexProducer {
   private started = false;
   private stopping = false;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private inFlight: Promise<SourceIndexProducerPassReceipt | SourceIndexLexicalPassResult> | null = null;
+  private inFlight: Promise<SourceIndexProducerPassReceipt> | null = null;
+  private lexicalWork: Promise<SourceIndexLexicalPassResult> | null = null;
   private signal = new AbortController();
   // A caller timeout is not native settlement. Only the shared provider lifecycle can kill it.
   private readonly nativeWork = new Set<Promise<unknown>>();
@@ -159,7 +164,7 @@ export class SourceIndexProducer {
     this.started = false;
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
     this.signal.abort();
-    if (this.inFlight !== null) await this.inFlight;
+    await Promise.all([this.inFlight, this.lexicalWork].filter(work => work !== null));
   }
 
   public async runPass(remaining?: SourceIndexProducerPassRemaining, representation?: SourceEmbeddingRepresentation,
@@ -168,12 +173,13 @@ export class SourceIndexProducer {
     const capturedRepresentation = representation === undefined ? undefined
       : SourceEmbeddingRepresentationSchema.parse(structuredClone(representation));
     const limits = restrictPassLimits(this.limits, remaining);
-    if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping && !this.started) {
+    if (this.inFlight !== null || this.stopping && !this.started) {
       return { status: this.stopping ? "stopped" : "busy", reason: this.stopping ? "producer_stopped" : "producer_occupied",
         binding: { status: "not_run" },
         resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
         accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
-        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
+        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
+        vector_reclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
@@ -188,7 +194,7 @@ export class SourceIndexProducer {
     remaining?: SourceIndexProducerPassRemaining,
     allocation?: SourceIndexLexicalPreparationAllocation): Promise<SourceIndexLexicalProducerPassReceipt> {
     const captured = allocation === undefined ? undefined : captureSourceIndexLexicalPreparationAllocation(allocation);
-    if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping) {
+    if (this.lexicalWork !== null || this.stopping) {
       throw new AlayaError("CONFLICT", this.stopping ? "producer_stopped" : "producer_occupied");
     }
     const limits = restrictPassLimits(captured === undefined ? this.limits : { ...this.limits, work: captured.work }, remaining);
@@ -199,13 +205,13 @@ export class SourceIndexProducer {
       work: limits.work, native_bytes: limits.nativeBytes, capture_page: limits.capturePage,
       max_capture_pages: limits.maxCapturePages, max_roots: limits.maxRootsPerPass, max_body_bytes: limits.maxBodyBytes
     }, signal, deadlineMs));
-    this.inFlight = work;
+    this.lexicalWork = work;
     try {
       const result = await work;
       return captured === undefined ? result : { ...result,
         preparation_allocation: { requested_work: captured.work, effective_work: limits.work } };
     }
-    finally { if (this.inFlight === work) this.inFlight = null; }
+    finally { if (this.lexicalWork === work) this.lexicalWork = null; }
   }
 
   private trackNative<T>(operation: () => Promise<T>): Promise<T> {
@@ -224,7 +230,8 @@ export class SourceIndexProducer {
       deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
       outcome: { status: "settled", reason: "pass_complete" },
       spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0,
-      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 }, limits };
+      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
+      vectorReclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
     try {
       await this.reconcilePass(pass, representation, windowing);
     } catch (error) {
@@ -234,25 +241,25 @@ export class SourceIndexProducer {
       }
       const reason = boundedProducerFailureReason(error instanceof Error ? error.message : String(error));
       pass.outcome = { status: "failed", reason };
-      if (!pass.signal.aborted) this.input.warn("source index producer pass failed", { error: reason });
+      if (!pass.signal.aborted && Date.now() < pass.deadline) this.input.warn("source index producer pass failed", { error: reason });
     } finally { clearTimeout(timer); }
     // A deadline may precede native settlement; these are observed lower bounds, not a native-call census.
     const outcome: PassOutcome = this.signal.signal.aborted ? { status: "stopped", reason: "producer_stopped" }
-      : deadline.signal.aborted ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
+      : deadline.signal.aborted || Date.now() >= pass.deadline ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
     return { ...outcome, binding: pass.binding, resources: { ...pass.spent }, accounting: "lower_bound", limits,
       visited_roots: pass.visitedRoots, capture_pages: pass.capturePages, reclamation: pass.reclamation,
-      model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
+      vector_reclamation: pass.vectorReclamation, model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
   }
 
   private async reconcilePass(pass: Pass, representation?: SourceEmbeddingRepresentation, windowing?: SourceIndexWindowing): Promise<void> {
     if (pass.signal.aborted) return;
-    const binding = await waitLocally(this.trackNative(() => bindIndexProfile(this.input.bindSourceEmbedding,
-      () => !pass.signal.aborted, representation, windowing)), pass.signal);
-    if (pass.signal.aborted) return;
-    pass.binding = binding.status === "ready"
-      ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
-    const tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
-    if (binding.status === "unsupported") pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+    // Start model binding without making it a prerequisite for the first lexical workspace.
+    // A timed-out native operation still owns model occupancy until it actually settles.
+    const pending = this.nativeWork.size > 0 ? null : waitLocally(this.trackNative(() => bindIndexProfile(
+      this.input.bindSourceEmbedding, () => !pass.signal.aborted, representation, windowing)), pass.signal)
+      .then(value => ({ value }), error => ({ error }));
+    if (pending === null) pass.outcome = { status: "busy", reason: "producer_occupied" };
+    let tracked: SourceEmbeddingBindingResult | undefined;
     const seen = new Set<string>();
     let wrapped = false;
     for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
@@ -268,18 +275,29 @@ export class SourceIndexProducer {
       seen.add(workspace);
       // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
       this.afterWorkspace = workspace;
-      if (tracked.status !== "ready") {
-        // Lexical text is model-independent, including when no embedding binding exists.
-        await this.reconcileLexical(workspace, pass);
+      this.reclaimVectors(workspace, pass);
+      const singleSlot = pass.limits.maxRootsPerPass - pass.visitedRoots === 1
+        || pass.limits.maxCapturePages - pass.capturePages === 1;
+      const vectorFirst = pending !== null && singleSlot && this.vectorFirstOnSingleSlot;
+      if (!vectorFirst) await this.reconcileLexical(workspace, pass);
+      if (pass.signal.aborted) return;
+      if (pending === null) continue;
+      if (tracked === undefined) {
+        const result = await pending;
+        if (pass.signal.aborted) return;
+        if ("error" in result) throw result.error;
+        const binding = result.value;
+        pass.binding = binding.status === "ready"
+          ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
+        tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
+        if (binding.status === "unsupported") pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+      }
+      if (tracked.status === "unsupported") {
+        if (vectorFirst) await this.reconcileLexical(workspace, pass);
         if (pass.signal.aborted) return;
         this.lifecycle.unbind(workspace);
         this.targetCursors.delete(workspace);
       } else {
-        const singleSlot = pass.limits.maxRootsPerPass - pass.visitedRoots === 1
-          || pass.limits.maxCapturePages - pass.capturePages === 1;
-        const vectorFirst = singleSlot && this.vectorFirstOnSingleSlot;
-        if (!vectorFirst) await this.reconcileLexical(workspace, pass);
-        if (pass.signal.aborted) return;
         const outcome = await this.reconcileWorkspace(workspace, tracked, pass);
         // Keep normal workspace rotation, but never let a later success erase a terminal refusal.
         if (outcome !== null && pass.outcome.status === "settled") pass.outcome = outcome;
@@ -289,17 +307,37 @@ export class SourceIndexProducer {
     }
   }
 
+  /** One retired-only page per visited workspace, charged before preparation from the shared allowance. */
+  private reclaimVectors(workspaceId: string, pass: Pass): void {
+    const left = remainingBudget(pass.limits, pass.spent);
+    if (pass.limits.maxCapturePages === 0 || left.work < 24 || left.native_bytes < 316) return;
+    const result = this.lifecycle.reclaimVectorPage(workspaceId, pass.limits.capturePage,
+      { work: Math.floor(left.work / 4), native_bytes: Math.floor(left.native_bytes / 4) });
+    pass.spent.work += result.resources.work; pass.spent.native_bytes += result.resources.native_bytes;
+    pass.vectorReclamation.status = result.status;
+    if (result.status === "unavailable") {
+      this.input.warn("source index vector reclamation unavailable", { workspace_id: workspaceId, reason: result.reason });
+      return;
+    }
+    pass.vectorReclamation.pages++;
+    for (const key of ["vectors", "windows", "targets", "generations"] as const) pass.vectorReclamation[key] += result[key];
+  }
+
   /** Takes at most half of what the pass has left so vector preparation after it is never starved. */
   private async reconcileLexical(workspaceId: string, pass: Pass): Promise<void> {
+    if (this.lexicalWork !== null) return;
     const left = remainingBudget(pass.limits, pass.spent);
     const roots = Math.ceil((pass.limits.maxRootsPerPass - pass.visitedRoots) / 2);
     if (left.work < 2 || left.native_bytes < 16 || roots < 1) return;
     // An explicit selection (e.g. a raw rollback) is honored; the default applies only to unselected workspaces.
     const selection = this.repository.lexical.ensureLexicalSelection(workspaceId, SOURCE_INDEX_DEFAULT_LEXICAL_REPRESENTATION);
-    const result = await this.lifecycle.prepareLexical(workspaceId, selection.representation, {
+    const work = this.lifecycle.prepareLexical(workspaceId, selection.representation, {
       work: Math.floor(left.work / 2), native_bytes: Math.floor(left.native_bytes / 2), capture_page: pass.limits.capturePage,
       max_capture_pages: Math.ceil((pass.limits.maxCapturePages - pass.capturePages) / 2),
       max_roots: roots, max_body_bytes: pass.limits.maxBodyBytes }, pass.signal, pass.deadline, selection);
+    this.lexicalWork = work;
+    let result: SourceIndexLexicalPassResult;
+    try { result = await work; } finally { if (this.lexicalWork === work) this.lexicalWork = null; }
     pass.spent.work += result.resources.work;
     pass.spent.native_bytes += result.resources.native_bytes;
     pass.visitedRoots += result.visited_roots;
@@ -393,7 +431,7 @@ export class SourceIndexProducer {
 
   private hasBudget(pass: Pass): boolean {
     const left = remainingBudget(pass.limits, pass.spent);
-    return left.work > 0 && left.native_bytes > 0 && left.model_inputs > 0 && left.input_bytes > 0;
+    return !pass.signal.aborted && Date.now() < pass.deadline && left.work > 0 && left.native_bytes > 0 && left.model_inputs > 0 && left.input_bytes > 0;
   }
 
   private publishIfReady(workspaceId: string, generationId: string): PassOutcome {

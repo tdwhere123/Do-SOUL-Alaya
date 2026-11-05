@@ -11,6 +11,7 @@ import type {
   RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
+import type { GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 
 export type ActiveBankruptcyKind = Exclude<BankruptcyKindValue, "none">;
 
@@ -99,6 +100,7 @@ export interface BudgetBankruptcyServiceDependencies {
   readonly eventLogRepo: BudgetBankruptcyServiceEventLogPort;
   readonly proposalService: BudgetBankruptcyServiceProposalPort;
   readonly runtimeNotifier: BudgetBankruptcyRuntimeNotifierPort;
+  readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly stateStoreMaxEntries?: number;

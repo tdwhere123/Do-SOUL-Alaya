@@ -216,12 +216,22 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
   });
 
 
-  it("soft-skips orphan detection when the optional orphan port is not configured", async () => {
+  it.each([
+    { taskKind: GardenTaskKind.ORPHAN_DETECTION, disabled: true, outcome: "skipped",
+      audit: "orphan_detection: skipped because orphan detection is disabled", error: null },
+    { taskKind: GardenTaskKind.ORPHAN_DETECTION, disabled: false, outcome: "failed",
+      audit: "orphan_detection: port is not configured", error: "orphan detection port is not configured" },
+    { taskKind: GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, disabled: true, outcome: "skipped",
+      audit: "event_log_orphan_detection: skipped because orphan detection is disabled", error: null },
+    { taskKind: GardenTaskKind.EVENT_LOG_ORPHAN_DETECTION, disabled: false, outcome: "failed",
+      audit: "event_log_orphan_detection: port is not configured", error: "event log orphan detection port is not configured" }
+  ] as const)("distinguishes disabled=$disabled from missing $taskKind configuration", async ({ taskKind, disabled, outcome, audit, error }) => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
     const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
+      orphanDetectionDisabled: disabled,
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
@@ -248,13 +258,11 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
       now: () => "2026-03-28T10:00:00.000Z"
     });
 
-    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.ORPHAN_DETECTION }));
+    const result = await auditor.run(createTask({ task_kind: taskKind }));
 
-    expect(result.success).toBe(true);
-    expect(result.objects_affected).toEqual([]);
-    expect(result.audit_entries).toEqual(["orphan_detection: skipped because orphan detection port is not configured"]);
+    expect(result).toMatchObject({ success: disabled, outcome, objects_affected: [], audit_entries: [audit], error_message: error });
     expect(eventLogRepo.append).not.toHaveBeenCalled();
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+    expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
   });
 
 

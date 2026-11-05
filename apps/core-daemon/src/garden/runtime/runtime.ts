@@ -21,6 +21,7 @@ import {
 import { createGardenRuntimeBackgroundServices, BULK_ENRICH_DRAIN_CAP_PER_PASS } from "./runtime-background-services.js";
 import { createHostWorkerTaskRuntimeSupport } from "../host-worker/host-worker-runtime.js";
 import { createGardenSchedulerRuntimeSupport } from "../scheduler/scheduler-runtime-support.js";
+import { EmbeddingBackfillCheckpoint } from "../scheduler/embedding-backfill-checkpoint.js";
 import type {
   ClockBoundGardenRuntimeInput,
   CreateGardenRuntimeInput,
@@ -120,11 +121,13 @@ function createGardenSchedulerRuntime(
 ): ReturnType<typeof createGardenSchedulerRuntimeSupport> {
   return createGardenSchedulerRuntimeSupport({
     now: input.now,
-    coherenceEdgeProducerPort: input.coherenceEdgeProducerPort,
     answersWithEdgeProducerPort: input.answersWithEdgeProducerPort,
     configService: input.configService,
     consolidationExecutor: core.consolidationExecutor,
     embeddingBackfillHandler: input.embeddingBackfillHandler,
+    ...(core.gardenTaskRepo === undefined || typeof input.databaseConnection.transaction !== "function" ? {} : {
+      embeddingBackfillCheckpoint: new EmbeddingBackfillCheckpoint(input.databaseConnection, input.eventPublisher, input.now)
+    }),
     edgeProposalReconcile: input.edgeProposalReconcile,
     enqueueForAllWorkspaces: runtimeSupportContext.enqueueForAllWorkspaces,
     eventPublisher: input.eventPublisher,

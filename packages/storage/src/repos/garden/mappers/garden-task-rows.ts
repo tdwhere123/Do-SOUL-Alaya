@@ -1,6 +1,7 @@
 import {
   GardenRoleSchema,
   GardenTaskKindSchema,
+  GardenTaskOutcomeSchema,
   type GardenRoleValue
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
@@ -23,6 +24,7 @@ export interface GardenTaskDbRow {
   readonly kind: string;
   readonly payload_json: string;
   readonly status: string;
+  readonly outcome: string | null;
   readonly claimed_by: string | null;
   readonly claimed_at: string | null;
   readonly created_at: string;
@@ -59,6 +61,7 @@ export const GardenTaskDbRowParser: RowParser<GardenTaskDbRow> = {
       kind: readNonEmptyStringField(record, "kind"),
       payload_json: readNonEmptyStringField(record, "payload_json"),
       status: readNonEmptyStringField(record, "status"),
+      outcome: readNullableStringField(record, "outcome"),
       claimed_by: readNullableStringField(record, "claimed_by"),
       claimed_at: readNullableStringField(record, "claimed_at"),
       created_at: readNonEmptyStringField(record, "created_at"),
@@ -115,6 +118,7 @@ export function parseGardenTaskRow(row: GardenTaskDbRow): GardenTaskRow {
     payload_json: parseNonEmptyString(row.payload_json, "garden_task.payload_json"),
     payload,
     status: parseStatus(row.status),
+    outcome: row.outcome === null ? null : GardenTaskOutcomeSchema.parse(row.outcome),
     claimed_by: parseNullableString(row.claimed_by, "garden_task.claimed_by"),
     claimed_at: parseNullableString(row.claimed_at, "garden_task.claimed_at"),
     created_at: parseTimestamp(row.created_at),

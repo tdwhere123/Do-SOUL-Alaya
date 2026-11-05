@@ -6,6 +6,7 @@ import {
   indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
   type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, SoulInterpretationFieldRecallDeliverySchema, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION,
+  SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION,
   type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
@@ -316,7 +317,8 @@ export function encodeSourceSemanticLibraryResponse(
     result.source_disclosures);
   const omitted = results.some((row) => !row.budget_state.within_budget);
   const incomplete = omitted || coverage.payload !== "complete";
-  const schema = result.protocol_version === 9 ? SourceSemanticComparisonResponseSchema : SoulInterpretationResponseSchema;
+  const schema = result.protocol_version === SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION
+    ? SourceSemanticComparisonResponseSchema : SoulInterpretationResponseSchema;
   return schema.parse({ operation: "recall", ...rest, results,
     total_count: results.length,
     index: incomplete ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,

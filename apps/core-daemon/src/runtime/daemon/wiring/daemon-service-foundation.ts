@@ -330,6 +330,7 @@ function createGovernanceServices(input: DaemonServiceFoundationInput) {
         now: budgetNow
       }),
       runtimeNotifier: input.runtimeNotifier,
+      runLookup: input.runRepo,
       now: budgetNow
     }),
     projectMappingService: new ProjectMappingService({

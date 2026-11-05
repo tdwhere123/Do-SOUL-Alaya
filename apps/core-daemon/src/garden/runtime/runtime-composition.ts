@@ -238,6 +238,7 @@ export function createGardenRuntimeAuditor(input: Readonly<{
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
     bootstrappingPort: input.gardenDataPorts.bootstrappingPort,
     orphanDetectionPort,
+    orphanDetectionDisabled: !input.orphanDetectionEnabled,
     scheduler: auditorSchedulerPort,
     healthJournal: input.healthJournalPort,
     eventLogRepo: auditorEventLogPort,
@@ -346,6 +347,7 @@ export function createGardenRuntimeLibrarian(input: Readonly<{
   return new Librarian({
     now: input.now,
     neighborPort: input.gardenDataPorts.neighborPort,
+    pathPlasticityDeferredReason: "temporal_assertion_provenance_required",
     synthesisPort: input.gardenDataPorts.synthesisPort,
     pathPlasticityPendingPort: input.gardenSchedulerRuntime.pathPlasticityPendingPort,
     scheduler: librarianSchedulerPort,

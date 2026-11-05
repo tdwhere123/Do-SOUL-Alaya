@@ -310,17 +310,16 @@ function lexicalCandidate(lane: LexicalLane, row: LexicalRow, rank: number, work
   return candidate;
 }
 
-const VECTOR_PAGE_SQL = `SELECT v.window_id,v.dimensions,v.embedding_blob,w.start_byte,w.end_byte,w.content_digest,r.root_key,
-  octet_length(r.target_json) AS target_bytes,
+const VECTOR_PAGE_SQL = `SELECT v.window_id,v.dimensions,v.embedding_blob,w.start_byte,w.end_byte,w.content_digest,v.root_key,
   octet_length(v.window_id)+octet_length(w.content_digest)+24 AS window_bytes
   FROM source_index_vectors v
   JOIN source_index_windows w ON w.workspace_id=v.workspace_id AND w.generation_id=v.generation_id
     AND w.root_key=v.root_key AND w.window_id=v.window_id
   JOIN source_index_targets t ON t.workspace_id=v.workspace_id AND t.generation_id=v.generation_id AND t.root_key=v.root_key
-  JOIN source_index_roots r ON r.workspace_id=v.workspace_id AND r.root_key=v.root_key
   WHERE v.workspace_id=? AND v.generation_id=? AND v.window_id>?
+    AND EXISTS (SELECT 1 FROM source_index_roots r WHERE r.workspace_id=v.workspace_id AND r.root_key=v.root_key)
   ORDER BY v.window_id ASC LIMIT ?`;
-const VECTOR_TARGETS_SQL = `SELECT root_key,target_json FROM source_index_roots
+const VECTOR_TARGETS_SQL = `SELECT root_key,target_json,octet_length(target_json) AS target_bytes FROM source_index_roots
   WHERE workspace_id=? AND root_key IN (SELECT value FROM json_each(?))`;
 
 /** Rows a ledger can still pay for: each needs `headroom` free before it starts and charges at least `charge`.
@@ -329,10 +328,10 @@ function consumableRows(free: number, headroom: number, charge: number): number 
   return free < headroom ? 1 : Math.floor((free - headroom) / charge) + 1;
 }
 
-type VectorWindowRow = Readonly<{ raw: Record<string, unknown>; rootKey: string; blob: Buffer; windowBytes: number; targetBytes: number }>;
+type VectorWindowRow = Readonly<{ raw: Record<string, unknown>; rootKey: string; blob: Buffer; windowBytes: number }>;
 function readVectorWindowRow(raw: Record<string, unknown>): VectorWindowRow {
   return { raw, rootKey: readStringField(raw, "root_key"), blob: readBufferField(raw, "embedding_blob"),
-    windowBytes: readIntegerField(raw, "window_bytes"), targetBytes: readIntegerField(raw, "target_bytes") };
+    windowBytes: readIntegerField(raw, "window_bytes") };
 }
 
 /** Windows are read in pages of one statement; the window key is the continuation and the deterministic order. */
@@ -371,13 +370,9 @@ export function readSourceIndexVectorCandidates(database: StorageDatabase, works
         consumableRows(meter.ledger.bytes, 4160 + 8 * dims, 40 + 8 * dims));
       const rows = page.all(workspaceId, binding.generation_id, next?.after_window_id ?? "", size)
         .map(item => readVectorWindowRow(readRecord(item, "source vector candidate")));
-      // Only the first window of a root not yet owned carries its target; owned roots never re-read it.
+      // Fetch and size target JSON once per unowned root, not once per vector window.
       const pending = new Set<string>();
-      const costs = rows.map(row => {
-        const carries = !pending.has(row.rootKey) && !parsedTargets.has(row.rootKey) && !(captured && capture!.owns(row.rootKey));
-        if (carries) pending.add(row.rootKey);
-        return 40 + Buffer.byteLength(row.rootKey) + row.windowBytes + row.blob.length + (carries ? row.targetBytes : 0);
-      });
+      for (const row of rows) if (!parsedTargets.has(row.rootKey) && !(captured && capture!.owns(row.rootKey))) pending.add(row.rootKey);
       const targets = new Map<string, Record<string, unknown>>();
       if (pending.size > 0) {
         for (const item of targetsStatement.all(workspaceId, JSON.stringify([...pending]))) {
@@ -385,12 +380,18 @@ export function readSourceIndexVectorCandidates(database: StorageDatabase, works
           targets.set(readStringField(target, "root_key"), target);
         }
       }
+      const costs = rows.map(row => {
+        const carries = pending.delete(row.rootKey);
+        const targetBytes = carries ? readIntegerField(readRecord(targets.get(row.rootKey), "source vector target"), "target_bytes") : 0;
+        return 40 + Buffer.byteLength(row.rootKey) + row.windowBytes + row.blob.length + targetBytes;
+      });
       const refusal = meter.readRows(costs);
       if (refusal !== null) throw refusal;
       for (const row of rows) {
         const owned = captured ? capture!.get(row.rootKey, meter) : undefined;
         const known = owned ?? parsedTargets.get(row.rootKey);
-        const payloadBytes = row.windowBytes + (known === undefined ? row.targetBytes : 0);
+        const payloadBytes = row.windowBytes + (known === undefined
+          ? readIntegerField(readRecord(targets.get(row.rootKey), "source vector target"), "target_bytes") : 0);
         // A known target needs neither another native JSON transfer nor JSON decoding. The cached branch reads five
         // typed window/vector fields; native window bytes and the embedding BLOB remain fully charged.
         const decodeWork = known === undefined ? payloadBytes : 5;

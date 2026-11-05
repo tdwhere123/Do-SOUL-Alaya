@@ -81,11 +81,12 @@ export function assertTemporalCutoverLease(
 /** A daemon holds this marker for its open database lifetime. */
 export async function acquireTemporalRuntimeLease(databaseFilename: string): Promise<TemporalRuntimeLease> {
   if (databaseFilename === ":memory:") {
+    // An in-memory database cannot contain a previous daemon's interrupted work.
     return Object.freeze({ release: async () => undefined });
   }
   const filename = runtimeLockFilename(normalizePath(databaseFilename));
   const lease = acquireLock(filename);
-  return Object.freeze({ release: async () => releaseLocks([{ filename, lease }]) });
+  return Object.freeze({ release: async () => { releaseLocks([{ filename, lease }]); } });
 }
 
 function createLease(input: TemporalCutoverLeaseInput): TemporalCutoverLease {

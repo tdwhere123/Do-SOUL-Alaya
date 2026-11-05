@@ -135,14 +135,16 @@ export abstract class AuditorCore {
     task: GardenTaskDescriptor,
     completedAt: string,
     objectIds: readonly string[],
-    auditEntries: readonly string[]
+    auditEntries: readonly string[],
+    outcome: "completed" | "skipped" = "completed"
   ): GardenTaskResult {
     return createGardenSuccessResult(
       { role: this.role, tier: this.tier },
       task,
       completedAt,
       objectIds,
-      auditEntries
+      auditEntries,
+      outcome
     );
   }
 

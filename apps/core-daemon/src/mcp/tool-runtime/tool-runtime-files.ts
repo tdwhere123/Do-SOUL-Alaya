@@ -7,16 +7,16 @@ import {
   type WriteFileToolInput
 } from "@do-soul/alaya-protocol";
 import { listDirectory, readFile, searchFiles } from "./tool-runtime-file-read-search.js";
-import { execShell, resolveWorkspaceGitBindingStatus, writeFile } from "./tool-runtime-file-write-exec.js";
+import { execShell, writeFile } from "./tool-runtime-file-write-exec.js";
+import { validateWorkspaceGitBindingInput } from "../../routes/workspace/git-binding/workspace-git-binding.js";
+import type { GitBindingValidationOptions } from "../../routes/workspace/git-binding/workspace-git-binding-types.js";
+
+export type { GitBindingValidationOptions } from "../../routes/workspace/git-binding/workspace-git-binding-types.js";
 
 const AFFECTED_PATH_WRITE_TOOL_IDS = new Set([
   "tools.write_file",
   "mcp__filesystem__write_file"
 ]);
-
-export interface GitBindingValidationOptions {
-  readonly currentWorkingDirectory?: string;
-}
 
 export type ValidatedBuiltinConversationToolCall =
   | {
@@ -73,10 +73,10 @@ export async function resolveAffectedPathRoots(
     return undefined;
   }
 
-  const status = await resolveWorkspaceGitBindingStatus(repoPath, gitBindingValidation);
-  if (status.status !== "bound") {
+  const validation = await validateWorkspaceGitBindingInput(repoPath, gitBindingValidation);
+  if (!validation.ok) {
     return undefined;
   }
 
-  return [status.repo_path];
+  return [validation.repo_path];
 }

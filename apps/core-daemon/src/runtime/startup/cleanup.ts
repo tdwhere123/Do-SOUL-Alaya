@@ -1,5 +1,19 @@
 import { closeDaemonSqliteWriteQueue } from "./database.js";
 
+const retainedStartupCleanups = new Set<() => Promise<void>>();
+
+/** Keep failed owners live, including their lease, until a later retry completes. */
+export function retainDaemonStartupCleanup(cleanup: () => Promise<void>): void {
+  retainedStartupCleanups.add(cleanup);
+}
+
+export async function retryDaemonStartupCleanups(): Promise<void> {
+  for (const cleanup of retainedStartupCleanups) {
+    await cleanup();
+    retainedStartupCleanups.delete(cleanup);
+  }
+}
+
 type StartupCleanupInput = Readonly<{
   readonly recallReadWorkerClient: Readonly<{ close(): Promise<void> }> | null;
   readonly database: Readonly<{ close(): void }>;
@@ -11,19 +25,35 @@ type StartupCleanupInput = Readonly<{
 export async function closeDaemonStartupResourcesAfterFailure(
   input: StartupCleanupInput
 ): Promise<never> {
-  await closeWorker(input);
-  await closeWriteQueue(input);
-  closeDatabase(input);
-  await releaseTemporalLease(input);
+  let worker = input.recallReadWorkerClient;
+  let database: StartupCleanupInput["database"] | null = input.database;
+  const cleanup = async () => {
+    if (worker !== null) {
+      await closeWorker(input, worker);
+      worker = null;
+    }
+    await closeWriteQueue(input);
+    if (database !== null) {
+      closeDatabase(input, database);
+      database = null;
+    }
+    await releaseTemporalLease(input);
+  };
+  try {
+    await cleanup();
+  } catch (error) {
+    retainDaemonStartupCleanup(cleanup);
+    throw error;
+  }
   throw input.error;
 }
 
-async function closeWorker(input: StartupCleanupInput): Promise<void> {
-  if (input.recallReadWorkerClient === null) return;
+async function closeWorker(input: StartupCleanupInput, worker: NonNullable<StartupCleanupInput["recallReadWorkerClient"]>): Promise<void> {
   try {
-    await input.recallReadWorkerClient.close();
+    await worker.close();
   } catch (error) {
     warnCleanupFailure(input, "recall read worker", error);
+    throw error;
   }
 }
 
@@ -32,14 +62,16 @@ async function closeWriteQueue(input: StartupCleanupInput): Promise<void> {
     await closeDaemonSqliteWriteQueue();
   } catch (error) {
     warnCleanupFailure(input, "sqlite write queue", error);
+    throw error;
   }
 }
 
-function closeDatabase(input: StartupCleanupInput): void {
+function closeDatabase(input: StartupCleanupInput, database: StartupCleanupInput["database"]): void {
   try {
-    input.database.close();
+    database.close();
   } catch (error) {
     warnCleanupFailure(input, "database", error);
+    throw error;
   }
 }
 
@@ -48,6 +80,7 @@ async function releaseTemporalLease(input: StartupCleanupInput): Promise<void> {
     await input.temporalRuntimeLease.release();
   } catch (error) {
     warnCleanupFailure(input, "temporal runtime lease", error);
+    throw error;
   }
 }
 

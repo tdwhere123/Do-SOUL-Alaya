@@ -6,11 +6,12 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../garden/garden-tier.js";
+import { GardenRoleSchema, GardenTaskKindSchema, GardenTaskOutcomeSchema, GardenTierSchema } from "../garden/garden-tier.js";
 import { HealthEventKindSchema } from "../memory/health-journal.js";
 
 const gardenEventTypeValues = [
   "soul.garden.semantic_enrichment",
+  "soul.garden.embedding_follow_up",
   "soul.garden.task_dispatched",
   "soul.garden.task_completed",
   "soul.garden.task_claim_reclaimed",
@@ -22,6 +23,7 @@ const gardenEventTypeValues = [
 
 export const GardenEventType = {
   SOUL_GARDEN_SEMANTIC_ENRICHMENT: "soul.garden.semantic_enrichment",
+  SOUL_GARDEN_EMBEDDING_FOLLOW_UP: "soul.garden.embedding_follow_up",
   SOUL_GARDEN_TASK_DISPATCHED: "soul.garden.task_dispatched",
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
   SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
@@ -63,6 +65,8 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     role: GardenRoleSchema,
     tier: GardenTierSchema,
     success: z.boolean(),
+    // Absent on historical or unmeasured completions; never infer from success.
+    outcome: GardenTaskOutcomeSchema.optional(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
     // invariant: these fields appear together only when objects_affected is a
     // truncated prefix; the digest covers the full ordered ID list with each
@@ -72,6 +76,8 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     candidate_signals_count: NonNegativeIntSchema.optional(),
     // Counts signals whose materialization failed; task success describes extraction/completion.
     failed_candidate_signals_count: NonNegativeIntSchema.optional(),
+    unknown_candidate_signals_count: NonNegativeIntSchema.optional(),
+    inflight_candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
   })
@@ -174,6 +180,16 @@ export const SoulHealthJournalRecordedPayloadSchema = z
   })
   .readonly();
 
+export const SoulGardenEmbeddingFollowUpPayloadSchema = z.object({
+  task_id: NonEmptyStringSchema,
+  workspace_id: NonEmptyStringSchema,
+  disposition: z.enum(["pending", "claimed", "recovered", "completed", "skipped", "retryable_failure", "blocked"]),
+  reason: z.enum(["operation_failed", "formation_changed", "source_unavailable",
+    "cache_only", "unwired", "insufficient_objects"]).optional(),
+  attempt_count: NonNegativeIntSchema,
+  occurred_at: IsoDatetimeStringSchema
+}).readonly();
+
 export const SoulGardenSemanticEnrichmentPayloadSchema = z.object({
   task_id: NonEmptyStringSchema,
   source_revision: NonEmptyStringSchema,
@@ -183,6 +199,7 @@ export const SoulGardenSemanticEnrichmentPayloadSchema = z.object({
 
 const gardenPayloadSchemas = {
   [GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT]: SoulGardenSemanticEnrichmentPayloadSchema,
+  [GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP]: SoulGardenEmbeddingFollowUpPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_DISPATCHED]: SoulGardenTaskDispatchedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
@@ -201,6 +218,10 @@ export function createGardenEventObjectSchema<T extends keyof typeof gardenPaylo
 
 const SoulGardenSemanticEnrichmentEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT, SoulGardenSemanticEnrichmentPayloadSchema
+);
+
+const SoulGardenEmbeddingFollowUpEventObjectSchema = createGardenEventObjectSchema(
+  GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP, SoulGardenEmbeddingFollowUpPayloadSchema
 );
 
 const SoulGardenTaskDispatchedEventObjectSchema = createGardenEventObjectSchema(
@@ -232,6 +253,7 @@ const SoulHealthJournalRecordedEventObjectSchema = createGardenEventObjectSchema
   SoulHealthJournalRecordedPayloadSchema
 );
 
+export const SoulGardenEmbeddingFollowUpEventSchema = SoulGardenEmbeddingFollowUpEventObjectSchema.readonly();
 export const SoulGardenTaskDispatchedEventSchema = SoulGardenTaskDispatchedEventObjectSchema.readonly();
 export const SoulGardenTaskCompletedEventSchema = SoulGardenTaskCompletedEventObjectSchema.readonly();
 export const SoulGardenTaskClaimReclaimedEventSchema = SoulGardenTaskClaimReclaimedEventObjectSchema.readonly();
@@ -243,6 +265,7 @@ export const SoulHealthJournalRecordedEventSchema = SoulHealthJournalRecordedEve
 export const GardenEventUnionSchema = z
   .discriminatedUnion("type", [
     SoulGardenSemanticEnrichmentEventObjectSchema,
+    SoulGardenEmbeddingFollowUpEventObjectSchema,
     SoulGardenTaskDispatchedEventObjectSchema,
     SoulGardenTaskCompletedEventObjectSchema,
     SoulGardenTaskClaimReclaimedEventObjectSchema,

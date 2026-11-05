@@ -11,10 +11,6 @@ export type FileSystemEntryResult =
   | { readonly ok: true; readonly stats: Awaited<ReturnType<typeof lstat>> }
   | FileToolError;
 
-export type WorkspaceGitBindingStatus =
-  | Readonly<{ readonly status: "bound"; readonly repo_path: string }>
-  | Readonly<{ readonly status: "unbound"; readonly reason: string }>;
-
 export function createAccessDenied(message: string): FileToolError {
   return {
     ok: false,

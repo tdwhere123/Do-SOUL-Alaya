@@ -71,7 +71,8 @@ class CapturedRootStep {
     try {
       return await this.embedRoot(binding, signal);
     } catch (error) {
-      return this.stop() ?? this.result("failed", error instanceof Error ? error.message : "backfill_failed");
+      return this.stop() ?? (deadline.signal.aborted ? this.result("deadline", "deadline_exceeded")
+        : this.result("failed", error instanceof Error ? error.message : "backfill_failed"));
     } finally {
       clearTimeout(timer);
     }

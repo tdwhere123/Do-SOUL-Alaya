@@ -17,6 +17,7 @@ import {
   type NeighborGroup
 } from "../../../garden/maintenance/librarian.js";
 import type { PathPlasticityComputePort } from "../../../garden/materialization/path-plasticity-task.js";
+import type { GraphEdgeCreationPort } from "../../../garden/materialization/materialization-router.js";
 import * as soulExports from "../../../index.js";
 
 describe("Librarian", () => {
@@ -75,6 +76,34 @@ describe("Librarian", () => {
 
     expect(healthJournal.record).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual([]);
+  });
+
+  it("keeps neighbor detection successful while omitting ids whose edge create failed", async () => {
+    const createEdge = vi.fn(async (params: { readonly targetMemoryId: string }) => {
+      if (params.targetMemoryId === "memory-2") {
+        throw new Error("edge persist failed");
+      }
+    });
+    const { librarian } = createLibrarian({
+      neighborGroups: [
+        {
+          subject: "workspace.memory.theme",
+          object_ids: ["memory-1", "memory-2", "memory-3"],
+          overlap_basis: "governance_subject"
+        }
+      ],
+      graphEdgePort: { createEdge } as GraphEdgeCreationPort
+    });
+
+    const result = await librarian.run(createTask({ task_kind: GardenTaskKind.SUBJECT_NEIGHBOR_DETECT }));
+
+    expect(result.success).toBe(true);
+    expect(result.objects_affected).toEqual(["memory-1", "memory-3"]);
+    expect(result.audit_entries).toEqual([
+      "subject_neighbor_detect: detected 1 overlapping subject groups",
+      "subject_neighbor_edge_create_failed: 1"
+    ]);
+    expect(createEdge).toHaveBeenCalledTimes(2);
   });
 
   it("throttles synthesis review by subject before creating candidates", async () => {
@@ -180,8 +209,10 @@ describe("Librarian", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("reports completion with success = true across all supported task kinds", async () => {
-    const { librarian, scheduler } = createLibrarian();
+  it("reports completed outcomes across configured supported task kinds", async () => {
+    const { librarian, scheduler } = createLibrarian({ pathPlasticityPort: {
+      computeAndApplyPlasticity: vi.fn(async () => ({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] }))
+    } });
     const taskKinds = [
       GardenTaskKind.SUBJECT_NEIGHBOR_DETECT,
       GardenTaskKind.SYNTHESIS_REVIEW,
@@ -189,14 +220,27 @@ describe("Librarian", () => {
     ] as const;
 
     for (const taskKind of taskKinds) {
-      const result = await librarian.run(createTask({ task_kind: taskKind }));
-      expect(result.success).toBe(true);
+      const result = await librarian.run(createTask({ task_kind: taskKind, target_object_refs: ["10", "40"] }));
+      expect(result).toMatchObject({ success: true, outcome: "completed" });
     }
 
     expect(scheduler.reportCompletion).toHaveBeenCalledTimes(taskKinds.length);
     for (const call of scheduler.reportCompletion.mock.calls) {
-      expect(call[0]).toMatchObject({ success: true, role: GardenRole.LIBRARIAN, tier: GardenTier.TIER_2 });
+      expect(call[0]).toMatchObject({ success: true, outcome: "completed", role: GardenRole.LIBRARIAN, tier: GardenTier.TIER_2 });
     }
+  });
+
+  it("distinguishes intentionally deferred path plasticity from missing configuration or cursor", async () => {
+    const unwired = createLibrarian();
+    const task = createTask({ task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE });
+    expect(await unwired.librarian.run(task)).toMatchObject({ success: false, outcome: "failed" });
+    const deferred = createLibrarian({ pathPlasticityDeferredReason: "temporal_assertion_provenance_required" });
+    expect(await deferred.librarian.run(task)).toMatchObject({ success: true, outcome: "skipped" });
+    const configured = createLibrarian({ pathPlasticityPort: {
+      computeAndApplyPlasticity: vi.fn(async () => ({ reinforced: 0, weakened: 0, retired: 0, affectedPathIds: [] }))
+    } });
+    expect(await configured.librarian.run(task)).toMatchObject({ success: false, outcome: "failed",
+      error_message: "path plasticity EventLog revision cursor is missing" });
   });
 
   it("reports failure when a port throws", async () => {
@@ -288,7 +332,9 @@ function createLibrarian(options: {
   readonly pendingSubjects?: readonly string[];
   readonly findSynthesisClusters?: (workspaceId: string) => Promise<readonly { subject: string; evidence_ids: readonly string[] }[]>;
   readonly pathPlasticityPort?: PathPlasticityComputePort;
+  readonly pathPlasticityDeferredReason?: string;
   readonly clearPendingWorkspace?: (workspaceId: string) => Promise<void>;
+  readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly schedulerOverride?: {
     reportCompletion: Mock<(result: Awaited<ReturnType<Librarian["run"]>>) => Promise<void>>;
   };
@@ -319,9 +365,11 @@ function createLibrarian(options: {
       neighborPort,
       synthesisPort,
       ...(options.pathPlasticityPort === undefined ? {} : { pathPlasticityPort: options.pathPlasticityPort }),
+      ...(options.pathPlasticityDeferredReason === undefined ? {} : { pathPlasticityDeferredReason: options.pathPlasticityDeferredReason }),
       ...(options.clearPendingWorkspace === undefined
         ? {}
         : { pathPlasticityPendingPort: { clearPendingWorkspace: options.clearPendingWorkspace } }),
+      ...(options.graphEdgePort === undefined ? {} : { graphEdgePort: options.graphEdgePort }),
       scheduler,
       healthJournal,
       now: () => "2026-03-27T00:00:00.000Z"

@@ -35,7 +35,7 @@ export function createSourceAdmissionPort(input: Readonly<{
   readonly stores: FieldFormationStores;
   readonly admitHook?: () => void;
   readonly hostCaptureBinding?: HostCaptureBinding;
-  readonly audit?: (record: SourceRecordIdentity) => Promise<void>;
+  readonly audit?: (record: SourceRecordIdentity, options?: Readonly<{ notify: boolean }>) => Promise<void>;
 }>): SourceAdmissionPort {
   return {
     ...(input.audit === undefined ? {} : { audit: input.audit }),
@@ -51,6 +51,12 @@ export function createSourceAdmissionPort(input: Readonly<{
         throw new CoreError("VALIDATION", "source recovery requires the exact available retained body");
       }
       return record;
+    },
+    findReceipt(workspaceId, recordId, context) {
+      if (workspaceId !== context.workspaceId || workspaceId.length === 0) {
+        throw new CoreError("VALIDATION", "source recovery requires workspace-bound caller context");
+      }
+      return input.stores.getRecord(workspaceId, recordId);
     },
     hostCaptureResourceLimited(record, context) {
       if (record.workspace_id !== context.workspaceId || input.stores.getStoredRecord(context.workspaceId, record.identity) === null) {

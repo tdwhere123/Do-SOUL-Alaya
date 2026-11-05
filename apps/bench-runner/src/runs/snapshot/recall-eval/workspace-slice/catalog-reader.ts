@@ -11,9 +11,11 @@ export function createSqliteCatalogReader(connection: SqliteCatalogConnection): 
   return {
     listObjects(): readonly CatalogObject[] {
       return connection.prepare(`
-        SELECT type, name, sql FROM sqlite_master
-        WHERE name NOT LIKE 'sqlite_%'
-        ORDER BY type, name
+        SELECT CASE WHEN tables.type = 'shadow' THEN 'shadow' ELSE objects.type END AS type,
+          objects.name, objects.sql
+        FROM main.sqlite_master AS objects
+        LEFT JOIN pragma_table_list AS tables ON tables.schema = 'main' AND tables.name = objects.name
+        ORDER BY objects.type, objects.name
       `).all() as CatalogObject[];
     },
     listColumns(table: string): readonly ColumnInfo[] {

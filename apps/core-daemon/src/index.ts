@@ -32,14 +32,13 @@ import {
   warnUnregisteredPrefixedDaemonEnvKeys
 } from "./runtime/config/daemon-config-environment.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
-import { openDaemonDatabase } from "./runtime/startup/database.js";
+import { openRuntimeDatabase } from "./runtime/startup/runtime-database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
 import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
 import { bindSourceFeedbackExecutionPort } from "./runtime/recall/source-feedback-execution.js";
 import { bindSourceSemanticObservation } from "./runtime/recall/source-semantic-observation.js";
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
-import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
 import type { EmbeddingStartupProbe } from "./ai/daemon-embedding-runtime.js";
 import type { SourceIndexProducerLimitsOverride } from "./runtime/source-index/source-index-producer.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
@@ -56,7 +55,7 @@ export type {
 } from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
 export type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
-export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+export { startCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export {
   resolveEffectiveEmbeddingPosture,
   type EffectiveEmbeddingPosture,
@@ -158,14 +157,7 @@ async function createRuntimeBootstrapContext() {
   });
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
-  const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
-  let database: Awaited<ReturnType<typeof openDaemonDatabase>>;
-  try {
-    database = await openDaemonDatabase(dbPath);
-  } catch (error) {
-    await temporalRuntimeLease.release();
-    throw error;
-  }
+  const { database, temporalRuntimeLease } = await openRuntimeDatabase(dbPath, runtimeNotifier, warnLogger.warn);
   recordStartupStep(startupSteps, "database");
   return {
     startupSteps,

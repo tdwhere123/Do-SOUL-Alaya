@@ -131,6 +131,30 @@ test("shared test checkout does not persist authentication rejected by authority
   for (const os of ["macos", "windows"]) assert.match(workflowJob(`test-shard-${os}`), /steps: \*shard-steps/u);
 });
 
+test("Linux native Source ONNX canary is offline, cache-verified, and gates Ubuntu Quality", () => {
+  const job = workflowJob("local-source-onnx");
+  assert.match(job, /runs-on: ubuntu-latest/u);
+  assert.match(job, /timeout-minutes: 30/u);
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /uses: actions\/cache@v4/u);
+  assert.match(job, /node scripts\/fetch-local-embedding-model\.mjs --cache-dir/u);
+  assert.match(job, /ALAYA_LOCAL_SOURCE_EMBEDDING_OFFLINE: "1"/u);
+  assert.match(job, /ALAYA_LOCAL_SOURCE_EMBEDDING_CACHE_DIR: \$\{\{ runner.temp \}\}/u);
+  assert.match(job, /VITEST_MAX_WORKERS: "1"/u);
+  const build = job.indexOf("run: pnpm build"), inference = job.indexOf("run: pnpm exec vitest run");
+  assert.ok(build >= 0 && inference > build);
+  assert.match(job, /vitest run packages\/core\/src\/__tests__\/embedding-recall\/local-onnx-source-embedding-offline\.test\.ts/u);
+  const quality = workflowJob("quality-ubuntu");
+  assert.match(quality, /needs: \[test-shard-ubuntu, hygiene-ubuntu, local-source-onnx\]/u);
+  assert.match(quality, /SOURCE_ONNX_RESULT: \$\{\{ needs\.local-source-onnx\.result \}\}/u);
+  assert.match(quality, /\[\[ "\$\{SOURCE_ONNX_RESULT\}" != "success" \]\]/u);
+  const nativeTest = readFileSync(path.join(repo, "packages/core/src/__tests__/embedding-recall/local-onnx-source-embedding-offline.test.ts"), "utf8");
+  const verification = nativeTest.indexOf("await resolveLocalArtifactTreeSha256(");
+  const client = nativeTest.indexOf("new LocalOnnxEmbeddingClient(");
+  assert.ok(verification >= 0 && client > verification);
+  assert.match(nativeTest, /throw new Error\("Offline Source embedding explicit local cache is unavailable\/incomplete/u);
+});
+
 test("CI builds compiled daemon dependencies before whole-workspace typechecking on every OS", () => {
   const job = workflowJob("test-shard-ubuntu");
   const build = job.indexOf("      - name: Build\n        run: pnpm build");

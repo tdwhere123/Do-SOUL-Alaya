@@ -1,6 +1,13 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary({ descendantPreload: new URL("../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
+});
+afterEach(() => expect(isolation.violations).toEqual([]));
+afterAll(() => isolation.restore());
 import { receiveGardenTaskSignals } from "../../garden/post-turn-extract/evidence-finalizer.js";
+import { createSignalOutcomeCounter } from "../../garden/post-turn-extract/signal-receiver.js";
 
 const CREATED_AT = "2026-07-27T12:00:00.000Z";
 
@@ -43,11 +50,12 @@ describe("garden task signal receipt", () => {
       signal: { ...signal, signal_state: "failed" as const }, triage_result: "deferred" as const,
       materialization: { created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }],
         target_kind: "deferred", defer_class: "source_grounding" as const } }));
-    const failedSignalIds = new Set<string>();
+    const outcomes = createSignalOutcomeCounter();
 
-    await receiveGardenTaskSignals({ candidates: [candidate()], signalReceiver: { receiveSignal }, failedSignalIds });
+    await receiveGardenTaskSignals({ candidates: [candidate()], signalReceiver: { receiveSignal }, outcomes });
 
     expect(receiveSignal).toHaveBeenCalledTimes(1);
-    expect([...failedSignalIds]).toEqual(["candidate-1"]);
+    expect(outcomes.snapshot()).toEqual({ failed_candidate_signals_count: 1,
+      unknown_candidate_signals_count: 0, inflight_candidate_signals_count: 0 });
   });
 });

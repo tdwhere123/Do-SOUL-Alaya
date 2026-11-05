@@ -247,8 +247,9 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
 
   private scrubEvidence(root: FieldEraseBarrierRow, evidenceIds: readonly string[], subjects: readonly EraseSubject[]): void {
     const connection = this.database.connection;
-    scrubDerivedPrivacyClosure(this.database, root, evidenceIds,
-      subjects.filter(subject => subject.subject_kind === "source_record").map(subject => subject.subject_id), this.redactAudit);
+    const sourceIds = subjects.filter(subject => subject.subject_kind === "source_record").map(subject => subject.subject_id);
+    scrubHostSessionBodies(this.database, root.workspace_id, sourceIds);
+    scrubDerivedPrivacyClosure(this.database, root, evidenceIds, sourceIds, this.redactAudit);
     const deletes = [
       "DELETE FROM evidence_search_projections WHERE workspace_id = ? AND evidence_object_id = ?",
       "DELETE FROM main.evidence_recall_embeddings WHERE workspace_id = ? AND owner_object_id = ?",
@@ -353,6 +354,29 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       deleteArtifacts.run(workspaceId, subject.subject_id);
     }
   }
+}
+
+/** Scrub both assigned intents and legacy unbound copies whose retained host inventory proves membership. */
+function scrubHostSessionBodies(database: StorageDatabase, workspaceId: string, sourceIds: readonly string[]): void {
+  const clear = database.connection.prepare(`UPDATE host_session_messages AS m SET pending_body = NULL, erased = 1
+    WHERE m.workspace_id = ? AND (m.round_root_id = ? OR EXISTS (
+      SELECT 1 FROM source_host_inventories i JOIN json_each(i.canonical_inventory, '$.occurrences') o
+      JOIN source_records s ON s.workspace_id = i.workspace_id AND s.record_id = i.record_id
+      WHERE i.workspace_id = m.workspace_id AND i.record_id = ? AND s.source_version = 'host-session-v1'
+        AND s.source_id = 'host-session:' || m.container_key || ':r' ||
+          CAST(substr(s.source_id, length('host-session:' || m.container_key || ':r') + 1) AS INTEGER)
+        AND json_extract(i.canonical_inventory, '$.issuer.basis') = 'host_session'
+        AND json_extract(i.canonical_inventory, '$.issuer.producer') = m.producer
+        AND json_extract(o.value, '$.occurrence_id') = m.message_id
+        AND json_extract(o.value, '$.upstream_position') = m.position
+        AND json_extract(o.value, '$.container_ref.scope') = m.container_scope
+        AND json_extract(o.value, '$.container_ref.id') = m.container_id))`);
+  const retire = database.connection.prepare(`UPDATE host_session_rounds SET state = CASE
+      WHEN state IN ('pending', 'erased_pending') AND EXISTS (SELECT 1 FROM source_records s
+        WHERE s.workspace_id = host_session_rounds.workspace_id AND s.record_id = host_session_rounds.root_id)
+      THEN 'erased_pending' ELSE 'erased' END
+    WHERE workspace_id = ? AND root_id = ?`);
+  for (const id of sourceIds) { clear.run(workspaceId, id, id); retire.run(workspaceId, id); }
 }
 
 function prepareEraseStatements(database: StorageDatabase) {

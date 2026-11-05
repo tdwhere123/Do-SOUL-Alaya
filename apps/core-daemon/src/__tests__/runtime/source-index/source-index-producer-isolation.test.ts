@@ -67,6 +67,20 @@ function isolatedChild(hold: "source" | "binding") {
     release: () => releaseUnrelated?.(), kills, exited: exited.promise, requests, spawns: () => spawns };
 }
 
+function activeLexicalBodies(environment: ReturnType<typeof fixture>): string[] {
+  return environment.database.connection.prepare(`SELECT p.projection FROM source_index_lexical_projections p
+    JOIN source_index_lexical_selections s ON s.workspace_id=p.workspace_id AND s.active_generation_id=p.generation_id
+    WHERE p.workspace_id=? ORDER BY p.projection`).all(WORKSPACE).map(row => (row as { projection: string }).projection);
+}
+
+async function waitForBodies(environment: ReturnType<typeof fixture>, bodies: string[]) {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    if (JSON.stringify(activeLexicalBodies(environment)) === JSON.stringify(bodies)) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  expect(activeLexicalBodies(environment)).toEqual(bodies);
+}
+
 // Actual child/IPC plus file SQLite and daemon binding. Fixture vectors are not real-model readiness.
 it.each(["stop", "deadline", "binding"] as const)("keeps shared IPC requests alive through producer %s and reaps only on provider close", async kind => {
   const directory = mkdtempSync(join(tmpdir(), "source-index-isolation-"));
@@ -117,5 +131,57 @@ it.each(["stop", "deadline", "binding"] as const)("keeps shared IPC requests ali
     await runtime.closeProvider();
     environment.database.close({ optimize: false });
     rmSync(directory, { recursive: true, force: true });
+  }
+}, 15_000);
+
+it.each(["unsupported", "throws"] as const)("publishes lexical bytes through SQLite when model binding %s", async kind => {
+  const directory = mkdtempSync(join(tmpdir(), "source-index-no-model-"));
+  const environment = fixture(join(directory, "index.sqlite"));
+  environment.index.lexical.selectLexical(WORKSPACE, "raw-unicode61.v1");
+  publishSource(environment, "fresh lexical document", "one");
+  const producer = createSourceIndexProducer({ database: environment.database, warn: vi.fn(),
+    bindSourceEmbedding: async () => {
+      if (kind === "throws") throw new Error("binding_failed");
+      return { status: "unsupported", reason: "no_model" };
+    } });
+  try {
+    expect(await producer.runPass()).toMatchObject({ status: kind === "throws" ? "failed" : "unsupported" });
+    expect(activeLexicalBodies(environment)).toEqual(["fresh lexical document"]);
+  } finally { await producer.stop(); environment.database.close({ optimize: false }); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it.each(["binding", "source"] as const)("allows lexical publication while a real child %s request remains occupied", async hold => {
+  const directory = mkdtempSync(join(tmpdir(), "source-index-independent-"));
+  const environment = fixture(join(directory, "index.sqlite"));
+  const child = isolatedChild(hold), provider = new LocalOnnxEmbeddingClient({ ipcHost: child.host });
+  environment.index.lexical.selectLexical(WORKSPACE, "raw-unicode61.v1");
+  const first = hold === "source" ? "__delay_exit__" : "first";
+  publishSource(environment, first, "first");
+  const producer = createSourceIndexProducer({ database: environment.database, warn: vi.fn(),
+    bindSourceEmbedding: options => provider.bindSourceEmbedding(options), limits: { stepDeadlineMs: 800 } });
+  try {
+    const pass = producer.runPass();
+    await child.running;
+    await waitForBodies(environment, [first]);
+    publishSource(environment, "second", "second");
+    expect(await producer.runLexicalPass(WORKSPACE, "raw-unicode61.v1")).toMatchObject({ status: "ready" });
+    expect(activeLexicalBodies(environment)).toEqual([first, "second"].sort());
+    const receipt = await pass;
+    expect(receipt.status, JSON.stringify(receipt)).toBe("deadline");
+    const requests = child.requests.size;
+    publishSource(environment, "third", "third");
+    expect(await producer.runPass()).toMatchObject({ status: "busy", reason: "producer_occupied" });
+    expect(activeLexicalBodies(environment)).toEqual([first, "second", "third"].sort());
+    expect(child.requests.size).toBe(requests);
+    expect([...child.requests.values()].filter(request => request.op === "embed_source").length)
+      .toBe(hold === "source" ? 1 : 0);
+    const beforeClose = activeLexicalBodies(environment);
+    await producer.stop();
+    await provider.close();
+    expect(activeLexicalBodies(environment)).toEqual(beforeClose);
+    expect(environment.database.connection.prepare("SELECT count(*) AS n FROM source_index_vectors").get()).toEqual({ n: 0 });
+  } finally {
+    await producer.stop(); await provider.close();
+    environment.database.close({ optimize: false }); rmSync(directory, { recursive: true, force: true });
   }
 }, 15_000);

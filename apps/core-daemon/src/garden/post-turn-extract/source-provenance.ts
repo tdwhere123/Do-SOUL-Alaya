@@ -1,4 +1,4 @@
-import { GardenEventType, GardenRole, GardenTaskKind, GardenTier, parseGardenEventPayload } from "@do-soul/alaya-protocol";
+import { gardenTaskOutcomeSuccess, GardenEventType, GardenRole, GardenTaskKind, GardenTier, parseGardenEventPayload } from "@do-soul/alaya-protocol";
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 
 export type GardenTaskSourceGuardPort = Partial<Pick<SqliteGardenTaskRepo,
@@ -31,7 +31,8 @@ export async function quarantineUnavailableSourceTasks(
       role: GardenRole.LIBRARIAN,
       tier: GardenTier.TIER_2,
       workspace_id: row.workspace_id,
-      success: false,
+      success: gardenTaskOutcomeSuccess("failed"),
+      outcome: "failed",
       objects_affected: [],
       candidate_signals_count: 0,
       occurred_at: completedAt

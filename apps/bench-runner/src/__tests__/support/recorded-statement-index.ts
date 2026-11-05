@@ -14,8 +14,8 @@ type IndexedTarget = ReturnType<SqliteSourceIndexRepository["listTargets"]>[numb
 
 /** Exercise actual SQLite preparation with recorded vectors, never an embedding model. */
 export function prepareRecordedStatementIndex(database: StorageDatabase, workspace: string,
-  embed: (source: IndexedTarget) => readonly number[] = source => source.auxiliary === undefined ? [0, 1, 0] : [1, 0, 0]) {
-  const configuration = RECORDED_STATEMENT_CONFIGURATION;
+  embed: (source: IndexedTarget) => readonly number[] = source => source.auxiliary === undefined ? [0, 1, 0] : [1, 0, 0],
+  configuration: SourceIndexConfiguration = RECORDED_STATEMENT_CONFIGURATION) {
   const index = new SqliteSourceIndexRepository(database, fieldContractSha256);
   const generation = index.begin(index.select(workspace, configuration));
   expect(index.capturePage(workspace, generation.generation_id, 128, BUDGET).generation.enumeration_complete).toBe(true);

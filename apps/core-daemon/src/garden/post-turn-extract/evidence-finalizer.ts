@@ -4,7 +4,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   isWritePathMaterializationDeferral,
-  signalMaterializationFailed,
+  type SignalOutcomeCounter,
   type PostTurnSignalReceiver
 } from "./signal-receiver.js";
 
@@ -12,7 +12,7 @@ type GardenTaskSignalReceiptInput = Readonly<{
   readonly candidates: readonly CandidateMemorySignal[];
   readonly signalReceiver: PostTurnSignalReceiver;
   readonly beforeReceive?: () => Promise<void>;
-  readonly failedSignalIds?: Set<string>;
+  readonly outcomes?: SignalOutcomeCounter;
 }>;
 
 /** Durable receipt of task-produced signals under a claim; no turn evidence fallback is involved. */
@@ -27,7 +27,7 @@ export async function receiveGardenTaskSignals(input: GardenTaskSignalReceiptInp
       received = await input.signalReceiver.receiveSignal(signal);
     }
     signalIds.push(received.signal.signal_id);
-    if (signalMaterializationFailed(received)) input.failedSignalIds?.add(received.signal.signal_id);
+    input.outcomes?.observe(received);
   }
   await input.beforeReceive?.();
   return signalIds;

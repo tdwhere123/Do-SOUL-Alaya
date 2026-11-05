@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { stableStringify } from "../../shared/stable-stringify.js";
 import type {
   RelationAssertionAdmissionPort,
   RelationAssertionAdmissionRequest
@@ -60,30 +62,33 @@ export class AnswersWithEdgeProducerService {
   public constructor(private readonly deps: AnswersWithEdgeProducerDeps) {}
 
   public async crystallize(input: AnswersWithCrystallizeInput): Promise<AnswersWithCrystallizeResult> {
-    if (input.objects.length < 2) {
-      return EMPTY_RESULT;
-    }
+    return await (await this.prepare(input)).execute();
+  }
+
+  /** Freeze the exact witnessed pair plan before any assertion admission. */
+  public async prepare(input: AnswersWithCrystallizeInput): Promise<Readonly<{
+    readonly digest: string;
+    execute(assertCurrentInTransaction?: () => undefined): Promise<AnswersWithCrystallizeResult>;
+  }>> {
     const objectIds = input.objects.map((object) => object.objectId);
     const sessionById = buildSessionMap(input.objects);
     const objectOrder = buildObjectFormationOrder(input.objects);
-    const witnesses = await this.loadCoRelevantPairs(input, objectIds);
-    if (witnesses.length === 0) {
-      return EMPTY_RESULT;
-    }
+    const witnesses = input.objects.length < 2 ? [] : await this.loadCoRelevantPairs(input, objectIds);
     const witnessByPair = new Map(witnesses.map((witness) => [pairKey(witness.pair), witness]));
-    const coRelevant = witnesses.map((witness) => witness.pair);
-    const kept = sparsifyPairs(
-      coRelevant,
-      sessionById,
-      objectOrder,
-      input.capPerNode,
-      input.crossSessionOnly
-    );
-    if (kept.length === 0) {
-      return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: 0, admitted: 0 });
-    }
-    const admitted = await this.admitCoRelevantPairs(input, kept, witnessByPair);
-    return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: kept.length, admitted });
+    const kept = sparsifyPairs(witnesses.map((witness) => witness.pair), sessionById, objectOrder,
+      input.capPerNode, input.crossSessionOnly);
+    const digest = createHash("sha256").update(stableStringify({
+      input: { ...input, objects: [...input.objects].sort((a, b) => compareIds(a.objectId, b.objectId)) },
+      witnesses: [...witnesses].sort((a, b) => compareIds(pairKey(a.pair), pairKey(b.pair))), kept
+    }), "utf8").digest("hex");
+    return Object.freeze({
+      digest,
+      execute: async (assertCurrentInTransaction?: () => undefined) => {
+        if (witnesses.length === 0) return EMPTY_RESULT;
+        const admitted = await this.admitCoRelevantPairs(input, kept, witnessByPair, assertCurrentInTransaction);
+        return Object.freeze({ coRelevantPairs: witnesses.length, keptPairs: kept.length, admitted });
+      }
+    });
   }
 
   private async loadCoRelevantPairs(
@@ -110,7 +115,8 @@ export class AnswersWithEdgeProducerService {
   private async admitCoRelevantPairs(
     input: AnswersWithCrystallizeInput,
     kept: readonly PathPair[],
-    witnessByPair: ReadonlyMap<string, AnswerCoRelevancePairWitness>
+    witnessByPair: ReadonlyMap<string, AnswerCoRelevancePairWitness>,
+    assertCurrentInTransaction?: () => undefined
   ): Promise<number> {
     let admitted = 0;
     for (const [source, target] of kept) {
@@ -129,12 +135,17 @@ export class AnswersWithEdgeProducerService {
           target_anchor: { kind: "object", object_id: target }
         },
         relationKind: "answers_with",
-        validity: { kind: "open", valid_from: witness.validFrom }
+        validity: { kind: "open", valid_from: witness.validFrom },
+        ...(assertCurrentInTransaction === undefined ? {} : { assertCurrentInTransaction })
       });
       if (outcome.status === "admitted") admitted += 1;
     }
     return admitted;
   }
+}
+
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function pairKey(pair: PathPair): string {

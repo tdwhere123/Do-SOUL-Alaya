@@ -446,8 +446,9 @@ function completeBudgetService(service: RecallService) {
 }
 
 function expectMemoryBaselineWithUnknownSources(index: InformationIndex): void {
+  // Unknown observed coverage cannot claim a complete representation.
   expect(index.completeness).toMatchObject({ logical_index: "open", observed_coverage: "unknown",
-    transport: "open", representation: "complete" });
+    transport: "open", representation: "open" });
   expect(index.completeness.certificate_id).toBeUndefined();
   expect(index.continuation).toBeNull();
 }

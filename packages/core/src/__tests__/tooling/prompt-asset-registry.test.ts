@@ -57,6 +57,17 @@ describe("PromptAssetRegistry", () => {
     expect(registry.stats()).toEqual({ constitutional: 1, operational: 2 });
   });
 
+  it("allows replacement of a mutable asset at capacity but rejects new identities", () => {
+    const registry = new PromptAssetRegistry({ maxAssets: 1 });
+    const asset = createAsset({ asset_id: "operational:one", kind: "operational", immutable: false });
+    registry.register(asset);
+    registry.register({ ...asset, content: "Replacement guidance" });
+    expect(registry.getById("operational:one")?.content).toBe("Replacement guidance");
+    expect(registry.list()).toHaveLength(1);
+    expect(() => registry.register({ ...asset, asset_id: "operational:two" })).toThrow(/capacity exceeded/);
+    expect(registry.list()).toHaveLength(1);
+  });
+
   it("treats same-content constitutional re-registration as idempotent", () => {
     const registry = new PromptAssetRegistry();
     const asset = createAsset();

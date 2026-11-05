@@ -9,7 +9,8 @@ import {
   type GardenTaskResult
 } from "@do-soul/alaya-protocol";
 import { GardenScheduler } from "@do-soul/alaya-soul";
-import { initDatabase, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import { EventPublisher } from "@do-soul/alaya-core";
+import { initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 import { createRuntimeInput } from "./runtime-fixture.js";
 
@@ -17,11 +18,11 @@ describe("createGardenRuntime with a real GardenScheduler", () => {
   it("persists a garden_tasks row after the background pass", async () => {
     const database = initDatabase({ filename: ":memory:" });
     try {
-      const runtime = createGardenRuntime(
-        createRuntimeInput({
-          databaseConnection: database.connection
-        })
-      );
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const eventPublisher = new EventPublisher({ eventLogRepo, runHotStateService: { apply: () => undefined },
+        runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined } });
+      const runtime = createGardenRuntime({ ...createRuntimeInput({ databaseConnection: database.connection }),
+        eventLogRepo, eventPublisher });
       await runtime.runBackgroundPass();
       const rows = database.connection.prepare("SELECT id FROM garden_tasks").all() as readonly {
         readonly id: string;

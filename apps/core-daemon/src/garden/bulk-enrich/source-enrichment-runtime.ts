@@ -5,6 +5,11 @@ import {
 } from "@do-soul/alaya-core";
 import {
   GardenEventType,
+  GardenRole,
+  GardenTaskKind,
+  GardenTier,
+  gardenTaskOutcomeSuccess,
+  parseGardenEventPayload,
   SoulGardenSemanticEnrichmentPayloadSchema,
   type GardenTaskDescriptor,
   type SemanticExtractionProfile
@@ -40,6 +45,7 @@ export type SourceEnrichmentCapability = Readonly<{
 export type SourceEnrichmentRuntime = Readonly<{
   run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
   readonly capability: SourceEnrichmentCapability;
+  readonly ownsCompletion: true;
 }>;
 
 export function createSourceEnrichmentRuntime(input: Readonly<{
@@ -71,17 +77,19 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
     repo,
     codec,
     transport,
-    audit: (action, task, mutate) => input.eventPublisher.appendManyWithMutation([{
-      event_type: GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT,
-      entity_type: "garden_task",
-      entity_id: task.id,
-      workspace_id: task.workspaceId,
-      run_id: null,
-      caused_by: "garden",
-      payload_json: SoulGardenSemanticEnrichmentPayloadSchema.parse({
-        task_id: task.id, source_revision: task.revision, action
-      })
-    }], mutate),
+    audit: (action, task, mutate) => input.eventPublisher.appendManyWithMutation([
+      {
+        event_type: GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT,
+        entity_type: "garden_task", entity_id: task.id, workspace_id: task.workspaceId,
+        run_id: null, caused_by: "garden",
+        payload_json: SoulGardenSemanticEnrichmentPayloadSchema.parse({
+          task_id: task.id, source_revision: task.revision, action
+        })
+      },
+      ...(action !== "published" && action !== "failed" ? [] : [sourceCompletionEvent(
+        task.id, task.workspaceId, action === "published" ? "completed" : "failed", input.now()
+      )])
+    ], mutate),
     now: input.now,
     leaseMs: 30_000,
     maxAttempts: 3,
@@ -93,8 +101,18 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
   });
   return {
     capability,
+    ownsCompletion: true,
     run: async (task) => await worker.run(task.workspace_id, task.task_id, { adoptClaim: true })
   };
+}
+
+function sourceCompletionEvent(taskId: string, workspaceId: string, outcome: "completed" | "failed", occurredAt: string) {
+  return { event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED, entity_type: "garden_task",
+    entity_id: taskId, workspace_id: workspaceId, run_id: null, caused_by: "garden-scheduler",
+    payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+      task_id: taskId, task_kind: GardenTaskKind.BULK_ENRICH, role: GardenRole.LIBRARIAN, tier: GardenTier.TIER_2,
+      success: gardenTaskOutcomeSuccess(outcome), outcome, objects_affected: [], workspace_id: workspaceId, occurred_at: occurredAt
+    }) };
 }
 
 function composeRuntimeTransport(input: Readonly<{

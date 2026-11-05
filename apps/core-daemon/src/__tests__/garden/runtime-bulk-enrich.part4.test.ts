@@ -153,7 +153,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
 
   it("keeps signal-ref replay failures pending by recording a transient failed attempt", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-retry-signal-ref");
+    enrichPendingRepo.enqueue("workspace-1", "memory-retry-signal-ref", "signal-memory-retry-signal-ref");
 
     const recordFailedAttempt = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
     const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");
@@ -188,13 +188,67 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(completion?.audit_entries).toContain("bulk_enrich:abandoned_0");
   });
 
+  it("retains source replay when its port is unavailable and resumes it without repeating independent work", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-owed", "signal-memory-owed");
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const recordFailure = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
+    const unavailable = createGardenRuntime(createRuntimeInput({
+      enrichPendingRepo,
+      findById: vi.fn(async (id: string) => buildMemory(id)),
+      produceForNewMemory
+    }));
+
+    await unavailable.runBulkEnrichPass("workspace-1");
+    await unavailable.runBulkEnrichPass("workspace-1");
+    expect(produceForNewMemory).toHaveBeenCalledTimes(1);
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+
+    const replaySignalRefs = vi.fn<ReplaySignalRefsFn>(async () => undefined);
+    const available = createGardenRuntime(createRuntimeInput({
+      enrichPendingRepo,
+      findById: vi.fn(async (id: string) => buildMemory(id)),
+      produceForNewMemory,
+      sourceSignalLookup: vi.fn<SourceSignalLookupFn>(async (id) => ({ ...buildSignal(id), signal_state: "materialized" })),
+      replaySignalRefs
+    }));
+    await available.runBulkEnrichPass("workspace-1");
+    expect(replaySignalRefs).toHaveBeenCalledTimes(1);
+    expect(produceForNewMemory).toHaveBeenCalledTimes(1);
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
+  });
+
+  it("does not enrich or replay objects from another workspace", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "wrong-memory-workspace", "signal-wrong-memory-workspace");
+    enrichPendingRepo.enqueue("workspace-1", "wrong-signal-workspace", "signal-wrong-signal-workspace");
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const replaySignalRefs = vi.fn<ReplaySignalRefsFn>(async () => undefined);
+    const runtime = createGardenRuntime(createRuntimeInput({
+      enrichPendingRepo,
+      findById: vi.fn(async (id: string) => buildMemory(id, id === "wrong-memory-workspace" ? "workspace-2" : "workspace-1")),
+      produceForNewMemory,
+      sourceSignalLookup: vi.fn<SourceSignalLookupFn>(async (id) => ({ ...buildSignal(id), workspace_id: "workspace-2" })),
+      replaySignalRefs
+    }));
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(produceForNewMemory).toHaveBeenCalledTimes(1);
+    expect(replaySignalRefs).not.toHaveBeenCalled();
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(2);
+    expect(currentScheduler().completions.at(-1)?.audit_entries).toContain("bulk_enrich:failed_2");
+  });
+
   it("keeps a missing canonical signal-emission anchor pending through the real Garden replay adapter", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-missing-anchor");
+    enrichPendingRepo.enqueue("workspace-1", "memory-missing-anchor", "signal-memory-missing-anchor");
     const recordFailedAttempt = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
     const materializationRouter = { replaySignalRefs: vi.fn(async () => []) };
     const signalRefReplayPort = createGardenSignalRefReplayPort({
-      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []) },
+      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []), queryByEntityTypeBefore: async () => [] },
+      signalLookup: { getById: async id => ({ ...buildSignal(id), signal_state: "materialized" }) },
       evidenceCapsuleLookup: { findByIds: vi.fn(async () => []) },
       materializationRouter
     });
@@ -222,7 +276,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
 
   it("does not mark processed when signal-ref replay cannot load the source signal", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-missing-signal");
+    enrichPendingRepo.enqueue("workspace-1", "memory-missing-signal", "signal-memory-missing-signal");
 
     const recordFailedAttempt = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
     const markProcessed = vi.spyOn(enrichPendingRepo, "markProcessed");

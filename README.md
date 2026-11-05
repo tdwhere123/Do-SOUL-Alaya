@@ -41,7 +41,7 @@ pnpm exec alaya install
 pnpm exec alaya attach codex
 pnpm exec alaya status
 pnpm exec alaya tools list
-pnpm exec alaya tools call --json
+pnpm exec alaya tools call soul.recall '{"query":"project decisions"}' --json
 ```
 
 `alaya install` takes optional JSON answers as
@@ -100,8 +100,10 @@ Release installs print the same provisioning command using the installed path.
 `pnpm-workspace.yaml` overrides `onnxruntime-web` away; the Node embedding path
 does not use it.
 
-CI and default developer installs stay on the slim path. Install the
-extra only when you want on-device embeddings.
+The runtime is required in CI and default developer installs; default installs
+do not download model weights. CI provisions a pinned model for one Linux native
+canary, verifies its artifact tree before loading, and runs inference offline;
+the other platform shards do not require that cache.
 
 Inspector SPA is compiled by `pnpm build` (`apps/inspector/web`) unless
 `ALAYA_BUILD_INSPECTOR_WEB=0` and `apps/inspector/web/dist/index.html`

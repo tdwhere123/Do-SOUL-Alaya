@@ -115,13 +115,6 @@ export function buildRecalledContextSection(workingProjection: Readonly<WorkingP
   return `<recalled_context>\n${recalledBody}\n</recalled_context>`;
 }
 
-export function getGardenProviderFailureKind(error: unknown): string {
-  if (error instanceof Error && error.name.length > 0) {
-    return error.name;
-  }
-  return "unknown_error";
-}
-
 export function applyMessagePage(
   messages: readonly ConversationMessage[],
   page: ConversationListPageOptions | undefined
@@ -158,11 +151,4 @@ export async function queryRunEventLog(
   runId: string
 ): Promise<readonly EventLogEntry[]> {
   return queryConversationMessageEvents(repo, runId, undefined);
-}
-
-export function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }

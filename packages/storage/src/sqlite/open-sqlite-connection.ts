@@ -1,9 +1,22 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
+import { StorageError } from "../shared/errors.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 type OpenOptions = ConstructorParameters<typeof BetterSqlite3>[1];
+
+/** Retains an opened native handle when cleanup itself fails. */
+export class SqliteConnectionCleanupError extends StorageError {
+  public constructor(private readonly database: SqliteConnection, operationError: unknown, closeError: unknown) {
+    super("DATABASE_OPEN_FAILED", "SQLite connection could not be closed.",
+      new AggregateError([operationError, closeError], "Database operation and cleanup did not both complete."));
+  }
+
+  public retryDatabaseOpenCleanup(): void {
+    if (this.database.open) this.database.close();
+  }
+}
 
 const OPEN_RETRY_BUDGET_MS = 2_000;
 const OPEN_RETRY_SLEEP_MS = 50;

@@ -1,7 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   buildOperationAuditPath,
   type AlayaConfigPaths
@@ -18,6 +16,8 @@ import {
   replaceStorageDbPathInToml,
   writeTextAtomic
 } from "../../runtime/config/storage-pointer-file.js";
+import { withTemporalCutoverLease } from "../../runtime/temporal-cutover/lease.js";
+import { readDatabaseSnapshot, restoreDatabaseSnapshot } from "./operations-database.js";
 import { readBundle } from "./operations-bundle-reader.js";
 import { readErrorMessage } from "@do-soul/alaya-protocol";
 
@@ -134,13 +134,25 @@ async function restoreImportedBundle(
   restoredPaths: string[]
 ): Promise<void> {
   const restoreDbPath = await resolveImportDbPath(configPaths, bundle);
-  await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
   if (bundle.storage.db_base64 === null || restoreDbPath === null) {
+    await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
     return;
   }
   const dbBytes = Buffer.from(bundle.storage.db_base64, "base64");
-  await writeBufferAtomic(restoreDbPath, dbBytes, 0o600);
-  restoredPaths.push(restoreDbPath);
+  // Restore is offline maintenance: exclude daemon startup and pointer cutovers
+  // before changing either the active database or its configuration.
+  await withTemporalCutoverLease({
+    configFilename: configPaths.tomlPath,
+    candidateFilename: restoreDbPath,
+    runtimeFilenames: [restoreDbPath]
+  }, async () => {
+    if (await resolveImportDbPath(configPaths, bundle) !== restoreDbPath) {
+      throw new AlayaOperationError("CANTCREAT", "Active database changed before import acquired its lease; retry import.");
+    }
+    await restoreDatabaseSnapshot(restoreDbPath, dbBytes);
+    restoredPaths.push(restoreDbPath);
+    await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
+  });
 }
 
 async function resolveImportDbPath(
@@ -223,7 +235,7 @@ async function buildBundle(
   const envContent = await readOptionalUtf8(configPaths.envPath);
   const dbPath = tomlContent === null ? null : parseStorageDbPathFromToml(tomlContent);
   const dbBytes =
-    dbPath === null ? null : await readOptionalBuffer(dbPath);
+    dbPath === null ? null : await readDatabaseSnapshot(dbPath);
 
   return {
     bundle_version: 1,
@@ -318,32 +330,9 @@ async function writeJsonAtomic(filePath: string, value: unknown, mode: number): 
   await writeTextAtomic(filePath, `${JSON.stringify(value)}\n`, mode);
 }
 
-async function writeBufferAtomic(filePath: string, content: Buffer, mode: number): Promise<void> {
-  const normalizedPath = path.resolve(filePath);
-  const directory = path.dirname(normalizedPath);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const tempPath = path.join(
-    directory,
-    `.tmp-${path.basename(normalizedPath)}-${randomUUID()}`
-  );
-  await writeFile(tempPath, content, { mode });
-  await rename(tempPath, normalizedPath);
-}
-
 async function readOptionalUtf8(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (isFsCode(error, "ENOENT")) {
-      return null;
-    }
-    throw new AlayaOperationError("NOINPUT", `Unable to read file: ${filePath}`);
-  }
-}
-
-async function readOptionalBuffer(filePath: string): Promise<Buffer | null> {
-  try {
-    return await readFile(filePath);
   } catch (error) {
     if (isFsCode(error, "ENOENT")) {
       return null;

@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 34.0.0, engine gateway 3.0.0
+## Unreleased — protocol 34.1.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,70 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Internal repair removes unused exports from the private workspace packages:
+`awaitCjkSegmentationWarmup` stays behind the nonblocking startup owner, while
+`measureSqliteBlockingOnEventLoop` and `SqliteBlockingProbeResult` are retired
+with their misleading P99 diagnostic. No MCP, EventLog or runtime-config field
+is removed by this cleanup; the corresponding internal export snapshots are
+updated. EventLog transactions now reject asynchronous callbacks and prevent
+late EventLog writes from escaping a completed or rolled-back callback scope.
+
+Protocol 34.1.0 adds the non-retryable `materialization_unknown` signal state,
+optional materialization audit disposition/route fields, and optional
+`unknown_candidate_signals_count` and `inflight_candidate_signals_count` in
+Garden completion audits and MCP results (invariant §25 minor). Interrupted
+COMPILED and historically ambiguous TRIAGED or ambiguously attempted DEFERRED
+effects are audited as unknown by the pre-activation database and OS-lease owner.
+An unfinished grounding redrive is also unknown; its expiry cannot authorize
+reconciliation while the attempt may still be running. Unknown effects require
+inspection; historical audit shapes cannot prove quiescence. New proven
+pre-effect deferrals remain retryable. New outcomes commit audit and state
+together, and signal-derived enrichment waits without dropping independent work.
+
+Protocol 34.1.0 adds an optional Garden task `outcome` (`completed`, `skipped`,
+`failed`) to completion events and MCP completion responses. Consolidation and
+bulk-enrich intentional skips are measured as skipped rather than inferred from
+legacy `success`; a bulk batch with failed items now reports failure while the
+existing item obligations remain pending. Source-enrichment publication or failure
+now commits its measured Garden completion with its existing semantic audit and
+terminal task state, without a second scheduler completion attempt. The pre-34.1
+boolean remains a non-failure projection. Migration
+042 stores measured outcomes without inventing them for historical rows. Keep a
+pre-042 database for rollback: older binaries must not reopen the migrated copy
+because they cannot preserve the new completion distinction. Signal unknown closes
+an unsafe replay path, not automatic recovery of missing memories.
+
+Migration 043 atomically records each memory embedding committed by Garden
+backfill as part of its task-scoped formation obligation. Supported `answers_with` follow-ups use audited fenced
+claims, a pinned formation digest, and current source/embedding checks inside
+assertion admission. After interruption they resume without re-embedding or
+re-admitting an existing assertion; stale, erased, or unauthorized inputs remain
+blocked for inspection. A later follow-up does not rewrite its parent's failed
+outcome. The new `soul.garden.embedding_follow_up` events and optional
+`garden.list_pending_tasks` follow-up projection distinguish pending, in-flight,
+and blocked obligations without making them externally claimable. Pre-043
+binaries must use a pre-043 backup rather than reopening the migrated database.
+Retired coherence mutation is not re-enabled.
+
+Migration 041 adds durable admission lineage, grounding-claim audit boundaries,
+and separate signal-reference versus independent-enrichment progress. Existing
+rows receive no invented provenance. Keep a pre-041 database for older-binary
+rollback: older binaries must not reopen a 041 database because they do not
+honor the signal-reference replay hold.
+
+Storage migration 040 freezes host-round membership before source admission and
+retains logical sweep/planning progress and attributable erase obligations.
+Migration 039 is unchanged. Keep a pre-040 database backup: an older binary must
+use that backup rather than dropping the new tables or editing schema versions.
+Legacy receipt reassociation requires retained occurrence identity; already-lost
+inventory is not reconstructed from text similarity or cross-workspace guesses.
+
+Source indexing keeps lexical preparation available during model occupancy and
+reclaims obsolete vector payloads in bounded pages. Exact vector scans share
+metadata and cosine work; statement association uses packed symmetric links and
+metered exact pruning with fallback. Ranking rules, candidate caps and budget
+limits are unchanged. Linux CI now requires verified offline ONNX inference.
 
 Protocol 34.0.0 changes ordinary native delivery (`ordinary-native-field.v9`, invariant §25
 major). Question-time preference now prefers roots whose recorded date lies from the

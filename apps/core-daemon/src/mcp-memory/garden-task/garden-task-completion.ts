@@ -1,6 +1,7 @@
 import {
   CandidateMemorySignalSchema,
   GARDEN_ROLE_TIER_MAP,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   GardenTaskKind,
   parseGardenEventPayload,
@@ -20,6 +21,7 @@ import {
   readVerifiedDeliverySourceObservation
 } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 import { emitTaskCandidateSignals } from "../garden-task-completion/candidate-signal-emission.js";
+import { createSignalOutcomeCounter, type SignalOutcomeCounts } from "../../garden/post-turn-extract/signal-receiver.js";
 import {
   buildGardenCompletionEnvelopeJson,
   GardenTaskNotFoundError,
@@ -48,8 +50,11 @@ interface GardenTaskCompletionParams {
 type GardenTaskCompletionResult = Readonly<{
   readonly task_id: string;
   readonly status: string;
+  readonly outcome: GardenCompleteTaskRequest["status"];
   readonly events_appended: 1;
   readonly failed_candidate_signals_count?: number;
+  readonly unknown_candidate_signals_count?: number;
+  readonly inflight_candidate_signals_count?: number;
 }>;
 
 export function createGardenTaskCompletionHandler(params: GardenTaskCompletionParams): Readonly<{
@@ -201,7 +206,7 @@ async function completeCandidateSignalTask(
   throwIfAborted(context.abortSignal);
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
-  let completion: Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>;
+  let completion: Readonly<{ counts: SignalOutcomeCounts; status: GardenCompleteTaskRequest["status"] }>;
   try {
     completion = await commitCandidateSignalCompletion(
       params, request, context, row, resolvedRunId, contentOnlySignals, completionClaimedBy
@@ -212,8 +217,7 @@ async function completeCandidateSignalTask(
     throw error;
   }
 
-  return { task_id: row.id, status: completion.status, events_appended: 1,
-    ...(completion.failedCount === 0 ? {} : { failed_candidate_signals_count: completion.failedCount }) };
+  return { task_id: row.id, status: completion.status, outcome: completion.status, events_appended: 1, ...completion.counts };
 }
 
 async function commitCandidateSignalCompletion(
@@ -226,7 +230,7 @@ async function commitCandidateSignalCompletion(
     NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
   >,
   completionClaimedBy: string
-): Promise<Readonly<{ failedCount: number; status: GardenCompleteTaskRequest["status"] }>> {
+): Promise<Readonly<{ counts: SignalOutcomeCounts; status: GardenCompleteTaskRequest["status"] }>> {
   const sessionPayload = row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION
     ? readClaimedStatementSessionPayload(row, context, resolvedRunId)
     : null;
@@ -238,23 +242,25 @@ async function commitCandidateSignalCompletion(
   const status = statements?.incomplete === true ? "failed" : request.status;
   const lastError = statements?.incomplete === true ? "Source statement extraction is incomplete; valid siblings and raw source were retained." : request.last_error_text;
   throwIfAborted(context.abortSignal);
-  const failedSignalIds = new Set<string>();
+  const outcomes = createSignalOutcomeCounter();
   const emittedSignalIds = await emitTaskCandidateSignals(
-    params, row, candidateSignals, completionClaimedBy, failedSignalIds, sessionPayload !== null
+    params, row, candidateSignals, completionClaimedBy, outcomes, sessionPayload !== null
   );
+  const counts = outcomes.snapshot();
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {
       status,
+      outcome: status,
       completed_at: params.now(),
       ...(lastError === undefined ? {} : { last_error_text: lastError })
     },
-    [buildCompletedTaskEvent(row, context, resolvedRunId, status, emittedSignalIds, params.now(), failedSignalIds.size)],
+    [buildCompletedTaskEvent(row, context, resolvedRunId, status, emittedSignalIds, params.now(), counts)],
     completionClaimedBy,
     context.workspaceId
   );
-  return { failedCount: failedSignalIds.size, status };
+  return { counts, status };
 }
 
 function readClaimedStatementSessionPayload(
@@ -394,6 +400,7 @@ async function completeEdgeClassifyTask(
     row.id,
     {
       status: request.status,
+      outcome: request.status,
       completed_at: params.now(),
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
@@ -403,7 +410,7 @@ async function completeEdgeClassifyTask(
   );
 
   emitEdgeClassifyBacklogDiagnostic(params.deps, context.workspaceId, params.warn);
-  return { task_id: row.id, status: request.status, events_appended: 1 };
+  return { task_id: row.id, status: request.status, outcome: request.status, events_appended: 1 };
 }
 
 async function applyEdgeClassifyVerdict(
@@ -454,7 +461,7 @@ function buildCompletedTaskEvent(
   status: GardenCompleteTaskRequest["status"],
   objectsAffected: readonly string[],
   completedAt: string,
-  failedSignalCount = 0
+  counts?: SignalOutcomeCounts
 ): GardenTaskEventInput {
   return {
     event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
@@ -468,10 +475,11 @@ function buildCompletedTaskEvent(
       task_kind: row.kind,
       role: row.role,
       tier: GARDEN_ROLE_TIER_MAP[row.role],
-      success: status === "completed",
+      success: gardenTaskOutcomeSuccess(status),
+      outcome: status,
       objects_affected: [...objectsAffected],
       candidate_signals_count: row.kind === GardenTaskKind.EDGE_CLASSIFY ? 0 : objectsAffected.length,
-      ...(failedSignalCount === 0 ? {} : { failed_candidate_signals_count: failedSignalCount }),
+      ...(counts ?? {}),
       workspace_id: context.workspaceId,
       occurred_at: completedAt
     })

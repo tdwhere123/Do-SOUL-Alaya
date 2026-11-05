@@ -31,6 +31,7 @@ interface PendingRow {
   processed: boolean;
   attemptCount: number;
   abandonedAt: string | null;
+  independentProcessedAt: string | null;
 }
 
 export class FakeEnrichPendingRepo {
@@ -41,27 +42,30 @@ export class FakeEnrichPendingRepo {
     this.budgetCap = cap;
   }
 
-  public enqueue(workspaceId: string, memoryId: string): void {
+  public enqueue(workspaceId: string, memoryId: string, sourceSignalId: string | null = null): void {
     const existing = this.rows.find((row) => row.workspaceId === workspaceId && row.memoryId === memoryId);
     if (existing !== undefined && !existing.processed) {
       return;
     }
     if (existing !== undefined) {
+      existing.sourceSignalId = sourceSignalId;
       existing.claimedAt = null;
       existing.processed = false;
       existing.attemptCount = 0;
       existing.abandonedAt = null;
+      existing.independentProcessedAt = null;
       return;
     }
     this.rows.push({
       workspaceId,
       memoryId,
       runId: "run-1",
-      sourceSignalId: `signal-${memoryId}`,
+      sourceSignalId,
       claimedAt: null,
       processed: false,
       attemptCount: 0,
-      abandonedAt: null
+      abandonedAt: null,
+      independentProcessedAt: null
     });
   }
 
@@ -93,8 +97,19 @@ export class FakeEnrichPendingRepo {
       workspaceId: row.workspaceId,
       memoryId: row.memoryId,
       runId: row.runId,
-      sourceSignalId: row.sourceSignalId
+      sourceSignalId: row.sourceSignalId,
+      independentProcessedAt: row.independentProcessedAt
     }));
+  }
+
+  public markIndependentProcessed(workspaceId: string, memoryId: string, processedAt: string): void {
+    const row = this.rows.find(entry => entry.workspaceId === workspaceId && entry.memoryId === memoryId);
+    if (row !== undefined) row.independentProcessedAt = processedAt;
+  }
+
+  public parkSignalRefs(workspaceId: string, memoryId: string): void {
+    const row = this.rows.find(entry => entry.workspaceId === workspaceId && entry.memoryId === memoryId);
+    if (row !== undefined) row.claimedAt = null;
   }
 
   public markProcessed(workspaceId: string, memoryId: string): void {

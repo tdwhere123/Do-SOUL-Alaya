@@ -94,8 +94,7 @@ describe("statement session closure robustness", { timeout: 30_000 }, () => {
     expect(env.sessionTasks().map(row => row.status)).toEqual(["completed"]);
 
     await env.processSession(env.provider(() => []));
-    const idle = () => env.gardenTaskRepo.hostSessions.idleContainers(env.now(),
-      new Date(Date.parse(env.now()) - 7 * DAY_MS).toISOString(), 64);
+    const idle = () => env.gardenTaskRepo.hostSessions.idleContainers(env.now(), env.now(), "mcp-host-session", 64);
     expect(idle()).toEqual([]);
     // Another producer's pending message needs its own issuer; the sweep leaves it pending.
     expect(env.gardenTaskRepo.hostSessions.openTail(WORKSPACE, "dead-0")).toHaveLength(1);

@@ -1,7 +1,8 @@
 import type {
   EventLogEntry,
   GardenRoleValue,
-  GardenTaskKindValue
+  GardenTaskKindValue,
+  GardenTaskOutcome
 } from "@do-soul/alaya-protocol";
 
 export type GardenTaskStatus = "pending" | "claimed" | "completed" | "failed";
@@ -32,6 +33,8 @@ export interface GardenTaskRow {
   readonly payload_json: string;
   readonly payload: unknown;
   readonly status: GardenTaskStatus;
+  /** Null or absent means this historical completion was not measured. */
+  readonly outcome?: GardenTaskOutcome | null;
   readonly claimed_by: string | null;
   readonly claimed_at: string | null;
   readonly created_at: string;
@@ -56,6 +59,7 @@ export interface GardenTaskKindBacklogCount {
 
 export interface GardenTaskCompletionResult {
   readonly status: "completed" | "failed";
+  readonly outcome?: GardenTaskOutcome;
   readonly completed_at: string;
   readonly last_error_text?: string;
 }

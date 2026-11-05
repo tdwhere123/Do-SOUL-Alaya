@@ -23,12 +23,12 @@ const offline = await vi.hoisted(async () => {
   if (process.env.ALAYA_LOCAL_SOURCE_EMBEDDING_OFFLINE !== "1") {
     skipReason = "requires ALAYA_LOCAL_SOURCE_EMBEDDING_OFFLINE=1 (explicit local inference authorization)";
   } else if (!cacheDir) {
-    skipReason = "requires explicit ALAYA_LOCAL_SOURCE_EMBEDDING_CACHE_DIR; no implicit cache or download";
+    throw new Error("Offline Source embedding requires explicit ALAYA_LOCAL_SOURCE_EMBEDDING_CACHE_DIR; no implicit cache or download");
   } else if (!isAbsolute(cacheDir)) {
     throw new Error("Offline Source embedding requires an absolute explicit cache directory");
   } else if (!["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "onnx/model_quantized.onnx"]
     .every(file => existsSync(join(cacheDir, "Xenova/paraphrase-multilingual-MiniLM-L12-v2", file)))) {
-    skipReason = "explicit local cache is unavailable/incomplete; no download or alternate cache allowed";
+    throw new Error("Offline Source embedding explicit local cache is unavailable/incomplete; no download or alternate cache allowed");
   }
   if (skipReason !== null) {
     console.info(`[local-source-embedding-offline] SKIPPED: ${skipReason}`);
@@ -65,7 +65,10 @@ function assertGuard(isolation: OfflineIsolation): void {
     expect(report.transport_guards).toEqual(parent.transport_guards);
     expect(report.violations).toEqual([]);
   }
-  expect(isolation.childReports.at(-1)?.phase).toBe("application_response");
+  // Close dispatch may be the final child checkpoint: the parent reaps the child
+  // without requiring a close reply. All six warmup/bind/inference replies must exist.
+  expect(isolation.childReports.filter(report => report.phase === "application_response").length).toBeGreaterThanOrEqual(6);
+  expect(parent.observed_application_replies).toBeGreaterThanOrEqual(6);
 }
 
 function assertVector(result: SourceEmbeddingResult): asserts result is Extract<SourceEmbeddingResult, { status: "embedded" }> {
@@ -94,6 +97,11 @@ it.skipIf(offline.isolation === null)("binds the cached native Source/query prof
   const { createHash } = await import("node:crypto");
   const { createRequire } = await import("node:module");
   const { readFile } = await import("node:fs/promises");
+  const { resolveLocalArtifactTreeSha256 } = await import("../../embedding-recall/local-onnx-artifacts.js");
+  const expectedTree = "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436";
+  // A restored/downloaded cache is untrusted until its complete tree is checked before ORT loads it.
+  expect(`sha256:${await resolveLocalArtifactTreeSha256(offline.cacheDir!, "Xenova/paraphrase-multilingual-MiniLM-L12-v2")}`)
+    .toBe(expectedTree);
   const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
   const digest = (text: string) => `sha256:${sha256(text)}`;
   const require = createRequire(import.meta.url);
@@ -109,11 +117,11 @@ it.skipIf(offline.isolation === null)("binds the cached native Source/query prof
     const expectedProfile = {
       provider_kind: "local_onnx", model_id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
       model_revision: "sha256:66fc00f5f29afcaff34092e1bdd20008ca3918265a82fb9695a551e510cc4ebc",
-      artifact_digest: "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436",
-      tokenizer_revision: "sha256:236cd2f6944b5e0a69f28f2fbe107e451c18e8139b253a3334737bd811f62436",
+      artifact_digest: expectedTree,
+      tokenizer_revision: expectedTree,
       dimensions: 384, preprocessing: `raw-string.special-tokens.no-truncation.v1;transformers-4.3.1.ort-${ort.version}.cpu`,
       normalization: "attention-mask-mean.l2.q8.v1", max_input_tokens: 512,
-      windowing: "utf8-byte-windows.v1" as const, window_bytes: 256
+      windowing: "recorded-message-windows.v1" as const, window_bytes: 256
     };
     console.info("[local-source-embedding-offline] loaded", JSON.stringify({ profile_id: binding.profile_id, profile: binding.profile }));
     expect(binding.profile).toEqual(expectedProfile);

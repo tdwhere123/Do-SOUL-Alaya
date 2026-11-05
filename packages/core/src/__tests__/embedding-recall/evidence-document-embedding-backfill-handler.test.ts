@@ -111,6 +111,52 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     expect(repo.listSourcesByWorkspace).not.toHaveBeenCalled();
   });
 
+  it("drains accepted sibling batches before rejecting and stops dispatch after a batch failure", async () => {
+    const records: EvidenceDocumentEmbeddingRecord[] = [];
+    const repo = createRepo(Array.from({ length: 48 }, (_, index) => source({
+      ownerObjectId: `evidence-${index}`, content: `Unique evidence ${index}.`
+    })), records);
+    let rejectFirst!: (error: Error) => void;
+    let releaseSecond!: () => void;
+    let announceSecond!: () => void;
+    const started = new Promise<void>(resolve => { announceSecond = resolve; });
+    const second = new Promise<void>(resolve => { releaseSecond = resolve; });
+    let calls = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      calls += 1;
+      if (calls === 1) await new Promise<never>((_resolve, reject) => { rejectFirst = reject; });
+      announceSecond();
+      await second;
+      return texts.map(() => new Float32Array([1, 2]));
+    });
+    const handler = new EvidenceDocumentEmbeddingBackfillHandler({ evidenceDocumentEmbeddingRepo: repo,
+      provider: provider(embedTexts), batchConcurrency: 2 });
+    let settled = false;
+    const attempt = handler.handle({ workspace_id: "workspace-1" }).finally(() => { settled = true; });
+    const failure = expect(attempt).rejects.toThrow("first batch failed");
+    await started;
+    rejectFirst(new Error("first batch failed"));
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(settled).toBe(false);
+    expect(embedTexts).toHaveBeenCalledTimes(2);
+    releaseSecond();
+    await failure;
+    expect(records).toHaveLength(16);
+    expect(embedTexts).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-embed when stored backfill state cannot be read", async () => {
+    const repo = createRepo([source()], []);
+    vi.mocked(repo.findByDocuments).mockRejectedValueOnce(new Error("stored state unavailable"));
+    const embedTexts = vi.fn(async () => [new Float32Array([1, 2])]);
+    const handler = new EvidenceDocumentEmbeddingBackfillHandler({
+      evidenceDocumentEmbeddingRepo: repo, provider: provider(embedTexts)
+    });
+    await expect(handler.handle({ workspace_id: "workspace-1" })).rejects.toThrow("stored state unavailable");
+    expect(embedTexts).not.toHaveBeenCalled();
+    expect(repo.upsertMany).not.toHaveBeenCalled();
+  });
+
   it("fails loudly when a cold batch cannot be persisted", async () => {
     const repo = createRepo([source()], []);
     vi.mocked(repo.upsertMany).mockRejectedValueOnce(new Error("disk unavailable"));

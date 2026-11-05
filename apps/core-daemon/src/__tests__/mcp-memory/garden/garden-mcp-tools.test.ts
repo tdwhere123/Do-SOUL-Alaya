@@ -257,7 +257,11 @@ describe("Garden MCP tools", () => {
     expect(response).toEqual({
       task_id: "task-complete-signals",
       status: "completed",
-      events_appended: 1
+      outcome: "completed",
+      events_appended: 1,
+      failed_candidate_signals_count: 0,
+      unknown_candidate_signals_count: 0,
+      inflight_candidate_signals_count: 0
     });
     const completedEvents = (await harness.eventLogRepo.queryByType(
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED
@@ -346,7 +350,11 @@ describe("Garden MCP tools", () => {
     expect(response).toEqual({
       task_id: "task-failed",
       status: "failed",
-      events_appended: 1
+      outcome: "failed",
+      events_appended: 1,
+      failed_candidate_signals_count: 0,
+      unknown_candidate_signals_count: 0,
+      inflight_candidate_signals_count: 0
     });
     expect(harness.getGardenTask("task-failed")).toMatchObject({
       status: "failed",

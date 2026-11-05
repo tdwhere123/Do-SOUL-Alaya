@@ -55,6 +55,8 @@ test("install.sh describes the required ONNX runtime and explicit model provisio
   assert.match(uninstallSource, /\. "\$SCRIPT_DIR\/install\.sh"/);
   assert.doesNotMatch(uninstallSource, /\beval\b|awk '\/\^reject_unsafe_path/);
   assert.doesNotMatch(source, /pnpm add .*--no-frozen-lockfile/);
+  assert.match(source, /Uninstall: ALAYA_CONFIG_DIR=/);
+  assert.doesNotMatch(source, /uninstall\.sh --config-dir/);
   const corePackage = JSON.parse(readFileSync(path.join(repoRoot, "packages/core/package.json"), "utf8"));
   assert.ok(source.includes(`@huggingface/transformers@${corePackage.dependencies["@huggingface/transformers"]}`));
   assert.match(source, /node \$\{ALAYA_HOME\}\/scripts\/fetch-local-embedding-model\.mjs/);

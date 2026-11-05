@@ -16,6 +16,7 @@ export type BulkEnrichPendingClaim = Readonly<{
   readonly memoryId: string;
   readonly runId: string | null;
   readonly sourceSignalId: string | null;
+  readonly independentProcessedAt?: string | null;
 }>;
 
 type BulkEnrichMemoryRecord = Readonly<{
@@ -61,8 +62,11 @@ export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
       workspaceId: string,
       limit: number,
       claimedAt: string,
-      maxAttempts: number
+      maxAttempts: number,
+      replayReadyState?: string
     ): readonly BulkEnrichPendingClaim[];
+    markIndependentProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
+    parkSignalRefs(workspaceId: string, memoryId: string): void;
     markProcessed(workspaceId: string, memoryId: string, processedAt: string): void;
     recordFailedAttempt(
       workspaceId: string,
@@ -105,7 +109,7 @@ export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
       readonly newMemoryId: string;
       readonly memoryEvidenceIds: readonly string[];
       readonly signal: Readonly<CandidateMemorySignal>;
-    }): Promise<void>;
+    }): Promise<void | "withheld">;
   };
   readonly eventPublisher: EventPublisher;
   readonly gardenScheduler: BulkEnrichSchedulerPort;

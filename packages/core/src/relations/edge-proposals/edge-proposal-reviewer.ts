@@ -90,11 +90,10 @@ export class EdgeProposalReviewer {
 
   public async requireMemoryInWorkspace(memoryId: string, label: string, workspaceId: string): Promise<void> {
     const memory = await this.deps.memoryRepo.findById(memoryId);
-    if (memory === null) {
+    // Missing and foreign-workspace rows are the same absence at this boundary.
+    // Existence of another workspace's memory is not a distinct client fact.
+    if (memory === null || memory.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", `${label} memory not found: ${memoryId}`);
-    }
-    if (memory.workspace_id !== workspaceId) {
-      throw new CoreError("VALIDATION", `${label} memory does not belong to workspace ${workspaceId}: ${memoryId}`);
     }
   }
 }

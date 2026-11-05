@@ -45,6 +45,19 @@ function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): Leg
   };
 }
 
+async function seedProvenDeferred(repo: SqliteSignalRepo, events: SqliteEventLogRepo,
+  signal: LegacyCandidateMemorySignal): Promise<number> {
+  const triage = await events.append({ event_type: "soul.signal.triaged", entity_type: "candidate_memory_signal",
+    entity_id: signal.signal_id, workspace_id: signal.workspace_id, run_id: signal.run_id, caused_by: "fixture",
+    payload_json: { signal_id: signal.signal_id, workspace_id: signal.workspace_id, run_id: signal.run_id,
+      triage_result: "deferred", defer_class: "write_path", deferral: "prewrite_unavailable" } });
+  for (const [expectedState, nextState] of [["emitted", "triaged"], ["triaged", "compiled"], ["compiled", "deferred"]] as const) {
+    expect(repo.compareAndSwapState({ signalId: signal.signal_id, workspaceId: signal.workspace_id,
+      expectedState, nextState })).not.toBeNull();
+  }
+  return triage.revision;
+}
+
 describe("SqliteSignalRepo", () => {
   it("creates and loads a signal by id", async () => {
     const { signalRepo } = await createSignalRepo();
@@ -95,6 +108,16 @@ describe("SqliteSignalRepo", () => {
 
     expect(page.map((signal) => signal.signal_id)).toEqual(["signal-page-2"]);
     await expect(signalRepo.countByRun("run-1")).resolves.toBe(3);
+  });
+
+  it("lists signals by persisted state", async () => {
+    const { signalRepo } = await createSignalRepo();
+    await signalRepo.create(createSignal({ signal_id: "signal-emitted", run_id: "run-1" }));
+    await signalRepo.create(createSignal({ signal_id: "signal-compiled", run_id: "run-1" }));
+    await signalRepo.updateState("signal-compiled", "compiled");
+
+    expect(await signalRepo.listIdsByStateAfter("compiled", null, 100)).toEqual(["signal-compiled"]);
+    await expect(signalRepo.listIdsByStateAfter("triaged", null, 100)).resolves.toEqual([]);
   });
 
   it("updates signal_state on the public signal shape", async () => {
@@ -148,27 +171,30 @@ describe("SqliteSignalRepo", () => {
   });
 
   it("claims a signal only from the expected workspace and state", async () => {
-    const { signalRepo } = await createSignalRepo();
+    const { database, signalRepo } = await createSignalRepo();
     const signal = createSignal({ signal_state: "deferred" });
     await signalRepo.create(signal);
-    await signalRepo.updateState(signal.signal_id, "deferred");
+    const expectedTriageRevision = await seedProvenDeferred(signalRepo, new SqliteEventLogRepo(database), signal);
 
     expect(signalRepo.compareAndSwapState({
       signalId: signal.signal_id,
       workspaceId: "other-workspace",
       expectedState: "deferred",
+      expectedTriageRevision,
       nextState: "compiled"
     })).toBeNull();
     expect(signalRepo.compareAndSwapState({
       signalId: signal.signal_id,
       workspaceId: signal.workspace_id,
       expectedState: "deferred",
+      expectedTriageRevision,
       nextState: "compiled"
     })?.signal_state).toBe("compiled");
     expect(signalRepo.compareAndSwapState({
       signalId: signal.signal_id,
       workspaceId: signal.workspace_id,
       expectedState: "deferred",
+      expectedTriageRevision,
       nextState: "compiled"
     })).toBeNull();
   });
@@ -184,12 +210,21 @@ describe("SqliteSignalRepo", () => {
       signalId: signal.signal_id,
       workspaceId: signal.workspace_id,
       expectedState: "deferred",
-      nextState: "compiled",
+      nextState: "deferred",
       rawPayload
     });
 
     expect(claimed?.raw_payload).toEqual(rawPayload);
     await expect(signalRepo.getById(signal.signal_id)).resolves.toMatchObject({ raw_payload: rawPayload });
+  });
+
+  it("does not claim a historical deferred row without proven pre-effect lineage", async () => {
+    const { signalRepo } = await createSignalRepo();
+    const signal = createSignal();
+    await signalRepo.create(signal);
+    await signalRepo.updateState(signal.signal_id, "deferred");
+    expect(signalRepo.compareAndSwapState({ signalId: signal.signal_id, workspaceId: signal.workspace_id,
+      expectedState: "deferred", nextState: "compiled" })).toBeNull();
   });
 
   it("round-trips first-class memory refs outside raw_payload", async () => {

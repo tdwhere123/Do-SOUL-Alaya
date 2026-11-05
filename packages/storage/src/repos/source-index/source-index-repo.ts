@@ -17,6 +17,7 @@ import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit
 } from "./native-source.js";
 import { captureSourceIndexTargets, persistSourceIndexLexical } from "./capture-targets.js";
 import { SqliteSourceIndexLexicalStore } from "./lexical-generation.js";
+import { reclaimVectorPage } from "./vector-reclamation.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
@@ -42,6 +43,10 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     this.targetCapture = options.captureReadTargets ? new SourceIndexTargetCapture() : undefined;
     this.records = sharedSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
+  }
+
+  public reclaimVectorPage(workspaceId: string, limit: number, budget: SourceIndexBudget) {
+    return reclaimVectorPage(this.database, workspaceId, limit, budget);
   }
 
   public quoteQueryCapacity(workspaceId: string, allowance: SourceIndexNominationAllowance) {

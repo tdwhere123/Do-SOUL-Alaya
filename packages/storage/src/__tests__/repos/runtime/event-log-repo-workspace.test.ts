@@ -231,9 +231,8 @@ describe("SqliteEventLogRepo workspace and transaction queries", () => {
 
     it("transactional() refuses an async callback (returning a Promise) by throwing", async () => {
       const { eventLogRepo } = await createEventLogRepos();
-      // better-sqlite3 itself throws if the wrapped function returns a Promise.
-      // We rely on this to prevent silent atomicity loss when callers
-      // accidentally pass an async fn.
+      // The repository rejects Promise results before commit. Separate boundary
+      // tests cover rollback and writes attempted by the asynchronous continuation.
       expect(() =>
         eventLogRepo.transactional((() =>
           Promise.resolve("nope")) as unknown as () => unknown)

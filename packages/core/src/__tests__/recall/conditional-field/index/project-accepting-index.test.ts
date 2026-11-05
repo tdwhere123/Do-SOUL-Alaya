@@ -566,6 +566,7 @@ describe("conditional-field production information index", () => {
       expect(index.entries).toEqual([]);
       expect(index.completeness.logical_index).not.toBe("complete");
       expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
+      expect(index.completeness.representation).not.toBe("complete");
     }
     const hypotheses = projectAcceptingIndex(baseInput({
       snapshot: emptySnapshot(),
@@ -621,6 +622,19 @@ describe("conditional-field production information index", () => {
       identity_tie_break: "serialization"
     });
     expect(withExpiry.continuation?.expires_at).toBe(EXPIRES_AT);
+  });
+
+  it("does not represent unavailable or incomplete observations as complete", () => {
+    const common = { remaining: 0, omitted_payload: false, expand_payload: true };
+    for (const status of ["cancelled", "unknown", "not_applicable", "invalidated"] as const) {
+      const report = composeCompleteness({ ...common, observer: coverage(status), total: 1 });
+      expect(report.representation).toBe("open");
+    }
+    expect(composeCompleteness({ ...common, observer: coverage("unavailable"), total: 0 }).representation)
+      .toBe("unavailable");
+    expect(composeCompleteness({ ...common, observer: coverage("unavailable"), total: 1 }).representation)
+      .toBe("open");
+    expect(composeCompleteness({ ...common, total: 1 }).representation).toBe("complete");
   });
 
   it("composes payload independently of observed coverage", () => {

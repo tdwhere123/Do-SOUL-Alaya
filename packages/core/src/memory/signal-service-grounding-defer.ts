@@ -4,8 +4,6 @@ import {
   ReconciliationDeferralSchema,
   SignalDeferClass,
   SignalEventType,
-  SignalState,
-  SoulSignalMaterializedPayloadSchema,
   SoulSignalNormalizedPayloadSchema,
   SoulSignalTriagedPayloadSchema,
   type CandidateMemorySignal,
@@ -13,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   buildEventLogRawPayloadSummary,
+  buildSignalMaterializationEvent,
   buildSignalWarningMeta,
   hashAuditText
 } from "./signal-service-helpers.js";
@@ -31,7 +30,7 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
-import { bindEventPublisher } from "../runtime/event-publisher.js";
+import { commitSignalMaterializationOutcome } from "./signal-materialization-outcome.js";
 
 const SOURCE_GROUNDING_REDRIVE_LEASE_MS = 5 * 60 * 1000;
 
@@ -101,32 +100,6 @@ export async function reconcileStaleSourceGroundingClaim(input: {
   });
   await notifyCommittedEventBestEffort(committed.event, input.dependencies, input.warn);
   return committed.signal;
-}
-
-export function buildSignalMaterializationEvent(
-  signal: CandidateMemorySignal,
-  materialization: SignalMaterializationResult
-): SourceGroundingDeferEventInput {
-  return {
-    event_type: materialization.success
-      ? SignalEventType.SOUL_SIGNAL_MATERIALIZED
-      : SignalEventType.SOUL_SIGNAL_MATERIALIZATION_FAILED,
-    entity_type: "candidate_memory_signal",
-    entity_id: signal.signal_id,
-    workspace_id: signal.workspace_id,
-    run_id: signal.run_id,
-    caused_by: "materialization_router",
-    payload_json: SoulSignalMaterializedPayloadSchema.parse({
-      signal_id: signal.signal_id,
-      workspace_id: signal.workspace_id,
-      run_id: signal.run_id,
-      created_objects: materialization.created_objects,
-      success: materialization.success,
-      ...(materialization.success === false ? {
-        error: `materialization_error:${hashAuditText(materialization.error)}:chars:${materialization.error.length}`
-      } : {})
-    })
-  };
 }
 
 export function buildSourceGroundingDeferEvent(input: {
@@ -268,6 +241,16 @@ export async function completeDeferredMaterialization(input: {
   readonly claimToken?: string;
 }): Promise<SignalServiceReceiveResult> {
   const meta = readSourceGroundingDeferMeta(input.materialization);
+  if (meta === null && input.claimToken !== undefined) {
+    // A source-grounding redrive may reach a generic/write-path deferral.
+    // Retain its claim for existing operator reconciliation, not an unowned replay.
+    const committed = requireTransitions(input.dependencies).failRedrive({
+      workspace_id: input.signal.workspace_id, signal_id: input.signal.signal_id,
+      claim_token: input.claimToken, event: buildSignalMaterializationEvent(input.signal, input.materialization)
+    });
+    await notifyCommittedEventBestEffort(committed.event, input.dependencies, input.warn);
+    return { signal: committed.signal, triage_result: "deferred", materialization: input.materialization };
+  }
   if (meta === null) return await completeGenericDeferredMaterialization(input);
   const deferEvent = buildDeferredTriageEvent(input.signal, meta);
   const transitions = input.dependencies.sourceGroundingDeferTransitions;
@@ -295,25 +278,8 @@ async function completeGenericDeferredMaterialization(input: {
   readonly signal: CandidateMemorySignal;
   readonly materialization: SignalMaterializationResult;
 }): Promise<SignalServiceReceiveResult> {
-  await bindEventPublisher({
-    eventLogRepo: input.dependencies.eventLogRepo,
-    runtimeNotifier: input.dependencies.runtimeNotifier,
-    purpose: "SignalService"
-  }).publish(buildSignalMaterializationEvent(input.signal, input.materialization));
-  const signal = await input.dependencies.signalRepo.updateState(
-    input.signal.signal_id,
-    SignalState.DEFERRED
-  );
-  await bindEventPublisher({
-    eventLogRepo: input.dependencies.eventLogRepo,
-    runtimeNotifier: input.dependencies.runtimeNotifier,
-    purpose: "SignalService"
-  }).publish(buildDeferredTriageEvent(input.signal, readWritePathDeferMeta(input.materialization)));
-  return {
-    signal,
-    triage_result: "deferred",
-    materialization: input.materialization
-  };
+  return await commitSignalMaterializationOutcome(input.dependencies, input.signal, input.materialization,
+    [buildDeferredTriageEvent(input.signal, readWritePathDeferMeta(input.materialization))]);
 }
 
 export async function recordFailedSourceGroundingRedrive(input: {

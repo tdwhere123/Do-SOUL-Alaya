@@ -282,6 +282,7 @@ describe("garden events", () => {
   it("keeps GardenEventTypeSchema aligned with the exported event constants", () => {
     expect(GardenEventTypeSchema.options).toEqual([
       GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT,
+      GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP,
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
@@ -298,6 +299,16 @@ describe("garden events", () => {
     expect(parseGardenEventPayload(type, payload)).toEqual(payload);
     expect(GardenEventUnionSchema.parse({ type, payload })).toEqual({ type, payload });
     expect(() => parseGardenEventPayload(type, { ...payload, action: "invented_success" })).toThrow();
+  });
+
+  it("validates durable embedding follow-up dispositions without accepting invented success", () => {
+    const type = GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP;
+    const payload = { task_id: "task-1", workspace_id: "workspace-1", disposition: "retryable_failure",
+      reason: "operation_failed", attempt_count: 1, occurred_at: validTimestamp };
+    expect(parseGardenEventPayload(type, payload)).toEqual(payload);
+    expect(GardenEventUnionSchema.parse({ type, payload })).toEqual({ type, payload });
+    expect(() => parseGardenEventPayload(type, { ...payload, disposition: "invented_success" })).toThrow();
+    expect(() => parseGardenEventPayload(type, { ...payload, attempt_count: -1 })).toThrow();
   });
 
   it("rejects unknown garden event types", () => {

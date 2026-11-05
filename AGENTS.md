@@ -158,7 +158,7 @@ pnpm exec alaya install
 pnpm exec alaya attach codex
 pnpm exec alaya status
 pnpm exec alaya tools list
-pnpm exec alaya tools call --json
+pnpm exec alaya tools call soul.recall '{"query":"project decisions"}' --json
 ```
 
 `pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH

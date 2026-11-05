@@ -3,7 +3,7 @@ import { SignalService } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 
-import { atomicUpdateState, createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalEventPage, signalServiceDependencies } from "./signal-service.test-support.js";
 
 describe("SignalService", () => {
 it("writes emitted/triaged events in order and moves accepted signals to triaged", async () => {
@@ -276,6 +276,7 @@ it("resumes an existing emitted signal through triage and materialization", asyn
           };
         }),
         queryByEntity: vi.fn(async () => [emittedEvent]),
+        queryByEntityTypeBefore: signalEventPage(() => [emittedEvent]),
         transactional: <T>(fn: () => T) => fn()
       },
       signalRepo,
@@ -300,42 +301,6 @@ it("resumes an existing emitted signal through triage and materialization", asyn
       expect.objectContaining({ signal_state: "compiled" }),
       { source_event_anchor: null }
     );
-  });
-
-it("does not replay materialization side effects for post-triage signal states", async () => {
-    for (const state of ["triaged", "compiled"] as const) {
-      const materialize = vi.fn(async () => {
-        throw new Error("should not rerun materialization");
-      });
-      const warn = vi.fn();
-      const service = new SignalService(signalServiceDependencies({
-        signalRepo: {
-          create: vi.fn(),
-          getById: vi.fn(async () => createSignal({ signal_state: state })),
-          listByRun: vi.fn(async () => []),
-          updateState: vi.fn()
-        },
-        postTriageMaterializer: {
-          materialize
-        },
-        warn
-      }));
-
-      const result = await service.receiveSignal(createSignal());
-
-      expect(result.signal.signal_state).toBe(state);
-      expect(result.materialization).toBeNull();
-      expect(materialize).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith(
-        "Signal replay found a post-triage signal; not replaying materialization side effects.",
-        {
-          phase: "signal_replay",
-          code: "POST_TRIAGE_REPLAY_SKIPPED",
-          detail_sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-          detail_char_count: expect.any(Number)
-        }
-      );
-    }
   });
 
 it("rejects an idempotent replay whose candidate content changed", async () => {

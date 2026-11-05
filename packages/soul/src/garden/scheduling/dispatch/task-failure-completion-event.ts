@@ -1,5 +1,6 @@
 import {
   GARDEN_ROLE_TIER_MAP,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   parseGardenEventPayload
 } from "@do-soul/alaya-protocol";
@@ -21,7 +22,8 @@ export function buildTaskFailureCompletionEvent(
       task_kind: task.kind,
       role: task.role,
       tier: GARDEN_ROLE_TIER_MAP[task.role],
-      success: false,
+      success: gardenTaskOutcomeSuccess("failed"),
+      outcome: "failed",
       objects_affected: [],
       workspace_id: task.workspace_id,
       occurred_at: occurredAt

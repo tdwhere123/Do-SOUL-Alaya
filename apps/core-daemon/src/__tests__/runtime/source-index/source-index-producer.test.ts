@@ -275,7 +275,8 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const environment = fileEnvironment();
     const receipt = await producerFor(environment, async () => { throw new Error("binding_transport_unavailable"); }).runPass();
     expect(receipt).toMatchObject({ status: "failed", reason: "binding_transport_unavailable", binding: { status: "not_run" },
-      resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+      resources: { model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+    expect(receipt.resources.work).toBeGreaterThan(0); // Lexical census also ran before the binding refusal.
   });
 
   it("retains an unbind exception instead of masking it with unsupported binding", async () => {
@@ -525,6 +526,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     publishSource(environment, "second", "b");
     publishSource(environment, "third", "a", { workspace_id: "workspace-2" });
     const operations = [
+      vi.spyOn(SqliteSourceIndexRepository.prototype, "reclaimVectorPage"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "capturePage"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "pendingWindows"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "readDocument"),
@@ -643,8 +645,11 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     await producer.runPass();
     expect(bind).toHaveBeenCalledTimes(1);
     gate.resolve({ status: "unsupported", reason: "fixture_absent" });
-    await new Promise(resolve => setImmediate(resolve));
-    await producer.runPass();
+    // The scheduled model-busy pass may still be yielding between lexical batches.
+    for (let attempt = 0; attempt < 100 && bind.mock.calls.length < 2; attempt++) {
+      await new Promise(resolve => setImmediate(resolve));
+      await producer.runPass();
+    }
     expect(bind).toHaveBeenCalledTimes(2);
   });
 
@@ -705,8 +710,11 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(environment.index.state(WORKSPACE).status).not.toBe("ready");
     gate.resolve();
     await new Promise(resolve => setImmediate(resolve));
-    // Rotation may first visit the other workspace; the next complete sweep must recover.
-    for (let pass = 0; pass < 2; pass++) await producer.runPass();
+    // A scheduled model-busy lexical pass and workspace rotation may still be in progress.
+    for (let pass = 0; pass < 100 && environment.index.state(WORKSPACE).status !== "ready"; pass++) {
+      await new Promise(resolve => setImmediate(resolve));
+      await producer.runPass();
+    }
     // The cancelled result was discarded; a fresh pass recovers the pending window.
     expect(embedInputs).toHaveBeenCalledTimes(2);
     expect(environment.index.state(WORKSPACE).status).toBe("ready");

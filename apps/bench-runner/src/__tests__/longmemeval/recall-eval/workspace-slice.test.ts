@@ -77,7 +77,7 @@ describe("packed workspace slice explode", () => {
       expect(matchObjectIds(first, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
       const copyPath = join(root, "independent.alaya.db");
       await createPackedTwoWorkspaceDb(copyPath);
-      expect(readFileSync(copyPath)).toEqual(originalBytes);
+      expect(readFileSync(copyPath).equals(originalBytes)).toBe(true);
       expect(existsSync(`${copyPath}-wal`)).toBe(false);
       expect(existsSync(`${copyPath}-shm`)).toBe(false);
       const second = initDatabase({ filename: copyPath });
@@ -148,7 +148,7 @@ describe("packed workspace slice explode", () => {
       destDir: join(root, "slices-operational-leases"),
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
     });
-    expect(readFileSync(packedPath)).toEqual(packedBytes);
+    expect(readFileSync(packedPath).equals(packedBytes)).toBe(true);
     for (const [index, workspaceId] of [WORKSPACE_A, WORKSPACE_B].entries()) {
       const slice = initDatabase({ filename: exploded.sliceDbPaths[workspaceId]! });
       try {

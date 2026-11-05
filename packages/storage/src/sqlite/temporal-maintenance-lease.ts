@@ -17,12 +17,10 @@ export function acquireTemporalMaintenanceLease(lockFilename: string): TemporalM
   const normalizedLockFilename = normalizeLockFilename(lockFilename);
   fs.mkdirSync(path.dirname(normalizedLockFilename), { recursive: true, mode: 0o700 });
   const database = new BetterSqlite3(sqliteHostFilename(normalizedLockFilename));
-  let acquired = false;
   try {
     fs.chmodSync(normalizedLockFilename, 0o600);
     database.pragma("busy_timeout = 0");
     database.exec("BEGIN EXCLUSIVE");
-    acquired = true;
   } catch (error) {
     database.close();
     throw new Error(`Temporal maintenance lease is unavailable: ${normalizedLockFilename}`, {
@@ -35,12 +33,10 @@ export function acquireTemporalMaintenanceLease(lockFilename: string): TemporalM
     lockFilename: normalizedLockFilename,
     release: () => {
       if (released) return;
+      // Closing rolls back the empty lock transaction. Committing first would
+      // release exclusivity before a failing close can be retried.
+      database.close();
       released = true;
-      try {
-        if (acquired) database.exec("COMMIT");
-      } finally {
-        database.close();
-      }
     }
   });
 }

@@ -1,4 +1,4 @@
-import { AlayaError, StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { AlayaError, StorageTier, type GardenTaskOutcome, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { hashMemoryContent } from "./helpers.js";
 import type { HqProvider } from "./embed-text-resolver.js";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
@@ -24,6 +24,11 @@ export type EmbeddingBackfillMetadata = Omit<EmbeddingVectorRecord, "embedding">
   readonly vector_valid: boolean;
 };
 
+export type EmbeddingBackfillCheckpoint = Readonly<{
+  readonly taskId: string;
+  readonly ownerToken: string;
+}>;
+
 export interface EmbeddingBackfillRepoPort {
   findMetadataByObjectIds(
     objectIds: readonly string[]
@@ -32,9 +37,15 @@ export interface EmbeddingBackfillRepoPort {
   upsertIfContentHashMatchesCurrentMemory?(
     record: EmbeddingVectorRecord
   ): Promise<Readonly<EmbeddingVectorRecord> | null>;
+  upsertForGardenBackfill?(
+    record: EmbeddingVectorRecord,
+    checkpoint: EmbeddingBackfillCheckpoint
+  ): Promise<Readonly<EmbeddingVectorRecord> | null>;
 }
 
 export interface EmbeddingBackfillHandleResult {
+  readonly outcome?: GardenTaskOutcome;
+  readonly errorMessage?: string | null;
   readonly objectsAffected: readonly string[];
   readonly auditEntries: readonly string[];
 }

@@ -9,6 +9,12 @@ import { SignalService } from "@do-soul/alaya-core";
 
 import { createGardenSignalRefReplayPort } from "../../runtime/garden-wiring/garden-signal-ref-replay.js";
 
+function signalEventPage(rows: readonly EventLogEntry[]) {
+  return async (type: string, id: string, eventType: string, before: number | null, limit: number) =>
+    [...rows].filter(row => row.entity_type === type && row.entity_id === id && row.event_type === eventType &&
+      (before === null || row.revision < before)).sort((a, b) => b.revision - a.revision).slice(0, limit);
+}
+
 function buildSignal(): CandidateMemorySignal {
   return CandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
@@ -17,7 +23,7 @@ function buildSignal(): CandidateMemorySignal {
     surface_id: null,
     source: "model_tool",
     signal_kind: "potential_claim",
-    signal_state: "emitted",
+    signal_state: "materialized",
     object_kind: "fact",
     scope_hint: "project",
     domain_tags: ["recall"],
@@ -64,6 +70,14 @@ async function emitCanonicalSignalEnvelope(signal: CandidateMemorySignal): Promi
     }),
     getById: vi.fn(async (signalId: string) => signals.get(signalId) ?? null),
     listByRun: vi.fn(async () => []),
+    compareAndSwapState: (input: { signalId: string; workspaceId: string;
+      expectedState: CandidateMemorySignal["signal_state"]; nextState: CandidateMemorySignal["signal_state"] }) => {
+      const current = signals.get(input.signalId);
+      if (current?.workspace_id !== input.workspaceId || current.signal_state !== input.expectedState) return null;
+      const updated = { ...current, signal_state: input.nextState };
+      signals.set(input.signalId, updated);
+      return updated;
+    },
     updateState: vi.fn(async (signalId: string, signalState: CandidateMemorySignal["signal_state"]) => {
       const prior = signals.get(signalId);
       if (prior === undefined) throw new Error("missing signal");
@@ -102,8 +116,9 @@ describe("Garden signal-ref replay admission", () => {
     const port = createGardenSignalRefReplayPort({
       eventLogRepo: {
         append: vi.fn(),
-        queryByEntity: vi.fn(async () => rows)
+        queryByEntity: vi.fn(async () => rows), queryByEntityTypeBefore: signalEventPage(rows)
       },
+      signalLookup: { getById: async () => signal },
       evidenceCapsuleLookup: {
         findByIds: vi.fn(async () => [{
           object_id: "evidence-created-with-memory",
@@ -143,7 +158,8 @@ describe("Garden signal-ref replay admission", () => {
     const rows = await emitCanonicalSignalEnvelope(signal);
     const replaySignalRefs = vi.fn(async () => []);
     const port = createGardenSignalRefReplayPort({
-      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => rows) },
+      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => rows), queryByEntityTypeBefore: signalEventPage(rows) },
+      signalLookup: { getById: async () => signal },
       evidenceCapsuleLookup: {
         findByIds: vi.fn(async () => [{
           object_id: "evidence-with-mismatched-anchor",
@@ -174,7 +190,8 @@ describe("Garden signal-ref replay admission", () => {
     expect(emitted).toBeDefined();
     const replaySignalRefs = vi.fn(async () => []);
     const port = createGardenSignalRefReplayPort({
-      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => rows) },
+      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => rows), queryByEntityTypeBefore: signalEventPage(rows) },
+      signalLookup: { getById: async () => signal },
       evidenceCapsuleLookup: {
         findByIds: vi.fn(async () => ["evidence-a", "evidence-b"].map((object_id) => ({
           object_id,
@@ -201,7 +218,8 @@ describe("Garden signal-ref replay admission", () => {
   it("throws a retryable defer when the unique canonical admission envelope is missing", async () => {
     const replaySignalRefs = vi.fn(async () => []);
     const port = createGardenSignalRefReplayPort({
-      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []) },
+      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []), queryByEntityTypeBefore: signalEventPage([]) },
+      signalLookup: { getById: async () => buildSignal() },
       evidenceCapsuleLookup: { findByIds: vi.fn(async () => []) },
       materializationRouter: { replaySignalRefs }
     });

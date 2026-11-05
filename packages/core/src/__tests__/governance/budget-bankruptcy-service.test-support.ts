@@ -30,10 +30,19 @@ export function createDeclareParams(overrides: Record<string, unknown> = {}) {
   };
 }
 
+export function createRunLookup(workspaceId = "workspace-1") {
+  return {
+    getById: vi.fn(async (runId: string) =>
+      runId === "run-404" ? null : { workspace_id: workspaceId }
+    )
+  };
+}
+
 export function createDependencies(overrides: Partial<{
   eventLogRepo: ReturnType<typeof createEventLogRepo>;
   proposalPort: ReturnType<typeof createProposalPort>;
   runtimeNotifier: { notifyEntry: BroadcastEntryMock };
+  runLookup: ReturnType<typeof createRunLookup>;
 }> = {}) {
   const proposalPort = overrides.proposalPort ?? createProposalPort();
   const eventLogRepo = overrides.eventLogRepo ?? createEventLogRepo();
@@ -53,6 +62,7 @@ export function createDependencies(overrides: Partial<{
       {
         notifyEntry: vi.fn(async () => {})
       },
+    runLookup: overrides.runLookup ?? createRunLookup(),
     generateRuntimeId: createRuntimeIdFactory(),
     now: () => "2026-03-26T00:00:00.000Z"
   };

@@ -1,5 +1,6 @@
 import {
   GARDEN_ROLE_TIER_MAP,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   GardenTaskKind,
   parseGardenEventPayload
@@ -156,7 +157,8 @@ async function failExpiredStatementSessions(
           tier: GARDEN_ROLE_TIER_MAP[row.role],
           workspace_id: row.workspace_id,
           run_id: runId,
-          success: false,
+          success: gardenTaskOutcomeSuccess("failed"),
+          outcome: "failed",
           objects_affected: [],
           candidate_signals_count: 0,
           occurred_at: occurredAt

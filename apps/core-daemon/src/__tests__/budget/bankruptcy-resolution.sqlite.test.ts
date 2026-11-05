@@ -22,7 +22,8 @@ function openBudget(filename = ":memory:", notifyEntry: (entry: EventLogEntry) =
   const eventLogRepo = new SqliteEventLogRepo(database);
   const proposalRepo = new SqliteProposalRepo(database);
   const service = new BudgetBankruptcyService({ eventLogRepo,
-    proposalService: createBudgetProposalPort({ proposalRepo, now }), runtimeNotifier: { notifyEntry }, now });
+    proposalService: createBudgetProposalPort({ proposalRepo, now }), runtimeNotifier: { notifyEntry },
+    runLookup: { getById: async () => ({ workspace_id: "workspace-1" }) }, now });
   return { database, eventLogRepo, proposalRepo, service };
 }
 

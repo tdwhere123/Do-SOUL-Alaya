@@ -343,12 +343,11 @@ export type SoulReportContextUsageRequest = z.infer<typeof SoulReportContextUsag
 export type SoulReportContextUsageResponse = z.infer<typeof SoulReportContextUsageResponseSchema>;
 
 /**
- * MCP tool input schemas, derived from the zod request schemas above. Single
- * source of truth: external MCP clients see the same constraints zod enforces
- * at parse time (maxLength / maxItems / strict additionalProperties / ...), so
- * a 100MB query is rejected by both the catalog-published shape and the
- * runtime parser. `apps/core-daemon/src/mcp-memory/tool-catalog.ts` consumes
- * this rather than carrying its own JSON Schema dictionary.
+ * MCP tool input schemas, derived from the zod request schemas above. The
+ * published JSON Schema catalog is a lossy view of those parsers: representable
+ * bounds appear, `superRefine` does not. Runtime Zod parse remains the
+ * authority (invariant §25). `apps/core-daemon/src/mcp-memory/tool-catalog.ts`
+ * consumes this rather than carrying its own JSON Schema dictionary.
  */
 
 type SoulToolName =

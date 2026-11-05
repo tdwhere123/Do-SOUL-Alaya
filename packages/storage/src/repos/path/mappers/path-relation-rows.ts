@@ -1,6 +1,7 @@
 import {
   PathAnchorRefSchema,
   PathRelationSchema,
+  isPathActiveForRecall,
   type PathAnchorRef,
   type PathLifecycleStatus,
   type PathRelation
@@ -145,7 +146,7 @@ export function comparePathRelationOrder(left: Readonly<PathRelation>, right: Re
 function normalizeLifecycle(lifecycle: PathRelation["lifecycle"]): PathRelation["lifecycle"] {
   const lifecycleWithStatus = lifecycle as PathLifecycleWithStatus;
   return {
-    status: lifecycleWithStatus.status ?? "active",
+    status: isPathActiveForRecall(lifecycleWithStatus.status) ? "active" : lifecycleWithStatus.status,
     retirement_rule: lifecycle.retirement_rule,
     ...(lifecycle.cooldown_rule === undefined ? {} : { cooldown_rule: lifecycle.cooldown_rule }),
     ...(lifecycle.override_rule === undefined ? {} : { override_rule: lifecycle.override_rule })

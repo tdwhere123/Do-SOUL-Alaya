@@ -1,10 +1,7 @@
 import fs from "node:fs";
-import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
-import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -31,6 +28,7 @@ import {
 } from "../../runtime/temporal-cutover/lease.js";
 import { replaceStorageDbPathInToml } from "../../runtime/config/storage-pointer-file.js";
 import { removeTempDirectorySync } from "../../../../../packages/storage/src/__tests__/temp-directory.js";
+import { startOwnedTestChild } from "../support/owned-child-process.js";
 
 interface Fixture {
   readonly directory: string;
@@ -43,10 +41,10 @@ interface Fixture {
 }
 
 const FIXED_NOW = "2026-07-17T00:00:00.000Z";
-type LeaseChild = ChildProcessByStdio<null, Readable, Readable>;
 
 describe("temporal projection daemon cutover", () => {
   let fixture: Fixture;
+  let leaseChild: ReturnType<typeof startOwnedTestChild> | undefined;
 
   beforeEach(async () => {
     fixture = createFixture();
@@ -59,7 +57,9 @@ describe("temporal projection daemon cutover", () => {
     fs.writeFileSync(fixture.tomlFilename, fixture.originalToml, "utf8");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await leaseChild?.stop();
+    leaseChild = undefined;
     closeCachedDatabase(fixture.sourceFilename);
     closeCachedDatabase(fixture.candidateFilename);
     removeTempDirectorySync(fixture.directory);
@@ -276,21 +276,22 @@ describe("temporal projection daemon cutover", () => {
     });
   });
 
-  it("reclaims the runtime barrier after a crashed holder exits without deleting a lock file", async () => {
-    const child = await holdRuntimeLockInChild(fixture.sourceFilename);
+  it("reclaims the runtime barrier after a crashed holder exits without deleting a lock file", async ({ signal }) => {
+    const running = holdRuntimeLockInChild(fixture.sourceFilename, signal);
+    leaseChild = running;
     try {
+      await running.waitForStdout("ready\n");
       await expect(acquireTemporalRuntimeLease(fixture.sourceFilename)).rejects.toThrow(
         /daemon must be stopped/i
       );
 
-      child.kill();
-      await once(child, "exit");
-
+      await running.stop();
+      signal.throwIfAborted();
       const restartedLease = await acquireTemporalRuntimeLease(fixture.sourceFilename);
       await restartedLease.release();
       expect(fs.existsSync(`${fixture.sourceFilename}.temporal-runtime.lock.sqlite`)).toBe(true);
     } finally {
-      if (!child.killed) child.kill();
+      await running.stop();
     }
   });
 });
@@ -420,44 +421,17 @@ function migrationsThrough(maxVersion: number): readonly { readonly version: num
     .sort((left, right) => left.version - right.version);
 }
 
-async function holdRuntimeLockInChild(sourceFilename: string): Promise<LeaseChild> {
+function holdRuntimeLockInChild(sourceFilename: string, signal: AbortSignal) {
   const lockFilename = `${sourceFilename}.temporal-runtime.lock.sqlite`;
-  const child = spawn(
-    process.execPath,
+  return startOwnedTestChild([
+    "--input-type=module", "--eval",
     [
-      "--input-type=module",
-      "--eval",
-      [
-        'import Database from "better-sqlite3";',
-        'const database = new Database(process.env.ALAYA_TEMPORAL_TEST_LOCK_FILENAME);',
-        'database.pragma("busy_timeout = 0");',
-        'database.exec("BEGIN EXCLUSIVE");',
-        'process.stdout.write("ready\\n");',
-        "setInterval(() => database.pragma(\"schema_version\"), 1_000);"
-      ].join(" ")
-    ],
-    {
-      env: { ...process.env, ALAYA_TEMPORAL_TEST_LOCK_FILENAME: lockFilename },
-      stdio: ["ignore", "pipe", "pipe"]
-    }
-  );
-  await waitForChildReady(child);
-  return child;
-}
-
-async function waitForChildReady(child: LeaseChild): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const fail = (error: Error | number | null) => {
-      child.stdout.off("data", ready);
-      reject(error instanceof Error ? error : new Error(`Lease child exited: ${error ?? "unknown"}`));
-    };
-    const ready = () => {
-      child.off("error", fail);
-      child.off("exit", fail);
-      resolve();
-    };
-    child.once("error", fail);
-    child.once("exit", fail);
-    child.stdout.once("data", ready);
-  });
+      'import Database from "better-sqlite3";',
+      'const database = new Database(process.env.ALAYA_TEMPORAL_TEST_LOCK_FILENAME);',
+      'database.pragma("busy_timeout = 0");',
+      'database.exec("BEGIN EXCLUSIVE");',
+      'process.stdout.write("ready\\n");',
+      'setInterval(() => database.pragma("schema_version"), 1_000);'
+    ].join(" ")
+  ], signal, { env: { ...process.env, ALAYA_TEMPORAL_TEST_LOCK_FILENAME: lockFilename } });
 }

@@ -36,6 +36,39 @@ export const SoulResolutionKindSchema = z.enum(soulResolutionKindValues);
 
 export type SoulResolutionKind = z.infer<typeof SoulResolutionKindSchema>;
 
+type SoulResolutionFields = Readonly<{
+  resolution: SoulResolutionKind;
+  correction?: string;
+  defer_until?: string;
+}>;
+
+type AdmittedSoulResolutionFields =
+  | (SoulResolutionFields & { resolution: "correct"; correction: string })
+  | (SoulResolutionFields & { resolution: "defer"; defer_until: string })
+  | (SoulResolutionFields & { resolution: Exclude<SoulResolutionKind, "correct" | "defer"> });
+
+/** Conditional presence policy shared by MCP parsing and direct core calls.
+ * Field syntax/bounds remain the request schema's responsibility; unrelated
+ * optional fields are not forbidden, trimmed, or used to change the verb.
+ */
+export function admitSoulResolutionFields(input: SoulResolutionFields):
+  | Readonly<{ valid: true; fields: AdmittedSoulResolutionFields }>
+  | Readonly<{ valid: false; field: "correction" | "defer_until"; message: string }> {
+  if (input.resolution === SoulResolutionKind.CORRECT) {
+    if (input.correction === undefined || input.correction.trim().length === 0) {
+      return { valid: false, field: "correction", message: "resolution=correct requires a non-empty correction" };
+    }
+    return { valid: true, fields: { ...input, resolution: input.resolution, correction: input.correction } };
+  }
+  if (input.resolution === SoulResolutionKind.DEFER) {
+    if (input.defer_until === undefined || input.defer_until.trim().length === 0) {
+      return { valid: false, field: "defer_until", message: "resolution=defer requires a defer_until ISO datetime" };
+    }
+    return { valid: true, fields: { ...input, resolution: input.resolution, defer_until: input.defer_until } };
+  }
+  return { valid: true, fields: { ...input, resolution: input.resolution } };
+}
+
 // invariant: agent-facing request shape. workspace_id / run_id /
 // agent_target are bound from trusted MCP call context
 // (invariants §29 Default Scope). Do NOT include them in the
@@ -61,7 +94,15 @@ export const SoulResolveRequestSchema = z
     defer_until: IsoDatetimeStringSchema.optional()
   })
   .strict()
-  .readonly();
+  .readonly()
+  .superRefine((value, context) => {
+    // invariant §25 patch: both runtime entries call the conditional policy.
+    // JSON Schema cannot represent this refinement; runtime parsing is authoritative.
+    const admission = admitSoulResolutionFields(value);
+    if (!admission.valid) {
+      context.addIssue({ code: "custom", path: [admission.field], message: admission.message });
+    }
+  });
 
 // invariant: maps the agent-facing StagedWarningResolutionOption
 // (recall sidecar surface) to the soul.resolve verb's SoulResolutionKind.

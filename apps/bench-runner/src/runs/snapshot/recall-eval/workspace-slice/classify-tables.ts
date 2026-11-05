@@ -30,11 +30,11 @@ export interface ClassifiedCatalog {
 
 export function classifyPackedTables(reader: CatalogReader): ClassifiedCatalog {
   const objects = reader.listObjects();
-  const tables = objects.filter((object) => object.type === "table");
+  const tables = objects.filter((object) => object.type === "table" || object.type === "shadow");
   const ftsVirtual = tables
     .filter((table) => isFtsVirtual(table.sql))
     .map((table) => table.name);
-  const classified = tables.map((table) => classifyTable(table, ftsVirtual, reader));
+  const classified = tables.map((table) => classifyTable(table, reader));
   return Object.freeze({
     workspace: Object.freeze(
       classified.filter((entry) => entry.kind === "workspace")
@@ -46,7 +46,6 @@ export function classifyPackedTables(reader: CatalogReader): ClassifiedCatalog {
 
 function classifyTable(
   table: CatalogObject,
-  ftsVirtual: readonly string[],
   reader: CatalogReader
 ): ClassifiedTable {
   if (table.name.startsWith("sqlite_")) {
@@ -55,7 +54,8 @@ function classifyTable(
   if (isFtsVirtual(table.sql)) {
     return { kind: "fts_virtual", name: table.name };
   }
-  if (ftsVirtual.some((fts) => table.name.startsWith(`${fts}_`))) {
+  // SQLite owns shadow-table identity; an ordinary product table may share an FTS prefix.
+  if (table.type === "shadow") {
     return { kind: "fts_shadow", name: table.name };
   }
   const columns = reader.listColumns(table.name).map((column) => column.name);

@@ -3,13 +3,14 @@ import {
   type CandidateMemorySignal,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
-import { resolveStoredSignalEmissionContext } from "@do-soul/alaya-core";
+import { resolveStoredSignalEmissionContext, SignalService } from "@do-soul/alaya-core";
 import type { MaterializationRouter } from "@do-soul/alaya-soul";
 
 type SignalEmissionLookup = Parameters<typeof resolveStoredSignalEmissionContext>[0];
 
 type GardenSignalRefReplayInput = Readonly<{
   eventLogRepo: SignalEmissionLookup["eventLogRepo"];
+  signalLookup: Readonly<{ getById(signalId: string): Promise<CandidateMemorySignal | null> }>;
   evidenceCapsuleLookup: Readonly<{
     findByIds(
       workspaceId: string,
@@ -27,11 +28,12 @@ export function createGardenSignalRefReplayPort(input: GardenSignalRefReplayInpu
       readonly newMemoryId: string;
       readonly memoryEvidenceIds: readonly string[];
       readonly signal: CandidateMemorySignal;
-    }): Promise<void> => {
-      if (!hasReplayableSignalMemoryRefs(signal, newMemoryId)) {
-        return;
-      }
-      const context = await resolveStoredSignalEmissionContext({ eventLogRepo: input.eventLogRepo }, signal);
+    }): Promise<void | "withheld"> => {
+      const persisted = await input.signalLookup.getById(signal.signal_id);
+      if (persisted === null || persisted.workspace_id !== signal.workspace_id) return "withheld";
+      if (!hasReplayableSignalMemoryRefs(persisted, newMemoryId)) return;
+      if (persisted.signal_state !== SignalService.referenceReplayReadyState) return "withheld";
+      const context = await resolveStoredSignalEmissionContext({ eventLogRepo: input.eventLogRepo }, persisted);
       if (context === null || context.source_event_anchor === null) {
         throw new Error(
           "BULK_ENRICH signal-ref replay deferred because the canonical signal emission anchor is unavailable."
@@ -39,7 +41,7 @@ export function createGardenSignalRefReplayPort(input: GardenSignalRefReplayInpu
       }
       const evidenceId = await resolveUniqueReplayEvidenceId({
         evidenceCapsuleLookup: input.evidenceCapsuleLookup,
-        workspaceId: signal.workspace_id,
+        workspaceId: persisted.workspace_id,
         memoryEvidenceIds,
         sourceEventAnchor: context.source_event_anchor
       });
@@ -51,7 +53,7 @@ export function createGardenSignalRefReplayPort(input: GardenSignalRefReplayInpu
       await input.materializationRouter.replaySignalRefs({
         newObjectId: newMemoryId,
         evidenceId,
-        signal,
+        signal: persisted,
         context
       });
     }

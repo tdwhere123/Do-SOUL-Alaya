@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 const DIMENSIONS = 384;
 const sourceBindings = new Map();
 let nextBinding = 0;
+let warmupAttempts = 0;
 
 process.title = "alaya-local-onnx-embed-stub";
 
@@ -25,6 +26,10 @@ async function handle(message) {
     return;
   }
   if (op === "warmup") {
+    if (message.modelId === "fixture-transient-load" && ++warmupAttempts <= 3) {
+      process.send({ id, ok: false, error: { name: "Error", message: "authored child load failure" } });
+      return;
+    }
     process.send({ id, ok: true });
     return;
   }

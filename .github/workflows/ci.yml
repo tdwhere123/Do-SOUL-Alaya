@@ -168,6 +168,54 @@ jobs:
       SHARD_COVERAGE: "0"
     steps: *shard-steps
 
+  # One real native canary; all inference itself is guarded and offline.
+  local-source-onnx:
+    name: Local Source ONNX artifact (ubuntu-node24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Restore Source model artifacts
+        id: source-model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/alaya-source-models
+          key: source-onnx-minilm-236cd2f6944b5e0a-v1
+
+      # This fetches public static artifacts, never inference. The test verifies the entire
+      # pinned tree before loading ORT; cache post-save happens only after job success.
+      - name: Provision Source model artifacts on cache miss
+        if: ${{ steps.source-model.outputs.cache-hit != 'true' }}
+        env:
+          HF_ENDPOINT: https://huggingface.co
+        run: node scripts/fetch-local-embedding-model.mjs --cache-dir "${{ runner.temp }}/alaya-source-models"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test guarded offline Source inference
+        env:
+          ALAYA_LOCAL_SOURCE_EMBEDDING_OFFLINE: "1"
+          ALAYA_LOCAL_SOURCE_EMBEDDING_CACHE_DIR: ${{ runner.temp }}/alaya-source-models
+          VITEST_MAX_WORKERS: "1"
+        run: pnpm exec vitest run packages/core/src/__tests__/embedding-recall/local-onnx-source-embedding-offline.test.ts
+
   # These guards consume the checkout, not test artifacts; report failures while shards run.
   hygiene-ubuntu:
     name: Hygiene (ubuntu-node24)
@@ -261,16 +309,27 @@ jobs:
     name: Quality (ubuntu-node24)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [test-shard-ubuntu, hygiene-ubuntu]
+    needs: [test-shard-ubuntu, hygiene-ubuntu, local-source-onnx]
     if: always()
     env:
       SHARD_LABEL: ubuntu-node24
       SHARD_RESULT: ${{ needs.test-shard-ubuntu.result }}
+      REQUIRE_SOURCE_ONNX: "1"
+      SOURCE_ONNX_RESULT: ${{ needs.local-source-onnx.result }}
       REQUIRE_HYGIENE: "1"
       HYGIENE_RESULT: ${{ needs.hygiene-ubuntu.result }}
       RUN_COVERAGE: "1"
       RUN_SMOKE: "0"
     steps: &quality-steps
+      - name: Check native Source ONNX result
+        if: ${{ env.REQUIRE_SOURCE_ONNX == '1' }}
+        shell: bash
+        run: |
+          if [[ "${SOURCE_ONNX_RESULT}" != "success" ]]; then
+            echo "Local Source ONNX artifact test finished as ${SOURCE_ONNX_RESULT}"
+            exit 1
+          fi
+
       - name: Check hygiene result
         if: ${{ env.REQUIRE_HYGIENE == '1' }}
         shell: bash

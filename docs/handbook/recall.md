@@ -118,7 +118,10 @@ reservations, currentness guards and exact scoring. It does not spend the first
 delivery page's exploration work. The `acquire` receipt phase records actual work,
 native bytes and elapsed time, while retained nominations consume field memory.
 An over-cap window-id prefix stays partial and is not an exact whole-generation
-ranking. Missing/unbound generations remain unavailable, independently of lexical
+ranking. Exact vector scan still visits every admitted window in that prefix; each native page sizes
+metadata once per previously unowned root and validates each candidate while computing cosine in one pass.
+The existing conservative logical work charge is retained, so the optimization does not buy extra
+windows or silently change a budget-limited result. Missing/unbound generations remain unavailable, independently of lexical
 discovery. Protocol 24.0.0 versions this ordinary membership/ranking change under
 invariant §25; existing queries must restart after upgrading.
 The complete source census and current-source ordering are
@@ -276,14 +279,22 @@ vector scan. Only allowance-funded ordinary acquisition associates: its quoted a
 includes the worst case of retention and pairwise links, so association never consumes the
 scan's share. Request-funded Source library pages do not associate. An unfunded charge drops
 the association with a recorded resource refusal, never the scan or nomination. Memory
-positions and slots 1–4 are unchanged. The association is retained with the field's native
-sources, so every continuation page re-derives the same order without reacquisition.
+positions and slots 1–4 are unchanged. Symmetric links retain one value per root pair. During
+acquisition, a conservative floating-point upper bound may prove that a key-pair dot product's
+remaining dimensions cannot improve its root-pair maximum; every evaluated dimension and bound
+preparation is charged. Optional scratch reuses only the eliminated dense-matrix allocation, never
+bytes reserved for subsequent hint acquisition or nomination retention. Dimension compatibility is
+tracked during key retention, so incompatible dimensions take the exact path without a charged
+inspection. The optimization falls back to the exact full comparison when its worst case cannot be
+reserved or the work spent on bounds has not paid for itself. Receipts report executed work, not this reservation. The association is
+retained with the field's native sources, so every continuation page re-derives the same order
+without reacquisition.
 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
 continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v9`, Protocol
-34.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+34.1.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -491,7 +502,12 @@ visits that has no explicit selection, whether or not an embedding binding exist
 explicit selection (for example a raw rollback) is prepared as selected. Lexical takes at
 most half of each pass's remaining work and native bytes, and half of discrete roots and
 capture pages rounded up. When only one discrete slot remains, ready vector and lexical
-work alternate priority on each workspace-ring traversal. Until the first generation of the selected representation publishes, the reader
+work alternate priority on each workspace-ring traversal. The first lexical visit normally precedes
+waiting for model binding, and explicit lexical preparation has its own occupancy. A locally timed-out
+binding or inference still fences new model work until it settles, while later bounded lexical passes
+can proceed. Automatic lexical and vector work debit the same pass allowance; explicit passes retain
+their own limits. SQLite transactions and selection/epoch guards still fence every write. Until the
+first generation of the selected representation publishes, the reader
 serves the raw `source_index_fts` exactly as for an absent selector, so preparation never
 causes a lexical outage. The raw reader remains the named consumer of historical
 exact-text rows. Explicit `raw-unicode61.v1`, `segmented-unicode61.v1` and
@@ -556,9 +572,18 @@ retains its old schema and rows until release; SQLite prevents physical page rec
 past that snapshot. The writer refuses a caller-owned transaction rather than mutating
 its own frozen read. Reclamation receipts report committed pages/rows separately from
 native root visits and census calls; SQL-internal deletion and disk cost remain unmeasured.
-There is no query-time maintenance or vector/raw-source deletion. Current-binary rollback
+There is no query-time maintenance or raw-source deletion. Current-binary rollback
 selects and prepares raw lexical anew, still with generation-scoped statistics. Restoring
 the old ranking/binary requires a retained pre-028 database, never downgrading the live DB.
+
+The idle producer also reclaims retired vector generations, at most one bounded page per visited
+workspace and pass, charged to the same work/byte allowance. Each transaction deletes vector rows,
+then windows, then targets, and generation metadata last; the current pointer and current-epoch builds
+are excluded. An unpointed older-epoch build is first retired because the existing source-epoch guard
+already prevents its recovery. Shared root/dependency material and erase barriers remain owned by source invalidation.
+An old WAL reader retains its snapshot until release; SQLite's physical pages may remain occupied until
+checkpoint. Remaining rows are restartable progress; reclamation keeps pace only when maintenance has
+sufficient allowance and execution opportunities relative to newly retired payload.
 
 Migration 025 is additive, with no automatic backfill. Selection/epoch CAS fences
 superseded producers; durable pending targets allow bounded restart and payload repair.
@@ -693,7 +718,8 @@ Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
 14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5,
-29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8 and current 34.0.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0/v9 and current
+34.1.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
 canonical request policy. Every native pair requires its matching
 `ordinary-native-field.vN` public semantics and result/continuation version,
 `native_query`, and current compact disclosures; cross-pairs are refused. This is offline

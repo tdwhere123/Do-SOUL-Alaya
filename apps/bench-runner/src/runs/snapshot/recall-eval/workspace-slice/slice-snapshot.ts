@@ -9,8 +9,8 @@ import { hashRegularFileNoFollow } from "../../bound-file.js";
 
 export const WORKSPACE_SLICE_SQLITE_KIND = "alaya.bench.workspace_slice_sqlite";
 export const WORKSPACE_SLICE_EXPLODE_RECIPE_ID = "alaya.bench.workspace-slice-explode";
-// Per-generation lexical domains must be rebuilt with their own statistics, never the shared archive FTS.
-export const WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION = "v4";
+// Tool execution audits follow either their principal or worker owner into the slice.
+export const WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION = "v6";
 export const WORKSPACE_SLICE_SNAPSHOT_SIDECAR_FILENAME = "workspace-slice-snapshot.json";
 
 export type WorkspaceSliceSnapshotReceipt = Readonly<{

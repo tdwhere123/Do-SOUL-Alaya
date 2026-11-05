@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { quoteIdent } from "./names.js";
 import type { ClassifiedCatalog } from "./classify-tables.js";
 import type { GlobalTablePolicy } from "./handled-global.js";
@@ -108,15 +109,25 @@ function copyGlobalRowsViaFk(
   policy: Extract<GlobalTablePolicy, { action: "copy_via_fk" }>
 ): void {
   const inserts = prepareInserts(destByWorkspace, table, columns);
-  const parents = new Map<string, Set<unknown>>();
+  const parents = new Map<string, readonly Set<unknown>[]>();
   for (const [workspaceId, dest] of destByWorkspace) {
-    parents.set(workspaceId, readParentKeys(dest, policy.parentTable, policy.parentKey));
+    parents.set(workspaceId, policy.references.map((reference) =>
+      readParentKeys(dest, reference.parentTable, reference.parentKey)
+    ));
   }
   streamPackedRows(packed, table, columns, (row) => {
-    const key = row[policy.childKey];
+    // Alternate owner FKs are exclusive. Never fan a malformed row out to two workspaces.
+    const owners = policy.references.flatMap((reference, index) => {
+      const key = row[reference.childKey];
+      if (key === undefined) throw new AlayaError("VALIDATION", `missing owner column ${table}.${reference.childKey}`);
+      return key === null ? [] : [{ index, key }];
+    });
+    if (owners.length > 1) throw new AlayaError("VALIDATION", `ambiguous workspace owner for ${table}`);
+    const owner = owners[0];
+    if (owner === undefined) return;
     const values = columns.map((column) => row[column]);
     for (const [workspaceId, insert] of inserts) {
-      if (parents.get(workspaceId)?.has(key) === true) insert.run(...values);
+      if (parents.get(workspaceId)?.[owner.index]?.has(owner.key) === true) insert.run(...values);
     }
   });
 }

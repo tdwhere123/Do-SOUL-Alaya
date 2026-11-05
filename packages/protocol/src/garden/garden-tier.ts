@@ -188,6 +188,15 @@ export const GardenTaskDescriptorSchema = z
   .strict()
   .readonly();
 
+export const GardenTaskOutcomeSchema = z.enum(["completed", "skipped", "failed"]);
+export type GardenTaskOutcome = z.infer<typeof GardenTaskOutcomeSchema>;
+
+// Compatibility for pre-34.1 `success` consumers; remove only with a major
+// protocol migration after those consumers move to the explicit outcome.
+export function gardenTaskOutcomeSuccess(outcome: GardenTaskOutcome): boolean {
+  return outcome !== "failed";
+}
+
 export const GardenTaskResultSchema = z
   .object({
     task_id: NonEmptyStringSchema,
@@ -196,6 +205,7 @@ export const GardenTaskResultSchema = z
     tier: GardenTierSchema,
     workspace_id: NonEmptyStringSchema,
     success: z.boolean(),
+    outcome: GardenTaskOutcomeSchema.optional(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
     audit_entries: z.array(NonEmptyStringSchema).readonly(),
     error_message: BoundedReasonSchema.nullable(),

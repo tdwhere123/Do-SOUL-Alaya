@@ -1,3 +1,5 @@
+import { PathLifecycleStatusSchema, isPathActiveForRecall } from "@do-soul/alaya-protocol";
+
 export const PATH_RELATION_SELECT_COLUMNS = `
       path_id,
       workspace_id,
@@ -115,6 +117,13 @@ export function findByBackingObjectIdsSql(objectIdCount: number): string {
     `;
 }
 
+// Compile the protocol's membership decision, including its legacy missing-status case.
+// JSON shape validation below remains the storage boundary, not a second lifecycle policy.
+const activeStatusPredicates = [
+  ...(isPathActiveForRecall(undefined) ? ["json_type(lifecycle_json, '$.status') IS NULL"] : []),
+  ...PathLifecycleStatusSchema.options.filter(isPathActiveForRecall).map(status =>
+    `json_extract(lifecycle_json, '$.status') = '${status.replaceAll("'", "''")}'`)
+];
 export const ACTIVE_PATH_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
@@ -125,7 +134,7 @@ export const ACTIVE_PATH_LIFECYCLE_SQL = `CASE
         AND json_type(lifecycle_json, '$.override_rule') != 'text' THEN 0
       WHEN json_type(lifecycle_json, '$.status') IS NOT NULL
         AND json_type(lifecycle_json, '$.status') != 'text' THEN 0
-      WHEN COALESCE(json_extract(lifecycle_json, '$.status'), 'active') != 'active' THEN 0
+      WHEN COALESCE((${activeStatusPredicates.join(" OR ") || "0"}), 0) = 0 THEN 0
       WHEN EXISTS (
         SELECT 1
         FROM json_each(lifecycle_json)

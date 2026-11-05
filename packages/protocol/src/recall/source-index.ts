@@ -110,6 +110,11 @@ export type SourceIndexVector = Readonly<{
   token_count: number; truncated: false;
 }>;
 export type SourceIndexBudget = Readonly<{ work: number; native_bytes: number }>;
+/** Retired-only maintenance; complete means the queue was observed empty. */
+export type SourceIndexVectorReclamationResult = Readonly<{
+  vectors: number; windows: number; targets: number; generations: number;
+  resources: SourceIndexResources; complete: boolean;
+}>;
 /** Ordinals address the deterministic prepared manifest, never a caller-owned resume cursor. */
 export type SourceIndexPendingResult = Readonly<{ status: "ready"; ordinals: readonly number[]; resources: SourceIndexResources }> |
   Exclude<SourceIndexReadResult, { status: "ready" }>;
@@ -156,6 +161,8 @@ export class SourceIndexOperationError extends AlayaError {
 export interface SourceIndexRepository {
   /** Opt-in preparation port. Existing raw/vector consumers do not require this capability. */
   readonly lexical?: SourceIndexLexicalRepository;
+  /** Optional maintenance capability; absence says nothing about the retired queue. */
+  reclaimVectorPage?(workspaceId: string, limit: number, budget: SourceIndexBudget): SourceIndexVectorReclamationResult;
   select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection;
   state(workspaceId: string): SourceIndexState;
   /** Revoke configuration eligibility without declaring a build failure. Retains history and fences old work. */

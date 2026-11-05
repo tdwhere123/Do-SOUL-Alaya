@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AlayaError,
   FormationKind,
+  GardenEventType,
   GardenRole,
   GardenTaskKind,
   MemoryDimension,
@@ -8,6 +10,7 @@ import {
   SourceKind
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, MemoryService } from "@do-soul/alaya-core";
+import { GardenScheduler } from "@do-soul/alaya-soul";
 import {
   initializeSemanticArtifactCandidateSchema,
   initDatabase,
@@ -17,7 +20,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createSourceEnrichmentRuntime } from "../../garden/bulk-enrich/source-enrichment-runtime.js";
-import { runBulkEnrichTask } from "../../garden/bulk-enrich/bulk-enrich-runtime-runner.js";
+import { createBulkEnrichReporter, runBulkEnrichTask } from "../../garden/bulk-enrich/bulk-enrich-runtime-runner.js";
 
 const databases = new Set<StorageDatabase>();
 const NOW = "2026-05-31T12:00:00.000Z";
@@ -84,7 +87,16 @@ async function sourceHarness() {
     expect(await garden.claimAtomic(pending.id, "librarian-1", "2026-05-31T12:00:01.000Z", WS)).toBe("claimed");
     return pending.id;
   }
-  return { database, garden, memory, eventPublisher, write };
+  return { database, garden, memory, eventLogRepo, eventPublisher, write };
+}
+
+async function expectOwnedCompletion(garden: SqliteGardenTaskRepo, eventLog: SqliteEventLogRepo,
+  taskId: string, outcome: "completed" | "failed", reason: string | null = null): Promise<void> {
+  expect(garden.findById(taskId)).toMatchObject({ status: outcome, outcome, last_error_text: reason });
+  const events = (await eventLog.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events
+    .filter(event => event.entity_id === taskId);
+  expect(events).toHaveLength(1);
+  expect(events[0]?.payload_json).toMatchObject({ task_id: taskId, outcome, success: outcome === "completed" });
 }
 
 function descriptor(taskId: string, objectId: string) {
@@ -117,6 +129,7 @@ async function runTask(
       ports: {
         enrichPendingRepo: {
           claimBatch,
+          markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
           markProcessed: vi.fn(),
           recordFailedAttempt: vi.fn(),
           delete: vi.fn(),
@@ -201,6 +214,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
@@ -224,7 +238,7 @@ describe("per-source bulk_enrich routing", () => {
     expect(reportCompletion).toHaveBeenCalledWith(
       expect.objectContaining({ task_id: "source_enrich_fixture" }),
       "2026-05-31T12:00:00.000Z",
-      false,
+      "failed",
       [
         "source_enrich_unwired",
         "source_enrich_capability:unconfigured",
@@ -306,6 +320,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
@@ -325,19 +340,8 @@ describe("per-source bulk_enrich routing", () => {
     expect(runtime).toBeDefined();
     expect(claimBatch).not.toHaveBeenCalled();
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: pending!.id }),
-      "2026-05-31T12:00:02.000Z",
-      true,
-      [
-        "source_enrich:completed",
-        "source_enrich_capability:configured",
-        "source_enrich_spend:unsupported",
-        "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:source_interpretation"
-      ],
-      undefined
-    );
+    expect(reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(garden, eventLogRepo, pending!.id, "completed");
     execute.mockClear();
     reportCompletion.mockClear();
     await runBulkEnrichTask({
@@ -348,6 +352,7 @@ describe("per-source bulk_enrich routing", () => {
         ports: {
           enrichPendingRepo: {
             claimBatch,
+            markIndependentProcessed: vi.fn(), parkSignalRefs: vi.fn(),
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
@@ -366,6 +371,57 @@ describe("per-source bulk_enrich routing", () => {
     });
     expect(execute).not.toHaveBeenCalled();
     expect(claimBatch).not.toHaveBeenCalled();
+    expect(reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(garden, eventLogRepo, pending!.id, "completed");
+  });
+
+  it("commits the source-owned completion once through the actual Garden scheduler", async () => {
+    const h = await sourceHarness();
+    await h.memory.create({ created_by: "user_action", dimension: MemoryDimension.PROCEDURE,
+      source_kind: SourceKind.USER, formation_kind: FormationKind.EXPLICIT, scope_class: ScopeClass.PROJECT,
+      content: "Alice owns Orion", domain_tags: [], evidence_refs: [], workspace_id: WS, run_id: "run-1",
+      surface_id: null, enqueueEnrichment: { runId: "run-1", sourceSignalId: null } });
+    const scheduler = new GardenScheduler({ append: async () => undefined, appendManyAtomic: async () => undefined },
+      { now: () => NOW }, null, h.garden);
+    const task = await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    expect(task).not.toBeNull();
+    const sourceEnrichment = createSourceEnrichmentRuntime({ connection: h.database.connection,
+      gardenTaskRepo: h.garden, eventPublisher: h.eventPublisher, now: () => NOW,
+      transport: { execute: async request => signalResponse(request), reconcile: async () => ({ kind: "unknown" }) } });
+    const reporter = createBulkEnrichReporter({ eventPublisher: h.eventPublisher, gardenScheduler: scheduler,
+      warn: () => undefined });
+    await runBulkEnrichTask({ now: () => NOW, task: task!, availability: { kind: "missing_repo" },
+      reporter, sourceEnrichment });
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, task!.task_id, "completed");
+    expect(count(h.database, "garden_semantic_projections")).toBe(1);
+  });
+
+  it("rolls back source publication and completion together when its audit transaction fails", async () => {
+    const h = await sourceHarness();
+    const objectId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000011";
+    const taskId = await h.write(objectId, "Alice owns Orion");
+    const execute = vi.fn(async (request: string) => signalResponse(request));
+    const runtime = createSourceEnrichmentRuntime({ connection: h.database.connection, gardenTaskRepo: h.garden,
+      eventPublisher: h.eventPublisher, now: () => NOW, transport: { execute, reconcile: async () => ({ kind: "unknown" }) } })!;
+    const original = h.eventPublisher.appendManyWithMutation.bind(h.eventPublisher);
+    h.eventPublisher.appendManyWithMutation = async (events, mutate) => {
+      if (events.some(event => event.event_type === GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT &&
+          event.payload_json.action === "published")) {
+        return await original(events, entries => {
+          mutate(entries);
+          throw new AlayaError("UNAVAILABLE", "injected audit transaction failure");
+        });
+      }
+      return await original(events, mutate);
+    };
+    await expect(runtime.run(descriptor(taskId, objectId))).rejects.toThrow(/audit transaction failure/);
+    expect(h.garden.findById(taskId)).toMatchObject({ status: "claimed", outcome: null });
+    expect(count(h.database, "garden_semantic_projections")).toBe(0);
+    expect((await h.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events).toHaveLength(0);
+    h.eventPublisher.appendManyWithMutation = original;
+    await expect(runtime.run(descriptor(taskId, objectId))).resolves.toBe("completed");
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, taskId, "completed");
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("reports an unconfigured provider port as unavailable without dispatching", async () => {
@@ -387,19 +443,8 @@ describe("per-source bulk_enrich routing", () => {
     });
     const { claimBatch, reportCompletion } = await runTask(descriptor(taskId, objectId), runtime);
     expect(claimBatch).not.toHaveBeenCalled();
-    expect(reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: taskId }),
-      "2026-05-31T12:00:02.000Z",
-      false,
-      [
-        "source_enrich:transport_unconfigured",
-        "source_enrich_capability:unconfigured",
-        "source_enrich_spend:unsupported",
-        "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:none"
-      ],
-      expect.any(Error)
-    );
+    expect(reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, taskId, "failed", "transport_unconfigured");
     expect(count(h.database, "garden_semantic_artifacts")).toBe(0);
   });
 
@@ -427,19 +472,8 @@ describe("per-source bulk_enrich routing", () => {
     expect(claimBatch).not.toHaveBeenCalled();
     expect(extract).toHaveBeenCalledTimes(1);
     expect(extract.mock.calls[0]?.[0]?.systemPrompt.length).toBeGreaterThan(0);
-    expect(reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: taskId }),
-      "2026-05-31T12:00:02.000Z",
-      true,
-      [
-        "source_enrich:completed",
-        "source_enrich_capability:configured",
-        "source_enrich_spend:unsupported",
-        "source_enrich_completion_tokens:unsupported",
-        "source_enrich_family:source_interpretation"
-      ],
-      undefined
-    );
+    expect(reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, taskId, "completed");
   });
 
   it("rejects an oversized composed completion and reuses a cached artifact without a provider", async () => {
@@ -460,13 +494,8 @@ describe("per-source bulk_enrich routing", () => {
       provider: { extract: async () => ({ rawJson: huge }) }
     });
     const oversized = await runTask(descriptor(oversizedTask, oversizedId), oversizedRuntime);
-    expect(oversized.reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: oversizedTask }),
-      "2026-05-31T12:00:02.000Z",
-      false,
-      expect.arrayContaining(["source_enrich:completion_limit_exceeded", "source_enrich_spend:unsupported"]),
-      expect.any(Error)
-    );
+    expect(oversized.reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, oversizedTask, "failed", "completion_limit_exceeded");
     expect(count(h.database, "garden_semantic_artifacts")).toBe(0);
 
     const extract = vi.fn(async ({ userPrompt }: { userPrompt: string }) => ({
@@ -491,13 +520,8 @@ describe("per-source bulk_enrich routing", () => {
     });
     const reused = await runTask(descriptor(reuseTask, reuseId), unconfigured);
     expect(extract).toHaveBeenCalledTimes(1);
-    expect(reused.reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: reuseTask }),
-      "2026-05-31T12:00:02.000Z",
-      true,
-      expect.arrayContaining(["source_enrich:completed", "source_enrich_capability:unconfigured"]),
-      undefined
-    );
+    expect(reused.reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, reuseTask, "completed");
   });
 
   it("does not publish a stale source completion from the composed provider port", async () => {
@@ -521,13 +545,8 @@ describe("per-source bulk_enrich routing", () => {
     });
     const { claimBatch, reportCompletion } = await runTask(descriptor(taskId, objectId), runtime);
     expect(claimBatch).not.toHaveBeenCalled();
-    expect(reportCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: taskId }),
-      "2026-05-31T12:00:02.000Z",
-      false,
-      expect.arrayContaining(["source_enrich:superseded_source", "source_enrich_spend:unsupported"]),
-      expect.any(Error)
-    );
+    expect(reportCompletion).not.toHaveBeenCalled();
+    await expectOwnedCompletion(h.garden, h.eventLogRepo, taskId, "failed", "superseded_source");
     expect(count(h.database, "garden_semantic_projections")).toBe(0);
     expect(count(h.database, "garden_semantic_bindings")).toBe(0);
   });

@@ -4,7 +4,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { OfficialApiGardenCompileIncompleteError, GardenProviderError, type GardenComputeProvider } from "@do-soul/alaya-soul";
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
-import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
+import { createSignalOutcomeCounter, type PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
 import { receiveGardenTaskSignals } from "../post-turn-extract/evidence-finalizer.js";
 import { quarantineUnavailableSourceTasks } from "../post-turn-extract/source-provenance.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../statement-session/statement-session-closure.js";
@@ -72,7 +72,7 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
       receipt = error.receipt; cause = error.cause;
     }
     await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now);
-    const failedSignalIds = new Set<string>();
+    const outcomes = createSignalOutcomeCounter();
     const emittedSignalIds = await receiveGardenTaskSignals({
       candidates: emitStatementSessionTaskSignals({ taskId: row.id, payload, request, located, receipt, createdAt: input.now(),
         sourceObservation: rootId => {
@@ -81,18 +81,18 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
           return read.status === "unavailable" ? null
             : { observed_at: read.root.recorded_at, authority: "trusted_host_event", source_event_id: dispatch.event_id };
         } }),
-      signalReceiver: input.signalReceiver, failedSignalIds,
+      signalReceiver: input.signalReceiver, outcomes,
       beforeReceive: async () => await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now)
     });
-    const outcome = { emittedSignalIds, failedSignalCount: failedSignalIds.size };
-    await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { success: true, ...outcome }
-      : { success: false, error: cause ?? new GardenProviderError(
+    const outcome = { emittedSignalIds, signalCounts: outcomes.snapshot() };
+    await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { status: "completed", ...outcome }
+      : { status: "failed", error: cause ?? new GardenProviderError(
         "Source statement extraction is incomplete; valid siblings and raw source were retained.", "invalid_response"), ...outcome },
     input.gardenTaskRepo, input.now);
   } catch (error) {
     await quarantineUnavailableSourceTasks(input.gardenTaskRepo, input.now, row.workspace_id, row.id);
     if (input.gardenTaskRepo.findByIdInWorkspace(row.id, row.workspace_id)?.status !== "claimed") return;
-    await settleInProcessTask(row, payload.run_id, { success: false, error }, input.gardenTaskRepo, input.now);
+    await settleInProcessTask(row, payload.run_id, { status: "failed", error }, input.gardenTaskRepo, input.now);
   }
 }
 

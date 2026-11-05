@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, mkdtemp, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -429,7 +429,7 @@ describe("tool-runtime relative path handling", () => {
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceRoot: workspaceDir,
-        affectedPathRoots: [repoDir]
+        affectedPathRoots: [await realpath(repoDir)]
       })
     );
   });

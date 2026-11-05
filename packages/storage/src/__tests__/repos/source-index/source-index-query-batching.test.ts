@@ -161,8 +161,9 @@ describe("source index vector pages", () => {
     const observed = observeRows(environment);
     const page = environment.index.readVectorCandidates(WORKSPACE, null, 16, QUERY_BUDGET);
     expect(page.inspected).toBe(16);
-    expect(observed.batches("ORDER BY v.window_id ASC LIMIT").flat().every(row => !("target_json" in row))).toBe(true);
-    expect(observed.batches("FROM source_index_roots").flat()).toHaveLength(1);
+    expect(observed.batches("ORDER BY v.window_id ASC LIMIT").flat()
+      .every(row => !("target_json" in row) && !("target_bytes" in row))).toBe(true);
+    expect(observed.batches("SELECT root_key,target_json,octet_length(target_json)").flat()).toHaveLength(1);
     expect(new Set(page.candidates.map(candidate => candidate.source)).size).toBe(1);
   });
 

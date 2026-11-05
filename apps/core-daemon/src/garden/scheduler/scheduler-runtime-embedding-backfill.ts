@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AlayaError,
   GardenRole,
   GardenTaskKind,
   GardenTier,
@@ -11,6 +12,8 @@ import type {
   EmbeddingBackfillMode,
   EmbeddingBackfillTaskOutcome
 } from "./scheduler-runtime-types.js";
+import { executeCheckpointedBackfill, makeOutcome } from "./embedding-backfill-execution.js";
+import { runAnswersWithBackfillFollowUp } from "./embedding-backfill-follow-up.js";
 
 const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 const ERROR_MESSAGE_MAX_LENGTH = 240;
@@ -43,6 +46,7 @@ export function createEmbeddingBackfillRuntimeSupport(
     task: Readonly<GardenTaskDescriptor>,
     mode?: EmbeddingBackfillMode
   ): Promise<EmbeddingBackfillTaskOutcome>;
+  retryEmbeddingBackfillFollowUp(workspaceId?: string): Promise<Readonly<{ retried: boolean; taskId: string | null; errorMessage: string | null }>>;
 }> {
   const pendingEmbeddingBackfillWorkspaces = new Set<string>();
   return {
@@ -62,7 +66,8 @@ export function createEmbeddingBackfillRuntimeSupport(
         mode
       ),
     runEmbeddingBackfillTask: async (task, mode = "production") =>
-      await runEmbeddingBackfillTask(input, pendingEmbeddingBackfillWorkspaces, task, mode)
+      await runEmbeddingBackfillTask(input, pendingEmbeddingBackfillWorkspaces, task, mode),
+    retryEmbeddingBackfillFollowUp: async workspaceId => await retryEmbeddingBackfillFollowUp(input, workspaceId)
   };
 }
 
@@ -119,73 +124,109 @@ async function runEmbeddingBackfillTask(
   mode: EmbeddingBackfillMode = "production"
 ): Promise<EmbeddingBackfillTaskOutcome> {
   const completedAt = input.now();
-  let outcome: EmbeddingBackfillTaskOutcome;
+  const checkpoint = input.embeddingBackfillCheckpoint;
   try {
-    const result = await resolveEmbeddingBackfillResult(input, task);
-    const followUpAuditEntries = await runEmbeddingPathFollowUps(
-      input,
-      task,
-      result.objectsAffected,
-      mode
-    );
-    outcome = Object.freeze({
-      success: true,
-      objectsAffected: Object.freeze([...result.objectsAffected]),
-      auditEntries: Object.freeze(appendUniqueAuditEntries(
-        result.auditEntries,
-        followUpAuditEntries
-      )),
-      errorMessage: null
-    });
-  } catch (error) {
-    outcome = buildEmbeddingBackfillFailure(error);
-    input.warn("embedding backfill task failed; continuing Garden background pass", {
-      workspace_id: task.workspace_id,
-      phase: "backfill",
-      error: serializeCausalError(error)
-    });
-  }
-  try {
-    await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
-    return outcome;
+    if (checkpoint === undefined) {
+      const outcome = await executeWithoutCheckpoint(input, task, mode);
+      await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
+      return outcome;
+    }
+    const checkpointMode = mode === "cache_only" ? "cache_only"
+      : input.answersWithEdgeProducerPort === undefined ? "unwired" : "production";
+    const claim = checkpoint.claimTask(task, checkpointMode);
+    if (claim === null) {
+      if (checkpoint.isOwnedByAnotherTask(task.task_id, task.workspace_id)) {
+        await input.gardenScheduler.releaseInProcessClaim?.(task.task_id);
+      }
+      throw new AlayaError("CONFLICT", "Garden embedding backfill is already owned.");
+    }
+    if (mode === "cache_only" && checkpoint.read(claim).mode !== "cache_only") {
+      checkpoint.release(claim);
+      await input.gardenScheduler.releaseInProcessClaim?.(task.task_id);
+      throw new AlayaError("CONFLICT", "Garden backfill mode is pinned to a production follow-up.");
+    }
+    try {
+      let outcome: EmbeddingBackfillTaskOutcome;
+      try {
+        outcome = await executeCheckpointedBackfill(input, task, checkpoint, claim,
+          buildEmbeddingBackfillFailure, sanitizeDurableErrorMessage);
+      } catch (error) {
+        const row = checkpoint.read(claim);
+        if (row.state === "backfilling") throw error;
+        input.warn("embedding follow-up checkpoint settlement failed", {
+          workspace_id: task.workspace_id, phase: "follow_up_completion", error: serializeCausalError(error)
+        });
+        outcome = makeOutcome("failed", checkpoint.objectIds(claim),
+          ["embedding_backfill_follow_up_completion_unavailable"], "embedding_backfill_follow_up_completion_unavailable");
+      }
+      await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
+      checkpoint.release(claim);
+      return outcome;
+    } catch (error) {
+      // Both execution and completion persistence have settled; no accepted writer
+      // remains. Recovery is audited atomically, never inferred from claim age.
+      try {
+        await checkpoint.relinquishQuiescent(claim);
+      } catch (recoveryError) {
+        throw new AggregateError([error, recoveryError], "Garden settled-attempt recovery remains pending.");
+      }
+      throw error;
+    }
   } finally {
     pendingWorkspaces.delete(task.workspace_id);
   }
 }
 
-async function runEmbeddingPathFollowUps(
-  input: CreateGardenSchedulerRuntimeSupportInput,
-  task: Readonly<GardenTaskDescriptor>,
-  objectsAffected: readonly string[],
-  mode: EmbeddingBackfillMode
-): Promise<readonly string[]> {
-  if (mode === "cache_only") {
-    return [CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT];
+async function executeWithoutCheckpoint(input: CreateGardenSchedulerRuntimeSupportInput,
+  task: Readonly<GardenTaskDescriptor>, mode: EmbeddingBackfillMode): Promise<EmbeddingBackfillTaskOutcome> {
+  try {
+    if (mode !== "cache_only" && input.answersWithEdgeProducerPort !== undefined) {
+      throw new AlayaError("UNAVAILABLE", "Garden embedding follow-up checkpoint is not configured.");
+    }
+    if (input.embeddingBackfillHandler === undefined) {
+      throw new AlayaError("UNAVAILABLE", "embedding backfill handler is not configured");
+    }
+    const result = await input.embeddingBackfillHandler.handle(task);
+    const unwired = mode !== "cache_only" && result.objectsAffected.length >= 2;
+    const outcome = unwired ? "failed" : result.outcome;
+    const entries = [...result.auditEntries];
+    if (mode === "cache_only") entries.push(CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT);
+    else if (unwired) entries.push("embedding_backfill_answers_with_follow_up_blocked:unwired", PATH_FOLLOW_UP_DEFERRED_AUDIT);
+    return makeOutcome(outcome, result.objectsAffected, entries,
+      unwired ? "embedding_backfill_answers_with_follow_up_blocked:unwired" : result.errorMessage ?? null);
+  } catch (error) {
+    input.warn("embedding backfill task failed; continuing Garden background pass", {
+      workspace_id: task.workspace_id, phase: "backfill", error: serializeCausalError(error)
+    });
+    return buildEmbeddingBackfillFailure(error);
   }
-  if (objectsAffected.length < 2) {
-    return [];
-  }
-  await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
-  if (input.legacyTopologyMutationsEnabled !== true) {
-    return [PATH_FOLLOW_UP_DEFERRED_AUDIT];
-  }
-  await runEmbeddingCoherenceFollowUp(input, task, objectsAffected);
-  return [];
 }
 
-function appendUniqueAuditEntries(
-  existing: readonly string[],
-  additions: readonly string[]
-): string[] {
-  const seen = new Set(existing);
-  const combined = [...existing];
-  for (const entry of additions) {
-    if (!seen.has(entry)) {
-      seen.add(entry);
-      combined.push(entry);
+async function retryEmbeddingBackfillFollowUp(input: CreateGardenSchedulerRuntimeSupportInput,
+  workspaceId?: string, excludedTaskIds: readonly string[] = []): Promise<Readonly<{
+    retried: boolean; taskId: string | null; errorMessage: string | null;
+  }>> {
+  const checkpoint = input.embeddingBackfillCheckpoint;
+  await checkpoint?.recoverQuiescent(workspaceId);
+  const claim = checkpoint === undefined ? null : await checkpoint.claimPending(workspaceId, excludedTaskIds);
+  if (checkpoint === undefined || claim === null) return { retried: false, taskId: null, errorMessage: null };
+  try {
+    const result = await runAnswersWithBackfillFollowUp(input, checkpoint, claim);
+    return { retried: true, taskId: claim.taskId, errorMessage: result.errorMessage };
+  } catch (error) {
+    input.warn("embedding follow-up retry could not settle", {
+      workspace_id: claim.workspaceId, phase: "follow_up_completion", error: serializeCausalError(error)
+    });
+    return { retried: true, taskId: claim.taskId, errorMessage: "embedding_backfill_follow_up_completion_unavailable" };
+  } finally {
+    try {
+      checkpoint.release(claim);
+    } catch (error) {
+      // The retry's formation work has settled even if releasing its fence fails.
+      await checkpoint.relinquishQuiescent(claim);
+      throw error;
     }
   }
-  return combined;
 }
 
 async function persistEmbeddingBackfillCompletion(
@@ -201,7 +242,7 @@ async function persistEmbeddingBackfillCompletion(
         input,
         task,
         completedAt,
-        outcome.success,
+        outcome,
         outcome.auditEntries,
         sanitizeDurableErrorMessage(outcome.errorMessage),
         outcome.objectsAffected
@@ -233,68 +274,6 @@ async function persistEmbeddingBackfillCompletion(
 
 function sanitizeDurableErrorMessage(message: string | null): string | null {
   return message === null ? null : sanitizeErrorText(message);
-}
-
-async function resolveEmbeddingBackfillResult(
-  input: CreateGardenSchedulerRuntimeSupportInput,
-  task: Readonly<GardenTaskDescriptor>
-): Promise<Readonly<{
-  readonly objectsAffected: readonly string[];
-  readonly auditEntries: readonly string[];
-}>> {
-  if (input.embeddingBackfillHandler === undefined) {
-    return {
-      objectsAffected: [],
-      auditEntries: ["embedding_backfill_skipped:handler_unconfigured"]
-    };
-  }
-  return await input.embeddingBackfillHandler.handle(task);
-}
-
-async function runEmbeddingCoherenceFollowUp(
-  input: CreateGardenSchedulerRuntimeSupportInput,
-  task: Readonly<GardenTaskDescriptor>,
-  objectsAffected: readonly string[]
-): Promise<void> {
-  if (input.coherenceEdgeProducerPort === undefined || objectsAffected.length < 2) {
-    return;
-  }
-  try {
-    await input.coherenceEdgeProducerPort.crystallizeForBackfill({
-      workspaceId: task.workspace_id,
-      runId: null,
-      objectIds: objectsAffected
-    });
-  } catch (coherenceError) {
-    input.warn("coherence crystallization failed after embedding backfill", {
-      workspace_id: task.workspace_id,
-      phase: "coherence",
-      error: serializeCausalError(coherenceError)
-    });
-  }
-}
-
-async function runEmbeddingAnswersWithFollowUp(
-  input: CreateGardenSchedulerRuntimeSupportInput,
-  task: Readonly<GardenTaskDescriptor>,
-  objectsAffected: readonly string[]
-): Promise<void> {
-  if (input.answersWithEdgeProducerPort === undefined || objectsAffected.length < 2) {
-    return;
-  }
-  try {
-    await input.answersWithEdgeProducerPort.crystallizeForBackfill({
-      workspaceId: task.workspace_id,
-      runId: null,
-      objectIds: objectsAffected
-    });
-  } catch (answersWithError) {
-    input.warn("answers_with crystallization failed after embedding backfill", {
-      workspace_id: task.workspace_id,
-      phase: "answers_with",
-      error: serializeCausalError(answersWithError)
-    });
-  }
 }
 
 function serializeCausalError(error: unknown): SafeCausalError {
@@ -356,12 +335,7 @@ function buildEmbeddingBackfillFailure(error: unknown): EmbeddingBackfillTaskOut
   const errorMessage = error instanceof Error ? error.message : String(error);
   const objectsAffected = isEmbeddingBackfillPartialFailureError(error) ? error.objectsAffected : [];
   const auditEntries = isEmbeddingBackfillPartialFailureError(error) ? error.auditEntries : [];
-  return Object.freeze({
-    success: false,
-    objectsAffected: Object.freeze([...objectsAffected]),
-    auditEntries: Object.freeze([...auditEntries]),
-    errorMessage
-  });
+  return makeOutcome("failed", objectsAffected, auditEntries, errorMessage);
 }
 
 async function runEmbeddingBackfillPass(
@@ -370,8 +344,13 @@ async function runEmbeddingBackfillPass(
   workspaceId: string,
   mode: EmbeddingBackfillMode
 ): Promise<void> {
+  await input.embeddingBackfillCheckpoint?.recoverQuiescent(workspaceId);
+  if (input.embeddingBackfillCheckpoint?.hasActiveWorkspace(workspaceId) === true) {
+    throw new AlayaError("CONFLICT", "Garden embedding backfill is already owned.");
+  }
+  if (mode === "production" && await retryTargetedFollowUps(input, workspaceId)) return;
   if (input.embeddingBackfillHandler === undefined) {
-    return;
+    throw new AlayaError("UNAVAILABLE", "embedding backfill handler is not configured");
   }
   const firstPass = await drainEmbeddingBackfillQueue(
     input,
@@ -389,8 +368,28 @@ async function runEmbeddingBackfillPass(
         )
       : firstPass;
   if (secondPass.lastTargetedReason !== null) {
-    throw new Error(secondPass.lastTargetedReason);
+    throw new AlayaError("UNAVAILABLE", secondPass.lastTargetedReason);
   }
+}
+
+async function retryTargetedFollowUps(input: CreateGardenSchedulerRuntimeSupportInput,
+  workspaceId: string): Promise<boolean> {
+  const attempted: string[] = [];
+  let failure: string | null = null;
+  for (let index = 0; index < EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS; index += 1) {
+    const result = await retryEmbeddingBackfillFollowUp(input, workspaceId, attempted);
+    if (!result.retried || result.taskId === null) break;
+    attempted.push(result.taskId);
+    failure ??= result.errorMessage;
+  }
+  if (failure !== null) throw new AlayaError("UNAVAILABLE", failure);
+  if (input.embeddingBackfillCheckpoint?.hasBlockedWorkspace(workspaceId) === true) {
+    throw new AlayaError("CONFLICT", "Garden embedding follow-up is blocked; inspection is required.");
+  }
+  if (input.embeddingBackfillCheckpoint?.hasPendingRetryWorkspace(workspaceId) === true) {
+    throw new AlayaError("UNAVAILABLE", "Garden embedding follow-up remains pending.");
+  }
+  return attempted.length > 0;
 }
 
 async function runQueuedTargetedEmbeddingBackfill(
@@ -441,7 +440,7 @@ async function reportEmbeddingBackfillCompletion(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>,
   completedAt: string,
-  success: boolean,
+  outcome: EmbeddingBackfillTaskOutcome,
   auditEntries: readonly string[],
   errorMessage: string | null,
   objectsAffected: readonly string[]
@@ -452,7 +451,8 @@ async function reportEmbeddingBackfillCompletion(
     role: GardenRole.LIBRARIAN,
     tier: GardenTier.TIER_2,
     workspace_id: task.workspace_id,
-    success,
+    success: outcome.success,
+    outcome: outcome.outcome,
     objects_affected: [...objectsAffected],
     audit_entries: [...auditEntries],
     error_message: errorMessage,

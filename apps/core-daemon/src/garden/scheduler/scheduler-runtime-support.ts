@@ -70,6 +70,7 @@ export function createGardenSchedulerRuntimeSupport(
       pathPlasticityRuntime.enqueuePathPlasticityForAllWorkspaces,
     runPathGraphSnapshotTask,
     runEmbeddingBackfillTask: embeddingBackfillRuntime.runEmbeddingBackfillTask,
+    retryEmbeddingBackfillFollowUp: embeddingBackfillRuntime.retryEmbeddingBackfillFollowUp,
     runConsolidationCycleTask: consolidationRuntime.runConsolidationCycleTask,
     reconcileStuckEdgeProposalAccepts,
     sweepExpiredEdgeProposals,

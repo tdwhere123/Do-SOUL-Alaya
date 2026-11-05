@@ -39,6 +39,7 @@ export interface AuditorDependencies {
   readonly pointerHealthPort: AuditorPointerHealthPort;
   readonly pointerHealPort?: AuditorPointerHealPort;
   readonly orphanDetectionPort?: AuditorOrphanDetectionPort;
+  readonly orphanDetectionDisabled?: boolean;
   readonly greenMaintenancePort: AuditorGreenMaintenancePort;
   readonly bootstrappingPort: AuditorBootstrappingPort;
   readonly scheduler: AuditorSchedulerPort;

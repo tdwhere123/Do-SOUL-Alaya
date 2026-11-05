@@ -112,13 +112,23 @@ export function createCosineBatchScorer(
   return (right) => cosineWithLeftMagnitude(left, leftMagnitude, right);
 }
 
+/** Validate the right magnitude while calculating cosine, without a separate dimension scan. */
+export function createValidatedCosineBatchScorer(left: Float32Array): (right: Float32Array) => number | null {
+  const leftMagnitude = nonzeroFiniteMagnitude(left);
+  if (leftMagnitude === null) return () => null;
+  return right => cosineWithLeftMagnitude(left, leftMagnitude, right, true);
+}
+
+function cosineWithLeftMagnitude(left: Float32Array, leftMagnitude: number, right: Float32Array): number;
+function cosineWithLeftMagnitude(left: Float32Array, leftMagnitude: number, right: Float32Array, rejectInvalid: true): number | null;
 function cosineWithLeftMagnitude(
   left: Float32Array,
   leftMagnitude: number,
-  right: Float32Array
-): number {
+  right: Float32Array,
+  rejectInvalid = false
+): number | null {
   if (left.length !== right.length || right.length === 0) {
-    return 0;
+    return rejectInvalid ? null : 0;
   }
   let dot = 0;
   let rightMagnitudeSquared = 0;
@@ -128,9 +138,8 @@ function cosineWithLeftMagnitude(
     dot += leftValue * rightValue;
     rightMagnitudeSquared += rightValue * rightValue;
   }
-  if (rightMagnitudeSquared === 0) {
-    return 0;
-  }
+  if (rightMagnitudeSquared === 0) return rejectInvalid ? null : 0;
+  if (rejectInvalid && !Number.isFinite(rightMagnitudeSquared)) return null;
   return dot / (leftMagnitude * Math.sqrt(rightMagnitudeSquared));
 }
 

@@ -28,7 +28,7 @@ import {
 } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
-import { openSqliteConnection } from "./open-sqlite-connection.js";
+import { openSqliteConnection, SqliteConnectionCleanupError } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
@@ -87,6 +87,7 @@ export class StorageDatabase {
   public readonly filename: string;
   public connection: SqliteConnection;
   private closed = false;
+  private failedReopenCleanup: SqliteConnectionCleanupError | null = null;
   private connectionVersion = 0;
   private reopenTemporalMode: TemporalDatabaseMode;
 
@@ -103,8 +104,9 @@ export class StorageDatabase {
     this.reopenTemporalMode = reopenTemporalMode;
   }
 
+  /** True only after both the active handle and any failed-reopen handle are retired. */
   public isClosed(): boolean {
-    return this.closed;
+    return this.closed && this.failedReopenCleanup === null;
   }
 
   public getConnectionVersion(): number {
@@ -124,19 +126,33 @@ export class StorageDatabase {
     if (!this.closed) {
       return;
     }
-    if (this.filename !== ":memory:" && this.reopenTemporalMode === "runtime") {
-      assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
+    this.closeFailedReopen();
+    let database: SqliteConnection | undefined;
+    try {
+      if (this.filename !== ":memory:" && this.reopenTemporalMode === "runtime") {
+        assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
+      }
+      database = openDatabase(this.filename);
+      applySqliteWritePragmas(database, {
+        busyTimeoutMs: this.reopenBusyTimeoutMs,
+        analysisLimit: 400
+      });
+      restrictSqliteFileModes(this.filename);
+      bindEmbeddingOverlayIfPresent(database, this.filename);
+      registerRetainedSourceChunkDigest(database);
+      registerUtcInstantComparison(database);
+    } catch (error) {
+      if (error instanceof SqliteConnectionCleanupError) this.failedReopenCleanup = error;
+      else if (database !== undefined) {
+        try { database.close(); }
+        catch (closeError) {
+          this.failedReopenCleanup = new SqliteConnectionCleanupError(database, error, closeError);
+          throw this.failedReopenCleanup;
+        }
+      }
+      throw error;
     }
-    const database = openDatabase(this.filename);
-    applySqliteWritePragmas(database, {
-      busyTimeoutMs: this.reopenBusyTimeoutMs,
-      analysisLimit: 400
-    });
-    restrictSqliteFileModes(this.filename);
-    bindEmbeddingOverlayIfPresent(database, this.filename);
     this.connection = database;
-    registerRetainedSourceChunkDigest(database);
-    registerUtcInstantComparison(database);
     this.connectionVersion += 1;
     this.closed = false;
     if (this.filename !== ":memory:") {
@@ -145,6 +161,13 @@ export class StorageDatabase {
         blocksEviction: (filename) => sqliteWriteQueuePort?.blocksEviction(filename) === true
       });
     }
+  }
+
+  private closeFailedReopen(): void {
+    const pending = this.failedReopenCleanup;
+    if (pending === null) return;
+    pending.retryDatabaseOpenCleanup();
+    this.failedReopenCleanup = null;
   }
 
   // Refresh query-planner statistics. Without stats SQLite mis-picks a
@@ -160,6 +183,7 @@ export class StorageDatabase {
   }
 
   public close(options?: Readonly<{ readonly optimize?: boolean }>): void {
+    this.closeFailedReopen();
     if (this.closed) {
       return;
     }
@@ -213,7 +237,8 @@ export function readSchemaMigrationLedger(
     assertOrderedSafeMigrationVersions(versions);
     return Object.freeze(versions as number[]);
   } finally {
-    database.close();
+    try { database.close(); }
+    catch (closeError) { throw new SqliteConnectionCleanupError(database, undefined, closeError); }
   }
 }
 
@@ -282,11 +307,18 @@ function initializeUncachedDatabase(
     runMigrations(database, temporalMode, busyTimeoutMs);
     bindEmbeddingOverlayIfPresent(database, filename);
   } catch (error) {
-    database.close();
+    try { database.close(); }
+    catch (closeError) { throw new SqliteConnectionCleanupError(database, error, closeError); }
     throw error;
   }
 
-  const storageDatabase = new StorageDatabase(filename, database, temporalMode, busyTimeoutMs);
+  let storageDatabase: StorageDatabase;
+  try { storageDatabase = new StorageDatabase(filename, database, temporalMode, busyTimeoutMs); }
+  catch (error) {
+    try { database.close(); }
+    catch (closeError) { throw new SqliteConnectionCleanupError(database, error, closeError); }
+    throw error;
+  }
 
   if (filename !== ":memory:") {
     evictDatabaseCacheIfNeeded(filename);
@@ -332,16 +364,21 @@ function assertCachedBusyTimeoutCompatible(
 }
 
 function openDatabase(filename: string): SqliteConnection {
+  let database: SqliteConnection | undefined;
   try {
     if (filename !== ":memory:") {
       const directory = path.dirname(filename);
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
 
-    const database = openSqliteConnection(filename);
+    database = openSqliteConnection(filename);
     restrictSqliteFileModes(filename);
     return database;
   } catch (error) {
+    if (database !== undefined) {
+      try { database.close(); }
+      catch (closeError) { throw new SqliteConnectionCleanupError(database, error, closeError); }
+    }
     if (error instanceof StorageError) throw error;
     throw new StorageError("DATABASE_OPEN_FAILED", `Failed to open database: ${filename}`, error);
   }
@@ -568,7 +605,10 @@ export function isUninitializedDatabaseFile(filename: string): boolean {
     // assertRuntimeTemporalDatabaseReady fail-closes instead of applying v7.
     return false;
   } finally {
-    database?.close();
+    if (database !== undefined) {
+      try { database.close(); }
+      catch (closeError) { throw new SqliteConnectionCleanupError(database, undefined, closeError); }
+    }
   }
 }
 

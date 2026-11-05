@@ -5,10 +5,12 @@ import {
   GardenEventType,
   GardenRole,
   GardenTier,
+  gardenTaskOutcomeSuccess,
   parseGardenEventPayload,
+  type GardenTaskOutcome,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "@do-soul/alaya-core";
+import { SignalService, type EventPublisher } from "@do-soul/alaya-core";
 import {
   isPerSourceEnrichmentTask,
   type BulkEnrichAvailability,
@@ -26,7 +28,7 @@ type BulkEnrichReporter = Readonly<{
   reportCompletion(
     task: Readonly<GardenTaskDescriptor>,
     completedAt: string,
-    success: boolean,
+    outcome: GardenTaskOutcome,
     auditEntries: readonly string[],
     error?: unknown
   ): Promise<void>;
@@ -43,6 +45,7 @@ export function createBulkEnrichReporter(input: Readonly<{
       readonly tier: string;
       readonly workspace_id: string;
       readonly success: boolean;
+      readonly outcome?: GardenTaskOutcome;
       readonly objects_affected: readonly string[];
       readonly audit_entries: readonly string[];
       readonly error_message: string | null;
@@ -71,17 +74,18 @@ export function createBulkEnrichReporter(input: Readonly<{
         })
       });
     },
-    reportCompletion: async (task, completedAt, success, auditEntries, error) => {
+    reportCompletion: async (task, completedAt, outcome, auditEntries, error) => {
       await input.gardenScheduler.reportCompletion({
         task_id: task.task_id,
         task_kind: task.task_kind,
         role: GardenRole.LIBRARIAN,
         tier: GardenTier.TIER_2,
         workspace_id: task.workspace_id,
-        success,
+        success: gardenTaskOutcomeSuccess(outcome),
+        outcome,
         objects_affected: [],
         audit_entries: [...auditEntries],
-        error_message: success ? null : error instanceof Error ? error.message : String(error),
+        error_message: outcome !== "failed" ? null : error instanceof Error ? error.message : String(error),
         completed_at: completedAt
       });
     },
@@ -97,6 +101,7 @@ export async function runBulkEnrichTask(input: Readonly<{
   readonly sourceEnrichment?: {
     run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
     readonly capability?: SourceEnrichmentCapability;
+    readonly ownsCompletion?: boolean;
   };
 }>): Promise<void> {
   const completedAt = input.now();
@@ -105,13 +110,13 @@ export async function runBulkEnrichTask(input: Readonly<{
     return;
   }
   if (input.availability.kind === "missing_repo") {
-    await input.reporter.reportCompletion(input.task, completedAt, true, [
-      "bulk_enrich_skipped:no_enrich_pending_table"
-    ]);
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [
+      "bulk_enrich_failed:no_enrich_pending_table"
+    ], new AlayaError("UNAVAILABLE", "bulk enrich pending table is not configured"));
     return;
   }
   if (input.availability.kind === "disabled") {
-    await input.reporter.reportCompletion(input.task, completedAt, true, [
+    await input.reporter.reportCompletion(input.task, completedAt, "skipped", [
       "bulk_enrich_skipped:enrichment_disabled"
     ]);
     return;
@@ -129,9 +134,15 @@ export async function runBulkEnrichTask(input: Readonly<{
       input.availability.ports,
       input.reporter
     );
-    await input.reporter.reportCompletion(input.task, completedAt, true, summarizeClaimedBatch(summary));
+    await input.reporter.reportCompletion(
+      input.task,
+      completedAt,
+      summary.failedCount > 0 ? "failed" : "completed",
+      summarizeClaimedBatch(summary),
+      summary.failedCount > 0 ? new AlayaError("UNAVAILABLE", "bulk enrich batch has unfinished failed items") : undefined
+    );
   } catch (error) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
     input.reporter.warn("bulk enrich task failed; continuing Garden background pass", {
       workspace_id: input.task.workspace_id,
       error: error instanceof Error ? error.message : String(error)
@@ -146,12 +157,13 @@ async function runPerSourceEnrichmentTask(
     readonly sourceEnrichment?: {
       run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
       readonly capability?: SourceEnrichmentCapability;
+      readonly ownsCompletion?: boolean;
     };
   }>,
   completedAt: string
 ): Promise<void> {
   if (input.sourceEnrichment === undefined) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [
       "source_enrich_unwired",
       ...sourceEnrichCapabilityEntries({
         configured: false,
@@ -160,30 +172,31 @@ async function runPerSourceEnrichmentTask(
         completionTokens: "unsupported",
         spend: "unsupported"
       })
-    ], new Error("per-source enrichment worker is not composed"));
+    ], new AlayaError("UNAVAILABLE", "per-source enrichment worker is not composed"));
     return;
   }
+  let outcome: string;
   try {
-    const outcome = await input.sourceEnrichment.run(input.task);
-    if (outcome === "uncertain" || outcome === "busy" || outcome === "work_busy") {
-      return;
-    }
-    const success = outcome === "completed";
-    await input.reporter.reportCompletion(
-      input.task,
-      completedAt,
-      success,
-      [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
-      success ? undefined : new Error(outcome)
-    );
+    outcome = await input.sourceEnrichment.run(input.task);
   } catch (error) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
     input.reporter.warn("per-source enrichment failed; continuing Garden background pass", {
       workspace_id: input.task.workspace_id,
       task_id: input.task.task_id,
       error: error instanceof Error ? error.message : String(error)
     });
+    return;
   }
+  if (outcome === "uncertain" || outcome === "busy" || outcome === "work_busy" ||
+      (input.sourceEnrichment.ownsCompletion === true && outcome !== "missing")) return;
+  const success = outcome === "completed";
+  await input.reporter.reportCompletion(
+    input.task,
+    completedAt,
+    success ? "completed" : "failed",
+    [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
+    success ? undefined : new AlayaError("UNAVAILABLE", outcome)
+  );
 }
 
 function sourceEnrichCapabilityEntries(capability: SourceEnrichmentCapability | undefined): readonly string[] {
@@ -238,7 +251,8 @@ function claimBulkEnrichBatch(
     workspaceId,
     DYNAMICS_CONSTANTS.enrich.claim_batch_size,
     claimedAt,
-    DYNAMICS_CONSTANTS.enrich.max_attempts
+    DYNAMICS_CONSTANTS.enrich.max_attempts,
+    SignalService.referenceReplayReadyState
   );
 }
 
@@ -252,11 +266,13 @@ async function processClaimedBatch(
   readonly missingCount: number;
   readonly failedCount: number;
   readonly abandonedCount: number;
+  readonly withheldCount: number;
 }>> {
   let processedCount = 0;
   let missingCount = 0;
   let failedCount = 0;
   let abandonedCount = 0;
+  let withheldCount = 0;
 
   for (const pending of claimed) {
     try {
@@ -266,9 +282,18 @@ async function processClaimedBatch(
         missingCount += 1;
         continue;
       }
-      await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
-      await produceBulkEnrichEdges(pending, memory, ports);
-      await detectBulkEnrichConflicts(memory, ports);
+      if (memory.workspace_id !== pending.workspaceId) throw new AlayaError("CONFLICT", "BULK_ENRICH memory workspace does not match its obligation.");
+      if (pending.independentProcessedAt == null) {
+        await produceBulkEnrichEdges(pending, memory, ports);
+        await detectBulkEnrichConflicts(memory, ports);
+        ports.enrichPendingRepo.markIndependentProcessed(pending.workspaceId, pending.memoryId, processedAt);
+      }
+      const replay = await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
+      if (replay === "withheld") {
+        ports.enrichPendingRepo.parkSignalRefs(pending.workspaceId, pending.memoryId);
+        withheldCount += 1;
+        continue;
+      }
       ports.enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, processedAt);
       processedCount += 1;
     } catch (error) {
@@ -290,7 +315,8 @@ async function processClaimedBatch(
     processedCount,
     missingCount,
     failedCount,
-    abandonedCount
+    abandonedCount,
+    withheldCount
   };
 }
 
@@ -299,20 +325,19 @@ async function replayBulkEnrichSignalRefs(
   memoryId: string,
   evidenceIds: readonly string[],
   ports: BulkEnrichReadyPorts
-): Promise<void> {
-  if (ports.signalRefReplay === undefined || pending.sourceSignalId === null) {
-    return;
-  }
-  if (ports.signalLookup === undefined) {
-    throw new Error("BULK_ENRICH signal-ref replay is wired without a source signal lookup port.");
-  }
+): Promise<void | "withheld"> {
+  if (pending.sourceSignalId === null) return;
+  if (ports.signalRefReplay === undefined || ports.signalLookup === undefined) return "withheld";
   const sourceSignal = await ports.signalLookup.getById(pending.sourceSignalId);
   if (sourceSignal === null) {
     throw new Error(
       `BULK_ENRICH signal-ref replay could not load source signal ${pending.sourceSignalId}.`
     );
   }
-  await ports.signalRefReplay.replaySignalRefs({
+  if (sourceSignal.workspace_id !== pending.workspaceId) {
+    throw new AlayaError("CONFLICT", "BULK_ENRICH source signal workspace does not match its obligation.");
+  }
+  return await ports.signalRefReplay.replaySignalRefs({
     newMemoryId: memoryId,
     memoryEvidenceIds: evidenceIds,
     signal: sourceSignal
@@ -409,11 +434,13 @@ function summarizeClaimedBatch(summary: Readonly<{
   readonly missingCount: number;
   readonly failedCount: number;
   readonly abandonedCount: number;
+  readonly withheldCount: number;
 }>): readonly string[] {
   return [
     `bulk_enrich:processed_${summary.processedCount}`,
     `bulk_enrich:missing_${summary.missingCount}`,
     `bulk_enrich:failed_${summary.failedCount}`,
-    `bulk_enrich:abandoned_${summary.abandonedCount}`
+    `bulk_enrich:abandoned_${summary.abandonedCount}`,
+    `bulk_enrich:withheld_${summary.withheldCount}`
   ];
 }

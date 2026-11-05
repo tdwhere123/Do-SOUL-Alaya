@@ -439,7 +439,7 @@ function dimensionReport(input: Readonly<{
     observed_coverage: input.observed_coverage,
     transport: input.remaining > 0 ? "partial" : input.closed,
     payload: payloadStatus(input),
-    representation: input.representation ?? "complete"
+    representation: input.representation ?? input.closed
   };
 }
 

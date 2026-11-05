@@ -47,6 +47,8 @@ interface DynamicUpdateParts {
   readonly params: readonly (string | number | null)[];
 }
 
+// Writer columns for explicit memory updates. `facet_tags` is creation/update
+// owned here and is not a reconciliation merge field.
 const PROJECTION_UPDATE_FIELDS = [
   "projection_schema_version",
   "event_time_start",

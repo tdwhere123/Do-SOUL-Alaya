@@ -138,7 +138,8 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly listByObjectIdFilterStatement: SqliteStatement;
   private readonly existsAnyByObjectIdFilterStatement: SqliteStatement;
   private readonly guardedUpsertTransaction: (
-    parsedRecord: Readonly<MemoryEmbeddingRecord>
+    parsedRecord: Readonly<MemoryEmbeddingRecord>,
+    checkpoint?: Readonly<{ readonly taskId: string; readonly ownerToken: string }>
   ) => Readonly<MemoryEmbeddingRecord> | null;
 
   public constructor(private readonly db: StorageDatabase) {
@@ -152,9 +153,12 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   }
 
   private createGuardedUpsertTransaction(): (
-    parsedRecord: Readonly<MemoryEmbeddingRecord>
+    parsedRecord: Readonly<MemoryEmbeddingRecord>,
+    checkpoint?: Readonly<{ readonly taskId: string; readonly ownerToken: string }>
   ) => Readonly<MemoryEmbeddingRecord> | null {
-    return this.db.connection.transaction((parsedRecord: Readonly<MemoryEmbeddingRecord>) => {
+    return this.db.connection.transaction((parsedRecord: Readonly<MemoryEmbeddingRecord>,
+      checkpoint?: Readonly<{ readonly taskId: string; readonly ownerToken: string }>) => {
+      if (checkpoint !== undefined) this.assertGardenBackfillClaim(parsedRecord.workspace_id, checkpoint);
       requirePrivacyObjectAvailable(this.db, parsedRecord.workspace_id, "memory_entry", parsedRecord.object_id);
       const currentMemory = parseMemoryContentProbe(
         this.findCurrentMemoryContentStatement.get(parsedRecord.object_id, parsedRecord.workspace_id)
@@ -165,8 +169,23 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       }
 
       this.runUpsert(parsedRecord);
+      if (checkpoint !== undefined) {
+        this.db.connection.prepare(`INSERT OR IGNORE INTO garden_embedding_backfill_objects (task_id, object_id, content_hash)
+          VALUES (?, ?, ?)`).run(checkpoint.taskId, parsedRecord.object_id, parsedRecord.content_hash);
+      }
       return this.findRequiredPersistedEmbedding(parsedRecord.object_id);
     });
+  }
+
+  private assertGardenBackfillClaim(workspaceId: string,
+    checkpoint: Readonly<{ readonly taskId: string; readonly ownerToken: string }>): void {
+    const row = this.db.connection.prepare(`SELECT 1 FROM garden_embedding_backfill_runs r
+      JOIN garden_tasks t ON t.id = r.task_id AND t.workspace_id = r.workspace_id
+      WHERE r.task_id = ? AND r.workspace_id = ? AND r.state = 'backfilling'
+        AND r.owner_token = ? AND t.status = 'claimed' AND t.claimed_by = 'in-process'`).get(
+      checkpoint.taskId, workspaceId, checkpoint.ownerToken
+    );
+    if (row === undefined) throw new StorageError("CONFLICT", "Garden embedding backfill claim is no longer current.");
   }
 
   private findRequiredPersistedEmbedding(objectId: string): Readonly<MemoryEmbeddingRecord> {
@@ -229,6 +248,19 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
         `Failed guarded memory embedding write for ${parsedRecord.object_id}.`,
         error
       );
+    }
+  }
+
+  public async upsertForGardenBackfill(
+    record: MemoryEmbeddingRecord,
+    checkpoint: Readonly<{ readonly taskId: string; readonly ownerToken: string }>
+  ): Promise<Readonly<MemoryEmbeddingRecord> | null> {
+    const parsedRecord = parseMemoryEmbeddingRecord(record);
+    try {
+      return this.guardedUpsertTransaction(parsedRecord, checkpoint);
+    } catch (error) {
+      if (error instanceof StorageError) throw error;
+      throw new StorageError("QUERY_FAILED", `Failed checkpointed embedding write for ${parsedRecord.object_id}.`, error);
     }
   }
 

@@ -1,4 +1,5 @@
 import {
+  gardenTaskOutcomeSuccess,
   GardenRole,
   GardenTier,
   HealthEventKind,
@@ -193,13 +194,15 @@ async function reportPathGraphSnapshotCompletion(
   snapshot: PathGraphSnapshotRecord | null,
   errorMessage: string | null
 ): Promise<void> {
+  const outcome = errorMessage !== null ? "failed" : snapshot === null ? "skipped" : "completed";
   await input.gardenScheduler.reportCompletion({
     task_id: task.task_id,
     task_kind: task.task_kind,
     role: GardenRole.LIBRARIAN,
     tier: GardenTier.TIER_2,
     workspace_id: task.workspace_id,
-    success: errorMessage === null,
+    success: gardenTaskOutcomeSuccess(outcome),
+    outcome,
     objects_affected: snapshot === null || errorMessage !== null ? [] : [snapshot.snapshot_id],
     audit_entries:
       errorMessage !== null

@@ -350,7 +350,9 @@ export class Janitor {
     completedAt: string
   ): Promise<GardenTaskResult> {
     if (this.dormantDemotionPort === undefined) {
-      const result = this.createSuccessResult(task, completedAt, [], ["[SKIPPED] dormant_demotion: port not wired"]);
+      const result = { ...this.createFailureResult(task, completedAt,
+        new AlayaError("UNAVAILABLE", "dormant demotion port is not configured")),
+        audit_entries: ["dormant_demotion: port not wired"] };
       await this.scheduler.reportCompletion(result);
       return result;
     }
@@ -397,10 +399,14 @@ export class Janitor {
     if (this.tombstoneGcDeferredReason !== undefined || this.tombstoneGcPort === undefined) {
       auditEntries.push(
         this.tombstoneGcDeferredReason === undefined
-          ? "[SKIPPED] tombstone_gc: gc port not wired"
+          ? "[UNAVAILABLE] tombstone_gc: gc port not wired"
           : `[DEFERRED] tombstone_gc: ${this.tombstoneGcDeferredReason}`
       );
-      const result = this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries);
+      const result = this.tombstoneGcDeferredReason !== undefined
+        ? this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries,
+          tombstonedNow.length > 0 ? "completed" : "skipped")
+        : { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "tombstone GC port is not configured")),
+          objects_affected: [...tombstonedNow], audit_entries: auditEntries };
       await this.scheduler.reportCompletion(result);
       return result;
     }
@@ -502,14 +508,16 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string,
     objectIds: readonly string[],
-    auditEntries: readonly string[]
+    auditEntries: readonly string[],
+    outcome: "completed" | "skipped" = "completed"
   ): GardenTaskResult {
     return createGardenSuccessResult(
       { role: this.role, tier: this.tier },
       task,
       completedAt,
       objectIds,
-      auditEntries
+      auditEntries,
+      outcome
     );
   }
 

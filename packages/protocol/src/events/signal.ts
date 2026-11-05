@@ -102,6 +102,10 @@ export const SoulSignalMaterializedPayloadSchema = z
       )
       .readonly(),
     success: z.boolean(),
+    // Absent on historical audits: success alone did not distinguish deferral.
+    disposition: z.enum(["materialized", "deferred", "failed"]).optional(),
+    target_kind: z.enum(["memory_and_claim", "synthesis", "handoff_gap", "evidence_only", "deferred", "unknown"]).optional(),
+    routing_reason: BoundedReasonSchema.optional(),
     error: BoundedReasonSchema.optional()
   })
   .strict()

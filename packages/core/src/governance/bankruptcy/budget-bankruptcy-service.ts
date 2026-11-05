@@ -13,6 +13,7 @@ import {
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { assertGovernanceRunWorkspace } from "../policy/run-workspace-guard.js";
 import { bindEventPublisher, type EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
@@ -93,6 +94,7 @@ export class BudgetBankruptcyService {
   public async declare(params: BudgetBankruptcyDeclareParams): Promise<BudgetBankruptcyDeclareResult> {
     const runId = parseNonEmptyString(params.runId, "runId");
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    await assertGovernanceRunWorkspace(this.dependencies.runLookup, runId, workspaceId);
     const existingDeclaration = this.inFlightDeclarations.get(runId);
     if (existingDeclaration !== undefined) {
       return await existingDeclaration;
@@ -114,6 +116,7 @@ export class BudgetBankruptcyService {
     const occurredAt = ensureIsoDatetime(this.now(), "now");
     const runId = parseNonEmptyString(params.runId, "runId");
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    await assertGovernanceRunWorkspace(this.dependencies.runLookup, runId, workspaceId);
     const optionId = parseNonEmptyString(params.optionId, "optionId");
     const action = parseResolutionAction(params.action);
     const entry = await this.getOrRecoverEntry(runId);
@@ -330,6 +333,14 @@ export class BudgetBankruptcyService {
     }
     if (proposal === null && existing !== undefined) {
       throw new CoreError("CONFLICT", "Cached bankruptcy is missing its proposal");
+    }
+    if (proposal === null && existing === undefined) {
+      const declarations = await this.dependencies.eventLogRepo.queryByRunAndEventType(
+        runId, BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED
+      );
+      if (declarations.length > 0) {
+        throw new CoreError("CONFLICT", "Bankruptcy declaration is missing its proposal");
+      }
     }
     if (proposal === null) {
       throw new CoreError("NOT_FOUND", "No active bankruptcy found for run");

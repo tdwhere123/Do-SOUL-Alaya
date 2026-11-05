@@ -8,6 +8,7 @@ import {
   wrapAppendError
 } from "./event-log/writes/event-log-append.js";
 import { appendEventLogViaWriteQueue } from "./event-log/writes/queue-append.js";
+import { assertEventLogWriteScope, runSynchronousEventLogTransaction } from "./event-log/writes/synchronous-transaction.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   CreatedAtRowParser,
@@ -70,6 +71,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public append(event: EventLogAppendInput): EventLogEntry | Promise<EventLogEntry> {
+    assertEventLogWriteScope();
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // The SELECT MAX + INSERT pair must be one write transaction even when callers append
@@ -91,6 +93,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public deleteById(eventId: string): void {
+    assertEventLogWriteScope();
     try {
       this.activeStatements().deleteByIdStatement.run(eventId);
     } catch (error) {
@@ -99,11 +102,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public transactional<T>(fn: () => T): T {
-    // better-sqlite3 transactions are synchronous; if `fn` returns a Promise the
-    // BEGIN/COMMIT pair completes before the awaited work, which is incorrect.
-    // Callers that need async work must do it outside the transaction.
-    const txn = this.activeConnection().transaction(fn);
-    return txn.immediate();
+    return runSynchronousEventLogTransaction(this.activeConnection(), fn);
   }
 
   public async queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
@@ -114,6 +113,21 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return this.readable(queryEventLogRows(
       this.activeStatements().queryByEntityPagedStatement.all(entityType, entityId, -1, 0),
       "Failed to query transactional event log history by entity."
+    ));
+  }
+
+  /** Bounded keyset read for a single entity/event kind, newest revision first. */
+  public async queryByEntityTypeBefore(
+    entityType: string, entityId: string, eventType: string, beforeRevision: number | null, limit: number
+  ): Promise<readonly EventLogEntry[]> {
+    const parsedPage = parseEventLogPage({ limit, offset: 0 });
+    if (beforeRevision !== null && (!Number.isSafeInteger(beforeRevision) || beforeRevision < 0)) {
+      throw new StorageError("VALIDATION_FAILED", "Invalid event-log revision cursor.");
+    }
+    return this.readable(queryEventLogRows(
+      this.activeStatements().queryByEntityTypeBeforeStatement.all(
+        entityType, entityId, eventType, beforeRevision, beforeRevision, parsedPage.limit
+      ), "Failed to query event log by entity and event type."
     ));
   }
 

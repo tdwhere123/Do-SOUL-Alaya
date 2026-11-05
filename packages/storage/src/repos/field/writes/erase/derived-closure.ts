@@ -31,9 +31,27 @@ export function scrubDerivedPrivacyClosure(
   );
   scrubGovernancePrivacyClosure(database, barrier, evidenceIds,
     [...sourceIds, ...evidenceIds, ...memoryIds, ...synthesisIds], redact);
+  scrubEmbeddingFollowUps(database, barrier, evidenceIds, memoryIds);
   scrubEvidenceLinkedHq(database, barrier, evidenceIds);
   scrubSynthesisCapsules(database, barrier, synthesisIds);
   scrubMemoryEntries(database, barrier, memoryIds);
+}
+
+function scrubEmbeddingFollowUps(database: StorageDatabase, barrier: FieldEraseBarrierRow,
+  evidenceIds: readonly string[], memoryIds: readonly string[]): void {
+  database.connection.prepare(`UPDATE garden_embedding_backfill_runs SET
+      state = CASE WHEN state IN ('backfilling', 'pending') THEN 'blocked' ELSE state END,
+      last_error = CASE WHEN state IN ('backfilling', 'pending') THEN 'source_unavailable' ELSE last_error END,
+      plan_digest = NULL, updated_at = ?
+    WHERE workspace_id = ? AND task_id IN (SELECT task_id FROM garden_embedding_backfill_objects
+      WHERE object_id IN (SELECT value FROM json_each(?) UNION SELECT object_id FROM memory_hq_observations
+        WHERE workspace_id = ? AND evidence_id IN (SELECT value FROM json_each(?))))`)
+    .run(barrier.erased_at, barrier.workspace_id, JSON.stringify(memoryIds), barrier.workspace_id, JSON.stringify(evidenceIds));
+  database.connection.prepare(`UPDATE garden_embedding_backfill_objects SET content_hash = 'erased'
+    WHERE task_id IN (SELECT task_id FROM garden_embedding_backfill_runs WHERE workspace_id = ?)
+      AND object_id IN (SELECT value FROM json_each(?) UNION SELECT object_id FROM memory_hq_observations
+        WHERE workspace_id = ? AND evidence_id IN (SELECT value FROM json_each(?)))`)
+    .run(barrier.workspace_id, JSON.stringify(memoryIds), barrier.workspace_id, JSON.stringify(evidenceIds));
 }
 
 /** Preserve the emitted identity and erase receipt, never the copied source or rewrite. */

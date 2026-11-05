@@ -240,6 +240,16 @@ describe("Source backfill cancellation races through SQLite with simulated infer
     }
   });
 
+  it("reports the deadline when its timer fires before the wall clock advances", async () => {
+    const environment = setup(), now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const binding = controlledBinding(environment.selection, () => new Promise(() => undefined));
+    const result = await environment.backfill.step({ ...environment.input, binding, deadline_ms: now + 20 });
+    expect(result).toMatchObject({ status: "deadline", reason: "deadline_exceeded", accepted_vectors: 0,
+      resources: { model_inputs_submitted: 1, inputs_without_token_count: 1 } });
+    expect(environment.vectors()).toEqual([]);
+  });
+
   it.each([
     { scenario: "synchronous abort then throw", stop: "caller", tokens: 0, unknownInputs: 1 },
     { scenario: "in-flight rejection on signal", stop: "caller", tokens: 0, unknownInputs: 1 },

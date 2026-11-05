@@ -222,15 +222,23 @@ daemon's host-session capture owner, idempotently by workspace, container and ho
 message id, with position, role, completeness, honest fidelity and optional
 host-reported time. A request conflicts as a whole (changed body, occupied or
 earlier position, another producer's container) and then admits nothing. The
-owner pairs a user message with the next consecutive reply into a round and admits
-each closed round receipt-first as one root; at most one trailing message per
-container waits until the host closes the tail or the idle sweep does. The issuer
-comes from composition, never request JSON. Statement generation runs as
-`SOURCE_STATEMENT_SESSION` chunks over a container's ordered rounds, enqueued when a
-later message closes a chunk or the container is idle for the host-worker fallback
-interval; a chunk payload names its container, member roots and occurrence ranges
-only. Source publication binds
-current source, scope and audit before notifying; a failed later optional
+owner pairs a user message with the next consecutive reply into a round and persists
+its immutable member and source identity before admitting the root receipt-first.
+The retained intent carries unfinished audit and binding work across retries; an
+authorized source erase also clears attributable pending message bodies while
+retaining their idempotency identities and any committed receipt's unfinished audit.
+Recovery of an erased receipt appends its audit without publishing it as an available source. At most one trailing message per container
+waits until the host closes the tail or the idle sweep does. Failed idle work remains
+eligible for retry, and the issuer comes from composition, never request JSON.
+Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a container's
+ordered rounds, enqueued when a later message closes a chunk or the container is idle
+for the host-worker fallback interval; a chunk payload names its container, member
+roots and occurrence ranges only. A tail closure fixes its round boundary before
+source admission, even if later captures overtake its audit. Incremental planning
+commits its logical cursor, reference-only pending state and queued chunks together;
+each pass reads at most one pending and one prior-context page, leaving unfinished
+work eligible for another pass. Source publication binds current source, scope and
+audit before notifying; a failed later optional
 memory formation does not delete the source capsule (invariant §20a).
 Producer text, extraction cache and normalization never certify source or
 model fidelity. Exact source and request identities, complete source corpus,
@@ -276,10 +284,58 @@ this state, both audited with the configured reviewer-identity trust mode:
    pass their typed governance and proof/effect barriers. Rejection is not an
    erase or a durable memory change.
 
-Garden task completion reports extraction and emission completion. When a
-candidate signal fails materialization, the completion audit and external
-completion response expose `failed_candidate_signals_count`; the signal's own
-audit retains its detailed outcome. An absent count on older records is unknown.
+Completion of source-statement and candidate-signal extraction tasks reports
+extraction and emission, not successful memory creation. Other Garden tasks report
+the outcome of their own maintenance work. A measured `outcome` distinguishes
+`completed`, `skipped`, and `failed`; its absence on historical or unmeasured
+records is unknown. The legacy `success` field remains true for both completed
+and intentionally skipped work for pre-34.1 consumers; it must not be read as
+proof that work was performed.
+
+Embedding backfill records each committed memory and its content identity in the
+same SQLite transaction as its vector. The Garden scheduler owns the supported
+`answers_with` handoff: an audited workspace-fenced claim pins the witnessed
+formation plan before governed assertion admission and checks that plan and its
+source inputs inside each admission transaction. A failed follow-up remains
+retryable without rerunning completed backfill; changed, erased or unauthorized
+inputs block instead of being replayed. The runtime lease fences startup recovery.
+A live executor relinquishes a failed attempt only after its accepted writers
+settle; an atomic recovery audit requeues a still-claimed parent and releases
+its checkpoint fence without changing terminal outcomes. Failed recovery audits
+retain that known-quiescent owner for a later pass, rather than inferring safety
+from claim age. A later follow-up does not rewrite the parent's historical outcome.
+The MCP pending-task response reports pending and blocked follow-ups separately
+from claimable tasks; a truncation flag prevents a bounded page from implying
+complete absence. Retired coherence mutation is not part of this handoff.
+
+HTTP/MCP `emitted` is candidate admission. Materialization audit
+and state commit atomically, including generic and source-grounding deferrals.
+A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
+At daemon startup, one owner acquires the OS-released runtime lease, opens its
+matching database and completes recovery before handing either to any writer.
+Interrupted COMPILED, historically ambiguous TRIAGED, and historical write-path
+DEFERRED states with missing or ambiguous historical evidence of an attempt,
+and grounding redrives without a completion witness, become
+`materialization_unknown` with an inspection-required audit. Expiry alone cannot
+release a live grounding claim; an explicit reconciliation requires a later
+outcome audit. The durable lineage
+is established only by the atomic pre-effect transition; migration never invents
+it for existing rows. New proven deferrals remain retryable. Historical
+success-shaped audits do not prove quiescence or the current attempt. Unknown
+effects cannot be automatically replayed. This inspection-required disposition
+closes the safety boundary; it does not automatically recover missing memories.
+Signal-reference replay waits for a
+known MATERIALIZED disposition while independent memory enrichment continues;
+its unfinished obligation remains durable and does not starve later work.
+Shutdown refuses new Garden passes, drains accepted writers and retains the lease
+until background drains and storage close are confirmed, including across retries.
+
+When a candidate fails materialization, completion audit and response expose
+`failed_candidate_signals_count`; `unknown_candidate_signals_count` separately
+exposes inspection-required effects; `inflight_candidate_signals_count` counts
+live claimed attempts. Fresh measured completions include zero counts, while
+absent counts on older or unmeasured records remain unknown. Unknown is neither
+failed nor retryable DEFERRED. The signal audit retains the detailed outcome.
 
 Inspector originates a review request, never directly persists a promotion.
 A warning names its target; agents should not infer it from array position.
