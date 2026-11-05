@@ -19,7 +19,8 @@ const server = createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk;
   assert.equal(req.headers.authorization, 'Bearer');
   received.push(body);
-  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  // Schema capture is independent of pooled-connection idle shutdown timing.
+  res.writeHead(200, { 'content-type': 'text/event-stream', connection: 'close' });
   res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: '{"answer":"literal answer"}' }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 17, completion_tokens: 9, total_tokens: 26 } }) + '\n\ndata: [DONE]\n\n');
 });
@@ -48,7 +49,7 @@ async function command(fixture) {
           const execution = await executeProviderChatCompletion({ ...prepared.gatewayRequest, apiKey: '',
             fetchImpl: async (url, init) => {
               assert.equal(url, `${pinned.providerUrl}/chat/completions`); assert.equal(init.redirect, 'error');
-              phase = 'encoded'; return fetch(endpoint, init);
+              phase = 'encoded'; server.closeIdleConnections(); return fetch(endpoint, init);
             } }, { maxRetries: 0, retryDelaysMs: [] });
           const result = execution.result;
           return { rawJson: result.text, responseMetadata: { finishReason: result.finishReason },

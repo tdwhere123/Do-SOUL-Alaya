@@ -30,7 +30,9 @@ const server = createServer(async (req, res) => {
   const answer = response === 'rejected' ? '{"not_answer":"no"}' : '{"answer":"  Cedar; partial evidence.\\n"}';
   const packet = { choices: [{ delta: { content: answer }, finish_reason: response === 'incomplete' ? 'length' : 'stop' }],
     ...(response === 'unknown' ? {} : { usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } }) };
-  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  // Independent authored attempts must not race an idle keep-alive shutdown
+  // while synchronous authority checks keep the client from observing its FIN.
+  res.writeHead(200, { 'content-type': 'text/event-stream', connection: 'close' });
   res.end(`data: ${JSON.stringify(packet)}\n\ndata: [DONE]\n\n`);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -48,6 +50,9 @@ function dependencies(selected) {
           fetchImpl: async (url, init) => {
             assert.equal(url, `${selected.providerUrl}/chat/completions`);
             assert.equal(init.redirect, 'error');
+            // Exercise idle retirement deterministically, without waiting for
+            // the server's timer or adding a retry to the zero-retry sender.
+            server.closeIdleConnections();
             return fetch(endpoint, init);
           } }, { maxRetries: 0, retryDelaysMs: [] });
         const result = execution.result;
@@ -148,7 +153,8 @@ try {
   const stableConfig = { ...mutation.selected };
   const mutated = await consumeFrozenAnswers({ grantPin: mutation.pin, mode: 'execute' }, {
     loadConfig: () => mutation.selected, createExtractor: pinned => dependencies(stableConfig).createExtractor(pinned) });
-  assert.equal(mutated.rows.filter(row => row.status === 'answered').length, 2);
+  assert.equal(mutated.failure, null, JSON.stringify(mutated));
+  assert.equal(mutated.rows.filter(row => row.status === 'answered').length, 2, JSON.stringify(mutated));
   assert.equal(received.length - before, 2); ready = () => {};
   checks.push('async caller config/grant-path/capture mutation cannot change captured send material');
 
