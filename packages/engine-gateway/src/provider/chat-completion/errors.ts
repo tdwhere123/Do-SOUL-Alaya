@@ -4,6 +4,7 @@ import {
 } from "./failure-identity.js";
 import type { ProviderResponseInspectionReason } from "./inspect-response.js";
 import type { ProviderHttpResponseEvidence } from "./types.js";
+import { providerTransportCleanupOf, type ProviderTransportCleanup } from "./transport-cleanup.js";
 
 export type { ProviderResponseInspectionReason };
 
@@ -63,5 +64,9 @@ export class ProviderChatCompletionError extends Error {
 
   public get httpResponse(): ProviderHttpResponseEvidence | undefined {
     return this.#httpResponse;
+  }
+
+  public get transportCleanup(): ProviderTransportCleanup | undefined {
+    return providerTransportCleanupOf(this);
   }
 }

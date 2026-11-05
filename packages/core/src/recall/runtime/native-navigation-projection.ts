@@ -31,6 +31,8 @@ export type NativeFieldNavigation =
 export type NativeNavigationObservation = Readonly<{
   status: "ordered" | "non_total"; total: number; truncated: boolean;
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
+  statement_association?: Readonly<{ status: "swapped" | "unchanged" | "resource_refused"; source_slot: 5;
+    replacement_global_rank: number | null; replaced_global_rank: number | null; mixed_at_5_changed: boolean; reason: string }>;
 }>;
 
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
@@ -126,7 +128,14 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
   const witnesses = new Map<string, RecallNavigationWitness>();
   try {
     const { input, navigation, catalog } = captureNativeNavigation(state, meter);
-    const ordered = orderNativeFieldAccess(input);
+    // Keep the mandatory coordinate/reference pass and a conservative comparison allowance
+    // available even if optional association spends its entire child grant and then refuses.
+    const coordinates = input.lanes.reduce((sum, lane) => sum + (lane.state === "exact-captured" ? lane.occurrences.length : 0), 0)
+      + (input.memory.state === "exact-captured" ? input.memory.occurrences.length : 0)
+      + (input.question_time?.capture.state === "exact-captured" ? input.question_time.capture.occurrences.length : 0) + catalog.size;
+    const ordered = orderNativeFieldAccess(input, meter, {
+      work_units: coordinates + values.length + values.length * values.length,
+      memory_bytes: values.length * 8 });
     // A bound source without a captured catalog position may still be returned,
     // but cannot manufacture a total navigation order or a native hit witness.
     const recordIds = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
@@ -153,6 +162,7 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     const shared = { witnessFor: (target: RecallTargetRef) => witnesses.get(sourceFactKey(target)),
       values: { size: result.length, at: (index: number) => result[index] } };
     try { observe?.(() => ({ status: ordered.status === "ordered" ? "ordered" : "non_total", total: result.length,
+      ...("statement_association" in ordered ? { statement_association: ordered.statement_association } : {}),
       truncated: result.length > 128, entries: result.slice(0, 128).map(value => ({ target: structuredClone(value.state.target),
         access_ordinal: witnesses.get(sourceFactKey(value.state.target))?.access_ordinal ?? null })) })); }
     catch { /* Diagnostic capture cannot change the native result. */ }

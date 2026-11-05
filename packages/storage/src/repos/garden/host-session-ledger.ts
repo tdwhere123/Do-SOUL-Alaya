@@ -1,5 +1,6 @@
 import type { SqliteConnection } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { HOST_SESSION_LIMITS } from "@do-soul/alaya-protocol";
 
 /** Message identity survives binding and erasure; bodies exist only while admission is pending. */
 export type HostSessionLedgerMessage = Readonly<{
@@ -91,13 +92,29 @@ export class HostSessionLedger {
     }
   }
 
-  public pendingRounds(workspaceId: string, containerKey: string): readonly HostSessionRoundIntent[] {
+  /** Completed states are the durable cursor; a failed round remains at the start of the next bounded page. */
+  public pendingRoundPage(workspaceId: string, containerKey: string, limit: number): readonly HostSessionRoundIntent[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 64) throw new RangeError("invalid host session recovery page size");
     const rounds = this.connection.prepare(`SELECT round_index, root_id, state FROM host_session_rounds
-      WHERE workspace_id = ? AND container_key = ? AND state IN ('pending', 'erased_pending') ORDER BY round_index`)
-      .all(workspaceId, containerKey) as { round_index: number; root_id: string; state: "pending" | "erased_pending" }[];
+      WHERE workspace_id = ? AND container_key = ? AND state IN ('pending', 'erased_pending') ORDER BY round_index LIMIT ?`)
+      .all(workspaceId, containerKey, limit) as { round_index: number; root_id: string; state: "pending" | "erased_pending" }[];
     const members = this.connection.prepare(`SELECT ${COLUMNS} FROM host_session_messages
-      WHERE workspace_id = ? AND container_key = ? AND round_index = ? ORDER BY position`);
-    return rounds.map(round => ({ ...round, members: members.all(workspaceId, containerKey, round.round_index) as HostSessionLedgerMessage[] }));
+      WHERE workspace_id = ? AND container_key = ? AND round_index = ? ORDER BY position LIMIT 2`);
+    const size = this.connection.prepare(`SELECT COALESCE(length(CAST(pending_body AS BLOB)), 0) AS bytes
+      FROM host_session_messages WHERE workspace_id = ? AND container_key = ? AND round_index = ? LIMIT 3`);
+    return rounds.map(round => {
+      const bound = size.all(workspaceId, containerKey, round.round_index) as { bytes: number }[];
+      if (bound.length < 1 || bound.length > 2 || bound.some(member => member.bytes > HOST_SESSION_LIMITS.contentBytes)) {
+        throw new StorageError("CONFLICT", "host session round exceeds retained membership or body bounds");
+      }
+      return { ...round, members: members.all(workspaceId, containerKey, round.round_index) as HostSessionLedgerMessage[] };
+    });
+  }
+
+  public pendingRoundCount(workspaceId: string, containerKey: string): number {
+    return (this.connection.prepare(`SELECT pending_round_count FROM host_session_containers
+      WHERE workspace_id = ? AND container_key = ?`)
+      .get(workspaceId, containerKey) as { pending_round_count: number } | undefined)?.pending_round_count ?? 0;
   }
 
   /** Idempotent under concurrent replays; erasure wins over completion. */
@@ -140,7 +157,7 @@ export class HostSessionLedger {
       LEFT JOIN host_session_sweeps s ON s.workspace_id = c.workspace_id AND s.container_key = c.container_key AND s.sweeper = ?
       WHERE c.newest_admitted_at <= ? AND (s.retry_after IS NULL OR s.retry_after <= ?)
         AND (s.swept_through IS NULL OR s.swept_through < c.newest_position)
-      ORDER BY (c.producer = ?) DESC, (s.retry_after IS NOT NULL), c.newest_admitted_at, c.workspace_id, c.container_key LIMIT ?`)
+      ORDER BY (c.producer = ?) DESC, (s.retry_after IS NOT NULL), s.retry_after, c.newest_admitted_at, c.workspace_id, c.container_key LIMIT ?`)
       .all(sweeper, idleBefore, now, sweeper, limit) as HostSessionIdleContainer[];
   }
 

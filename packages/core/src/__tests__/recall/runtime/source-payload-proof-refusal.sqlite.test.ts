@@ -3,7 +3,7 @@ import { sourceRecallTarget } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { runConditionalFieldRecallWithReceipt } from "../../../recall/runtime/recall-service-runner.js";
 import { captureIndexPreviews } from "../../../recall/runtime/recall-index-commit.js";
-import { evictIssuedDeliveries, fieldResumeKey, assertMembershipContinuation, restoreField }
+import { evictIssuedDeliveries, fieldExecutionId, assertMembershipContinuation, restoreField }
   from "../../../recall/runtime/index-continuation.js";
 import { readersFor } from "../conditional-field-oracle/bound-producer.js";
 import { defaultBudget, FAR_FUTURE_EXPIRY } from "../conditional-field/reference/deployment.fixture.js";
@@ -56,7 +56,7 @@ it("keeps rejected source proofs terminal while their body-only capability deliv
   expect(read).toHaveBeenCalledTimes(after);
 
   const retained = restoreField(continuation);
-  evictIssuedDeliveries(fieldResumeKey(rejected.index.query_id, rejected.index.snapshot_id, rejected.index.interpretation_id!));
+  evictIssuedDeliveries(fieldExecutionId(retained!)!);
   expect(restoreField(continuation)).toBe(retained);
   expect(() => assertMembershipContinuation(continuation)).toThrowError();
   expect(() => runConditionalFieldRecallWithReceipt({ ...request, continuation, budget: defaultBudget({ page_budget: 1 }) }))

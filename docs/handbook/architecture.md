@@ -160,8 +160,12 @@ fields are null and carry a typed source-erase marker identifying the barrier;
 they are unavailable history, not original values. Independent review and
 resolution text is retained. An independent current slot winner keeps its own
 subject and support; an erased winner is removed from the current projection.
-Startup reapplies existing source barriers to repair dependencies that remain
-attributable. Older unindexed interpretation capsules whose source link was
+Startup completes indexed, versioned source-barrier repair obligations before
+serving. Each transaction repairs at most 32 receipts and commits their checked
+data revisions together with cleanup; interruption preserves completed receipts.
+Direct source attribution changes dirty only the affected receipts. Clean
+restarts and unrelated workspace activity do not replay historical closures;
+replay preserves generations rebuilt after the original erase. Older unindexed interpretation capsules whose source link was
 destroyed by a prior erase cannot be attributed to a particular barrier from
 their tombstone alone; current consumers must fail closed on invalid dependencies.
 
@@ -227,7 +231,14 @@ its immutable member and source identity before admitting the root receipt-first
 The retained intent carries unfinished audit and binding work across retries; an
 authorized source erase also clears attributable pending message bodies while
 retaining their idempotency identities and any committed receipt's unfinished audit.
-Recovery of an erased receipt appends its audit without publishing it as an available source. At most one trailing message per container
+Recovery of an erased receipt appends its audit without publishing it as an available source.
+Each capture or idle-container recovery pass reads at most 16 pending rounds,
+with at most two messages of 16 KiB each per round. Pending states retain the
+durable retry position; a failed round blocks its successors. The optional
+`pending_round_count` response separates accepted messages from unfinished source
+publication or audit. Publication consumers replay their idempotent window until
+that count is zero before checkpointing. Idle recovery yields between containers
+and backs off unfinished pages. At most one trailing message per container
 waits until the host closes the tail or the idle sweep does. Failed idle work remains
 eligible for retry, and the issuer comes from composition, never request JSON.
 Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a container's

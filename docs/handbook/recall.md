@@ -201,6 +201,29 @@ missing ordinary worker authorization key fails closed. Do not substitute a
 workspace default. Source-semantic attached-agent handles have their own
 explicit principal and lifetime admission, not a reusable ordinary worker key.
 
+Protocol 35.0.0 separates deterministic semantic query identity from a random,
+server-owned execution identity. Each independent start owns its field state;
+opaque continuation capabilities select that execution, and preparation CAS and
+retry delivery IDs apply only within it. Equal queries, snapshots and clocks do
+not alias mutable sessions. Field and issued-page admission commit together;
+a failed capacity check or competing acknowledgment cannot overwrite a winner.
+
+The process-local [execution retention owner](../../packages/core/src/recall/runtime/recall-execution-retention.ts)
+accounts fields, worker preparations and issued pages together, with conservative
+object-graph bytes (including full typed-array backing buffers). Independent
+retained roots pay separately for shared nodes. The default ceiling is 128 MiB
+per process/Worker and 64 MiB per workspace within it; capacity exhaustion is an
+explicit `execution_retention` resource refusal and never evicts a valid lease.
+These are retention estimates, not heap/RSS guarantees or request-work charges.
+Executions expire at the earlier of their admitted lifetime and five minutes;
+an active timer drops references even when no token is used again. Acknowledgment
+releases preparation/source-reader closures; its conservative reservation and
+retry receipt remain until expiry. Terminal replay may retain the field needed
+for source eligibility checks during that lease. Expiry, discard and invalidation
+notify the parent to revoke the affected Worker affinity handles; Worker exit
+revokes all its routes. Source-currentness and authorization checks remain separate
+from TTL. Older process-local handles cannot resume after upgrade or Worker restart.
+
 ## Minimal statement navigation
 
 Protocol 31.0.0 (`ordinary-native-field.v8`, invariant §25 major) admits
@@ -275,20 +298,44 @@ high on both and higher on one; the earliest dominating root in access order swa
 A root without observed statement keys sits at -1, the floor of both coordinates: it never
 displaces the root at slot 5, and at slot 5 it yields to the earliest later root with any observed key.
 Acquisition retains at most 16 statement-key vectors per root seen by the original query's
-vector scan. Only allowance-funded ordinary acquisition associates: its quoted allowance
-includes the worst case of retention and pairwise links, so association never consumes the
-scan's share. Request-funded Source library pages do not associate. An unfunded charge drops
-the association with a recorded resource refusal, never the scan or nomination. Memory
-positions and slots 1–4 are unchanged. Symmetric links retain one value per root pair. During
-acquisition, a conservative floating-point upper bound may prove that a key-pair dot product's
-remaining dimensions cannot improve its root-pair maximum; every evaluated dimension and bound
-preparation is charged. Optional scratch reuses only the eliminated dense-matrix allocation, never
-bytes reserved for subsequent hint acquisition or nomination retention. Dimension compatibility is
-tracked during key retention, so incompatible dimensions take the exact path without a charged
-inspection. The optimization falls back to the exact full comparison when its worst case cannot be
-reserved or the work spent on bounds has not paid for itself. Receipts report executed work, not this reservation. The association is
-retained with the field's native sources, so every continuation page re-derives the same order
-without reacquisition.
+vector scan. Only allowance-funded ordinary acquisition associates; request-funded Source
+library pages do not. Protocol 35.0.0 retains the bounded vectors as explicit nomination data,
+then computes exact pairs on demand after filtering and time preference determine the source
+order. Navigation pays for every comparison before execution. The snapshot-owned triangular
+cache reserves all numeric cells up front; null means uncomputed and -1 means a computed floor.
+Continuations reuse completed pairs; reordering can demand additional pairs. No vectors hide in
+a closure, and incompatible dimensions refuse the optional association.
+
+This plan reduces comparison work while increasing retained memory compared with an eager
+matrix. Both are metered separately. Optional retention or comparison exhaustion preserves
+base nominations/order before any swap is selected, records refusal, and cannot silently retry
+the swap on a later page. After a swap has been selected, a later underfunded request fails
+explicitly instead of reverting to baseline order. Child refusal requirements include the
+mandatory navigation reserve when translated back to the request budget.
+The retained state includes the vectors, cache capacity and fixed-size refusal state. Acquisition
+receipts retain work already spent even when optional vectors cannot fit in the field.
+
+Memory positions and the first four source slots remain unchanged. The fifth source can be
+outside mixed Top-5. Navigation diagnostics report the exchanged global ranks and whether
+mixed Top-5 changed. Two-coordinate dominance is a limited heuristic, not a guarantee of
+complementary evidence: a relevant duplicate can displace a necessary fact. Frozen,
+label-selected screens show gains and losses; neither source hits nor complete annotation
+exposure establish full support sufficiency or natural-data acceptance.
+
+## Versioned cutoff measurement
+
+Current bench-runner visibility uses `consumer-message-visibility-v2`: admitted whole-message
+witnesses establish Any at every containing frozen cutoff even if later positions were not
+collected. Absence still needs a complete cutoff or authoritative exhausted tail; All additionally
+needs complete, nonempty gold mapping and every member visible. Invalid page/body admission
+cannot prove a positive. Collection completeness, observed positions and exhaustion are separate
+from proposition status. Source-root metrics share this collection gate but retain their distinct
+source/proof admission; a source hit is not a body witness.
+
+The historical v1 scorer remains available for replay. Acquisition reports v2 plus same-input
+historical differences; conditional-navigation evaluation v3 identifies v2 visibility in each
+summary and retains historical rows. Such differences are measurement-contract changes, not
+algorithm gains. Unknown samples remain in denominators and support sufficiency stays unmeasured.
 
 ## Ordinary native field delivery
 

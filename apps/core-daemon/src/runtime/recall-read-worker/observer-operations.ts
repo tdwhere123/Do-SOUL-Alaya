@@ -1,4 +1,5 @@
-import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger, type SourceIndexQueryVector,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger,
+  SourceSemanticResourceExhausted, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
@@ -217,15 +218,32 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   // must continue paying acquisition from that request, without an ordinary allowance.
   if (capacity === undefined) return captured;
   const result = captured.result!;
+  const { association, ...baseCapture } = captured;
   const beforeRetention = meter.spentBytes;
-  meter.retain({ ...captured, retained_bytes: 0, acquisition_resources: result.resources }, "source retained nomination");
+  meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
+    acquisition_resources: result.resources }, "source retained nomination");
+  const baseRetainedBytes = meter.spentBytes - beforeRetention;
+  let retainedAssociation = association, associationRetainedBytes = 0;
+  if (association !== undefined) {
+    const beforeAssociation = meter.spentBytes;
+    try {
+      meter.retain(association, "source retained statement association");
+      associationRetainedBytes = meter.spentBytes - beforeAssociation;
+    } catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      retainedAssociation = undefined;
+    }
+  }
   const resources = {
     ...result.resources, work: meter.spentWork,
     native_bytes: result.resources.native_bytes + capacity.resources.native_bytes,
     memory_bytes: meter.spentBytes
   };
-  return { ...captured, retained_bytes: meter.spentBytes - beforeRetention, acquisition_resources: resources,
-    result: { ...result, resources } };
+  return { ...baseCapture, ...(retainedAssociation === undefined ? {} : { association: retainedAssociation }),
+    association_retained_bytes: associationRetainedBytes, retained_bytes: baseRetainedBytes + associationRetainedBytes,
+    acquisition_resources: resources, result: { ...result, resources,
+      resource_refusals: association !== undefined && retainedAssociation === undefined
+        ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
 }
 
 /** Frozen captures are already paid; reuse reports their real membership and totals. */

@@ -1,6 +1,7 @@
 import { INTERN_SEMANTIC_REQUEST_PROFILES, INTERN_PROTOCOL_PROBE_PROFILES,
   STEP_SEMANTIC_REQUEST_PROFILES, type EnvLookup } from "@do-soul/alaya-protocol";
 import type { Agent, Dispatcher } from "undici";
+import type { ProviderTransportCleanup } from "./transport-cleanup.js";
 
 export const PROVIDER_REQUEST_PROFILES = [
   "provider-default-v1",
@@ -80,6 +81,7 @@ export type ProviderUsage = Readonly<{
 }>;
 
 export type ProviderChatCompletionResult = Readonly<{
+  readonly transportCleanup?: ProviderTransportCleanup;
   readonly text: string;
   readonly finishReason: string | null;
   readonly usage?: ProviderUsage;

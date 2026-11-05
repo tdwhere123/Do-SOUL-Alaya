@@ -46,7 +46,9 @@ export const HostSessionCaptureResponseSchema = z.object({
   admitted_message_count: NonNegativeIntSchema,
   replayed_message_count: NonNegativeIntSchema,
   pending_message_count: NonNegativeIntSchema,
-  admitted_round_count: NonNegativeIntSchema
+  admitted_round_count: NonNegativeIntSchema,
+  /** Accepted rounds whose source admission or audit is still pending; absent on older servers. */
+  pending_round_count: NonNegativeIntSchema.optional()
 }).strict().readonly();
 export type HostSessionCaptureResponse = z.infer<typeof HostSessionCaptureResponseSchema>;
 

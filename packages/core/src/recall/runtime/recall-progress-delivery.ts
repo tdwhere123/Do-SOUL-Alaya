@@ -55,7 +55,7 @@ export function observedRecallProgressDelivery(prepared: RecallProgressDelivery,
 export function prepareRecallProgressDelivery(input: ConditionalFieldRecallRequest,
   interpretation: QueryInterpretation, restored: FieldEngineState | undefined,
   cost: RequestCostLedger): RecallProgressDelivery {
-  const identity = recallDeliveryIdentity(input, interpretation);
+  const identity = recallDeliveryIdentity(input);
   const skipped = { ...identity, spent_work: 0, spent_memory: 0, retention_hold: 0 };
   if (input.cancelled || replayIssuedDelivery(identity.request_digest) !== undefined) return skipped;
   const generation = (restored?.projection_progress?.generation ?? 0) + 1;

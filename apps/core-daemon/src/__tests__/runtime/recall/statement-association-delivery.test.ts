@@ -91,7 +91,7 @@ it("swaps a dominated source slot 5 from published statement keys through SQLite
   expect(sourceOrder(env, readers)).toEqual(swapped);
 });
 
-it("preserves a legacy-fundable tight SQLite acquisition and nomination-retention grant", async () => {
+it("drops unfundable optional vectors while preserving actual SQLite nominations and charging spent work", async () => {
   const env = await createStatementSessionEnvironment(); environments.push(env);
   await env.capture({ container: CONTAINER, messages: hostMessages(Array.from({ length: 2 }, (_, k) => [
     { role: "user" as const, content: `Round ${k}: I planted bed ${k}.` },
@@ -106,24 +106,22 @@ it("preserves a legacy-fundable tight SQLite acquisition and nomination-retentio
     profile_id: sourceIndexProfileId(configuration.profile, fieldContractSha256), embedding: Float32Array.of(1, 0, 0, 0) };
   const nominate = () => env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 } }, query))();
-  const baseline = nominate(), packed = baseline.association!;
-  expect(packed.roots).toHaveLength(2);
-  const dense = { ...packed, link: [[-1, packed.link[1]![0]!], [packed.link[1]![0]!, -1]] };
-  const allowance = { work_units: 1_000_000, memory_bytes: 1_000_000 };
-  const retainedSavings = SourceSemanticResourceLedger.measureRetain(dense, allowance).memory_bytes
-    - SourceSemanticResourceLedger.measureRetain(packed, allowance).memory_bytes;
-  // Legacy association allocation: two question values plus four link values (48 bytes).
-  // Packed allocation: two question values plus one link value (24 bytes).
-  const legacyFundableBytes = baseline.result!.resources.memory_bytes + retainedSavings + 24;
+  const baseline = nominate(), deferred = baseline.association!;
+  expect(deferred.roots).toHaveLength(2);
+  expect(deferred.link).toEqual([[], [null]]);
+  expect(baseline.association_retained_bytes).toBeGreaterThan(0);
+  const baseFundableBytes = baseline.result!.resources.memory_bytes - baseline.association_retained_bytes!;
   const quote = SourceIndexAcquisition.quoteAllowanceBudget;
   const spy = vi.spyOn(SourceIndexAcquisition, "quoteAllowanceBudget").mockImplementation((input, capacity) => ({
-    ...quote(input, capacity), memory_bytes: legacyFundableBytes }));
+    ...quote(input, capacity), memory_bytes: baseFundableBytes }));
   try {
     const tight = nominate();
-    expect(tight.result?.resource_refusals).toEqual([]);
+    expect(tight.result?.resource_refusals).toEqual([{ stage: "admission", phase: "source retained statement association" }]);
     expect(tight.result?.nominations).toEqual(baseline.result?.nominations);
-    expect(tight.association).toEqual(packed);
-    expect(tight.result!.resources.memory_bytes).toBeLessThanOrEqual(legacyFundableBytes);
+    expect(tight.association).toBeUndefined();
+    expect(tight.association_retained_bytes).toBe(0);
+    expect(tight.result!.resources.memory_bytes).toBeLessThanOrEqual(baseFundableBytes);
+    expect(tight.result!.resources.work).toBeGreaterThan(0);
   } finally { spy.mockRestore(); }
 });
 
@@ -158,10 +156,10 @@ it("delivers the same slot swap and continuation through the built worker with m
       embedInputs: async inputs => inputs.map(input => ({ status: "embedded" as const, input_id: input.input_id,
         input_digest: input.input_id, vector: queryEmbedding, token_count: 1, truncated: false })) }) });
   if (prepared.vector.status !== "available") throw new Error(JSON.stringify(prepared));
-  let boundsWork = 0;
+  let pairWork = 0;
   const charge = SourceSemanticResourceLedger.prototype.charge;
   const spy = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(function (this: SourceSemanticResourceLedger, work, bytes, phase) {
-    if (phase === "statement key association bounds") boundsWork += work;
+    if (phase === "statement key association link") pairWork += work;
     return charge.call(this, work, bytes, phase);
   });
   let nominated: ReturnType<typeof nominateNativeSources>;
@@ -170,7 +168,8 @@ it("delivers the same slot swap and continuation through the built worker with m
       { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 1_000_000, memory_bytes: 16_000_000 } },
       prepared.vector))();
   } finally { spy.mockRestore(); }
-  expect(boundsWork).toBeGreaterThan(0);
+  expect(pairWork).toBe(0);
+  expect(nominated.association?.link.flat().every(value => value === null)).toBe(true);
   expect(nominated.result?.resource_refusals).toEqual([]);
   expect(nominated.result?.nominations).toHaveLength(count);
   expect(nominated.association?.roots).toHaveLength(count);

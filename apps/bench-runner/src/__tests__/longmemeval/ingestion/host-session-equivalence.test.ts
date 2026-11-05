@@ -13,7 +13,7 @@ import {
   buildLongMemEvalRoundMessages, pairSessionIntoRounds, type LongMemEvalQuestion
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
-  createLongMemEvalHostSessionIssuer, importLongMemEvalQuestion, longMemEvalHostSessionRequests
+  captureLongMemEvalWindow, createLongMemEvalHostSessionIssuer, importLongMemEvalQuestion, longMemEvalHostSessionRequests
 } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
 import { prepareRecordedStatementIndex } from "../../support/recorded-statement-index.js";
 import { createTestLongMemEvalDatasetAuthority } from "./test-dataset-authority.js";
@@ -133,4 +133,21 @@ it("imports a session larger than one request window and an over-limit message a
   const excerpt = session!.requests[0]!.messages[3]!;
   expect(excerpt).toMatchObject({ completeness: "excerpt", fidelity: "original_bytes" });
   expect(Buffer.byteLength(excerpt.content, "utf8")).toBe(16_384);
+});
+
+it("finishes all source rounds in a captured window before returning publication readiness", async () => {
+  const env = await environment();
+  const request = { container: { scope: "test-host", id: "publication-window" }, closes_tail: true,
+    messages: Array.from({ length: 64 }, (_, position) => ({ message_id: `message-${position}`, position,
+      role: "assistant" as const, content: `Retained message ${position}`, completeness: "complete" as const,
+      fidelity: "original_bytes" as const })) };
+  const pages: number[] = [];
+  const response = await captureLongMemEvalWindow(async () => {
+    const result = await env.capture(request);
+    pages.push(result.admitted_round_count);
+    return result;
+  });
+  expect(pages).toEqual([16, 16, 16, 16]);
+  expect(response).toMatchObject({ admitted_message_count: 64, admitted_round_count: 64, pending_round_count: 0 });
+  expect(new SqliteFieldSourceRecordRepo(env.database, fieldContractSha256).listByWorkspace(WORKSPACE)).toHaveLength(64);
 });

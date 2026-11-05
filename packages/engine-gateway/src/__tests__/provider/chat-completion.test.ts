@@ -66,6 +66,7 @@ describe("provider chat completion", () => {
     });
 
     expect(result).toEqual({
+      transportCleanup: { status: "closed", failures: [] },
       text: '{"ok":true}',
       finishReason: "stop",
       usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },

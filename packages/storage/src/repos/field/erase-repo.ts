@@ -28,6 +28,7 @@ import type {
 } from "./ports.js";
 import { scrubDerivedPrivacyClosure } from "./writes/erase/derived-closure.js";
 import type { EraseAuditRedactor } from "./writes/erase/governance-closure.js";
+import { repairSourceClosureBatch } from "./writes/erase/repair-progress.js";
 
 type EraseSubject = Readonly<{
   subject_kind: ProjectionEraseSubjectKind;
@@ -78,28 +79,25 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       const existing = this.findById(row.workspace_id, row.barrier_id) ??
         this.findBySubject(row.workspace_id, row.subject_kind, row.subject_id);
       const stored = existing === null ? row : requireCompatibleBarrier(existing, row);
-      const closure = this.discoverClosure(stored);
+      const closure = this.discoverClosure(stored, existing === null);
       if (existing === null) {
         this.insertBarrier(stored);
-        this.insertDescendantBarriers(stored, closure.subjects);
       }
+      this.insertDescendantBarriers(stored, closure.subjects);
       this.scrubEvidence(stored, closure.evidenceIds, closure.subjects);
-      if (existing === null) {
-        this.scrubSubjects(stored, closure.subjects);
-        this.invalidateGenerations(stored.workspace_id, closure.subjects);
-      }
+      this.scrubSubjects(stored, closure.subjects);
+      this.invalidateGenerations(stored.workspace_id, closure.subjects);
       return stored;
     }, "erase barrier");
   }
 
-  /** Reapply committed receipts before serving so older, attributable closures are repaired. */
+  /** Finish versioned, dirty historical obligations before serving; clean history is not replayed. */
   public repairExistingSourceClosures(): void {
-    const rows = parseRows(this.database.connection.prepare(`
-      SELECT receipt_identity AS identity, barrier_id, workspace_id, generation_id,
-        subject_kind, subject_id, erased_at FROM projection_erase_barriers
-      WHERE subject_kind = 'source_record' ORDER BY workspace_id, barrier_id
-    `).all(), fieldEraseBarrierParser, "existing source erase barrier");
-    for (const row of rows) this.apply(row);
+    while (this.repairSourceClosureBatch()) { /* Each completed batch survives interruption. */ }
+  }
+
+  public repairSourceClosureBatch(): boolean {
+    return repairSourceClosureBatch(this.database, row => this.apply(row));
   }
 
   public isErased(workspaceId: string, subjectId: string): boolean {
@@ -146,10 +144,10 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     );
   }
 
-  private discoverClosure(row: FieldEraseBarrierRow): EraseClosure {
+  private discoverClosure(row: FieldEraseBarrierRow, includeCurrentGenerations: boolean): EraseClosure {
     const subjects = this.discoverSubjects(row);
     return {
-      subjects: row.subject_kind === "generation"
+      subjects: row.subject_kind === "generation" || !includeCurrentGenerations
         ? subjects
         : [...subjects, ...this.discoverGenerations(row.workspace_id)],
       evidenceIds: row.subject_kind === "source_record"

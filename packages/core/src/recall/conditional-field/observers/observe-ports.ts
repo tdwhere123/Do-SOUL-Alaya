@@ -170,6 +170,8 @@ export type NativeSourceNomination = Readonly<{
   /** Fresh work funded by the ordinary acquisition allowance; absent on a prepaid library capture. */
   acquisition_resources?: SourceIndexAcquisitionResult["resources"];
   retained_bytes?: number;
+  /** Optional statement vectors/cache within retained_bytes; can be discarded before field admission. */
+  association_retained_bytes?: number;
 }>;
 
 export type ObserverReaders = Readonly<{

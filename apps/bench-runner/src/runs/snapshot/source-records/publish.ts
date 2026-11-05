@@ -19,7 +19,7 @@ import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
 import { readVerifiedNativeSourceSnapshot } from "./native.js";
-import { longMemEvalSessionContainer } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
+import { captureLongMemEvalWindow, longMemEvalSessionContainer } from "../../../datasets/longmemeval/ingestion/host-session-import.js";
 import { resolveSourceRecordsImportEffects, type SourceRecordsImportEffects } from "./import-effects.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
@@ -308,10 +308,10 @@ async function admitCensusSources(
       for (const capture of census.flatMap(population => population.host_sessions ?? [])) {
         for (const request of capture.requests) {
           const container = containerLabel(request.container);
-          // A failed window admitted nothing; later windows of that session would only leave a gap.
+          // A failed window may retain pending intents; later windows would leave a publication gap.
           if (failures.has(container)) continue;
           try {
-            await daemon.captureHostSession(request, capture.issuer);
+            await captureLongMemEvalWindow(() => daemon.captureHostSession(request, capture.issuer), refuseBenchWorkAfterCancel);
           } catch (error) {
             refuseBenchWorkAfterCancel();
             if (error instanceof AlayaError && error.code === "CANCELLED") throw error;

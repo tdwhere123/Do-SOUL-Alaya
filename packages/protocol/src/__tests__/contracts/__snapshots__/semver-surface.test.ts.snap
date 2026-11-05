@@ -62,7 +62,7 @@ soul:mcp-types.ts#SoulApplyOverrideResponseSchema(override_id,status)#6cd88a9
 soul:mcp-types.ts#SoulBatchReviewEdgeProposalsRequestSchema(filter,reason,reviewer_identity,reviewer_token,verdict)#f597395
 soul:mcp-types.ts#SoulBatchReviewEdgeProposalsResponseSchema(accepted_count,rejected_count,reviewed_proposal_ids)#74462b8
 soul:mcp-types.ts#SoulCaptureHostSessionRequestSchema(closes_tail,container,messages)#cfd2a80
-soul:mcp-types.ts#SoulCaptureHostSessionResponseSchema(admitted_message_count,admitted_round_count,container_key,pending_message_count,replayed_message_count)#845dbeb
+soul:mcp-types.ts#SoulCaptureHostSessionResponseSchema(admitted_message_count,admitted_round_count,container_key,pending_message_count,pending_round_count,replayed_message_count)#1e9f869
 soul:mcp-types.ts#SoulContextDeliveredObjectUsageSchema(object_id,object_kind,target,usage_status)#5101eee
 soul:mcp-types.ts#SoulContextObjectIdentitySchema(object_id,object_kind,target)#cef6883
 soul:mcp-types.ts#SoulContextPerAnchorUsageSchema(anchor_role,object_id,object_kind,target)#af168db

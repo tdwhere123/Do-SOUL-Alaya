@@ -3,6 +3,7 @@ import { sourceTargetJoinsGold, type SourceGoldUnit } from "../measurement/sourc
 import type { AnswerTurnGold, AnswerTurnSpan } from "./answer-spans.js";
 
 export const CONSUMER_MESSAGE_VISIBILITY_CONTRACT = "consumer-message-visibility-v1" as const;
+export const CONSUMER_MESSAGE_PROPOSITION_CONTRACT = "consumer-message-visibility-v2" as const;
 
 /** One consumer-visible UTF-8 interval after caller-owned delivery admission. */
 export type ConsumerVisibilityInterval = Readonly<{
@@ -67,7 +68,7 @@ export type ConsumerVisibilityMessage = Readonly<{
 }>;
 
 export type ConsumerVisibilityScore = Readonly<{
-  contract: typeof CONSUMER_MESSAGE_VISIBILITY_CONTRACT;
+  contract: typeof CONSUMER_MESSAGE_VISIBILITY_CONTRACT | typeof CONSUMER_MESSAGE_PROPOSITION_CONTRACT;
   any_at_5: ConsumerVisibilityMetric;
   any_at_10: ConsumerVisibilityMetric;
   /** Every annotated answer-turn message is visible; never vacuous on zero gold. */
@@ -113,6 +114,25 @@ const STRUCTURAL_REASONS = new Set(["delivery_page_order_invalid", "delivery_pag
  * function proves whole-message UTF-8 visibility from admitted intervals, occupied positions,
  * terminal_tail, and gold. Acquisition residuals do not reopen a complete cutoff prefix. */
 export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): ConsumerVisibilityScore {
+  return scoreVisibility(input, CONSUMER_MESSAGE_VISIBILITY_CONTRACT);
+}
+
+/** Current measurement separates admitted proposition witnesses from collection completion.
+ * The v1 entry remains the historical replay contract; never relabel its stored results. */
+export function scoreConsumerMessagePropositions(input: ConsumerVisibilityInput) {
+  const result = scoreVisibility(input, CONSUMER_MESSAGE_PROPOSITION_CONTRACT);
+  const observation = deriveObservation(input.pages);
+  const unavailable = consumerVisibilityUnavailableReason(input);
+  const completion = (cutoff: number) => ({ cutoff,
+    status: unavailable !== null ? "invalid" as const : observedAt(observation, cutoff)
+      ? "complete" as const : "incomplete" as const,
+    reason: unavailable ?? (observedAt(observation, cutoff) ? null : observation.reason) });
+  return { ...result, object: "whole_answer_turn_message" as const,
+    collection: { at_5: completion(5), at_10: completion(10), exhausted: observation.exhausted } };
+}
+
+function scoreVisibility(input: ConsumerVisibilityInput,
+  contract: ConsumerVisibilityScore["contract"]): ConsumerVisibilityScore {
   const gold = input.gold;
   const observation = deriveObservation(input.pages);
   // Unavailable delivery and malformed page facts invalidate their own interval claims, so a
@@ -123,14 +143,15 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
     : [];
   // One unobserved-@10 gate serves the aggregates and every message row. An unobserved ten-slot
   // prefix is unknown even for a visible first-page message, and its reason outranks incomplete gold.
-  const unobservedAt10 = malformed === null && !observedAt(observation, 10)
+  const unobservedAt10 = contract === CONSUMER_MESSAGE_VISIBILITY_CONTRACT
+    && malformed === null && !observedAt(observation, 10)
     ? unknown(observation.reason ?? "delivery_position_not_observed") : null;
   const unmapped = (input.pages ?? []).flatMap(page => page.status === "observed" ? page.unmapped_sources ?? [] : []);
   const messages = (gold?.spans ?? []).map(span =>
     messageVisibility(span, intervals, unmapped, observation, malformed, unobservedAt10));
   const result = (anyAt5: ConsumerVisibilityMetric, anyAt10: ConsumerVisibilityMetric,
     allAt5: ConsumerVisibilityMetric, allAt10: ConsumerVisibilityMetric): ConsumerVisibilityScore => ({
-      contract: CONSUMER_MESSAGE_VISIBILITY_CONTRACT, any_at_5: anyAt5, any_at_10: anyAt10,
+      contract, any_at_5: anyAt5, any_at_10: anyAt10,
       all_at_5: allAt5, all_at_10: allAt10,
       gold_messages: gold === undefined ? { annotated: 0, mapped: 0, complete: false }
         : { annotated: gold.annotated_turns, mapped: gold.spans.length, complete: gold.complete },

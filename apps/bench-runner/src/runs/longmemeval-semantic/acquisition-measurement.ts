@@ -4,7 +4,7 @@ import { deliveredSourceSemanticLibraryIntervals } from "../measurement/source-s
 import { admittedSourceDeliveryTail } from "../measurement/source-delivery-visibility.js";
 import { sourceGoldUnitFromPublishedRoot, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import type { AnswerTurnGold } from "./answer-spans.js";
-import { scoreConsumerMessageVisibility, type ConsumerVisibilityMetric,
+import { scoreConsumerMessageVisibility, scoreConsumerMessagePropositions, type ConsumerVisibilityMetric,
   type ConsumerVisibilityPage } from "./message-visibility.js";
 
 type NativeMeasurement = ReturnType<typeof measureSemanticChain>["result"]["rows"][number];
@@ -118,7 +118,7 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
     ? deliveredSourceSemanticLibraryIntervals(measurement, replay.response) : null;
   const unavailable = refused?.reason ?? (input.cohort === "abstention" ? "abstention_requires_separate_calibration"
     : intervals === null ? input.unavailableReason ?? "native_delivery_unavailable" : null);
-  const source5: AcquisitionMetric = unavailable !== null ? unknown(unavailable)
+  const historicalSource5: AcquisitionMetric = unavailable !== null ? unknown(unavailable)
     : native?.source_bearing_union?.any_at_5.status === "hit" ? hit
     : sourceGold?.complete && native?.source_bearing_union?.any_at_5.status === "miss" ? miss
     : unknown(sourceGold?.complete ? "native_access_or_computation_unresolved" : "source_or_gold_mapping_incomplete");
@@ -135,15 +135,33 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
       intervals: intervals.map(({ rank, target, start, end }) =>
         ({ rank, target: sourceGoldUnitFromPublishedRoot(target), start, end }))
     };
-  const visibility = unavailable !== null ? { any_at_5: unknown(unavailable), any_at_10: unknown(unavailable),
-    all_at_5: unknown(unavailable), all_at_10: unknown(unavailable) }
-    : scoreConsumerMessageVisibility({ gold: answerGold, pages: deliveryPage === undefined ? [] : [deliveryPage] });
+  const visibilityInput = { gold: answerGold, pages: deliveryPage === undefined ? [] : [deliveryPage],
+    ...(unavailable === null ? {} : { unavailableReason: unavailable }) };
+  const visibility = scoreConsumerMessagePropositions(visibilityInput);
+  const historicalVisibility = scoreConsumerMessageVisibility(visibilityInput);
+  const sourceAt = (k: 5 | 10): AcquisitionMetric => {
+    if (unavailable !== null) return unknown(unavailable);
+    const nativeMetric = k === 5 ? native?.source_bearing_union?.any_at_5 : native?.source_bearing_union?.any_at_10;
+    if (nativeMetric?.status === "hit") return hit;
+    const collection = k === 5 ? visibility.collection.at_5 : visibility.collection.at_10;
+    if (collection.status !== "complete") return unknown(collection.reason ?? "delivery_position_not_observed");
+    return sourceGold?.complete && nativeMetric?.status === "miss" ? miss
+      : unknown(sourceGold?.complete ? "native_access_or_computation_unresolved" : "source_or_gold_mapping_incomplete");
+  };
+  const source5 = sourceAt(5);
   const answer5 = visibility.any_at_5;
   const at10 = (at5: AcquisitionMetric): AcquisitionMetric => at5.status === "hit" ? at5
     : hasContinuation ? unknown("second_page_not_observed") : at5;
   const stages = stageObservations(native, sourceGold?.sourceUnits ?? [], source5.status === "hit", answer5, sourceGold?.complete ?? false);
   // has_answer annotations do not identify a complete sufficient support set (especially multi-hop).
-  return { metrics: { "source_bearing_any@5": source5, "source_bearing_any@10": at10(source5),
+  const source10 = sourceAt(10);
+  return { contract: "longmemeval-acquisition-observation-v2" as const,
+    measurement_change: { attribution: "cutoff_semantics_only" as const,
+      historical_contract: "longmemeval-acquisition-observation-v1" as const,
+      historical_at_10: { source_bearing_any: at10(historicalSource5), answer_span_exposure: historicalVisibility.any_at_10,
+        answer_complete_coverage: historicalVisibility.all_at_10 } },
+    collection: visibility.collection,
+    metrics: { "source_bearing_any@5": source5, "source_bearing_any@10": source10,
       "answer_span_exposure@5": visibility.any_at_5, "answer_span_exposure@10": visibility.any_at_10,
       "answer_complete_coverage@5": visibility.all_at_5, "answer_complete_coverage@10": visibility.all_at_10 },
     support_sufficiency: { status: "not_measured" as const, reason: "no_evaluator_frozen_full_support_set" },
@@ -172,7 +190,7 @@ export function summarizeLongMemEvalAcquisition(rows: readonly LongMemEvalAcquis
     const reason = row.metrics["source_bearing_any@5"].reason ?? "unstated";
     return { ...counts, [reason]: (counts[reason] ?? 0) + 1 };
   }, {})).sort(([left], [right]) => left.localeCompare(right)).map(([reason, rowsWithReason]) => ({ reason, rows: rowsWithReason }));
-  return { contract: "longmemeval-acquisition-observation-v1", metrics, unknown_reasons: unknownReasons,
+  return { contract: "longmemeval-acquisition-observation-v2", metrics, unknown_reasons: unknownReasons,
     support_sufficiency: { measured: 0, not_measured: rows.length },
     loss_attribution: { denominator: rows.length,
       stages: Object.fromEntries(STAGES.map(stage => [stage, rows.filter(row => row.earliest_observable_loss.stage === stage).length])),

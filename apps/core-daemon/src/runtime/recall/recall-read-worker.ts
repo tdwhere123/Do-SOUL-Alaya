@@ -1,4 +1,5 @@
 import { parentPort, workerData } from "node:worker_threads";
+import { recallExecutionRetention } from "@do-soul/alaya-core";
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { readCjkSegmentationStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import type { RecallReadWorkerResponse } from "../recall-read-worker/protocol.js";
@@ -26,6 +27,7 @@ if (parentPort === null) {
 }
 
 const databaseFilename = readDatabaseFilename(workerData);
+recallExecutionRetention.subscribe(event => parentPort!.postMessage({ kind: "recall_retention_removed", ...event }));
 const pathReadBind = readPathReadBind(workerData);
 let runtime: ReturnType<typeof createRecallReadWorkerRuntime> | undefined;
 

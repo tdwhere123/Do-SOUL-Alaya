@@ -67,7 +67,7 @@ export function projectFromField(
       && !input.governance.temporal_uncertain);
   const retained = state;
   const projectionProgress = resumeIndexProjection(state, snapshot);
-  const { query_key: queryKey, request_digest: requestDigest } = progressDelivery ?? recallDeliveryIdentity(input, interpretation);
+  const { query_key: queryKey, request_digest: requestDigest } = progressDelivery ?? recallDeliveryIdentity(input);
   const issued = input.continuation == null ? undefined : replayIssuedDelivery(requestDigest);
   if (issued !== undefined) {
     const eligible = new Set(snapshot.values

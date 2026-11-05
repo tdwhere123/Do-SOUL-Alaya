@@ -73,6 +73,7 @@ export type ProviderExecutionFailure = Readonly<{
     "success_first_try" | "success_after_retry">;
   readonly retryCount: number;
   readonly failures: readonly ProviderAttemptFailure[];
+  readonly observerFailures?: readonly unknown[];
 }>;
 
 const EXECUTION_FAILURES = new WeakMap<object, ProviderExecutionFailure>();
@@ -107,9 +108,14 @@ export const executeProviderChatCompletion: ProviderChatExecutionPort = async (
     } catch (error) {
       const failure = normalizeAttemptFailure(error, attempt);
       failures.push(failure);
-      await observer?.onAttemptFailure?.(failure, error);
       if (failure.kind === "timeout") timeoutRetries += 1;
       const decision = decideRetry(error, failure, attempt, timeoutRetries, policy);
+      try {
+        await observer?.onAttemptFailure?.(failure, error);
+      } catch (observerError) {
+        recordExecutionFailure(error, attempt, decision.classification, failures, [observerError]);
+        throw error;
+      }
       if (!decision.retry) {
         recordExecutionFailure(error, attempt, decision.classification, failures);
         throw error;
@@ -191,13 +197,15 @@ function recordExecutionFailure(
   error: unknown,
   retryCount: number,
   retryClassification: ProviderExecutionFailure["retryClassification"],
-  failures: readonly ProviderAttemptFailure[]
+  failures: readonly ProviderAttemptFailure[],
+  observerFailures?: readonly unknown[]
 ): void {
   if (typeof error !== "object" || error === null) return;
   EXECUTION_FAILURES.set(error, Object.freeze({
     retryClassification,
     retryCount,
-    failures: Object.freeze([...failures])
+    failures: Object.freeze([...failures]),
+    ...(observerFailures === undefined ? {} : { observerFailures: Object.freeze([...observerFailures]) })
   }));
 }
 

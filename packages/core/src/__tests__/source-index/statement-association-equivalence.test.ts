@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
 import { preferAssociatedSlot, quoteStatementAssociation, restrictStatementAssociation, StatementKeyRetention,
-  type StatementAssociation } from "../../source-index/statement-association.js";
+  statementAssociationLink, type StatementAssociation } from "../../source-index/statement-association.js";
 
 type Key = { root: string; question: number; vector: Float32Array };
 type Dense = { roots: string[]; question: number[]; link: number[][] };
@@ -60,9 +60,11 @@ function associate(roots: string[], keys: Key[], dimensions: number) {
   return { result: result!, work: meter.spentWork - before.work, bytes: meter.spentBytes - before.bytes };
 }
 
+const navigationMeter = () => new SourceSemanticResourceLedger({ work_units: 1e9, memory_bytes: 1e9 });
 function full(association: StatementAssociation): number[][] {
+  const meter = navigationMeter();
   return association.roots.map((_, i) => association.roots.map((_, j) => i === j ? -1
-    : i > j ? association.link[i]![j]! : association.link[j]![i]!));
+    : statementAssociationLink(association, i, j, meter)));
 }
 
 function generator(seed: number) {
@@ -105,20 +107,21 @@ describe("exact statement association and final field order", () => {
       }
       const dense = denseOracle(roots, keys), actual = associate(roots, keys, dimensions).result;
       expect(actual.question).toEqual(dense.question);
-      expect(full(actual)).toEqual(dense.link);
+      expect(actual.link.flat().every(value => value === null)).toBe(true);
       for (let n = 0; n < 4; n++) {
         const retained = roots.filter(() => random() > 0.2), restricted = restrictStatementAssociation(actual, r => retained.includes(r));
         const restrictedDense = denseOracle(retained, keys);
         const order = shuffled([...retained, "unassociated"], random);
-        expect(preferAssociatedSlot(order, restricted)).toEqual(oracleOrder(order, restrictedDense));
+        expect(preferAssociatedSlot(order, restricted, navigationMeter())).toEqual(oracleOrder(order, restrictedDense));
         const input = fieldInput(retained, shuffled(retained, random).slice(0, 4));
-        const before = orderNativeFieldAccess(input), after = orderNativeFieldAccess({ ...input, association: restricted });
+        const before = orderNativeFieldAccess(input), after = orderNativeFieldAccess({ ...input, association: restricted }, navigationMeter());
         expect(before.status).toBe("ordered"); expect(after.status).toBe("ordered");
         if (before.status !== "ordered" || after.status !== "ordered") throw new Error("expected total order");
         const sourceOrder = oracleOrder(before.record_ids.filter(id => id !== "memory"), restrictedDense);
         let cursor = 0;
         expect(after.record_ids).toEqual(before.record_ids.map(id => id === "memory" ? id : sourceOrder[cursor++]));
       }
+      expect(full(actual)).toEqual(dense.link);
     }
   });
 
@@ -133,36 +136,38 @@ describe("exact statement association and final field order", () => {
     expect(full(associate(roots, keys, dimensions).result)).toEqual(denseOracle(roots, keys).link);
   });
 
-  it("returns to full comparison when bounds cost more than they save", () => {
-    const random = generator(91324), count = 16, dimensions = 256;
+  it("evaluates only demanded pairs and shares results across repeated source orders", () => {
+    const random = generator(91324), count = 16, dimensions = 64;
     const roots = Array.from({ length: count }, (_, i) => `r${i}`);
     const keys = roots.flatMap(root => Array.from({ length: 16 }, (_, k) => ({ root, question: (16 - k) / 20,
       vector: Float32Array.from({ length: dimensions }, () => random() * 2 - 1) })));
-    const actual = associate(roots, keys, dimensions);
-    expect(full(actual.result)).toEqual(denseOracle(roots, keys).link);
-    const baselineWork = count * (count - 1) / 2 * 16 * 16 * dimensions;
-    expect(actual.work).toBeLessThan(baselineWork * 1.01);
+    const actual = associate(roots, keys, dimensions).result, meter = navigationMeter();
+    const dense = denseOracle(roots, keys);
+    expect(preferAssociatedSlot(roots, actual, meter)).toEqual(oracleOrder(roots, dense));
+    expect(actual.link.flat().filter(value => value !== null).length).toBeLessThanOrEqual(4 * (count - 4));
+    const firstWork = meter.spentWork;
+    expect(preferAssociatedSlot(roots, actual, meter)).toEqual(oracleOrder(roots, dense));
+    expect(meter.spentWork - firstWork).toBeLessThanOrEqual(count * 2 + 4 * (count - 4));
+    expect(full(actual)).toEqual(dense.link);
   });
 
-  it("uses less actual work on a larger clustered set while retaining every key and exact link", () => {
-    const dimensions = 256;
-    for (const count of [16, 32, 64]) {
+  it("reports comparison reduction separately from the increased explicit retained vectors", () => {
+    const dimensions = 32;
+    for (const count of [6, 16, 32]) {
       const roots = Array.from({ length: count }, (_, i) => `r${i}`);
-      const keys = roots.flatMap((root, i) => Array.from({ length: 16 }, (_, k) => {
+      const keys = roots.flatMap((root, i) => Array.from({ length: 4 }, (_, k) => {
         const vector = new Float32Array(dimensions);
         vector[0] = 1; vector[1 + k] = 0.5 + i / 10000;
         return { root, vector, question: (16 - k) / 20 };
       }));
-      const actual = associate(roots, keys, dimensions), dense = denseOracle(roots, keys);
-      expect(full(actual.result)).toEqual(dense.link);
-      const baselineWork = count * (count - 1) / 2 * 16 * 16 * dimensions;
-      const baselineMemory = count * (count + 1) * 8;
-      expect(actual.work).toBeLessThan(baselineWork * 0.8);
-      expect(actual.bytes).toBeLessThan(baselineMemory);
+      const actual = associate(roots, keys, dimensions).result, dense = denseOracle(roots, keys), meter = navigationMeter();
+      expect(preferAssociatedSlot(roots, actual, meter)).toEqual(oracleOrder(roots, dense));
+      const baselineWork = count * (count - 1) / 2 * 4 * 4 * dimensions;
+      expect(meter.spentWork).toBeLessThan(baselineWork);
       const allowance = { work_units: 10_000_000, memory_bytes: 100_000_000 };
-      const packed = SourceSemanticResourceLedger.measureRetain(actual.result, allowance);
+      const retained = SourceSemanticResourceLedger.measureRetain(actual, allowance);
       const original = SourceSemanticResourceLedger.measureRetain(dense, allowance);
-      expect(packed.memory_bytes).toBeLessThan(original.memory_bytes);
+      expect(retained.memory_bytes).toBeGreaterThan(original.memory_bytes);
     }
   });
 });

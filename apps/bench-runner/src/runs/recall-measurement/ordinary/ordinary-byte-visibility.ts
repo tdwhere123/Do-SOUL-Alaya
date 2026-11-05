@@ -1,5 +1,5 @@
 import {
-  consumerVisibilityUnavailableReason, scoreConsumerByteVisibility, scoreConsumerMessageVisibility,
+  consumerVisibilityUnavailableReason, scoreConsumerByteVisibility, scoreConsumerMessagePropositions,
   type ConsumerVisibilityInput
 } from "../../longmemeval-semantic/message-visibility.js";
 import { ordinaryLiteralWindows, ordinaryUnmappedSources, ordinaryPreviewStreamIssue, prefixOrdinaryBodyPreviews,
@@ -14,7 +14,7 @@ export const ORDINARY_VISIBILITY_BYTE_BUDGETS = [2048, 4096, 8192] as const;
 export function scoreOrdinaryByteVisibility(input: ConsumerVisibilityInput & Readonly<{
   previews: readonly OrdinarySourcePreview[];
 }>) {
-  const slot = scoreConsumerMessageVisibility(input);
+  const slot = scoreConsumerMessagePropositions(input);
   const admissionIssue = input.unavailableReason ?? ordinaryPreviewStreamIssue(input.previews, input.pages)
     ?? consumerVisibilityUnavailableReason(input)
     ?? (slot.observation.observed_pages === 0 ? "ordinary_captured_stream_unobserved" : null);

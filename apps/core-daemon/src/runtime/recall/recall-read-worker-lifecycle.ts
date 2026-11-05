@@ -55,6 +55,7 @@ type Options = {
   readonly pathReadBind?: RecallPathReadBind;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly onUnavailable: (worker: Worker) => void;
+  readonly onRetentionRemoved?: (worker: Worker, handles: readonly string[]) => void;
 };
 
 /** One slot owns a worker through quarantine and actual exit, including its snapshot lease. */
@@ -375,6 +376,13 @@ export class RecallReadWorkerLifecycle {
   }
 
   private handleMessage(resource: Resource, message: unknown): void {
+    if (resource.state === "active" && typeof message === "object" && message !== null
+      && "kind" in message && message.kind === "recall_retention_removed"
+      && "handles" in message && Array.isArray(message.handles)
+      && message.handles.every(handle => typeof handle === "string")) {
+      this.options.onRetentionRemoved?.(resource.worker, message.handles);
+      return;
+    }
     if (resource.state !== "active" || !isRecallReadWorkerResponse(message)) return;
     const pending = this.pending.get(message.id);
     if (pending === undefined || pending.resource !== resource) return;

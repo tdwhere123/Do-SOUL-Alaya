@@ -39,7 +39,7 @@ describe("host session capture contract", { timeout: 30_000 }, () => {
     expect(records(sliding).listByWorkspace(WORKSPACE).map(row => row.record_id).sort())
       .toEqual([...sliding.roots()].sort());
     expect(await sliding.capture({ container: CONTAINER, messages: SIX })).toEqual({ container_key: CONTAINER_KEY,
-      admitted_message_count: 0, replayed_message_count: 6, pending_message_count: 0, admitted_round_count: 0 });
+      admitted_message_count: 0, replayed_message_count: 6, pending_message_count: 0, admitted_round_count: 0, pending_round_count: 0 });
   });
 
   it("refuses a whole request on any conflict and admits none of its messages", async () => {

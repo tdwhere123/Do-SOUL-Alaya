@@ -4,7 +4,8 @@ import { z } from "zod";
 import { AlayaError, SourceEvidenceTargetSchema, SourceSemanticNominationOccurrenceSchema, canonicalJson } from "@do-soul/alaya-protocol";
 import { FIELD_DELIVERY_LIMITS, FieldDeliverySchema, SourceContextRouteSchema, sourceContextRoute } from "./field-delivery.js";
 import { navigationInventory } from "./conditional-navigation.js";
-import { scoreConsumerByteVisibility, scoreConsumerMessageVisibility } from "../longmemeval-semantic/message-visibility.js";
+import { scoreConsumerByteVisibility, scoreConsumerMessagePropositions, scoreConsumerMessageVisibility,
+  type ConsumerVisibilityInput } from "../longmemeval-semantic/message-visibility.js";
 import { ConditionalNavigationRunSchema, navigationFileDigest, frozenDeliveryPolicy, frozenDeliveryArms } from "./conditional-navigation-input.js";
 import { FrozenNominationArtifactSchema, admitFrozenQueries } from "./conditional-navigation-frozen.js";
 import { structuralNavigationStatus } from "./structural-navigation.js";
@@ -213,12 +214,15 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
   }));
   const rows = admitted.map(({ ref, capture }) => {
     const label = gold.get(ref.ordinal)!;
+    const visibilityInput: ConsumerVisibilityInput = { gold: label.value, pages: capture === null ? [] : [{ page: 1,
+      status: "observed", reason: null, occupied_slots: capture.windows.length, complete: true,
+      continuation: capture.tail.status === "exhausted" ? "none" : capture.tail.status === "open" ? "present" : "unknown",
+      terminal_tail: capture.tail,
+      intervals: capture.windows.map(({ rank, target, start, end }) => ({ rank, target, start, end })) }] };
     return { ordinal: ref.ordinal, question_id: ref.question_id, arm: ref.arm, status: ref.status,
       evaluator_projection: { path: label.path, sha256: label.sha256 },
-      visibility: capture === null ? null : scoreConsumerMessageVisibility({ gold: label.value, pages: [{ page: 1,
-        status: "observed", reason: null, occupied_slots: capture.windows.length, complete: true,
-        continuation: capture.tail.status === "exhausted" ? "none" : "present", terminal_tail: capture.tail,
-        intervals: capture.windows.map(({ rank, target, start, end }) => ({ rank, target, start, end })) }] }),
+      visibility: capture === null ? null : scoreConsumerMessagePropositions(visibilityInput),
+      historical_visibility: capture === null ? null : scoreConsumerMessageVisibility(visibilityInput),
       byte_visibility: capture?.field_delivery ? scoreConsumerByteVisibility({ gold: label.value,
         windows: capture.windows, byte_budget: capture.field_delivery.policy.byte_budget,
         unique_utf8_bytes: capture.field_delivery.packing.unique_utf8_bytes }) : null,
@@ -238,10 +242,15 @@ export function evaluateConditionalNavigation(root: string, labelManifestPath: s
         losses: outcomes.filter(([a, b]) => a === "hit" && b === "miss").length,
         unknown_pairs: outcomes.filter(([a, b]) => a === "unknown" || b === "unknown").length }];
     }));
-    return { arm, status: complete ? "scored" : "unavailable",
+    const measurement_changes = Object.fromEntries(Metrics.map(metric => [metric, selected.filter(row =>
+      row.visibility !== null && row.historical_visibility !== null
+      && row.visibility[metric].status !== row.historical_visibility[metric].status).length]));
+    return { contract: "consumer-message-visibility-v2", measurement_attribution: "cutoff_semantics_only",
+      historical_contract: "consumer-message-visibility-v1", measurement_changes,
+      arm, status: complete ? "scored" : "unavailable",
       denominator: selected.length, metrics: counts, paired: pairs };
   });
-  const result = { contract: "conditional-navigation-evaluation.v2", exposed_development_data: true,
+  const result = { contract: "conditional-navigation-evaluation.v3", exposed_development_data: true,
     receipt_sha256: navigationFileDigest(join(root, "receipt.json")), summary, rows };
   writeFileSync(output, JSON.stringify(result, null, 2), { flag: "wx" });
   return result;

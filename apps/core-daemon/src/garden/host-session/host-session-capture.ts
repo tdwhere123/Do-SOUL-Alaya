@@ -83,6 +83,7 @@ export function createHostSessionSourceAudit(eventLogRepo: SqliteEventLogRepo,
 
 const SWEEP_CONTAINERS_PER_PASS = 32;
 const SWEEP_RETRY_MS = 1000;
+const RECOVERY_ROUNDS_PER_PASS = 16;
 
 export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSessionCapture {
   if (ports.admission.audit === undefined || ports.admission.findRetained === undefined || ports.admission.findReceipt === undefined) {
@@ -97,7 +98,8 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
       const rounds = await formRounds(ports, { workspaceId: input.workspaceId, key, issuer: input.issuer });
       closeStatementChunks(ports, input.workspaceId, key);
       return { container_key: key, admitted_message_count: counts.admitted, replayed_message_count: counts.replayed,
-        pending_message_count: ports.ledger.openTail(input.workspaceId, key).length, admitted_round_count: rounds };
+        pending_message_count: ports.ledger.openTail(input.workspaceId, key).length, admitted_round_count: rounds,
+        pending_round_count: ports.ledger.pendingRoundCount(input.workspaceId, key) };
     },
     async sweepIdle(issuer) {
       const nowMs = Date.parse(ports.now());
@@ -112,6 +114,11 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
             ports.ledger.reserveTailBoundary(container.workspace_id, container.container_key, owns);
           });
           if (owns) await formRounds(ports, { workspaceId: container.workspace_id, key: container.container_key, issuer });
+          if (owns && ports.ledger.pendingRoundCount(container.workspace_id, container.container_key) > 0) {
+            ports.ledger.retrySweep(container.workspace_id, container.container_key, issuer.producer,
+              new Date(nowMs + SWEEP_RETRY_MS).toISOString());
+            continue;
+          }
           const closure = closeStatementSessionChunks(ports.statementSessions, { workspaceId: container.workspace_id,
             containerKey: container.container_key, closeTail: false, now: ports.now });
           if (closure.more) ports.ledger.retrySweep(container.workspace_id, container.container_key, issuer.producer,
@@ -194,7 +201,7 @@ async function formRounds(ports: HostSessionCapturePorts, input: Readonly<{
   workspaceId: string; key: string; issuer: HostSessionIssuer;
 }>): Promise<number> {
   let completed = 0;
-  for (const intent of ports.ledger.pendingRounds(input.workspaceId, input.key)) {
+  for (const intent of ports.ledger.pendingRoundPage(input.workspaceId, input.key, RECOVERY_ROUNDS_PER_PASS)) {
     if (intent.members.length === 0 || intent.members.some(member => member.producer !== input.issuer.producer)) {
       throw new AlayaError("CONFLICT", "host session round intent has invalid members or producer");
     }

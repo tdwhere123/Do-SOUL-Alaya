@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { hashLabeledIdentity, hostSessionContainerKey, type SourceAdmissionPort, type SourceAdmissionRequest } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
@@ -21,6 +21,57 @@ const context = { workspaceId: WORKSPACE, runId: RUN, issuer: MCP_HOST_SESSION_I
 const request = (index: number) => ({ container: CONTAINER, messages: [messages[index]!], closes_tail: true });
 const injectedCapture = (env: Environment, admission: SourceAdmissionPort) => createHostSessionCapture({ admission,
   ledger: env.gardenTaskRepo.hostSessions, statementSessions: env.gardenTaskRepo, now: env.now, warn: () => undefined });
+
+it("bounds actual SQLite member bodies while recovering an audit backlog across restart and yielding to another container", async () => {
+  const env = await environment();
+  const failing = injectedCapture(env, { ...env.sourceAdmission, audit: async () => { throw new Error("audit offline"); } });
+  const windows = Array.from({ length: 3 }, (_, batch) => ({ container: CONTAINER, closes_tail: true,
+    messages: Array.from({ length: 32 }, (_, index) => ({ message_id: `backlog-${batch * 32 + index}`,
+      position: batch * 32 + index, role: "assistant" as const, content: "x".repeat(16_384),
+      completeness: "complete" as const, fidelity: "original_bytes" as const })) }));
+  for (const request of windows) await expect(failing.capture({ ...context, request })).rejects.toThrow("audit offline");
+  expect(env.gardenTaskRepo.hostSessions.pendingRoundCount(WORKSPACE, CONTAINER_KEY)).toBe(96);
+  const ledger = env.gardenTaskRepo.hostSessions;
+  const read = ledger.pendingRoundPage.bind(ledger);
+  const pages: { members: number; bytes: number }[] = [];
+  const spy = vi.spyOn(ledger, "pendingRoundPage").mockImplementation((...args) => {
+    const page = read(...args), members = page.flatMap(round => round.members);
+    pages.push({ members: members.length, bytes: members.reduce((sum, member) => sum + Buffer.byteLength(member.pending_body ?? ""), 0) });
+    return page;
+  });
+  const first = await env.capture(windows[2]!);
+  expect(first).toMatchObject({ admitted_message_count: 0, replayed_message_count: 32,
+    admitted_round_count: 16, pending_round_count: 80 });
+  expect(pages).toEqual([{ members: 16, bytes: 16 * 16_384 }]);
+  spy.mockRestore();
+  const resumed = restartedCapture(env);
+  expect(await resumed.capture({ ...context, request: windows[2]! })).toMatchObject({ admitted_round_count: 16, pending_round_count: 64 });
+  const other = { scope: "test-host", id: "healthy-peer" };
+  await resumed.capture({ ...context, request: { container: other, messages: [messages[0]!] } });
+  env.advance(STATEMENT_SESSION_IDLE_MS);
+  await resumed.sweepIdle(MCP_HOST_SESSION_ISSUER);
+  const pending = () => (env.database.connection.prepare(`SELECT COUNT(*) AS n FROM host_session_rounds
+    WHERE container_key = ? AND state = 'pending'`).get(CONTAINER_KEY) as { n: number }).n;
+  expect(pending()).toBe(48);
+  expect(env.database.connection.prepare(`SELECT state FROM host_session_rounds WHERE container_key = ?`)
+    .get(hostSessionContainerKey(other, fieldContractSha256))).toEqual({ state: "done" });
+  for (let pass = 0; pass < 3; pass++) { env.advance(1001); await resumed.sweepIdle(MCP_HOST_SESSION_ISSUER); }
+  expect(pending()).toBe(0);
+  expect(auditCount(env)).toHaveLength(97);
+  expect(auditCount(env).every(row => (row as { n: number }).n === 1)).toBe(true);
+});
+
+it("refuses oversized retained round bodies before loading them and preserves the pending obligation", async () => {
+  const env = await environment();
+  await expect(injectedCapture(env, { ...env.sourceAdmission, admit: () => { throw new Error("offline"); } })
+    .capture({ ...context, request: request(0) })).rejects.toThrow("offline");
+  env.database.connection.prepare("UPDATE host_session_messages SET pending_body = ?").run("x".repeat(16_385));
+  expect(() => env.gardenTaskRepo.hostSessions.pendingRoundPage(WORKSPACE, CONTAINER_KEY, 16)).toThrow(/bounds/);
+  expect(env.gardenTaskRepo.hostSessions.pendingRoundCount(WORKSPACE, CONTAINER_KEY)).toBe(1);
+  env.database.connection.prepare("DELETE FROM host_session_rounds WHERE workspace_id = ? AND container_key = ?")
+    .run(WORKSPACE, CONTAINER_KEY);
+  expect(env.gardenTaskRepo.hostSessions.pendingRoundCount(WORKSPACE, CONTAINER_KEY)).toBe(0);
+});
 function restartedCapture(env: Environment, notifyEntry: () => void = () => undefined) {
   const database = env.reopen(), eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo });
@@ -86,6 +137,12 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
     run_id: RUN, producer: MCP_HOST_SESSION_ISSUER.producer, admitted_at: env.now(), pending_body: later.content });
   const sql039 = readFileSync("packages/storage/src/migrations/039-host-session-capture.sql", "utf8");
   const oldTable = sql039.slice(0, sql039.indexOf("CREATE INDEX idx_host_session_messages_admitted"));
+  // Remove the later recovery migration as well: the fixture must represent a real pre-intent schema.
+  const recoveryTriggers = env.database.connection.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger'
+    AND name LIKE 'source_erase_recovery_%'`).all() as { name: string }[];
+  for (const { name } of recoveryTriggers) env.database.connection.exec(`DROP TRIGGER "${name}"`);
+  env.database.connection.exec(`DROP TABLE source_erase_closure_progress; DROP TABLE source_erase_repair_control;
+    DROP INDEX idx_source_erase_recovery_subject; DELETE FROM schema_version WHERE version = 44;`);
   env.database.connection.exec(`DROP TABLE host_session_rounds; DROP TABLE host_session_planning; DROP TABLE host_session_tail_boundaries;
     DROP TABLE host_session_sweeps;
     DROP TRIGGER host_session_message_container_insert; DROP TABLE host_session_containers;
@@ -101,7 +158,8 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
   expect(persisted(env)).toEqual([
     expect.objectContaining({ round_index: 0, round_root_id: originalRoot, pending_body: "secret first" }),
     expect.objectContaining({ message_id: "message-1", round_index: null, pending_body: "later reply" })]);
-  await resumed.capture({ ...context, request: request(1) });
+  expect(env.database.connection.prepare("SELECT pending_round_count FROM host_session_containers").get()).toEqual({ pending_round_count: 1 });
+  expect(await resumed.capture({ ...context, request: request(1) })).toMatchObject({ pending_round_count: 0 });
   expect(persisted(env)).toEqual([
     expect.objectContaining({ message_id: "message-0", round_index: 0, round_root_id: originalRoot, source_body: "User: secret first" }),
     expect.objectContaining({ message_id: "message-1", round_index: 1, source_body: "Assistant: later reply" })]);
@@ -191,11 +249,13 @@ for (const stage of ["intent", "receipt", "audit"] as const) {
       pending_body: null, erased: 1, source_body: null })]);
     expect(env.database.connection.prepare("SELECT state FROM host_session_rounds").get())
       .toEqual({ state: stage === "intent" ? "erased" : "erased_pending" });
+    expect(env.gardenTaskRepo.hostSessions.pendingRoundCount(WORKSPACE, CONTAINER_KEY)).toBe(stage === "intent" ? 0 : 1);
     let notifications = 0;
     const capture = restartedCapture(env, () => { notifications++; });
     await capture.capture({ ...context, request: request(0) });
     expect(notifications).toBe(0);
     expect(env.database.connection.prepare("SELECT state FROM host_session_rounds").get()).toEqual({ state: "erased" });
+    expect(env.database.connection.prepare("SELECT pending_round_count FROM host_session_containers").get()).toEqual({ pending_round_count: 0 });
     expect(auditCount(env)).toEqual(stage === "intent" ? [] : [{ entity_id: rootId, n: 1 }]);
     env.advance(8 * 24 * 60 * 60 * 1000);
     await capture.sweepIdle(MCP_HOST_SESSION_ISSUER);

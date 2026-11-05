@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { indexEntryCacheKey, type InformationIndex } from "@do-soul/alaya-protocol";
-import { CoreError, type ConditionalFieldRecallPortResult, type runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
+import { CoreError, recallExecutionRetention, recallRetentionBytes,
+  type ConditionalFieldRecallPortResult, type runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { attachMeasuredWorkerCost, measuredWorkerCostOfReceipt } from "../recall/worker-actual-cost.js";
 import { claimDeliverySettlement, finishDeliverySettlement } from "./delivery-settlement.js";
@@ -12,19 +13,25 @@ type Prepared = {
   receipt: Execution["execution_receipt"];
   metadata: NonNullable<ConditionalFieldRecallPortResult["source_metadata"]>;
   index: InformationIndex;
+  owner: symbol;
+  execution: string;
+  workspace: string;
+  deadline?: number;
 };
-const PREPARED = new WeakMap<RecallReadWorkerRuntime, Map<string, Prepared>>();
+const OWNERS = new WeakMap<RecallReadWorkerRuntime, symbol>();
 
 export function prepareWorkerDelivery(
   runtime: RecallReadWorkerRuntime,
   execution: Execution,
   metadata: Prepared["metadata"]
 ): string {
-  let pending = PREPARED.get(runtime);
-  if (pending === undefined) { pending = new Map(); PREPARED.set(runtime, pending); }
+  let owner = OWNERS.get(runtime);
+  if (owner === undefined) { owner = Symbol(); OWNERS.set(runtime, owner); }
   const id = randomUUID();
-  pending.set(id, { issue: execution.issue, receipt: execution.execution_receipt, metadata, index: execution.index });
-  while (pending.size > 32) pending.delete(pending.keys().next().value!);
+  retainPrepared(id, { issue: execution.issue, receipt: execution.execution_receipt, metadata, index: execution.index,
+    owner, execution: execution.execution_id ?? id, workspace: execution.execution_receipt.workspace_id ?? "",
+    deadline: execution.retain_until },
+  execution.retained_bytes ?? 0);
   return id;
 }
 
@@ -33,13 +40,13 @@ export function settleWorkerDelivery(
   payload: WorkerOperationPayload<"conditionalField.acknowledge"> | WorkerOperationPayload<"conditionalField.discard">,
   discard: boolean
 ): Execution["execution_receipt"] | null {
-  const pending = PREPARED.get(runtime);
   const id = payload.preparation_id;
-  if (discard) { pending?.delete(id); return null; }
-  const prepared = pending?.get(id);
+  const prepared = recallExecutionRetention.get<Prepared>(`prepared:${id}`);
+  if (prepared !== undefined && prepared.owner !== OWNERS.get(runtime)) throw new CoreError("CONFLICT", "Recall preparation belongs to another runtime");
+  if (discard) { recallExecutionRetention.delete(`prepared:${id}`); return null; }
   if (prepared === undefined) throw new Error("Recall preparation expired or discarded");
   try {
-    return settlePrepared(pending!, id, prepared,
+    return settlePrepared(id, prepared,
       payload as WorkerOperationPayload<"conditionalField.acknowledge">);
   } catch (error) {
     // issue() refreshes this same receipt even on refusal (including its pin read).
@@ -49,7 +56,7 @@ export function settleWorkerDelivery(
   }
 }
 
-function settlePrepared(pending: Map<string, Prepared>, id: string, prepared: Prepared,
+function settlePrepared(id: string, prepared: Prepared,
   acknowledgePayload: WorkerOperationPayload<"conditionalField.acknowledge">): Execution["execution_receipt"] | null {
   // A retried or first acknowledgement must describe the same prepared membership;
   // a re-issued envelope may never substitute entries after the fact.
@@ -67,7 +74,7 @@ function settlePrepared(pending: Map<string, Prepared>, id: string, prepared: Pr
   const entries = Object.entries(acknowledgePayload.previews);
   if (entries.some(([, value]) => typeof value !== "string")) throw new TypeError("invalid Recall previews");
   if (!claimDeliverySettlement(acknowledgePayload.settlement)) {
-    pending.delete(id);
+    recallExecutionRetention.delete(`prepared:${id}`);
     throw new CoreError("CONFLICT", "Recall acknowledgment cancelled before issuance", {
       details: { delivery_settlement: "cancelled", execution_receipt: prepared.receipt }
     });
@@ -80,6 +87,15 @@ function settlePrepared(pending: Map<string, Prepared>, id: string, prepared: Pr
     throw error;
   }
   // An acknowledgment retry must neither retain source closures nor advance a successor.
-  pending.set(id, { metadata: {}, receipt: prepared.receipt, index: prepared.index });
+  // Release closures without a fallible post-commit capacity admission. The
+  // original reservation remains conservative until this execution expires.
+  prepared.issue = undefined;
+  prepared.metadata = {};
   return prepared.receipt;
+}
+
+function retainPrepared(id: string, prepared: Prepared, fieldBytes: number): void {
+  recallExecutionRetention.set(`prepared:${id}`, { execution: prepared.execution, workspace: prepared.workspace,
+    bytes: fieldBytes + recallRetentionBytes(prepared), value: prepared, deadline: prepared.deadline,
+    handles: [id, ...(prepared.index.continuation == null ? [] : [prepared.index.continuation.continuation_id])] });
 }

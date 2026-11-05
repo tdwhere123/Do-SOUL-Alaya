@@ -29,6 +29,7 @@ import { stableStringify } from "../../shared/stable-stringify.js";
 import { CoreError } from "../../shared/errors.js";
 import { assertCommittedLedgerCapacity, type EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
+import { recallExecutionRetention, recallRetentionBytes } from "./recall-execution-retention.js";
 import {
   continuationCapabilityMatches,
   issuedContinuationTampered,
@@ -45,17 +46,15 @@ export const OFFSET_CURSOR = /^offset-(\d+)$/u;
 export const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
 export const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?(?:x(\d+))?(?:d(\d+))?$/u;
 
-const ISSUED_MAX = 32;
-const FIELD_RESUME_MAX = 32;
-const ISSUED_PAGES = new Map<string, IssuedDelivery>();
 const INDEX_ISSUED_DELIVERY = new WeakMap<InformationIndex, string>();
+const FIELD_EXECUTIONS = new WeakMap<FieldEngineState, string>();
+const REQUEST_EXECUTIONS = new WeakMap<ConditionalFieldRecallRequest, string>();
 type RetainedField = Readonly<{
   state: FieldEngineState;
   token_digest: string;
   issued: Continuation;
   purpose: "membership" | "payload_only";
 }>;
-const FIELD_RESUME = new Map<string, RetainedField>();
 
 export type IssuedDelivery = Readonly<{
   readonly query_key: string;
@@ -295,13 +294,15 @@ function revisionKeyRetentionBytes(prior: EmittedRevisions, keys: Iterable<strin
 
 export function rememberIssuedDelivery(input: Readonly<{
   readonly query_key: string;
+  readonly workspace?: string;
+  readonly deadline?: number;
   readonly request_digest: string;
   readonly index: InformationIndex;
   readonly request?: Continuation | null;
   readonly surfaces?: IssuedDelivery["surfaces"];
 }>): string {
   const delivery_id = preparedDeliveryId(input.request_digest, input.index);
-  ISSUED_PAGES.set(input.request_digest, {
+  const issued: IssuedDelivery = {
     query_key: input.query_key,
     request_digest: input.request_digest,
     delivery_id,
@@ -309,13 +310,12 @@ export function rememberIssuedDelivery(input: Readonly<{
     index: input.index,
     surfaces: input.surfaces,
     ...(input.request == null ? {} : { request: input.request })
-  });
-  while (ISSUED_PAGES.size > ISSUED_MAX) {
-    const oldest = ISSUED_PAGES.keys().next().value;
-    if (oldest === undefined) break;
-    ISSUED_PAGES.delete(oldest);
-  }
-  bindIssuedDeliveryId(input.index, delivery_id);
+  };
+  recallExecutionRetention.set(`page:${input.request_digest}`, { execution: input.query_key,
+    deadline: input.deadline,
+    workspace: input.workspace ?? recallExecutionRetention.workspaceFor(input.query_key), bytes: recallRetentionBytes(issued),
+    handles: [delivery_id, ...(input.request == null ? [] : [input.request.continuation_id]),
+      ...(input.index.continuation === null ? [] : [input.index.continuation.continuation_id])], value: issued });
   return delivery_id;
 }
 
@@ -334,14 +334,14 @@ export function issuedDeliveryIdOf(index: InformationIndex): string | undefined 
 }
 
 export function replayIssuedDelivery(requestDigest: string): IssuedDelivery | undefined {
-  return ISSUED_PAGES.get(requestDigest);
+  return recallExecutionRetention.get<IssuedDelivery>(`page:${requestDigest}`);
 }
 
 export function deliveredPayloadEntry(queryKey: string, target: RecallTargetRef): Readonly<{
   readonly index: InformationIndex;
   readonly entry: IndexEntry;
 }> | undefined {
-  for (const issued of [...ISSUED_PAGES.values()].reverse()) {
+  for (const issued of [...recallExecutionRetention.values<IssuedDelivery>("page:")].reverse()) {
     if (issued.query_key !== queryKey) continue;
     const entry = issued.index.entries.find((candidate) => candidate.target.kind === "source_evidence"
       && target.kind === "source_evidence" && sameSourceEvidenceRoot(candidate.target, target));
@@ -363,18 +363,17 @@ export function assertMembershipContinuation(continuation: Continuation | null |
 
 export function evictIssuedDeliveries(queryKey: string): readonly string[] {
   const removed: string[] = [];
-  for (const [digest, issued] of ISSUED_PAGES) {
+  for (const issued of recallExecutionRetention.values<IssuedDelivery>("page:")) {
     if (issued.query_key === queryKey) {
-      ISSUED_PAGES.delete(digest);
-      removed.push(digest);
+      recallExecutionRetention.delete(`page:${issued.request_digest}`);
+      removed.push(issued.request_digest);
     }
   }
   return removed;
 }
 
 export function invalidateFieldDelivery(queryKey: string): void {
-  evictIssuedDeliveries(queryKey);
-  FIELD_RESUME.delete(queryKey);
+  recallExecutionRetention.invalidate(queryKey);
 }
 
 export function issuedDeliveryRevoked(
@@ -390,16 +389,20 @@ export function replayIssuedIndex(issued: IssuedDelivery): InformationIndex {
   return replayed;
 }
 
-export function recallDeliveryIdentity(input: ConditionalFieldRecallRequest, interpretation: FieldEngineState["interpretation"]) {
-  const query_key = fieldResumeKey(interpretation.query_id, interpretation.snapshot_id,
-    interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock }));
-  const base = input.continuation == null ? `${query_key}:root:${randomUUID()}` : input.continuation.continuation_id;
+export function recallDeliveryIdentity(input: ConditionalFieldRecallRequest) {
+  // Semantic identity stays deterministic; each independent request gets its own
+  // mutable execution. Only owner-issued capabilities can select an existing one.
+  const query_key = input.continuation == null
+    ? REQUEST_EXECUTIONS.get(input) ?? randomUUID()
+    : recallExecutionRetention.executionFor(input.continuation.continuation_id) ?? randomUUID();
+  REQUEST_EXECUTIONS.set(input, query_key);
+  const base = input.continuation == null ? `${query_key}:root` : input.continuation.continuation_id;
   return { query_key, request_digest: input.payload_continuation === undefined ? base
     : createHash("sha256").update(stableCanonicalStringify([base, input.payload_continuation])).digest("hex") };
 }
 
-export function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {
-  return `${queryId}\0${snapshotId}\0${interpretationId}\0v1`;
+export function fieldExecutionId(state: FieldEngineState): string | undefined {
+  return FIELD_EXECUTIONS.get(state);
 }
 
 export function continuationDigest(continuation: Continuation): string {
@@ -411,41 +414,38 @@ export function continuationDigest(continuation: Continuation): string {
 }
 
 export function rememberField(state: FieldEngineState, continuation: Continuation | null,
-  purpose: RetainedField["purpose"] = "membership"): void {
-  const key = fieldResumeKey(
-    state.query_id,
-    state.snapshot_id,
-    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
-  );
-  FIELD_RESUME.delete(key);
-  if (continuation === null) return;
-  FIELD_RESUME.set(key, {
+  purpose: RetainedField["purpose"] = "membership", execution = FIELD_EXECUTIONS.get(state) ?? randomUUID(),
+  workspace = "", deadline?: number): void {
+  const key = `field:${execution}`;
+  FIELD_EXECUTIONS.set(state, execution);
+  if (continuation === null) { recallExecutionRetention.delete(key); return; }
+  const retained: RetainedField = {
     state,
     token_digest: continuationDigest(continuation),
     issued: continuation,
     purpose
-  });
-  while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
-    const oldest = FIELD_RESUME.keys().next().value;
-    if (oldest === undefined) break;
-    FIELD_RESUME.delete(oldest);
-  }
+  };
+  recallExecutionRetention.set(key, { execution, workspace, deadline, bytes: recallRetentionBytes(retained),
+    handles: [continuation.continuation_id], value: retained });
 }
 
 export function prepareFieldCommit(
   state: FieldEngineState,
   continuation: Continuation | null,
-  index: InformationIndex
+  index: InformationIndex,
+  execution: string,
+  workspace: string,
+  deadline: number
 ): () => void {
-  const key = fieldResumeKey(state.query_id, state.snapshot_id,
-    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock }));
-  const expected = FIELD_RESUME.get(key);
+  const key = `field:${execution}`;
+  const expected = recallExecutionRetention.get<RetainedField>(key);
+  FIELD_EXECUTIONS.set(state, execution);
   let committed = false;
   return () => {
     if (committed) return;
-    if (FIELD_RESUME.get(key) !== expected) throw new Error("stale prepared Recall delivery");
+    if (recallExecutionRetention.get(key) !== expected) throw new Error("stale prepared Recall delivery");
     rememberField(state, continuation, index.continuation !== null && index.completeness.payload === "resource_rejected"
-      ? "payload_only" : "membership");
+      ? "payload_only" : "membership", execution, workspace, deadline);
     committed = true;
   };
 }
@@ -458,11 +458,7 @@ export function issuedContinuationFor(
 }
 
 export function issuedContinuationForState(state: FieldEngineState): Continuation | undefined {
-  return FIELD_RESUME.get(fieldResumeKey(
-    state.query_id,
-    state.snapshot_id,
-    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
-  ))?.issued;
+  return recallExecutionRetention.get<RetainedField>(`field:${FIELD_EXECUTIONS.get(state)}`)?.issued;
 }
 
 export function restoreField(
@@ -503,13 +499,14 @@ function lookupResume(
   interpretationClock?: string,
   interpretationId?: string
 ): RetainedField | undefined {
-  return FIELD_RESUME.get(fieldResumeKey(
-    continuation.query_id,
-    continuation.snapshot_id,
-    continuation.interpretation_id
-      ?? interpretationId
-      ?? interpretationIdentity({ interpretation_clock: interpretationClock })
-  ));
+  const execution = recallExecutionRetention.executionFor(continuation.continuation_id);
+  if (execution === undefined) return undefined;
+  const retained = recallExecutionRetention.get<RetainedField>(`field:${execution}`);
+  if (retained === undefined || retained.state.query_id !== continuation.query_id
+    || retained.state.snapshot_id !== continuation.snapshot_id
+    || (continuation.interpretation_id ?? interpretationId
+      ?? interpretationIdentity({ interpretation_clock: interpretationClock })) !== retained.issued.interpretation_id) return undefined;
+  return retained;
 }
 
 function updateKindFor(entry: IndexEntry, previousRevision: string | undefined): ProductUpdateKind {

@@ -1,5 +1,8 @@
 import { CoreError } from "../../shared/errors.js";
-import { preferAssociatedSlot, type StatementAssociation } from "../../source-index/statement-association.js";
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
+import { preferAssociatedSlot, refuseStatementAssociation, statementAssociationRefusalReason,
+  type StatementAssociation } from "../../source-index/statement-association.js";
 
 // One demand, four views/operators. This is not a caller-configurable strategy registry.
 const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"] as const;
@@ -240,21 +243,57 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   memory: NativeMemoryLane;
   question_time?: Readonly<{ capture: NativeTimeCapture; root_order: readonly string[] }>;
   association?: StatementAssociation;
-}) {
+}, meter?: SourceSemanticResourceLedger, mandatoryReserve: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 }) {
   const ordered = orderTimedFieldAccess(input);
   if (input.association === undefined) return ordered;
-  validateAssociation(input.association);
+  requireFact(meter !== undefined, "statement association requires a navigation resource ledger");
+  const optional = new SourceSemanticResourceLedger({
+    work_units: Math.max(0, meter!.work - mandatoryReserve.work_units),
+    memory_bytes: Math.max(0, meter!.bytes - mandatoryReserve.memory_bytes) });
   // Association may swap source slot 5 with a later source root; memory keeps its positions.
   const memoryIds = new Set(ordered.trace.filter(row => row.lane === "memory-lexical").map(row => row.record_id));
   const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
     : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
-  const sources = preferAssociatedSlot(current.filter(id => !memoryIds.has(id)), input.association);
+  const originalSources = current.filter(id => !memoryIds.has(id));
+  let sources: readonly string[] = originalSources;
+  if (input.association.refusal.phase === null) {
+    try {
+      optional.charge(input.association.roots.length * input.association.roots.length, 0, "statement key association validation");
+      validateAssociation(input.association);
+      sources = preferAssociatedSlot(originalSources, input.association, optional);
+    } catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      if (input.association.refusal.swap_selected) throw new SourceSemanticResourceExhausted(error.phase,
+        error.constraints === undefined ? undefined : {
+          ...(error.constraints.work === undefined ? {} : { work: {
+            required: error.constraints.work.required + mandatoryReserve.work_units,
+            available: meter!.work - optional.spentWork } }),
+          ...(error.constraints.memory === undefined ? {} : { memory: {
+            required: error.constraints.memory.required + mandatoryReserve.memory_bytes,
+            available: meter!.bytes - optional.spentBytes } })
+        });
+      refuseStatementAssociation(input.association, error.phase);
+    } finally {
+      // The child limits optional work; it does not forgive work already performed on refusal.
+      meter!.charge(optional.spentWork, optional.spentBytes, "statement key association executed");
+    }
+  }
   let cursor = 0;
   const recordIds = current.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
-  return { ...ordered, preferred_record_ids: recordIds, ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
+  const changed = originalSources[4] !== sources[4];
+  const from = changed ? current.indexOf(sources[4]!) + 1 : null;
+  const to = changed ? current.indexOf(originalSources[4]!) + 1 : null;
+  const refusal = statementAssociationRefusalReason(input.association);
+  const statement_association = { status: refusal !== null ? "resource_refused" as const
+    : changed ? "swapped" as const : "unchanged" as const,
+    source_slot: 5 as const, replacement_global_rank: from, replaced_global_rank: to,
+    mixed_at_5_changed: to !== null && to <= 5 && from !== null && from > 5,
+    reason: refusal ?? (changed ? "question_and_link_dominance" : "no_dominating_source") };
+  return { ...ordered, statement_association, preferred_record_ids: recordIds,
+    ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function validateAssociation({ roots, question, link }: StatementAssociation): void {
+function validateAssociation({ roots, question, link, keys }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(question) && Array.isArray(link)
     && new Set(roots).size === roots.length, "association roots must be distinct identities");
   requireFact(question.length === roots.length && link.length === roots.length,
@@ -265,9 +304,11 @@ function validateAssociation({ roots, question, link }: StatementAssociation): v
     requireFact(Object.hasOwn(question, i) && Number.isFinite(question[i]) && Object.hasOwn(link, i)
       && Array.isArray(row) && row.length === i,
     "association must be one finite question value and one triangular link row per root");
-    for (let j = 0; j < i; j++) requireFact(Object.hasOwn(row, j) && Number.isFinite(row[j]),
+    for (let j = 0; j < i; j++) requireFact(Object.hasOwn(row, j) && (row[j] === null || Number.isFinite(row[j])),
       "association must be one finite question value and one triangular link row per root");
   }
+  requireFact(keys.length === roots.length && keys.every(row => Array.isArray(row)
+    && row.every(key => Array.isArray(key.embedding) && Number.isFinite(key.norm))), "association keys must be retained vector data");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

@@ -142,7 +142,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
   row("bounded-observations-retain-unfinished", "bounded observations/joins/continuation retain unfinished regions",
     "grounding work advances through observation growth; zero/one-work and exhausted-memory requests terminate honestly",
     "memory eviction or cursor reset erases required work",
-    "FIELD_RESUME + observer cursors; scale-delivery.test.ts 48-match tight work and 1,024-match memory pressure", "direct runtime plus separate small worker/RPC resume fixtures", "real-producer"),
+    "Execution retention + observer cursors; scale-delivery.test.ts 48-match tight work and 1,024-match memory pressure", "direct runtime plus separate small worker/RPC resume fixtures", "real-producer"),
   row("affordable-alternative-explanations", "affordable complete alternative explanations remain available",
     "cheap complete witness retained when scalar winner differs",
     "winning scalar deletes a needed weaker/cheaper witness",

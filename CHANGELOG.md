@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 34.1.0, engine gateway 3.0.0
+## Unreleased — protocol 35.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,36 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 35.0.0 separates ordinary Recall execution ownership from semantic
+query identity and bounds retained execution and delivery state. This is a
+major delivery-contract change under invariant §25: old process-local
+continuation handles must be discarded and callers must start a fresh query.
+Capacity refusal does not overwrite another active execution. Host-session
+capture also adds optional `pending_round_count`, distinguishing accepted
+rounds awaiting publication from completed rounds; older responses omit it.
+
+Host-session recovery reads at most 16 pending rounds per pass and preserves
+unfinished publication and audit obligations across restart. Migration 044
+records source-erasure closure completion per barrier, with indexed pending
+work and exact attributable dirty triggers. Startup repairs bounded batches
+before becoming ready; clean receipts and unrelated rebuilt generations are
+preserved. Older binaries must not open the migrated database. A rollback must
+retain erase receipts and completed scrubs; restoring erased plaintext from an
+older backup is not a rollback procedure.
+
+Provider request outcomes and usage survive owned-transport cleanup failures.
+Cleanup has a separate observable, bounded retirement result; cleanup and retry
+observer faults cannot replace the original request failure or authorize a
+duplicate successful dispatch.
+
+Current acquisition and message visibility measurements separate positive
+cutoff witnesses from collection completeness. Historical v1 scoring remains
+available and current outputs identify the semantic change separately from
+retrieval gains. Statement association retains its limited source-slot-five
+heuristic, computes only demanded pairs with explicit retained vectors and
+resource accounting, and reports the actual mixed-slot impact. Similarity
+dominance is not a guarantee of complementary evidence or answer sufficiency.
 
 Internal repair removes unused exports from the private workspace packages:
 `awaitCjkSegmentationWarmup` stays behind the nonblocking startup owner, while

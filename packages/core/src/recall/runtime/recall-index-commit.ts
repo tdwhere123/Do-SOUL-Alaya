@@ -13,7 +13,6 @@ import {
   bindIssuedDeliveryId,
   type EmittedRevisions,
   issuedDeliveryIdOf,
-  evictIssuedDeliveries,
   replayIssuedDelivery,
   rememberIssuedDelivery,
   retainCommittedRevisions,
@@ -24,11 +23,15 @@ import { BoundedIndexPayload } from "./index-payload.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
+import { recallExecutionRetention, recallRetentionBytes } from "./recall-execution-retention.js";
 
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
 const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const PENDING_ISSUE = new WeakMap<InformationIndex, PendingIssuedDelivery>();
 const PREPARED_FIELD = new WeakMap<InformationIndex, () => void>();
+const PREPARED_BYTES = new WeakMap<InformationIndex, number>();
+const PREPARED_WORKSPACE = new WeakMap<InformationIndex, string>();
+const PREPARED_DEADLINE = new WeakMap<InformationIndex, number>();
 const VALIDATE_SOURCE = new WeakMap<InformationIndex, () => void>();
 
 export function issueRetainedIndex(
@@ -41,7 +44,7 @@ export function issueRetainedIndex(
 ): string | undefined {
   VALIDATE_SOURCE.get(retained)?.();
   const alreadyIssued = issuedDeliveryIdOf(retained);
-  if (alreadyIssued !== undefined) return alreadyIssued;
+  if (alreadyIssued !== undefined) { releasePreparation(retained); return alreadyIssued; }
   const pending = pendingIssuedDeliveryOf(retained);
   if (pending === undefined) return issuedDeliveryIdOf(issued?.index ?? retained);
   const index = InformationIndexSchema.parse(issued?.index ?? retained);
@@ -50,25 +53,55 @@ export function issueRetainedIndex(
     || JSON.stringify(members(index)) !== JSON.stringify(members(retained))) {
     throw new Error("Recall envelope changed prepared membership");
   }
-  commitIndexField(retained);
-  if (pending.request == null) evictIssuedDeliveries(pending.query_key);
-  const deliveryId = commitIssuedDelivery({
-    ...pending,
-    index,
-    previews: issued?.previews ?? captureIndexPreviews(retained, {}, ""),
-    metadata: issued?.metadata ?? captureIndexSourceMetadata(retained)
+  // Admit the page before changing the field CAS. Roll it back on a stale or
+  // over-cap field so failed acknowledgements never advance committed progress.
+  const deliveryId = recallExecutionRetention.transaction(() => {
+    const id = commitIssuedDelivery({
+      ...pending,
+      workspace: PREPARED_WORKSPACE.get(retained),
+      deadline: PREPARED_DEADLINE.get(retained),
+      index,
+      previews: issued?.previews ?? captureIndexPreviews(retained, {}, ""),
+      metadata: issued?.metadata ?? captureIndexSourceMetadata(retained)
+    });
+    commitIndexField(retained);
+    return id;
   });
   bindIssuedDeliveryId(retained, deliveryId);
+  bindIssuedDeliveryId(index, deliveryId);
+  releasePreparation(retained);
   return deliveryId;
 }
 
-export function stageIndexSourceValidation(index: InformationIndex, validate: () => void): void {
-  VALIDATE_SOURCE.set(index, validate);
+function releasePreparation(retained: InformationIndex): void {
+  // Settled retry records retain the result, never the source-reader or field
+  // preparation closures. WeakMap values otherwise remain live through index.
+  PREPARED_FIELD.delete(retained);
+  VALIDATE_SOURCE.delete(retained);
+  PENDING_ISSUE.delete(retained);
+  PREPARED_BYTES.delete(retained);
+  PREPARED_WORKSPACE.delete(retained);
+  PREPARED_DEADLINE.delete(retained);
 }
 
-export function stageIndexField(index: InformationIndex, commit: () => void): void {
-  PREPARED_FIELD.set(index, commit);
+export function stageIndexSourceValidation(index: InformationIndex, validate: () => void, retainedInputs: unknown): void {
+  VALIDATE_SOURCE.set(index, validate);
+  PREPARED_BYTES.set(index, recallRetentionBytes(retainedInputs));
 }
+
+export function stageIndexField(index: InformationIndex, commit: () => void, state: FieldEngineState,
+  request: ConditionalFieldRecallRequest, deadline: number): void {
+  PREPARED_FIELD.set(index, () => {
+    if (Date.now() >= deadline) throw new CoreError("CONFLICT", "Recall preparation expired");
+    commit();
+  });
+  PREPARED_BYTES.set(index, Math.max(PREPARED_BYTES.get(index) ?? 0, recallRetentionBytes({ state, request })));
+  PREPARED_WORKSPACE.set(index, request.workspace_id);
+  PREPARED_DEADLINE.set(index, deadline);
+}
+
+export function preparedFieldRetentionBytes(index: InformationIndex): number { return PREPARED_BYTES.get(index) ?? 0; }
+export function preparedFieldDeadline(index: InformationIndex): number | undefined { return PREPARED_DEADLINE.get(index); }
 
 export function commitIndexField(index: InformationIndex): void {
   PREPARED_FIELD.get(index)?.();
@@ -134,6 +167,8 @@ export function stageIssuedDelivery(index: InformationIndex, pending: PendingIss
 
 export function commitIssuedDelivery(input: Readonly<{
   readonly query_key: string;
+  readonly workspace?: string;
+  readonly deadline?: number;
   readonly request_digest: string;
   readonly index: InformationIndex;
   readonly request?: Continuation | null;
@@ -143,6 +178,8 @@ export function commitIssuedDelivery(input: Readonly<{
   // Selected rows must already have survived encode/preview; retain only stages this.
   const deliveryId = rememberIssuedDelivery({
     query_key: input.query_key,
+    workspace: input.workspace,
+    deadline: input.deadline,
     request_digest: input.request_digest,
     index: input.index,
     request: input.request,

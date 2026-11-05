@@ -60,7 +60,7 @@ describe("usage feedback and recall capture nothing", () => {
 
     expect(unwrapOk(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,
       context: defaultContext() }))).toEqual({ container_key: hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256),
-      admitted_message_count: 2, replayed_message_count: 0, pending_message_count: 0, admitted_round_count: 1 });
+      admitted_message_count: 2, replayed_message_count: 0, pending_message_count: 0, admitted_round_count: 1, pending_round_count: 0 });
     expect(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,
       context: noRunContext() })).toMatchObject({ ok: false });
     expect(unwrapOk(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,

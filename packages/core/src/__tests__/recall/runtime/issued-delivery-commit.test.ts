@@ -168,7 +168,7 @@ describe("issued delivery commit", () => {
     expect(source?.object_id).toBeUndefined();
   });
 
-  it("stages a continuation page without writing ISSUED_PAGES until encode succeeds", async () => {
+  it("stages a continuation page without retaining an issued delivery until encode succeeds", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     for (const [index, id] of [MEM.r, MEM.c, MEM.h].entries()) {
       await slice.writeMemory(id, `needle ${index}`, MemoryDimension.FACT);

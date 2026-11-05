@@ -157,7 +157,19 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     ...(interpretation.interpretation_proposal?.question_time === undefined ? {}
       : { questionTime: interpretation.interpretation_proposal.question_time }),
     budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
-  const captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
+  let captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
+  // The optional vectors must not prevent otherwise fundable base nominations from entering
+  // the field. Acquisition still reports all work/allocation already spent on the discarded data.
+  if (captured?.association !== undefined && captured.charged_by_caller
+    && (captured.retained_bytes ?? 0) > initial.remaining_memory_bytes) {
+    const optionalBytes = captured.association_retained_bytes;
+    if (optionalBytes !== undefined) {
+      const { association: _discarded, ...base } = captured;
+      captured = { ...base, retained_bytes: (base.retained_bytes ?? 0) - optionalBytes, association_retained_bytes: 0,
+        result: base.result === null ? null : { ...base.result, resource_refusals: [...base.result.resource_refusals,
+          { stage: "admission", phase: "field retained statement association" }] } };
+    }
+  }
   const resources = captured?.result?.resources;
   const fresh = captured?.acquisition_resources ?? (captured?.charged_by_caller ? undefined : resources);
   input.cost?.add("acquire", { budget_work: fresh?.work ?? 0, native_bytes: fresh?.native_bytes ?? 0 });

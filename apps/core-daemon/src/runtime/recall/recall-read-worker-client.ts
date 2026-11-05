@@ -53,6 +53,8 @@ import {
 } from "../recall-read-worker/memory-client.js";
 import { createDeliverySettlement } from "../recall-read-worker/delivery-settlement.js";
 import { RecallReadWorkerLifecycle, type SuccessConsumption } from "./recall-read-worker-lifecycle.js";
+import { RecallDeliveryRoutes } from "./recall-delivery-routes.js";
+import { semanticLeaseExpiry, sourceSemanticLifetimeNow } from "../recall-read-worker/source-semantic-leases.js";
 
 export interface RecallReadWorkerClient {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
@@ -111,7 +113,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly lifecycle: RecallReadWorkerLifecycle;
   private readonly pathReadBind: RecallPathReadBind | undefined;
   private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
-  private readonly deliveryOwners = new Map<string, Worker>();
+  private readonly deliveryOwners = new RecallDeliveryRoutes();
   private readonly prepareSourceQuery?: PrepareSourceQuery;
   private readyPromise: Promise<void> | null = null;
   public readonly readSnapshot: RecallReadSnapshotPort;
@@ -252,7 +254,6 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
           for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
             if (key !== undefined) this.deliveryOwners.set(key, worker);
           }
-          while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
           return parsed;
         }, preferred, 0));
     }
@@ -278,6 +279,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       ...input,
       workerCount: normalizeWorkerCount(input.workerCount),
       requestTimeoutMs: normalizeRequestTimeoutMs(input.requestTimeoutMs),
+      onRetentionRemoved: (worker, handles) => {
+        for (const handle of handles) if (this.deliveryOwners.get(handle) === worker) this.deliveryOwners.delete(handle);
+      },
       onUnavailable: (worker) => {
         for (const [handle, owner] of this.deliveryOwners) {
           if (owner === worker) this.deliveryOwners.delete(handle);
@@ -367,17 +371,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
           admitSourceSemanticWorkerResultFamily(native, false);
           const issued = native.kind === "prepare_source" ? native.source_handle
             : native.kind === "prepare_query" ? native.query_handle : undefined;
-          if (issued !== undefined) this.deliveryOwners.set(issued, worker);
-          if (native.kind === "prepare_query" && native.continuation_handle !== undefined) this.deliveryOwners.set(native.continuation_handle, worker);
+          const lifetimeNow = sourceSemanticLifetimeNow(captured);
+          const routeDeadline = Date.now() + Math.max(0,
+            Date.parse(semanticLeaseExpiry(lifetimeNow, captured.expires_at)) - Date.parse(lifetimeNow));
+          if (issued !== undefined) this.deliveryOwners.set(issued, worker, routeDeadline);
+          if (native.kind === "prepare_query" && native.continuation_handle !== undefined) this.deliveryOwners.set(native.continuation_handle, worker, routeDeadline);
           if (native.kind === "recall") {
-            this.deliveryOwners.set(native.delivery_id, worker);
+            this.deliveryOwners.set(native.delivery_id, worker, routeDeadline);
             if (native.protocol_version === SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION
-              && native.preparation_id !== undefined) this.deliveryOwners.set(native.preparation_id, worker);
-            if (native.index.continuation !== null) this.deliveryOwners.set(native.index.continuation.continuation_id, worker);
-          }
-          while (this.deliveryOwners.size > 256) {
-            const id = this.deliveryOwners.keys().next().value!;
-            this.deliveryOwners.delete(id);
+              && native.preparation_id !== undefined) this.deliveryOwners.set(native.preparation_id, worker, routeDeadline);
+            if (native.index.continuation !== null) this.deliveryOwners.set(native.index.continuation.continuation_id, worker, routeDeadline);
           }
           return native;
         }, owner);
@@ -397,7 +400,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   }
 
   public async close(): Promise<void> {
-    await this.lifecycle.close();
+    try { await this.lifecycle.close(); }
+    finally { this.deliveryOwners.clear(); }
   }
 
   private async request<T = unknown>(

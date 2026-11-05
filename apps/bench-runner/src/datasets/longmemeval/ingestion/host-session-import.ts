@@ -1,5 +1,5 @@
 import {
-  HOST_SESSION_LIMITS, HostSessionCaptureRequestSchema, type HostScopedReference, type HostSessionCaptureRequest,
+  AlayaError, HOST_SESSION_LIMITS, HostSessionCaptureRequestSchema, type HostScopedReference, type HostSessionCaptureRequest,
   type HostSessionCaptureResponse
 } from "@do-soul/alaya-protocol";
 import type { HostSessionIssuer } from "../../../../../core-daemon/src/garden/host-session/host-session-capture.js";
@@ -61,9 +61,27 @@ export async function importLongMemEvalQuestion(
 ): Promise<readonly HostSessionCaptureResponse[]> {
   const responses: HostSessionCaptureResponse[] = [];
   for (const session of longMemEvalHostSessionRequests(question)) {
-    for (const request of session.requests) responses.push(await capture(request, issuer));
+    for (const request of session.requests) responses.push(await captureLongMemEvalWindow(() => capture(request, issuer)));
   }
   return responses;
+}
+
+/** Publication consumers finish each accepted window before checkpointing its sources. */
+export async function captureLongMemEvalWindow(capture: () => Promise<HostSessionCaptureResponse>,
+  checkCancellation: () => void = () => undefined): Promise<HostSessionCaptureResponse> {
+  checkCancellation();
+  const first = await capture();
+  let result = first, admitted = first.admitted_round_count;
+  while ((result.pending_round_count ?? 0) > 0) {
+    checkCancellation();
+    const previous = result.pending_round_count!;
+    result = await capture();
+    if ((result.pending_round_count ?? 0) >= previous) {
+      throw new AlayaError("UNAVAILABLE", "host session publication made no recovery progress");
+    }
+    admitted += result.admitted_round_count;
+  }
+  return { ...first, admitted_round_count: admitted, pending_round_count: result.pending_round_count };
 }
 
 /** A message over the capture limit is retained as an honest leading excerpt, never silently dropped. */

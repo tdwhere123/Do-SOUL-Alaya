@@ -30,7 +30,7 @@ import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import {
   bindIssuedDeliveryId,
-  fieldResumeKey,
+  fieldExecutionId,
   issuedDeliveryIdOf,
   prepareFieldCommit,
   preparedDeliveryId,
@@ -44,12 +44,15 @@ import {
   issueRetainedIndex,
   stageIndexSourceValidation,
   stageIndexField,
+  preparedFieldRetentionBytes,
+  preparedFieldDeadline,
   pendingIssuedDeliveryOf
 } from "./recall-index-commit.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { attachIncurredExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { captureRecallData, captureRecallRequest, withRecallEnvironment } from "./captured-recall-request.js";
 import { CoreError } from "../../shared/errors.js";
+import { RECALL_RETENTION_TTL_MS } from "./recall-execution-retention.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
 import { restoredFieldFootprint, retainedFieldLevels, stampRetainedFieldLevel, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
 import type {
@@ -221,6 +224,9 @@ export function runConditionalFieldRecallWithReceipt(
   readonly index: InformationIndex;
   readonly execution_receipt: ConditionalFieldExecutionReceipt;
   readonly delivery_id?: string;
+  readonly execution_id?: string;
+  readonly retained_bytes?: number;
+  readonly retain_until?: number;
   readonly issue?: (issued: Readonly<{
     readonly index: InformationIndex;
     readonly previews: ReadonlyMap<string, string>;
@@ -301,7 +307,8 @@ export function runConditionalFieldRecallWithReceipt(
     cost.captureBudgetWork(capture_budget_work);
     const pending = pendingIssuedDeliveryOf(index);
     const delivery_id = pending === undefined ? issuedDeliveryIdOf(index) : preparedDeliveryId(pending.request_digest, index);
-    return { index, execution_receipt, delivery_id, issue: (issued) => {
+    return { index, execution_receipt, delivery_id, execution_id: pending?.query_key,
+      retained_bytes: preparedFieldRetentionBytes(index), retain_until: preparedFieldDeadline(index), issue: (issued) => {
       try { return issueRetainedIndex(index, issued); }
       catch (error) {
         cost.invalidateBudgetWork();
@@ -355,8 +362,7 @@ function runCompiledConditionalFieldRecall(
     snapshotIdFromPin(input.workspace_id, pin), [...(input.readers.permittedTimelessPolicyIds?.() ?? [])].sort()
   ]);
   if (restored !== undefined && FIELD_SOURCE_PINS.get(restored) !== currentPin) {
-    invalidateFieldDelivery(fieldResumeKey(restored.query_id, restored.snapshot_id,
-      interpretationIdentity({ interpretation_clock: restored.interpretation.interpretation_clock })));
+    invalidateFieldDelivery(fieldExecutionId(restored)!);
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
   if (input.payload_continuation === undefined) assertMembershipContinuation(input.continuation);
@@ -418,20 +424,23 @@ function runCompiledConditionalFieldRecall(
       snapshotIdFromPin(input.workspace_id, latest), [...(input.readers.permittedTimelessPolicyIds?.() ?? [])].sort()
     ]);
     if (latestPin !== currentPin) {
-      invalidateFieldDelivery(fieldResumeKey(retained.query_id, retained.snapshot_id,
-        interpretationIdentity({ interpretation_clock: retained.interpretation.interpretation_clock })));
+      invalidateFieldDelivery(progressDelivery.query_key);
       // A typed refusal keeps its classification and cause so the caller's incurred
       // receipt (already spent on this request) survives the boundary.
       throw new CoreError("CONFLICT", "Recall source generation changed before delivery", {
         details: { outcome: "stale_generation", resource: "source_generation" }
       });
     }
-  });
+  }, { retained, restored, input, progressDelivery, cost });
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
   // Keep resume under the request token so a last page (response continuation
   // null) can still replay the same issued delivery_id.
   if (pendingIssuedDeliveryOf(index) !== undefined) {
-    stageIndexField(index, prepareFieldCommit(retained, index.continuation ?? input.continuation ?? null, index));
+    const leaseMs = Math.max(0, Math.min(RECALL_RETENTION_TTL_MS,
+      Date.parse(input.expires_at) - Date.parse(input.lifetime_now ?? new Date().toISOString())));
+    const deadline = Date.now() + leaseMs;
+    stageIndexField(index, prepareFieldCommit(retained, index.continuation ?? input.continuation ?? null,
+      index, progressDelivery.query_key, input.workspace_id, deadline), retained, input, deadline);
   }
   cost.recordRetainedLevels(retainedFieldLevels(retained, input.budget.memory_bytes));
   return index;
