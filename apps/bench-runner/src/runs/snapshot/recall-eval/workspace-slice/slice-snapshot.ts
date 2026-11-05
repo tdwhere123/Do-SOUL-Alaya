@@ -9,8 +9,8 @@ import { hashRegularFileNoFollow } from "../../bound-file.js";
 
 export const WORKSPACE_SLICE_SQLITE_KIND = "alaya.bench.workspace_slice_sqlite";
 export const WORKSPACE_SLICE_EXPLODE_RECIPE_ID = "alaya.bench.workspace-slice-explode";
-// Tool execution audits follow either their principal or worker owner into the slice.
-export const WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION = "v6";
+// Preserve workspace recovery progress while resetting transaction-local suppression.
+export const WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION = "v7";
 export const WORKSPACE_SLICE_SNAPSHOT_SIDECAR_FILENAME = "workspace-slice-snapshot.json";
 
 export type WorkspaceSliceSnapshotReceipt = Readonly<{

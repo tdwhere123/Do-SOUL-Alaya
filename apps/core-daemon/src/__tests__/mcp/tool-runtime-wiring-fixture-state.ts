@@ -46,8 +46,9 @@ const hoisted = vi.hoisted(() => {
     // fixture must expose a prepare() that returns inert statement handles.
     // SqliteEnrichPendingRepo also wraps its claim batch in a
     // connection.transaction() at construction, so transaction() must return a
-    // callable that runs the supplied function with its args (matching
-    // better-sqlite3's transaction wrapper contract).
+    // callable that runs the supplied function with its args and exposes the
+    // transaction modes used by storage (including source-erase startup repair).
+    // This wiring fake does not model SQLite locking or rollback.
     connection: {
       exec: vi.fn(),
       prepare: vi.fn((sql: string) => ({
@@ -61,7 +62,8 @@ const hoisted = vi.hoisted(() => {
         all: vi.fn(() => [])
       })),
       transaction: vi.fn(<Args extends readonly unknown[], Result>(fn: (...args: Args) => Result) => {
-        return (...args: Args): Result => fn(...args);
+        const run = (...args: Args): Result => fn(...args);
+        return Object.assign(run, { deferred: run, immediate: run, exclusive: run });
       })
     },
     close: vi.fn(),

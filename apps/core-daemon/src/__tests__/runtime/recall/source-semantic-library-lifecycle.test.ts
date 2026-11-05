@@ -226,17 +226,16 @@ it("arbitrates cancellation during an in-flight compiled acknowledgment and deni
       expect((error?.details?.work as { logical_work: number }).logical_work).toBeGreaterThan(0);
       expect((error?.details?.worker as { native_visits: number }).native_visits).toBeGreaterThan(0);
       expect(error?.details?.execution_receipt).toBeDefined();
-      // The staged successor did not become an issued continuation at Core's owner.
-      const unissued = await resume!();
-      if (unissued.kind !== "recall") throw new Error("recall expected");
-      expect(unissued.index.completeness.logical_index).toBe("invalidated");
-      expect(unissued.index.entries).toEqual([]);
+      // Cancellation discards the preparation and revokes its unissued successor's
+      // parent affinity, so neither continuation nor acknowledgment reaches a worker.
+      await expect(resume!()).rejects.toThrow("Recall delivery worker unavailable");
       await expect(port.acknowledge!(preparationId!, recalled!.index, new Map(Object.entries(recalled!.previews))))
-        .rejects.toThrow(/expired or discarded/u);
+        .rejects.toThrow("Recall delivery worker unavailable");
       await port.discard!(preparationId!);
       await port.discard!(preparationId!);
       await expect(port.acknowledge!(preparationId!, recalled!.index, new Map(Object.entries(recalled!.previews))))
         .rejects.toThrow(/worker unavailable/u);
+      expect(posted).toBe(1);
     } finally { await client.close(); }
   }, indexed);
 }, 60_000);

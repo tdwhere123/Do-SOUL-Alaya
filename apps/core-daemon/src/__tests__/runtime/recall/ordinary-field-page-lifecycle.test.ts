@@ -56,15 +56,25 @@ it("delivers a generation-pinned membership page and replays its issued retry id
     expect(prepared.vector.status).toBe("available");
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(1);
 
-    const retry = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
-    const deliveryId = retry.issue!({ index: retry.index,
-      previews: captureIndexPreviews(retry.index, request.readers, WS), metadata: {} });
-    expect(deliveryId).toBe(retry.delivery_id);
-    expect(retry.index.entries).toEqual(first.index.entries);
-    // The superseded prepared capture cannot commit over its successor.
-    expect(() => first.issue!({ index: first.index,
-      previews: captureIndexPreviews(first.index, request.readers, WS), metadata: {} }))
-      .toThrow("stale prepared Recall delivery");
+    const independent = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
+    const issue = (page: typeof first) => page.issue!({ index: page.index,
+      previews: captureIndexPreviews(page.index, request.readers, WS), metadata: {} });
+    expect(issue(independent)).toBe(independent.delivery_id);
+    expect(independent.index.entries).toEqual(first.index.entries);
+    expect(independent.execution_id).not.toBe(first.execution_id);
+    expect(issue(first)).toBe(first.delivery_id);
+    expect(first.index.continuation).not.toBeNull();
+
+    // Only preparations for the same execution and request token compete.
+    const next = { ...request, continuation: first.index.continuation };
+    const winner = runConditionalFieldRecallWithReceipt(next, { issue: "defer" });
+    const loser = runConditionalFieldRecallWithReceipt(next, { issue: "defer" });
+    const deliveryId = issue(winner);
+    expect(() => issue(loser)).toThrow("stale prepared Recall delivery");
+    const retry = runConditionalFieldRecallWithReceipt(next, { issue: "defer" });
+    expect(retry.index.page_purpose).toBe("retry");
+    expect(retry.index.entries).toEqual(winner.index.entries);
+    expect(issue(retry)).toBe(deliveryId);
   });
 });
 

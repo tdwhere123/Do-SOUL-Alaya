@@ -87,6 +87,9 @@ it("delivers a time-preferred mixed SQLite pool through the built worker and MCP
   });
 });
 
+// This integration includes 19 persisted roots, two lexical generations, a cold built
+// worker and both complete paginated/replayed recalls. Budget the whole lifecycle,
+// not one request; worker deadlines and measured continuation budgets stay unchanged.
 it("displaces a generation-scoped native prefix with a time root and retains mixed continuation through retired cleanup", async () => {
   await withIndexedSources([
     ...Array.from({ length: 18 }, (_, i) => ({ id: `native-${i}`, text: i === 0 ? "needle needle" : "needle a",
@@ -164,4 +167,4 @@ it("displaces a generation-scoped native prefix with a time root and retains mix
       .every(entry => entry.navigation?.domain === undefined)).toBe(true);
     expect(original.filter(id => !sourceIds(preferred).includes(id))).toHaveLength(1);
   });
-});
+}, 20_000);

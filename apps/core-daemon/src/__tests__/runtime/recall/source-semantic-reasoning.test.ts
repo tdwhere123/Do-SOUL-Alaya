@@ -632,10 +632,13 @@ it("invalidates expired handles and does not recover them after worker loss", as
     const prepared = await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET },
       { expires_at: CLOCK });
     if (prepared.kind !== "prepare_source") throw new Error("expected source handle");
-    await expect(call(execute, {
-      kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET,
-      source_handle: prepared.source_handle
-    })).rejects.toThrow(/expired/u);
+    // Expiry removes parent affinity before the stale handle can reach a worker.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(call(execute, {
+        kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET,
+        source_handle: prepared.source_handle
+      })).rejects.toThrow("Recall delivery worker unavailable");
+    }
     const querySemantics = queryOf();
     const oneshot = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,

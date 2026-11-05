@@ -297,10 +297,24 @@ try {
     const ordered = balanced.evaluation.rows.find(r => r.ordinal === row.ordinal && r.arm === 'window-prefix');
     assert.equal(row.byte_visibility.all_at_budget.status, i < 3 ? 'hit' : i < 6 ? 'miss' : 'unknown');
     assert.equal(ordered.byte_visibility.all_at_budget.status, i < 3 ? 'miss' : i < 6 ? 'hit' : 'unknown');
-    assert.equal(ordered.visibility.all_at_10.status, 'unknown');
+    // A visible gold message survives an incomplete cutoff, but an absent one
+    // cannot become a miss until the collection closes. Historical v1 stays frozen.
+    assert.equal(ordered.visibility.all_at_10.status, i >= 3 && i < 6 ? 'hit' : 'unknown');
+    assert.equal(ordered.visibility.collection.at_10.status, 'incomplete');
+    assert.equal(ordered.historical_visibility.all_at_10.status, 'unknown');
+    assert.equal(row.visibility.collection.at_10.status, 'complete');
   }
   assert.deepEqual(balanced.evaluation.summary[1].metrics.all_at_10, { hit: 3, miss: 3, unknown: 2 });
-  assert.deepEqual(balanced.evaluation.summary[1].paired.all_at_10, { gains: 0, losses: 0, unknown_pairs: 8 });
+  assert.deepEqual(balanced.evaluation.summary[1].paired.all_at_10, { gains: 0, losses: 3, unknown_pairs: 5 });
+  assert.equal(balanced.evaluation.contract, 'conditional-navigation-evaluation.v3');
+  assert.deepEqual(balanced.evaluation.summary[0].metrics.all_at_10, { hit: 3, miss: 0, unknown: 5 });
+  for (const [i, summary] of balanced.evaluation.summary.entries()) {
+    assert.equal(summary.contract, 'consumer-message-visibility-v2');
+    assert.equal(summary.historical_contract, 'consumer-message-visibility-v1');
+    assert.equal(summary.measurement_attribution, 'cutoff_semantics_only');
+    assert.deepEqual(summary.measurement_changes, { any_at_5: 0, any_at_10: i === 0 ? 3 : 0,
+      all_at_5: 0, all_at_10: i === 0 ? 3 : 0 });
+  }
   for (const name of ['balanced-unknown', 'balanced-failed-read', 'balanced-failed-publication']) {
     const summary = get(name).evaluation.summary[1]; assert.equal(summary.status, 'unavailable'); assert.equal(summary.metrics, null); assert.equal(summary.paired, null);
   }
