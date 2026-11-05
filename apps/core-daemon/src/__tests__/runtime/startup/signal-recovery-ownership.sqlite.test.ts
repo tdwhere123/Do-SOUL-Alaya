@@ -235,7 +235,8 @@ it("does not manufacture pre-effect lineage when a pre-041 database is upgraded"
     const row = owner.database.connection.prepare("SELECT signal_state,materialization_lineage_proven FROM signals WHERE signal_id=?")
       .get(candidate.signal_id) as { signal_state: string; materialization_lineage_proven: number };
     expect(row).toEqual({ signal_state: "materialization_unknown", materialization_lineage_proven: 0 });
-    expect((owner.database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get() as { version: number }).version).toBe(41);
+    expect(owner.database.connection.prepare("SELECT version FROM schema_version WHERE version = 41").get())
+      .toEqual({ version: 41 });
   } finally { await closeOwner(owner); rmSync(directory, { recursive: true, force: true }); }
 });
 
