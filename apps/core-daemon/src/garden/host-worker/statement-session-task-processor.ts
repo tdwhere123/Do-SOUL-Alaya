@@ -85,14 +85,14 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
       beforeReceive: async () => await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now)
     });
     const outcome = { emittedSignalIds, signalCounts: outcomes.snapshot() };
-    await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { success: true, ...outcome }
-      : { success: false, error: cause ?? new GardenProviderError(
+    await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { status: "completed", ...outcome }
+      : { status: "failed", error: cause ?? new GardenProviderError(
         "Source statement extraction is incomplete; valid siblings and raw source were retained.", "invalid_response"), ...outcome },
     input.gardenTaskRepo, input.now);
   } catch (error) {
     await quarantineUnavailableSourceTasks(input.gardenTaskRepo, input.now, row.workspace_id, row.id);
     if (input.gardenTaskRepo.findByIdInWorkspace(row.id, row.workspace_id)?.status !== "claimed") return;
-    await settleInProcessTask(row, payload.run_id, { success: false, error }, input.gardenTaskRepo, input.now);
+    await settleInProcessTask(row, payload.run_id, { status: "failed", error }, input.gardenTaskRepo, input.now);
   }
 }
 

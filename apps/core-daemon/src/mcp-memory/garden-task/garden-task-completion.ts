@@ -1,6 +1,7 @@
 import {
   CandidateMemorySignalSchema,
   GARDEN_ROLE_TIER_MAP,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   GardenTaskKind,
   parseGardenEventPayload,
@@ -474,7 +475,7 @@ function buildCompletedTaskEvent(
       task_kind: row.kind,
       role: row.role,
       tier: GARDEN_ROLE_TIER_MAP[row.role],
-      success: status === "completed",
+      success: gardenTaskOutcomeSuccess(status),
       outcome: status,
       objects_affected: [...objectsAffected],
       candidate_signals_count: row.kind === GardenTaskKind.EDGE_CLASSIFY ? 0 : objectsAffected.length,

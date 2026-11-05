@@ -29,6 +29,20 @@ describe("Garden completion outcomes through scheduler and EventLog", () => {
     expect(events.at(-1)).toMatchObject({ task_id: disabled.task_id, success: true, outcome: "skipped" });
   });
 
+  it("rejects a legacy success value that contradicts a measured outcome", async () => {
+    const events: Record<string, unknown>[] = [];
+    const scheduler = new GardenScheduler({ append: async entry => { events.push(entry.payload); } }, { now });
+    const disabled = task("contradictory-result", GardenTaskKind.CONSOLIDATION_CYCLE);
+    scheduler.enqueue(disabled);
+    await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+    const before = events.length;
+    await expect(scheduler.reportCompletion({ task_id: disabled.task_id, task_kind: disabled.task_kind,
+      role: GardenRole.LIBRARIAN, tier: GardenTier.TIER_2, workspace_id: disabled.workspace_id,
+      success: false, outcome: "skipped", objects_affected: [], audit_entries: [],
+      error_message: null, completed_at: now() })).rejects.toThrow(/conflicts/);
+    expect(events).toHaveLength(before);
+  });
+
   it("separates disabled maintenance, missing configuration, completed work and unknown history", async () => {
     const db = initDatabase({ filename: ":memory:" });
     try {

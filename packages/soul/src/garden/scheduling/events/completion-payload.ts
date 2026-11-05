@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   BoundedJsonObjectSchema,
+  gardenTaskOutcomeSuccess,
   GardenEventType,
   parseGardenEventPayload,
   type GardenEventPayloadMap,
@@ -19,7 +20,7 @@ function createBasePayload(
     task_kind: result.task_kind,
     role: result.role,
     tier: result.tier,
-    success: result.success,
+    success: result.outcome === undefined ? result.success : gardenTaskOutcomeSuccess(result.outcome),
     ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
     objects_affected: objectsAffected,
     workspace_id: result.workspace_id,
