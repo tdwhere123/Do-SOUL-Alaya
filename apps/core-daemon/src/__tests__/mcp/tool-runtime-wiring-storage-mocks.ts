@@ -44,7 +44,9 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
       return hoisted.eventLogRepo;
     }),
     SqliteSignalRepo: makeRepo({
-      getStorageConnectionIdentity: () => hoisted.database
+      getStorageConnectionIdentity: () => hoisted.database,
+      // Startup recovery pages interrupted identities; bootstrap fakes have none.
+      listIdsByStateAfter: vi.fn(async () => [])
     }),
     SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo({
