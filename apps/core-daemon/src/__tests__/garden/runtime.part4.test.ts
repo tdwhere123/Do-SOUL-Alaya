@@ -204,6 +204,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("dispatches only EMBEDDING_BACKFILL and never touches other Librarian kinds already queued", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => ({
+        outcome: "completed" as const, errorMessage: null,
         objectsAffected: ["memory-1", "memory-2"],
         auditEntries: ["embedding_upserted:memory-1", "embedding_upserted:memory-2"]
       }))
@@ -221,7 +222,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
     seedQueueTask(scheduler, GardenTaskKind.PATH_GRAPH_SNAPSHOT, "task-snapshot");
     seedQueueTask(scheduler, GardenTaskKind.CONSOLIDATION_CYCLE, "task-consolidation");
 
-    await runtime.runEmbeddingBackfillPass("workspace-1");
+    await runtime.runEmbeddingBackfillPass("workspace-1", "cache_only");
 
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
@@ -255,6 +256,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("drains only the requested workspace's EMBEDDING_BACKFILL and leaves another workspace's same-kind task queued", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async (task: { workspace_id: string }) => ({
+        outcome: "completed" as const, errorMessage: null,
         objectsAffected: [`memory-${task.workspace_id}`],
         auditEntries: [`embedding_upserted:memory-${task.workspace_id}`]
       }))
@@ -294,6 +296,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("drains an existing same-workspace EMBEDDING_BACKFILL without enqueueing a duplicate", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async (task: { workspace_id: string }) => ({
+        outcome: "completed" as const, errorMessage: null,
         objectsAffected: [`memory-${task.workspace_id}`],
         auditEntries: [`embedding_upserted:memory-${task.workspace_id}`]
       }))
@@ -327,6 +330,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   it("surfaces provider-unavailable audit reasons to targeted warmup callers", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => ({
+        outcome: "failed" as const, errorMessage: "embedding_backfill_skipped:provider_unavailable",
         objectsAffected: [],
         auditEntries: ["embedding_backfill_skipped:provider_unavailable"]
       }))
@@ -344,7 +348,8 @@ describe("garden runtime targeted embedding backfill pass", () => {
     expect(scheduler.completions).toHaveLength(1);
     expect(scheduler.completions[0]).toEqual(
       expect.objectContaining({
-        success: true,
+        success: false,
+        outcome: "failed",
         audit_entries: ["embedding_backfill_skipped:provider_unavailable"]
       })
     );
@@ -388,23 +393,20 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const completion = currentScheduler().completions.at(-1);
     expect(completion?.error_message).not.toMatch(/alice|private\.db|super-secret/u);
   });
-  it("identifies coherence, answers_with, and completion warning phases", async () => {
+  it("fails before configured formation when a durable checkpoint is unavailable", async () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({
+            outcome: "completed" as const, errorMessage: null,
             objectsAffected: ["memory-1", "memory-2"],
             auditEntries: []
           }))
         }
       }),
-      legacyTopologyMutationsEnabled: true,
-      coherenceEdgeProducerPort: {
-        crystallizeForBackfill: vi.fn(async () => { throw new Error("coherence failed"); })
-      },
       answersWithEdgeProducerPort: {
-        crystallizeForBackfill: vi.fn(async () => { throw new Error("answers failed"); })
+        prepareForBackfill: vi.fn(async () => { throw new Error("must not prepare without a checkpoint"); })
       },
       warn
     });
@@ -419,22 +421,12 @@ describe("garden runtime targeted embedding backfill pass", () => {
       )
       .mockImplementation(reportCompletion);
 
-    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).resolves.toBeUndefined();
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(/checkpoint is not configured/);
 
-    expect(warn.mock.calls.map((call) => call[1]?.phase)).toEqual([
-      "answers_with",
-      "coherence",
-      "completion"
-    ]);
-    expect(scheduler.completions).toContainEqual(
-      expect.objectContaining({
-        success: true,
-        audit_entries: expect.arrayContaining([
-          "embedding_backfill_answers_with_follow_up_failed",
-          "embedding_backfill_coherence_follow_up_failed"
-        ])
-      })
-    );
+    expect(warn.mock.calls.map((call) => call[1]?.phase)).toEqual(["backfill", "completion"]);
+    expect(scheduler.completions).toContainEqual(expect.objectContaining({
+      outcome: "failed", success: false, error_message: "Garden embedding follow-up checkpoint is not configured."
+    }));
   });
 
   it("fails loud without rewriting the work outcome when completion retries exhaust", async () => {
@@ -442,7 +434,8 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
         embeddingBackfillHandler: {
-          handle: vi.fn(async () => ({ objectsAffected: ["memory-1"], auditEntries: [] }))
+          handle: vi.fn(async () => ({ outcome: "completed" as const, errorMessage: null,
+            objectsAffected: ["memory-1"], auditEntries: [] }))
         }
       }),
       warn

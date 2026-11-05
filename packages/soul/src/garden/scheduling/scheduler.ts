@@ -324,6 +324,10 @@ export class GardenScheduler {
     }
   }
 
+  public async releaseInProcessClaim(taskId: string): Promise<boolean> {
+    return await this.taskRepo.releaseClaim(taskId, IN_PROCESS_GARDEN_CLAIMANT);
+  }
+
   public get queueDepth(): number {
     return countByStatus(this.taskRepo.countBacklog(), "pending");
   }

@@ -12,4 +12,11 @@ export class GardenTaskPendingFailureCasMiss extends Error {
   }
 }
 
+export class GardenTaskAlreadyCompleted extends Error {
+  constructor() {
+    super("Garden task completion was already committed.");
+    this.name = "GardenTaskAlreadyCompleted";
+  }
+}
+
 export { isUniqueConstraintError } from "@do-soul/alaya-protocol";

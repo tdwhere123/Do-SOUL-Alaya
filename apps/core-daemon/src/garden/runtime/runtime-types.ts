@@ -12,7 +12,6 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type {
   DynamicsService,
-  EmbeddingBackfillHandler,
   EventPublisher,
   SemanticEnrichmentWorkerDependencies,
   StrongRefService
@@ -39,7 +38,7 @@ import type { BackgroundServiceManager } from "../../background/bootstrap.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
 import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import type { HostSessionCapture } from "../host-session/host-session-capture.js";
-import type { EmbeddingBackfillMode } from "../scheduler/scheduler-runtime-types.js";
+import type { EmbeddingBackfillMode, EmbeddingBackfillRuntimePort } from "../scheduler/scheduler-runtime-types.js";
 
 export type RuntimeGardenScheduler = GardenScheduler & {
   dispatchNextMatchingTaskKind(
@@ -136,11 +135,11 @@ export interface BulkEnrichEdgeProducerPort {
 }
 
 export interface BulkFormationFollowUpPort {
-  crystallizeForBackfill(params: {
+  prepareForBackfill(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly objectIds: readonly string[];
-  }): Promise<void>;
+  }): Promise<Readonly<{ readonly digest: string; execute(assertClaim: () => undefined): Promise<void> }>>;
 }
 
 export interface BulkEnrichSourceSignalLookupPort {
@@ -206,8 +205,7 @@ export type CreateGardenRuntimeInput = {
   // temporal assertion provenance.
   readonly legacyTopologyMutationsEnabled?: boolean;
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
-  readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
-  readonly coherenceEdgeProducerPort?: BulkFormationFollowUpPort;
+  readonly embeddingBackfillHandler?: EmbeddingBackfillRuntimePort;
   readonly answersWithEdgeProducerPort?: BulkFormationFollowUpPort;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;

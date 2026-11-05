@@ -143,12 +143,31 @@ describe("Janitor GC task kinds", () => {
 
     expect(legacyTombstoneGcPort.findTombstonedMemories).not.toHaveBeenCalled();
     expect(legacyTombstoneGcPort.hardDelete).not.toHaveBeenCalled();
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true, outcome: "skipped" });
     expect(result.objects_affected).toEqual([]);
     expect(result.audit_entries).toEqual([
       "[SKIPPED] tombstone_gc: disposition sweep port not wired",
       "[DEFERRED] tombstone_gc: temporal_assertion_provenance_required"
     ]);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
+  it("reports performed disposition work when physical GC is intentionally deferred", async () => {
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const janitor = new Janitor({
+      cleanupPort: { findExpiredObjects: vi.fn(async () => []), removeExpiredObjects: vi.fn(() => undefined) },
+      tieringPort: { findHotDemotionCandidates: vi.fn(async () => []), demoteToWarm: vi.fn(() => []) },
+      dispositionSweepPort: {
+        findDormantDispositionCandidates: vi.fn(async () => [
+          { memory_id: "memory-1", disposition: "judged_useless" as const, disposition_ref: null }
+        ]),
+        autonomousTombstone: vi.fn(async () => ({ status: "tombstoned" }) as const)
+      },
+      tombstoneGcDeferredReason: "temporal_assertion_provenance_required", scheduler
+    } as ConstructorParameters<typeof Janitor>[0]);
+    const result = await janitor.run(createTask(GardenTaskKind.TOMBSTONE_GC));
+    expect(result).toMatchObject({ success: true, outcome: "completed", objects_affected: ["memory-1"] });
+    expect(result.audit_entries).toContain("[DEFERRED] tombstone_gc: temporal_assertion_provenance_required");
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 

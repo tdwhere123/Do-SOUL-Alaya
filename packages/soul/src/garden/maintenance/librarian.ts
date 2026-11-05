@@ -70,6 +70,7 @@ export interface LibrarianDependencies {
   readonly healthJournal?: HealthJournalRecordPort;
   readonly graphEdgePort?: GraphEdgeCreationPort;
   readonly pathPlasticityPort?: PathPlasticityComputePort;
+  readonly pathPlasticityDeferredReason?: string;
   readonly pathPlasticityPendingPort?: PathPlasticityPendingPort;
   readonly pathPlasticityBudgetMs?: number;
   readonly now?: () => string;
@@ -85,6 +86,7 @@ export class Librarian {
   private readonly healthJournal: HealthJournalRecordPort | null;
   private readonly graphEdgePort: GraphEdgeCreationPort | null;
   private readonly pathPlasticityPort: PathPlasticityComputePort | null;
+  private readonly pathPlasticityDeferredReason: string | undefined;
   private readonly pathPlasticityPendingPort: PathPlasticityPendingPort | null;
   private readonly pathPlasticityBudgetMs: number;
   private readonly now: () => string;
@@ -97,6 +99,7 @@ export class Librarian {
     this.healthJournal = deps.healthJournal ?? null;
     this.graphEdgePort = deps.graphEdgePort ?? null;
     this.pathPlasticityPort = deps.pathPlasticityPort ?? null;
+    this.pathPlasticityDeferredReason = deps.pathPlasticityDeferredReason;
     this.pathPlasticityPendingPort = deps.pathPlasticityPendingPort ?? null;
     this.pathPlasticityBudgetMs =
       deps.pathPlasticityBudgetMs ?? PATH_PLASTICITY_TASK_DEFAULTS.MAX_EXECUTION_MS;
@@ -248,18 +251,19 @@ export class Librarian {
       const pathPlasticityPort = this.pathPlasticityPort;
 
       if (pathPlasticityPort === null) {
-        const result = this.createSuccessResult(task, completedAt, [], [
-          "path_plasticity_update: skipped because path plasticity port is not configured"
-        ]);
+        const audit = ["path_plasticity_update: skipped because path plasticity port is not configured"];
+        const result = this.pathPlasticityDeferredReason === undefined
+          ? { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "path plasticity port is not configured")), audit_entries: audit }
+          : this.createSuccessResult(task, completedAt, [], audit, "skipped");
         await this.scheduler.reportCompletion(result);
         return result;
       }
 
       const untilRevision = parsePathPlasticityRevisionCursor(task.target_object_refs[1]);
       if (untilRevision === undefined) {
-        const result = this.createSuccessResult(task, completedAt, [], [
-          "path_plasticity_update: skipped because EventLog revision cursor is missing"
-        ]);
+        const result = { ...this.createFailureResult(task, completedAt,
+          new AlayaError("VALIDATION", "path plasticity EventLog revision cursor is missing")),
+          audit_entries: ["path_plasticity_update: EventLog revision cursor is missing"] };
         await this.scheduler.reportCompletion(result);
         return result;
       }
@@ -295,14 +299,16 @@ export class Librarian {
     task: GardenTaskDescriptor,
     completedAt: string,
     objectIds: readonly string[],
-    auditEntries: readonly string[]
+    auditEntries: readonly string[],
+    outcome: "completed" | "skipped" = "completed"
   ): GardenTaskResult {
     return createGardenSuccessResult(
       { role: this.role, tier: this.tier },
       task,
       completedAt,
       objectIds,
-      auditEntries
+      auditEntries,
+      outcome
     );
   }
 

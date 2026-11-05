@@ -1,9 +1,8 @@
-import type {
-  GardenRoleValue,
-  GardenTaskDescriptor,
-  GardenTaskKindValue,
-  GardenTaskResult,
-  GardenTierValue
+import { gardenTaskOutcomeSuccess, type GardenRoleValue,
+  type GardenTaskDescriptor,
+  type GardenTaskKindValue,
+  type GardenTaskResult,
+  type GardenTierValue
 } from "@do-soul/alaya-protocol";
 
 export type GardenTaskHandler = (
@@ -28,7 +27,8 @@ export function createGardenSuccessResult(
   task: GardenTaskDescriptor,
   completedAt: string,
   objectIds: readonly string[],
-  auditEntries: readonly string[]
+  auditEntries: readonly string[],
+  outcome: "completed" | "skipped" = "completed"
 ): GardenTaskResult {
   return {
     task_id: task.task_id,
@@ -36,7 +36,8 @@ export function createGardenSuccessResult(
     role: ctx.role,
     tier: ctx.tier,
     workspace_id: task.workspace_id,
-    success: true,
+    success: gardenTaskOutcomeSuccess(outcome),
+    outcome,
     objects_affected: [...objectIds],
     audit_entries: [...auditEntries],
     error_message: null,
@@ -56,7 +57,8 @@ export function createGardenFailureResult(
     role: ctx.role,
     tier: ctx.tier,
     workspace_id: task.workspace_id,
-    success: false,
+    success: gardenTaskOutcomeSuccess("failed"),
+    outcome: "failed",
     objects_affected: [],
     audit_entries: [],
     error_message: error instanceof Error ? error.message : String(error),

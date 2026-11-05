@@ -37,9 +37,21 @@ export const GardenPendingTaskSnapshotSchema = z
   .strict()
   .readonly();
 
+const GardenEmbeddingFollowUpSnapshotSchema = z.object({
+  task_id: BoundedIdSchema,
+  state: z.enum(["pending", "blocked"]),
+  in_flight: z.boolean(),
+  attempt_count: NonNegativeIntSchema,
+  reason: BoundedLabelSchema.nullable(),
+  parent_outcome: GardenTaskOutcomeSchema.nullable()
+}).strict().readonly();
+
 export const GardenListPendingTasksResponseSchema = z
   .object({
-    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly()
+    tasks: z.array(GardenPendingTaskSnapshotSchema).readonly(),
+    // Omitted by an older or unmeasured implementation; [] is a measured empty list.
+    embedding_follow_ups: z.array(GardenEmbeddingFollowUpSnapshotSchema).readonly().optional(),
+    embedding_follow_ups_truncated: z.boolean().optional()
   })
   .strict()
   .readonly();

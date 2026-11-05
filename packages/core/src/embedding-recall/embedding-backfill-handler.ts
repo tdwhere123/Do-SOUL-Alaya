@@ -1,4 +1,4 @@
-import { type GardenTaskDescriptor, type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
+import { AlayaError, type GardenTaskDescriptor, type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../runtime/config/install-core-config.js";
 import { persistEmbeddedBackfillBatch } from "./backfill/persist-embedded-batch.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";
@@ -16,6 +16,7 @@ import {
   type ConcurrentBatchResult,
   type EmbeddedBackfillCandidate,
   type EmbeddingBackfillCandidate,
+  type EmbeddingBackfillCheckpoint,
   type EmbeddingBackfillHandleResult,
   type EmbeddingBackfillHandlerDependencies,
   type EmbeddingBackfillMetadata
@@ -45,11 +46,17 @@ interface BackfillCandidateSelection {
   readonly auditEntries: readonly string[];
 }
 
+type MeasuredBackfillResult = EmbeddingBackfillHandleResult & Required<
+  Pick<EmbeddingBackfillHandleResult, "outcome" | "errorMessage">
+>;
+
 const EMPTY_HQS: readonly string[] = Object.freeze([]);
 const EMPTY_HQ_MAP: ReadonlyMap<string, readonly string[]> = new Map();
 
-function emptyBackfillResult(auditEntries: readonly string[]): EmbeddingBackfillHandleResult {
+function emptyBackfillResult(auditEntries: readonly string[], unavailable = false): MeasuredBackfillResult {
   return Object.freeze({
+    outcome: unavailable ? "failed" : "skipped",
+    errorMessage: unavailable ? "embedding_backfill_skipped:provider_unavailable" : null,
     objectsAffected: Object.freeze([]),
     auditEntries: Object.freeze([...auditEntries])
   });
@@ -74,9 +81,15 @@ export class EmbeddingBackfillHandler {
     );
   }
 
-  public async handle(task: Pick<GardenTaskDescriptor, "workspace_id">): Promise<EmbeddingBackfillHandleResult> {
+  public async handle(
+    task: Pick<GardenTaskDescriptor, "workspace_id">,
+    checkpoint?: EmbeddingBackfillCheckpoint
+  ): Promise<MeasuredBackfillResult> {
+    if (checkpoint !== undefined && this.dependencies.memoryEmbeddingRepo.upsertForGardenBackfill === undefined) {
+      throw new AlayaError("UNAVAILABLE", "Garden backfill requires atomic embedding checkpoint persistence.");
+    }
     if (!this.dependencies.provider.isAvailable) {
-      return emptyBackfillResult(["embedding_backfill_skipped:provider_unavailable"]);
+      return emptyBackfillResult(["embedding_backfill_skipped:provider_unavailable"], true);
     }
 
     const initialMemories = await this.collectInitialBackfillMemories(task.workspace_id);
@@ -96,10 +109,14 @@ export class EmbeddingBackfillHandler {
       initialMemories,
       selection.memoriesToEmbed,
       objectsAffected,
-      auditEntries
+      auditEntries,
+      checkpoint
     );
 
+    const failed = auditEntries.find(entry => entry.startsWith("embedding_failed:provider:"));
     return Object.freeze({
+      outcome: failed !== undefined ? "failed" : objectsAffected.length === 0 ? "skipped" : "completed",
+      errorMessage: failed ?? null,
       objectsAffected: Object.freeze(objectsAffected),
       auditEntries: Object.freeze(auditEntries)
     });
@@ -202,7 +219,8 @@ export class EmbeddingBackfillHandler {
     initialMemories: readonly MemoryEntry[],
     memoriesToEmbed: readonly EmbeddingBackfillCandidate[],
     objectsAffected: string[],
-    auditEntries: string[]
+    auditEntries: string[],
+    checkpoint: EmbeddingBackfillCheckpoint | undefined
   ): Promise<void> {
     const snapshotMemories = new Map(initialMemories.map((memory) => [memory.object_id, memory] as const));
     const batches = buildEmbeddingBackfillBatches(memoriesToEmbed);
@@ -231,7 +249,7 @@ export class EmbeddingBackfillHandler {
         nextToStart += 1;
       }
       try {
-        await this.persistEmbeddedBatch(workspaceId, ready, snapshotMemories, objectsAffected, auditEntries);
+        await this.persistEmbeddedBatch(workspaceId, ready, snapshotMemories, objectsAffected, auditEntries, checkpoint);
       } catch (error) {
         await Promise.allSettled(inFlight.filter((entry) => entry !== null));
         throw error;
@@ -248,7 +266,8 @@ export class EmbeddingBackfillHandler {
     result: ConcurrentBatchResult,
     snapshotMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
     objectsAffected: string[],
-    auditEntries: string[]
+    auditEntries: string[],
+    checkpoint: EmbeddingBackfillCheckpoint | undefined
   ): Promise<void> {
     await persistEmbeddedBackfillBatch({
       workspaceId,
@@ -256,6 +275,7 @@ export class EmbeddingBackfillHandler {
       snapshotMemories,
       objectsAffected,
       auditEntries,
+      ...(checkpoint === undefined ? {} : { checkpoint }),
       dependencies: this.dependencies,
       now: this.now,
       warn: this.warn

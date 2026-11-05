@@ -88,6 +88,8 @@ export type RelationAssertionAdmissionRequest = Readonly<{
   readonly validity: RelationValidity;
   readonly assertionId?: string;
   readonly admittedAt?: string;
+  /** Additional same-transaction precondition; never replaces formation validation. */
+  readonly assertCurrentInTransaction?: () => undefined;
 }>;
 
 export type RelationAssertionResolutionRequest = Readonly<{

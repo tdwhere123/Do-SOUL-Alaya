@@ -256,10 +256,13 @@ function composeEmbeddingBackfillHandlers(
   evidenceHandler: EvidenceDocumentEmbeddingBackfillHandler
 ) {
   return {
-    handle: async (task: Parameters<EmbeddingBackfillHandler["handle"]>[0]) => {
-      const memory = await memoryHandler.handle(task);
+    handle: async (task: Parameters<EmbeddingBackfillHandler["handle"]>[0],
+      checkpoint?: Parameters<EmbeddingBackfillHandler["handle"]>[1]) => {
+      const memory = await memoryHandler.handle(task, checkpoint);
       const evidence = await evidenceHandler.handle(task);
       return Object.freeze({
+        outcome: memory.outcome === "failed" ? "failed" : evidence.documentsAffected > 0 ? "completed" : memory.outcome,
+        errorMessage: memory.errorMessage,
         objectsAffected: memory.objectsAffected,
         auditEntries: Object.freeze([...memory.auditEntries, ...evidence.auditEntries])
       });

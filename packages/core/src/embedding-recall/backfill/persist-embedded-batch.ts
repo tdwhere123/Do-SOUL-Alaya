@@ -1,9 +1,10 @@
-import { type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
+import { AlayaError, type MemoryEntry, readErrorMessage } from "@do-soul/alaya-protocol";
 import {
   EmbeddingBackfillPartialFailureError,
   hashMemoryContent,
   type ConcurrentBatchResult,
   type EmbeddedBackfillCandidate,
+  type EmbeddingBackfillCheckpoint,
   type EmbeddingBackfillHandlerDependencies
 } from "../embedding-backfill-handler-shared.js";
 import { assertValidEmbeddingBatch } from "../helpers.js";
@@ -15,6 +16,7 @@ interface PersistEmbeddedBatchParams {
   readonly snapshotMemories: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly objectsAffected: string[];
   readonly auditEntries: string[];
+  readonly checkpoint?: EmbeddingBackfillCheckpoint;
   readonly dependencies: Pick<
     EmbeddingBackfillHandlerDependencies,
     "memoryEmbeddingRepo" | "provider"
@@ -83,6 +85,13 @@ async function upsertEmbeddingRecord(
   params: PersistEmbeddedBatchParams,
   record: EmbeddingVectorRecord
 ): Promise<Readonly<EmbeddingVectorRecord> | null> {
+  if (params.checkpoint !== undefined) {
+    const upsert = params.dependencies.memoryEmbeddingRepo.upsertForGardenBackfill;
+    if (upsert === undefined) {
+      throw new AlayaError("UNAVAILABLE", "Garden backfill requires atomic embedding checkpoint persistence.");
+    }
+    return await upsert.call(params.dependencies.memoryEmbeddingRepo, record, params.checkpoint);
+  }
   const guardedUpsert = params.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory;
   return guardedUpsert === undefined
     ? await params.dependencies.memoryEmbeddingRepo.upsert(record)

@@ -216,12 +216,16 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
   });
 
 
-  it("soft-skips orphan detection when the optional orphan port is not configured", async () => {
+  it.each([
+    { disabled: true, outcome: "skipped", audit: "orphan_detection: skipped because orphan detection is disabled" },
+    { disabled: false, outcome: "failed", audit: "orphan_detection: port is not configured" }
+  ] as const)("distinguishes disabled=$disabled from missing orphan configuration", async ({ disabled, outcome, audit }) => {
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
     const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
+      orphanDetectionDisabled: disabled,
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {
@@ -250,9 +254,7 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
 
     const result = await auditor.run(createTask({ task_kind: GardenTaskKind.ORPHAN_DETECTION }));
 
-    expect(result.success).toBe(true);
-    expect(result.objects_affected).toEqual([]);
-    expect(result.audit_entries).toEqual(["orphan_detection: skipped because orphan detection port is not configured"]);
+    expect(result).toMatchObject({ success: disabled, outcome, objects_affected: [], audit_entries: [audit] });
     expect(eventLogRepo.append).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });

@@ -113,6 +113,29 @@ describe("Garden completion outcomes through scheduler and EventLog", () => {
     }
   });
 
+  it("does not append a duplicate completion audit when the same committed completion is retried", async () => {
+    const db = initDatabase({ filename: ":memory:" });
+    try {
+      const eventLogRepo = new SqliteEventLogRepo(db);
+      const publisher = new EventPublisher({ eventLogRepo, runHotStateService: { apply: () => undefined },
+        runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined } });
+      const repo = new SqliteGardenTaskRepo(db.connection, publisher);
+      const scheduler = new GardenScheduler({ append: async () => undefined }, { now }, null, repo);
+      const work = task("completion-retry", GardenTaskKind.CONSOLIDATION_CYCLE);
+      scheduler.enqueue(work);
+      await scheduler.dispatchNext(GardenRole.LIBRARIAN);
+      const result = { task_id: work.task_id, task_kind: work.task_kind, role: GardenRole.LIBRARIAN,
+        tier: GardenTier.TIER_2, workspace_id: work.workspace_id, success: true, outcome: "skipped" as const,
+        objects_affected: [], audit_entries: [], error_message: null, completed_at: now() };
+      await scheduler.reportCompletion(result);
+      await scheduler.reportCompletion(result);
+      expect((await eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events).toHaveLength(1);
+      await expect(scheduler.reportCompletion({ ...result, outcome: "completed" })).rejects.toThrow();
+      expect(repo.findById(work.task_id)).toMatchObject({ status: "completed", outcome: "skipped" });
+      expect((await eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
   it("rolls back the outcome and completion audit together when the SQLite update fails", async () => {
     const db = initDatabase({ filename: ":memory:" });
     try {

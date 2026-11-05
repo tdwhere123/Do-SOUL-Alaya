@@ -43,7 +43,8 @@ import type {
   GardenTaskCompletionResult,
   GardenTaskEnqueueInput,
   GardenTaskEventInput,
-  GardenTaskRow
+  GardenTaskRow,
+  SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-handlers.js";
 import type { createSoulResolveHandler } from "./resolve-handler.js";
@@ -239,6 +240,7 @@ export interface McpMemoryToolHandlerDependencies {
   };
   readonly gardenTaskRepo?: GardenTaskSourceGuardPort & {
     readonly statementSessions: StatementSessionSourcesPort;
+    listEmbeddingBackfillFollowUps?: SqliteGardenTaskRepo["listEmbeddingBackfillFollowUps"];
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(

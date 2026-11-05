@@ -290,7 +290,21 @@ the outcome of their own maintenance work. A measured `outcome` distinguishes
 `completed`, `skipped`, and `failed`; its absence on historical or unmeasured
 records is unknown. The legacy `success` field remains true for both completed
 and intentionally skipped work for pre-34.1 consumers; it must not be read as
-proof that work was performed. HTTP/MCP `emitted` is candidate admission. Materialization audit
+proof that work was performed.
+
+Embedding backfill records each committed memory and its content identity in the
+same SQLite transaction as its vector. The Garden scheduler owns the supported
+`answers_with` handoff: an audited workspace-fenced claim pins the witnessed
+formation plan before governed assertion admission and checks that plan and its
+source inputs inside each admission transaction. A failed follow-up remains
+retryable without rerunning completed backfill; changed, erased or unauthorized
+inputs block instead of being replayed. The runtime lease fences startup recovery,
+and a later follow-up does not rewrite the parent task's historical outcome.
+The MCP pending-task response reports pending and blocked follow-ups separately
+from claimable tasks; a truncation flag prevents a bounded page from implying
+complete absence. Retired coherence mutation is not part of this handoff.
+
+HTTP/MCP `emitted` is candidate admission. Materialization audit
 and state commit atomically, including generic and source-grounding deferrals.
 A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
 At daemon startup, one owner acquires the OS-released runtime lease, opens its

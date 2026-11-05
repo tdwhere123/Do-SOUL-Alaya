@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AlayaError,
   GraphAuditorEventType,
   HealthIssueCauseKind,
   HealthIssueSeverity,
@@ -24,9 +25,11 @@ export abstract class AuditorOrphanOperations extends AuditorCore {
     const orphanDetectionPort = this.dependencies.orphanDetectionPort;
 
     if (orphanDetectionPort === undefined) {
-      const result = this.createSuccessResult(task, completedAt, [], [
-        "orphan_detection: skipped because orphan detection port is not configured"
-      ]);
+      const result = this.dependencies.orphanDetectionDisabled === true
+        ? this.createSuccessResult(task, completedAt, [],
+          ["orphan_detection: skipped because orphan detection is disabled"], "skipped")
+        : { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "orphan detection port is not configured")),
+          audit_entries: ["orphan_detection: port is not configured"] };
       await this.dependencies.scheduler.reportCompletion(result);
       return result;
     }
@@ -98,9 +101,11 @@ export abstract class AuditorOrphanOperations extends AuditorCore {
       orphanDetectionPort?.findEventLogOrphans === undefined ||
       orphanDetectionPort.createEventLogOrphanRadarRecord === undefined
     ) {
-      const result = this.createSuccessResult(task, completedAt, [], [
-        "event_log_orphan_detection: skipped because orphan detection port is not configured"
-      ]);
+      const result = this.dependencies.orphanDetectionDisabled === true
+        ? this.createSuccessResult(task, completedAt, [],
+          ["event_log_orphan_detection: skipped because orphan detection is disabled"], "skipped")
+        : { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "event log orphan detection port is not configured")),
+          audit_entries: ["event_log_orphan_detection: port is not configured"] };
       await this.dependencies.scheduler.reportCompletion(result);
       return result;
     }

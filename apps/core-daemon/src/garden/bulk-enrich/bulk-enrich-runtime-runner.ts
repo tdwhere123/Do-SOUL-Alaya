@@ -101,6 +101,7 @@ export async function runBulkEnrichTask(input: Readonly<{
   readonly sourceEnrichment?: {
     run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
     readonly capability?: SourceEnrichmentCapability;
+    readonly ownsCompletion?: boolean;
   };
 }>): Promise<void> {
   const completedAt = input.now();
@@ -111,7 +112,7 @@ export async function runBulkEnrichTask(input: Readonly<{
   if (input.availability.kind === "missing_repo") {
     await input.reporter.reportCompletion(input.task, completedAt, "failed", [
       "bulk_enrich_failed:no_enrich_pending_table"
-    ], new Error("bulk enrich pending table is not configured"));
+    ], new AlayaError("UNAVAILABLE", "bulk enrich pending table is not configured"));
     return;
   }
   if (input.availability.kind === "disabled") {
@@ -156,6 +157,7 @@ async function runPerSourceEnrichmentTask(
     readonly sourceEnrichment?: {
       run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
       readonly capability?: SourceEnrichmentCapability;
+      readonly ownsCompletion?: boolean;
     };
   }>,
   completedAt: string
@@ -170,22 +172,12 @@ async function runPerSourceEnrichmentTask(
         completionTokens: "unsupported",
         spend: "unsupported"
       })
-    ], new Error("per-source enrichment worker is not composed"));
+    ], new AlayaError("UNAVAILABLE", "per-source enrichment worker is not composed"));
     return;
   }
+  let outcome: string;
   try {
-    const outcome = await input.sourceEnrichment.run(input.task);
-    if (outcome === "uncertain" || outcome === "busy" || outcome === "work_busy") {
-      return;
-    }
-    const success = outcome === "completed";
-    await input.reporter.reportCompletion(
-      input.task,
-      completedAt,
-      success ? "completed" : "failed",
-      [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
-      success ? undefined : new Error(outcome)
-    );
+    outcome = await input.sourceEnrichment.run(input.task);
   } catch (error) {
     await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
     input.reporter.warn("per-source enrichment failed; continuing Garden background pass", {
@@ -193,7 +185,18 @@ async function runPerSourceEnrichmentTask(
       task_id: input.task.task_id,
       error: error instanceof Error ? error.message : String(error)
     });
+    return;
   }
+  if (outcome === "uncertain" || outcome === "busy" || outcome === "work_busy" ||
+      (input.sourceEnrichment.ownsCompletion === true && outcome !== "missing")) return;
+  const success = outcome === "completed";
+  await input.reporter.reportCompletion(
+    input.task,
+    completedAt,
+    success ? "completed" : "failed",
+    [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
+    success ? undefined : new AlayaError("UNAVAILABLE", outcome)
+  );
 }
 
 function sourceEnrichCapabilityEntries(capability: SourceEnrichmentCapability | undefined): readonly string[] {

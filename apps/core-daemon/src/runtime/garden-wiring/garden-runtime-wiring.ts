@@ -2,8 +2,6 @@ import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protoc
 import {
   createGardenProposalWriter,
   type AnswersWithEdgeProducerService,
-  CoherenceEdgeProducerService,
-  DEFAULT_ANSWER_OVERLAP_BAR,
   GardenBacklogTelemetryService,
   RelationAssertionService,
   rebuildCountersFromEventLog,
@@ -29,8 +27,7 @@ import {
 } from "./garden-compute-support.js";
 import {
   createGardenEdgeProposalReconcileDeferralPort,
-  deferGardenBootstrapPathReconciliation,
-  createGardenLegacyPathCandidateRejectionPort
+  deferGardenBootstrapPathReconciliation
 } from "./garden-legacy-path-admission.js";
 import { createGardenSignalRefReplayPort } from "./garden-signal-ref-replay.js";
 import type { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
@@ -39,7 +36,7 @@ import type { createDaemonCoreServices } from "../daemon/wiring/daemon-service-w
 import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime-types.js";
 import type { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
-import { loadBackfillFormationObjects } from "../daemon/support/path-formation-order.js";
+import { createAnswersWithBackfillPort } from "./answers-with-backfill.js";
 import { createRecallTemporalProjectionEnsurer } from "../recall/recall-path-readers.js";
 
 type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
@@ -117,14 +114,11 @@ export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput)
   input.warnLogger.warn("garden tombstone physical gc deferred without temporal assertion provenance", {
     scope: "temporal_clean_break"
   });
-  const legacyPathCandidateRejectionPort = createGardenLegacyPathCandidateRejectionPort(input.warnLogger.warn);
-  const coherenceCrystallizer = createCoherenceCrystallizer(input, legacyPathCandidateRejectionPort);
   const answersWithCrystallizer = input.answersWithCrystallizer;
   const gardenRuntime = createGardenSchedulerRuntime(
     input,
     gardenDataPorts,
     forgetTombstoneAuthority,
-    coherenceCrystallizer,
     answersWithCrystallizer
   );
   const gardenTaskRepo = createGardenTaskRepo(input);
@@ -194,26 +188,10 @@ function createGardenDataPorts(input: GardenRuntimeWiringInput) {
   };
 }
 
-function createCoherenceCrystallizer(
-  input: GardenRuntimeWiringInput,
-  mintPort: ReturnType<typeof createGardenLegacyPathCandidateRejectionPort>
-) {
-  if (input.embeddingRecallService === undefined) {
-    return undefined;
-  }
-
-  return new CoherenceEdgeProducerService({
-    pairSource: input.embeddingRecallService,
-    mintPort,
-    warn: input.warnLogger.warn
-  });
-}
-
 function createGardenSchedulerRuntime(
   input: GardenRuntimeWiringInput,
   gardenDataPorts: ReturnType<typeof createGardenDataPorts>,
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
-  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
   answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
   return createGardenRuntime({
@@ -245,7 +223,7 @@ function createGardenSchedulerRuntime(
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(
       createTombstoneDispositionSweepInput(input, forgetTombstoneAuthority)
     ),
-    ...createGardenEnrichmentPorts(input, coherenceCrystallizer, answersWithCrystallizer),
+    ...createGardenEnrichmentPorts(input, answersWithCrystallizer),
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     warn: input.warnLogger.warn
   });
@@ -270,16 +248,10 @@ function createTemporalMaintenancePathReader(input: GardenRuntimeWiringInput) {
 
 function createGardenEnrichmentPorts(
   input: GardenRuntimeWiringInput,
-  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
   answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
-  const coherenceEdgeProducerPort = createCoherenceEdgeProducerPort(
-    coherenceCrystallizer,
-    input.memoryEntryRepo
-  );
-  const answersWithEdgeProducerPort = createAnswersWithEdgeProducerPort(
-    answersWithCrystallizer,
-    input.memoryEntryRepo
+  const answersWithEdgeProducerPort = createAnswersWithBackfillPort(
+    input.database, input.memoryEntryRepo, answersWithCrystallizer
   );
   return {
     enrichPendingRepo: input.enrichPendingRepo,
@@ -294,7 +266,6 @@ function createGardenEnrichmentPorts(
       materializationRouter: input.materializationRouter
     }),
     enrichEdgeProducerPort: input.edgeAutoProducerService,
-    ...(coherenceEdgeProducerPort === undefined ? {} : { coherenceEdgeProducerPort }),
     ...(answersWithEdgeProducerPort === undefined ? {} : { answersWithEdgeProducerPort }),
     ...(input.conflictDetectionService === null
       ? {}
@@ -341,68 +312,6 @@ function createEnrichMemoryLookup(input: GardenRuntimeWiringInput) {
         workspace_id: memory.workspace_id,
         run_id: memory.run_id
       };
-    }
-  };
-}
-
-function createCoherenceEdgeProducerPort(
-  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
-  memoryEntryRepo: GardenRuntimeWiringInput["memoryEntryRepo"]
-) {
-  if (coherenceCrystallizer === undefined) {
-    return undefined;
-  }
-
-  return {
-    crystallizeForBackfill: async (params: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly objectIds: readonly string[];
-    }) => {
-      const objects = await loadBackfillFormationObjects(
-        memoryEntryRepo,
-        params.workspaceId,
-        params.objectIds
-      );
-      await coherenceCrystallizer.crystallize({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        objects,
-        floor: 0.6,
-        capPerNode: 3,
-        crossSessionOnly: false
-      });
-    }
-  };
-}
-
-function createAnswersWithEdgeProducerPort(
-  answersWithCrystallizer: AnswersWithEdgeProducerService | undefined,
-  memoryEntryRepo: GardenRuntimeWiringInput["memoryEntryRepo"]
-) {
-  if (answersWithCrystallizer === undefined) {
-    return undefined;
-  }
-
-  return {
-    crystallizeForBackfill: async (params: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly objectIds: readonly string[];
-    }) => {
-      const objects = await loadBackfillFormationObjects(
-        memoryEntryRepo,
-        params.workspaceId,
-        params.objectIds
-      );
-      await answersWithCrystallizer.crystallize({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        objects,
-        bar: DEFAULT_ANSWER_OVERLAP_BAR,
-        capPerNode: 3,
-        crossSessionOnly: false
-      });
     }
   };
 }

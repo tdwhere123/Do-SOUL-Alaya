@@ -428,16 +428,17 @@ describe("Janitor", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("skips dormant demotion when its port is not wired", async () => {
+  it("fails dormant demotion when its required port is not wired", async () => {
     const { scheduler, janitor } = createJanitor();
 
     const result = await janitor.run(createTask({ task_kind: GardenTaskKind.DORMANT_DEMOTION }));
 
     expect(result).toMatchObject({
       task_kind: GardenTaskKind.DORMANT_DEMOTION,
-      success: true,
-      error_message: null,
-      audit_entries: ["[SKIPPED] dormant_demotion: port not wired"]
+      success: false,
+      outcome: "failed",
+      error_message: "dormant demotion port is not configured",
+      audit_entries: ["dormant_demotion: port not wired"]
     });
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });

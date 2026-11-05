@@ -155,6 +155,7 @@ export async function createGardenMcpHarness(
     enqueue: gardenTaskRepo.enqueue.bind(gardenTaskRepo),
     findByIdInWorkspace: gardenTaskRepo.findByIdInWorkspace.bind(gardenTaskRepo),
     peekPending: gardenTaskRepo.peekPending.bind(gardenTaskRepo),
+    listEmbeddingBackfillFollowUps: gardenTaskRepo.listEmbeddingBackfillFollowUps.bind(gardenTaskRepo),
     hasAvailableSource: gardenTaskRepo.hasAvailableSource.bind(gardenTaskRepo),
     quarantineUnavailableSourceTasks: gardenTaskRepo.quarantineUnavailableSourceTasks.bind(gardenTaskRepo),
     claimAtomic: gardenTaskRepo.claimAtomic.bind(gardenTaskRepo),

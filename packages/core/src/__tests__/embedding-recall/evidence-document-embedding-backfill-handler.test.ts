@@ -111,6 +111,18 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     expect(repo.listSourcesByWorkspace).not.toHaveBeenCalled();
   });
 
+  it("does not re-embed when stored backfill state cannot be read", async () => {
+    const repo = createRepo([source()], []);
+    vi.mocked(repo.findByDocuments).mockRejectedValueOnce(new Error("stored state unavailable"));
+    const embedTexts = vi.fn(async () => [new Float32Array([1, 2])]);
+    const handler = new EvidenceDocumentEmbeddingBackfillHandler({
+      evidenceDocumentEmbeddingRepo: repo, provider: provider(embedTexts)
+    });
+    await expect(handler.handle({ workspace_id: "workspace-1" })).rejects.toThrow("stored state unavailable");
+    expect(embedTexts).not.toHaveBeenCalled();
+    expect(repo.upsertMany).not.toHaveBeenCalled();
+  });
+
   it("fails loudly when a cold batch cannot be persisted", async () => {
     const repo = createRepo([source()], []);
     vi.mocked(repo.upsertMany).mockRejectedValueOnce(new Error("disk unavailable"));

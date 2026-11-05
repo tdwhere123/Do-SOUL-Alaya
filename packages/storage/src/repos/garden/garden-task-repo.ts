@@ -13,7 +13,7 @@ import { prepareGardenTaskStatements } from "./statements/garden-task-statements
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 import { parseClaimRequest } from "./writes/garden-task-claim-request.js";
-import { isUniqueConstraintError } from "./garden-task-errors.js";
+import { GardenTaskAlreadyCompleted, isUniqueConstraintError } from "./garden-task-errors.js";
 import { claimGardenTaskWithEvents } from "./writes/garden-task-claim-with-events.js";
 import { failPendingGardenTaskWithCompletionEvent } from "./writes/garden-task-pending-failure.js";
 import {
@@ -35,6 +35,7 @@ import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row
 import { GardenTaskSourceProvenance } from "./garden-task-source-provenance.js";
 import { GardenStatementSessionSources } from "./garden-statement-session-sources.js";
 import { HostSessionLedger } from "./host-session-ledger.js";
+import { listEmbeddingFollowUps } from "./embedding-follow-up-list.js";
 
 export type * from "./garden-task-types.js";
 
@@ -115,6 +116,10 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       }
       throw new StorageError("QUERY_FAILED", `Failed to enqueue Garden task ${id}.`, error);
     }
+  }
+
+  public listEmbeddingBackfillFollowUps(workspaceId: string, limit: number) {
+    return listEmbeddingFollowUps(this.connection, workspaceId, limit);
   }
 
   public findById(taskId: string): GardenTaskRow | null {
@@ -375,6 +380,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         );
       });
     } catch (error) {
+      if (error instanceof GardenTaskAlreadyCompleted) return;
       if (error instanceof StorageError) {
         throw error;
       }
@@ -598,8 +604,10 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       return;
     }
     const row = this.findByIdInWorkspace(taskId, workspaceId);
-    if (row !== null && row.status === status && row.outcome === outcome && row.claimed_by === claimedBy) {
-      return;
+    if (row !== null && row.status === status && row.outcome === outcome && row.claimed_by === claimedBy &&
+        row.completed_at === completedAt && row.last_error_text === lastErrorText) {
+      // Abort the append-first transaction so a retry cannot append another completion audit.
+      throw new GardenTaskAlreadyCompleted();
     }
     throw new StorageError(
       "CONFLICT",

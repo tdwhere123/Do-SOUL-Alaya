@@ -41,12 +41,26 @@ Protocol 34.1.0 adds an optional Garden task `outcome` (`completed`, `skipped`,
 `failed`) to completion events and MCP completion responses. Consolidation and
 bulk-enrich intentional skips are measured as skipped rather than inferred from
 legacy `success`; a bulk batch with failed items now reports failure while the
-existing item obligations remain pending. The pre-34.1 boolean remains a
-non-failure projection. Migration
+existing item obligations remain pending. Source-enrichment publication or failure
+now commits its measured Garden completion with its existing semantic audit and
+terminal task state, without a second scheduler completion attempt. The pre-34.1
+boolean remains a non-failure projection. Migration
 042 stores measured outcomes without inventing them for historical rows. Keep a
 pre-042 database for rollback: older binaries must not reopen the migrated copy
 because they cannot preserve the new completion distinction. Signal unknown closes
 an unsafe replay path, not automatic recovery of missing memories.
+
+Migration 043 atomically records each memory embedding committed by Garden
+backfill as part of its task-scoped formation obligation. Supported `answers_with` follow-ups use audited fenced
+claims, a pinned formation digest, and current source/embedding checks inside
+assertion admission. After interruption they resume without re-embedding or
+re-admitting an existing assertion; stale, erased, or unauthorized inputs remain
+blocked for inspection. A later follow-up does not rewrite its parent's failed
+outcome. The new `soul.garden.embedding_follow_up` events and optional
+`garden.list_pending_tasks` follow-up projection distinguish pending, in-flight,
+and blocked obligations without making them externally claimable. Pre-043
+binaries must use a pre-043 backup rather than reopening the migrated database.
+Retired coherence mutation is not re-enabled.
 
 Migration 041 adds durable admission lineage, grounding-claim audit boundaries,
 and separate signal-reference versus independent-enrichment progress. Existing

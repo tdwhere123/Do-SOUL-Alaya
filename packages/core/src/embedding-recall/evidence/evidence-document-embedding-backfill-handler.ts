@@ -55,7 +55,8 @@ export class EvidenceDocumentEmbeddingBackfillHandler {
       BACKFILL_BATCH_SIZE * BACKFILL_BATCH_CONCURRENCY_MAX,
       dependencies.evidenceDocumentEmbeddingRepo,
       dependencies.now,
-      dependencies.warn
+      dependencies.warn,
+      true
     );
     this.batchConcurrency = resolveBackfillBatchConcurrency(
       dependencies.batchConcurrency ??

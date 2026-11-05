@@ -227,6 +227,7 @@ async function runGardenSchedulerMaintenance(input: Readonly<{
     await input.hostWorkerTaskRuntime.expireUnclaimedHostWorkerTasks();
   }
   input.bulkEnrichRuntime.reclaimStaleClaims();
+  await input.gardenSchedulerRuntime.retryEmbeddingBackfillFollowUp();
   await input.gardenSchedulerRuntime.reconcileStuckEdgeProposalAccepts();
   await input.gardenSchedulerRuntime.sweepExpiredEdgeProposals();
   await input.hostWorkerTaskRuntime.processStatementSessionTask();

@@ -5,7 +5,8 @@ import type {
   GardenTierValue,
   SoulConfig
 } from "@do-soul/alaya-protocol";
-import type { EmbeddingBackfillHandler, EventPublisher } from "@do-soul/alaya-core";
+import type { EmbeddingBackfillHandleResult, EmbeddingBackfillHandler, EventPublisher } from "@do-soul/alaya-core";
+import type { EmbeddingBackfillCheckpoint } from "./embedding-backfill-checkpoint.js";
 import type {
   PathPlasticityWatermarkRepo,
   SqlitePathGraphSnapshotRepo,
@@ -17,7 +18,12 @@ import type {
   ConsolidationExecutor
 } from "@do-soul/alaya-core";
 
+export type EmbeddingBackfillRuntimePort = Readonly<{
+  handle(...args: Parameters<EmbeddingBackfillHandler["handle"]>): Promise<EmbeddingBackfillHandleResult>;
+}>;
+
 export type EmbeddingBackfillTaskOutcome = Readonly<{
+  readonly outcome: GardenTaskOutcome | undefined;
   readonly success: boolean;
   readonly objectsAffected: readonly string[];
   readonly auditEntries: readonly string[];
@@ -52,6 +58,7 @@ export interface GardenSchedulerRuntimeSupport {
     mode?: EmbeddingBackfillMode
   ): Promise<EmbeddingBackfillTaskOutcome>;
   runConsolidationCycleTask(task: Readonly<GardenTaskDescriptor>): Promise<void>;
+  retryEmbeddingBackfillFollowUp(workspaceId?: string): Promise<Readonly<{ retried: boolean; taskId: string | null; errorMessage: string | null }>>;
   reconcileStuckEdgeProposalAccepts(): Promise<void>;
   sweepExpiredEdgeProposals(): Promise<void>;
   runEventLogOrphanDetection(): Promise<void>;
@@ -63,26 +70,20 @@ export interface GardenSchedulerRuntimeSupport {
 
 export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
   readonly now: () => string;
-  readonly coherenceEdgeProducerPort?: {
-    crystallizeForBackfill(input: {
-      readonly workspaceId: string;
-      readonly runId: string | null;
-      readonly objectIds: readonly string[];
-    }): Promise<unknown>;
-  };
   readonly answersWithEdgeProducerPort?: {
-    crystallizeForBackfill(input: {
+    prepareForBackfill(input: {
       readonly workspaceId: string;
       readonly runId: string | null;
       readonly objectIds: readonly string[];
-    }): Promise<unknown>;
+    }): Promise<Readonly<{ readonly digest: string; execute(assertClaim: () => undefined): Promise<void> }>>;
   };
   readonly configService?: {
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
   };
   readonly consolidationExecutor: ConsolidationExecutor | null;
   readonly legacyTopologyMutationsEnabled?: boolean;
-  readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
+  readonly embeddingBackfillHandler?: EmbeddingBackfillRuntimePort;
+  readonly embeddingBackfillCheckpoint?: EmbeddingBackfillCheckpoint;
   readonly edgeProposalReconcile?: {
     reconcileStuckAccepts(input: {
       readonly workspaceId: string;
@@ -110,6 +111,7 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
   ) => Promise<void>;
   readonly eventPublisher: Pick<EventPublisher, "publish" | "appendManyWithMutation">;
   readonly gardenScheduler: {
+    releaseInProcessClaim?(taskId: string): Promise<boolean>;
     enqueue(task: {
       readonly task_id: string;
       readonly task_kind: string;

@@ -5,6 +5,7 @@ import { SqliteEventLogRepo, SqliteSignalRepo, SqliteSourceGroundingDeferQueueRe
 import { acquireTemporalRuntimeLease } from "../temporal-cutover/lease.js";
 import { closeDaemonStartupResourcesAfterFailure, retainDaemonStartupCleanup, retryDaemonStartupCleanups } from "./cleanup.js";
 import { DaemonDatabaseOpenCleanupError, openDaemonDatabase } from "./database.js";
+import { recoverInterruptedEmbeddingBackfills } from "./embedding-backfill-recovery.js";
 
 /** No database or writer escapes until this owner has acquired its own lease and completed recovery. */
 export async function openRuntimeDatabase(filename: string, runtimeNotifier: RuntimeNotifier,
@@ -15,6 +16,7 @@ export async function openRuntimeDatabase(filename: string, runtimeNotifier: Run
   try {
     database = await openDaemonDatabase(filename);
     await recoverInterruptedSignals(database, runtimeNotifier, warn);
+    await recoverInterruptedEmbeddingBackfills(database, runtimeNotifier);
     return { database, temporalRuntimeLease };
   } catch (error) {
     if (database !== undefined) {

@@ -171,6 +171,8 @@ const GARDEN_TASK_MAINTENANCE_SQL: SqlDefinitionMap<GardenTaskMaintenanceStateme
       SELECT${GARDEN_TASK_SELECT_COLUMNS}
       FROM garden_tasks
       WHERE status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < ?
+        AND NOT EXISTS (SELECT 1 FROM garden_embedding_backfill_runs r
+          WHERE r.task_id = garden_tasks.id AND r.owner_token IS NOT NULL)
       ORDER BY claimed_at ASC, id ASC
     `,
   gcAbandonedClaimStatement: `

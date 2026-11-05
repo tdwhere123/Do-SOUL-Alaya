@@ -15,7 +15,8 @@ import type { GardenTaskOperations } from "../tool/tool-handler-operations.js";
 import type {
   GardenTaskCompletionResult,
   GardenTaskEventInput,
-  GardenTaskRow
+  GardenTaskRow,
+  SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 import {
   GardenTaskUnavailableError,
@@ -42,6 +43,7 @@ export interface GardenTaskToolCallContext {
 export interface GardenTaskHandlerDependencies {
   readonly gardenTaskRepo?: GardenTaskSourceGuardPort & {
     readonly statementSessions: GardenTaskPayloadSources;
+    listEmbeddingBackfillFollowUps?: SqliteGardenTaskRepo["listEmbeddingBackfillFollowUps"];
     findByIdInWorkspace(taskId: string, workspaceId: string): GardenTaskRow | null;
     peekPending(
       role: GardenRoleValue,
@@ -142,7 +144,15 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies, now: 
       tasks.push(snapshot);
       payloadChars += size;
     }
-    return GardenListPendingTasksResponseSchema.parse({ tasks });
+    const listFollowUps = deps.gardenTaskRepo.listEmbeddingBackfillFollowUps;
+    const followUps = listFollowUps === undefined || (request.role !== undefined && request.role !== "librarian")
+      ? [] : listFollowUps.call(deps.gardenTaskRepo, context.workspaceId, request.limit + 1);
+    return GardenListPendingTasksResponseSchema.parse({ tasks,
+      ...(listFollowUps === undefined ? {} : {
+        embedding_follow_ups: followUps.slice(0, request.limit),
+        embedding_follow_ups_truncated: followUps.length > request.limit
+      })
+    });
   };
 }
 
