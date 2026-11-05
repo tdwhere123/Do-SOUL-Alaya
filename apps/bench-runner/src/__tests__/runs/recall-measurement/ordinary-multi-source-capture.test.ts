@@ -13,7 +13,7 @@ import { captureMultipleSources } from "./ordinary-multi-source.test-support.js"
 import { admitOrdinaryRecallObservation } from "../../../runs/recall-measurement/ordinary/ordinary-recall.js";
 import { readJson, writeJson, type RecallResponseCase } from "./ordinary-capture.test-support.js";
 import { chainIdentity } from "../../../runs/recall-measurement/contract.js";
-import { OrdinaryRecallMultiSourceConfigSchema, OrdinaryRecallMultiSourceObservationSchema } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
+import { ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, OrdinaryRecallMultiSourceConfigSchema, OrdinaryRecallMultiSourceObservationSchema } from "../../../runs/recall-measurement/ordinary/ordinary-recall-contract.js";
 import { verifyOrdinaryMultiSourceDelivery } from "../../../runs/recall-measurement/ordinary/ordinary-multi-source-delivery.js";
 import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
 import { capturedCalls } from "./ordinary-multi-source.test-support.js";
@@ -58,7 +58,7 @@ it("admits actual multiple source roots and each contiguous targeted expansion f
   expect(capture.delivered).toEqual(capture.bodies);
   const admitted = admitOrdinaryRecallObservation(capture.root);
   expect(admitted.state).toBe("complete");
-  expect(admitted.binding).toMatchObject({ protocol_package_version: "34.0.0", reader_protocol_package_version: "34.0.0",
+  expect(admitted.binding).toMatchObject({ protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, reader_protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION,
     public_semantics: "ordinary-native-field.v9", producer_revision: capture.config.implementation_revision });
   expect(capturedCalls(capture).every(call => call.output?.index?.result_version === "ordinary-native-field.v9")).toBe(true);
 });
