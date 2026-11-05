@@ -294,7 +294,7 @@ without reacquisition.
 
 Current public `QueryView` defaults to `native_query`; field index and
 continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v9`, Protocol
-34.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+34.1.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -718,7 +718,8 @@ Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
 14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5,
-29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8 and current 34.0.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0/v9 and current
+34.1.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
 canonical request policy. Every native pair requires its matching
 `ordinary-native-field.vN` public semantics and result/continuation version,
 `native_query`, and current compact disclosures; cross-pairs are refused. This is offline
