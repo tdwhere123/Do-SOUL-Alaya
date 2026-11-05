@@ -460,8 +460,9 @@ function runRecall(
 }
 
 function expectMemoryBaselineWithUnknownSources(index: InformationIndex): void {
+  // Unknown observed coverage cannot claim a complete representation.
   expect(index.completeness, JSON.stringify(index.completeness)).toMatchObject({
-    logical_index: "open", observed_coverage: "unknown", transport: "open", representation: "complete"
+    logical_index: "open", observed_coverage: "unknown", transport: "open", representation: "open"
   });
   expect(index.completeness.certificate_id).toBeUndefined();
   expect(index.continuation).toBeNull();

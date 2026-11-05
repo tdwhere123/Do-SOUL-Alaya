@@ -55,7 +55,7 @@ function expectUnresolvedLogInterpretation(index: InformationIndex): void {
   // The in-window log is reachable through its relation, but its prose does
   // not decide whether it independently denotes another failed deployment.
   expect(index.completeness).toMatchObject({ logical_index: "open", observed_coverage: "unknown",
-    transport: "open", representation: "complete" });
+    transport: "open", representation: "open" });
   expect(index.continuation).toBeNull();
 }
 
