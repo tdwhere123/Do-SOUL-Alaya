@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 
 import { tmpdir } from "node:os";
 
@@ -94,7 +94,7 @@ describe("tool-runtime relative path handling", () => {
 
     expect(JSON.parse(result.content)).toMatchObject({ ok: true });
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.affectedPathRoots).toContain(await realpath(repoDir));
     expect(requests[0]?.rawInput).toMatchObject({ path: path.join(repoDir, "src/index.ts") });
   });
 
@@ -141,7 +141,7 @@ describe("tool-runtime relative path handling", () => {
       content: [{ type: "text", text: "ok" }]
     });
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.affectedPathRoots).toContain(await realpath(repoDir));
     expect(requests[0]?.rawInput).toMatchObject({ path: path.join(repoDir, "docs/notes.md") });
   });
 
@@ -188,7 +188,7 @@ describe("tool-runtime relative path handling", () => {
       content: [{ type: "text", text: "ok" }]
     });
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.affectedPathRoots).toContain(await realpath(repoDir));
     expect(requests[0]?.rawInput).toMatchObject({ path: path.join(workspaceDir, "outside-repo.txt") });
   });
 

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ describe("tool runtime repository binding", () => {
     const { root, worktree } = await createWorktree();
     expect(await resolveAffectedPathRoots(worktree, {
       currentWorkingDirectory: root, repoRootsEnv: ""
-    })).toEqual([worktree]);
+    })).toEqual([await realpath(worktree)]);
   });
 
   it("uses explicitly allowed roots for a worktree's external gitdir", async () => {
@@ -37,13 +37,15 @@ describe("tool runtime repository binding", () => {
     })).toBeUndefined();
     expect(await resolveAffectedPathRoots(worktree, {
       currentWorkingDirectory: worktree, repoRootsEnv: repo
-    })).toEqual([worktree]);
+    })).toEqual([await realpath(worktree)]);
   });
 
   it("rejects a binding whose Git metadata disappeared after registration", async () => {
     const { root, worktree } = await createWorktree();
-    const marker = await readFile(path.join(worktree, ".git"), "utf8");
-    await writeFile(path.join(worktree, ".git"), `${marker.trim()}-missing\n`);
+    const gitMarkerPath = path.join(worktree, ".git");
+    const marker = await readFile(gitMarkerPath, "utf8");
+    await chmod(gitMarkerPath, 0o666);
+    await writeFile(gitMarkerPath, `${marker.trim()}-missing\n`);
     expect(await resolveAffectedPathRoots(worktree, {
       currentWorkingDirectory: root, repoRootsEnv: ""
     })).toBeUndefined();
