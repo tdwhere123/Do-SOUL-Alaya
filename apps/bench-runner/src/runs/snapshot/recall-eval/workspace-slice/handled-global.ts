@@ -8,6 +8,7 @@ export type GlobalTablePolicy =
   | { readonly action: "schema_ledger" }
   | { readonly action: "copy_all" }
   | { readonly action: "copy_none" }
+  | { readonly action: "reset"; readonly sql: string }
   | {
       readonly action: "copy_via_fk";
       // Exactly one non-null FK selects the row owner; null references do not confer scope.
@@ -21,6 +22,12 @@ const SCHEMA_LEDGER = Object.freeze({ action: "schema_ledger" as const });
 
 export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = Object.freeze({
   schema_version: SCHEMA_LEDGER,
+  // Transaction-local suppression is not snapshot state. Keep a zero singleton:
+  // an empty table would also suppress dirty tracking through SQL NULL semantics.
+  source_erase_repair_control: Object.freeze({
+    action: "reset" as const,
+    sql: "DELETE FROM source_erase_repair_control; INSERT INTO source_erase_repair_control(singleton, repairing) VALUES (1, 0)"
+  }),
   garden_semantic_schema: COPY_ALL,
   garden_embedding_backfill_objects: Object.freeze({
     action: "copy_via_fk" as const,

@@ -15,6 +15,7 @@ import { MEM, NOW, WS, openSourceSlice } from "../../../../../../packages/core/s
 import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { commitIssuedDelivery, replayIssuedSurfaces } from "../../../../../../packages/core/src/recall/runtime/recall-index-commit.js";
+import { recallExecutionRetention } from "../../../../../../packages/core/src/recall/runtime/recall-execution-retention.js";
 import { evictIssuedDeliveries, replayIssuedDelivery } from "../../../../../../packages/core/src/recall/runtime/index-continuation.js";
 
 const databases = new Set<StorageDatabase>();
@@ -262,16 +263,39 @@ it("does not repeat membership when a source payload remains incomplete", async 
   expect(next.entries).toHaveLength(0);
 });
 
-it("bounds source surfaces with issued pages and deletes them on query eviction", () => {
-  const index = { query_id: "eviction", snapshot_id: "snapshot", entries: [] } as unknown as InformationIndex;
-  for (let i = 0; i < 33; i++) commitIssuedDelivery({ query_key: i === 32 ? "other" : "eviction",
+it("retains live issued source surfaces beyond 32 pages and deletes only the evicted execution", () => {
+  const index = { query_id: "eviction", snapshot_id: "snapshot", entries: [], continuation: null } as unknown as InformationIndex;
+  for (let i = 0; i < 34; i++) commitIssuedDelivery({ query_key: i === 33 ? "other" : "eviction",
     request_digest: `eviction-${i}`, index, request: { continuation_id: `eviction-${i}` } as Continuation,
     previews: new Map([["key", "protected source bytes"]]), metadata: { key: {} } });
-  expect(replayIssuedDelivery("eviction-0")).toBeUndefined();
-  expect(replayIssuedSurfaces("eviction-0")).toBeUndefined();
+  expect(replayIssuedDelivery("eviction-0")?.index).toBe(index);
+  expect(replayIssuedSurfaces("eviction-0")?.previews.get("key")).toBe("protected source bytes");
   evictIssuedDeliveries("eviction");
-  for (let i = 0; i < 32; i++) expect(replayIssuedSurfaces(`eviction-${i}`)).toBeUndefined();
-  expect(replayIssuedSurfaces("eviction-32")?.previews.get("key")).toBe("protected source bytes");
+  for (let i = 0; i < 33; i++) expect(replayIssuedSurfaces(`eviction-${i}`)).toBeUndefined();
+  expect(replayIssuedSurfaces("eviction-33")?.previews.get("key")).toBe("protected source bytes");
   evictIssuedDeliveries("other");
-  expect(replayIssuedSurfaces("eviction-32")).toBeUndefined();
+  expect(replayIssuedSurfaces("eviction-33")).toBeUndefined();
+});
+
+
+it("expires issued source surfaces and revokes their handles without a resume request", () => {
+  vi.useFakeTimers();
+  const removed = vi.fn();
+  const unsubscribe = recallExecutionRetention.subscribe(removed);
+  try {
+    const index = { query_id: "expiry", snapshot_id: "snapshot", entries: [], continuation: null } as unknown as InformationIndex;
+    const deliveryId = commitIssuedDelivery({ query_key: "expiry", request_digest: "expiry-page", index,
+      deadline: Date.now() + 100, request: { continuation_id: "expiry-token" } as Continuation,
+      previews: new Map([["key", "protected source bytes"]]), metadata: { key: {} } });
+    expect(replayIssuedSurfaces("expiry-page")?.previews.get("key")).toBe("protected source bytes");
+    vi.advanceTimersByTime(100);
+    expect(removed).toHaveBeenCalledWith({ handles: [deliveryId, "expiry-token"], reason: "expired" });
+    expect(replayIssuedDelivery("expiry-page")).toBeUndefined();
+    expect(replayIssuedSurfaces("expiry-page")).toBeUndefined();
+    expect(recallExecutionRetention.executionFor("expiry-token")).toBeUndefined();
+  } finally {
+    evictIssuedDeliveries("expiry");
+    unsubscribe();
+    vi.useRealTimers();
+  }
 });

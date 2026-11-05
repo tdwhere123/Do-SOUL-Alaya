@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { initDatabase, SqliteRunRepo } from "@do-soul/alaya-storage";
 import { WORKSPACE, createStatementSessionEnvironment } from "../../../../core-daemon/src/__tests__/garden/statement-session-fixture.js";
-import { longMemEvalSessionContainer } from "../../datasets/longmemeval/ingestion/host-session-import.js";
+import { captureLongMemEvalWindow, longMemEvalSessionContainer } from "../../datasets/longmemeval/ingestion/host-session-import.js";
 
 const saved = process.env.STATEMENT_MAP;
 afterEach(() => {
@@ -63,8 +63,9 @@ it("publishes a cached statement beyond the first round page and rejects incompl
       role: "assistant" as const, content: `Message ${position}.`, completeness: "complete" as const, fidelity: "original_bytes" as const }));
     await new SqliteRunRepo(env.database).create({ run_id: WORKSPACE, workspace_id: WORKSPACE, title: "publication", goal: null,
       run_mode: "chat", engine_binding_id: null, engine_class: null, run_state: "idle", current_surface_id: null });
-    await env.capture({ container, messages: messages.slice(0, 64) });
-    await env.capture({ container, messages: messages.slice(64), closes_tail: true });
+    await captureLongMemEvalWindow(() => env.capture({ container, messages: messages.slice(0, 64) }));
+    const closed = await captureLongMemEvalWindow(() => env.capture({ container, messages: messages.slice(64), closes_tail: true }));
+    expect(closed.pending_round_count).toBe(0);
     const rounds = env.database.connection.prepare(`SELECT round_index, root_id FROM host_session_rounds
       WHERE workspace_id = ? AND state = 'done' ORDER BY round_index`).all(WORKSPACE) as { round_index: number; root_id: string }[];
     expect(rounds.map(row => row.round_index)).toEqual(Array.from({ length: 70 }, (_, index) => index));

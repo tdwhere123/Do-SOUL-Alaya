@@ -155,6 +155,21 @@ describe("published answer-turn exposure", () => {
     expect(score(observed(28, 43)).support_sufficiency).toEqual({ status: "not_measured", reason: "no_evaluator_frozen_full_support_set" });
   });
 
+  it("retains admitted first-page witnesses at @10 without claiming collection completion or support sufficiency", () => {
+    const result = score(observed(28, 43, undefined, true, true));
+    expect(result.contract).toBe("longmemeval-acquisition-observation-v2");
+    for (const metric of ["source_bearing_any@10", "answer_span_exposure@10", "answer_complete_coverage@10"] as const) {
+      expect(result.metrics[metric]).toEqual({ status: "hit", reason: null });
+    }
+    expect(result.collection.at_10).toEqual({ cutoff: 10, status: "incomplete", reason: "second_page_not_observed" });
+    expect(result.measurement_change).toEqual({ attribution: "cutoff_semantics_only",
+      historical_contract: "longmemeval-acquisition-observation-v1", historical_at_10: {
+        source_bearing_any: { status: "hit", reason: null },
+        answer_span_exposure: { status: "unknown", reason: "second_page_not_observed" },
+        answer_complete_coverage: { status: "unknown", reason: "second_page_not_observed" } } });
+    expect(result.support_sufficiency.status).toBe("not_measured");
+  });
+
   it("keeps @10 unknown for an unobserved continuation without backfilling @5", () => {
     const value = observed(0, 16, undefined, true, true);
     expect(value.replay.response.index?.continuation).not.toBeNull();

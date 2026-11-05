@@ -84,18 +84,34 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     expect(third.continuation).toBeNull();
   });
 
-  it("does not let a same-query instance consume another instance's continuation state", async () => {
+  it("keeps same-query instances independently resumable through completion and retry", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const ids = await plantNeedles(slice, 6, 971);
     const firstInstance = runRecall(slice, { page_budget: 2 });
     const secondInstance = runRecall(slice, { page_budget: 2 });
     expect(firstInstance.query_id).toBe(secondInstance.query_id);
+    expect(firstInstance.entries.map((entry) => entry.object_id)).toEqual(ids.slice(0, 2));
+    expect(secondInstance.entries.map((entry) => entry.object_id)).toEqual(ids.slice(0, 2));
+    expect(firstInstance.continuation).not.toBeNull();
+    expect(secondInstance.continuation).not.toBeNull();
     expect(firstInstance.continuation).not.toEqual(secondInstance.continuation);
-    const displaced = runRecall(slice, { page_budget: 2, continuation: firstInstance.continuation });
-    expect(displaced.entries).toEqual([]);
-    expect(displaced.completeness.logical_index).toBe("invalidated");
-    const continued = runRecall(slice, { page_budget: 2, continuation: secondInstance.continuation });
-    expect(continued.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
+    const firstContinued = runRecall(slice, { page_budget: 2, continuation: firstInstance.continuation });
+    const secondContinued = runRecall(slice, { page_budget: 2, continuation: secondInstance.continuation });
+    expect(firstContinued.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
+    expect(secondContinued.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
+    expect(firstContinued.continuation).not.toBeNull();
+    expect(secondContinued.continuation).not.toBeNull();
+    expect(firstContinued.continuation).not.toEqual(secondContinued.continuation);
+
+    const firstCompleted = runRecall(slice, { page_budget: 2, continuation: firstContinued.continuation });
+    expect(firstCompleted.entries.map((entry) => entry.object_id)).toEqual(ids.slice(4));
+    expect(firstCompleted.continuation).toBeNull();
+    const firstReplay = runRecall(slice, { page_budget: 2, continuation: firstInstance.continuation });
+    expect(firstReplay.page_purpose).toBe("retry");
+    expect(firstReplay.entries).toEqual(firstContinued.entries);
+    const secondCompleted = runRecall(slice, { page_budget: 2, continuation: secondContinued.continuation });
+    expect(secondCompleted.entries.map((entry) => entry.object_id)).toEqual(ids.slice(4));
+    expect(secondCompleted.continuation).toBeNull();
   });
 
   it("changes the observable pin when a relation is admitted", async () => {

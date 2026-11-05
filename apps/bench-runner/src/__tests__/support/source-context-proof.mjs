@@ -173,8 +173,19 @@ try {
     run.evaluation = json(output); assert.equal(run.evaluation.rows.length, 16); assert.ok(run.evaluation.summary.every(s => s.denominator === 8));
   }
   assert.ok(main.evaluation.rows.every(row => row.visibility.any_at_5.status === 'hit'
-    && row.visibility.any_at_10.status === 'unknown' && row.visibility.all_at_10.status === 'unknown'
+    && row.visibility.any_at_10.status === 'hit' && row.visibility.all_at_10.status === 'hit'
+    && row.visibility.collection.at_10.status === 'incomplete' && row.visibility.collection.exhausted === false
+    && row.historical_visibility.any_at_10.status === 'unknown' && row.historical_visibility.all_at_10.status === 'unknown'
     && row.byte_visibility.all_at_budget.status === 'hit'));
+  assert.equal(main.evaluation.contract, 'conditional-navigation-evaluation.v3');
+  for (const summary of main.evaluation.summary) {
+    assert.equal(summary.contract, 'consumer-message-visibility-v2');
+    assert.equal(summary.historical_contract, 'consumer-message-visibility-v1');
+    assert.equal(summary.measurement_attribution, 'cutoff_semantics_only');
+    assert.deepEqual(summary.measurement_changes, { any_at_5: 0, any_at_10: 8, all_at_5: 0, all_at_10: 8 });
+    assert.deepEqual(summary.metrics.all_at_10, { hit: 8, miss: 0, unknown: 0 });
+  }
+  assert.deepEqual(main.evaluation.summary[1].paired.all_at_10, { gains: 0, losses: 0, unknown_pairs: 0 });
   for (const name of ['unknown-location', 'strict']) {
     const evaluation = runs.find(r => r.name === name).evaluation;
     assert.equal(evaluation.summary[0].status, 'scored'); assert.equal(evaluation.summary[1].status, 'unavailable');

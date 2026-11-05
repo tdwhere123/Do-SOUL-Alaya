@@ -77,6 +77,10 @@ function applyOneGlobalPolicy(
     return;
   }
   if (policy.action === "copy_none") return;
+  if (policy.action === "reset") {
+    for (const dest of destByWorkspace.values()) dest.exec(policy.sql);
+    return;
+  }
   const columns = listColumns(packed, table);
   if (policy.action === "copy_all") {
     copyAllGlobalRows(packed, destByWorkspace, table, columns);

@@ -31,7 +31,8 @@ it("keeps refused and absent rows in the real mixed report without consulting th
     return loaded;
   });
   const answerCensus = vi.spyOn(census, "censusCompleteSourceRecords");
-  const scorer = vi.spyOn(visibility, "scoreConsumerMessageVisibility");
+  const historicalScorer = vi.spyOn(visibility, "scoreConsumerMessageVisibility");
+  const currentScorer = vi.spyOn(visibility, "scoreConsumerMessagePropositions");
   try {
     const measured = await measureLongMemEvalSemanticRun(f.experiment, f.replayPath, join(f.root, "evaluator"));
     expect(readChainArtifact(measured.path)).toEqual(measured.result);
@@ -55,8 +56,22 @@ it("keeps refused and absent rows in the real mixed report without consulting th
     expect(labelReads).not.toHaveBeenCalled();
     expect(answerCensus).toHaveBeenCalledTimes(1);
     expect(answerCensus.mock.calls[0]![0].questionWindow).toEqual({ offset: 0, limit: 1 });
-    expect(scorer).toHaveBeenCalledTimes(1);
-  } finally { loader.mockRestore(); answerCensus.mockRestore(); scorer.mockRestore(); }
+    // Both contracts may construct explicit unknown rows, but only the admitted
+    // supported row can carry labels or visible intervals into either scorer.
+    for (const scorer of [currentScorer, historicalScorer]) {
+      const inputs = scorer.mock.calls.map(([input]) => input);
+      expect(inputs.filter(input => input.gold !== undefined)).toHaveLength(1);
+      const admitted = inputs.find(input => input.gold !== undefined)!;
+      expect(admitted.gold?.complete).toBe(true);
+      expect(admitted.pages).toHaveLength(1);
+      expect(admitted.unavailableReason).toBeUndefined();
+      for (const input of inputs.filter(input => input.gold === undefined)) {
+        expect(input.pages).toEqual([]);
+        expect(input.unavailableReason).toEqual(expect.any(String));
+      }
+    }
+    expect(currentScorer.mock.calls).toEqual(historicalScorer.mock.calls);
+  } finally { loader.mockRestore(); answerCensus.mockRestore(); currentScorer.mockRestore(); historicalScorer.mockRestore(); }
 }, 120_000);
 
 /** Runs the real emitted launcher/caller/archive/SQLite path. A module wrapper instruments only

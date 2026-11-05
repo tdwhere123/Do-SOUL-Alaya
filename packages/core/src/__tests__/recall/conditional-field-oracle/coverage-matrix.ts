@@ -130,7 +130,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "completing one interpretation produces certainty about omitted hypotheses",
     "projectAcceptingIndex CompletenessReport", "MCP completeness", "real-producer"),
   row("revised-source-vs-fresh-eval", "revised-source evaluation agrees with fresh evaluation; mixed epochs invalidate",
-    "epoch mismatch or stale/displaced/tampered issued token invalidates; only the current exact token refines retained state",
+    "epoch mismatch or tampered issued token invalidates; exact issued tokens resume or replay their own execution without displacing equal-query starts",
     "old source/model/interpretation silently refines a new epoch",
     "continuationInvalidated + interpretation_id; snapshot-cursor-continuation.test.ts exact token and interleaved instances",
     "paged resume; grounded-revision.test.ts same-count stronger seed, transition, derivation, root-map and source-revision equal fresh grounding", "real-producer"),

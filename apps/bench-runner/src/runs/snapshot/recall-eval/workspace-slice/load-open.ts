@@ -11,6 +11,7 @@ import {
   readTriggers,
   restoreTriggers
 } from "./dest-schema.js";
+import type { GlobalTablePolicy } from "./handled-global.js";
 import { quoteIdent, quoteLiteral } from "./names.js";
 import { rebuildWorkspaceFts } from "./rebuild-fts.js";
 
@@ -66,7 +67,7 @@ function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog
       replaceAttachedTable(live, table.name);
     }
     for (const table of catalog.global) {
-      applyAttachedGlobalTable(live, table.name, table.policy.action);
+      applyAttachedGlobalTable(live, table.name, table.policy);
     }
     rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
     live.connection.exec("COMMIT");
@@ -83,11 +84,15 @@ function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog
 function applyAttachedGlobalTable(
   live: StorageDatabase,
   table: string,
-  action: string
+  policy: GlobalTablePolicy
 ): void {
-  if (action === "schema_ledger") return;
-  if (action === "copy_none") {
+  if (policy.action === "schema_ledger") return;
+  if (policy.action === "copy_none") {
     live.connection.exec(`DELETE FROM ${quoteIdent(table)}`);
+    return;
+  }
+  if (policy.action === "reset") {
+    live.connection.exec(policy.sql);
     return;
   }
   replaceAttachedTable(live, table);

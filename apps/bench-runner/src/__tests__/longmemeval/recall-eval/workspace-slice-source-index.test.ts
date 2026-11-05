@@ -185,7 +185,7 @@ describe("workspace slice source index explode", () => {
     ))).toBe(false);
   });
 
-  it.each(["v1", "v2", "v3"])("refuses a %s sidecar instead of relabelling it as a lexical-complete snapshot", async (recipeVersion) => {
+  it.each(["v1", "v2", "v3", "v6"])("refuses a %s sidecar instead of relabelling it as a current snapshot", async (recipeVersion) => {
     const dataDir = join(root, `${recipeVersion}-data`);
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
