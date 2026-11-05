@@ -247,7 +247,7 @@ describe("embedding backfill supported follow-up recovery", () => {
       database.connection.exec(`CREATE TRIGGER fail_backfill_handoff BEFORE UPDATE OF state ON garden_embedding_backfill_runs
         WHEN NEW.state = 'pending' BEGIN SELECT RAISE(ABORT, 'handoff interrupted'); END`);
       await expect(first.runtime.runEmbeddingBackfillPass(WORKSPACE)).rejects.toThrow(/handoff interrupted/);
-      expect(checkpoint(database)).toMatchObject({ state: "backfilling", status: "claimed", outcome: null });
+      expect(checkpoint(database)).toMatchObject({ state: "backfilling", status: "pending", outcome: null });
       expect(count(database, "memory_embeddings")).toBe(3);
       expect(count(database, "garden_embedding_backfill_objects")).toBe(3);
       expect(count(database, "relation_assertions")).toBe(0);
@@ -260,7 +260,9 @@ describe("embedding backfill supported follow-up recovery", () => {
         expect(faults.embedCalls).toBe(1);
         expect(count(resumed.database, "relation_assertions")).toBe(3);
         expect(checkpoint(resumed.database)).toMatchObject({ state: "completed", status: "completed", outcome: "completed" });
-        expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).events).toHaveLength(1);
+        expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).events).toHaveLength(0);
+        expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP)).events
+          .filter(event => event.caused_by === "garden-settled-attempt-recovery")).toHaveLength(1);
       } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
     } finally { if (!database.isClosed()) database.close(); }
   });
@@ -422,9 +424,10 @@ describe("embedding backfill supported follow-up recovery", () => {
       const harness = createHandoffRuntime(database, faults);
       faults.failPendingAudit = true;
       await expect(harness.runtime.runEmbeddingBackfillPass(WORKSPACE)).rejects.toThrow(/pending audit failure/);
-      expect(checkpoint(database)).toMatchObject({ state: "backfilling", status: "claimed", outcome: null });
+      expect(checkpoint(database)).toMatchObject({ state: "backfilling", status: "pending", outcome: null });
       expect(count(database, "memory_embeddings")).toBe(3);
-      expect((await harness.eventLog.queryByType(GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP)).events).toHaveLength(0);
+      expect((await harness.eventLog.queryByType(GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP)).events
+        .map(event => event.payload_json.disposition)).toEqual(["recovered"]);
     } finally { database.close(); }
     const resumed = await reopened(file, faults);
     try {

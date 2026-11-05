@@ -145,22 +145,33 @@ async function runEmbeddingBackfillTask(
       await input.gardenScheduler.releaseInProcessClaim?.(task.task_id);
       throw new AlayaError("CONFLICT", "Garden backfill mode is pinned to a production follow-up.");
     }
-    let outcome: EmbeddingBackfillTaskOutcome;
     try {
-      outcome = await executeCheckpointedBackfill(input, task, checkpoint, claim,
-        buildEmbeddingBackfillFailure, sanitizeDurableErrorMessage);
+      let outcome: EmbeddingBackfillTaskOutcome;
+      try {
+        outcome = await executeCheckpointedBackfill(input, task, checkpoint, claim,
+          buildEmbeddingBackfillFailure, sanitizeDurableErrorMessage);
+      } catch (error) {
+        const row = checkpoint.read(claim);
+        if (row.state === "backfilling") throw error;
+        input.warn("embedding follow-up checkpoint settlement failed", {
+          workspace_id: task.workspace_id, phase: "follow_up_completion", error: serializeCausalError(error)
+        });
+        outcome = makeOutcome("failed", checkpoint.objectIds(claim),
+          ["embedding_backfill_follow_up_completion_unavailable"], "embedding_backfill_follow_up_completion_unavailable");
+      }
+      await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
+      checkpoint.release(claim);
+      return outcome;
     } catch (error) {
-      const row = checkpoint.read(claim);
-      if (row.state === "backfilling") throw error;
-      input.warn("embedding follow-up checkpoint settlement failed", {
-        workspace_id: task.workspace_id, phase: "follow_up_completion", error: serializeCausalError(error)
-      });
-      outcome = makeOutcome("failed", checkpoint.objectIds(claim),
-        ["embedding_backfill_follow_up_completion_unavailable"], "embedding_backfill_follow_up_completion_unavailable");
+      // Both execution and completion persistence have settled; no accepted writer
+      // remains. Recovery is audited atomically, never inferred from claim age.
+      try {
+        await checkpoint.relinquishQuiescent(claim);
+      } catch (recoveryError) {
+        throw new AggregateError([error, recoveryError], "Garden settled-attempt recovery remains pending.");
+      }
+      throw error;
     }
-    await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
-    checkpoint.release(claim);
-    return outcome;
   } finally {
     pendingWorkspaces.delete(task.workspace_id);
   }
@@ -196,6 +207,7 @@ async function retryEmbeddingBackfillFollowUp(input: CreateGardenSchedulerRuntim
     retried: boolean; taskId: string | null; errorMessage: string | null;
   }>> {
   const checkpoint = input.embeddingBackfillCheckpoint;
+  await checkpoint?.recoverQuiescent(workspaceId);
   const claim = checkpoint === undefined ? null : await checkpoint.claimPending(workspaceId, excludedTaskIds);
   if (checkpoint === undefined || claim === null) return { retried: false, taskId: null, errorMessage: null };
   try {
@@ -207,7 +219,13 @@ async function retryEmbeddingBackfillFollowUp(input: CreateGardenSchedulerRuntim
     });
     return { retried: true, taskId: claim.taskId, errorMessage: "embedding_backfill_follow_up_completion_unavailable" };
   } finally {
-    checkpoint.release(claim);
+    try {
+      checkpoint.release(claim);
+    } catch (error) {
+      // The retry's formation work has settled even if releasing its fence fails.
+      await checkpoint.relinquishQuiescent(claim);
+      throw error;
+    }
   }
 }
 
@@ -326,6 +344,7 @@ async function runEmbeddingBackfillPass(
   workspaceId: string,
   mode: EmbeddingBackfillMode
 ): Promise<void> {
+  await input.embeddingBackfillCheckpoint?.recoverQuiescent(workspaceId);
   if (input.embeddingBackfillCheckpoint?.hasActiveWorkspace(workspaceId) === true) {
     throw new AlayaError("CONFLICT", "Garden embedding backfill is already owned.");
   }

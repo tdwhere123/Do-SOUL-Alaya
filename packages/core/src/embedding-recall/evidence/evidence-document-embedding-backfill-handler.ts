@@ -184,16 +184,26 @@ async function mapConcurrent<T, R>(
 ): Promise<readonly R[]> {
   const results = new Array<R>(values.length);
   let cursor = 0;
-  await Promise.all(Array.from(
+  let failed = false;
+  const settled = await Promise.allSettled(Array.from(
     { length: Math.min(concurrency, values.length) },
     async () => {
-      while (cursor < values.length) {
+      while (!failed && cursor < values.length) {
         const index = cursor;
         cursor += 1;
-        results[index] = await action(values[index]!);
+        try {
+          results[index] = await action(values[index]!);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
       }
     }
   ));
+  // A caller may relinquish its Garden claim only after every accepted batch
+  // stops writing, even when a sibling batch failed earlier.
+  const failure = settled.find(entry => entry.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
   return Object.freeze(results);
 }
 

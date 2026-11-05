@@ -298,8 +298,12 @@ same SQLite transaction as its vector. The Garden scheduler owns the supported
 formation plan before governed assertion admission and checks that plan and its
 source inputs inside each admission transaction. A failed follow-up remains
 retryable without rerunning completed backfill; changed, erased or unauthorized
-inputs block instead of being replayed. The runtime lease fences startup recovery,
-and a later follow-up does not rewrite the parent task's historical outcome.
+inputs block instead of being replayed. The runtime lease fences startup recovery.
+A live executor relinquishes a failed attempt only after its accepted writers
+settle; an atomic recovery audit requeues a still-claimed parent and releases
+its checkpoint fence without changing terminal outcomes. Failed recovery audits
+retain that known-quiescent owner for a later pass, rather than inferring safety
+from claim age. A later follow-up does not rewrite the parent's historical outcome.
 The MCP pending-task response reports pending and blocked follow-ups separately
 from claimable tasks; a truncation flag prevents a bounded page from implying
 complete absence. Retired coherence mutation is not part of this handoff.

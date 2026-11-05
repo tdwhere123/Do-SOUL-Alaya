@@ -28,6 +28,8 @@ export interface HandoffFaults {
   failAfterAdmissionAt: number | null;
   failFollowUpAudit: boolean;
   failPendingAudit?: boolean;
+  failTaskCompletionAudits?: number;
+  failSettledRecoveryAudits?: number;
   failRetryClaimAudit?: boolean;
   afterRetryClaimAudit?: () => void;
   pauseAdmissionAt?: number;
@@ -101,6 +103,16 @@ export function createHandoffRuntime(database: StorageDatabase, faults: HandoffF
     runtimeNotifier: notifier });
   const originalDecide = publisher.decideAppendThenApply.bind(publisher);
   publisher.decideAppendThenApply = async decide => {
+    if ((faults.failSettledRecoveryAudits ?? 0) > 0) {
+      return await originalDecide(() => {
+        const decision = decide();
+        if (decision.eventInputs.some(event => event.caused_by === "garden-settled-attempt-recovery")) {
+          faults.failSettledRecoveryAudits! -= 1;
+          throw new AlayaError("UNAVAILABLE", "injected settled recovery audit failure");
+        }
+        return decision;
+      });
+    }
     if (faults.failRetryClaimAudit) {
       faults.failRetryClaimAudit = false;
       throw new AlayaError("UNAVAILABLE", "injected retry claim audit failure");
@@ -111,6 +123,11 @@ export function createHandoffRuntime(database: StorageDatabase, faults: HandoffF
   };
   const originalAppend = publisher.appendManyWithMutation.bind(publisher);
   publisher.appendManyWithMutation = async (events, mutate) => {
+    if ((faults.failTaskCompletionAudits ?? 0) > 0 &&
+        events.some(event => event.event_type === "soul.garden.task_completed")) {
+      faults.failTaskCompletionAudits! -= 1;
+      throw new AlayaError("UNAVAILABLE", "injected task completion audit failure");
+    }
     if (faults.failPendingAudit && events.some(event => event.event_type === "soul.garden.embedding_follow_up" &&
         event.payload_json.disposition === "pending")) {
       faults.failPendingAudit = false;

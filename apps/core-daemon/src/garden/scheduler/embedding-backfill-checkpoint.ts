@@ -48,6 +48,10 @@ export function createEmbeddingFollowUpEvent(input: Readonly<{
 
 /** Task-scoped progress; embedding IDs are recorded by the guarded embedding write. */
 export class EmbeddingBackfillCheckpoint {
+  // Only the executor that awaited its accepted work may declare quiescence.
+  // Keep failed recovery audits here for a later pass; restart uses the OS lease.
+  private readonly quiescent = new Map<string, EmbeddingBackfillClaim>();
+
   public constructor(private readonly connection: StorageDatabase["connection"],
     private readonly publisher: Pick<EventPublisher, "appendManyWithMutation" | "decideAppendThenApply">,
     private readonly now: () => string) {}
@@ -96,6 +100,45 @@ export class EmbeddingBackfillCheckpoint {
           return claim;
         } };
     });
+  }
+
+  public async relinquishQuiescent(claim: EmbeddingBackfillClaim): Promise<void> {
+    this.quiescent.set(claim.taskId, claim);
+    await this.recoverQuiescent(claim.workspaceId);
+  }
+
+  public async recoverQuiescent(workspaceId?: string): Promise<void> {
+    for (const claim of this.quiescent.values()) {
+      if (workspaceId !== undefined && claim.workspaceId !== workspaceId) continue;
+      await this.publisher.decideAppendThenApply(() => {
+        const row = this.connection.prepare(`SELECT r.attempt_count, t.status, t.claimed_by
+          FROM garden_embedding_backfill_runs r JOIN garden_tasks t
+            ON t.id = r.task_id AND t.workspace_id = r.workspace_id
+          WHERE r.task_id = ? AND r.workspace_id = ? AND r.owner_token = ?`)
+          .get(claim.taskId, claim.workspaceId, claim.ownerToken) as {
+            attempt_count: number; status: string; claimed_by: string | null;
+          } | undefined;
+        if (row === undefined) return { eventInputs: [], apply: () => undefined };
+        if (row.status === "claimed" && row.claimed_by !== "in-process") {
+          throw new AlayaError("CONFLICT", "Quiescent Garden task no longer belongs to its executor.");
+        }
+        const occurredAt = this.now();
+        return { eventInputs: [createEmbeddingFollowUpEvent({ ...claim, disposition: "recovered",
+          attemptCount: row.attempt_count, occurredAt, causedBy: "garden-settled-attempt-recovery" })],
+          apply: () => {
+            // This transaction never changes a terminal parent or its committed completion receipt.
+            if (row.status === "claimed") {
+              const parent = this.connection.prepare(`UPDATE garden_tasks SET status = 'pending',
+                claimed_by = NULL, claimed_at = NULL WHERE id = ? AND workspace_id = ?
+                AND status = 'claimed' AND claimed_by = 'in-process'`)
+                .run(claim.taskId, claim.workspaceId);
+              if (parent.changes !== 1) throw new AlayaError("CONFLICT", "Quiescent Garden parent claim changed.");
+            }
+            this.release(claim);
+          } };
+      });
+      if (this.quiescent.get(claim.taskId) === claim) this.quiescent.delete(claim.taskId);
+    }
   }
 
   public hasPendingRetryWorkspace(workspaceId: string): boolean {
