@@ -5,9 +5,12 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { closeCachedDatabase, initDatabase } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { startBenchDaemon } from "../../../harness/daemon.js";
 import {
   explodePackedWorkingCopy,
-  loadSliceIntoOpenDatabase
+  installWorkspaceSlice,
+  loadSliceIntoOpenDatabase,
+  workingAlayaDbPath
 } from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
@@ -57,7 +60,7 @@ describe("workspace slice Garden follow-ups", () => {
         slice.close();
       }
     }
-    expect(readFileSync(packedPath)).toEqual(packedBytes);
+    expect(readFileSync(packedPath).equals(packedBytes)).toBe(true);
   });
 
   it("replaces both parent and child rows when switching an open database between slices", async () => {
@@ -73,11 +76,62 @@ describe("workspace slice Garden follow-ups", () => {
         loadSliceIntoOpenDatabase(live, slicePath);
         assertFollowUps(live.connection, workspaceId, sequence);
         expect(live.connection.pragma("foreign_keys", { simple: true })).toBe(1);
-        expect(readFileSync(slicePath)).toEqual(sealedBytes);
+        expect(readFileSync(slicePath).equals(sealedBytes)).toBe(true);
       }
     } finally {
       live.close();
     }
+  });
+
+  it("preserves checkpoint evidence in sealed slices and audits stale owner release only on daemon restore", async () => {
+    const packed = initDatabase({ filename: packedPath });
+    try {
+      packed.connection.prepare(`UPDATE garden_embedding_backfill_runs SET owner_token = 'packed-owner'
+        WHERE task_id = ?`).run(`${WORKSPACE_A}-failed`);
+    } finally {
+      packed.close();
+    }
+    const packedBytes = readFileSync(packedPath);
+    const exploded = await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir: join(root, "owned-slices")
+    });
+    const slicePath = exploded.sliceDbPaths[WORKSPACE_A]!;
+    const sealedBytes = readFileSync(slicePath);
+    const dataDir = join(root, "restored");
+    installWorkspaceSlice({ dataDir, sliceDbPath: slicePath });
+    const before = new BetterSqlite3(workingAlayaDbPath(dataDir), { readonly: true });
+    try {
+      expect(before.prepare("SELECT owner_token FROM garden_embedding_backfill_runs WHERE task_id = ?")
+        .get(`${WORKSPACE_A}-failed`)).toEqual({ owner_token: "packed-owner" });
+    } finally {
+      before.close();
+    }
+    const daemon = await startBenchDaemon({
+      dataDirRoot: dataDir, workspaceId: WORKSPACE_A, runId: "run-a", embeddingMode: "disabled"
+    });
+    let live: BetterSqlite3.Database | undefined;
+    try {
+      live = new BetterSqlite3(workingAlayaDbPath(dataDir), { readonly: true });
+      expect(live.prepare(`SELECT r.owner_token, r.state, r.attempt_count, t.status, t.outcome,
+        o.object_id, o.content_hash FROM garden_embedding_backfill_runs r
+        JOIN garden_tasks t ON t.id = r.task_id
+        JOIN garden_embedding_backfill_objects o ON o.task_id = r.task_id
+        WHERE r.task_id = ?`).get(`${WORKSPACE_A}-failed`)).toEqual({
+        owner_token: null, state: "blocked", attempt_count: 2, status: "failed", outcome: "failed",
+        object_id: "shared-object", content_hash: `sha256:${WORKSPACE_A}-failed`
+      });
+      expect(live.prepare(`SELECT entity_id, workspace_id,
+        json_extract(payload_json, '$.disposition') AS disposition FROM event_log
+        WHERE caused_by = 'garden-startup-recovery'`).all()).toEqual([{
+        entity_id: `${WORKSPACE_A}-failed`, workspace_id: WORKSPACE_A, disposition: "recovered"
+      }]);
+    } finally {
+      try { live?.close(); }
+      finally { await daemon.shutdown(); }
+    }
+    expect(readFileSync(slicePath).equals(sealedBytes)).toBe(true);
+    expect(readFileSync(packedPath).equals(packedBytes)).toBe(true);
   });
 });
 

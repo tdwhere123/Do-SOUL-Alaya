@@ -1,3 +1,4 @@
+import BetterSqlite3 from "better-sqlite3";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,7 +21,7 @@ describe("alaya operations", () => {
     await mkdir(paths.configDir, { recursive: true });
     await writeFile(paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(dbPath)}\n`, "utf8");
     await writeFile(paths.envPath, "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n", "utf8");
-    await writeFile(dbPath, "sqlite-bytes");
+    writeDatabase(dbPath, "saved");
 
     const service = createAlayaOperationsService({
       configPaths: paths,
@@ -37,7 +38,7 @@ describe("alaya operations", () => {
     };
 
     expect(bundle.kind).toBe("backup");
-    expect(Buffer.from(bundle.storage.db_base64, "base64").toString("utf8")).toBe("sqlite-bytes");
+    expect(readDatabase(Buffer.from(bundle.storage.db_base64, "base64"))).toBe("saved");
     expect(audit).toMatchObject({ operation: "backup", status: "succeeded" });
     await expect(service.previewImport({ bundlePath: result.artifact_path })).resolves.toMatchObject({
       bundle_kind: "backup",
@@ -56,7 +57,11 @@ describe("alaya operations", () => {
     const bundlePath = path.join(configDir, "bundle.json");
     await mkdir(paths.configDir, { recursive: true });
     await writeFile(paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(activeDbPath)}\n`, "utf8");
-    await writeFile(activeDbPath, "original-bytes");
+    writeDatabase(activeDbPath, "original");
+    const incoming = new BetterSqlite3(":memory:");
+    incoming.exec("CREATE TABLE example (value TEXT); INSERT INTO example VALUES ('restored')");
+    const incomingBytes = incoming.serialize();
+    incoming.close();
     await writeFile(
       bundlePath,
       JSON.stringify({
@@ -69,7 +74,7 @@ describe("alaya operations", () => {
         },
         storage: {
           db_path: bundledDbPath,
-          db_base64: Buffer.from("restored-bytes").toString("base64")
+          db_base64: incomingBytes.toString("base64")
         }
       }),
       "utf8"
@@ -83,7 +88,7 @@ describe("alaya operations", () => {
 
     expect(result.restored_paths).toContain(activeDbPath);
     expect(result.restored_paths).not.toContain(bundledDbPath);
-    await expect(readFile(activeDbPath, "utf8")).resolves.toBe("restored-bytes");
+    expect(readDatabase(activeDbPath)).toBe("restored");
     await expect(readFile(bundledDbPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(paths.tomlPath, "utf8")).resolves.toContain(`db_path = ${quoteTomlString(activeDbPath)}`);
   });
@@ -135,7 +140,7 @@ async function createBackupFixture(): Promise<{
   await mkdir(paths.configDir, { recursive: true });
   await writeFile(paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(dbPath)}\n`, "utf8");
   await writeFile(paths.envPath, "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n", "utf8");
-  await writeFile(dbPath, "sqlite-bytes");
+  writeDatabase(dbPath, "saved");
   return {
     paths,
     service: createAlayaOperationsService({
@@ -143,4 +148,18 @@ async function createBackupFixture(): Promise<{
       clock: () => "2026-04-30T00:00:00.000Z"
     })
   };
+}
+
+function writeDatabase(filename: string, value: string): void {
+  const db = new BetterSqlite3(filename);
+  try {
+    db.exec("CREATE TABLE example (value TEXT)");
+    db.prepare("INSERT INTO example VALUES (?)").run(value);
+  } finally { db.close(); }
+}
+
+function readDatabase(input: string | Buffer): string {
+  const db = new BetterSqlite3(input);
+  try { return (db.prepare("SELECT value FROM example").get() as { value: string }).value; }
+  finally { db.close(); }
 }

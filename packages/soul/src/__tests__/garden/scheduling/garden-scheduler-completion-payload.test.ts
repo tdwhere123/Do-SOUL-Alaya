@@ -31,6 +31,53 @@ function createUuidLikeObjectIds(count: number): readonly string[] {
 }
 
 describe("GardenScheduler completion event payloads", () => {
+  it.each([
+    { outcome: "completed", success: true },
+    { outcome: "skipped", success: true },
+    { outcome: "failed", success: false }
+  ] as const)("preserves measured $outcome with compatibility success=$success", async ({ outcome, success }) => {
+    const eventLog = createBoundedEventLog();
+    const scheduler = new GardenScheduler(eventLog);
+    scheduler.enqueue(createTask());
+    await scheduler.dispatchNext(GardenRole.JANITOR);
+
+    await scheduler.reportCompletion(createResult({ outcome, success }));
+
+    const completions = eventLog.events.filter(event => event.event_type === GardenEventType.SOUL_GARDEN_TASK_COMPLETED);
+    expect(completions).toHaveLength(1);
+    expect(completions[0]!.payload).toMatchObject({ outcome, success });
+    expect(scheduler.queueDepth).toBe(0);
+  });
+
+  it.each([
+    { outcome: "completed", success: false },
+    { outcome: "skipped", success: false },
+    { outcome: "failed", success: true }
+  ] as const)("rejects $outcome with contradictory success=$success before completing the claim", async ({ outcome, success }) => {
+    const eventLog = createBoundedEventLog();
+    const scheduler = new GardenScheduler(eventLog);
+    scheduler.enqueue(createTask());
+    await scheduler.dispatchNext(GardenRole.JANITOR);
+    const eventsBefore = eventLog.events.length;
+
+    await expect(scheduler.reportCompletion(createResult({ outcome, success }))).rejects.toThrow(/conflicts/);
+
+    expect(eventLog.events).toHaveLength(eventsBefore);
+    expect(await scheduler.releaseInProcessClaim("task-1")).toBe(true);
+    expect(scheduler.queueDepth).toBe(1);
+  });
+
+  it.each([true, false])("does not infer an unmeasured outcome from legacy success=%s", async success => {
+    const eventLog = createBoundedEventLog();
+    const scheduler = new GardenScheduler(eventLog);
+
+    await scheduler.reportCompletion(createResult({ success }));
+
+    expect(eventLog.events).toHaveLength(1);
+    expect(eventLog.events[0]!.payload.success).toBe(success);
+    expect(eventLog.events[0]!.payload).not.toHaveProperty("outcome");
+  });
+
   it("bounds a large completion event while retaining full tier-1 cooling state", async () => {
     const eventLog = createBoundedEventLog();
     const scheduler = new GardenScheduler(eventLog, {

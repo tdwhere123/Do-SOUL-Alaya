@@ -2,8 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { Hono } from "hono";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
@@ -11,6 +9,7 @@ const isolation = await vi.hoisted(async () => {
     descendantPreload: new URL("../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
 });
 import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/lease.js";
+import { closeDaemonSqliteWriteQueue } from "../../runtime/startup/database.js";
 import { openRuntimeDatabase } from "../../runtime/startup/runtime-database.js";
 import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
 import {
@@ -23,6 +22,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { SignalService } from "@do-soul/alaya-core";
 import {
+  getSqliteWriteQueuePort,
   initDatabase,
   SqliteEventLogRepo,
   SqliteRunRepo,
@@ -31,23 +31,29 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { registerSignalRoutes, type SignalRouteServices } from "../../routes/workspace/signals.js";
+import { startOwnedTestChild } from "../support/owned-child-process.js";
 
 const directories: string[] = [];
 const databases: StorageDatabase[] = [];
+const children: ReturnType<typeof startOwnedTestChild>[] = [];
 afterAll(() => isolation.restore());
 
-afterEach(() => {
-  expect(isolation.violations).toEqual([]);
+afterEach(async () => {
+  for (const child of children.splice(0)) await child.stop();
   for (const database of databases.splice(0)) {
     if (!database.isClosed()) database.close();
   }
   for (const directory of directories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
+  expect(isolation.violations).toEqual([]);
 });
 
 describe("compiled signal resume through storage and signal routes", () => {
-  it("lists explicit unknown after restart under the real runtime lease, never replays effects", async () => {
+  it.for([
+    { outcome: "successful assertions", failAfterRestart: false },
+    { outcome: "failed assertions", failAfterRestart: true }
+  ])("keeps compiled signals unknown after restart and releases resources after $outcome", async ({ failAfterRestart }, { signal: abortSignal }) => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-signal-route-compiled-"));
     directories.push(directory);
     const filename = join(directory, "alaya.db");
@@ -75,41 +81,64 @@ describe("compiled signal resume through storage and signal routes", () => {
     });
 
     const seeded = initDatabase({ filename });
-    await seedCompiledCrash(seeded, signal);
-    seeded.close();
+    try { await seedCompiledCrash(seeded, signal); }
+    finally { seeded.close(); }
     // The child owns the exact production lease. OS process death, not a PID
     // heuristic or caller flag, establishes release before startup recovery.
     const leaseModule = new URL("../../../dist/runtime/temporal-cutover/lease.js", import.meta.url).href;
-    const child = spawn(process.execPath, ["--input-type=module", "-e", `
+    const child = startOwnedTestChild(["--input-type=module", "-e", `
       const { acquireTemporalRuntimeLease } = await import(${JSON.stringify(leaseModule)});
       await acquireTemporalRuntimeLease(${JSON.stringify(filename)});
       console.log('owned'); setInterval(() => {}, 1000);
-    `], { stdio: ["ignore", "pipe", "pipe"] });
+    `], abortSignal);
+    children.push(child);
     try {
-      await Promise.race([once(child.stdout!, "data"), once(child, "exit").then(() => { throw new Error("lease owner exited early"); })]);
+      await child.waitForStdout("owned\n");
       await expect(acquireTemporalRuntimeLease(filename)).rejects.toThrow("must be stopped");
     } finally {
-      const exited = once(child, "exit");
-      child.kill("SIGKILL");
-      await exited;
+      await child.stop();
     }
+    abortSignal.throwIfAborted();
     const { database: reopened, temporalRuntimeLease: restartLease } = await openRuntimeDatabase(
       filename, createRuntimeNotifier(), () => undefined
     );
     databases.push(reopened);
-    const eventLogRepo = new SqliteEventLogRepo(reopened);
-    const signalRepo = new SqliteSignalRepo(reopened);
-    const runRepo = new SqliteRunRepo(reopened);
-    const materialize = vi.fn(async () => {
-      throw new Error("compiled crash must not rematerialize");
-    });
-    const signalService = new SignalService({
-      eventLogRepo,
-      signalRepo,
-      runtimeNotifier: { notifyEntry: vi.fn(async () => {}) },
-      postTriageMaterializer: { materialize }
-    });
+    const checkRestartedState = async () => {
+      try { await assertRecoveredSignalRoutes(reopened, signal, failAfterRestart); }
+      finally {
+        await closeDaemonSqliteWriteQueue();
+        try { reopened.close(); }
+        finally { await restartLease.release(); }
+      }
+    };
+    if (failAfterRestart) await expect(checkRestartedState()).rejects.toThrow("injected restarted assertion failure");
+    else await checkRestartedState();
+    expect(reopened.isClosed()).toBe(true);
+    expect(getSqliteWriteQueuePort()).toBeNull();
+    const nextLease = await acquireTemporalRuntimeLease(filename);
+    await nextLease.release();
+    expect(isolation.violations).toEqual([]);
+  });
+});
 
+async function assertRecoveredSignalRoutes(
+  reopened: StorageDatabase, signal: CandidateMemorySignal, failAfterRestart: boolean
+): Promise<void> {
+  const eventLogRepo = new SqliteEventLogRepo(reopened);
+  const signalRepo = new SqliteSignalRepo(reopened);
+  const runRepo = new SqliteRunRepo(reopened);
+  const materialize = vi.fn(async () => {
+    throw new Error("compiled crash must not rematerialize");
+  });
+  const signalService = new SignalService({
+    eventLogRepo,
+    signalRepo,
+    runtimeNotifier: { notifyEntry: vi.fn(async () => {}) },
+    postTriageMaterializer: { materialize }
+  });
+
+  try {
+    if (failAfterRestart) throw new Error("injected restarted assertion failure");
     expect(materialize).not.toHaveBeenCalled();
     expect(await signalService.receiveSignal(signal)).toMatchObject({
       signal: { signal_state: "materialization_unknown" }, triage_result: "unknown", materialization: null
@@ -144,12 +173,8 @@ describe("compiled signal resume through storage and signal routes", () => {
     expect(events.at(-1)?.payload_json).toMatchObject({ normalized_fields: {
       materialization_recovery: { disposition: "effects_unknown", requires_inspection: true, automatic_replay: false }
     } });
-    await signalService.close();
-    reopened.close();
-    await restartLease.release();
-    expect(isolation.violations).toEqual([]);
-  });
-});
+  } finally { await signalService.close(); }
+}
 
 async function seedCompiledCrash(database: StorageDatabase, signal: CandidateMemorySignal): Promise<void> {
   await new SqliteWorkspaceRepo(database).create({

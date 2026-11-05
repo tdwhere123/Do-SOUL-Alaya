@@ -271,7 +271,7 @@ describe("H02 — sealed slice private working copy", () => {
     expect(statAfter.size).toBe(statBefore.size);
     expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
     expect(hashRegularFileNoFollow(slicePathA)).toBe(shaBefore);
-    expect(readFileSync(slicePathA)).toEqual(bytesBefore);
+    expect(readFileSync(slicePathA).equals(bytesBefore)).toBe(true);
 
     await closeRecallEvalPagerChild();
   }, 60_000);

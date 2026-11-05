@@ -1,24 +1,28 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GardenEventType, GardenRole, GardenTaskKind, GardenTier, type GardenTaskDescriptor } from "@do-soul/alaya-protocol";
 import { GardenScheduler } from "@do-soul/alaya-soul";
 import { EventPublisher } from "@do-soul/alaya-core";
-import { initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { getSqliteWriteQueuePort, initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { EmbeddingBackfillCheckpoint } from "../../garden/scheduler/embedding-backfill-checkpoint.js";
 import { createEmbeddingBackfillRuntimeSupport } from "../../garden/scheduler/scheduler-runtime-embedding-backfill.js";
 import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler/scheduler-runtime-types.js";
+import { closeDaemonSqliteWriteQueue } from "../../runtime/startup/database.js";
 import { openRuntimeDatabase } from "../../runtime/startup/runtime-database.js";
 import { CLOCK, createFaults, createHandoffRuntime, EVIDENCE, IDS, notifier, OTHER_WORKSPACE, seedAdditionalHandoffData, seedHandoffData, WORKSPACE,
   type HandoffFaults } from "./embedding-backfill-follow-up-fixture.js";
 
 const directories = new Set<string>();
 afterEach(() => {
+  // A runtime writer owns a separate SQLite connection, not database.connection.
+  expect(getSqliteWriteQueuePort()).toBeNull();
   for (const directory of directories) {
-    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(directory, { recursive: true, force: true });
   }
   directories.clear();
 });
@@ -42,7 +46,22 @@ function count(database: StorageDatabase, table: string): number {
 
 async function reopened(file: string, faults: HandoffFaults) {
   const opened = await openRuntimeDatabase(file, notifier, () => undefined);
-  return { ...opened, ...createHandoffRuntime(opened.database, faults) };
+  try {
+    return { ...opened, ...createHandoffRuntime(opened.database, faults) };
+  } catch (error) {
+    await closeReopenedRuntime(opened);
+    throw error;
+  }
+}
+
+async function closeReopenedRuntime(opened: Awaited<ReturnType<typeof openRuntimeDatabase>>): Promise<void> {
+  // Drain and retire the worker before closing the caller connection or releasing
+  // the runtime lease. Otherwise Windows cannot remove the worker's database.
+  try { await closeDaemonSqliteWriteQueue(); }
+  finally {
+    try { opened.database.close(); }
+    finally { await opened.temporalRuntimeLease.release(); }
+  }
 }
 
 async function killAt(file: string, point: "task_dispatch" | "before_embedding" | "embedding" | "assertion" | "followup_audit" | "task_audit" | "retry_claim") {
@@ -71,6 +90,52 @@ async function killAt(file: string, point: "task_dispatch" | "before_embedding" 
 }
 
 describe("embedding backfill supported follow-up recovery", () => {
+  it.each([false, true])("retires the runtime writer and lease after a backfill with provider failure=%s", async failEmbedding => {
+    const file = filename();
+    const initial = initDatabase({ filename: file });
+    try { await seedHandoffData(initial); } finally { initial.close(); }
+    const opened = await reopened(file, createFaults());
+    const queue = getSqliteWriteQueuePort();
+    const terminate = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      expect(queue).not.toBeNull();
+      // This payload opens the worker's independent native SQLite handle even
+      // when the provider fails before the backfill can write any vectors.
+      await queue!.enqueue({ jobId: "fixture-writer-handle", kind: "maintenance", filename: file,
+        payload: { statements: [{ sql: "CREATE TABLE fixture_writer_handle (id INTEGER)" }] } });
+      const faults = createFaults();
+      faults.failEmbedding = failEmbedding;
+      const harness = createHandoffRuntime(opened.database, faults);
+      const execution = harness.runtime.runEmbeddingBackfillPass(WORKSPACE);
+      if (failEmbedding) await expect(execution).rejects.toThrow(/embedding_failed:provider/);
+      else await execution;
+    } finally {
+      try {
+        await closeReopenedRuntime(opened);
+        expect(terminate).toHaveBeenCalledTimes(1);
+        const worker = terminate.mock.contexts[0];
+        expect(worker).toBeInstanceOf(Worker);
+        if (worker instanceof Worker) expect(worker.threadId).toBe(-1);
+      } finally { terminate.mockRestore(); }
+    }
+    expect(opened.database.isClosed()).toBe(true);
+    expect(getSqliteWriteQueuePort()).toBeNull();
+    await expect(queue!.enqueue({ jobId: "retired-writer", kind: "maintenance", filename: file,
+      payload: { statements: [] } })).rejects.toThrow(/clos/i);
+    // Delete immediately, with no retries: Windows rejects an outstanding native
+    // database/lease handle; POSIX alone would allow unlinking an open file.
+    rmSync(dirname(file), { recursive: true });
+    expect(existsSync(dirname(file))).toBe(false);
+    directories.delete(dirname(file));
+    const next = initDatabase({ filename: filename() });
+    try {
+      await seedHandoffData(next);
+      expect(count(next, "memory_entries")).toBe(3);
+      expect(getSqliteWriteQueuePort()).toBeNull();
+      expect(existsSync(dirname(file))).toBe(false);
+    } finally { next.close(); }
+  });
+
   it("retries formation after the daemon's combined memory and evidence backfills without repeating either", async () => {
     const file = filename();
     const database = initDatabase({ filename: file });
@@ -91,8 +156,8 @@ describe("embedding backfill supported follow-up recovery", () => {
     } finally { database.close(); }
     faults.failAdmissionAt = null;
     const opened = await openRuntimeDatabase(file, notifier, () => undefined);
-    const resumed = createHandoffRuntime(opened.database, faults, false, false, false, true);
     try {
+      const resumed = createHandoffRuntime(opened.database, faults, false, false, false, true);
       await resumed.runtime.runEmbeddingBackfillPass(WORKSPACE);
       expect(count(opened.database, "memory_embeddings")).toBe(3);
       expect(count(opened.database, "evidence_recall_embeddings")).toBe(3);
@@ -100,7 +165,7 @@ describe("embedding backfill supported follow-up recovery", () => {
       expect((await resumed.eventLog.queryByType("relation.assertion_admitted")).events).toHaveLength(3);
       expect(checkpoint(opened.database)).toMatchObject({ state: "completed", status: "failed", outcome: "failed" });
       expect(faults.embedCalls).toBe(2);
-    } finally { opened.database.close(); await opened.temporalRuntimeLease.release(); }
+    } finally { await closeReopenedRuntime(opened); }
   });
 
   it("preserves committed vectors and retries a partially admitted plan after reopen without duplicate assertions", async () => {
@@ -136,7 +201,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         expect(events.map(event => event.payload_json.disposition)).toEqual(["pending", "retryable_failure", "claimed", "completed"]);
         const admissions = (await resumed.eventLog.queryByType("relation.assertion_admitted")).events;
         expect(admissions).toHaveLength(3);
-      } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+      } finally { await closeReopenedRuntime(resumed); }
     } finally { if (!database.isClosed()) database.close(); }
   });
 
@@ -159,7 +224,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         expect(count(resumed.database, "relation_assertions")).toBe(3);
         expect((await resumed.eventLog.queryByType("relation.assertion_admitted")).events).toHaveLength(3);
         expect(faults.embedCalls).toBe(1);
-      } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+      } finally { await closeReopenedRuntime(resumed); }
     } finally { if (!database.isClosed()) database.close(); }
   });
 
@@ -180,7 +245,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         expect(count(resumed.database, "memory_embeddings")).toBe(3);
         expect(count(resumed.database, "relation_assertions")).toBe(3);
         expect(checkpoint(resumed.database)).toMatchObject({ state: "completed", status: "completed", outcome: "completed" });
-      } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+      } finally { await closeReopenedRuntime(resumed); }
     }, 60_000
   );
 
@@ -203,7 +268,7 @@ describe("embedding backfill supported follow-up recovery", () => {
       expect(faults.embeddedTexts?.[0]).not.toContain("Memory 0 about cobalt deployment policy.");
       expect(count(resumed.database, "relation_assertions")).toBe(3);
       expect(checkpoint(resumed.database)).toMatchObject({ state: "completed", status: "completed", outcome: "completed" });
-    } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+    } finally { await closeReopenedRuntime(resumed); }
   }, 60_000);
 
   it.each(["assertion", "followup_audit", "task_audit"] as const)(
@@ -228,7 +293,7 @@ describe("embedding backfill supported follow-up recovery", () => {
             ? ["pending", "recovered", "completed"] : ["pending", "completed", "recovered"]);
         expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events).toHaveLength(1);
         expect(checkpoint(resumed.database)).toMatchObject({ state: "completed", status: "completed", outcome: "completed" });
-      } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+      } finally { await closeReopenedRuntime(resumed); }
     }, 60_000
   );
 
@@ -275,7 +340,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).events).toHaveLength(0);
         expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP)).events
           .filter(event => event.caused_by === "garden-settled-attempt-recovery")).toHaveLength(1);
-      } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+      } finally { await closeReopenedRuntime(resumed); }
     } finally { if (!database.isClosed()) database.close(); }
   });
 
@@ -449,7 +514,7 @@ describe("embedding backfill supported follow-up recovery", () => {
       expect(count(resumed.database, "relation_assertions")).toBe(3);
       expect((await resumed.eventLog.queryByType(GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP)).events
         .map(event => event.payload_json.disposition)).toEqual(["recovered", "pending", "completed"]);
-    } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+    } finally { await closeReopenedRuntime(resumed); }
   });
 
   it("keeps an unwired formation retryable and completes it once the producer is restored", async () => {
@@ -471,7 +536,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         status: "failed", attempt_count: 2 });
       expect(count(resumed.database, "relation_assertions")).toBe(3);
       expect(faults.embedCalls).toBe(1);
-    } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+    } finally { await closeReopenedRuntime(resumed); }
   });
 
   it("audits retry ownership before claim and recovers a killed retry owner", async () => {
@@ -504,7 +569,7 @@ describe("embedding backfill supported follow-up recovery", () => {
         .map(event => event.payload_json.disposition)).toEqual([
           "pending", "retryable_failure", "claimed", "recovered", "claimed", "completed"
         ]);
-    } finally { resumed.database.close(); await resumed.temporalRuntimeLease.release(); }
+    } finally { await closeReopenedRuntime(resumed); }
   }, 60_000);
 
   it("atomically chooses one retry claimant across independent SQLite connections", async () => {

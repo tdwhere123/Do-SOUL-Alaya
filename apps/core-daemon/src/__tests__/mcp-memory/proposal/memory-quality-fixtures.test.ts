@@ -33,38 +33,8 @@ interface IntegrationFixture {
 }
 
 describe("memory quality read/write fixtures", () => {
-  // Six before/after comparisons each open real SQLite and seed native recall;
-  // the test asserts recall content, not a five-second wall-clock SLA.
-  it("compares baseline recall with schema-aware write-path recall on the same fixture set", async () => {
-    const packs = [];
-
-    for (const fixture of createIntegrationFixtures()) {
-      const baselineHarness = createHarness([...fixture.baseline_memories]);
-      const baseline = await baselineHarness.recall(fixture.query);
-
-      const writeHarness = createHarness([...fixture.baseline_memories]);
-      for (const signal of fixture.signals) {
-        await writeHarness.receive(signal);
-      }
-      const after = await writeHarness.recall(fixture.query);
-      const expectedObjectIds = fixture.expected_after_content.flatMap((content) =>
-        writeHarness.memoryIdsByContent.get(content) ?? []
-      );
-
-      packs.push({
-        fixture_id: fixture.fixture_id,
-        selected_ids: after.index.entries.map((entry) => entry.object_id),
-        expected_ids: expectedObjectIds
-      });
-
-      if (fixture.expected_after_content.length > 0) {
-        expect(baseline.index.entries.map((entry) => entry.object_id)).not.toEqual(
-          expect.arrayContaining(expectedObjectIds)
-        );
-      }
-    }
-
-    expect(packs.map((pack) => pack.fixture_id)).toEqual([
+  it("covers the maintained recall fixture set", () => {
+    expect(createIntegrationFixtures().map((fixture) => fixture.fixture_id)).toEqual([
       "exact_fact",
       "current_state_update",
       "negative_query",
@@ -72,12 +42,30 @@ describe("memory quality read/write fixtures", () => {
       "broad_thematic_recall",
       "chinese_preference_constraint"
     ]);
-    expect(packs.every((pack) => pack.expected_ids.every((id) => pack.selected_ids.includes(id)))).toBe(true);
-    expect(packs.find((pack) => pack.fixture_id === "negative_query")?.selected_ids).toEqual([]);
-    const broad = packs.find((pack) => pack.fixture_id === "broad_thematic_recall")!;
-    expect(broad.expected_ids).toHaveLength(2);
-    expect(broad.selected_ids).toEqual(expect.arrayContaining(broad.expected_ids));
-  }, 30_000);
+  });
+
+  // Each case owns its before/after databases and timeout. Combining twelve
+  // SQLite initializations into one test hid which fixture exceeded its budget.
+  it.each(createIntegrationFixtures())("compares baseline and schema-aware recall for $fixture_id", async (fixture) => {
+    const baselineHarness = createHarness([...fixture.baseline_memories]);
+    const baseline = await baselineHarness.recall(fixture.query);
+    const writeHarness = createHarness([...fixture.baseline_memories]);
+    for (const signal of fixture.signals) await writeHarness.receive(signal);
+    const after = await writeHarness.recall(fixture.query);
+    const expectedObjectIds = fixture.expected_after_content.flatMap((content) =>
+      writeHarness.memoryIdsByContent.get(content) ?? []
+    );
+    const selectedIds = after.index.entries.map((entry) => entry.object_id);
+    if (fixture.expected_after_content.length > 0) {
+      expect(expectedObjectIds).toHaveLength(fixture.expected_after_content.length);
+      expect(baseline.index.entries.map((entry) => entry.object_id)).not.toEqual(
+        expect.arrayContaining(expectedObjectIds)
+      );
+    }
+    expect(selectedIds).toEqual(expect.arrayContaining(expectedObjectIds));
+    if (fixture.fixture_id === "negative_query") expect(selectedIds).toEqual([]);
+    if (fixture.fixture_id === "broad_thematic_recall") expect(expectedObjectIds).toHaveLength(2);
+  });
 });
 
 function createHarness(initialMemories: MemoryEntry[]) {
