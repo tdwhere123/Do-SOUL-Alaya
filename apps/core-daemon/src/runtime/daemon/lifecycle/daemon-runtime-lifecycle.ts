@@ -510,12 +510,12 @@ async function closeSqliteAfterBackgroundStop(
   backgroundStop: "drained" | "timed_out" | "not_started" | "failed"
 ): Promise<void> {
   if (backgroundStop === "failed") {
-    throw new Error("Garden background shutdown failed; retaining database and runtime lease.");
+    throw new AlayaError("UNAVAILABLE", "Garden background shutdown failed; retaining database and runtime lease.");
   }
   if (state.backgroundDrainOwed) {
     input.warnLogger.warn("waiting for garden background drain before sqlite close", {});
     if (input.gardenRuntime.backgroundManager.whenIdle === undefined) {
-      throw new Error("Garden drain cannot be verified; retaining database and runtime lease.");
+      throw new AlayaError("UNAVAILABLE", "Garden drain cannot be verified; retaining database and runtime lease.");
     }
     await input.gardenRuntime.backgroundManager.whenIdle();
     state.backgroundDrainOwed = false;

@@ -1,5 +1,5 @@
 import { bindEventPublisher, SignalService, type RuntimeNotifier } from "@do-soul/alaya-core";
-import { SignalEventType, SignalState, SoulSignalNormalizedPayloadSchema, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import { AlayaError, SignalEventType, SignalState, SoulSignalNormalizedPayloadSchema, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { SqliteEventLogRepo, SqliteSignalRepo, SqliteSourceGroundingDeferQueueRepo,
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { acquireTemporalRuntimeLease } from "../temporal-cutover/lease.js";
@@ -77,7 +77,7 @@ async function recoverInterruptedSignals(database: StorageDatabase, runtimeNotif
         }], () => {
           const updated = signalRepo.compareAndSwapState({ signalId: signal.signal_id,
             workspaceId: signal.workspace_id, expectedState: state, nextState: SignalState.MATERIALIZATION_UNKNOWN });
-          if (updated === null) throw new Error("Signal changed during quiescent startup recovery.");
+          if (updated === null) throw new AlayaError("CONFLICT", "Signal changed during quiescent startup recovery.");
         });
       }
     }

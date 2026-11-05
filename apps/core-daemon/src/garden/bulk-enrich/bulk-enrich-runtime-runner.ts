@@ -269,7 +269,7 @@ async function processClaimedBatch(
         missingCount += 1;
         continue;
       }
-      if (memory.workspace_id !== pending.workspaceId) throw new Error("BULK_ENRICH memory workspace does not match its obligation.");
+      if (memory.workspace_id !== pending.workspaceId) throw new AlayaError("CONFLICT", "BULK_ENRICH memory workspace does not match its obligation.");
       if (pending.independentProcessedAt == null) {
         await produceBulkEnrichEdges(pending, memory, ports);
         await detectBulkEnrichConflicts(memory, ports);
@@ -322,7 +322,7 @@ async function replayBulkEnrichSignalRefs(
     );
   }
   if (sourceSignal.workspace_id !== pending.workspaceId) {
-    throw new Error("BULK_ENRICH source signal workspace does not match its obligation.");
+    throw new AlayaError("CONFLICT", "BULK_ENRICH source signal workspace does not match its obligation.");
   }
   return await ports.signalRefReplay.replaySignalRefs({
     newMemoryId: memoryId,
