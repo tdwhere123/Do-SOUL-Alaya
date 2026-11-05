@@ -100,6 +100,7 @@ async function reviseSource(database: StorageDatabase, sourceId: string, scope: 
     valid_from: null, valid_to: null, speaker: "user", scope_class: scope, spans: deriveAddressableSpanViews(content) }, { workspaceId: WS });
 }
 
+// Includes cold worker startup and multiple SQLite-backed source/query reads.
 it("excludes unrelated source reads during source-scoped observation while retaining worker proof and raw delivery", async () => {
   await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },
     { id: "unrelated", text: "Granite walls.", reading: "surround" }], async ({ filename, execute, ids }) => {
@@ -146,7 +147,7 @@ it("excludes unrelated source reads during source-scoped observation while retai
       expect(trace.reads.bodies.map(row => row.source)).not.toContain("unrelated");
     } finally { database.close(); closeCachedDatabase(filename); }
   });
-});
+}, 30_000);
 
 it("keeps a corrupted interpretation source identity unknown before source-scoped exclusion", async () => {
   await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },

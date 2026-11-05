@@ -38,6 +38,7 @@ function createLibrarian(
   plasticityPort: PathPlasticityComputePort | undefined,
   options: {
     readonly pathPlasticityBudgetMs?: number;
+    readonly pathPlasticityDeferredReason?: string;
     readonly pathPlasticityPendingPort?: PathPlasticityPendingPort;
   } = {}
 ) {
@@ -51,6 +52,9 @@ function createLibrarian(
       createSynthesisReviewCandidate: vi.fn(async () => ({ candidate_id: "synthesis-1", created: true }))
     },
     ...(plasticityPort === undefined ? {} : { pathPlasticityPort: plasticityPort }),
+    ...(options.pathPlasticityDeferredReason === undefined
+      ? {}
+      : { pathPlasticityDeferredReason: options.pathPlasticityDeferredReason }),
     pathPlasticityPendingPort: options.pathPlasticityPendingPort ?? { clearPendingWorkspace },
     scheduler,
     ...(options.pathPlasticityBudgetMs === undefined
@@ -77,7 +81,7 @@ describe("Librarian.path_plasticity_update", () => {
 
     const result = await librarian.run(createTask({ target_object_refs: ["10", "40"] }));
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true, outcome: "completed", error_message: null });
     expect(result.role).toBe(GardenRole.LIBRARIAN);
     expect(result.tier).toBe(GardenTier.TIER_2);
     expect(result.objects_affected).toEqual([
@@ -118,8 +122,9 @@ describe("Librarian.path_plasticity_update", () => {
       markProcessed
     });
 
-    await librarian.run(createTask({ target_object_refs: ["12", "40"] }));
+    const result = await librarian.run(createTask({ target_object_refs: ["12", "40"] }));
 
+    expect(result).toMatchObject({ success: true, outcome: "completed", objects_affected: [] });
     expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
       expect.objectContaining({ sinceRevision: 12, untilRevision: 40 })
     );
@@ -131,7 +136,7 @@ describe("Librarian.path_plasticity_update", () => {
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
   });
 
-  it("does not treat wall-clock ISO refs as a monotonic watermark", async () => {
+  it("fails wall-clock ISO refs instead of treating them as a monotonic watermark", async () => {
     const computeAndApplyPlasticity = vi.fn(async () => ({
       reinforced: 0,
       weakened: 0,
@@ -139,16 +144,26 @@ describe("Librarian.path_plasticity_update", () => {
       affectedPathIds: []
     }));
     const markProcessed = vi.fn(async () => undefined);
-    const { librarian } = createLibrarian({ computeAndApplyPlasticity, markProcessed });
+    const { librarian, scheduler, clearPendingWorkspace } = createLibrarian({
+      computeAndApplyPlasticity,
+      markProcessed
+    });
 
     const result = await librarian.run(createTask({
       target_object_refs: ["2026-05-03T00:00:00.000Z", "2026-05-04T11:59:00.000Z"]
     }));
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({
+      success: false,
+      outcome: "failed",
+      objects_affected: [],
+      error_message: "path plasticity EventLog revision cursor is missing"
+    });
     expect(result.audit_entries[0]).toMatch(/EventLog revision cursor is missing/);
     expect(computeAndApplyPlasticity).not.toHaveBeenCalled();
     expect(markProcessed).not.toHaveBeenCalled();
+    expect(clearPendingWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1");
+    expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
   });
 
   it("does not drop later events or double-count when compute sees clock skew", async () => {
@@ -178,16 +193,34 @@ describe("Librarian.path_plasticity_update", () => {
     }));
   });
 
-  it("soft-skips path_plasticity_update when the optional plasticity port is not configured", async () => {
+  it("fails path_plasticity_update when its port is missing without an explicit deferral", async () => {
     const { librarian, scheduler, clearPendingWorkspace } = createLibrarian(undefined);
 
     const result = await librarian.run(createTask());
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({
+      success: false,
+      outcome: "failed",
+      objects_affected: [],
+      error_message: "path plasticity port is not configured"
+    });
+    expect(result.audit_entries[0]).toMatch(/path plasticity port is not configured/);
+    expect(clearPendingWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1");
+    expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
+  });
+
+  it("reports an intentional path plasticity deferral as skipped and clears the pending marker", async () => {
+    const { librarian, scheduler, clearPendingWorkspace } = createLibrarian(undefined, {
+      pathPlasticityDeferredReason: "temporal_assertion_provenance_required"
+    });
+
+    const result = await librarian.run(createTask());
+
+    expect(result).toMatchObject({ success: true, outcome: "skipped", error_message: null });
     expect(result.objects_affected).toEqual([]);
     expect(result.audit_entries[0]).toMatch(/skipped because path plasticity port is not configured/);
-    expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
-    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+    expect(clearPendingWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1");
+    expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
   });
 
   it("parsePathPlasticityRevisionCursor accepts integer cursors and rejects wall-clock ISO", () => {

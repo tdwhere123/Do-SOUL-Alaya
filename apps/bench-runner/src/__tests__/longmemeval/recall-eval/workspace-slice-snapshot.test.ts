@@ -164,18 +164,18 @@ describe("workspace slice snapshot identity", () => {
     const currentSidecar = readSidecar(first!.sliceDbPaths[WORKSPACE_A]!);
     writeFileSync(sidecarPath(sliceA), `${JSON.stringify({
       ...currentSidecar,
-      recipe_version: "v1",
+      recipe_version: "v4",
       snapshot_digest: digestWorkspaceSliceSnapshotIdentity({
         workspaceId: WORKSPACE_A,
         sqliteMainFileSha256: currentSidecar.sqlite_main_file_sha256,
-        recipeVersion: "v1"
+        recipeVersion: "v4"
       })
     })}\n`);
     expect(readValidWorkspaceSliceSnapshotDigest({
       workspaceId: WORKSPACE_A,
       dbPath: sliceA
     })).toBeNull();
-    expect(readSidecar(sliceA).recipe_version).toBe("v1");
+    expect(readSidecar(sliceA).recipe_version).toBe("v4");
     const rebuilt = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(rebuilt).not.toBeNull();
     expect(readSidecar(rebuilt!.sliceDbPaths[WORKSPACE_A]!).recipe_version)

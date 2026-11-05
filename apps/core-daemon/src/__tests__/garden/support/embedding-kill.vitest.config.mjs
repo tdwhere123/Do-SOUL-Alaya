@@ -17,6 +17,6 @@ export default defineConfig({
   resolve: { alias: Object.entries(packages).map(([name, target]) => ({
     find: new RegExp(`^${name}$`), replacement: path.join(root, target)
   })) },
-  test: { include: [path.join(root, "apps/core-daemon/src/__tests__/garden/support/embedding-kill-child.ts")],
+  test: { include: ["apps/core-daemon/src/__tests__/garden/support/embedding-kill-child.ts"],
     pool: "threads", maxWorkers: 1, minWorkers: 1, testTimeout: 30_000 }
 });

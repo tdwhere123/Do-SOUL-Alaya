@@ -16,7 +16,12 @@ import { CLOCK, createFaults, createHandoffRuntime, EVIDENCE, IDS, notifier, OTH
   type HandoffFaults } from "./embedding-backfill-follow-up-fixture.js";
 
 const directories = new Set<string>();
-afterEach(() => { for (const directory of directories) rmSync(directory, { recursive: true, force: true }); directories.clear(); });
+afterEach(() => {
+  for (const directory of directories) {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+  directories.clear();
+});
 
 function filename(): string {
   const directory = mkdtempSync(join(tmpdir(), "alaya-garden-follow-up-"));
@@ -45,17 +50,24 @@ async function killAt(file: string, point: "task_dispatch" | "before_embedding" 
   const config = fileURLToPath(new URL("./support/embedding-kill.vitest.config.mjs", import.meta.url));
   const child = spawn(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", "--config", config], {
     cwd: root, env: { ...process.env, ALAYA_GARDEN_CRASH_DATABASE: file, ALAYA_GARDEN_CRASH_POINT: point },
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"], timeout: 45_000, killSignal: "SIGKILL"
   });
   let output = "";
-  child.stdout.on("data", chunk => { output += String(chunk); });
+  let reachedCheckpoint = false;
+  child.stdout.on("data", chunk => {
+    output += String(chunk);
+    if (!reachedCheckpoint && output.includes(`ALAYA_GARDEN_CRASH_POINT_REACHED:${point}\n`)) {
+      reachedCheckpoint = true;
+      child.kill("SIGKILL");
+    }
+  });
   child.stderr.on("data", chunk => { output += String(chunk); });
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
-  if (process.platform === "win32") expect(exit.code, output).toBe(86);
-  else expect(exit.signal, output).toBe("SIGKILL");
+  expect(reachedCheckpoint, output).toBe(true);
+  expect(exit.signal, output).toBe("SIGKILL");
 }
 
 describe("embedding backfill supported follow-up recovery", () => {

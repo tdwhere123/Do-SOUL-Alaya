@@ -17,6 +17,12 @@ const SCHEMA_LEDGER = Object.freeze({ action: "schema_ledger" as const });
 export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = Object.freeze({
   schema_version: SCHEMA_LEDGER,
   garden_semantic_schema: COPY_ALL,
+  garden_embedding_backfill_objects: Object.freeze({
+    action: "copy_via_fk" as const,
+    parentTable: "garden_embedding_backfill_runs",
+    parentKey: "task_id",
+    childKey: "task_id"
+  }),
   app_config: COPY_ALL,
   consolidation_trigger_budgets: COPY_ALL,
   extension_descriptors: COPY_ALL,

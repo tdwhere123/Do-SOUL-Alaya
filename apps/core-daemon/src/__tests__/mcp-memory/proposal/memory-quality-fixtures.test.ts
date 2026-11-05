@@ -33,6 +33,8 @@ interface IntegrationFixture {
 }
 
 describe("memory quality read/write fixtures", () => {
+  // Six before/after comparisons each open real SQLite and seed native recall;
+  // the test asserts recall content, not a five-second wall-clock SLA.
   it("compares baseline recall with schema-aware write-path recall on the same fixture set", async () => {
     const packs = [];
 
@@ -75,7 +77,7 @@ describe("memory quality read/write fixtures", () => {
     const broad = packs.find((pack) => pack.fixture_id === "broad_thematic_recall")!;
     expect(broad.expected_ids).toHaveLength(2);
     expect(broad.selected_ids).toEqual(expect.arrayContaining(broad.expected_ids));
-  });
+  }, 30_000);
 });
 
 function createHarness(initialMemories: MemoryEntry[]) {

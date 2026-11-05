@@ -45,7 +45,9 @@ describe("tool runtime repository binding", () => {
     const gitMarkerPath = path.join(worktree, ".git");
     const marker = await readFile(gitMarkerPath, "utf8");
     await chmod(gitMarkerPath, 0o666);
-    await writeFile(gitMarkerPath, `${marker.trim()}-missing\n`);
+    // Git marks this file hidden on Windows, where opening an existing hidden
+    // file with the default truncating write flag fails even after chmod.
+    await writeFile(gitMarkerPath, `${marker.trim()}-missing\n`, { flag: "r+" });
     expect(await resolveAffectedPathRoots(worktree, {
       currentWorkingDirectory: root, repoRootsEnv: ""
     })).toBeUndefined();
