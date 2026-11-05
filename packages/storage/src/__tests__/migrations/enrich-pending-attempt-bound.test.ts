@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
-import { StorageDatabase } from "../../sqlite/db.js";
+import { initDatabase } from "../../sqlite/db.js";
 import { SqliteEnrichPendingRepo } from "../../repos/garden/enrich-pending-repo.js";
 import { openBaselineDatabase, seedWorkspaceRow } from "./apply-baseline.js";
 
@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("enrich_pending attempt bound", () => {
-  it("defaults retry columns and excludes abandoned rows from the claimable index", () => {
+  it("keeps retry defaults and the abandoned-row exclusion in the baseline schema", () => {
     const db = openBaselineDatabase();
     openDbs.add(db);
     seedWorkspaceRow(db, "workspace-1");
@@ -46,15 +46,27 @@ describe("enrich_pending attempt bound", () => {
       .get() as Readonly<{ readonly sql: string }> | undefined;
     expect(indexSqlRow?.sql).toContain("abandoned_at IS NULL");
 
-    db.prepare(
-      `UPDATE enrich_pending
-      SET attempt_count = 3, abandoned_at = ?
-      WHERE workspace_id = ? AND memory_id = ?`
-    ).run("2026-05-30T02:00:00.000Z", "workspace-1", "memory-abandoned");
+  });
 
-    const repo = new SqliteEnrichPendingRepo(new StorageDatabase(":memory:", db));
-    const claimed = repo.claimBatch("workspace-1", 5, "2026-05-30T03:00:00.000Z", 3);
-    expect(claimed.map((entry) => entry.memoryId)).toEqual(["memory-healthy"]);
+  it("claims healthy obligations after migrating to the current repository schema", () => {
+    // The live repository also requires later enrichment-progress columns;
+    // keep baseline migration assertions independent of its current shape.
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const db = database.connection;
+      seedWorkspaceRow(db, "workspace-1");
+      seedPendingRow(db, "memory-abandoned", "2026-05-30T00:00:00.000Z");
+      seedPendingRow(db, "memory-healthy", "2026-05-30T00:01:00.000Z");
+      db.prepare(`UPDATE enrich_pending SET attempt_count = 3, abandoned_at = ?
+        WHERE workspace_id = ? AND memory_id = ?`)
+        .run("2026-05-30T02:00:00.000Z", "workspace-1", "memory-abandoned");
+      const claimed = new SqliteEnrichPendingRepo(database)
+        .claimBatch("workspace-1", 5, "2026-05-30T03:00:00.000Z", 3);
+      expect(claimed.map((entry) => entry.memoryId)).toEqual(["memory-healthy"]);
+      expect(claimed[0]?.independentProcessedAt).toBeNull();
+    } finally {
+      database.close();
+    }
   });
 });
 
