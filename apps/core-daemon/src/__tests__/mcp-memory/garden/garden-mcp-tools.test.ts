@@ -257,6 +257,7 @@ describe("Garden MCP tools", () => {
     expect(response).toEqual({
       task_id: "task-complete-signals",
       status: "completed",
+      outcome: "completed",
       events_appended: 1,
       failed_candidate_signals_count: 0,
       unknown_candidate_signals_count: 0,
@@ -349,6 +350,7 @@ describe("Garden MCP tools", () => {
     expect(response).toEqual({
       task_id: "task-failed",
       status: "failed",
+      outcome: "failed",
       events_appended: 1,
       failed_candidate_signals_count: 0,
       unknown_candidate_signals_count: 0,

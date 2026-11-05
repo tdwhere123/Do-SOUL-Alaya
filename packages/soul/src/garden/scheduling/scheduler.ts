@@ -1,4 +1,6 @@
 import {
+  AlayaError,
+  gardenTaskOutcomeSuccess,
   GARDEN_ROLE_PERMISSIONS,
   GARDEN_ROLE_TIER_MAP,
   GardenTier,
@@ -286,12 +288,16 @@ export class GardenScheduler {
   }
 
   public async reportCompletion(result: GardenTaskResult): Promise<void> {
+    if (result.outcome !== undefined && result.success !== gardenTaskOutcomeSuccess(result.outcome)) {
+      throw new AlayaError("VALIDATION_FAILED", "Garden task outcome conflicts with its compatibility success field.");
+    }
     const nowIso = this.now();
 
     await this.taskRepo.completeWithEvents(
       result.task_id,
       {
         status: result.success ? "completed" : "failed",
+        ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
         completed_at: result.completed_at,
         last_error_text: result.error_message ?? undefined
       },

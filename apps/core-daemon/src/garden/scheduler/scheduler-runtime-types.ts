@@ -1,6 +1,7 @@
 import type {
   GardenTaskDescriptor,
   GardenTaskKindValue,
+  GardenTaskOutcome,
   GardenTierValue,
   SoulConfig
 } from "@do-soul/alaya-protocol";
@@ -126,6 +127,7 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
       readonly tier: string;
       readonly workspace_id: string;
       readonly success: boolean;
+      readonly outcome?: GardenTaskOutcome;
       readonly objects_affected: readonly string[];
       readonly audit_entries: readonly string[];
       readonly error_message: string | null;

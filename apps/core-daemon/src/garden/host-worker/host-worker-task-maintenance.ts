@@ -157,6 +157,7 @@ async function failExpiredStatementSessions(
           workspace_id: row.workspace_id,
           run_id: runId,
           success: false,
+          outcome: "failed",
           objects_affected: [],
           candidate_signals_count: 0,
           occurred_at: occurredAt

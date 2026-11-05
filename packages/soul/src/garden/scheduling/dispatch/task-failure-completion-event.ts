@@ -22,6 +22,7 @@ export function buildTaskFailureCompletionEvent(
       role: task.role,
       tier: GARDEN_ROLE_TIER_MAP[task.role],
       success: false,
+      outcome: "failed",
       objects_affected: [],
       workspace_id: task.workspace_id,
       occurred_at: occurredAt

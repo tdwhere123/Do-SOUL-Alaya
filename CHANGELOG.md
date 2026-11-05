@@ -37,6 +37,17 @@ inspection; historical audit shapes cannot prove quiescence. New proven
 pre-effect deferrals remain retryable. New outcomes commit audit and state
 together, and signal-derived enrichment waits without dropping independent work.
 
+Protocol 34.1.0 adds an optional Garden task `outcome` (`completed`, `skipped`,
+`failed`) to completion events and MCP completion responses. Consolidation and
+bulk-enrich intentional skips are measured as skipped rather than inferred from
+legacy `success`; a bulk batch with failed items now reports failure while the
+existing item obligations remain pending. The pre-34.1 boolean remains a
+non-failure projection. Migration
+042 stores measured outcomes without inventing them for historical rows. Keep a
+pre-042 database for rollback: older binaries must not reopen the migrated copy
+because they cannot preserve the new completion distinction. Signal unknown closes
+an unsafe replay path, not automatic recovery of missing memories.
+
 Migration 041 adds durable admission lineage, grounding-claim audit boundaries,
 and separate signal-reference versus independent-enrichment progress. Existing
 rows receive no invented provenance. Keep a pre-041 database for older-binary

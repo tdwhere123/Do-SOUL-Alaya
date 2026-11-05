@@ -32,6 +32,7 @@ export async function quarantineUnavailableSourceTasks(
       tier: GardenTier.TIER_2,
       workspace_id: row.workspace_id,
       success: false,
+      outcome: "failed",
       objects_affected: [],
       candidate_signals_count: 0,
       occurred_at: completedAt

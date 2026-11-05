@@ -47,7 +47,7 @@ soul:edge-proposal.ts#SoulProposeEdgeResponseSchema(proposal_id,status)#6b20a6f
 soul:mcp-types.ts#GardenClaimTaskRequestSchema(task_id)#50b8195
 soul:mcp-types.ts#GardenClaimTaskResponseSchema(kind,payload,role,status,task_id)#051875c
 soul:mcp-types.ts#GardenCompleteTaskRequestSchema(last_error_text,result_envelope,status,task_id)#f319da2
-soul:mcp-types.ts#GardenCompleteTaskResponseSchema(events_appended,failed_candidate_signals_count,inflight_candidate_signals_count,status,task_id,unknown_candidate_signals_count)#fef7c87
+soul:mcp-types.ts#GardenCompleteTaskResponseSchema(events_appended,failed_candidate_signals_count,inflight_candidate_signals_count,outcome,status,task_id,unknown_candidate_signals_count)#a301cee
 soul:mcp-types.ts#GardenListPendingTasksRequestSchema(limit,role)#4386aeb
 soul:mcp-types.ts#GardenListPendingTasksResponseSchema(tasks)#d14dec7
 soul:mcp-types.ts#GardenMcpWorkerRoleSchema()#16723db|enum=auditor|host_worker|janitor|librarian
@@ -189,14 +189,14 @@ evt:file-approval.ts#SoulHintEmittedEventSchema(payload,type)#ab8fab9
 evt:file-approval.ts#SoulHintEmittedPayloadSchema(hint,message_id,source_kind)#ebd58f1
 evt:file-approval.ts#SoulInteractionRiskLevelSchema()#8979484|enum=high|low|medium
 evt:garden.ts#GardenEventTypeSchema()#c127d04|enum=soul.garden.enrich_abandoned|soul.garden.semantic_enrichment|soul.garden.task_claim_reclaimed|soul.garden.task_completed|soul.garden.task_dispatched|soul.garden.task_expired|soul.garden.tier_violation_rejected|soul.health_journal.recorded
-evt:garden.ts#GardenEventUnionSchema()#08667e3
+evt:garden.ts#GardenEventUnionSchema()#35e6387
 evt:garden.ts#SoulEnrichAbandonedEventSchema(payload,type)#856ec77
 evt:garden.ts#SoulEnrichAbandonedPayloadSchema(attempt_count,last_failure_kind,memory_id,occurred_at,run_id,source_signal_id,workspace_id)#bfa9104
 evt:garden.ts#SoulGardenSemanticEnrichmentPayloadSchema(action,source_revision,task_id)#d1d6b8c
 evt:garden.ts#SoulGardenTaskClaimReclaimedEventSchema(payload,type)#e1412e6
 evt:garden.ts#SoulGardenTaskClaimReclaimedPayloadSchema(claimed_at,occurred_at,previous_claimed_by,role,run_id,stale_after_ms,task_id,task_kind,tier,workspace_id)#e883494
-evt:garden.ts#SoulGardenTaskCompletedEventSchema(payload,type)#9f389f7
-evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,failed_candidate_signals_count,inflight_candidate_signals_count,objects_affected,objects_affected_sha256,objects_affected_total_count,occurred_at,role,success,task_id,task_kind,tier,unknown_candidate_signals_count,workspace_id)#b3d6f76
+evt:garden.ts#SoulGardenTaskCompletedEventSchema(payload,type)#2a45551
+evt:garden.ts#SoulGardenTaskCompletedPayloadSchema(candidate_signals_count,failed_candidate_signals_count,inflight_candidate_signals_count,objects_affected,objects_affected_sha256,objects_affected_total_count,occurred_at,outcome,role,success,task_id,task_kind,tier,unknown_candidate_signals_count,workspace_id)#5453c58
 evt:garden.ts#SoulGardenTaskDispatchedEventSchema(payload,type)#e117340
 evt:garden.ts#SoulGardenTaskDispatchedPayloadSchema(occurred_at,role,run_id,task_id,task_kind,tier,workspace_id)#62bb91b
 evt:garden.ts#SoulGardenTaskExpiredEventSchema(payload,type)#7e52a53

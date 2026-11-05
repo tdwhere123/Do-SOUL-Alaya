@@ -25,9 +25,9 @@ it("reports failed signal materialization separately from successful external ta
   const result = await harness.callTool("garden.complete_task", { task_id: "task-signal-failure", status: "completed",
     result_envelope: { candidate_signals: [{ signal_kind: "potential_preference", object_kind: "memory_entry",
       scope_hint: "project", domain_tags: ["garden"], confidence: 0.9, evidence_refs: [], raw_payload: { observation: "preference" } }] } });
-  expect(result).toMatchObject({ status: "completed", failed_candidate_signals_count: 1 });
+  expect(result).toMatchObject({ status: "completed", outcome: "completed", failed_candidate_signals_count: 1 });
   const events = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
-  expect(events.at(-1)?.payload_json).toMatchObject({ success: true, candidate_signals_count: 1,
+  expect(events.at(-1)?.payload_json).toMatchObject({ success: true, outcome: "completed", candidate_signals_count: 1,
     failed_candidate_signals_count: 1 });
 });
 

@@ -76,7 +76,7 @@ export class GardenTaskSourceProvenance {
             .get(row.id, row.workspace_id) as GardenTaskDbRow | undefined;
           if (current === undefined || !["pending", "claimed"].includes(current.status) ||
               this.unavailableReason(parseGardenTaskRow(current)) !== unavailable) throw new QuarantineLostRace();
-          this.connection.prepare(`UPDATE garden_tasks SET status = 'failed', completed_at = ?,
+          this.connection.prepare(`UPDATE garden_tasks SET status = 'failed', outcome = 'failed', completed_at = ?,
             claimed_by = NULL, claimed_at = NULL,
             last_error_text = CASE WHEN last_error_text IS NULL THEN ? ELSE last_error_text || char(10) || ? END
             WHERE id = ? AND workspace_id = ? AND status IN ('pending', 'claimed')`)

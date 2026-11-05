@@ -47,6 +47,7 @@ const GARDEN_TASK_SELECT_COLUMNS = `
         kind,
         payload_json,
         status,
+        outcome,
         claimed_by,
         claimed_at,
         created_at,
@@ -131,6 +132,7 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
   failPendingStatement: `
       UPDATE garden_tasks
       SET status = 'failed',
+          outcome = 'failed',
           claimed_by = NULL,
           claimed_at = NULL,
           completed_at = ?,
@@ -159,7 +161,7 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
     `,
   completeStatement: `
       UPDATE garden_tasks
-      SET status = ?, completed_at = ?, last_error_text = ?
+      SET status = ?, outcome = ?, completed_at = ?, last_error_text = ?
       WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND workspace_id = ?
     `
 };

@@ -284,8 +284,13 @@ this state, both audited with the configured reviewer-identity trust mode:
    pass their typed governance and proof/effect barriers. Rejection is not an
    erase or a durable memory change.
 
-Garden task completion reports extraction and emission completion, not successful
-memory creation. HTTP/MCP `emitted` is candidate admission. Materialization audit
+Completion of source-statement and candidate-signal extraction tasks reports
+extraction and emission, not successful memory creation. Other Garden tasks report
+the outcome of their own maintenance work. A measured `outcome` distinguishes
+`completed`, `skipped`, and `failed`; its absence on historical or unmeasured
+records is unknown. The legacy `success` field remains true for both completed
+and intentionally skipped work for pre-34.1 consumers; it must not be read as
+proof that work was performed. HTTP/MCP `emitted` is candidate admission. Materialization audit
 and state commit atomically, including generic and source-grounding deferrals.
 A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
 At daemon startup, one owner acquires the OS-released runtime lease, opens its
@@ -299,7 +304,9 @@ outcome audit. The durable lineage
 is established only by the atomic pre-effect transition; migration never invents
 it for existing rows. New proven deferrals remain retryable. Historical
 success-shaped audits do not prove quiescence or the current attempt. Unknown
-effects cannot be automatically replayed. Signal-reference replay waits for a
+effects cannot be automatically replayed. This inspection-required disposition
+closes the safety boundary; it does not automatically recover missing memories.
+Signal-reference replay waits for a
 known MATERIALIZED disposition while independent memory enrichment continues;
 its unfinished obligation remains durable and does not starve later work.
 Shutdown refuses new Garden passes, drains accepted writers and retains the lease

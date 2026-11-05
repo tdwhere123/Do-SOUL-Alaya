@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import {
   GardenRoleSchema,
   GardenTaskKindSchema,
+  GardenTaskOutcomeSchema,
+  gardenTaskOutcomeSuccess,
+  type GardenTaskOutcome,
   type GardenRoleValue,
   type GardenTaskKindValue
 } from "@do-soul/alaya-protocol";
@@ -329,6 +332,10 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   ): Promise<void> {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const status = parseCompletedStatus(result.status);
+    const outcome = result.outcome === undefined ? null : GardenTaskOutcomeSchema.parse(result.outcome);
+    if (outcome !== null && gardenTaskOutcomeSuccess(outcome) !== (status === "completed")) {
+      throw new StorageError("VALIDATION_FAILED", "Garden task outcome conflicts with its compatibility status.");
+    }
     const completedAt = parseTimestamp(result.completed_at);
     const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
     const parsedWorkspaceId =
@@ -346,6 +353,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
           this.completeClaimedTask(
             parsedTaskId,
             status,
+            outcome,
             completedAt,
             lastErrorText,
             parsedClaimedBy,
@@ -359,6 +367,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
         this.completeClaimedTask(
           parsedTaskId,
           status,
+          outcome,
           completedAt,
           lastErrorText,
           parsedClaimedBy,
@@ -567,6 +576,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private completeClaimedTask(
     taskId: string,
     status: "completed" | "failed",
+    outcome: GardenTaskOutcome | null,
     completedAt: string,
     lastErrorText: string | null,
     claimedBy: string,
@@ -577,6 +587,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
     const update = this.completeStatement.run(
       status,
+      outcome,
       completedAt,
       lastErrorText,
       taskId,
@@ -587,7 +598,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       return;
     }
     const row = this.findByIdInWorkspace(taskId, workspaceId);
-    if (row !== null && row.status === status && row.claimed_by === claimedBy) {
+    if (row !== null && row.status === status && row.outcome === outcome && row.claimed_by === claimedBy) {
       return;
     }
     throw new StorageError(

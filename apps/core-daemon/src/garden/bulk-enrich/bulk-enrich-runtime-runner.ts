@@ -5,7 +5,9 @@ import {
   GardenEventType,
   GardenRole,
   GardenTier,
+  gardenTaskOutcomeSuccess,
   parseGardenEventPayload,
+  type GardenTaskOutcome,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import { SignalService, type EventPublisher } from "@do-soul/alaya-core";
@@ -26,7 +28,7 @@ type BulkEnrichReporter = Readonly<{
   reportCompletion(
     task: Readonly<GardenTaskDescriptor>,
     completedAt: string,
-    success: boolean,
+    outcome: GardenTaskOutcome,
     auditEntries: readonly string[],
     error?: unknown
   ): Promise<void>;
@@ -43,6 +45,7 @@ export function createBulkEnrichReporter(input: Readonly<{
       readonly tier: string;
       readonly workspace_id: string;
       readonly success: boolean;
+      readonly outcome?: GardenTaskOutcome;
       readonly objects_affected: readonly string[];
       readonly audit_entries: readonly string[];
       readonly error_message: string | null;
@@ -71,17 +74,18 @@ export function createBulkEnrichReporter(input: Readonly<{
         })
       });
     },
-    reportCompletion: async (task, completedAt, success, auditEntries, error) => {
+    reportCompletion: async (task, completedAt, outcome, auditEntries, error) => {
       await input.gardenScheduler.reportCompletion({
         task_id: task.task_id,
         task_kind: task.task_kind,
         role: GardenRole.LIBRARIAN,
         tier: GardenTier.TIER_2,
         workspace_id: task.workspace_id,
-        success,
+        success: gardenTaskOutcomeSuccess(outcome),
+        outcome,
         objects_affected: [],
         audit_entries: [...auditEntries],
-        error_message: success ? null : error instanceof Error ? error.message : String(error),
+        error_message: outcome !== "failed" ? null : error instanceof Error ? error.message : String(error),
         completed_at: completedAt
       });
     },
@@ -105,13 +109,13 @@ export async function runBulkEnrichTask(input: Readonly<{
     return;
   }
   if (input.availability.kind === "missing_repo") {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [
       "bulk_enrich_failed:no_enrich_pending_table"
     ], new Error("bulk enrich pending table is not configured"));
     return;
   }
   if (input.availability.kind === "disabled") {
-    await input.reporter.reportCompletion(input.task, completedAt, true, [
+    await input.reporter.reportCompletion(input.task, completedAt, "skipped", [
       "bulk_enrich_skipped:enrichment_disabled"
     ]);
     return;
@@ -129,9 +133,15 @@ export async function runBulkEnrichTask(input: Readonly<{
       input.availability.ports,
       input.reporter
     );
-    await input.reporter.reportCompletion(input.task, completedAt, true, summarizeClaimedBatch(summary));
+    await input.reporter.reportCompletion(
+      input.task,
+      completedAt,
+      summary.failedCount > 0 ? "failed" : "completed",
+      summarizeClaimedBatch(summary),
+      summary.failedCount > 0 ? new AlayaError("UNAVAILABLE", "bulk enrich batch has unfinished failed items") : undefined
+    );
   } catch (error) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
     input.reporter.warn("bulk enrich task failed; continuing Garden background pass", {
       workspace_id: input.task.workspace_id,
       error: error instanceof Error ? error.message : String(error)
@@ -151,7 +161,7 @@ async function runPerSourceEnrichmentTask(
   completedAt: string
 ): Promise<void> {
   if (input.sourceEnrichment === undefined) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [
       "source_enrich_unwired",
       ...sourceEnrichCapabilityEntries({
         configured: false,
@@ -172,12 +182,12 @@ async function runPerSourceEnrichmentTask(
     await input.reporter.reportCompletion(
       input.task,
       completedAt,
-      success,
+      success ? "completed" : "failed",
       [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
       success ? undefined : new Error(outcome)
     );
   } catch (error) {
-    await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
+    await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
     input.reporter.warn("per-source enrichment failed; continuing Garden background pass", {
       workspace_id: input.task.workspace_id,
       task_id: input.task.task_id,

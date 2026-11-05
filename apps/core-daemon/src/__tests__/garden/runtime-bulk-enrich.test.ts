@@ -452,7 +452,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(reportCompletion).toHaveBeenCalledWith(
       expect.anything(),
       BULK_ENRICH_TEST_NOW,
-      false,
+      "failed",
       ["bulk_enrich_failed:no_enrich_pending_table"],
       expect.any(Error)
     );
@@ -473,7 +473,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(reportCompletion).toHaveBeenCalledWith(
       expect.anything(),
       BULK_ENRICH_TEST_NOW,
-      true,
+      "skipped",
       ["bulk_enrich_skipped:enrichment_disabled"]
     );
   });

@@ -49,6 +49,7 @@ interface GardenTaskCompletionParams {
 type GardenTaskCompletionResult = Readonly<{
   readonly task_id: string;
   readonly status: string;
+  readonly outcome: GardenCompleteTaskRequest["status"];
   readonly events_appended: 1;
   readonly failed_candidate_signals_count?: number;
   readonly unknown_candidate_signals_count?: number;
@@ -215,7 +216,7 @@ async function completeCandidateSignalTask(
     throw error;
   }
 
-  return { task_id: row.id, status: completion.status, events_appended: 1, ...completion.counts };
+  return { task_id: row.id, status: completion.status, outcome: completion.status, events_appended: 1, ...completion.counts };
 }
 
 async function commitCandidateSignalCompletion(
@@ -250,6 +251,7 @@ async function commitCandidateSignalCompletion(
     row.id,
     {
       status,
+      outcome: status,
       completed_at: params.now(),
       ...(lastError === undefined ? {} : { last_error_text: lastError })
     },
@@ -397,6 +399,7 @@ async function completeEdgeClassifyTask(
     row.id,
     {
       status: request.status,
+      outcome: request.status,
       completed_at: params.now(),
       ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
     },
@@ -406,7 +409,7 @@ async function completeEdgeClassifyTask(
   );
 
   emitEdgeClassifyBacklogDiagnostic(params.deps, context.workspaceId, params.warn);
-  return { task_id: row.id, status: request.status, events_appended: 1 };
+  return { task_id: row.id, status: request.status, outcome: request.status, events_appended: 1 };
 }
 
 async function applyEdgeClassifyVerdict(
@@ -472,6 +475,7 @@ function buildCompletedTaskEvent(
       role: row.role,
       tier: GARDEN_ROLE_TIER_MAP[row.role],
       success: status === "completed",
+      outcome: status,
       objects_affected: [...objectsAffected],
       candidate_signals_count: row.kind === GardenTaskKind.EDGE_CLASSIFY ? 0 : objectsAffected.length,
       ...(counts ?? {}),

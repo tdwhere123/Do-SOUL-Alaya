@@ -3,7 +3,8 @@ import type {
   GardenBacklogSnapshot,
   GardenBacklogWarningTransition,
   GardenRoleValue,
-  GardenTaskKindValue
+  GardenTaskKindValue,
+  GardenTaskOutcome
 } from "@do-soul/alaya-protocol";
 import type { BacklogPressureThresholds } from "./backlog-telemetry.js";
 
@@ -93,6 +94,7 @@ export interface GardenTaskRepoPort {
     taskId: string,
     result: {
       readonly status: "completed" | "failed";
+      readonly outcome?: GardenTaskOutcome;
       readonly completed_at: string;
       readonly last_error_text?: string;
     },

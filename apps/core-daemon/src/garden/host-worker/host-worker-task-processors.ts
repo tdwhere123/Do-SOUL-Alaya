@@ -65,8 +65,8 @@ export async function settleInProcessTask(
   await gardenTaskRepo.completeWithEvents(
     row.id,
     outcome.success
-      ? { status: "completed", completed_at: completedAt }
-      : { status: "failed", completed_at: completedAt,
+      ? { status: "completed", outcome: "completed", completed_at: completedAt }
+      : { status: "failed", outcome: "failed", completed_at: completedAt,
         last_error_text: outcome.error instanceof Error ? outcome.error.message : String(outcome.error) },
     [
       {
@@ -82,6 +82,7 @@ export async function settleInProcessTask(
           role: GardenRole.LIBRARIAN,
           tier: GardenTier.TIER_2,
           success: outcome.success,
+          outcome: outcome.success ? "completed" : "failed",
           objects_affected: [...objectsAffected],
           candidate_signals_count: objectsAffected.length,
           ...(outcome.signalCounts ?? {}),

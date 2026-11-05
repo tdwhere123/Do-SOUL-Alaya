@@ -221,8 +221,8 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         },
         reporter: {
           emitEnrichAbandoned: async () => undefined,
-          reportCompletion: async (_task, completedAt, success, auditEntries) => {
-            completions.push({ success, completed_at: completedAt, audit_entries: auditEntries });
+          reportCompletion: async (_task, completedAt, outcome, auditEntries) => {
+            completions.push({ outcome, completed_at: completedAt, audit_entries: auditEntries });
           },
           warn: vi.fn()
         }
@@ -231,7 +231,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       expect(enrichPendingRepo.countPending(WORKSPACE_ID)).toBe(2);
       expect(completions).toEqual([
         expect.objectContaining({
-          success: true,
+          outcome: "failed",
           completed_at: FIXED_ISO,
           audit_entries: expect.arrayContaining(["bulk_enrich:processed_1", "bulk_enrich:failed_2"])
         })
@@ -353,7 +353,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         } }, conflictDetection: undefined, signalLookup: signalRepo, signalRefReplay: replay } };
       const reports: string[][] = [];
       const reporter = { emitEnrichAbandoned: async () => { throw new Error("held work must not be abandoned"); },
-        reportCompletion: async (_task: unknown, _at: string, _success: boolean, entries: readonly string[]) => {
+        reportCompletion: async (_task: unknown, _at: string, _outcome: string, entries: readonly string[]) => {
           reports.push([...entries]); }, warn: vi.fn() };
       await runBulkEnrichTask({ now: () => FIXED_ISO, availability, reporter, task: {
         task_id: "scheduled-bulk", task_kind: GardenTaskKind.BULK_ENRICH, required_tier: GardenTier.TIER_2,

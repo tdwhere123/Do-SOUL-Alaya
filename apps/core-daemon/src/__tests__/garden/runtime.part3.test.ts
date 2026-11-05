@@ -315,6 +315,7 @@ describe("garden runtime consolidation cycle", () => {
       expect.objectContaining({
         task_id: "stale-consolidation-task",
         success: true,
+        outcome: "skipped",
         audit_entries: ["consolidation_deferred:temporal_assertion_provenance_required"]
       })
     );
@@ -344,6 +345,7 @@ describe("garden runtime consolidation cycle", () => {
       expect.objectContaining({
         task_id: "missing-budget-table",
         success: false,
+        outcome: "failed",
         audit_entries: ["consolidation_failed:no_durable_budget_table"],
         error_message: "consolidation executor unavailable"
       })

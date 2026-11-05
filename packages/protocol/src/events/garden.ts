@@ -6,7 +6,7 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../garden/garden-tier.js";
+import { GardenRoleSchema, GardenTaskKindSchema, GardenTaskOutcomeSchema, GardenTierSchema } from "../garden/garden-tier.js";
 import { HealthEventKindSchema } from "../memory/health-journal.js";
 
 const gardenEventTypeValues = [
@@ -63,6 +63,8 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     role: GardenRoleSchema,
     tier: GardenTierSchema,
     success: z.boolean(),
+    // Absent on historical or unmeasured completions; never infer from success.
+    outcome: GardenTaskOutcomeSchema.optional(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
     // invariant: these fields appear together only when objects_affected is a
     // truncated prefix; the digest covers the full ordered ID list with each

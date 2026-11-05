@@ -1,6 +1,8 @@
 import {
+  gardenTaskOutcomeSuccess,
   GardenRole,
   GardenTier,
+  type GardenTaskOutcome,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import { ConsolidationPlanner } from "@do-soul/alaya-core";
@@ -25,7 +27,7 @@ async function runConsolidationCycleTask(
   try {
     const skipAuditEntry = await resolveConsolidationSkipAuditEntry(input, task.workspace_id);
     if (skipAuditEntry !== null) {
-      await reportConsolidationCompletion(input, task, completedAt, true, [skipAuditEntry], null);
+      await reportConsolidationCompletion(input, task, completedAt, "skipped", [skipAuditEntry], null);
       return;
     }
     if (input.consolidationExecutor === null) {
@@ -33,7 +35,7 @@ async function runConsolidationCycleTask(
         input,
         task,
         completedAt,
-        false,
+        "failed",
         ["consolidation_failed:no_durable_budget_table"],
         "consolidation executor unavailable"
       );
@@ -44,13 +46,13 @@ async function runConsolidationCycleTask(
       input,
       task,
       completedAt,
-      true,
+      "completed",
       [`consolidation_cycle:fuse_${result.fuse_outcome}`],
       null
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    await reportConsolidationCompletion(input, task, completedAt, false, [], errorMessage);
+    await reportConsolidationCompletion(input, task, completedAt, "failed", [], errorMessage);
     input.warn("consolidation cycle task failed; continuing Garden background pass", {
       workspace_id: task.workspace_id,
       error: errorMessage
@@ -94,7 +96,7 @@ async function reportConsolidationCompletion(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>,
   completedAt: string,
-  success: boolean,
+  outcome: GardenTaskOutcome,
   auditEntries: readonly string[],
   errorMessage: string | null
 ): Promise<void> {
@@ -104,7 +106,8 @@ async function reportConsolidationCompletion(
     role: GardenRole.LIBRARIAN,
     tier: GardenTier.TIER_2,
     workspace_id: task.workspace_id,
-    success,
+    success: gardenTaskOutcomeSuccess(outcome),
+    outcome,
     objects_affected: [],
     audit_entries: [...auditEntries],
     error_message: errorMessage,

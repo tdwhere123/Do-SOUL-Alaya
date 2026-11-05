@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CandidateMemorySignalContentSchema } from "../signals/candidate-memory-signal.js";
 import { BoundedIdSchema, BoundedJsonObjectSchema, BoundedLabelSchema, BoundedReasonSchema, IsoDatetimeStringSchema, NonNegativeIntSchema, boundedJsonObjectSchema } from "../shared/schema-primitives.js";
-import { EdgeClassifyVerdictSchema } from "../garden/garden-tier.js";
+import { EdgeClassifyVerdictSchema, GardenTaskOutcomeSchema } from "../garden/garden-tier.js";
 import { SOURCE_STATEMENT_LIMITS } from "../garden/source-statements.js";
 
 const GARDEN_COMPLETE_CANDIDATE_SIGNAL_MAX = 64;
@@ -113,6 +113,7 @@ export const GardenCompleteTaskResponseSchema = z
   .object({
     task_id: BoundedIdSchema,
     status: z.enum(["completed", "failed"]),
+    outcome: GardenTaskOutcomeSchema.optional(),
     events_appended: NonNegativeIntSchema,
     failed_candidate_signals_count: NonNegativeIntSchema.optional(),
     unknown_candidate_signals_count: NonNegativeIntSchema.optional(),

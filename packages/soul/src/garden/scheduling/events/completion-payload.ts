@@ -20,6 +20,7 @@ function createBasePayload(
     role: result.role,
     tier: result.tier,
     success: result.success,
+    ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
     objects_affected: objectsAffected,
     workspace_id: result.workspace_id,
     occurred_at: occurredAt
