@@ -183,6 +183,7 @@ export type ObserverReaders = Readonly<{
     /** Prepared access hint; a discovery proposal, never proof of relevance. */
     hint?: string;
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
+    sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
   }>) => NativeSourceNomination;
   /** An admitted Q/H/C package may require a different visible source interval
    * from the native navigation window; this never changes membership or rank. */

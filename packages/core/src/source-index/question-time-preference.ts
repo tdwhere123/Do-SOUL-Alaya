@@ -27,6 +27,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   refusals: SourceIndexAcquisitionResult["resource_refusals"][number][];
   occurrences?: SourceSemanticNominationOccurrence[];
   ordered: (rootKeys: readonly string[]) => void;
+  beforeFinalRetention?: (original: readonly (readonly [string, N])[]) => void;
 }>): boolean {
   const { meter, absorb, nominations, counts } = input;
   const original = [...nominations.entries()];
@@ -60,6 +61,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     counts.admitted -= displaced;
     counts.rejected += displaced;
     counts.nomination_limit += displaced;
+    input.beforeFinalRetention?.(original);
     input.ordered([...nominations.keys()]);
     if (input.occurrences !== undefined) input.occurrences.splice(0, input.occurrences.length,
       ...input.occurrences.filter(row => nominations.has(sourceIndexNativeRootKey(row.source))));

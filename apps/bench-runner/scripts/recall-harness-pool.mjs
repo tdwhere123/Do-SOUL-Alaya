@@ -199,8 +199,9 @@ export async function captureRecallPool({ row, query, observation, generation, c
     try {
     const inventory = readInventory(db, row.workspace), allEvents = listEvents(observation);
     const events = allEvents.filter(event => activeFrame(event, row.workspace, query.snapshot_identity?.as_of));
-    const rejected = observation.observations.filter(frame => (frame.execution !== "success" || frame.events.some(event =>
+    const rejected = observation.observations.filter(frame => (frame.execution !== "success" || frame.dropped_events > 0 || frame.events.some(event =>
       event.kind === "field_nomination" || event.kind === "field_access_order" || event.kind === "source_index_routes"
+        || event.kind === "source_index_acquisition" && event.data?.kind === "source_template_restoration"
         || event.kind === "field_page_metadata" || event.kind === "field_page_attempt"))
       && !frame.events.some(event => activeFrame({ ...event, binding: frame.facts?.binding ?? null,
         frame_status: frame.status, execution: frame.execution, facts_complete: frame.facts?.complete === true,
@@ -219,7 +220,10 @@ export async function captureRecallPool({ row, query, observation, generation, c
     else if (nomination.result === null) issues.push("native_nomination_unavailable");
     if (nominated.length > 16) issues.push("native_nomination_exceeds_bound");
     if (nominated.some(item => !inventory.has(item.source.target.root_id))) issues.push("nominated_root_metadata_unavailable");
-    if (events.some(event => event.dropped_events > 0)) issues.push("native_progress_events_dropped");
+    if (observation.observations.some(frame => frame.dropped_events > 0)) issues.push("native_progress_events_dropped");
+    const templateEvents = events.filter(event => event.kind === "source_index_acquisition"
+      && event.data?.kind === "source_template_restoration").map(event => ({ request_id: event.request_id,
+        binding: event.binding, phase: event.phase, ...event.data }));
     const rankKinds = ["lexical_candidate", "vector_ranked"].flatMap(kind => ["original", "hint"].map(view => `source_index_${view}_${kind}`));
     if (events.some(event => rankKinds.some(kind => (event.diagnostics?.omitted_counts?.[kind] ?? 0) > 0))) {
       issues.push("native_route_rank_detail_overflow");
@@ -261,6 +265,10 @@ export async function captureRecallPool({ row, query, observation, generation, c
       route_phases: events.filter(event => event.kind === "source_index_routes").map(event => event.data),
       pool: nominated.map(item => ({ ...item, host: sourceFact(inventory.get(item.source.target.root_id)) })), rejected_frames: rejected,
       access_orders: orders, page_metadata: pageMetadata, page_attempts: pageAttempts, witness,
+      source_template_restoration: {
+        status: observation.status !== "available" || rejected.length > 0 ? "partial"
+          : templateEvents.length > 0 ? "captured" : "not_observed",
+        events: templateEvents },
       association_lifecycle: events.flatMap(event => event.kind === "statement_association_retention"
         ? [{ request_id: event.request_id, ...event.data }]
         : event.kind === "source_index_acquisition" && event.data.kind === "acquisition_complete"
@@ -269,8 +277,8 @@ export async function captureRecallPool({ row, query, observation, generation, c
       diagnostic_beyond_allowance: { rankings: diagnostic, sibling_scope: "first_five_containers",
         sibling_scope_status: missingContainers.length ? "partial" : "complete", missing_container_roots: missingContainers,
         siblings: siblings.map(sourceFact), native_work: "not_measured" },
-      observation_limits: events.map(event => ({ request_id: event.request_id, dropped_events: event.dropped_events,
-        diagnostics: event.diagnostics })).filter((row, index, rows) => rows.findIndex(other => other.request_id === row.request_id) === index),
+      observation_limits: observation.observations.map(frame => ({ request_id: frame.request_id,
+        dropped_events: frame.dropped_events, diagnostics: frame.diagnostics ?? null })),
       pages: observedPages.map(page => ({
         request: page.request, output: page.output, occupied_slots: page.occupied_slots })) };
     } finally { db.close(); }

@@ -17,6 +17,7 @@ import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
+import { restoreSourceTemplate, type SourceTemplateRetention } from "./source-template-restoration.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -280,14 +281,17 @@ export class SourceIndexAcquisition {
    * only on request for the original view, whose budget must include `quoteStatementAssociation`.
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
-    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false) {
+    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false,
+    templateRetention?: SourceTemplateRetention) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
-      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original" });
+      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original",
+        ...(view === "original" && templateRetention !== undefined ? { templateRetention } : {}) });
     const result = query.run();
     return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
-      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }) };
+      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
+      ...(query.prepaidBaseBytes === undefined ? {} : { prepaid_base_bytes: query.prepaidBaseBytes }) };
   }
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -329,6 +333,7 @@ class AcquisitionQuery {
   private timeRoute = false;
   public questionTimeOrder?: readonly string[];
   public association?: StatementAssociation;
+  public prepaidBaseBytes?: number;
   private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
@@ -336,7 +341,7 @@ class AcquisitionQuery {
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number }; associate?: boolean }) {
+      progress: { lexical: number; vector: number }; associate?: boolean; templateRetention?: SourceTemplateRetention }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
@@ -401,6 +406,20 @@ class AcquisitionQuery {
             maxRoots: this.input.allowance.max_roots, maxAttempts: this.input.allowance.max_attempts, meter: this.meter,
             absorb: resources => this.absorb(resources), refusals: this.resourceRefusals,
             ordered: keys => { this.questionTimeOrder = keys; },
+            ...(this.input.source_template === undefined || this.candidate?.templateRetention === undefined ? {} : {
+              beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
+                this.prepaidBaseBytes = restoreSourceTemplate({ proposal: this.input.source_template!, original,
+                  nominations: this.nominations, occurrences: this.candidate!.retained, max_roots: this.input.allowance.max_roots,
+                  repository: this.repository, meter: this.meter, retention: this.candidate!.templateRetention!,
+                  association: this.statements?.finalizationProtection(this.input.allowance.max_roots,
+                    original.reduce((sum, [key]) => sum + key.length, 0)
+                      + [...this.nominations.keys()].reduce((sum, key) => sum + key.length, 0))
+                    ?? { work_units: 0, memory_bytes: 0 }, result: () => this.result(),
+                  nativeBytes: bytes => { this.nativeBytes += bytes; }, observe: observation =>
+                    this.observe("source_template_restoration", () => ({ kind: "source_template_restoration",
+                      observation, index_binding: this.vectorBinding })) });
+              }
+            }),
             ...(this.candidate === undefined ? {} : { occurrences: this.candidate.retained }),
             nominate: candidates => {
               this.timeRoute = true; this.lexicalCandidates = this.collapseStatementCandidates(candidates); this.vectorCandidates = [];
@@ -420,10 +439,18 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
+    const result = this.result();
+    this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
+      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
+      statement_association: this.statements?.availability() ?? { status: "not_requested", reason: "association_not_requested" } }));
+    return result;
+  }
+
+  private result(): SourceIndexAcquisitionResult {
     const lexicalDone = this.lexical.completion === "complete" || this.control === "vector" && this.lexical.completion === "not_run";
     const complete = !this.limited && this.counts.native_unknown === 0 && lexicalDone &&
       (this.vector.completion === "complete" || this.vector.completion === "not_run");
-    const result: SourceIndexAcquisitionResult = {
+    return {
       policy: "source-index-interleaved-prefix.v1", navigation_digest: this.navigationDigest,
       completion: complete ? "complete" : this.nominations.size === 0 && this.lexical.completion === "unavailable" &&
         this.vector.completion === "unavailable" ? "unavailable" : "partial",
@@ -435,10 +462,6 @@ class AcquisitionQuery {
         "native_deadline_and_interruption_require_daemon_integration", "caller_owned_read_snapshot_required",
         "lexical_corpus_coverage_untracked", ...(this.timeRoute ? ["question_time_bounded_preference"] : [])]
     };
-    this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
-      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
-      statement_association: this.statements?.availability() ?? { status: "not_requested", reason: "association_not_requested" } }));
-    return result;
   }
 
   private observe(kind: SourceIndexAcquisitionFact["kind"], capture: () => SourceIndexAcquisitionFact): void {

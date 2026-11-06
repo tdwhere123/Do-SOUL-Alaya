@@ -5,6 +5,15 @@ const FTS_SURFACE_CHARACTERS = String.raw`\p{L}\p{N}_`;
 const FTS_SURFACE_TOKEN_PATTERN = new RegExp(`[${FTS_SURFACE_CHARACTERS}]+`, "gu");
 const FTS_SURFACE_SEPARATOR_PATTERN = new RegExp(`[^${FTS_SURFACE_CHARACTERS}]+`, "u");
 
+export type FtsSurfaceToken = Readonly<{ text: string; start: number; end: number }>;
+
+/** Ordered, unchanged surface tokens; offsets are UTF-16 indices into the supplied text. */
+export function ftsSurfaceTokens(text: string): readonly FtsSurfaceToken[] {
+  return Array.from(text.matchAll(FTS_SURFACE_TOKEN_PATTERN), match => ({
+    text: match[0], start: match.index, end: match.index + match[0].length
+  }));
+}
+
 export const CJK_SCRIPT_PATTERN =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 

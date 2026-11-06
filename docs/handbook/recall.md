@@ -290,6 +290,35 @@ permutes source positions in the mixed access schedule, preserving memory positi
 and native order within each source tier. Continuations retain that frozen order;
 public navigation exposes factual capture provenance and the separate access ordinal.
 
+Protocol 36.0.0 adds optional `source_template` to the ordinary interpretation proposal.
+Producer `alaya.query.source-template.v1` may supply it and question time, bound to the
+original query digest and interpretation clock. Its known asked host role and exactly
+one evidence statement with one nonempty `<...>` hole define a narrow navigation frame.
+Protocol's FTS surface-token owner preserves ordered Unicode letter/number/underscore
+tokens and their offsets, including case and duplicates; it does not normalize, segment,
+stem or truncate. Both literal sides must occur contiguously and in order with at least
+one intervening token in a current statement and its own bound retained host message.
+The occurrence must be complete; exact retained bytes do not claim upstream original-byte
+fidelity. Session-context messages cannot supply either side. UTF-16 token positions are explicitly
+converted to UTF-8 source positions.
+
+After active soft time preference completes, acquisition inspects every eligible root
+from the original admitted prefix (at most 16). Known empty current artifacts are
+nonmatches; partial, stale, unread or refused evidence leaves uniqueness unknown.
+Exactly one matching root may be restored only when time preference displaced it;
+it precedes the incumbent nominations under the unchanged 16-root cap. Authorization,
+source restrictions and hard time filters remain authoritative. An explicit hard source
+guard disables template inspection: acquisition lacks the later Field facts needed to
+prove eligibility, so it preserves the incumbent. The complete incumbent
+capture is retained before optional inspection, while a conservative association bound
+protects finalization and graph retention. Optional reads and replacement capture use
+only the remaining allowance and remain charged on refusal; the paid incumbent survives.
+Association is finalized once after membership is settled. The observation records its
+source/artifact identities, current bindings, index binding, admitted-prefix authorization
+and matching source coordinates. These are navigation witnesses, not entailment or
+event-time proof; quoted or negated text can still match a literal frame. Proposal absence
+preserves the existing path and Recall makes no new provider or embedding calls.
+
 ## Statement-key association at slot 5
 
 Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
@@ -343,8 +372,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v9`, Protocol
-34.1.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v10`, Protocol
+36.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -768,8 +797,8 @@ Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
 14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5,
-29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0–34.1.0/v9 and current
-35.0.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0–35.0.0/v9 and current
+36.0.0/v10 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
 canonical request policy. Every native pair requires its matching
 `ordinary-native-field.vN` public semantics and result/continuation version,
 `native_query`, and current compact disclosures; cross-pairs are refused. This is offline

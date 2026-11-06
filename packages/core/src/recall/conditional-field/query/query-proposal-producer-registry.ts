@@ -1,6 +1,7 @@
 import {
   QUERY_PROPOSAL_PROGRAM_KINDS,
   QUESTION_TIME_PROPOSAL_PRODUCER_ID,
+  SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID,
   QUERY_PROPOSAL_TRANSPORT_LIMITS,
   tightenQueryProposalLimits,
   type QueryInterpretationProposal,
@@ -18,7 +19,8 @@ export const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
   "holes",
   "hypotheses",
   "stored_cosine_admission",
-  "question_time"
+  "question_time",
+  "source_template"
 ] as const;
 
 export type QueryProposalProducerCapability = (typeof QUERY_PROPOSAL_PRODUCER_CAPABILITIES)[number];
@@ -78,6 +80,9 @@ const PRODUCTION_RECORDS: readonly QueryProposalProducerRecord[] = [
   queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID),
   queryProposalProducerRecord(QUESTION_TIME_PROPOSAL_PRODUCER_ID, {
     capabilities: ["question_time"], allowed_grammar: []
+  }),
+  queryProposalProducerRecord(SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID, {
+    capabilities: ["question_time", "source_template"], allowed_grammar: []
   })
 ];
 

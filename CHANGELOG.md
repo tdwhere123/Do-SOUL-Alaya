@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 35.0.0, engine gateway 3.0.0
+## Unreleased — protocol 36.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,14 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 36.0.0 changes ordinary source priority (`ordinary-native-field.v10`).
+A query-and-clock-bound source template may restore one uniquely matching original
+root displaced by soft time preference, after checking its current statement and own
+retained host message. Mandatory capture and association costs are protected before optional
+inspection; unknown or refused inspection preserves the incumbent. This is navigation
+evidence, not event-time or entailment proof. Old continuation handles are rejected;
+restart the query after upgrading. No query-time model call or allowance increase is added.
 
 Protocol 35.0.0 separates ordinary Recall execution ownership from semantic
 query identity and bounds retained execution and delivery state. This is a

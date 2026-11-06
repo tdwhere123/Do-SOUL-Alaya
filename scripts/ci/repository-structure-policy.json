@@ -31,6 +31,10 @@
       "packages/core/src/recall/conditional-field/observers/observe.ts": {
         "kind": "handwritten",
         "reason": "Native observer port contracts, cursor validation and action dispatch; source and measurement algorithms have separate owners."
+      },
+      "packages/core/src/source-index/source-index-acquisition.ts": {
+        "kind": "handwritten",
+        "reason": "One acquisition coordinator owns shared read and nomination accounting, admission, and final result; time preference and template matching/restoration are separate phase owners."
       }
     }
   },
@@ -1138,8 +1142,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 3169,
-      "expected_sha256": "fcb9c53d42d42b0e43605f18b5b48aac9693a6e67482a27f77a18deb5c9c2ee0"
+      "expected_count": 3175,
+      "expected_sha256": "89b1ca5a12274245fed76479b4eb3584aa1ddd8ec7016515af0f3343033eb782"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",

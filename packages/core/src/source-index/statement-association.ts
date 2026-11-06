@@ -53,6 +53,7 @@ export class StatementKeyRetention {
   private readonly byRoot = new Map<string, Retained[]>();
   private abandoned = false;
   private dimensions: number | undefined;
+  private retainedKeyCount = 0;
   private observed: StatementAssociationAvailability = { status: "unavailable", reason: "association_capture_not_reached" };
 
   public availability(): StatementAssociationAvailability { return { ...this.observed }; }
@@ -74,9 +75,19 @@ export class StatementKeyRetention {
     this.dimensions ??= embedding.length;
     const row = { cosine, embedding: embedding.slice(), norm: Math.sqrt(norm) };
     const at = kept.findIndex(other => other.cosine < cosine);
+    if (kept.length < STATEMENT_ASSOCIATION_KEYS_PER_ROOT) this.retainedKeyCount++;
     kept.splice(at === -1 ? kept.length : at, 0, row);
     if (kept.length > STATEMENT_ASSOCIATION_KEYS_PER_ROOT) kept.pop();
     this.byRoot.set(root, kept);
+  }
+
+  /** Numeric conservative protection for any final root membership, before optional reads.
+   * It includes the existing conversion and retained graph bound without traversing vectors. */
+  public finalizationProtection(roots: number, rootCharacters: number): SourceSemanticResourceBudget {
+    if (this.abandoned) return { work_units: 0, memory_bytes: 0 };
+    const cost = quoteStatementAssociation(roots,
+      Math.min(this.retainedKeyCount, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT), this.dimensions ?? 0);
+    return { ...cost, memory_bytes: cost.memory_bytes + rootCharacters * 4 };
   }
 
   private abandon(phase: string): void {

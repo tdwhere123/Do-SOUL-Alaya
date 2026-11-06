@@ -157,6 +157,10 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     ...(input.access_hint === undefined ? {} : { hint: input.access_hint }),
     ...(interpretation.interpretation_proposal?.question_time === undefined ? {}
       : { questionTime: interpretation.interpretation_proposal.question_time }),
+    // Hard source guards require Field-owned facts unavailable at the acquisition seam.
+    // Abstain instead of allowing a later-ineligible restoration to evict an incumbent.
+    ...(interpretation.source_guard !== undefined || interpretation.interpretation_proposal?.source_template === undefined ? {}
+      : { sourceTemplate: interpretation.interpretation_proposal.source_template }),
     budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
   let captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
   const requiredNominationBytes = captured?.retained_bytes ?? null;

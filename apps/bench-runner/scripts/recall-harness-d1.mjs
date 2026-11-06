@@ -96,7 +96,7 @@ if (values["historical-preparation"] !== undefined && (values["historical-prepar
 const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
 const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
 const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
-const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
+const { queryProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/query-coordinate-proposal.js")).href);
 const { chainIdentity, writeChainArtifact } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
 const { admitHistoricalRecallPreparation, assertHistoricalRecallProducer } = await import(pathToFileURL(join(dist, "runs/recall-measurement/historical-preparation.js")).href);
 const { captureRecallRuntimeBuild } = await import("./recall-runtime-binding.mjs");
@@ -313,7 +313,7 @@ for (const id of ids) {
       const frozen = coordinates.get(id);
       if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
       const proposal = arm.question_time === true
-        ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
+        ? queryProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
       if (arm.question_time === true) row.formation.question_time = { status: frozen.status,
         proposal: proposal === undefined ? "not_issued" : "issued" };
       const root = join(out, "runs", id, arm.name);

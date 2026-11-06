@@ -1,6 +1,7 @@
 import type { SourceIndexTarget, SourceIndexLexicalRank, SourceIndexRootNomination,
   SourceIndexQueryAdmission, SourceIndexAcquisitionResult, SourceIndexNominationAccounting } from "@do-soul/alaya-protocol";
 import type { StatementAssociationAvailability } from "./statement-association.js";
+import type { SourceTemplateRestorationObservation } from "./source-template-restoration.js";
 type QueryResourceRefusal = SourceIndexAcquisitionResult["resource_refusals"][number];
 
 export type NativeAdmissionFact =
@@ -36,6 +37,9 @@ export type SourceIndexAcquisitionFact = Readonly<{
   lexical_completion: SourceIndexAcquisitionResult["lexical"]["completion"];
   vector_completion: SourceIndexAcquisitionResult["vector"]["completion"];
   statement_association: StatementAssociationAvailability;
+}> | Readonly<{ kind: "source_template_restoration";
+  observation: SourceTemplateRestorationObservation;
+  index_binding: import("@do-soul/alaya-protocol").SourceIndexVectorBinding | null;
 }>;
 /** Kind is available without constructing a payload, including count-only inspection diagnostics. */
 export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact,

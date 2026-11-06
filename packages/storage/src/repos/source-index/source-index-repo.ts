@@ -23,6 +23,7 @@ import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndex
 import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
   readSourceIndexVectorCandidates, quoteSourceIndexQueryCapacity } from "./source-index-query-reader.js";
 import { readQuestionTimeDomain } from "./question-time-domain.js";
+import { readTemplateStatements } from "./template-statements.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
@@ -58,6 +59,10 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     rootKeys: readonly string[], budget: SourceSemanticResourceBudget) {
     BoundedIdSchema.parse(workspaceId);
     return this.atomic(() => readQuestionTimeDomain(this.database, workspaceId, preference, rootKeys, budget), "read");
+  }
+
+  public readTemplateStatements(source: SourceIndexTarget, budget: SourceSemanticResourceBudget) {
+    return this.atomic(() => readTemplateStatements(this.database, this.records, source, budget, this.sha256), "read");
   }
 
   public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget,

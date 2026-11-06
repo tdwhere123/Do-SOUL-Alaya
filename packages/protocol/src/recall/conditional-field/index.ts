@@ -374,3 +374,5 @@ export {
   SourceSemanticEvaluationContextSchema,
   type SourceSemanticEvaluationContext
 } from "./interpretation-context.js";
+export { SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID, SourceTemplateProposalSchema,
+  type SourceTemplateProposal } from "./source-template.js";

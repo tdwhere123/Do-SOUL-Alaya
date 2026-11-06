@@ -160,7 +160,9 @@ export function runConditionalFieldWorkerRecall(
   };
 }
 
-type NominationCapture = ReturnType<SourceIndexAcquisition["nominateWithWitness"]>;
+type NominationCapture = Omit<ReturnType<SourceIndexAcquisition["nominateWithWitness"]>, "witness"> & {
+  witness: NativeSourceNomination["witness"];
+};
 type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]>>[0];
 type AcquisitionFunding = "allowance" | "request";
 
@@ -180,17 +182,28 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
     allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE,
-    ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }) };
+    ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }),
+    ...(input.sourceTemplate === undefined ? {} : { source_template: input.sourceTemplate }) };
   const capacity = funding === "allowance" ? repository.quoteQueryCapacity(input.workspaceId, fields.allowance) : undefined;
   const budget = capacity === undefined ? input.budget
     : SourceIndexAcquisition.quoteAllowanceBudget({ ...fields, navigation_text: input.query }, capacity);
   const meter = new SourceSemanticResourceLedger(budget);
+  let prepaidCapture: NativeSourceNomination | undefined;
   if (capacity !== undefined) meter.charge(capacity.resources.work, capacity.resources.memory_bytes, "source acquisition capacity reads");
   const run = (navigation_text: string, allowance: SourceIndexNominationAllowance, invocation: "original" | "hint") => {
     const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
-      ...(invocation === "hint" ? { question_time: undefined } : {}) }, admit, invocation,
+      ...(invocation === "hint" ? { question_time: undefined, source_template: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
-        observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined);
+        observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined,
+      invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined ? undefined : {
+        ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
+        retain: (capture, retentionMeter) => {
+          const retained = nominationFromCaptures([capture], input.sourceId, { charged_by_caller: true });
+          const bytes = retainBaseNomination(retained, retentionMeter);
+          prepaidCapture = retained;
+          return bytes;
+        }
+      });
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
@@ -213,8 +226,12 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       ...(hint === undefined ? {} : { supplemental: [phase(hint, hintBudget, hintAllowance)] }) },
       beyond_observed_prefix: "unknown_not_nomination_limit" };
   });
-  const captured = nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId,
-    capacity === undefined ? undefined : { charged_by_caller: true });
+  const captured = prepaidCapture === undefined ? nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId,
+    capacity === undefined ? undefined : { charged_by_caller: true }) : {
+    ...prepaidCapture, result: { ...original.result, nominations: prepaidCapture.result!.nominations },
+    ...(original.association === undefined ? {} : { association: restrictStatementAssociation(original.association,
+      key => prepaidCapture!.result!.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) })
+  };
   // Library requests already have an explicit outer resource ledger; their field
   // must continue paying acquisition from that request, without an ordinary allowance.
   if (capacity === undefined) {
@@ -224,10 +241,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   }
   const result = captured.result!;
   const { association, ...baseCapture } = captured;
-  const beforeRetention = meter.spentBytes;
-  meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
-    acquisition_resources: result.resources }, "source retained nomination");
-  const baseRetainedBytes = meter.spentBytes - beforeRetention;
+  const baseRetainedBytes = original.prepaid_base_bytes ?? retainBaseNomination(captured, meter);
   let retainedAssociation = association, associationRetainedBytes = 0;
   const associationAvailableBytes = meter.bytes;
   if (association !== undefined) {
@@ -255,6 +269,14 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     acquisition_resources: resources, result: { ...result, resources,
       resource_refusals: association !== undefined && retainedAssociation === undefined
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
+}
+
+/** The same actual capture is paid either at the late template choice or after ordinary acquisition. */
+function retainBaseNomination(captured: NativeSourceNomination, meter: SourceSemanticResourceLedger): number {
+  const { association: _association, ...baseCapture } = captured, before = meter.spentBytes;
+  meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
+    acquisition_resources: captured.result!.resources }, "source retained nomination");
+  return meter.spentBytes - before;
 }
 
 /** Frozen captures are already paid; reuse reports their real membership and totals. */

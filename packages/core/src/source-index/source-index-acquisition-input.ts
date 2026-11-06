@@ -1,10 +1,11 @@
-import { BoundedIdSchema, QuestionTimePreferenceSchema, type SourceIndexAcquisitionInput,
+import { BoundedIdSchema, QuestionTimePreferenceSchema, SourceTemplateProposalSchema, type SourceIndexAcquisitionInput,
   type SourceIndexScopeAdmission } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 
 export function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission, rootCeiling = 16): void {
   BoundedIdSchema.parse(input.workspace_id);
   if (input.question_time !== undefined) QuestionTimePreferenceSchema.parse(input.question_time);
+  if (input.source_template !== undefined) SourceTemplateProposalSchema.parse(input.source_template);
   if (typeof admitScope !== "function" || typeof input.navigation_text !== "string") {
     throw new CoreError("VALIDATION", "source index query requires captured text and scope admission");
   }

@@ -13,6 +13,19 @@ function association(question: Record<string, number>, links: Record<string, num
 }
 const select = (order: readonly string[], value: StatementAssociation) => preferAssociatedSlot(order, value, meter());
 
+it.each([0, 1, 16])("protects actual finalization and complete plain-graph retention with %i keys per root", count => {
+  const budget = meter(), retained = new StatementKeyRetention(budget, () => { throw new Error("unexpected refusal"); });
+  const identities = Array.from({ length: 16 }, (_, index) => `${index}:${"字".repeat(1024)}`);
+  for (const root of identities) for (let key = 0; key < count; key++) {
+    retained.consider(root, 1, Float32Array.from({ length: 32 }, () => 1));
+  }
+  const protection = retained.finalizationProtection(identities.length, identities.reduce((sum, root) => sum + root.length, 0));
+  const work = budget.spentWork, bytes = budget.spentBytes, graph = retained.associate(identities)!;
+  budget.retain(graph);
+  expect(budget.spentWork - work).toBeLessThanOrEqual(protection.work_units);
+  expect(budget.spentBytes - bytes).toBeLessThanOrEqual(protection.memory_bytes);
+});
+
 describe("statement association source-slot heuristic", () => {
   it("chooses the earliest two-coordinate dominator, not a weighted score", () => {
     expect(select(roots, association({ e: 0.3, f: 0.4, g: 0.5 }, { ae: 0.2, af: 0.2, bg: 0.6 })))
