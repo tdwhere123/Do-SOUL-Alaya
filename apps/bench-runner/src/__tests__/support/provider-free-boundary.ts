@@ -1,8 +1,6 @@
-import childProcess from "node:child_process";
-import workerThreads from "node:worker_threads";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
@@ -10,6 +8,12 @@ import http from "node:http";
 import http2 from "node:http2";
 import dgram from "node:dgram";
 import dns from "node:dns";
+
+// Native CLI preloads execute this TypeScript source directly; type-only imports
+// retain normal compiler resolution while require uses Node's source loader.
+const require = createRequire(import.meta.url);
+const { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } = require("./provider-free-isolation.ts") as typeof import("./provider-free-isolation.js");
+const { installProviderFreeDescendants } = require("./provider-free-descendants.ts") as typeof import("./provider-free-descendants.js");
 
 type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
 
@@ -19,9 +23,11 @@ type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
  * not fixture ownership. Native CLI fixtures retain their named config owner. */
 export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFixtures?: boolean; descendantPreload?: string }> = {}) {
   const restores: (() => void)[] = [], violations: string[] = [];
+  const isolation = new ProviderFreeIsolation();
   const fixtures = new Map<string, FixtureDirectory>();
   const deny = (kind: string): never => {
     violations.push(kind);
+    isolation.violation(kind);
     throw new Error(`Provider-free test refused ${kind}`);
   };
   restores.push(installProviderFreeTransport(deny));
@@ -41,35 +47,12 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
   process.env = Object.fromEntries(Object.keys(environment)
     .filter(key => !/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key))
     .map(key => [key, environment[key]]));
+  process.env = isolation.environment(process.env);
   restores.push(() => { process.env = environment; });
   if (options.descendantPreload !== undefined) {
     const preload = `--import=${options.descendantPreload}`;
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${preload}`.trim();
-    const argv = (supplied?: readonly string[]) => {
-      // Repeated valued flags (for example --conditions) must keep their order
-      // and multiplicity. Only our complete preload token is idempotent.
-      const selected = [...(supplied ?? process.execArgv)];
-      return selected.includes(preload) ? selected : [...selected, preload];
-    };
-    // ONNX deliberately clears inherited loader flags; recall workers supply
-    // explicit argv. Apply the fixture guard at those actual creation boundaries.
-    const fork = childProcess.fork;
-    childProcess.fork = ((modulePath, argsOrOptions, suppliedOptions) => {
-      const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
-      const selected = Array.isArray(argsOrOptions) ? suppliedOptions : argsOrOptions;
-      const settings = selected as import("node:child_process").ForkOptions | undefined;
-      return fork(modulePath, args, { ...settings, execArgv: argv(settings?.execArgv) });
-    }) as typeof childProcess.fork;
-    restores.push(() => { childProcess.fork = fork; });
-    const Worker = workerThreads.Worker;
-    workerThreads.Worker = new Proxy(Worker, { construct(target, [filename, settings = {}]) {
-      // Node does not run --import preloads for CommonJS eval workers (the
-      // native SQLite lease uses one). Install synchronously before their body.
-      const guarded = settings.eval === true
-        ? `require(${JSON.stringify(fileURLToPath(options.descendantPreload!))});\n${filename}` : filename;
-      return new target(guarded, { ...settings, execArgv: argv(settings.execArgv) });
-    } });
-    restores.push(() => { workerThreads.Worker = Worker; });
+    restores.push(installProviderFreeDescendants(isolation, options.descendantPreload));
   }
 
   const remember = (value: unknown) => {
@@ -128,7 +111,9 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     }
   }
   syncBuiltinESMExports();
-  return { violations, restore: () => {
+  isolation.ready();
+  return { violations, evidence: { ...isolation.binding }, signalFailureExitCode: ISOLATION_SIGNAL_FAILURE_EXIT,
+    assertSafe: (requireSettled = false) => isolation.assertSafe(requireSettled), restore: () => {
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };

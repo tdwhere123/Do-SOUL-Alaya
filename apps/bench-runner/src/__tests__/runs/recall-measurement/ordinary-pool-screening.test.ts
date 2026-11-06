@@ -1,7 +1,9 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  return installProviderFreeBoundary({
+    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+  });
 });
 
 import { execFile } from "node:child_process";
@@ -21,7 +23,8 @@ import { observeOrdinaryEntry } from "../../../runs/recall-measurement/ordinary/
 const roots: string[] = [];
 afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
-  isolation.restore();
+  try { isolation.assertSafe(true); }
+  finally { isolation.restore(); }
   expect(isolation.violations).toEqual([]);
 });
 

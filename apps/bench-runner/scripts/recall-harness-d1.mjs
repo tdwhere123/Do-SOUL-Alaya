@@ -22,7 +22,7 @@
 // --historical-preparation pre-statement-map.v1 explicitly admits the named archived producers by
 // their config, original snapshot hash and preparation receipt, not current preparation source equality.
 // --reader end_continuation also reads each cut slot on after the membership window (scored separately).
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,9 +35,10 @@ const providerFree = installProviderFreeBoundary({
   descendantPreload: new URL("../src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href
 });
 process.on("exit", () => {
-  if (providerFree.violations.length > 0) {
-    process.stderr.write(`Provider-free boundary violations: ${providerFree.violations.join(", ")}\n`);
-    process.exitCode = 1;
+  try { providerFree.assertSafe(true); }
+  catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    if (process.exitCode !== providerFree.signalFailureExitCode) process.exitCode = 1;
   }
 });
 
@@ -153,6 +154,7 @@ mkdirSync(out, { recursive: true });
 const runtime = captureRecallRuntimeBuild(repo, revision);
 const runtimeIdentity = chainIdentity(runtime);
 writeChainArtifact(join(out, "runtime.json"), runtime);
+writeChainArtifact(join(out, `isolation-${providerFree.evidence.member}.json`), providerFree.evidence);
 writeChainArtifact(join(out, "invocation.json"), { runtime_identity: runtimeIdentity, question_ids: ids, arms,
   dataset_sha256: datasetSha, reader: values.reader, capture_pool: values["capture-pool"],
   coordinates_sha256: values.coordinates === undefined ? null : sha256(readFileSync(values.coordinates)),
@@ -281,11 +283,21 @@ async function prepared(question, index, arm) {
   return { config: result.config, formation: statementFormation(dir) };
 }
 
+function assertDispatchSafe() {
+  try { providerFree.assertSafe(true); }
+  catch (error) {
+    writeChainArtifact(join(out, `isolation-failure-${randomUUID()}.json`), {
+      ...providerFree.evidence, status: "failed", reasons: error.reasons ?? ["isolation_signal_unknown"] });
+    throw error;
+  }
+}
+
 for (const id of ids) {
   const entry = byId.get(id);
   if (!entry) throw new AlayaError("VALIDATION", `unknown question ${id}`);
   const { question, index } = entry;
   for (const arm of arms) {
+    assertDispatchSafe();
     if (done.has(`${id}:${arm.name}`)) continue;
     const started = performance.now();
     let preparation;
@@ -348,8 +360,12 @@ for (const id of ids) {
     row.elapsed_ms = Math.round(performance.now() - started);
     appendFileSync(rowsPath, `${JSON.stringify(row)}\n`);
     process.stdout.write(`${id} ${arm.name} ${row.status} ${row.elapsed_ms}ms${row.error ? ` ${row.error}` : ""}\n`);
+    // Preserve the raw per-item result and completed cleanup before a cohort stop.
+    // A caught guard refusal is independent of the row's ordinary status.
+    assertDispatchSafe();
   }
 }
+assertDispatchSafe();
 const finalRuntime = captureRecallRuntimeBuild(repo, readCurrentExtractionAuthorityRevision());
 if (chainIdentity(finalRuntime) !== runtimeIdentity) throw new AlayaError("CONFLICT", "recall runtime source or build changed during execution");
 writeChainArtifact(join(out, "runtime-final.json"), { runtime_identity: runtimeIdentity, unchanged: true });
