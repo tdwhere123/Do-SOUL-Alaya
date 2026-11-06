@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { AlayaError, HostOccurrenceInventorySchema } from "@do-soul/alaya-protocol";
 import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answer-spans.js";
 import { endContinuationReading } from "../dist/runs/recall-measurement/ordinary/ordinary-end-continuation.js";
@@ -183,15 +184,21 @@ export function scoreRecallHarnessRow(row, dataset) {
 }
 
 export function runRecallHarnessScore({ outDir, baseArm, datasetPath, censusPath }) {
-  const out = resolve(outDir);
+  const out = resolve(outDir), censusPathname = join(out, "census.json");
+  // Invalidate the current projection before any fallible input read/parse/validation.
+  // Frozen evidence is never a scoring destination; callers use fresh output directories.
+  writeFileSync(censusPathname, JSON.stringify({ status: "not_qualifiable", reason: "scoring_incomplete" }, null, 2) + "\n");
+  const inputs = {};
+  const readInput = (name, path) => {
+    const bytes = readFileSync(path);
+    inputs[name] = { path: resolve(path), sha256: createHash("sha256").update(bytes).digest("hex") };
+    return bytes.toString("utf8");
+  };
   const resolvedDatasetPath = resolve(datasetPath ?? join(here, "../data/longmemeval/longmemeval_s.json"));
-  const dataset = new Map(JSON.parse(readFileSync(resolvedDatasetPath, "utf8")).map(q => [q.question_id, q]));
-  const captured = readFileSync(join(out, "rows.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
-  const manifest = censusPath === undefined ? undefined : JSON.parse(readFileSync(resolve(censusPath), "utf8"));
-  const census = recallHarnessCensus(captured, dataset, manifest);
-  const censusPathname = join(out, "census.json");
-  // A valid row census is not a successful score: a later snapshot read may fail.
-  writeFileSync(censusPathname, JSON.stringify({ ...census, status: "not_qualifiable", reason: "scoring_incomplete" }, null, 2) + "\n");
+  const dataset = new Map(JSON.parse(readInput("dataset", resolvedDatasetPath)).map(q => [q.question_id, q]));
+  const captured = readInput("rows", join(out, "rows.jsonl")).split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const manifest = censusPath === undefined ? undefined : JSON.parse(readInput("census", resolve(censusPath)));
+  const census = { ...recallHarnessCensus(captured, dataset, manifest), inputs };
   const continued = endContinuationRows(captured);
   const rows = [...captured, ...continued.read];
 

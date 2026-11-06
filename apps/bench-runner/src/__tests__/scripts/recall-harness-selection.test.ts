@@ -166,6 +166,14 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
     const empty = JSON.parse(readFileSync(join(emptyOut, "rows.jsonl"), "utf8"));
     expect(empty.formation.statements).toMatchObject({ status: "empty", sessions: 2, statements: 0 });
     expect(empty.error).not.toContain("no sealed preparation");
+    // A missing model-output message is not an explicit empty statement array.
+    writeFileSync(join(cache, "fixture", keyA, "d1-statements.json"), JSON.stringify({ status: "published", sessions: 2,
+      unmapped_sessions: 0, raw_gaps: [], rejections: [], messages: 2, matched_messages: 1, keyed_messages: 0, statements: 0 }));
+    const missingMessageOut = join(root, "missing-message-formation-out");
+    await promisify(execFile)(process.execPath, d1Args(missingMessageOut, cache), { timeout: 30_000, env });
+    const missingMessage = JSON.parse(readFileSync(join(missingMessageOut, "rows.jsonl"), "utf8"));
+    expect(missingMessage.formation.statements).toMatchObject({ status: "partial", messages: 2, matched_messages: 1, statements: 0 });
+    expect(missingMessage.error).toBe(empty.error); // Both reach the same raw-recall entry with the synthetic config.
 
     for (const [name, selectedDataset, id, expected] of [
       ["noncanonical", join(root, "synthetic.json"), "fixture", "--dataset must name the canonical longmemeval_s.json file"],

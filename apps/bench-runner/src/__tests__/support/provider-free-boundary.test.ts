@@ -106,6 +106,7 @@ it("leaves local fixture transport available without following redirects", async
 });
 
 it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UDP and DNS", async () => {
+  const isolation = installProviderFreeBoundary();
   let okRequests = 0;
   const server = http.createServer((req, res) => {
     if (req.url === "/redirect") { res.writeHead(302, { location: "/ok" }); res.end(); }
@@ -113,7 +114,6 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as net.AddressInfo).port;
-  const isolation = installProviderFreeBoundary();
   const request = (path: string) => new Promise<string>((resolve, reject) => {
     http.get(`http://localhost:${port}${path}`, response => {
       let body = ""; response.on("data", chunk => { body += chunk; }); response.on("end", () => resolve(body));
@@ -128,10 +128,13 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
     expect(() => net.connect("/tmp/nonexistent-provider-fixture.sock")).toThrow("non-loopback socket");
     expect(() => dgram.createSocket("udp4")).toThrow("UDP transport");
     expect(() => dns.resolve4("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
-    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "UDP transport", "DNS lookup"]);
+    expect(() => dns.lookup("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
+    expect(() => dns.promises.lookup("provider-fixture.invalid")).toThrow("DNS lookup");
+    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "UDP transport",
+      "DNS lookup", "DNS lookup", "DNS lookup"]);
   } finally {
-    isolation.restore();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    isolation.restore();
   }
 });
 

@@ -5,8 +5,39 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 
 const scripts = new URL("../../../scripts/", import.meta.url);
+
+it("qualifies successful CLI scoring and invalidates prior success before malformed input reads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "recall-score-inputs-"));
+  try {
+    const data = join(root, "dataset.json"), census = join(root, "expected.json"), rows = join(root, "rows.jsonl");
+    const snapshot = join(root, "snapshot.sqlite"), db = new Database(snapshot);
+    db.exec("CREATE TABLE source_records(workspace_id TEXT, record_id TEXT, source_id TEXT, source_version TEXT, content_digest TEXT, source_body TEXT)");
+    db.close();
+    const good = new Map([
+      [data, JSON.stringify([{ question_id: "empty", haystack_sessions: [[]] }])],
+      [census, JSON.stringify({ question_ids: ["empty"], arms: ["base"], reader: "current", capture_pool: false })],
+      [rows, JSON.stringify({ question_id: "empty", arm: "base", status: "complete", snapshot, workspace: "fixture", intervals: [] }) + "\n"]
+    ]);
+    const score = () => promisify(execFile)(process.execPath, [fileURLToPath(new URL("recall-harness-score.mjs", scripts)),
+      "--out", root, "--dataset", data, "--census", census]);
+    for (const badInput of [data, rows, census, "invalid-census"]) {
+      for (const [path, content] of good) writeFileSync(path, content);
+      await score();
+      const success = JSON.parse(readFileSync(join(root, "census.json"), "utf8"));
+      expect(success.status).toBe("qualifiable");
+      expect(success.by_arm[0]).toMatchObject({ expected: 1, complete: 1, unknown: 0, unanswerable: 1 });
+      expect(success.inputs.rows.sha256).toBe(createHash("sha256").update(good.get(rows)!).digest("hex"));
+      writeFileSync(badInput === "invalid-census" ? census : badInput, badInput === "invalid-census" ? "{}" : "not json");
+      await expect(score()).rejects.toMatchObject({ code: 1 });
+      expect(JSON.parse(readFileSync(join(root, "census.json"), "utf8")))
+        .toMatchObject({ status: "not_qualifiable", reason: "scoring_incomplete" });
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}, 30_000);
 const dataset = new Map([
   ["a", { question_id: "a", haystack_sessions: [[{ has_answer: true, content: "gold" }]] }],
   ["b", { question_id: "b", haystack_sessions: [[{ has_answer: true, content: "gold" }]] }],

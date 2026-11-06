@@ -185,7 +185,12 @@ function installProviderFreeTransport(deny: (kind: string) => never): () => void
   for (const owner of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolver.prototype]) {
     for (const key of Object.getOwnPropertyNames(owner)) {
       if (/^(?:lookup|resolve|reverse)/u.test(key) && typeof Reflect.get(owner, key) === "function") {
-        replace(owner, key, () => deny("DNS lookup"));
+        const lookup = Reflect.get(owner, key);
+        replace(owner, key, new Proxy(lookup, { apply(target, receiver, args) {
+          // Node also calls lookup for literal listen addresses; these require no DNS query.
+          if (key === "lookup" && (args[0] === "127.0.0.1" || args[0] === "::1")) return Reflect.apply(target, receiver, args);
+          return deny("DNS lookup");
+        } }));
       }
     }
   }

@@ -206,7 +206,8 @@ function statementFormation(dir) {
       .some(key => !Number.isInteger(report[key]) || report[key] < 0) || !Array.isArray(report.raw_gaps) || !Array.isArray(report.rejections)) {
       return { status: "unavailable", reason: "report_invalid" };
     }
-    return { status: report.unmapped_sessions || report.raw_gaps.length || report.rejections.length ? "partial"
+    return { status: report.unmapped_sessions || report.raw_gaps.length || report.rejections.length
+      || report.matched_messages < report.messages ? "partial"
       : report.statements === 0 ? "empty" : "available",
       sessions: report.sessions, unmapped_sessions: report.unmapped_sessions, raw_gaps: report.raw_gaps.length,
       rejections: report.rejections.length, messages: report.messages, matched_messages: report.matched_messages,
