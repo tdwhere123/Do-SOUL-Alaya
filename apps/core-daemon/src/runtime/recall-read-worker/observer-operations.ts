@@ -66,9 +66,7 @@ export function runConditionalFieldWorkerRecall(
   const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
     ...base, nominateSources: input => {
       const nomination = base.nominateSources!(input);
-      observer.event("field_nomination", "observe", () => ({ result: nomination.result, witness: nomination.witness,
-        admitted_roots: nomination.admitted_roots, question_time_order: nomination.question_time_order,
-        association: nomination.association }));
+      observer.nomination(nomination);
       return nomination;
     }
   };

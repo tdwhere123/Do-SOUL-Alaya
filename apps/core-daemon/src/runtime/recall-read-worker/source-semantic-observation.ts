@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
-import type { SourceIndexAcquisition } from "@do-soul/alaya-core";
+import type { NativeSourceNomination, SourceIndexAcquisition } from "@do-soul/alaya-core";
 import type { SourceIndexQueryVector } from "@do-soul/alaya-protocol";
 import { SourceSemanticNativeFactsSchema, SourceSemanticObservationFacts, type SourceSemanticNativeFacts } from "./source-semantic-provenance.js";
 
@@ -211,6 +211,22 @@ export class SourceSemanticObserver {
     this.event("source_query_vector", "field", () => vector === undefined
       ? { status: "unavailable", reason: "query_vector_unprovided" }
       : vector.status === "unavailable" ? vector : { ...vector, embedding: Array.from(vector.embedding) });
+  }
+
+  /** Nomination facts are not the retained computation graph. Association vectors belong to
+   * navigation/continuation accounting, not this event; copying them can crowd out the pool.
+   * Keep the capture-time coordinates/cache state explicit. The later field_access_order event
+   * owns the actual association decision, ranks and refusal after navigation has executed. */
+  nomination(value: NativeSourceNomination): void {
+    this.event("field_nomination", "observe", () => ({ result: value.result, witness: value.witness,
+      admitted_roots: value.admitted_roots, question_time_order: value.question_time_order,
+      association: value.association === undefined ? undefined : {
+        representation: "retained-association-summary.v1",
+        roots: value.association.roots, question: value.association.question,
+        link: value.association.link, refusal: value.association.refusal,
+        retained_key_counts: value.association.keys.map(keys => keys.length),
+        vectors: "not_captured_runtime_state"
+      }, beyond_observed_prefix: "unknown_not_nomination_limit" }));
   }
 
   pageAttempt(capture: () => unknown): void {
