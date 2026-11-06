@@ -42,7 +42,7 @@ it("reports independent paired expectations, exact sign tests, floors, residual 
   const out = report.buildOfflineReport(fixture());
   expect(out.status).toBe("diagnostic_only");
   expect(out.qualification).toBe("NOT_VERIFIED");
-  expect(out.paired.msg5.all).toMatchObject({ declared: 2, known_pairs: 2, base: 1, current: 1,
+  expect(out.paired.msg5.all).toMatchObject({ declared: 2, answerable_known: 2, base: 1, current: 1,
     wins: ["gain"], losses: ["loss"], exact_sign_p: 1 });
   expect(out.paired.b4096.all).toMatchObject({ wins: ["loss"], losses: ["gain"] });
   expect(out.paired.b8192.any.losses).toEqual(["gain"]);
@@ -70,7 +70,7 @@ it("keeps the full 488 denominator and uses declared answerable counts for held-
   }
   const out = report.buildOfflineReport(input);
   expect(out.census).toMatchObject({ declared: 488, b0_size_matches: true });
-  expect(out.overall.current.metrics.msg5.all).toEqual({ success: 465, miss: 0, unknown: 23, denominator: 488 });
+  expect(out.overall.current.metrics.msg5.all).toEqual({ success: 465, miss: 0, unknown_answerable: 0, not_applicable: 23, declared: 488, answerable: 465 });
   expect(out.cohorts.heldout.floor).toEqual({ any: { target: 89, success: 93, answerable_unknown: 0, met: true },
     all: { target: 69, success: 93, answerable_unknown: 0, met: true } });
   expect(out.cohorts.dev2.floor.any.met).toBe(true);
@@ -98,10 +98,10 @@ it("retains every missing, failed, partial, unavailable and gold0 census member"
   input.current.scores = input.current.rows.map(r => ({ ...score(r.question_id, true), gold: r.question_id === "gold0" ? 0 : 2 }));
   const out = report.buildOfflineReport(input);
   expect(out.census.declared_ids).toEqual(["missing", "failed", "partial", "unavailable", "gold0"]);
-  expect(out.overall.current.metrics.msg5.any).toEqual({ success: 0, miss: 0, unknown: 5, denominator: 5 });
+  expect(out.overall.current.metrics.msg5.any).toEqual({ success: 0, miss: 0, unknown_answerable: 4, not_applicable: 1, declared: 5, answerable: 4 });
   expect(out.overall.current.gold0).toBe(1);
   expect(out.census.current.rows.missing).toEqual(["missing"]);
-  expect(out.paired.msg5.any.known_pairs).toBe(0);
+  expect(out.paired.msg5.any.answerable_known).toBe(0);
   expect(out.rows).toHaveLength(5);
 });
 
@@ -112,7 +112,7 @@ it("quarantines duplicates and unexpected IDs rather than silently intersecting 
   const out = report.buildOfflineReport(input);
   expect(out.census.current.rows).toMatchObject({ duplicate: ["gain"], unexpected: ["unexpected"] });
   expect(out.census.current.scores.duplicate).toEqual(["loss"]);
-  expect(out.overall.current.metrics.msg5.any.unknown).toBe(2);
+  expect(out.overall.current.metrics.msg5.any.unknown_answerable).toBe(2);
   expect(out.paired.msg5.any.aggregate_not_below_base).toBeNull();
   expect(() => report.buildOfflineReport({ ...input, questions: [...input.questions, input.questions[0]] })).toThrow("duplicate census");
 });
@@ -132,7 +132,7 @@ it("detects guard mismatches, gold census mismatches and all parity dimensions",
   const input = fixture();
   input.current.score_contract = { ...contract, ranked_slots: 16 };
   let out = report.buildOfflineReport(input);
-  expect(out.overall.current.metrics.b4096.all.unknown).toBe(2);
+  expect(out.overall.current.metrics.b4096.all.unknown_answerable).toBe(2);
   expect(out.rows[0].current.issues).toContain("score_guard_mismatch");
   input.current.score_contract = contract;
   const wrongReader = { ...input, current: { ...input.current, rows: [{ ...row(), reader: "current" }, row("loss")] } };
@@ -140,7 +140,7 @@ it("detects guard mismatches, gold census mismatches and all parity dimensions",
   input.current.rows[0] = { ...row(), status: "partial", stop_cause: "failed", input_identity: "other-input",
     snapshot_sha256: "other-snapshot", intervals: [interval(0, "different")], end_continuation: { continuations: [] } };
   out = report.buildOfflineReport(input);
-  expect(out.rows[0].parity.changed).toEqual(["status", "stop_cause", "input_identity", "snapshot_sha256", "intervals"]);
+  expect(out.rows[0].parity.changed).toEqual(["status", "stop_cause", "snapshot_sha256", "intervals"]);
   expect(out.rows[0].parity.unavailable).toContain("msg5");
   input.current.scores = [score("gain", true), { ...score("loss"), gold: 1 }];
   expect(report.buildOfflineReport(input).rows[1].current.issues).toContain("gold_census_mismatch");
@@ -155,6 +155,61 @@ it("compares continuations and retains missing parity identities as unknown even
   out = report.buildOfflineReport({ ...input, current: { ...input.current, rows: [{ ...baseline, snapshot_sha256: undefined }, row("loss")],
     scores: input.base.scores } });
   expect(out.rows[0].parity).toEqual({ status: "unknown", changed: [], unavailable: ["snapshot_sha256"] });
+});
+
+it("separates runtime provenance and latency from semantic delivery without hiding payload changes", () => {
+  const input = fixture();
+  const baseRow = { ...row(), end_continuation: { continuations: [], issues: [], latency_ms: 10 } };
+  const currentRow = { ...baseRow, input_identity: "new-runtime", end_continuation: { ...baseRow.end_continuation, latency_ms: 99 } };
+  const compare = (r: unknown) => report.buildOfflineReport({ ...input,
+    base: { ...input.base, rows: [baseRow, row("loss")] },
+    current: { ...input.current, rows: [r, row("loss")], scores: input.base.scores } }).rows[0];
+  expect(compare(currentRow).parity.status).toBe("identical");
+  expect(compare(currentRow).parity_metadata).toMatchObject({ provenance_changed_fields: ["input_identity"], timing_changed: true,
+    timing: { base: { continuation_latency_ms: 10 }, current: { continuation_latency_ms: 99 } } });
+  for (const changed of [
+    { ...currentRow, intervals: [interval(0, "r1", 1001)] },
+    { ...currentRow, intervals: [interval(1, "r1")] },
+    { ...currentRow, end_continuation: { ...currentRow.end_continuation, issues: ["no progress"] } },
+    { ...currentRow, end_continuation: { ...currentRow.end_continuation, continuations: [interval(0, "r1")] } },
+    { ...currentRow, status: "failed" }
+  ]) expect(compare(changed).parity.status).toBe("changed");
+});
+
+it("distinguishes five gold0 IDs from unknown answerable rows in a complete 100-question comparison", () => {
+  const input = fixture();
+  input.questions = Array.from({ length: 100 }, (_, i) => ({ question_id: `q${i}`, cohort: "o100", gold: i < 95 ? 2 : 0 }));
+  for (const side of [input.base, input.current]) {
+    side.rows = input.questions.map(q => row(q.question_id));
+    side.scores = input.questions.map(q => ({ ...score(q.question_id, true), gold: q.gold, scored: q.gold > 0 }));
+  }
+  let out = report.buildOfflineReport(input);
+  expect(out.paired.msg5.any).toMatchObject({ declared: 100, answerable_known: 95, not_applicable: 5,
+    not_applicable_ids: ["q95", "q96", "q97", "q98", "q99"], unknown_answerable: 0, aggregate_not_below_base: true });
+  expect(out.parity.identical_ids).toHaveLength(100);
+  input.current.rows = input.current.rows.filter(r => r.question_id !== "q0");
+  out = report.buildOfflineReport(input);
+  expect(out.paired.msg5.any).toMatchObject({ declared: 100, answerable_known: 94, not_applicable: 5,
+    unknown_answerable: 1, unknown_answerable_ids: ["q0"], aggregate_not_below_base: null });
+  input.current.rows = input.current.rows.filter(r => r.question_id !== "q95").map(r => r.question_id === "q96" ? { ...r, status: "failed" } : r);
+  out = report.buildOfflineReport(input);
+  expect(out.parity.unknown_ids).toEqual(["q0", "q95", "q96"]);
+});
+
+it("preserves incomplete formation without rejecting successful raw-fallback recall", () => {
+  const input = fixture();
+  const formation = { question_time: { status: "incomplete", proposal: "not_issued" },
+    statements: { status: "partial", missing_sessions: ["s2"] } };
+  const out = report.buildOfflineReport({ ...input, current: { ...input.current,
+    rows: [{ ...row(), formation }, row("loss")] } });
+  expect(out.rows[0].formation.current).toEqual(formation);
+  expect(out.rows[1].formation.current).toBeNull();
+  expect(out.rows[0].current.issues).toEqual([]);
+  expect(out.overall.current.metrics.msg5.any.success).toBe(1);
+  expect(out.formation.current).toEqual({
+    question_time: { incomplete: { count: 1, ids: ["gain"] }, not_observed: { count: 1, ids: ["loss"] } },
+    statements: { partial: { count: 1, ids: ["gain"] }, not_observed: { count: 1, ids: ["loss"] } }
+  });
 });
 
 it("reads actual JSONL shards through the offline CLI, hashes inputs and emits the full declared census", () => {
@@ -176,5 +231,8 @@ it("reads actual JSONL shards through the offline CLI, hashes inputs and emits t
     expect(out.provenance[0]).toMatchObject({ path, bytes: Buffer.byteLength(readFileSync(path)), sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(out.parity.changed_ids).toEqual(["gain", "loss"]);
     expect(out.paired.b4096.all.losses).toEqual(["gain"]);
+    expect(out.rows[0].current.issues).toEqual([]);
+    expect(out.rows[0].residual).toMatchObject({ status: "available", distinct_mapped_gold_roots: 2 });
+    expect(out.rows[0].slot5.paired.b8192.all).toBe("loss");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

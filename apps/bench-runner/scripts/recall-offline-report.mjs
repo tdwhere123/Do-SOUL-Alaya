@@ -16,6 +16,11 @@
  * parity changed/unknown IDs, fixed-denominator B0 floors, paired metrics/sign tests,
  * residual cross-tabs and per-ID source-slot-5 traces. Unknown/partial rows stay in denominators.
  * Missing files/invalid JSON/invalid declarations fail; row anomalies are retained in the report.
+ * Gold0 remains in the declared census but is not applicable to answerable metrics.
+ * Formation observations are reported, never used to reject raw-fallback recall.
+ * Output parity excludes input/runtime provenance and continuation latency; these differences
+ * remain explicit metadata. Missing snapshot binding remains unknown, not equal by hashing.
+ * initial_ten_slot_bytes is NOT full C-end byte-cost attribution.
  * Counts are saved-artifact observations, never D23 acceptance or current-main/B0 qualification.
  */
 import { createHash } from "node:crypto";
@@ -67,13 +72,12 @@ function observation(side, q) {
   if (row && (row.reader !== "end_continuation" || row.end_continuation === undefined)) issues.push("row_reader_mismatch");
   if (score && score.status !== "complete") issues.push(`score_status_${score.status ?? "unknown"}`);
   if (score && score.gold !== q.gold) issues.push("gold_census_mismatch");
-  if (q.gold === 0) issues.push("gold0");
-  else if (score && score.scored !== true) issues.push("unscored");
-  return { row, score, issues, known: issues.length === 0 };
+  if (q.gold > 0 && score && score.scored !== true) issues.push("unscored");
+  return { row, score, issues, applicable: q.gold > 0, known: issues.length === 0 };
 }
 
 function flag(obs, metric, kind) {
-  return obs.known && typeof obs.score?.[metric]?.[kind] === "boolean" ? obs.score[metric][kind] : null;
+  return obs.applicable && obs.known && typeof obs.score?.[metric]?.[kind] === "boolean" ? obs.score[metric][kind] : null;
 }
 
 // Two-sided exact binomial sign test; recurrence avoids overflowing binomial coefficients.
@@ -86,16 +90,18 @@ export function exactSignTest(wins, losses) {
 }
 
 function paired(entries, metric, kind) {
-  const wins = [], losses = [], unknown = [];
+  const wins = [], losses = [], unknown = [], notApplicable = [];
   let base = 0, current = 0, known = 0;
   for (const e of entries) {
+    if (e.gold === 0) { notApplicable.push(e.question_id); continue; }
     const a = flag(e.base, metric, kind), b = flag(e.current, metric, kind);
     if (a === null || b === null) { unknown.push(e.question_id); continue; }
     known++; base += Number(a); current += Number(b);
     if (!a && b) wins.push(e.question_id);
     if (a && !b) losses.push(e.question_id);
   }
-  return { declared: entries.length, known_pairs: known, unknown_ids: unknown, base, current,
+  return { declared: entries.length, answerable_known: known, unknown_answerable: unknown.length,
+    unknown_answerable_ids: unknown, not_applicable: notApplicable.length, not_applicable_ids: notApplicable, base, current,
     wins, losses, exact_sign_p: exactSignTest(wins.length, losses.length),
     aggregate_not_below_base: unknown.length ? null : current >= base };
 }
@@ -110,9 +116,10 @@ function summarize(entries, side) {
   return { declared: entries.length, answerable: entries.filter(e => e.gold > 0).length,
     gold0: entries.filter(e => e.gold === 0).length, statuses, issues,
     metrics: Object.fromEntries(metrics.map(m => [m, Object.fromEntries(["any", "all"].map(k => {
-      const values = entries.map(e => flag(e[side], m, k));
+      const values = entries.filter(e => e.gold > 0).map(e => flag(e[side], m, k));
       return [k, { success: values.filter(v => v === true).length, miss: values.filter(v => v === false).length,
-        unknown: values.filter(v => v === null).length, denominator: entries.length }];
+        unknown_answerable: values.filter(v => v === null).length,
+        not_applicable: entries.length - values.length, declared: entries.length, answerable: values.length }];
     }))])) };
 }
 
@@ -130,19 +137,40 @@ function floor(entries, cohort) {
     })) };
 }
 
+function parityMetadata(a, b) {
+  const fields = ["input_identity", "implementation_revision", "arm_identity", "snapshot_identity"];
+  const provenance = Object.fromEntries(fields.map(k => [k, { base: a?.[k] ?? null, current: b?.[k] ?? null }]));
+  const timing = Object.fromEntries(["base", "current"].map((side, i) => [side, {
+    elapsed_ms: (i ? b : a)?.elapsed_ms ?? null,
+    continuation_latency_ms: (i ? b : a)?.end_continuation?.latency_ms ?? null
+  }]));
+  return { provenance, provenance_changed_fields: fields.filter(k => !isDeepStrictEqual(a?.[k], b?.[k])),
+    timing, timing_changed: !isDeepStrictEqual(timing.base, timing.current) };
+}
+
+function continuationOutput(record) {
+  if (record === undefined || record === null) return record;
+  const { latency_ms: _latency, ...output } = record;
+  return output;
+}
+
 function parity(e) {
   const a = e.base.row, b = e.current.row;
   if (!a || !b) return { status: "unknown", changed: [], unavailable: ["row"] };
-  const fields = ["status", "stop_cause", "input_identity", "snapshot_sha256", "intervals", "end_continuation"];
+  const fields = ["status", "stop_cause", "snapshot_sha256", "intervals", "end_continuation"];
   const changed = [], unavailable = [];
+  if (a.status !== "complete" || b.status !== "complete") unavailable.push("row_output_incomplete");
   for (const key of fields) {
-    if (a[key] === undefined || b[key] === undefined) unavailable.push(key);
-    else if (!isDeepStrictEqual(a[key], b[key])) changed.push(key);
+    if (a[key] === undefined || a[key] === null || b[key] === undefined || b[key] === null) unavailable.push(key);
+    else if (!isDeepStrictEqual(key === "end_continuation" ? continuationOutput(a[key]) : a[key],
+      key === "end_continuation" ? continuationOutput(b[key]) : b[key])) changed.push(key);
   }
   const a5 = [flag(e.base, "msg5", "any"), flag(e.base, "msg5", "all")];
   const b5 = [flag(e.current, "msg5", "any"), flag(e.current, "msg5", "all")];
-  if ([...a5, ...b5].includes(null)) unavailable.push("msg5");
-  else if (!isDeepStrictEqual(a5, b5)) changed.push("msg5");
+  if (e.gold > 0) {
+    if ([...a5, ...b5].includes(null)) unavailable.push("msg5");
+    else if (!isDeepStrictEqual(a5, b5)) changed.push("msg5");
+  }
   return { status: changed.length ? "changed" : unavailable.length ? "unknown" : "identical", changed, unavailable };
 }
 
@@ -157,6 +185,7 @@ function poolFacts(obs) {
 }
 
 function residual(obs) {
+  if (!obs.applicable) return { status: "not_applicable", reason: "gold0" };
   if (!obs.known) return { status: "unavailable", reason: obs.issues };
   const messages = obs.score.source_diagnostics?.messages;
   const mapped = Array.isArray(messages) && messages.every(m => typeof root(m) === "string")
@@ -201,8 +230,19 @@ function swapTrace(e) {
     paired: Object.fromEntries(["msg5", "b4096", "b8192"].map(m => [m,
       Object.fromEntries(["any", "all"].map(k => {
         const a = flag(e.base, m, k), b = flag(e.current, m, k);
-        return [k, a === null || b === null ? "unknown" : !a && b ? "gain" : a && !b ? "loss" : "unchanged"];
+        return [k, e.gold === 0 ? "not_applicable" : a === null || b === null ? "unknown" : !a && b ? "gain" : a && !b ? "loss" : "unchanged"];
       }))])), initial_ten_slot_bytes: slotBytes(e.current.row?.intervals) };
+}
+
+function formationSummary(entries, side) {
+  return Object.fromEntries(["question_time", "statements"].map(field => {
+    const statuses = {};
+    for (const e of entries) {
+      const status = e[side].row?.formation?.[field]?.status ?? "not_observed";
+      (statuses[status] ??= []).push(e.question_id);
+    }
+    return [field, Object.fromEntries(Object.entries(statuses).map(([status, ids]) => [status, { count: ids.length, ids }]))];
+  }));
 }
 
 export function buildOfflineReport(input) {
@@ -222,6 +262,8 @@ export function buildOfflineReport(input) {
     identities: Object.fromEntries(["base", "current"].map(s => [s, Object.fromEntries(
       ["implementation_revision", "input_identity", "snapshot_sha256", "snapshot_identity", "arm_identity"]
         .map(k => [k, e[s].row?.[k] ?? null]))])),
+    formation: { base: e.base.row?.formation ?? null, current: e.current.row?.formation ?? null },
+    parity_metadata: parityMetadata(e.base.row, e.current.row),
     parity: parity(e), residual: residual(e.current), slot5: swapTrace(e) }));
   const residual_classes = {};
   for (const row of rows.filter(r => r.residual.all_miss === true)) {
@@ -240,6 +282,7 @@ export function buildOfflineReport(input) {
       base: { rows: base.rowsIndex.anomalies, scores: base.scoresIndex.anomalies },
       current: { rows: current.rowsIndex.anomalies, scores: current.scoresIndex.anomalies } },
     overall: { base: summarize(entries, "base"), current: summarize(entries, "current") },
+    formation: { base: formationSummary(entries, "base"), current: formationSummary(entries, "current") },
     cohorts: Object.fromEntries(["dev2", "o100", "heldout"].map(c => [c, floor(entries.filter(e => e.cohort === c), c)])),
     parity: { changed_ids: rows.filter(r => r.parity.status === "changed").map(r => r.question_id),
       unknown_ids: rows.filter(r => r.parity.unavailable.length).map(r => r.question_id),
@@ -248,7 +291,7 @@ export function buildOfflineReport(input) {
     all_observed: Object.fromEntries([base, current].map((s, i) => [i ? "current" : "base", {
       status: s.all_observed_scores ? "caller_supplied_diagnostic" : "unavailable",
       anomalies: s.allIndex.anomalies, scores: [...ids].map(id => ({ question_id: id, score: s.allIndex.get(id) })) }])),
-    residual_classes, residual_unknown_ids: rows.filter(r => r.residual.status !== "available").map(r => r.question_id),
+    residual_classes, residual_unknown_ids: rows.filter(r => !["available", "not_applicable"].includes(r.residual.status)).map(r => r.question_id),
     slot5: { declared: rows.length, observed: observedSwaps.length, unknown: rows.length - observedSwaps.length,
       swapped: swapped.length, observed_swap_rate: observedSwaps.length ? swapped.length / observedSwaps.length : null,
       entered_first5: swapped.filter(r => r.slot5.entered_first5 === true).length }, rows };
