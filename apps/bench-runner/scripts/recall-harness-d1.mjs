@@ -25,10 +25,7 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "nod
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { AlayaError, captureSourceIndexLexicalPreparationAllocation } from "@do-soul/alaya-protocol";
 import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
-import { loadRecallVectorCache } from "./recall-vector-cache.mjs";
-import { recallExecutionIdentity, recallPreparationKey, assertRecallCachedPreparation } from "./recall-harness-selection.mjs";
 import { writeFileSync } from "node:fs";
 
 // Install before runtime imports: only local inference and loopback transport are authorized.
@@ -41,6 +38,10 @@ process.on("exit", () => {
     process.exitCode = 1;
   }
 });
+
+const { AlayaError, captureSourceIndexLexicalPreparationAllocation } = await import("@do-soul/alaya-protocol");
+const { loadRecallVectorCache } = await import("./recall-vector-cache.mjs");
+const { recallExecutionIdentity, recallPreparationKey, assertRecallCachedPreparation } = await import("./recall-harness-selection.mjs");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "../dist");
@@ -120,7 +121,8 @@ const execution = sourceOptions.every(Boolean) ? { cache_root: resolve(values["s
     ...(values["warm-memory"] ? { memory_warmup: "eager" } : {}) };
 const revision = readCurrentExtractionAuthorityRevision();
 const preparationRevision = values["prepared-revision"] ?? revision;
-const consumer = preparationRevision !== revision;
+// Ownership is selected by the explicit mode, not by whether the revisions differ.
+const consumer = values["prepared-cache"] !== undefined;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
@@ -181,21 +183,47 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 }
 
 // Statements are published into the sealed snapshot, so the map and its caches are preparation input.
-const statementMap = process.env.STATEMENT_MAP === undefined ? undefined
-  : (await import("./recall-statement-keys.mjs")).statementMapDigest();
+let statementMap;
+try {
+  statementMap = process.env.STATEMENT_MAP === undefined ? undefined
+    : (await import("./recall-statement-keys.mjs")).statementMapDigest();
+} catch (error) {
+  if (consumer && error?.code === "ENOENT") throw new AlayaError("UNAVAILABLE",
+    "original statement map or referenced cache is missing; sealed preparation identity cannot be verified", { cause: error });
+  throw error;
+}
 
 function prepKey(arm) {
   return recallPreparationKey(preparationRevision, preparationIdentity, execution, arm, lexicalPreparation, statementMap);
 }
 
-/** Returns a prepared chain config, reusing a cached preparation for the same inputs. */
+function statementFormation(dir) {
+  const path = join(dir, "d1-statements.json");
+  if (!existsSync(path)) return { status: "unavailable", reason: "report_missing" };
+  try {
+    const report = JSON.parse(readFileSync(path, "utf8"));
+    if (report.status !== "published" || ["sessions", "unmapped_sessions", "messages", "matched_messages", "keyed_messages", "statements"]
+      .some(key => !Number.isInteger(report[key]) || report[key] < 0) || !Array.isArray(report.raw_gaps) || !Array.isArray(report.rejections)) {
+      return { status: "unavailable", reason: "report_invalid" };
+    }
+    return { status: report.unmapped_sessions || report.raw_gaps.length || report.rejections.length ? "partial"
+      : report.statements === 0 ? "empty" : "available",
+      sessions: report.sessions, unmapped_sessions: report.unmapped_sessions, raw_gaps: report.raw_gaps.length,
+      rejections: report.rejections.length, messages: report.messages, matched_messages: report.matched_messages,
+      keyed_messages: report.keyed_messages, statements: report.statements };
+  } catch {
+    return { status: "unavailable", reason: "report_invalid" };
+  }
+}
+
+/** Returns a prepared chain config and formation observation without altering the seal. */
 async function prepared(question, index, arm) {
   const dir = join(consumer ? resolve(values["prepared-cache"]) : cacheRoot, question.question_id, prepKey(arm));
   const configPath = join(dir, "prepare", "chain-config.json");
   if (existsSync(configPath)) {
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     assertRecallCachedPreparation(config, preparationRevision, execution, arm);
-    return consumer ? { ...config, consumer_revision: revision } : config;
+    return { config: consumer ? { ...config, consumer_revision: revision } : config, formation: statementFormation(dir) };
   }
   if (consumer) throw new AlayaError("UNAVAILABLE", `no sealed preparation for ${question.question_id} in --prepared-cache`);
   rmSync(dir, { recursive: true, force: true });
@@ -225,7 +253,7 @@ async function prepared(question, index, arm) {
     { maxPasses: 10_000, ...(lexicalPreparation === undefined ? {} : { lexicalPreparation }),
       ...(producerPassLimits === undefined ? {} : { producerPassLimits }) });
   if (result.config === null) throw new AlayaError("UNAVAILABLE", `preparation failed: ${result.report.reason}`);
-  return result.config;
+  return { config: result.config, formation: statementFormation(dir) };
 }
 
 for (const id of ids) {
@@ -238,18 +266,25 @@ for (const id of ids) {
     const row = { question_id: id, question_type: question.question_type, arm: arm.name,
       arm_identity: chainIdentity(arm),
       ...(executionIdentity === undefined ? {} : { source_execution_identity: executionIdentity }),
+      ...(consumer ? { consumer_revision: revision } : {}),
       ...(values["capture-pool"] ? { capture_requested: true } : {}),
-      ...(values.reader === "current" ? {} : { reader: values.reader }) };
+      ...(values.reader === "current" ? {} : { reader: values.reader }),
+      formation: { question_time: { status: arm.question_time === true ? "unavailable" : "not_requested" },
+        statements: { status: "unavailable", reason: "preparation_not_read" } } };
     try {
       const frozen = coordinates.get(id);
       if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
       const proposal = arm.question_time === true
         ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
+      if (arm.question_time === true) row.formation.question_time = { status: frozen.status,
+        proposal: proposal === undefined ? "not_issued" : "issued" };
       const root = join(out, "runs", id, arm.name);
       if (captureRecallPool !== undefined && existsSync(root)) {
         throw new AlayaError("CONFLICT", "capture root already exists; prior first exposure may be unresolved");
       }
-      const config = await prepared(question, index, arm);
+      const preparation = await prepared(question, index, arm);
+      const config = preparation.config;
+      row.formation.statements = preparation.formation;
       if (captureRecallPool === undefined) rmSync(root, { recursive: true, force: true });
       const saved = Object.fromEntries(Object.keys(arm.env ?? {}).map(key => [key, process.env[key]]));
       Object.assign(process.env, arm.env ?? {});
@@ -278,7 +313,8 @@ for (const id of ids) {
         catch (error) { row.pool_capture = { status: "unavailable", issues: [error instanceof Error ? error.message : String(error)] }; }
       }
     } catch (error) {
-      Object.assign(row, { status: "error", error: error instanceof Error ? error.message : String(error) });
+      Object.assign(row, { status: error instanceof AlayaError && error.code === "UNAVAILABLE" ? "unavailable" : "error",
+        error: error instanceof Error ? error.message : String(error) });
     }
     row.elapsed_ms = Math.round(performance.now() - started);
     appendFileSync(rowsPath, `${JSON.stringify(row)}\n`);

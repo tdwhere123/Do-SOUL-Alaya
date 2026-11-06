@@ -37,6 +37,7 @@ it("binds the statement map that published a preparation's statements into its c
 it("keeps explicit Memory cache changes out of cached preparations and resumed harness rows", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-harness-selection-"));
   const harness = fileURLToPath(new URL("../../../scripts/recall-harness.mjs", import.meta.url));
+  const d1 = fileURLToPath(new URL("../../../scripts/recall-harness-d1.mjs", import.meta.url));
   const selection = await import(pathToFileURL(fileURLToPath(new URL("../../../scripts/recall-harness-selection.mjs", import.meta.url))).href);
   const revision = readCurrentExtractionAuthorityRevision(), model_id = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
   const cacheA = join(root, "models-a"), cacheB = join(root, "models-b"), cache = join(root, "preparations");
@@ -83,7 +84,7 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       }`;
     writeFileSync(hook, `import { registerHooks } from 'node:module';
       registerHooks({ resolve(specifier, context, next) {
-        if (context.parentURL === ${JSON.stringify(pathToFileURL(harness).href)} && specifier === ${JSON.stringify(pathToFileURL(fetchPath).href)})
+        if ([${JSON.stringify(pathToFileURL(harness).href)}, ${JSON.stringify(pathToFileURL(d1).href)}].includes(context.parentURL) && specifier === ${JSON.stringify(pathToFileURL(fetchPath).href)})
           return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
         return next(specifier, context);
       } });`);
@@ -117,6 +118,54 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       expect(selected.requested).toEqual(expected.map(([id]) => id));
       expect(selected.sha256).toBe(createHash("sha256").update(raw).digest("hex"));
     }
+
+    // Explicit same-revision consumers must never prepare a missing seal.
+    const d1Arms = join(root, "d1-arms.json"), coordinates = join(root, "coordinates.jsonl");
+    writeFileSync(d1Arms, JSON.stringify([{ ...arm, question_time: true }]));
+    const d1Args = (output: string, preparedCache: string, producerRevision = revision) => [`--import=${pathToFileURL(hook).href}`, d1,
+      "--out", output, "--arms", d1Arms, "--dataset", dataset, "--model-cache", cacheA, "--ids", "fixture",
+      "--prepared-cache", preparedCache, "--prepared-revision", producerRevision, "--coordinates", coordinates];
+    const env = { ...process.env }; delete env.STATEMENT_MAP;
+    writeFileSync(coordinates, JSON.stringify({ question_id: "fixture", status: "failed" }) + "\n");
+    for (const [name, producerRevision] of [["same", revision], ["different", `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`]]) {
+      const missingOut = join(root, `${name}-missing-seal-out`), missingCache = join(root, `${name}-missing-seal-cache`);
+      await promisify(execFile)(process.execPath, d1Args(missingOut, missingCache, producerRevision), { timeout: 30_000, env });
+      const missing = JSON.parse(readFileSync(join(missingOut, "rows.jsonl"), "utf8"));
+      expect(missing.status).toBe("unavailable");
+      expect(missing.consumer_revision).toBe(revision);
+      expect(missing.error).toContain("no sealed preparation");
+      expect(missing.formation.question_time).toEqual({ status: "failed", proposal: "not_issued" });
+      expect(existsSync(missingCache)).toBe(false);
+      await promisify(execFile)(process.execPath, d1Args(missingOut, missingCache, producerRevision), { timeout: 30_000, env });
+      expect(readFileSync(join(missingOut, "rows.jsonl"), "utf8").trim().split("\n")).toHaveLength(1);
+    }
+
+    const missingMap = join(root, "statement-map.jsonl"), mapOut = join(root, "missing-map-out");
+    writeFileSync(missingMap, JSON.stringify({ cache_file: join(root, "missing-statement.json") }) + "\n");
+    const missingMapError = await promisify(execFile)(process.execPath, d1Args(mapOut, cache),
+      { timeout: 30_000, env: { ...env, STATEMENT_MAP: missingMap } })
+      .then(() => { throw new Error("a missing original statement input must fail"); }, (error: Error & { stderr: string }) => error);
+    expect(missingMapError.stderr).toContain("original statement map or referenced cache is missing");
+    expect(missingMapError.stderr).toMatch(/code:\s*['"]UNAVAILABLE['"]/u);
+    expect(existsSync(join(mapOut, "rows.jsonl"))).toBe(false);
+
+    // Sealed statements may be partial while raw recall remains eligible. Report, don't reject.
+    writeFileSync(join(cache, "fixture", keyA, "d1-statements.json"), JSON.stringify({ status: "published", sessions: 2,
+      unmapped_sessions: 1, raw_gaps: [], rejections: [], messages: 2, matched_messages: 1, keyed_messages: 1, statements: 2 }));
+    writeFileSync(coordinates, JSON.stringify({ question_id: "fixture", status: "formed", coordinates: { time: { kind: "absent" } } }) + "\n");
+    const formationOut = join(root, "formation-out");
+    await promisify(execFile)(process.execPath, d1Args(formationOut, cache), { timeout: 30_000, env });
+    const formation = JSON.parse(readFileSync(join(formationOut, "rows.jsonl"), "utf8"));
+    expect(formation.formation.question_time).toEqual({ status: "formed", proposal: "not_issued" });
+    expect(formation.formation.statements).toMatchObject({ status: "partial", sessions: 2, unmapped_sessions: 1 });
+    expect(formation.error).not.toContain("no sealed preparation");
+    writeFileSync(join(cache, "fixture", keyA, "d1-statements.json"), JSON.stringify({ status: "published", sessions: 2,
+      unmapped_sessions: 0, raw_gaps: [], rejections: [], messages: 2, matched_messages: 2, keyed_messages: 0, statements: 0 }));
+    const emptyOut = join(root, "empty-formation-out");
+    await promisify(execFile)(process.execPath, d1Args(emptyOut, cache), { timeout: 30_000, env });
+    const empty = JSON.parse(readFileSync(join(emptyOut, "rows.jsonl"), "utf8"));
+    expect(empty.formation.statements).toMatchObject({ status: "empty", sessions: 2, statements: 0 });
+    expect(empty.error).not.toContain("no sealed preparation");
 
     for (const [name, selectedDataset, id, expected] of [
       ["noncanonical", join(root, "synthetic.json"), "fixture", "--dataset must name the canonical longmemeval_s.json file"],
