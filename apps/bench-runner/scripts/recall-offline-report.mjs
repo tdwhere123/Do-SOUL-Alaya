@@ -29,6 +29,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { BUDGETS } from "./recall-harness-score.mjs";
+import { readRecallJsonlFile } from "./recall-jsonl-file.mjs";
 import { clipDeliveredSlotsByBudget } from "../dist/runs/longmemeval-semantic/recall-visibility-diagnostics.js";
 
 const metrics = ["msg5", "msg10", ...BUDGETS.map(b => `b${b}`)];
@@ -333,7 +334,12 @@ export function readOfflineReportInput(path) {
     for (const key of ["rows", "scores", "all_observed_scores"]) {
       if (key === "all_observed_scores" && side[key] === undefined) continue;
       if (!Array.isArray(side[key])) fail(`${key} must be an array of JSONL paths`);
-      side[key] = side[key].flatMap(p => read(p).split(/\r?\n/u).filter(line => line.trim()).map(line => JSON.parse(line)));
+      side[key] = side[key].flatMap(p => {
+        const absolutePath = resolve(dirname(absolute), p);
+        const { rows, bytes, sha256 } = readRecallJsonlFile(absolutePath, { skipWhitespace: true });
+        provenance.push({ path: absolutePath, bytes, sha256 });
+        return rows;
+      });
     }
   }
   return { ...input, provenance };

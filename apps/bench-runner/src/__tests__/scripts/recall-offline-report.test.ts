@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -275,10 +276,21 @@ it("reads actual JSONL shards through the offline CLI, hashes inputs and emits t
     expect(out.census.declared_ids).toEqual(["gain", "loss"]);
     expect(out.provenance).toHaveLength(5);
     expect(out.provenance[0]).toMatchObject({ path, bytes: Buffer.byteLength(readFileSync(path)), sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    const rawRows = readFileSync(join(dir, "current-rows.jsonl"));
+    expect(out.provenance.find((p: { path: string }) => p.path === join(dir, "current-rows.jsonl")))
+      .toEqual({ path: join(dir, "current-rows.jsonl"), bytes: rawRows.length,
+        sha256: createHash("sha256").update(rawRows).digest("hex") });
     expect(out.parity.changed_ids).toEqual(["gain", "loss"]);
     expect(out.paired.b4096.all.losses).toEqual(["gain"]);
     expect(out.rows[0].current.issues).toEqual([]);
     expect(out.rows[0].residual).toMatchObject({ status: "available", distinct_mapped_gold_roots: 2 });
     expect(out.rows[0].slot5.paired.b8192.all).toBe("loss");
+    // A late parse failure must not emit an apparently successful partial report.
+    writeFileSync(join(dir, "current-rows.jsonl"), Buffer.concat([rawRows,
+      Buffer.from(JSON.stringify({ observation: "x".repeat(140000) }) + '\n{"truncated":')]));
+    const failed = spawnSync(process.execPath, [script, "--input", path], { encoding: "utf8" });
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toBe("");
+    expect(failed.stderr).toContain("SyntaxError");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
