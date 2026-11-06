@@ -258,14 +258,20 @@ it("keeps explicit reader capabilities, cancellation signals and codecs live whi
       this.calls++; return { result: null, witness: [] };
     };
   }
-  const readers = new Readers(), encode = vi.fn(() => ({ ok: true })), observe = vi.fn();
-  const captured = captureRecallRequest(classRecord({ ...request, readers, budget: classRecord({ ...budget }) }));
+  const readers = new Readers(), encode = vi.fn(() => ({ ok: true })), observe = vi.fn(), association = vi.fn();
+  const captured = captureRecallRequest(classRecord({ ...request, readers, budget: classRecord({ ...budget }),
+    observe_source_association: association }));
+  expect(captured.request).not.toHaveProperty("observe_source_association");
+  expect(captured.request).toEqual(captureRecallRequest(classRecord({ ...request, readers, budget: classRecord({ ...budget }) })).request);
   const composed = withRecallEnvironment(captured, { encode_page: encode, observe_page_fit: observe });
   expect(composed.readers).toBe(readers);
   expect(composed.encode_page).toBe(encode);
   expect(composed.observe_page_fit).toBe(observe);
+  expect(composed.observe_source_association).toBe(association);
   runConditionalFieldRecallWithReceipt(composed, { issue: "defer" });
   expect(readers.calls).toBe(1);
+  expect(association).toHaveBeenCalledOnce();
+  expect(association.mock.calls[0]![0]()).toMatchObject({ stage: "field_admission", status: "absent", reason: "association_not_provided" });
   expect(encode).toHaveBeenCalled(); expect(observe).toHaveBeenCalled();
   controller.abort();
   expect(composed.readers).toHaveProperty("signal.aborted", true);

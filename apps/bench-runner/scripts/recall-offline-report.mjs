@@ -222,10 +222,27 @@ export function slotBytes(intervals) {
 function swapTrace(e) {
   const pool = poolFacts(e.current), association = pool?.order.statement_association;
   const sourceEntries = pool?.order.entries.filter(i => i.target?.kind === "source_evidence");
-  const replacement = association?.status === "swapped" ? root(sourceEntries?.[4]) : null;
+  const accessOrders = e.current.row?.pool_capture?.access_orders;
+  const status = ["swapped", "unchanged", "resource_refused", "not_run"].includes(association?.status)
+    ? association.status : "unavailable";
+  const retainedLifecycle = e.current.row?.pool_capture?.association_lifecycle;
+  const lifecycle = Array.isArray(retainedLifecycle)
+    ? retainedLifecycle.filter(item => pool === null || item.request_id === pool.order.request_id) : [];
+  const stages = ["acquisition", "source_retention", "field_admission"];
+  const availabilityObserved = pool !== null && stages.every(stage => {
+    const facts = lifecycle.filter(item => item.stage === stage);
+    return facts.length === 1 && (stage === "acquisition" ? ["not_requested", "ready", "unavailable"]
+      : ["retained", "discarded", "absent"]).includes(facts[0].status)
+      && (["ready", "retained"].includes(facts[0].status) ? facts[0].reason === null || typeof facts[0].reason === "string"
+        : typeof facts[0].reason === "string" && facts[0].reason.length > 0);
+  });
+  const replacement = status === "swapped" ? root(sourceEntries?.[4]) : null;
   const entered = replacement && Array.isArray(e.current.row?.intervals)
     ? e.current.row.intervals.some(i => i.slot_index < 5 && root(i) === replacement) : null;
-  return { status: association?.status ?? "unavailable", replacement_global_rank: association?.replacement_global_rank ?? null,
+  return { status, navigation_refusals: (Array.isArray(accessOrders) ? accessOrders : [])
+      .filter(order => order?.status === "resource_refused").map(order => ({ request_id: order.request_id, ...order.navigation_refusal })),
+    availability: { status: availabilityObserved ? "observed" : lifecycle.length ? "partial" : "unknown",
+      stages: lifecycle }, replacement_global_rank: association?.replacement_global_rank ?? null,
     replacement_root: replacement, entered_first5: entered, diagnostic: association ?? null,
     paired: Object.fromEntries(["msg5", "b4096", "b8192"].map(m => [m,
       Object.fromEntries(["any", "all"].map(k => {
@@ -274,6 +291,7 @@ export function buildOfflineReport(input) {
   }
   const observedSwaps = rows.filter(r => r.slot5.status !== "unavailable");
   const swapped = observedSwaps.filter(r => r.slot5.status === "swapped");
+  const decidedSwaps = observedSwaps.filter(r => ["swapped", "unchanged"].includes(r.slot5.status));
   return { status: "diagnostic_only", qualification: "NOT_VERIFIED", label: input.label ?? null,
     provenance: input.provenance ?? null, sides: { base: { label: base.label, arm: base.arm, score_arm: base.score_arm },
       current: { label: current.label, arm: current.arm, score_arm: current.score_arm } },
@@ -293,7 +311,12 @@ export function buildOfflineReport(input) {
       anomalies: s.allIndex.anomalies, scores: [...ids].map(id => ({ question_id: id, score: s.allIndex.get(id) })) }])),
     residual_classes, residual_unknown_ids: rows.filter(r => !["available", "not_applicable"].includes(r.residual.status)).map(r => r.question_id),
     slot5: { declared: rows.length, observed: observedSwaps.length, unknown: rows.length - observedSwaps.length,
-      swapped: swapped.length, observed_swap_rate: observedSwaps.length ? swapped.length / observedSwaps.length : null,
+      swapped: swapped.length, completed_decisions: decidedSwaps.length,
+      not_run: observedSwaps.filter(r => r.slot5.status === "not_run").length,
+      optional_work_refused: observedSwaps.filter(r => r.slot5.status === "resource_refused").length,
+      availability_unknown: rows.filter(r => r.slot5.availability.status !== "observed").length,
+      observed_swap_rate_denominator: "completed_decisions_only",
+      observed_swap_rate: decidedSwaps.length ? swapped.length / decidedSwaps.length : null,
       entered_first5: swapped.filter(r => r.slot5.entered_first5 === true).length }, rows };
 }
 

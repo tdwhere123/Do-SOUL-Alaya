@@ -52,6 +52,7 @@ export function runConditionalFieldWorkerRecall(
   adapters: Readonly<{ readers?: ObserverReaders; encode_page?: ConditionalFieldRecallRequest["encode_page"];
     observe_page_fit?: ConditionalFieldRecallRequest["observe_page_fit"];
     observe_navigation?: ConditionalFieldRecallRequest["observe_navigation"];
+    observe_source_association?: ConditionalFieldRecallRequest["observe_source_association"];
     observer?: SourceSemanticObserver;
     capture_budget_work?: (work: number | undefined) => void }> = {}
 ): ConditionalFieldRecallPortResult {
@@ -91,6 +92,8 @@ export function runConditionalFieldWorkerRecall(
       : capture => observer.pageAttempt(capture),
     observe_navigation: adapters.observe_navigation ?? (observer === undefined ? undefined
       : capture => observer.event("field_access_order", "index", capture)),
+    observe_source_association: adapters.observe_source_association ?? (observer === undefined ? undefined
+      : capture => observer.associationRetention(capture)),
     delivery_budget: payload.delivery_budget,
     delivery_context: payload.delivery_context,
     ...(payload.prepared_query === undefined ? {} : { prepared_query: payload.prepared_query }),
@@ -214,7 +217,11 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     capacity === undefined ? undefined : { charged_by_caller: true });
   // Library requests already have an explicit outer resource ledger; their field
   // must continue paying acquisition from that request, without an ordinary allowance.
-  if (capacity === undefined) return captured;
+  if (capacity === undefined) {
+    observer?.associationRetention(() => ({ stage: "source_retention", status: captured.association === undefined ? "absent" : "retained",
+      reason: "request_funded_acquisition", required_bytes: null, available_bytes: meter.bytes, retained_bytes: null }));
+    return captured;
+  }
   const result = captured.result!;
   const { association, ...baseCapture } = captured;
   const beforeRetention = meter.spentBytes;
@@ -222,6 +229,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     acquisition_resources: result.resources }, "source retained nomination");
   const baseRetainedBytes = meter.spentBytes - beforeRetention;
   let retainedAssociation = association, associationRetainedBytes = 0;
+  const associationAvailableBytes = meter.bytes;
   if (association !== undefined) {
     const beforeAssociation = meter.spentBytes;
     try {
@@ -232,6 +240,11 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       retainedAssociation = undefined;
     }
   }
+  observer?.associationRetention(() => ({ stage: "source_retention",
+    status: retainedAssociation !== undefined ? "retained" : association !== undefined ? "discarded" : "absent",
+    reason: retainedAssociation !== undefined ? null : association !== undefined ? "source_retained_statement_association" : "association_not_provided",
+    required_bytes: retainedAssociation === undefined ? null : associationRetainedBytes,
+    available_bytes: associationAvailableBytes, retained_bytes: associationRetainedBytes }));
   const resources = {
     ...result.resources, work: meter.spentWork,
     native_bytes: result.resources.native_bytes + capacity.resources.native_bytes,

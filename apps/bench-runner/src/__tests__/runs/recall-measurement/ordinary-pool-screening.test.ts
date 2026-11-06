@@ -73,6 +73,9 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   const poolCapture = await pool.captureRecallPool({ row, query: captured, observation: observed });
   expect(poolCapture.status).toBe("captured");
   expect(poolCapture.pool.length).toBeGreaterThan(0);
+  expect(poolCapture.association_lifecycle.map((fact: { stage: string }) => fact.stage))
+    .toEqual(["acquisition", "source_retention", "field_admission"]);
+  expect(poolCapture.access_orders[0].statement_association.status).toBe("unchanged");
   expect(poolCapture.diagnostic_beyond_allowance.rankings.status).toBe("unavailable");
   const nativeIndex = observed!.observations.find(frame => frame.events.some(event => event.kind === "field_nomination"))?.facts?.binding?.index;
   expect(nativeIndex).toBeTruthy();
