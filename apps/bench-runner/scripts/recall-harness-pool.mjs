@@ -261,6 +261,11 @@ export async function captureRecallPool({ row, query, observation, generation, c
       route_phases: events.filter(event => event.kind === "source_index_routes").map(event => event.data),
       pool: nominated.map(item => ({ ...item, host: sourceFact(inventory.get(item.source.target.root_id)) })), rejected_frames: rejected,
       access_orders: orders, page_metadata: pageMetadata, page_attempts: pageAttempts, witness,
+      association_lifecycle: events.flatMap(event => event.kind === "statement_association_retention"
+        ? [{ request_id: event.request_id, ...event.data }]
+        : event.kind === "source_index_acquisition" && event.data.kind === "acquisition_complete"
+          && event.data.invocation === "original" && event.data.statement_association !== undefined
+          ? [{ request_id: event.request_id, stage: "acquisition", ...event.data.statement_association }] : []),
       diagnostic_beyond_allowance: { rankings: diagnostic, sibling_scope: "first_five_containers",
         sibling_scope_status: missingContainers.length ? "partial" : "complete", missing_container_roots: missingContainers,
         siblings: siblings.map(sourceFact), native_work: "not_measured" },

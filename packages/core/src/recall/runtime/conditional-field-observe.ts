@@ -60,6 +60,7 @@ export type ObserveFieldInput = Readonly<{
   readonly budget: import("@do-soul/alaya-protocol").RequestBudget;
   readonly as_of: string;
   readonly readers: ObserverReaders;
+  readonly observe_source_association?: import("./recall-service-runner-types.js").ConditionalFieldRecallRequest["observe_source_association"];
   readonly authorized_scopes?: readonly string[] | null;
   readonly source_id?: string;
   readonly access_hint?: string;
@@ -158,12 +159,15 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
       : { questionTime: interpretation.interpretation_proposal.question_time }),
     budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
   let captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
+  const requiredNominationBytes = captured?.retained_bytes ?? null;
+  let associationDiscarded = false;
   // The optional vectors must not prevent otherwise fundable base nominations from entering
   // the field. Acquisition still reports all work/allocation already spent on the discarded data.
   if (captured?.association !== undefined && captured.charged_by_caller
     && (captured.retained_bytes ?? 0) > initial.remaining_memory_bytes) {
     const optionalBytes = captured.association_retained_bytes;
     if (optionalBytes !== undefined) {
+      associationDiscarded = true;
       const { association: _discarded, ...base } = captured;
       captured = { ...base, retained_bytes: (base.retained_bytes ?? 0) - optionalBytes, association_retained_bytes: 0,
         result: base.result === null ? null : { ...base.result, resource_refusals: [...base.result.resource_refusals,
@@ -183,6 +187,12 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     details: { outcome: "resource_exhausted", resource: "acquisition_memory",
       available_bytes: initial.remaining_memory_bytes, required_bytes: bytes }
   });
+  try { input.observe_source_association?.(() => ({ stage: "field_admission",
+    status: associationDiscarded ? "discarded" : captured?.association === undefined ? "absent" : "retained",
+    reason: associationDiscarded ? "field_retained_statement_association" : captured?.association === undefined ? "association_not_provided" : null,
+    required_bytes: requiredNominationBytes, available_bytes: initial.remaining_memory_bytes,
+    retained_bytes: captured?.association_retained_bytes ?? null })); }
+  catch { /* Diagnostic failure cannot change field admission or its accounting. */ }
   return { ...initial, native_sources: captured, native_source_retained_bytes: retained,
     remaining_exploration: initial.remaining_exploration - work,
     remaining_memory_bytes: initial.remaining_memory_bytes - bytes,

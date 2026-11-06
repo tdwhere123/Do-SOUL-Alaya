@@ -6,7 +6,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterAll(() => { isolation.restore(); });
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
-import type { SourceIndexAcquisitionFact } from "../../source-index/source-index-acquisition.js";
+import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
 import { configuration, fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
   AXIS_ROOTS, admitScope, expectBounded, expectMetadataOnly, publishIndex, query, queryInput

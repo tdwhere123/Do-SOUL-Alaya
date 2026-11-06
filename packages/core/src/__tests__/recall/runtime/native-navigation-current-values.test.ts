@@ -38,8 +38,11 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     let retained: FieldEngineState | undefined;
     const captured = { ...initial, native_sources: { result: null, witness: [], admitted_roots: [target],
       catalog_positions: { [sourceGoldRootIdentity(target)]: 0 } } };
+    const refusalObservations: unknown[] = [];
     const workRefused = nativeNavigationProjection(captured, [],
-      new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 100_000 }));
+      new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 100_000 }), capture => refusalObservations.push(capture()));
+    expect(refusalObservations).toEqual([expect.objectContaining({ status: "resource_refused", entries: [],
+      navigation_refusal: { phase: expect.any(String), constraints: { work: { required: 1, available: 0 } } } })]);
     expect(workRefused).toMatchObject({ status: "resource_refused", constraints: { work: { required: 2, available: 1 } } });
     const memoryRefused = nativeNavigationProjection(captured, [],
       new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 0 }));

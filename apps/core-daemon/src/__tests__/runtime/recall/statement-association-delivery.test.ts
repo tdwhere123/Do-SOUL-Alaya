@@ -1,4 +1,10 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
+import { SourceSemanticObserver } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
 import { SourceSemanticResourceLedger, sourceIndexProfileId } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, fieldContractSha256, runConditionalFieldRecallWithReceipt, snapshotIdFromPin,
   type ObserverReaders } from "@do-soul/alaya-core";
@@ -104,8 +110,9 @@ it("drops unfundable optional vectors while preserving actual SQLite nominations
   prepareRecordedStatementIndex(env.database, WORKSPACE, source => source.auxiliary === undefined ? [1, 1, 0, 0] : [1, 0, 0, 0], configuration);
   const query = { ...vector, profile: configuration.profile,
     profile_id: sourceIndexProfileId(configuration.profile, fieldContractSha256), embedding: Float32Array.of(1, 0, 0, 0) };
-  const nominate = () => env.database.connection.transaction(() => nominateNativeSources(env.database,
-    { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 } }, query))();
+  const observer = new SourceSemanticObserver(1, { max_events: 2048, max_bytes: 524288 });
+  const nominate = (capture?: SourceSemanticObserver) => env.database.connection.transaction(() => nominateNativeSources(env.database,
+    { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 } }, query, capture))();
   const baseline = nominate(), deferred = baseline.association!;
   expect(deferred.roots).toHaveLength(2);
   expect(deferred.link).toEqual([[], [null]]);
@@ -115,7 +122,10 @@ it("drops unfundable optional vectors while preserving actual SQLite nominations
   const spy = vi.spyOn(SourceIndexAcquisition, "quoteAllowanceBudget").mockImplementation((input, capacity) => ({
     ...quote(input, capacity), memory_bytes: baseFundableBytes }));
   try {
-    const tight = nominate();
+    const tight = nominate(observer);
+    expect(observer.finish("success").events.filter(event => event.kind === "statement_association_retention").map(event => event.data))
+      .toContainEqual(expect.objectContaining({ stage: "source_retention", status: "discarded",
+        reason: "source_retained_statement_association", retained_bytes: 0 }));
     expect(tight.result?.resource_refusals).toEqual([{ stage: "admission", phase: "source retained statement association" }]);
     expect(tight.result?.nominations).toEqual(baseline.result?.nominations);
     expect(tight.association).toBeUndefined();
@@ -198,7 +208,20 @@ it("delivers the same slot swap and continuation through the built worker with m
       protocol_version: 1 as const, supported_result_kinds: ["memory_entry", "source_evidence"] as const,
       supports_source_evidence: true, supports_product_updates: true };
     const delivered: string[] = [];
-    let page = await client.conditionalFieldPort.recall(request), pageCount = 0;
+    const observed = await client.observeSourceSemantics({ max_events: 2048, max_bytes: 524288, capture_page_attempts: true },
+      () => client!.conditionalFieldPort.recall(request));
+    if (observed.outcome.status !== "success") throw observed.outcome.error;
+    const facts = observed.observations.flatMap(frame => frame.events);
+    expect(observed.observations.every(frame => frame.status === "observed" && frame.dropped_events === 0)).toBe(true);
+    expect(facts.find(event => event.kind === "source_index_acquisition" && (event.data as { kind: string }).kind === "acquisition_complete")?.data)
+      .toMatchObject({ statement_association: { status: "ready", roots: 16, keys: 64 } });
+    expect(facts.filter(event => event.kind === "statement_association_retention").map(event => event.data)).toEqual([
+      expect.objectContaining({ stage: "source_retention", status: "retained" }),
+      expect.objectContaining({ stage: "field_admission", status: "retained" })
+    ]);
+    expect(facts.find(event => event.kind === "field_access_order")?.data).toMatchObject({
+      statement_association: { status: "swapped", source_slot: 5, replacement_global_rank: 6, replaced_global_rank: 5 } });
+    let page = observed.outcome.value, pageCount = 0;
     expect(page.execution_receipt?.actual?.phases.acquire?.budget_work).toBeGreaterThan(0);
     while (true) {
       delivered.push(...page.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : []));
@@ -212,5 +235,21 @@ it("delivers the same slot swap and continuation through the built worker with m
     }
     expect(pageCount).toBeGreaterThan(1);
     expect(delivered).toEqual(expected);
+
+    // The same real capture fits as base nominations but not with optional vectors once
+    // field setup has reserved memory. Only this test request uses the tighter allowance.
+    const limited = await client.observeSourceSemantics({ max_events: 2048, max_bytes: 524288 },
+      () => client!.conditionalFieldPort.recall({ ...request, budget: { ...request.budget,
+        memory_bytes: nominated.retained_bytes! } }));
+    if (limited.outcome.status !== "success") throw limited.outcome.error;
+    const limitedFacts = limited.observations.flatMap(frame => frame.events);
+    expect(limitedFacts.filter(event => event.kind === "statement_association_retention").map(event => event.data))
+      .toContainEqual(expect.objectContaining({ stage: "field_admission", status: "discarded",
+        reason: "field_retained_statement_association", retained_bytes: 0 }));
+    expect(limitedFacts.find(event => event.kind === "field_access_order")?.data).toMatchObject({
+      statement_association: { status: "not_run", reason: "association_absent_at_navigation",
+        replacement_global_rank: null, replaced_global_rank: null } });
+    expect(limited.outcome.value.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : []))
+      .toEqual(baseline.slice(0, 5));
   } finally { await client.close(); }
 }, 60_000);

@@ -149,7 +149,9 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
         readers: readers.adapter,
         capture_budget_work: captureBudgetWork,
         observe_page_fit: fit => observer.fit(fit),
-        ...(meter.observer === undefined ? {} : { observe_navigation: capture => meter.observer?.event("field_access_order", "index", capture) }),
+        ...(meter.observer === undefined ? {} : {
+          observe_navigation: capture => meter.observer?.event("field_access_order", "index", capture),
+          observe_source_association: capture => meter.observer?.associationRetention(capture) }),
         encode_page: (index, previews, metadata, owner) => libraryFitEnvelope(libraryFieldDelivery(
           { index, previews, metadata }, { ...context, meter: owner }, reservedLibraryWork(request.budget), false))
       }), executed => {

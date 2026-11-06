@@ -383,6 +383,7 @@ function runCompiledConditionalFieldRecall(
     budget: executionBudget,
     as_of: input.as_of,
     readers: input.readers,
+    observe_source_association: input.observe_source_association,
     cost,
     on_atomic_work_block: recordWorkBlock,
     on_retained_progress: () => { observationAdvanced = true; },

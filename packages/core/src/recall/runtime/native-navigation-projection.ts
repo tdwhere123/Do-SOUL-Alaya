@@ -29,9 +29,10 @@ export type NativeFieldNavigation =
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>;
 
 export type NativeNavigationObservation = Readonly<{
-  status: "ordered" | "non_total"; total: number; truncated: boolean;
+  status: "ordered" | "non_total" | "resource_refused"; total: number; truncated: boolean;
+  navigation_refusal?: Readonly<{ phase: string; constraints: SourceSemanticResourceExhausted["constraints"] | null }>;
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
-  statement_association?: Readonly<{ status: "swapped" | "unchanged" | "resource_refused"; source_slot: 5;
+  statement_association?: Readonly<{ status: "swapped" | "unchanged" | "resource_refused" | "not_run"; source_slot: 5;
     replacement_global_rank: number | null; replaced_global_rank: number | null; mixed_at_5_changed: boolean; reason: string }>;
 }>;
 
@@ -162,7 +163,10 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     const shared = { witnessFor: (target: RecallTargetRef) => witnesses.get(sourceFactKey(target)),
       values: { size: result.length, at: (index: number) => result[index] } };
     try { observe?.(() => ({ status: ordered.status === "ordered" ? "ordered" : "non_total", total: result.length,
-      ...("statement_association" in ordered ? { statement_association: ordered.statement_association } : {}),
+      statement_association: input.association === undefined ? {
+        status: "not_run", source_slot: 5, replacement_global_rank: null, replaced_global_rank: null,
+        mixed_at_5_changed: false, reason: "association_absent_at_navigation"
+      } : "statement_association" in ordered ? ordered.statement_association : undefined,
       truncated: result.length > 128, entries: result.slice(0, 128).map(value => ({ target: structuredClone(value.state.target),
         access_ordinal: witnesses.get(sourceFactKey(value.state.target))?.access_ordinal ?? null })) })); }
     catch { /* Diagnostic capture cannot change the native result. */ }
@@ -171,6 +175,9 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       : { status: "non_total", missing_record_ids: ordered.missing_record_ids, ...shared };
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    try { observe?.(() => ({ status: "resource_refused", total: values.length, truncated: values.length > 0,
+      entries: [], navigation_refusal: { phase: error.phase, constraints: error.constraints ?? null } })); }
+    catch { /* Refusal evidence cannot replace the native resource outcome. */ }
     // Never substitute another order on resource failure or commit a partial sort.
     return { status: "resource_refused" as const,
       ...(error.constraints === undefined ? {} : { constraints: {

@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
-import type { NativeSourceNomination, SourceIndexAcquisition } from "@do-soul/alaya-core";
+import type { NativeSourceNomination, SourceIndexAcquisition, ConditionalFieldRecallRequest } from "@do-soul/alaya-core";
 import type { SourceIndexQueryVector } from "@do-soul/alaya-protocol";
 import { SourceSemanticNativeFactsSchema, SourceSemanticObservationFacts, type SourceSemanticNativeFacts } from "./source-semantic-provenance.js";
 
@@ -227,6 +227,10 @@ export class SourceSemanticObserver {
         retained_key_counts: value.association.keys.map(keys => keys.length),
         vectors: "not_captured_runtime_state"
       }, beyond_observed_prefix: "unknown_not_nomination_limit" }));
+  }
+
+  associationRetention(capture: Parameters<NonNullable<ConditionalFieldRecallRequest["observe_source_association"]>>[0]): void {
+    this.event("statement_association_retention", "field", capture);
   }
 
   pageAttempt(capture: () => unknown): void {

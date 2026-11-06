@@ -128,6 +128,52 @@ it("does not treat absent or partial pool captures or missing association diagno
   expect(out.rows[1].slot5.status).toBe("unavailable");
 });
 
+it("separates causal absence, optional refusal, completed decisions and unknown historical slot evidence", () => {
+  const input = fixture();
+  const ids = ["swapped", "unchanged", "resource_refused", "field_discarded", "acquisition_failed", "legacy"];
+  const rows = ids.map(id => ({ ...row(id), pool_capture: { ...row(id).pool_capture,
+    access_orders: [{ ...row(id).pool_capture.access_orders[0], request_id: 4,
+      statement_association: id === "legacy" ? undefined : {
+        status: ["field_discarded", "acquisition_failed"].includes(id) ? "not_run" : id,
+        source_slot: 5, replacement_global_rank: id === "swapped" ? 9 : null,
+        reason: ["field_discarded", "acquisition_failed"].includes(id) ? "association_absent_at_navigation" : "native_decision" } }],
+    association_lifecycle: id === "legacy" ? undefined : [
+      { request_id: 4, stage: "acquisition", status: id === "acquisition_failed" ? "unavailable" : "ready",
+        reason: id === "acquisition_failed" ? "statement key association retention" : null },
+      { request_id: 4, stage: "source_retention", status: id === "acquisition_failed" ? "absent" : "retained",
+        reason: id === "acquisition_failed" ? "association_not_provided" : null },
+      { request_id: 4, stage: "field_admission", status: id === "field_discarded" ? "discarded"
+        : id === "acquisition_failed" ? "absent" : "retained",
+        reason: id === "field_discarded" ? "field_retained_statement_association"
+          : id === "acquisition_failed" ? "association_not_provided" : null }
+    ] } }));
+  const out = report.buildOfflineReport({ ...input, questions: ids.map(question_id => ({ question_id, cohort: "dev2", gold: 2 })),
+    current: { ...input.current, rows, scores: ids.map(id => score(id)) } });
+  expect(out.slot5).toMatchObject({ declared: 6, observed: 5, unknown: 1, swapped: 1,
+    completed_decisions: 2, not_run: 2, optional_work_refused: 1, availability_unknown: 1,
+    observed_swap_rate_denominator: "completed_decisions_only", observed_swap_rate: 0.5 });
+  expect(out.rows[3].slot5).toMatchObject({ status: "not_run", availability: { status: "observed", stages: [
+    { stage: "acquisition", status: "ready" }, { stage: "source_retention", status: "retained" },
+    { stage: "field_admission", status: "discarded", reason: "field_retained_statement_association" }
+  ] } });
+  expect(out.rows[4].slot5).toMatchObject({ status: "not_run", availability: { status: "observed" } });
+  expect(out.rows[5].slot5).toMatchObject({ status: "unavailable", availability: { status: "unknown", stages: [] } });
+});
+
+it("retains a native navigation refusal and partial lifecycle without promoting an incomplete pool", () => {
+  const input = fixture();
+  const current = row();
+  const refused = { ...current, pool_capture: { ...current.pool_capture, status: "partial",
+    access_orders: [{ status: "resource_refused", request_id: 4, entries: [], total: 16, truncated: true,
+      navigation_refusal: { phase: "statement key association link", constraints: { work: { required: 20, available: 0 } } } }],
+    association_lifecycle: [{ request_id: 4, stage: "field_admission", status: "retained" }] } };
+  const out = report.buildOfflineReport({ ...input, current: { ...input.current, rows: [refused, row("loss")] } });
+  expect(out.rows[0].slot5).toMatchObject({ status: "unavailable", availability: { status: "partial", stages: [
+    { stage: "field_admission", status: "retained" }
+  ] }, navigation_refusals: [{ request_id: 4, phase: "statement key association link" }] });
+  expect(out.slot5).toMatchObject({ unknown: 1, completed_decisions: 1, swapped: 1 });
+});
+
 it("detects guard mismatches, gold census mismatches and all parity dimensions", () => {
   const input = fixture();
   input.current.score_contract = { ...contract, ranked_slots: 16 };

@@ -44,7 +44,9 @@ describe("statement key retention and demanded pairs", () => {
     for (let i = 0; i < STATEMENT_ASSOCIATION_KEYS_PER_ROOT + 4; i++) retained.consider("a", i / 100, Float32Array.of(1, 0));
     retained.consider("b", 0.5, Float32Array.of(0, 1));
     retained.consider("b", 0.4, Float32Array.of(1, 1));
+    expect(retained.availability()).toEqual({ status: "unavailable", reason: "association_capture_not_reached" });
     const value = retained.associate(["a", "b", "c"])!;
+    expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 18 });
     expect(value.question).toEqual([0.19, 0.5, -1]);
     expect(value.keys[0]).toHaveLength(16);
     expect(value.link).toEqual([[], [null], [null, null]]);
@@ -74,6 +76,7 @@ describe("statement key retention and demanded pairs", () => {
     retained.consider("c", 0.4, Float32Array.of(1, 0));
     expect(retained.associate(roots)).toBeUndefined();
     expect(refused).toEqual(["statement key association incompatible dimensions"]);
+    expect(retained.availability()).toEqual({ status: "unavailable", reason: "statement key association incompatible dimensions" });
   });
   it("reports retention refusal once, without returning partial data", () => {
     const refused: string[] = [], retained = new StatementKeyRetention(meter(1e9, 10), phase => refused.push(phase));
@@ -81,6 +84,7 @@ describe("statement key retention and demanded pairs", () => {
     retained.consider("b", 0.5, Float32Array.of(1, 0));
     expect(retained.associate(roots)).toBeUndefined();
     expect(refused).toEqual(["statement key association retention"]);
+    expect(retained.availability()).toEqual({ status: "unavailable", reason: "statement key association retention" });
   });
   it("persists a pair refusal without free retries or a partial swap", () => {
     const retained = new StatementKeyRetention(meter(), () => { throw new Error("unexpected refusal"); });

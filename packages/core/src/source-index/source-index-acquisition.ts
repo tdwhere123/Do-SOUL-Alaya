@@ -41,42 +41,7 @@ type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
   acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionQueryVectorCaptureCost } from "./acquisition-prices.js";
 
-type NativeAdmissionFact =
-  | Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>, "status" | "reason">
-  | Pick<Extract<SourceIndexQueryAdmission, { status: "resource_limited" }>, "status" | "reason" | "phase">;
-
-/** Core-owned acquisition facts. Not a public receipt, protocol schema or daemon type.
- * Rank on vector_ranked exists only after the whole finalized ranked set is retained.
- */
-export type SourceIndexAcquisitionFact = Readonly<{
-  kind: "lexical_candidate"; target: SourceIndexTarget["target"];
-  lane: SourceIndexLexicalRank["lane"]; rank: number; lane_rank: number; bm25: number;
-}> | Readonly<{
-  kind: "vector_inspected"; target: SourceIndexTarget["target"];
-  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number;
-}> | Readonly<{
-  kind: "vector_ranked"; target: SourceIndexTarget["target"];
-  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number; rank: number;
-}> | Readonly<{
-  kind: "nomination_attempt"; channel: "lexical" | "vector"; target: SourceIndexTarget["target"];
-  disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
-    | "stale" | "native_unknown" | "resource_refused" | "rejected";
-  /** Native admission status/reason/phase. Absent when the attempt never returned one. */
-  admission?: NativeAdmissionFact;
-  /** Previous retained gold-root target when this attempt merged as a duplicate. Absent otherwise. */
-  merge_target?: SourceIndexTarget["target"];
-  /** Producer-owned refusal recorded for this attempt. Absent when none was recorded.
-   * Reuses result resource_refusals semantics; not a native admission. */
-  resource_refusal?: QueryResourceRefusal;
-}> | Readonly<{
-  kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
-  accounting: SourceIndexNominationAccounting;
-  lexical_completion: SourceIndexAcquisitionResult["lexical"]["completion"];
-  vector_completion: SourceIndexAcquisitionResult["vector"]["completion"];
-}>;
-/** Kind is available without constructing a payload, including count-only inspection diagnostics. */
-export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact,
-  kind: SourceIndexAcquisitionFact["kind"]) => void;
+import type { NativeAdmissionFact, SourceIndexAcquisitionFact, SourceIndexAcquisitionObserver } from "./acquisition-observation.js";
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
@@ -471,7 +436,8 @@ class AcquisitionQuery {
         "lexical_corpus_coverage_untracked", ...(this.timeRoute ? ["question_time_bounded_preference"] : [])]
     };
     this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
-      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion }));
+      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
+      statement_association: this.statements?.availability() ?? { status: "not_requested", reason: "association_not_requested" } }));
     return result;
   }
 

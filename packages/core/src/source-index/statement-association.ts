@@ -17,6 +17,15 @@ export type StatementAssociation = Readonly<{
   refusal: { phase: number | null; swap_selected: boolean };
 }>;
 
+/** Internal diagnostics, never part of the retained association graph or its resource quote. */
+export type StatementAssociationAvailability = Readonly<{
+  status: "not_requested" | "ready" | "unavailable"; reason: string | null; roots?: number; keys?: number;
+}>;
+export type StatementAssociationRetentionObservation = Readonly<{
+  stage: "source_retention" | "field_admission"; status: "retained" | "discarded" | "absent";
+  reason: string | null; required_bytes: number | null; available_bytes: number; retained_bytes: number | null;
+}>;
+
 const refusalPhases = ["statement key association validation", "statement key association ordering",
   "statement key association lookup", "statement key association link"] as const;
 export function refuseStatementAssociation(value: StatementAssociation, phase: string): void {
@@ -44,6 +53,9 @@ export class StatementKeyRetention {
   private readonly byRoot = new Map<string, Retained[]>();
   private abandoned = false;
   private dimensions: number | undefined;
+  private observed: StatementAssociationAvailability = { status: "unavailable", reason: "association_capture_not_reached" };
+
+  public availability(): StatementAssociationAvailability { return { ...this.observed }; }
 
   public constructor(private readonly meter: SourceSemanticResourceLedger,
     private readonly refused: (phase: string) => void) {}
@@ -69,6 +81,7 @@ export class StatementKeyRetention {
 
   private abandon(phase: string): void {
     if (this.abandoned) return;
+    this.observed = { status: "unavailable", reason: phase };
     this.abandoned = true; this.byRoot.clear(); this.refused(phase);
   }
 
@@ -92,6 +105,7 @@ export class StatementKeyRetention {
     const result: StatementAssociation = { roots: [...roots], question: kept.map(rows => rows[0]?.cosine ?? -1),
       keys: kept.map(rows => rows.map(row => ({ embedding: Array.from(row.embedding), norm: row.norm }))),
       link: roots.map((_, i) => Array<number | null>(i).fill(null)), refusal: { phase: null, swap_selected: false } };
+    this.observed = { status: "ready", reason: null, roots: roots.length, keys: keyCount };
     this.byRoot.clear();
     return result;
   }
