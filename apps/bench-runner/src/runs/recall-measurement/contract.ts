@@ -30,6 +30,8 @@ export const SemanticChainConfigSchema = z.object({
   implementation_revision: z.string().refine(isAuthorityRevision),
   /** Recall-only reader of a snapshot `implementation_revision` prepared; never prepares or reseals it. */
   consumer_revision: z.string().refine(isAuthorityRevision).optional(),
+  /** Byte-identical private read copy; original snapshot and receipt identities remain authoritative. */
+  consumer_snapshot_path: z.string().min(1).optional(),
   interpretation_clock: z.string().datetime(),
   workspace_id: z.string().min(1), run_id: z.string().min(1),
   query_workset: SemanticProposalWorksetSchema.refine((value) => value.kind === "query", "query workset required"),
@@ -49,6 +51,9 @@ export const SemanticChainConfigSchema = z.object({
   budget: RequestBudgetSchema, authorized_scopes: AuthorizedScopesAdmissionSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
 }).strict().superRefine((config, context) => {
+  if (config.consumer_snapshot_path !== undefined && (config.consumer_revision === undefined || config.source_index === undefined)) {
+    context.addIssue({ code: "custom", path: ["consumer_snapshot_path"], message: "private snapshot requires a bound recall-only consumer" });
+  }
   const preparation = SourceSemanticCorrespondencePreparationOptionsSchema.safeParse({
     correspondence_demand: config.correspondence_demand, correspondence_cap: config.correspondence_cap
   });
@@ -155,6 +160,9 @@ export function writeChainJson(path: string, value: unknown): void {
 
 export function assertChainSnapshot(config: SemanticChainConfig): void {
   if (hashRegularFileNoFollow(config.snapshot_path) !== config.snapshot_sha256) throw new AlayaError("CONFLICT", "semantic chain snapshot changed");
+  if (config.consumer_snapshot_path !== undefined && hashRegularFileNoFollow(config.consumer_snapshot_path) !== config.snapshot_sha256) {
+    throw new AlayaError("CONFLICT", "semantic chain private snapshot changed");
+  }
   const expected = config.consumer_revision ?? config.implementation_revision;
   if (readCurrentExtractionAuthorityRevision() !== expected) throw new AlayaError("CONFLICT", "semantic chain implementation changed");
   assertSemanticChainSourceIndex(config);
@@ -193,7 +201,7 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
   // Keep that host spelling at the filesystem boundary, not in restoration identity.
   const created = mkdtempSync(toNamespacedPath(join(root, "native-session-")));
   const directory = join(root, basename(created));
-  const snapshotPath = config.snapshot_path;
+  const snapshotPath = config.consumer_snapshot_path ?? config.snapshot_path;
   const restoration = Object.freeze({ snapshotSha256: config.snapshot_sha256, workspaceId: config.workspace_id,
     databasePath: join(directory, BENCH_DAEMON_DB_FILENAME) });
   let daemon: BenchDaemonHandle | undefined;
@@ -216,7 +224,14 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
           { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } } : {}) }),
       fieldProjectionAdmissionMode: "explicit_checkpoint" });
     daemon = started;
-    if (config.source_index !== undefined) assertSemanticChainSourceIndex(config, restoration.databasePath);
+    if (config.source_index !== undefined) {
+      assertSemanticChainSourceIndex(config, restoration.databasePath);
+      if (config.consumer_snapshot_path !== undefined) writeChainArtifact(join(root, "consumer-restoration.json"), {
+        consumer_revision: config.consumer_revision, producer_revision: config.implementation_revision,
+        original_snapshot_sha256: restoration.snapshotSha256, private_input_path: snapshotPath,
+        startup_and_migrations: "complete", active_source_index_after_startup: config.source_index.index
+      });
+    }
     if (config.source_index !== undefined && (config.source_index.memory_warmup === "eager" || selectedMemory !== undefined)) {
       const status = await started.runtime.services.embeddingProviderWarmup;
       const dimensions = started.runtime.services.getEmbeddingProviderDimensions();

@@ -16,6 +16,8 @@ import { join } from "node:path";
 /** Retained plans expose readable cache inputs without admitting the plan or its execution state. */
 export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
   const paths: string[] = [];
+  const privateSnapshot = retainedArtifactPathField(value, "config", "consumer_snapshot_path");
+  if (privateSnapshot !== undefined) paths.push(privateSnapshot);
   for (const key of ["cache_root", "preparation_path"] as const) {
     const path = retainedArtifactPathField(value, "config", "source_index", key);
     if (path !== undefined) paths.push(path);

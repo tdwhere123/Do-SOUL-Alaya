@@ -140,6 +140,13 @@ it("keeps explicit Memory cache changes out of cached preparations and resumed h
       expect(readFileSync(join(missingOut, "rows.jsonl"), "utf8").trim().split("\n")).toHaveLength(1);
     }
 
+    const historicalOut = join(root, "historical-missing-out");
+    const archivedRevision = "git-worktree-v1:9dce76ae7dabc8103baf277c6ad93863c5c16bbd:401cb0d9177b84228e94123a0d81ba8b4f74706625e4562003ccf3f1dce2edac";
+    await promisify(execFile)(process.execPath, [...d1Args(historicalOut, join(root, "absent-historical"), archivedRevision),
+      "--historical-preparation", "pre-statement-map.v1"], { timeout: 30_000, env: { ...env, STATEMENT_MAP: join(root, "missing-original-map") } });
+    expect(JSON.parse(readFileSync(join(historicalOut, "rows.jsonl"), "utf8"))).toMatchObject({ status: "unavailable" });
+    expect(existsSync(join(root, "absent-historical"))).toBe(false);
+
     const missingMap = join(root, "statement-map.jsonl"), mapOut = join(root, "missing-map-out");
     writeFileSync(missingMap, JSON.stringify({ cache_file: join(root, "missing-statement.json") }) + "\n");
     const missingMapError = await promisify(execFile)(process.execPath, d1Args(mapOut, cache),

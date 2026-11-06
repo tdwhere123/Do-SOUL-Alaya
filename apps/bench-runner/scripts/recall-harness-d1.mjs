@@ -19,6 +19,8 @@
 // --source-pass-limits JSON raises the preparation producer's per-pass caps (fewer, larger passes).
 // --prepared-cache DIR --prepared-revision REV only read preparations another checkout sealed; valid only
 // when that checkout's preparation path is unchanged here. Rows keep both revisions; nothing is prepared.
+// --historical-preparation pre-statement-map.v1 explicitly admits the named archived producers by
+// their config, original snapshot hash and preparation receipt, not current preparation source equality.
 // --reader end_continuation also reads each cut slot on after the membership window (scored separately).
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, rmSync } from "node:fs";
@@ -52,7 +54,8 @@ const { values } = parseArgs({ options: {
   "model-cache": { type: "string" }, "model-artifact-digest": { type: "string" },
   "source-model": { type: "string" }, "source-cache": { type: "string" },
   "source-artifact-digest": { type: "string" }, "source-lexical-work": { type: "string" }, "source-pass-limits": { type: "string" },
-  "prepared-cache": { type: "string" }, "prepared-revision": { type: "string" }, "warm-memory": { type: "boolean", default: false },
+  "prepared-cache": { type: "string" }, "prepared-revision": { type: "string" }, "historical-preparation": { type: "string" },
+  "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
   reader: { type: "string", default: "current" }
 } });
@@ -85,12 +88,17 @@ if (values["prepared-cache"] !== undefined && (values["source-pass-limits"] !== 
   throw new AlayaError("VALIDATION", "a recall-only consumer neither prepares nor owns a cache");
 }
 
+if (values["historical-preparation"] !== undefined && (values["historical-preparation"] !== "pre-statement-map.v1"
+  || values["prepared-cache"] === undefined)) throw new AlayaError("VALIDATION", "historical preparation requires its supported version and explicit consumer mode");
+
 // Reject invalid invocations before loading the daemon and native runtime graph.
 const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
 const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
 const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
 const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
-const { chainIdentity } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
+const { chainIdentity, writeChainArtifact } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
+const { admitHistoricalRecallPreparation, assertHistoricalRecallProducer } = await import(pathToFileURL(join(dist, "runs/recall-measurement/historical-preparation.js")).href);
+const { captureRecallRuntimeBuild } = await import("./recall-runtime-binding.mjs");
 const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
 const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
 
@@ -123,6 +131,8 @@ const revision = readCurrentExtractionAuthorityRevision();
 const preparationRevision = values["prepared-revision"] ?? revision;
 // Ownership is selected by the explicit mode, not by whether the revisions differ.
 const consumer = values["prepared-cache"] !== undefined;
+const historical = values["historical-preparation"];
+if (historical !== undefined) assertHistoricalRecallProducer(historical, preparationRevision);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
@@ -138,7 +148,15 @@ const metadata = await loadSelectedQuestionMetadata("longmemeval_s", { ...datase
 const datasetSha = metadata.sha256;
 const byId = new Map(metadata.entries.map(entry => [entry.question.question_id, entry]));
 
+if (historical !== undefined && existsSync(out)) throw new AlayaError("CONFLICT", "historical recall requires a fresh output root");
 mkdirSync(out, { recursive: true });
+const runtime = captureRecallRuntimeBuild(repo, revision);
+const runtimeIdentity = chainIdentity(runtime);
+writeChainArtifact(join(out, "runtime.json"), runtime);
+writeChainArtifact(join(out, "invocation.json"), { runtime_identity: runtimeIdentity, question_ids: ids, arms,
+  dataset_sha256: datasetSha, reader: values.reader, capture_pool: values["capture-pool"],
+  coordinates_sha256: values.coordinates === undefined ? null : sha256(readFileSync(values.coordinates)),
+  producer_revision: preparationRevision, historical_preparation: historical ?? null });
 const rowsPath = join(out, "rows.jsonl");
 const previous = existsSync(rowsPath) ? readFileSync(rowsPath, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
 const executionIdentity = recallExecutionIdentity(values, execution, revision, chainIdentity);
@@ -185,7 +203,8 @@ function baseConfig({ question, snapshot, snapshotSha, workspace, caches }) {
 // Statements are published into the sealed snapshot, so the map and its caches are preparation input.
 let statementMap;
 try {
-  statementMap = process.env.STATEMENT_MAP === undefined ? undefined
+  // These immutable producer versions predate statementMapDigest. Their original keys never read it.
+  statementMap = historical !== undefined || process.env.STATEMENT_MAP === undefined ? undefined
     : (await import("./recall-statement-keys.mjs")).statementMapDigest();
 } catch (error) {
   if (consumer && error?.code === "ENOENT") throw new AlayaError("UNAVAILABLE",
@@ -224,6 +243,11 @@ async function prepared(question, index, arm) {
   if (existsSync(configPath)) {
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     assertRecallCachedPreparation(config, preparationRevision, execution, arm);
+    if (historical !== undefined) {
+      const admitted = admitHistoricalRecallPreparation({ version: historical, producerRevision: preparationRevision,
+        configPath, root: join(out, "historical-inputs", question.question_id, arm.name) });
+      return { ...admitted, formation: statementFormation(dir) };
+    }
     return { config: consumer ? { ...config, consumer_revision: revision } : config, formation: statementFormation(dir) };
   }
   if (consumer) throw new AlayaError("UNAVAILABLE", `no sealed preparation for ${question.question_id} in --prepared-cache`);
@@ -264,7 +288,8 @@ for (const id of ids) {
   for (const arm of arms) {
     if (done.has(`${id}:${arm.name}`)) continue;
     const started = performance.now();
-    const row = { question_id: id, question_type: question.question_type, arm: arm.name,
+    let preparation;
+    const row = { question_id: id, question_type: question.question_type, arm: arm.name, runtime_identity: runtimeIdentity,
       arm_identity: chainIdentity(arm),
       ...(executionIdentity === undefined ? {} : { source_execution_identity: executionIdentity }),
       ...(consumer ? { consumer_revision: revision } : {}),
@@ -283,8 +308,11 @@ for (const id of ids) {
       if (captureRecallPool !== undefined && existsSync(root)) {
         throw new AlayaError("CONFLICT", "capture root already exists; prior first exposure may be unresolved");
       }
-      const preparation = await prepared(question, index, arm);
+      preparation = await prepared(question, index, arm);
       const config = preparation.config;
+      if (historical !== undefined) row.historical_preparation = { contract: historical, config_sha256: preparation.identity,
+        original_snapshot: config.snapshot_path, original_snapshot_sha256: config.snapshot_sha256,
+        receipt_identity: config.source_index.preparation_identity, producer_revision: config.implementation_revision };
       row.formation.statements = preparation.formation;
       if (captureRecallPool === undefined) rmSync(root, { recursive: true, force: true });
       const saved = Object.fromEntries(Object.keys(arm.env ?? {}).map(key => [key, process.env[key]]));
@@ -300,7 +328,7 @@ for (const id of ids) {
         for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       }
       const query = result.rows[0];
-      Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.snapshot_path,
+      Object.assign(row, { status: query.status, stop_cause: query.stop_cause, snapshot: config.consumer_snapshot_path ?? config.snapshot_path,
         snapshot_sha256: config.snapshot_sha256, workspace: config.workspace_id, implementation_revision: config.implementation_revision,
         ...(config.consumer_revision === undefined ? {} : { consumer_revision: config.consumer_revision }),
         input_identity: result.input_identity, snapshot_identity: query.snapshot_identity,
@@ -316,9 +344,12 @@ for (const id of ids) {
     } catch (error) {
       Object.assign(row, { status: error instanceof AlayaError && error.code === "UNAVAILABLE" ? "unavailable" : "error",
         error: error instanceof Error ? error.message : String(error) });
-    }
+    } finally { preparation?.finish?.(); }
     row.elapsed_ms = Math.round(performance.now() - started);
     appendFileSync(rowsPath, `${JSON.stringify(row)}\n`);
     process.stdout.write(`${id} ${arm.name} ${row.status} ${row.elapsed_ms}ms${row.error ? ` ${row.error}` : ""}\n`);
   }
 }
+const finalRuntime = captureRecallRuntimeBuild(repo, readCurrentExtractionAuthorityRevision());
+if (chainIdentity(finalRuntime) !== runtimeIdentity) throw new AlayaError("CONFLICT", "recall runtime source or build changed during execution");
+writeChainArtifact(join(out, "runtime-final.json"), { runtime_identity: runtimeIdentity, unchanged: true });

@@ -20,7 +20,9 @@ const invalidInvocations = [
 it.each(entries.flatMap(entry => [
   ...invalidInvocations,
   ...(entry === "recall-harness-d1.mjs" ? [{ name: "unpaired prepared cache", args: [...required, "--prepared-cache", "unused-cache"],
-    message: "--prepared-cache and --prepared-revision are required together" }] : [])
+    message: "--prepared-cache and --prepared-revision are required together" },
+    { name: "historical producer mode", args: [...required, "--historical-preparation", "pre-statement-map.v1"],
+      message: "historical preparation requires its supported version and explicit consumer mode" }] : [])
 ].map(input => ({ entry, ...input }))))(
   "$entry rejects $name before runtime imports with typed validation and exit one", async ({ entry, args, message }) => {
     const root = mkdtempSync(join(tmpdir(), "recall-harness-validation # -"));
