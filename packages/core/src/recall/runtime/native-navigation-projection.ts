@@ -175,8 +175,9 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       : { status: "non_total", missing_record_ids: ordered.missing_record_ids, ...shared };
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    // Detach nested costs: the operational refusal below still reads this error.
     try { observe?.(() => ({ status: "resource_refused", total: values.length, truncated: values.length > 0,
-      entries: [], navigation_refusal: { phase: error.phase, constraints: error.constraints ?? null } })); }
+      entries: [], navigation_refusal: { phase: error.phase, constraints: structuredClone(error.constraints ?? null) } })); }
     catch { /* Refusal evidence cannot replace the native resource outcome. */ }
     // Never substitute another order on resource failure or commit a partial sort.
     return { status: "resource_refused" as const,
