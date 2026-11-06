@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, executeSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
-import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
+import { indexSourceSemanticUnits } from "@do-soul/alaya-soul/source-read";
 import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";

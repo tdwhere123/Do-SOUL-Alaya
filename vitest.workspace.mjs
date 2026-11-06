@@ -17,6 +17,7 @@ const sharedAlias = {
   "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),
   "@do-soul/alaya-core": path.resolve(rootDir, "packages/core/src/index.ts"),
   "@do-soul/alaya-soul": path.resolve(rootDir, "packages/soul/src/index.ts"),
+  "@do-soul/alaya-soul/source-read": path.resolve(rootDir, "packages/soul/src/source-read.ts"),
   "@do-soul/alaya-engine-gateway": path.resolve(rootDir, "packages/engine-gateway/src/index.ts"),
   "@do-soul/alaya-eval": path.resolve(rootDir, "packages/eval/src/index.ts")
 };

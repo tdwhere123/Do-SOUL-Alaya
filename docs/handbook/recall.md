@@ -56,6 +56,9 @@ worker affinity and MCP/CLI encoding. `PathRelation` is a rebuildable
 current/as-of projection of immutable governed relation history, not another
 ontology or a license to infer proof from graph connectivity (invariant §12).
 Recall performs no provider call, embedding generation or index backfill.
+The read worker imports source locator binding and semantic unit indexing from
+`@do-soul/alaya-soul/source-read`. This entry re-exports their existing Soul
+owners without loading the Garden and tool barrel; both remain eager imports.
 
 ## Conditional meaning
 
