@@ -24,14 +24,17 @@ it("qualifies successful CLI scoring and invalidates prior success before malfor
     ]);
     const score = () => promisify(execFile)(process.execPath, [fileURLToPath(new URL("recall-harness-score.mjs", scripts)),
       "--out", root, "--dataset", data, "--census", census]);
-    for (const badInput of [data, rows, census, "invalid-census"]) {
+    for (const badInput of [data, rows, census, "invalid-census", "late-truncated-row", "missing-rows"]) {
       for (const [path, content] of good) writeFileSync(path, content);
       await score();
       const success = JSON.parse(readFileSync(join(root, "census.json"), "utf8"));
       expect(success.status).toBe("qualifiable");
       expect(success.by_arm[0]).toMatchObject({ expected: 1, complete: 1, unknown: 0, unanswerable: 1 });
       expect(success.inputs.rows.sha256).toBe(createHash("sha256").update(good.get(rows)!).digest("hex"));
-      writeFileSync(badInput === "invalid-census" ? census : badInput, badInput === "invalid-census" ? "{}" : "not json");
+      if (badInput === "missing-rows") rmSync(rows);
+      else if (badInput === "late-truncated-row") {
+        writeFileSync(rows, good.get(rows)! + JSON.stringify({ observation: "x".repeat(140000) }) + '\n{"truncated":');
+      } else writeFileSync(badInput === "invalid-census" ? census : badInput, badInput === "invalid-census" ? "{}" : "not json");
       await expect(score()).rejects.toMatchObject({ code: 1 });
       expect(JSON.parse(readFileSync(join(root, "census.json"), "utf8")))
         .toMatchObject({ status: "not_qualifiable", reason: "scoring_incomplete" });

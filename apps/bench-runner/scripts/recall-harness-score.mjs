@@ -22,6 +22,7 @@ import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answe
 import { endContinuationReading } from "../dist/runs/recall-measurement/ordinary/ordinary-end-continuation.js";
 import { ORDINARY_RECALL_OBSERVED_SLOT_TARGET } from "../dist/runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { recallHarnessCensus } from "./recall-harness-census.mjs";
+import { readRecallJsonlFile } from "./recall-jsonl-file.mjs";
 import {
   scoreContiguousReadVisibility,
   unavailableRecallRowDiagnostics
@@ -196,7 +197,9 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath, censusPath
   };
   const resolvedDatasetPath = resolve(datasetPath ?? join(here, "../data/longmemeval/longmemeval_s.json"));
   const dataset = new Map(JSON.parse(readInput("dataset", resolvedDatasetPath)).map(q => [q.question_id, q]));
-  const captured = readInput("rows", join(out, "rows.jsonl")).split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const rowsPath = join(out, "rows.jsonl");
+  const { rows: captured, sha256 } = readRecallJsonlFile(rowsPath);
+  inputs.rows = { path: rowsPath, sha256 };
   const manifest = censusPath === undefined ? undefined : JSON.parse(readInput("census", resolve(censusPath)));
   const census = { ...recallHarnessCensus(captured, dataset, manifest), inputs };
   const continued = endContinuationRows(captured);
