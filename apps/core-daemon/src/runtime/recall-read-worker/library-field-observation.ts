@@ -33,9 +33,7 @@ export class LibraryFieldObserver {
     // A fresh nomination does not create an already leased pool or establish its ancestry.
     this.pool(nomination, bound, bound !== undefined || reused ? "reused" : "created");
     if (reused) return;
-    this.observer?.event("field_nomination", "observe", () => ({ result: nomination.result,
-      witness: nomination.witness, admitted_roots: nomination.admitted_roots,
-      question_time_order: nomination.question_time_order, beyond_observed_prefix: "unknown_not_nomination_limit" }));
+    this.observer?.nomination(nomination);
   }
 
   public sourceRead(input: Parameters<SourceRead>[0], page: ReturnType<SourceRead>): void {
