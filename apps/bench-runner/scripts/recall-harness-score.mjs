@@ -9,16 +9,19 @@
 // Rows read with the end-continuation reader are also scored as "<arm>+end-continuation": the
 // delivered slots, then each continued slot re-read from the last message end at or before its cut.
 //
-//   node apps/bench-runner/scripts/recall-harness-score.mjs --out DIR [--base ARM] [--dataset PATH]
+//   node apps/bench-runner/scripts/recall-harness-score.mjs --out DIR --census FILE [--base ARM] [--dataset PATH]
+// Census JSON: { "question_ids": [...], "arms": [...], "reader": "end_continuation" | "current", "capture_pool": true | false }.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { AlayaError, HostOccurrenceInventorySchema } from "@do-soul/alaya-protocol";
 import { joinSnapshotAnswerSpans } from "../dist/runs/longmemeval-semantic/answer-spans.js";
 import { endContinuationReading } from "../dist/runs/recall-measurement/ordinary/ordinary-end-continuation.js";
 import { ORDINARY_RECALL_OBSERVED_SLOT_TARGET } from "../dist/runs/recall-measurement/ordinary/ordinary-entry-contract.js";
+import { recallHarnessCensus } from "./recall-harness-census.mjs";
 import {
   scoreContiguousReadVisibility,
   unavailableRecallRowDiagnostics
@@ -59,7 +62,7 @@ function endContinuationRows(rows) {
   const read = [];
   const stat = { rows: 0, cut: 0, completed: 0, payload_calls: 0, issues: 0, initial_bytes: 0, continuation_bytes: 0 };
   for (const row of rows) {
-    if (row.end_continuation === undefined || !Array.isArray(row.intervals)) continue;
+    if ((row.status !== "complete" && row.status !== "partial") || row.end_continuation === undefined || !Array.isArray(row.intervals)) continue;
     const ends = loadMessageEnds(row.snapshot, row.workspace);
     const reading = endContinuationReading(row.intervals, row.end_continuation, root => ends.get(root) ?? []);
     stat.rows += 1; stat.cut += reading.cut; stat.completed += reading.completed;
@@ -79,7 +82,7 @@ export function scoreRecallHarnessRow(row, dataset) {
   const gold = question.haystack_sessions.flat().filter(turn => turn.has_answer).map(turn => norm(turn.content)).filter(Boolean);
   const baseData = { question_id: row.question_id, question_type: row.question_type, arm: row.arm, status: row.status };
 
-  if (row.status === "error" || row.status === "failed" || row.status === "unavailable") {
+  if (row.status !== "complete" && row.status !== "partial") {
     const unavail = unavailableRecallRowDiagnostics(`row_status_${row.status}`, gold.length);
     return {
       ...baseData,
@@ -180,11 +183,22 @@ export function scoreRecallHarnessRow(row, dataset) {
   };
 }
 
-export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
-  const out = resolve(outDir);
+export function runRecallHarnessScore({ outDir, baseArm, datasetPath, censusPath }) {
+  const out = resolve(outDir), censusPathname = join(out, "census.json");
+  // Invalidate the current projection before any fallible input read/parse/validation.
+  // Frozen evidence is never a scoring destination; callers use fresh output directories.
+  writeFileSync(censusPathname, JSON.stringify({ status: "not_qualifiable", reason: "scoring_incomplete" }, null, 2) + "\n");
+  const inputs = {};
+  const readInput = (name, path) => {
+    const bytes = readFileSync(path);
+    inputs[name] = { path: resolve(path), sha256: createHash("sha256").update(bytes).digest("hex") };
+    return bytes.toString("utf8");
+  };
   const resolvedDatasetPath = resolve(datasetPath ?? join(here, "../data/longmemeval/longmemeval_s.json"));
-  const dataset = new Map(JSON.parse(readFileSync(resolvedDatasetPath, "utf8")).map(q => [q.question_id, q]));
-  const captured = readFileSync(join(out, "rows.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const dataset = new Map(JSON.parse(readInput("dataset", resolvedDatasetPath)).map(q => [q.question_id, q]));
+  const captured = readInput("rows", join(out, "rows.jsonl")).split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const manifest = censusPath === undefined ? undefined : JSON.parse(readInput("census", resolve(censusPath)));
+  const census = { ...recallHarnessCensus(captured, dataset, manifest), inputs };
   const continued = endContinuationRows(captured);
   const rows = [...captured, ...continued.read];
 
@@ -207,7 +221,7 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
     for (const m of metrics) line[m] = `${mine.filter(s => s[m]?.any).length}/${mine.filter(s => s[m]?.all).length}`;
     table.push(line);
   }
-  console.log("Any/All counts per arm");
+  console.log("Conditional scored-subset Any/All counts per arm (diagnostic, not the fixed denominator)");
   console.table(table);
 
   const diagMetrics = ["read5", "read10", ...BUDGETS.map(B => `read_b${B}`)];
@@ -244,18 +258,22 @@ export function runRecallHarnessScore({ outDir, baseArm, datasetPath }) {
         const losses = pairs.filter(s => !s[m]?.any && ref.get(s.question_id)[m]?.any).length;
         diff[m] = `+${wins}/-${losses}`;
       }
-      console.log(`${arm} vs ${baseArm} (Any wins/losses over ${pairs.length} pairs)`, diff);
+      console.log(`${arm} vs ${baseArm} (diagnostic Any wins/losses over ${pairs.length} available pairs)`, diff);
     }
   }
 
-  return { scored, table, diagTable, endContinuation: continued.stat };
+  writeFileSync(censusPathname, JSON.stringify(census, null, 2) + "\n");
+  console.log(`Fixed cohort: ${census.status}; see census.json`);
+  return { scored, table, diagTable, endContinuation: continued.stat, census };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const { values } = parseArgs({ options: { out: { type: "string" }, base: { type: "string" }, dataset: { type: "string" } } });
+  const { values } = parseArgs({ options: { out: { type: "string" }, base: { type: "string" }, dataset: { type: "string" },
+    census: { type: "string" } } });
   if (!values.out) {
-    console.error("Usage: recall-harness-score.mjs --out DIR [--base ARM] [--dataset PATH]");
+    console.error("Usage: recall-harness-score.mjs --out DIR --census FILE [--base ARM] [--dataset PATH]");
     process.exit(1);
   }
-  runRecallHarnessScore({ outDir: values.out, baseArm: values.base, datasetPath: values.dataset });
+  const result = runRecallHarnessScore({ outDir: values.out, baseArm: values.base, datasetPath: values.dataset, censusPath: values.census });
+  if (result.census.status !== "qualifiable") process.exitCode = 1;
 }

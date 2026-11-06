@@ -20,7 +20,9 @@ const invalidInvocations = [
 it.each(entries.flatMap(entry => [
   ...invalidInvocations,
   ...(entry === "recall-harness-d1.mjs" ? [{ name: "unpaired prepared cache", args: [...required, "--prepared-cache", "unused-cache"],
-    message: "--prepared-cache and --prepared-revision are required together" }] : [])
+    message: "--prepared-cache and --prepared-revision are required together" },
+    { name: "historical producer mode", args: [...required, "--historical-preparation", "pre-statement-map.v1"],
+      message: "historical preparation requires its supported version and explicit consumer mode" }] : [])
 ].map(input => ({ entry, ...input }))))(
   "$entry rejects $name before runtime imports with typed validation and exit one", async ({ entry, args, message }) => {
     const root = mkdtempSync(join(tmpdir(), "recall-harness-validation # -"));
@@ -55,18 +57,21 @@ it.each(entries)("%s guards the main thread, explicit-argv recall workers and ch
   const arms = join(root, "arms.json");
   writeFileSync(arms, "[]");
   const childProgram = join(root, "guard-probe.cjs");
-  const source = "try { require('node:fs').readFileSync('/nonexistent-authored-harness/auth.json'); } catch (error) { console.log(error.message); }";
+  const source = "try { require('node:fs').readFileSync('/nonexistent-authored-harness/auth.json'); } catch (error) { console.log(error.message); }" +
+    "try { require('node:net').connect(443, '192.0.2.1'); } catch (error) { console.log(error.message); }";
   writeFileSync(childProgram, source);
   // Intercept the first native application import, before dataset/config access.
   // Only synthetic nonexistent credential-shaped paths are probed, never real credentials or network.
   const probe = `
     import { readFileSync } from 'node:fs';
     import { Worker } from 'node:worker_threads';
+    import { connect } from 'node:net';
     import { execFile, fork } from 'node:child_process';
     import { promisify } from 'node:util';
     const source = ${JSON.stringify(source)};
-    let main;
+    let main, mainSocket;
     try { readFileSync('/nonexistent-authored-harness/auth.json'); } catch (error) { main=error.message; }
+    try { connect(443, '192.0.2.1'); } catch (error) { mainSocket=error.message; }
     const worker = await new Promise((resolve, reject) => {
       const worker = new Worker(source, { eval: true, stdout: true,
         execArgv: process.execArgv.filter(arg => !arg.startsWith('--input-type')) });
@@ -82,7 +87,7 @@ it.each(entries)("%s guards the main thread, explicit-argv recall workers and ch
       let output=''; child.stdout.on('data', chunk => { output+=chunk; });
       child.on('error', reject); child.on('exit', code => resolve({code, output}));
     });
-    console.log(JSON.stringify({main,worker,child,forked}));
+    console.log(JSON.stringify({main,mainSocket,worker,child,forked}));
     process.exit(0);
   `;
   const hook = join(root, "before-native.mjs");
@@ -101,8 +106,10 @@ it.each(entries)("%s guards the main thread, explicit-argv recall workers and ch
     expect(result.code).toBe(1);
     const report = JSON.parse(result.stdout);
     expect(report.main).toContain("Provider-free test refused credential file");
-    expect(report.worker).toEqual({code:1, output:"Provider-free test refused credential file\n"});
-    expect(report.child).toEqual({code:1, output:"Provider-free test refused credential file\n"});
-    expect(report.forked).toEqual({code:1, output:"Provider-free test refused credential file\n"});
+    expect(report.mainSocket).toContain("Provider-free test refused non-loopback socket");
+    const output = "Provider-free test refused credential file\nProvider-free test refused non-loopback socket\n";
+    expect(report.worker).toEqual({code:1, output});
+    expect(report.child).toEqual({code:1, output});
+    expect(report.forked).toEqual({code:1, output});
   } finally { rmSync(root, {recursive:true, force:true}); }
 });

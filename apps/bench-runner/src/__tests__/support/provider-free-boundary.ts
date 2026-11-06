@@ -5,6 +5,11 @@ import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import net from "node:net";
+import http from "node:http";
+import http2 from "node:http2";
+import dgram from "node:dgram";
+import dns from "node:dns";
 
 type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
 
@@ -19,10 +24,15 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     violations.push(kind);
     throw new Error(`Provider-free test refused ${kind}`);
   };
+  restores.push(installProviderFreeTransport(deny));
   const nativeFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) deny("non-loopback fetch");
+    if (url.hostname === "localhost") {
+      url.hostname = "127.0.0.1";
+      input = typeof input === "string" ? url.href : input instanceof URL ? url : new Request(url, input);
+    }
     return nativeFetch(input, { ...init, redirect: "error" });
   };
   restores.push(() => { globalThis.fetch = nativeFetch; });
@@ -122,6 +132,69 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };
+}
+
+/** Guard native Node transports too: fetch alone does not cover http, sockets or DNS. */
+function installProviderFreeTransport(deny: (kind: string) => never): () => void {
+  const restores: (() => void)[] = [];
+  const replace = (owner: object, key: string, value: unknown) => {
+    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+    if (typeof Reflect.get(owner, key) !== "function") return;
+    Object.defineProperty(owner, key, descriptor && "value" in descriptor ? { ...descriptor, value }
+      : { configurable: true, enumerable: descriptor?.enumerable ?? false, writable: true, value });
+    restores.push(() => { if (descriptor) Object.defineProperty(owner, key, descriptor); else Reflect.deleteProperty(owner, key); });
+  };
+  const connect = net.Socket.prototype.connect;
+  replace(net.Socket.prototype, "connect", new Proxy(connect, {
+    apply(target, receiver, args) {
+      // net.createConnection passes Node's normalized [options, callback] array.
+      const normalized = Array.isArray(args[0]) ? args[0] : undefined;
+      const value = normalized ? normalized[0] : args[0];
+      if (typeof value === "string") return deny("non-loopback socket");
+      let options: Record<string, unknown>;
+      if (typeof value === "number") options = { port: value, host: typeof args[1] === "string" ? args[1] : undefined };
+      else if (value && typeof value === "object") options = { ...value };
+      else return deny("unknown socket destination");
+      if (typeof options.path === "string") return deny("non-loopback socket");
+      const host = options.host ?? options.hostname ?? "localhost";
+      if (host !== "127.0.0.1" && host !== "::1" && host !== "localhost") return deny("non-loopback socket");
+      // Do not trust a machine's localhost DNS/hosts mapping or a custom lookup callback.
+      options.host = host === "localhost" ? "127.0.0.1" : host;
+      delete options.hostname; delete options.lookup;
+      if (normalized) {
+        const copy = Object.assign([...normalized], normalized); copy[0] = options; args[0] = copy;
+      } else if (typeof value === "number") {
+        args = [options, ...args.slice(1).filter((arg: unknown) => typeof arg === "function")];
+      } else args[0] = options;
+      return Reflect.apply(target, receiver, args);
+    }
+  }));
+  const emit = http.ClientRequest.prototype.emit;
+  replace(http.ClientRequest.prototype, "emit", function (this: http.ClientRequest, event: string | symbol, ...args: unknown[]) {
+    if (event === "response") {
+      const response = args[0] as http.IncomingMessage;
+      if ((response.statusCode ?? 0) >= 300 && (response.statusCode ?? 0) < 400 && response.headers.location) {
+        try { deny("HTTP redirect"); }
+        catch (error) { this.destroy(error as Error); response.destroy(); return false; }
+      }
+    }
+    return Reflect.apply(emit, this, [event, ...args]);
+  });
+  replace(dgram, "createSocket", () => deny("UDP transport"));
+  replace(http2, "connect", () => deny("HTTP/2 transport"));
+  for (const owner of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolver.prototype]) {
+    for (const key of Object.getOwnPropertyNames(owner)) {
+      if (/^(?:lookup|resolve|reverse)/u.test(key) && typeof Reflect.get(owner, key) === "function") {
+        const lookup = Reflect.get(owner, key);
+        replace(owner, key, new Proxy(lookup, { apply(target, receiver, args) {
+          // Node also calls lookup for literal listen addresses; these require no DNS query.
+          if (key === "lookup" && (args[0] === "127.0.0.1" || args[0] === "::1")) return Reflect.apply(target, receiver, args);
+          return deny("DNS lookup");
+        } }));
+      }
+    }
+  }
+  return () => { for (const restore of restores.reverse()) restore(); };
 }
 
 function containedFixtureFile(path: string, root: string): boolean {

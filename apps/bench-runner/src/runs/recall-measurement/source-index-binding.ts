@@ -68,7 +68,7 @@ export function inspectSemanticChainSourceIndex(filename: string, workspace: str
   } finally { connection.close(); }
 }
 
-export function assertSemanticChainSourceIndex(config: SemanticChainConfig, filename = config.snapshot_path): void {
+export function assertSemanticChainSourceIndex(config: SemanticChainConfig, filename = config.consumer_snapshot_path ?? config.snapshot_path): void {
   const binding = config.source_index;
   if (binding === undefined) return;
   const report = readChainArtifact(binding.preparation_path);
