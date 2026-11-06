@@ -1,10 +1,10 @@
 import {
   isPathActiveForRecall,
+  normalizeTimeConcernWindowDigest,
   timeConcernWindowDigestsMatch,
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { normalizeRecallTimeConcernWindowDigest } from "../garden-wiring/garden-compute-support.js";
 import { mergePathRelationsByIdentity } from "./path-relation-identity-merge.js";
 
 export type RecallPathProjectionReadOptions = Readonly<{
@@ -200,7 +200,7 @@ function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPath
     windowDigests: readonly string[],
     options: RecallPathProjectionReadOptions = {}
   ) => {
-    const normalizedWindowDigests = windowDigests.map(normalizeRecallTimeConcernWindowDigest);
+    const normalizedWindowDigests = windowDigests.map(normalizeTimeConcernWindowDigest);
     await mode.ensureTemporalProjection(options);
     const paths = await mode.reader.findByTimeConcernWindowDigests(
       workspaceId,
@@ -244,7 +244,7 @@ function createLegacyRecallPathReadPorts(mode: LegacyPathReader): RecallPathRead
     workspaceId,
     windowDigests
   ) => {
-    const normalizedWindowDigests = windowDigests.map(normalizeRecallTimeConcernWindowDigest);
+    const normalizedWindowDigests = windowDigests.map(normalizeTimeConcernWindowDigest);
     const paths = await mode.reader.findByWorkspaceAll(workspaceId);
     return paths.filter((path) =>
       isPathActiveForRecall(path.lifecycle.status) &&

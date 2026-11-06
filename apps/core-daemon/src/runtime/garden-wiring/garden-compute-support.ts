@@ -124,10 +124,6 @@ export function createConflictDetectionLlmPort(env = processEnvLookup()): Confli
   };
 }
 
-export function normalizeRecallTimeConcernWindowDigest(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, "_");
-}
-
 function formatGardenSecretRefError(error: ResolveSecretError): string {
   switch (error.kind) {
     case "malformed":
