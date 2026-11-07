@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDatetimeStringSchema } from "../../shared/schema-primitives.js";
+import { BoundedIdSchema, IsoDatetimeStringSchema } from "../../shared/schema-primitives.js";
 import { SourceEvidenceTargetSchema } from "./product-identity.js";
 import { QuestionTimeIntervalSchema, QuestionTimePreferenceSchema } from "./question-time.js";
 import { SourceSemanticHandleSchema } from "../../garden/source-semantic-draft.js";
@@ -94,7 +94,7 @@ export const QualifiedTaskObservationSchema = z.object({
   conditional_binding: z.object({
     source_interpretation_id: Sha256DigestSchema, query_semantics_id: Sha256DigestSchema,
     semantic_correspondence_id: Sha256DigestSchema, conditional_computation_id: Sha256DigestSchema,
-    binding_id: Sha256DigestSchema,
+    binding_id: BoundedIdSchema,
     support_span: z.object({ start_byte: z.number().int().nonnegative(), end_byte: z.number().int().positive() }).strict().readonly()
   }).strict().readonly().optional()
 }).strict().readonly();

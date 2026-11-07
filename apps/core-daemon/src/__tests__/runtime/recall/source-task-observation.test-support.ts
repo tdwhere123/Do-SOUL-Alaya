@@ -14,7 +14,7 @@ import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixtur
 import { CLOCK, WS, digest, type IndexFixture } from "./source-semantic-index-acquisition.test-support.js";
 
 type AuthoredFrame = Readonly<{ id: string; text: string; predicate: string;
-  roles: readonly Readonly<{ id: string; text: string; unresolved?: boolean }>[] }>;
+  roles: readonly Readonly<{ id: string; text: string; unresolved?: boolean; unexpressed?: boolean }>[] }>;
 
 /** Authored legal Q/H/C through the production publication and correspondence owners. */
 export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<{
@@ -45,13 +45,14 @@ export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<
     const predicate = mention(`${frame.id}Predicate`, frame.predicate);
     const roles = frame.roles.map(role => {
       const id = `${frame.id}${role.id}`;
-      const m = mention(`${id}Mention`, role.text);
-      referents.push({ id, referent_kind: "grouped", mentions: [m] });
+      const m = role.unexpressed ? undefined : mention(`${id}Mention`, role.text);
+      referents.push({ id, referent_kind: role.unexpressed ? "unexpressed" : "grouped", mentions: m === undefined ? [] : [m] });
       return { role, id, m };
     });
     frames.push({ id: frame.id, assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
       additional_support: [], predicate_support: { kind: "explicit", reading: frame.predicate, mentions: [predicate] },
-      slots: roles.map(({ role, m }) => ({ id: role.id, role_reading: role.id, support: [{ kind: "lexical", mentions: [m] }] })),
+      slots: roles.map(({ role, m }) => ({ id: role.id, role_reading: role.id,
+        support: m === undefined ? [] : [{ kind: "lexical", mentions: [m] }] })),
       bindings: roles.map(({ role, id }) => ({ slot_id: role.id,
         target: role.unresolved ? { kind: "unresolved" } : { kind: "node", id }, support: [] })) });
   }

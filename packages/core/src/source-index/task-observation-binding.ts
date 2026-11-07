@@ -10,6 +10,7 @@ import { CoreError } from "../shared/errors.js";
 import { admitSourceSemanticCorrespondence } from "../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { executeSourceSemanticInterpretation, SOURCE_SEMANTIC_REASONING_BUDGET } from "../recall/runtime/source-semantic-reasoning.js";
 import { sourceSemanticSupportExtent } from "../memory/evidence-create/source-semantic-support-window.js";
+import { sourceSemanticProofDependencies } from "../recall/runtime/source-semantic-delivery.js";
 
 /** The host uses the existing publication/source verification owner inside the pinned read snapshot. */
 export type TaskInterpretationReader = (identity: string, meter: SourceSemanticResourceLedger,
@@ -92,7 +93,8 @@ export function bindSourceTaskAssociation(input: Readonly<{
   if (binding === undefined) throw new TaskObservationFailure("unknown",
     result.outcome.status === "resource_exhausted" || result.completeness?.logical_index !== "complete"
       ? "source_task_computation_incomplete" : "source_task_binding_unresolved");
-  const support = sourceSemanticSupportExtent(admission.interpretation, execution.source_dependencies ?? [], meter);
+  const dependencies = sourceSemanticProofDependencies(result, meter, binding.binding_id);
+  const support = sourceSemanticSupportExtent(admission.interpretation, dependencies, meter);
   if (support.status !== "located") throw new TaskObservationFailure("unknown", "source_task_support_unavailable");
   const event = row.event_time;
   meter.charge(input.question.intervals.length, 0, "source task bound temporal comparison");

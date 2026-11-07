@@ -363,9 +363,13 @@ into a second schedule. Validation, verified H reads and conditional computation
 the remaining optional allowance; resource refusal preserves the paid incumbent.
 There is no provider call, index repair, extra quota or default promotion.
 
-Navigation retains the actual conditional-computation and binding identities, the
-unreviewed observation and its required source-support extent. The shared payload fit
-uses that explicit extent, not the discovery window, while keeping its normal byte
+Protocol 39.1.0 corrects qualification identity and support closure. Navigation retains
+the actual conditional-computation and canonical bounded binding identities, including
+multi-phase prefixes, without renaming them. The required support
+extent comes from the selected binding's full executed proof closure through the existing
+dependency/location owners, not the union of independent proofs. An unlocated independent
+input cannot revoke the selected located input; an unlocated selected dependency still
+prevents qualification. The shared payload fit uses that explicit extent, not the discovery window, while keeping its normal byte
 limits and continuation accounting. A navigation observation is not itself a claim that
 its entire support was delivered: the result's actual span/preview remains authoritative.
 Source record, interpretation and field continuation invalidation remain independent.
@@ -439,7 +443,7 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 
 Current public `QueryView` defaults to `native_query`; field index and
 continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v13`, Protocol
-39.0.0; library field protocol 13). Ordinary delivery is a semantic major under
+39.1.0; library field protocol 13). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

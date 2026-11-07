@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 39.0.0, engine gateway 3.0.0
+## Unreleased — protocol 39.1.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,12 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 39.1.0 widens task qualification binding IDs to the existing canonical
+bounded execution identity, including multi-phase prefixes (additive schema
+compatibility correction under invariant §25). It also corrects selected support
+closure without redefining the native v13 policy or field-library protocol 13.
+The Protocol 39.0/native v13 archive mapping remains readable.
 
 Protocol 39.0.0 deepens opt-in task observation admission through the existing
 selected Q/H/C conditional field (`ordinary-native-field.v13`, library field protocol
@@ -27,8 +33,11 @@ Unbound/free-text observations no longer obtain that preference. Raw fallback an
 hard-guard abstention remain intact; a standing input requires no occurrence-time
 proof. Existing partial evidence-input support does not claim a complete answer or
 executed task operation.
-Navigation retains conditional identities and a support span used by the existing
-payload fit. Neither interpretation admission nor overlap establishes world truth.
+Navigation retains canonical bounded execution binding IDs, including multi-phase
+prefixes, and a support span used by the existing payload fit. That span requires the
+selected actual binding's complete proof closure; independent unlocated inputs cannot
+revoke its support. These corrections complete the unreleased Protocol 39 major
+contract in 39.1.0. Neither interpretation admission nor overlap establishes world truth.
 Discard old continuations and restart queries on upgrade or rollback; never relabel
 a frozen handle. Protocol 38/native v12 archives retain their original identities
 and remain readable. The v6 formation identity does not readmit v5 outputs.
