@@ -33,7 +33,8 @@ const questionTime = { interpretation_clock: CLOCK, intervals: [{ start: "2026-0
 const base = { schema_version: 1, producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID,
   original_query_digest: digest(query), question_time: questionTime };
 
-function proposal(target: SourceEvidenceTarget, secondTarget: SourceEvidenceTarget, coverage: "ready" | "partial" = "partial") {
+function proposal(target: SourceEvidenceTarget, secondTarget: SourceEvidenceTarget, coverage: "ready" | "partial" = "partial",
+  invalidTime?: { start: string; end: string; reason: string }) {
   const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
     sources: [{ source_ref: "source1", target, source_observed_at: originals[0]!.eventTime, body: sourceText },
       { source_ref: "source2", target: secondTarget, source_observed_at: originals[1]!.eventTime, body: standingText }] };
@@ -42,14 +43,16 @@ function proposal(target: SourceEvidenceTarget, secondTarget: SourceEvidenceTarg
     description: "The speaker reports repairing a hinge with a wrench.", task_correspondence: "possible",
     task_role: "requested_event", task_component: "tool used for the hinge repair", time_status: "interpreted",
     time_expression: "last Thursday", time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" },
-    { source_ref: "source2", source_excerpt: "The repair shop offers", query_excerpt: query, utterance_kind: "standing",
+    { source_ref: "source2", source_excerpt: invalidTime === undefined ? "The repair shop offers" : standingText,
+      query_excerpt: query, utterance_kind: "standing",
       description: "A shop discount.", task_correspondence: "unresolved", task_role: null, task_component: null,
       ...(coverage === "partial" ? { time_status: "interpreted", time_expression: "last Thursday",
-        time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" }
+        time_anchor: "source_observation_clock", time_start: invalidTime?.start ?? "2026-09-03",
+        time_end: invalidTime?.end ?? "2026-09-03" }
         : { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null }) }] });
   const formed = interpretSourceTaskObservationSourceLocalDecoded(input, { rawJson, finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
   expect(formed).toMatchObject({ classified: coverage === "partial" ? "incomplete" : "interpreted", admitted: true, outcome: {
-    diagnostics: coverage === "partial" ? [{ reason: "invalid_bound_observation", source_ref: "source2", row_index: 1 }] : [],
+    diagnostics: coverage === "partial" ? [{ reason: invalidTime?.reason ?? "invalid_bound_observation", source_ref: "source2", row_index: 1 }] : [],
     proposal: { source_task_observation: { status: coverage } } } });
   if (formed.outcome.status !== "source_task_observation") throw new Error(JSON.stringify(formed.outcome));
   return formed.outcome.proposal;
@@ -82,6 +85,19 @@ it("restores a separately timed task observation before freeze and delivers it t
       entry.target.kind === "source_evidence" ? entry.target.root_id : "memory");
     expect(ids(baseline)).not.toContain(target.root_id);
     expect(ids(first)[0]).toBe(target.root_id);
+    for (const invalidTime of [
+      { start: "2026-09-03T00:00:00Z", end: "2026-09-03", reason: "invalid_shape" },
+      { start: "2023-02-29", end: "2023-03-01", reason: "invalid_shape" },
+      { start: "2026-09-04", end: "2026-09-03", reason: "invalid_bound_observation" }
+    ]) {
+      const partial = proposal(target, secondTarget, "partial", invalidTime);
+      expect(partial.source_task_observation.observations).toHaveLength(1);
+      const delivered = await call(partial);
+      expect(ids(delivered)).toEqual(ids(first));
+      expect(delivered.index!.entries[0]!.navigation?.task_observation)
+        .toEqual(first.index!.entries[0]!.navigation?.task_observation);
+      expect(ids(delivered).slice(1)).toEqual(ids(baseline).slice(0, 4));
+    }
     const readyCandidate = proposal(target, secondTarget, "ready");
     expect(readyCandidate.source_task_observation.observations).toHaveLength(2);
     expect(fixture.targets).toHaveLength(32); // Ready covers the supplied pair, not the native candidate inventory.

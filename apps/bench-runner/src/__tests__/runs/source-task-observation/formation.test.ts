@@ -19,6 +19,7 @@ import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/at
 import type { ExtractionSuccessfulShard } from "../../../runs/extraction/authority/attempt-ledger-shards.js";
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey, SOURCE_TASK_OBSERVATION_SCHEMA_NAME }
   from "../../../runs/provider-request/request-binding.js";
+import { prepareSemanticProviderRequest } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { executeProviderRequestLine, type ProviderRequestLine } from "../../../runs/provider-request/execution.js";
 
 const hash = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -44,7 +45,7 @@ const decode = (value: unknown, captured = input(), finishReason: string | null 
 
 it("binds unique Unicode quotations to captured identities and clocks without asking the model for native metadata", () => {
   const request = buildSourceTaskObservationRequest(input());
-  expect(request.formationIdentity).toBe("source-task-observation.task-input-correspondence.v4");
+  expect(request.formationIdentity).toBe("source-task-observation.calendar-day-wire.v5");
   expect(request.responseJsonSchema).toMatchObject({ required: ["observations"], additionalProperties: false });
   expect(Object.keys(Reflect.get(request.responseJsonSchema, "properties"))).toEqual(["observations"]);
   expect(request.userPrompt).not.toContain(target(body).content_digest);
@@ -58,6 +59,46 @@ it("binds unique Unicode quotations to captured identities and clocks without as
         source_excerpt: { start_byte: 5, end_byte: Buffer.byteLength(body), text: row.source_excerpt },
         task_correspondence: { status: "possible", role: "requested_event" },
         event_time: { status: "interpreted", interval: { start: "2026-09-03", end: "2026-09-03" } } }] } } } });
+});
+
+it("advertises nullable calendar-day endpoints in the generated provider schema", () => {
+  const material = buildSourceTaskObservationRequest(input());
+  const schema = material.responseJsonSchema;
+  const wire = prepareSemanticProviderRequest({ model: "step-3.5-flash-2603",
+    requestProfile: "step-3.5-2603-low-json-schema-v1", providerUrl: "https://api.stepfun.com/v1", apiKey: null },
+  { ...material, maxOutputTokens: 2048, retryMode: "disabled", outputTokenField: "max_tokens",
+    validateRawJson: () => undefined }, SOURCE_TASK_OBSERVATION_SCHEMA_NAME);
+  expect(JSON.parse(wire.body).response_format.json_schema.schema).toEqual(schema);
+  const properties = Reflect.get(schema, "properties").observations.items.properties;
+  for (const name of ["time_start", "time_end"]) {
+    expect(properties[name]).toMatchObject({ anyOf: [
+      { type: "string", format: "date", pattern: expect.any(String) }, { type: "null" }
+    ] });
+    const pattern = new RegExp(properties[name].anyOf[0].pattern);
+    for (const valid of ["2024-02-29", "2000-02-29", "2026-09-03"]) expect(pattern.test(valid)).toBe(true);
+    for (const invalid of ["2023-02-29", "1900-02-29", "2026-04-31", "2026-09-03T00:00:00Z", "yesterday"]) {
+      expect(pattern.test(invalid)).toBe(false);
+    }
+  }
+  expect(decode({ observations: [{ ...row, time_start: "2024-02-29", time_end: "2024-02-29" }] }))
+    .toMatchObject({ admitted: true, outcome: { proposal: { source_task_observation: { status: "ready" } } } });
+  expect(decode({ observations: [{ ...row, time_status: "unavailable", time_expression: null,
+    time_anchor: null, time_start: null, time_end: null }] }))
+    .toMatchObject({ admitted: true, outcome: { proposal: { source_task_observation: {
+      observations: [{ event_time: { status: "unavailable" } }] } } } });
+});
+
+it.each([
+  ["2026-09-03T00:00:00Z", "2026-09-03", "invalid_shape"],
+  ["2023-02-29", "2023-03-01", "invalid_shape"],
+  ["2026-09-04", "2026-09-03", "invalid_bound_observation"]
+])("refuses a source-local invalid interval %s to %s without losing its valid neighbor", (start, end, reason) => {
+  const result = decode({ observations: [row, { ...secondRow, time_start: start, time_end: end }] }, batchInput());
+  expect(result).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
+    diagnostics: [{ reason, source_ref: "source2", row_index: 1 }],
+    proposal: { source_task_observation: { status: "partial", observations: [{ source: target(body) }] } } } });
+  if (result.outcome.status !== "source_task_observation") throw new Error("missing partial proposal");
+  expect(result.outcome.proposal.source_task_observation.observations).toHaveLength(1);
 });
 
 it("asks for source-qualified inputs separately from their unknown applicability", () => {
@@ -264,6 +305,7 @@ it("separates fresh correspondence cache keys from earlier raw-attempt identitie
   const freshKey = keyFor(material.formationIdentity);
   expect(freshKey).not.toBe(keyFor("source-task-observation.source-local-admission.v2"));
   expect(freshKey).not.toBe(keyFor("source-task-observation.host-derived-coverage.v3"));
+  expect(freshKey).not.toBe(keyFor("source-task-observation.task-input-correspondence.v4"));
 });
 
 it("retains a separately identified Step physical response through the existing raw owner", () => {

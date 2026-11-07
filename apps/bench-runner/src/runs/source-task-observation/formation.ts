@@ -6,7 +6,7 @@ import { SOURCE_TASK_OBSERVATION_PRODUCER_ID, SourceTaskObservationDraftSchema,
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 
 /** Fresh wire/cache identity: previous observation requests and their raw attempts are not reusable. */
-export const SOURCE_TASK_OBSERVATION_FORMATION_ID = "source-task-observation.task-input-correspondence.v4";
+export const SOURCE_TASK_OBSERVATION_FORMATION_ID = "source-task-observation.calendar-day-wire.v5";
 
 export const SOURCE_TASK_OBSERVATION_SYSTEM_PROMPT = `Describe source-local task evidence, not an answer or ranking.
 For each supplied source, identify one literal utterance and explain its reported role. Separate a reported event from a request, recommendation, standing statement, prospective statement or uncertainty. A request, intention or recommendation is not a report that an event occurred.

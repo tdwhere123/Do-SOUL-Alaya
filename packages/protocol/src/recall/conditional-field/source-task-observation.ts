@@ -74,7 +74,9 @@ export const SourceTaskObservationDraftSchema = z.object({
     task_role: z.enum(["requested_event", "task_input"]).nullable(), task_component: z.string().max(256).nullable(),
     time_status: z.enum(["interpreted", "unavailable"]), time_expression: z.string().max(256).nullable(),
     time_anchor: z.enum(["source_observation_clock", "explicit_date"]).nullable(),
-    time_start: z.string().nullable(), time_end: z.string().nullable()
+    // Derive wire endpoints from admission's calendar coordinates; ordering stays source-local at binding.
+    time_start: QuestionTimeIntervalSchema.unwrap().shape.start.nullable(),
+    time_end: QuestionTimeIntervalSchema.unwrap().shape.end.nullable()
   }).strict()).max(16).readonly()
 }).strict().readonly();
 /** The relation compares hypotheses only; applicability remains unknown and overlap never establishes event identity. */

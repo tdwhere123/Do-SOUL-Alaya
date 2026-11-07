@@ -367,9 +367,12 @@ no-admissible output, missing/duplicate/malformed source rows, invalid global JS
 incomplete transport retain explicit failures or diagnostics. A source without a temporal
 expression can still supply a unique bound excerpt, with event time unavailable; missing
 rows remain missing rather than being relabeled observed. The fresh
-`source-task-observation.task-input-correspondence.v4` formation/cache identity does not
-reuse earlier requests or raw attempts. This formation clarification preserves the
-Protocol 38 runtime proposal and native selection contract.
+`source-task-observation.calendar-day-wire.v5` formation/cache identity does not
+reuse earlier requests or raw attempts. Its nullable wire endpoints derive from the
+same calendar-day schema as admission; datetime strings are not normalized. Malformed
+endpoints are refused per row as `invalid_shape`; reversed intervals remain
+`invalid_bound_observation`. Under invariant §25 this wire-only change preserves the
+Protocol 38 MCP request/response schemas, runtime proposal and native selection contract.
 
 ## Statement-key association at slot 5
 
