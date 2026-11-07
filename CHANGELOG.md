@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 39.1.0, engine gateway 3.0.0
+## Unreleased — protocol 39.2.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -25,6 +25,12 @@ replaces caller-preselected v6 formation input and does not reuse its raw attemp
 Canonical MCP observations and Protocol 39.1/native v13 archive readers are unchanged;
 this internal producer correction has no public schema or SemVer step under invariant §25.
 Provider-shaped fixtures establish mechanism only, not natural availability or benefit.
+Protocol 39.2.0 adds the public `SourceSemanticEndpointCatalogCapacityError` export
+for the observation producer, an additive minor under invariant §25. Catalog capacity
+refusal is isolated per source with an owner-issued diagnostic; valid raw coverage and
+independently selectable neighbors survive. The 256-endpoint cap, under-capacity v7
+requests, public schema signatures and native v13/library 13 semantics are unchanged.
+Protocol 39.0/39.1 archives retain their existing exact mappings.
 
 Protocol 39.1.0 widens task qualification binding IDs to the existing canonical
 bounded execution identity, including multi-phase prefixes (additive schema

@@ -19,6 +19,21 @@ export const SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES = 1_000_000;
 export const SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE = /^qe([1-9][0-9]{0,2})$/u;
 export const SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE = /^se([1-9][0-9]{0,2})$/u;
 
+const CATALOG_ENDPOINT_LIMIT = 256;
+
+/** Catalog capacity is unavailable addressability, not invalid Q/H/C or evidence absence. */
+export class SourceSemanticEndpointCatalogCapacityError extends z.ZodError {
+  // Zod's inherited hasInstance tests its shared error trait, not subclass identity.
+  // Capacity recovery must never capture unrelated Zod validation failures.
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return typeof value === "object" && value !== null && Object.prototype.isPrototypeOf.call(this.prototype, value);
+  }
+  readonly limit = CATALOG_ENDPOINT_LIMIT;
+  constructor(readonly endpoint_kind: "query" | "source", readonly attempted: number) {
+    super([{ code: "custom", path: [], message: "semantic_correspondence endpoint catalog exceeds its bound" }]);
+  }
+}
+
 const QueryHandle = z.string().regex(SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE);
 const SourceHandle = z.string().regex(SOURCE_SEMANTIC_SOURCE_ENDPOINT_HANDLE);
 const DescriptorHandle = z.string().regex(SOURCE_SEMANTIC_CORRESPONDENCE_DESCRIPTOR_HANDLE);
@@ -46,8 +61,8 @@ export const SourceSemanticSourceCatalogEntrySchema = z.object({
 }).strict().readonly();
 
 export const SourceSemanticCorrespondenceEndpointCatalogSchema = z.object({
-  query_endpoints: z.array(SourceSemanticQueryCatalogEntrySchema).max(256).readonly(),
-  source_endpoints: z.array(SourceSemanticSourceCatalogEntrySchema).max(256).readonly()
+  query_endpoints: z.array(SourceSemanticQueryCatalogEntrySchema).max(CATALOG_ENDPOINT_LIMIT).readonly(),
+  source_endpoints: z.array(SourceSemanticSourceCatalogEntrySchema).max(CATALOG_ENDPOINT_LIMIT).readonly()
 }).strict().readonly();
 
 const ProposedEquivalentSchema = z.object({
@@ -518,8 +533,8 @@ function sourceEndpoint(entry: SourceSemanticSourceCatalogEntry): SourceSemantic
 
 function nextHandle(prefix: "qe" | "se", index: number): string {
   const handle = `${prefix}${index + 1}`;
-  if (index + 1 > 256) {
-    throw new z.ZodError([{ code: "custom", path: [], message: "semantic_correspondence endpoint catalog exceeds its bound" }]);
+  if (index + 1 > CATALOG_ENDPOINT_LIMIT) {
+    throw new SourceSemanticEndpointCatalogCapacityError(prefix === "qe" ? "query" : "source", index + 1);
   }
   return handle;
 }

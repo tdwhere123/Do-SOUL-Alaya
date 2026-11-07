@@ -33,12 +33,9 @@ export function observationEndpointChoice(input: unknown, sourceRef: string, des
 type AuthoredFrame = Readonly<{ id: string; text: string; predicate: string;
   roles: readonly Readonly<{ id: string; text: string; unresolved?: boolean; unexpressed?: boolean }>[] }>;
 
-/** Authored legal Q/H/C through the production publication and correspondence owners. */
-export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<{
-  sourceId: string; body: string; observedAt: string; query: string;
-  frames: readonly AuthoredFrame[]; selectedFrame: string;
-  roles: readonly Readonly<{ id: string; queryExcerpt: string; named?: boolean }>[];
-  evidence?: boolean; temporalSlot?: string;
+/** Authored native draft through the existing source publication owner, never a patched H output. */
+export async function publishAuthoredTaskSource(fixture: IndexFixture, input: Readonly<{
+  sourceId: string; body: string; frames: readonly AuthoredFrame[];
 }>) {
   const stores = createSqliteFieldFormationStores({ database: fixture.database,
     repos: createDaemonFieldRepos({ database: fixture.database }) });
@@ -78,6 +75,17 @@ export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<
     provenance: { producer_id: "authored-source-task" }, producer_version: "1", contract_version: "source-interpretation-v4",
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(input.body)] }],
     draft: { contract: "source-interpretation-v4", frames, mentions, referents, operators: [], gaps: [] } });
+  return { published, evidenceService };
+}
+
+/** Authored legal Q/H/C through the production publication and correspondence owners. */
+export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<{
+  sourceId: string; body: string; observedAt: string; query: string;
+  frames: readonly AuthoredFrame[]; selectedFrame: string;
+  roles: readonly Readonly<{ id: string; queryExcerpt: string; named?: boolean }>[];
+  evidence?: boolean; temporalSlot?: string;
+}>) {
+  const { published, evidenceService } = await publishAuthoredTaskSource(fixture, input);
   const h = published.bound.interpretation;
   const sourceFrame = h.frames.find(frame => frame.id === input.selectedFrame)!;
   if (sourceFrame === undefined) throw new Error("selected authored frame is absent");

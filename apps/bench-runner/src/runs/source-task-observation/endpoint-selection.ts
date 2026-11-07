@@ -1,5 +1,5 @@
 import {
-  buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson, sourceSemanticQueryBranchViews,
+  buildSourceSemanticCorrespondenceEndpointCatalog, SourceSemanticEndpointCatalogCapacityError, canonicalJson, sourceSemanticQueryBranchViews,
   sourceSemanticCorrespondenceIdentity, type SourceTaskAssociation, type SourceTaskObservationDraftSchema,
   type SourceTaskObservationFormationInput
 } from "@do-soul/alaya-protocol";
@@ -15,9 +15,11 @@ export function buildObservationEndpointCatalogs(input: SourceTaskObservationFor
     const associations: { ref: string; association: SourceTaskAssociation }[] = [];
     const temporal_operands: { ref: string; endpoint: NonNullable<SourceTaskAssociation["temporal_operand"]>; reading?: string }[] = [];
     const selected = source.selected_interpretation, query = input.query_semantics;
-    const empty = (reason: string) => ({ source_ref: source.source_ref, reason, associations, temporal_operands });
-    if (selected === undefined || query === undefined) return empty("missing_query_or_interpretation");
-    if (canonicalJson(selected.source_target) !== canonicalJson(source.target)) return empty("interpretation_source_mismatch");
+    const result = (reason: string | null,
+      capacity?: Pick<SourceSemanticEndpointCatalogCapacityError, "endpoint_kind" | "limit" | "attempted">) =>
+      ({ source_ref: source.source_ref, reason, capacity, associations, temporal_operands });
+    if (selected === undefined || query === undefined) return result("missing_query_or_interpretation");
+    if (canonicalJson(selected.source_target) !== canonicalJson(source.target)) return result("interpretation_source_mismatch");
     const correspondences = input.semantic_correspondences ?? [];
     const identities = correspondences.map(row => sourceSemanticCorrespondenceIdentity(row, fieldContractSha256));
     const seen = new Set<string>();
@@ -27,8 +29,16 @@ export function buildObservationEndpointCatalogs(input: SourceTaskObservationFor
       const admitted = admitSourceSemanticCorrespondence({ query_semantics: query, source_interpretation: selected.interpretation,
         semantic_correspondence: correspondence, original_query: input.query });
       if (admitted.kind !== "admitted" || admitted.interpretation_id !== selected.interpretation_id) continue;
-      const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted.query,
-        [{ source_interpretation_handle: "source1", interpretation: admitted.interpretation }]);
+      let catalog: ReturnType<typeof buildSourceSemanticCorrespondenceEndpointCatalog>;
+      try {
+        catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted.query,
+          [{ source_interpretation_handle: "source1", interpretation: admitted.interpretation }]);
+      } catch (error) {
+        if (!(error instanceof SourceSemanticEndpointCatalogCapacityError)) throw error;
+        // Q/H are fixed for this source. No partial catalog, C fallback or truncation is legal.
+        return result("endpoint_catalog_capacity_exhausted", {
+          endpoint_kind: error.endpoint_kind, limit: error.limit, attempted: error.attempted });
+      }
       if (temporal_operands.length === 0) for (const endpoint of catalog.source_endpoints) {
         if (endpoint.kind !== "slot") continue;
         temporal_operands.push({ ref: `t:${request}:${sourceIndex}:${temporal_operands.length}`,
@@ -51,8 +61,7 @@ export function buildObservationEndpointCatalogs(input: SourceTaskObservationFor
         }
       }
     }
-    return { source_ref: source.source_ref,
-      reason: associations.length === 0 ? "no_admitted_association_endpoints" : null, associations, temporal_operands };
+    return result(associations.length === 0 ? "no_admitted_association_endpoints" : null);
   });
 }
 
@@ -63,7 +72,8 @@ export function resolveObservationEndpointSelection(catalog: ReturnType<typeof b
     return { error: "incoherent_endpoint_selection" } as const;
   }
   const selection = { source_ref: row.source_ref, association_status: row.association_status,
-    temporal_operand_status: row.temporal_operand_status };
+    temporal_operand_status: row.temporal_operand_status, catalog_reason: catalog.reason,
+    ...(catalog.capacity === undefined ? {} : { catalog_capacity: catalog.capacity }) };
   if (row.association_status !== "selected") {
     return row.temporal_operand_status === "selected" ? { error: "temporal_selection_without_association" } as const
       : { selection };

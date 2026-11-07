@@ -393,7 +393,14 @@ proof and temporal-support verification above remain independent and authoritati
 Ready coverage means one admitted row per supplied source with no row diagnostics,
 not coverage of all Recall candidates, endpoint availability or relevance. The producer's
 separate `endpoint_selections` result preserves absence reasons without making valid raw
-rows partial. An admitted subset is partial; malformed, missing, duplicate or incomplete
+rows partial. Catalog capacity refusal is source-local: the catalog owner's typed refusal
+emits `endpoint_catalog_capacity_exhausted` with its side, limit and attempted count,
+not a truncated catalog or a claim of no evidence. Formation retains that host reason
+as `catalog_reason`/`catalog_capacity` independently of the model's selection status;
+valid raw rows and selectable neighbors survive. Other validation or unexpected errors
+are not caught as capacity. Protocol 39.2 adds the typed catalog error export for this
+producer; existing MCP schema signatures and native v13 semantics remain unchanged.
+An admitted subset is partial; malformed, missing, duplicate or incomplete
 rows remain explicit. Missing prerequisites retain raw fallback. The internal
 `source-task-observation.endpoint-selection.v7` request/cache identity does not readmit
 v6 drafts or raw attempts; the retired caller-preselected formation input is rejected.
@@ -458,7 +465,7 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 
 Current public `QueryView` defaults to `native_query`; field index and
 continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v13`, Protocol
-39.1.0; library field protocol 13). Ordinary delivery is a semantic major under
+39.2.0; library field protocol 13). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

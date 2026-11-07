@@ -340,6 +340,7 @@ export {
   SourceSemanticQueryCatalogEntrySchema,
   SourceSemanticSourceCatalogEntrySchema,
   SourceSemanticCorrespondenceEndpointCatalogSchema,
+  SourceSemanticEndpointCatalogCapacityError,
   SourceSemanticCorrespondenceAssessmentSchema,
   buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence,
