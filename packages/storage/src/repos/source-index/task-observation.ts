@@ -13,9 +13,10 @@ export function readTaskObservation(database: StorageDatabase, records: SqliteFi
   budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead {
   const meter = new QueryReadMeter(budget);
   try {
-    if (source.target.root_kind !== "source_record" || source.auxiliary !== undefined ||
+    if (source.target.root_kind !== "source_record" ||
         !Number.isSafeInteger(span.start_byte) || !Number.isSafeInteger(span.end_byte) || span.start_byte < 0 ||
-        span.end_byte <= span.start_byte || span.end_byte > source.body_bytes || span.end_byte - span.start_byte > 4096) {
+        span.end_byte <= span.start_byte || (source.auxiliary === undefined && span.end_byte > source.body_bytes) ||
+        span.end_byte - span.start_byte > 4096) {
       return { status: "unknown", reason: "source_task_invalid_span", resources: meter.resources() };
     }
     let admission;
@@ -34,7 +35,9 @@ export function readTaskObservation(database: StorageDatabase, records: SqliteFi
       { workLimit: meter.ledger.work, nativeByteLimit: meter.ledger.bytes });
     if (read === null) { meter.read(1, 0); return { status: "unknown", reason: "source_task_missing", resources: meter.resources() }; }
     meter.absorb(sourceReadCost(read));
-    if (read.resourceLimited || read.invalidOffset || read.prefixBytes !== bytes || read.record?.source_body == null) {
+    // An auxiliary target's body_bytes describes statement key text, not raw source coordinates.
+    if (read.resourceLimited || read.invalidOffset || span.end_byte > read.bodyBytes ||
+        read.prefixBytes !== bytes || read.record?.source_body == null) {
       return { status: "unknown", reason: read.resourceLimited ? "source_task_read_budget" : "source_task_incomplete",
         resources: meter.resources() };
     }

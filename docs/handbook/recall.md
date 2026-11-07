@@ -324,10 +324,17 @@ Its [typed proposal and formation schemas](../../packages/protocol/src/recall/co
 carry bounded, unreviewed source-local utterances and possible task-component
 correspondences, not Q/H/C or world claims. The optional query field accepts untrusted
 values so malformed observation payloads can be refused without rejecting raw source
-access. Core binds the original query and its clock;
-Storage rechecks each nominated root, exact UTF-8 excerpt, currentness, dependencies,
-erasure and source-observation clock. A reported event possibly corresponding to the
-asked event or task input, or a standing statement possibly supplying a named task input,
+access. Core binds the original query and its clock, and compares the proposed excerpt
+and source-observation clock with Storage's current raw read. Storage rechecks each
+nominated root's currentness, dependencies and erasure, and reads a complete UTF-8
+excerpt. If discovery nominated an auxiliary statement, Storage first admits that complete
+statement binding and its dependencies, then reads from its bound current raw source.
+Excerpt coordinates address the raw source;
+the auxiliary key's `body_bytes` and supporting `source_span` are not raw excerpt bounds.
+The discovery location remains navigation provenance, not a payload restriction or a
+claim that the observed excerpt was delivered; the delivered span and preview remain
+subject to the existing bounded payload rules. A reported event possibly corresponding
+to the asked event or task input, or a standing statement possibly supplying a named task input,
 may participate in the existing bounded preference when the independently proposed
 question-time domain is active. Without that active phase the observation does not
 reorder acquisition. A standing statement's applicability is unavailable, not presumed
