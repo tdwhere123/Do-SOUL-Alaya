@@ -20,12 +20,15 @@ const SourceTaskObservationSchema = z.object({
     kind: z.enum(["reported_event", "request", "recommendation", "standing", "prospective", "unknown"]),
     description: z.string().min(1).max(512)
   }).strict().readonly(),
+  // Possible task input is source-qualified navigation, not a verdict that it applies at question time.
+  // Unsupported rejects correspondence; unresolved leaves correspondence itself undecided.
   task_correspondence: z.discriminatedUnion("status", [
     z.object({ status: z.literal("possible"), role: z.enum(["requested_event", "task_input"]),
       component: z.string().min(1).max(256) }).strict().readonly(),
     z.object({ status: z.literal("unsupported") }).strict().readonly(),
     z.object({ status: z.literal("unresolved") }).strict().readonly()
   ]),
+  // This source-local time is not a persistence or answer-time applicability judgment.
   event_time: z.discriminatedUnion("status", [
     z.object({ status: z.literal("unavailable") }).strict().readonly(),
     z.object({ status: z.literal("interpreted"), expression: z.string().min(1).max(256),
@@ -74,7 +77,7 @@ export const SourceTaskObservationDraftSchema = z.object({
     time_start: z.string().nullable(), time_end: z.string().nullable()
   }).strict()).max(16).readonly()
 }).strict().readonly();
-/** The relation compares hypotheses only; overlap never establishes event identity. */
+/** The relation compares hypotheses only; applicability remains unknown and overlap never establishes event identity. */
 export const QualifiedTaskObservationSchema = z.object({
   semantic_status: z.literal("unreviewed"), world_claim: z.literal("unknown"),
   observation: SourceTaskObservationSchema,

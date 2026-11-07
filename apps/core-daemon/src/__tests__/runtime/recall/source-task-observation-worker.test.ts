@@ -209,3 +209,83 @@ it("restores a separately timed task observation before freeze and delivers it t
     expect(ids(await call(standing, { query: standingQuery }))).not.toContain(standingTarget.root_id);
   }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, max_input_tokens: 4096 } });
 }, 30_000);
+
+it("delivers earlier task inputs without asserting current applicability or an event-time match", async () => {
+  const taskQuery = "What discount did the repair shop offer for the hinge last Thursday?";
+  const reports = ["I used a 10% discount when repairing my hinge last Thursday.",
+    "The repair shop currently offers a standing 10% discount.", "I attended a concert last Thursday.",
+    "Can you find a repair shop discount on September 17?"];
+  const changedOriginals = originals.map((source, index) => index < reports.length
+    ? { ...source, text: prefix + reports[index]! } : source);
+  await withIndexedSources([...changedOriginals, ...preferred], async fixture => {
+    const client = await fixture.openClient();
+    try {
+      const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
+        readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
+        activeConstraintsPort: client.activeConstraintsPort });
+      const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
+      const call = async (interpretation_proposal: unknown) => {
+        const result = await handler.call({ toolName: "soul.recall", arguments: { ...capableRecallConsumerDeclaration(),
+          query: taskQuery, max_results: 5, scope_class: "project", dimension: null, domain_tags: null,
+          result_kind_view: "source_only", interpretation_proposal }, context: { workspaceId: WS, runId: "run-1",
+          sessionId: "source-task-input-session", agentTarget: "codex" } });
+        if (!result.ok) throw new Error(JSON.stringify(result.error));
+        return SoulMemorySearchResponseSchema.parse(result.output);
+      };
+      const sources = changedOriginals.slice(0, 6).map((source, index) => ({ source_ref: `source${index + 1}`,
+        target: fixture.targets.find(row => row.source_id === source.id)!.target,
+        source_observed_at: source.eventTime, body: source.text }));
+      const captured = { query: taskQuery, interpretation_clock: CLOCK, question_time: questionTime, sources };
+      const noTime = { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null };
+      const common = { query_excerpt: taskQuery, description: "A source-local report." };
+      const rawJson = JSON.stringify({ observations: [
+        { ...common, ...noTime, source_ref: "source1", source_excerpt: reports[0], utterance_kind: "reported_event",
+          task_correspondence: "possible", task_role: "task_input", task_component: "discount percentage" },
+        { ...common, source_ref: "source2", source_excerpt: reports[1], utterance_kind: "standing",
+          task_correspondence: "possible", task_role: "task_input", task_component: "discount percentage",
+          time_status: "interpreted", time_expression: "currently", time_anchor: "source_observation_clock",
+          time_start: "2026-09-08", time_end: "2026-09-08" },
+        { ...common, ...noTime, source_ref: "source3", source_excerpt: reports[2], utterance_kind: "reported_event",
+          task_correspondence: "unsupported", task_role: null, task_component: null },
+        { ...common, source_ref: "source4", source_excerpt: reports[3], utterance_kind: "request",
+          task_correspondence: "possible", task_role: "requested_event", task_component: "shop discount event",
+          time_status: "interpreted", time_expression: "September 17", time_anchor: "explicit_date",
+          time_start: "2026-09-17", time_end: "2026-09-17" },
+        { ...common, ...noTime, source_ref: "source5", source_excerpt: "invented quotation", utterance_kind: "request",
+          task_correspondence: "unresolved", task_role: null, task_component: null }
+      ] });
+      const formed = interpretSourceTaskObservationSourceLocalDecoded(captured, { rawJson, finishReason: "stop" },
+        "step-3.5-2603-low-json-schema-v1");
+      expect(formed).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
+        diagnostics: [{ reason: "quote_missing_or_ambiguous", source_ref: "source5", row_index: 4 },
+          { reason: "missing_source_ref", source_ref: "source6" }],
+        proposal: { source_task_observation: { status: "partial" } } } });
+      if (formed.outcome.status !== "source_task_observation") throw new Error("expected a partial proposal");
+      expect(formed.outcome.proposal.source_task_observation.observations).toHaveLength(4);
+      const baseline = await call({ ...base, original_query_digest: digest(taskQuery) });
+      const result = await call(formed.outcome.proposal);
+      const rootIds = (page: typeof result) => page.index!.entries.map(entry =>
+        entry.target.kind === "source_evidence" ? entry.target.root_id : "memory");
+      expect(rootIds(baseline)).not.toContain(sources[0]!.target.root_id);
+      expect(rootIds(baseline)).not.toContain(sources[1]!.target.root_id);
+      expect(new Set(rootIds(result).slice(0, 2))).toEqual(new Set([sources[0]!.target.root_id, sources[1]!.target.root_id]));
+      expect(rootIds(result).slice(2)).toEqual(rootIds(baseline).slice(0, 3));
+      for (const source of sources.slice(2)) {
+        const entry = result.index!.entries.find(item => item.target.kind === "source_evidence" && item.target.root_id === source.target.root_id);
+        expect(entry?.navigation?.task_observation).toBeUndefined();
+      }
+      const observations = sources.slice(0, 2).map(source => result.index!.entries.find(entry =>
+        entry.target.kind === "source_evidence" && entry.target.root_id === source.target.root_id)?.navigation?.task_observation);
+      expect(observations[0]).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
+        temporal_relation: "unavailable", observation: { source: sources[0]!.target,
+          source_observed_at: sources[0]!.source_observed_at, source_excerpt: { text: reports[0] },
+          utterance: { kind: "reported_event" }, task_correspondence: { status: "possible", role: "task_input" },
+          event_time: { status: "unavailable" } } });
+      expect(observations[1]).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
+        temporal_relation: "unavailable", observation: { source: sources[1]!.target,
+          source_observed_at: sources[1]!.source_observed_at, source_excerpt: { text: reports[1] },
+          utterance: { kind: "standing" }, task_correspondence: { status: "possible", role: "task_input" },
+          event_time: { status: "interpreted", interval: { start: "2026-09-08", end: "2026-09-08" } } } });
+    } finally { await client.close(); }
+  }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, max_input_tokens: 4096 } });
+}, 30_000);

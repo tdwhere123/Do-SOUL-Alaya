@@ -331,11 +331,15 @@ asked event or task input, or a standing statement possibly supplying a named ta
 may participate in the existing bounded preference when the independently proposed
 question-time domain is active. Without that active phase the observation does not
 reorder acquisition. A standing statement's applicability is unavailable, not presumed
-current. Unresolved and unsupported correspondence are
-distinct and neither removes independent raw eligibility. The model-proposed event time
-uses its own source clock or an explicit date, never the question clock. The comparison
-with independently proposed question intervals is `hypothesized_overlap`,
-`hypothesized_disjoint`, or `unavailable`; overlap does not identify the event. Within
+current. A possible `task_input` means a source-qualified report could inform a named
+question component; it does not assert that the report is true or applies at question time.
+Unknown applicability alone does not make the correspondence unsupported or unresolved.
+Those two states concern correspondence itself and neither removes independent raw
+eligibility. Requests, recommendations and intentions do not report an occurred event.
+The model-proposed event time uses its own source clock or an explicit date, never the
+question clock. The comparison with independently proposed question intervals is
+`hypothesized_overlap`, `hypothesized_disjoint`, or `unavailable`; it does not determine
+current applicability, and overlap does not identify the event. Within
 admitted partial-task evidence, hypothesized overlap precedes other task evidence, with
 stable original order inside each tier. Incumbents remain fallback under the same 16-root
 cap. Guarded programs, explicit source filters and prepared access hints abstain from this
@@ -360,9 +364,11 @@ relative only to the explicitly supplied set, not all eligible Recall candidates
 relevance. Unobserved time-preference incumbents may remain fallback. Unsupported or
 unresolved correspondence can still be available observations, never fact truth. Empty or
 no-admissible output, missing/duplicate/malformed source rows, invalid global JSON and
-incomplete transport retain explicit failures or diagnostics. The fresh
-`source-task-observation.host-derived-coverage.v3` formation/cache identity does not
-reuse earlier model-summary drafts or raw attempts. This wire-only change preserves the
+incomplete transport retain explicit failures or diagnostics. A source without a temporal
+expression can still supply a unique bound excerpt, with event time unavailable; missing
+rows remain missing rather than being relabeled observed. The fresh
+`source-task-observation.task-input-correspondence.v4` formation/cache identity does not
+reuse earlier requests or raw attempts. This formation clarification preserves the
 Protocol 38 runtime proposal and native selection contract.
 
 ## Statement-key association at slot 5

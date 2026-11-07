@@ -44,7 +44,7 @@ const decode = (value: unknown, captured = input(), finishReason: string | null 
 
 it("binds unique Unicode quotations to captured identities and clocks without asking the model for native metadata", () => {
   const request = buildSourceTaskObservationRequest(input());
-  expect(request.formationIdentity).toBe("source-task-observation.host-derived-coverage.v3");
+  expect(request.formationIdentity).toBe("source-task-observation.task-input-correspondence.v4");
   expect(request.responseJsonSchema).toMatchObject({ required: ["observations"], additionalProperties: false });
   expect(Object.keys(Reflect.get(request.responseJsonSchema, "properties"))).toEqual(["observations"]);
   expect(request.userPrompt).not.toContain(target(body).content_digest);
@@ -58,6 +58,55 @@ it("binds unique Unicode quotations to captured identities and clocks without as
         source_excerpt: { start_byte: 5, end_byte: Buffer.byteLength(body), text: row.source_excerpt },
         task_correspondence: { status: "possible", role: "requested_event" },
         event_time: { status: "interpreted", interval: { start: "2026-09-03", end: "2026-09-03" } } }] } } } });
+});
+
+it("asks for source-qualified inputs separately from their unknown applicability", () => {
+  const prompt = buildSourceTaskObservationRequest(input()).systemPrompt;
+  expect(prompt).toContain("can be a possible task_input even when its applicability at question time is unknown");
+  expect(prompt).toContain("without asserting that it persisted or applies later");
+  expect(prompt).toContain("Unknown applicability alone is not non-correspondence or unresolved correspondence");
+  expect(prompt).toContain("A request, intention or recommendation is not a report that an event occurred");
+  expect(prompt).toContain("that possibility does not establish event identity");
+  expect(prompt).toContain("If there is no expression or the interval or anchor is uncertain, use unavailable");
+});
+
+it("binds earlier task inputs without converting unrelated, invalid or missing rows into coverage", () => {
+  const question = "How does my old power consumption compare with the current reading?";
+  const bodies = ["At the earlier check I used 17 units.", "The meter currently reads 12 units.",
+    "I finished painting the fence.", "I booked a visit next month.", "The meter is in the basement."];
+  const captured = { query: question, interpretation_clock: clock,
+    question_time: { interpretation_clock: clock, intervals: [{ start: "2026-09-01", end: "2026-09-07" }] },
+    sources: bodies.map((text, index) => ({ source_ref: `source${index + 1}`,
+      target: { ...target(text), root_id: `power-source-${index + 1}` }, source_observed_at: observed, body: text })) };
+  const unavailable = { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null };
+  const common = { query_excerpt: question, description: "A source-local report." };
+  const observations = [
+    { ...common, ...unavailable, source_ref: "source1", source_excerpt: bodies[0], utterance_kind: "reported_event",
+      task_correspondence: "possible", task_role: "task_input", task_component: "earlier power consumption" },
+    { ...common, source_ref: "source2", source_excerpt: bodies[1], utterance_kind: "standing",
+      task_correspondence: "possible", task_role: "task_input", task_component: "current power reading",
+      time_status: "interpreted", time_expression: "currently", time_anchor: "source_observation_clock",
+      time_start: "2026-09-08", time_end: "2026-09-08" },
+    { ...common, ...unavailable, source_ref: "source3", source_excerpt: bodies[2], utterance_kind: "reported_event",
+      task_correspondence: "unsupported", task_role: null, task_component: null },
+    { ...common, ...unavailable, source_ref: "source4", source_excerpt: "invented visit", utterance_kind: "request",
+      task_correspondence: "unresolved", task_role: null, task_component: null }
+  ];
+  const result = interpretSourceTaskObservationSourceLocalDecoded(captured,
+    { rawJson: JSON.stringify({ observations }), finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
+  expect(result).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
+    diagnostics: [{ reason: "quote_missing_or_ambiguous", source_ref: "source4", row_index: 3 },
+      { reason: "missing_source_ref", source_ref: "source5" }],
+    proposal: { source_task_observation: { status: "partial", observations: [
+      { source: captured.sources[0]!.target, source_excerpt: { text: bodies[0] },
+        task_correspondence: { status: "possible", role: "task_input", component: "earlier power consumption" },
+        event_time: { status: "unavailable" } },
+      { source: captured.sources[1]!.target, source_excerpt: { text: bodies[1] },
+        task_correspondence: { status: "possible", role: "task_input", component: "current power reading" },
+        event_time: { status: "interpreted", interval: { start: "2026-09-08", end: "2026-09-08" } } },
+      { source: captured.sources[2]!.target, task_correspondence: { status: "unsupported" },
+        event_time: { status: "unavailable" } }
+    ] } } } });
 });
 
 it.each(["unsupported", "unresolved"] as const)(
@@ -206,7 +255,7 @@ it.each([{ status: "ready", classified: "interpreted" }, { status: "partial", cl
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-it("separates fresh coverage cache keys from earlier raw-attempt identities", () => {
+it("separates fresh correspondence cache keys from earlier raw-attempt identities", () => {
   const material = buildSourceTaskObservationRequest(input());
   const keyFor = (identityPrefix: string) => semanticProviderRequestCacheKey({ identityPrefix,
     model: "step-3.5-flash-2603", requestProfile: "step-3.5-2603-low-json-schema-v1",
@@ -214,6 +263,7 @@ it("separates fresh coverage cache keys from earlier raw-attempt identities", ()
     maxOutputTokens: 2048, providerUrl: "https://api.stepfun.com/v1", schemaName: SOURCE_TASK_OBSERVATION_SCHEMA_NAME });
   const freshKey = keyFor(material.formationIdentity);
   expect(freshKey).not.toBe(keyFor("source-task-observation.source-local-admission.v2"));
+  expect(freshKey).not.toBe(keyFor("source-task-observation.host-derived-coverage.v3"));
 });
 
 it("retains a separately identified Step physical response through the existing raw owner", () => {
