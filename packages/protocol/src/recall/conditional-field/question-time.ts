@@ -5,9 +5,11 @@ import { IsoDatetimeStringSchema } from "../../shared/schema-primitives.js";
 export const QUESTION_TIME_PROPOSAL_PRODUCER_ID = "alaya.query.question-time.v1";
 /** Omission means unrestricted capture; a rank is local to its explicit domain. */
 export const QuestionTimeCaptureDomainSchema = z.literal("question_time");
+/** Shared closed UTC calendar-day coordinates; they do not establish event identity. */
+export const QuestionTimeIntervalSchema = z.object({ start: z.iso.date(), end: z.iso.date() }).strict()
+  .refine(value => value.start <= value.end, "calendar interval must be ordered").readonly();
 export const QuestionTimePreferenceSchema = z.object({
   interpretation_clock: IsoDatetimeStringSchema,
-  intervals: z.array(z.object({ start: z.iso.date(), end: z.iso.date() }).strict()
-    .refine(value => value.start <= value.end, "calendar interval must be ordered").readonly()).max(32).readonly()
+  intervals: z.array(QuestionTimeIntervalSchema).max(32).readonly()
 }).strict().readonly();
 export type QuestionTimePreference = z.infer<typeof QuestionTimePreferenceSchema>;

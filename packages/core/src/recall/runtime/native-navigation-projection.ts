@@ -143,13 +143,20 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       : ordered.status === "ordered" ? ordered.record_ids
         : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
     const positions = new Map(recordIds.map((key, index) => [key, index]));
+    const observations = state.native_sources?.task_observations ?? [];
+    meter.charge(observations.length, observations.length * 32, "source task observation coordinates");
+    const tasks = new Map(observations.map(item => [sourceFactKey(item.observation.source), item]));
     for (const row of ordered.trace) if (row.decision === "placed") {
-      const witness = { ...navigation.get(row.occurrence.reference)!, access_ordinal: positions.get(row.record_id)! };
+      const task = tasks.get(row.record_id);
+      const witness = { ...navigation.get(row.occurrence.reference)!, access_ordinal: positions.get(row.record_id)!,
+        ...(task === undefined ? {} : { task_observation: task }) };
       meter.charge(1, 0, "field access coordinate");
       witnesses.set(row.record_id, witness);
     }
     for (const [key, witness] of catalog) if (!witnesses.has(key) && positions.has(key)) {
-      const placed = { ...witness, access_ordinal: positions.get(key)! };
+      const task = tasks.get(key);
+      const placed = { ...witness, access_ordinal: positions.get(key)!,
+        ...(task === undefined ? {} : { task_observation: task }) };
       meter.charge(1, 0, "bound catalog access coordinate");
       witnesses.set(key, placed);
     }

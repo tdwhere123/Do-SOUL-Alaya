@@ -34,6 +34,7 @@ const STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT = "source-evidence-preserv
 const PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT = "page-support-comparison-raw-attempt-v1" as const;
 const STEP_PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT = "page-support-comparison-raw-attempt-v2" as const;
 const TASK_CONSUMER_RAW_ATTEMPT_CONTRACT = "task-consumer-raw-attempt-v1" as const;
+const SOURCE_TASK_OBSERVATION_RAW_ATTEMPT_CONTRACT = "source-task-observation-raw-attempt-v1" as const;
 const FROZEN_ANSWER_RAW_ATTEMPT_CONTRACT = "frozen-answer-raw-attempt-v1" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
 const MAX_RETAINED_RESPONSE_BODY_BYTES = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES;
@@ -140,6 +141,10 @@ const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
     kind: z.literal("frozen_delivery_answer"),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
   }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(SOURCE_TASK_OBSERVATION_RAW_ATTEMPT_CONTRACT),
+    kind: z.literal("source_task_observation"),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
   z.object({ ...RawAttemptFields, contract: z.literal(TASK_CONSUMER_RAW_ATTEMPT_CONTRACT),
     kind: z.literal("task_consumer"),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
@@ -238,7 +243,7 @@ export class ProviderRawAttemptIdentityError extends Error {
 export type RawAttemptOwner =
   | { kind: "source_semantic"; attemptLineageDigest?: never;
     authorityReceiptDigest?: string; authorityLineageDigest?: string; sourceRequestSha256?: string }
-  | { kind: "query" | "semantic_correspondence" | "source_evidence_selection" | "source_evidence_preservation" | "page_support_comparison" | "task_consumer" | "frozen_delivery_answer"; attemptLineageDigest: string };
+  | { kind: "query" | "semantic_correspondence" | "source_evidence_selection" | "source_evidence_preservation" | "page_support_comparison" | "task_consumer" | "frozen_delivery_answer" | "source_task_observation"; attemptLineageDigest: string };
 
 function isNativeChatRawAttemptContract(contract: string): boolean {
   return contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
@@ -246,11 +251,16 @@ function isNativeChatRawAttemptContract(contract: string): boolean {
     contract === STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT ||
     contract === STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT ||
     contract === STEP_PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT ||
-    contract === TASK_CONSUMER_RAW_ATTEMPT_CONTRACT || contract === FROZEN_ANSWER_RAW_ATTEMPT_CONTRACT;
+    contract === TASK_CONSUMER_RAW_ATTEMPT_CONTRACT || contract === FROZEN_ANSWER_RAW_ATTEMPT_CONTRACT ||
+    contract === SOURCE_TASK_OBSERVATION_RAW_ATTEMPT_CONTRACT;
 }
 
 function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfile: string): string {
   const chat = isChatSemanticRequestProfile(requestProfile);
+  if (kind === "source_task_observation") {
+    if (!chat) throw new ProviderRawAttemptIdentityError("source task observation requires a native chat request profile");
+    return SOURCE_TASK_OBSERVATION_RAW_ATTEMPT_CONTRACT;
+  }
   if (kind === "frozen_delivery_answer") {
     if (!chat) throw new ProviderRawAttemptIdentityError("frozen answer requires a native chat request profile");
     return FROZEN_ANSWER_RAW_ATTEMPT_CONTRACT;

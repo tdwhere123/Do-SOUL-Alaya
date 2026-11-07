@@ -358,6 +358,8 @@ export const QueryInterpretationProposalBodySchema = z
     stored_cosine_admission: StoredCosineAdmissionSchema.optional(),
     question_time: QuestionTimePreferenceSchema.optional(),
     source_template: SourceTemplateProposalSchema.optional(),
+    // Low-trust optional input is separately admitted; malformed observations do not revoke raw access.
+    source_task_observation: z.unknown().optional(),
     conditions: z.array(ProposedGuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     input_limits: QueryProposalInputLimitsSchema.optional(),
     program: ProposedQueryProgramSchema.optional(),

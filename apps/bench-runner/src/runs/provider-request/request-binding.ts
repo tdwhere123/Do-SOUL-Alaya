@@ -11,6 +11,7 @@ export const SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME = "source_semantic_proposal" a
 export const SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME = "source_evidence_selection" as const;
 export const SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME = "source_evidence_preservation" as const;
 export const PAGE_SUPPORT_COMPARISON_SCHEMA_NAME = "page_support_comparison" as const;
+export const SOURCE_TASK_OBSERVATION_SCHEMA_NAME = "source_task_observation" as const;
 
 const MILLION = 1_000_000;
 

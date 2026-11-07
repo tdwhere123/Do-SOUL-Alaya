@@ -86,6 +86,12 @@ export type SourceIndexTemplateRead = Readonly<{ resources: SourceIndexQueryReso
   Readonly<{ status: "unknown"; reason: string }>
 );
 
+/** A complete literal excerpt and its native source-observation clock, or an explicitly unknown read. */
+export type SourceIndexTaskObservationRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; text: string; source_observed_at: string | null }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
@@ -93,6 +99,8 @@ export interface SourceIndexQueryRepository {
   readQuestionTimeDomain?(workspaceId: string, preference: QuestionTimePreference, rootKeys: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexQuestionTimeDomain;
   readTemplateStatements?(source: SourceIndexTarget, budget: SourceSemanticResourceBudget): SourceIndexTemplateRead;
+  readTaskObservation?(source: SourceIndexTarget, span: Readonly<{ start_byte: number; end_byte: number }>,
+    budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */
@@ -106,6 +114,8 @@ export type SourceIndexAcquisitionInput = Readonly<{
   allowance: SourceIndexNominationAllowance; budget: SourceSemanticResourceBudget;
   question_time?: QuestionTimePreference;
   source_template?: SourceTemplateProposal;
+  /** Untrusted optional proposal; acquisition admits it after protecting the incumbent. */
+  source_task_observation?: unknown;
 }>;
 /** Bounded schedule completion, never a source-absence certificate. Leaf-safe semantic authority only. */
 export type SourceIndexAcquisitionResult = SourceSemanticAcquisition;

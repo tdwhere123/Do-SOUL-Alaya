@@ -319,6 +319,33 @@ and matching source coordinates. These are navigation witnesses, not entailment 
 event-time proof; quoted or negated text can still match a literal frame. Proposal absence
 preserves the existing path and Recall makes no new provider or embedding calls.
 
+Protocol 38.0.0 adds the opt-in `alaya.query.source-task-observation.v1` producer.
+Its [typed proposal and formation schemas](../../packages/protocol/src/recall/conditional-field/source-task-observation.ts)
+carry bounded, unreviewed source-local utterances and possible task-component
+correspondences, not Q/H/C or world claims. The optional query field accepts untrusted
+values so malformed observation payloads can be refused without rejecting raw source
+access. Core binds the original query and its clock;
+Storage rechecks each nominated root, exact UTF-8 excerpt, currentness, dependencies,
+erasure and source-observation clock. A reported event possibly corresponding to the
+asked event or task input, or a standing statement possibly supplying a named task input,
+may participate in the existing bounded preference when the independently proposed
+question-time domain is active. Without that active phase the observation does not
+reorder acquisition. A standing statement's applicability is unavailable, not presumed
+current. Unresolved and unsupported correspondence are
+distinct and neither removes independent raw eligibility. The model-proposed event time
+uses its own source clock or an explicit date, never the question clock. The comparison
+with independently proposed question intervals is `hypothesized_overlap`,
+`hypothesized_disjoint`, or `unavailable`; overlap does not identify the event. Within
+admitted partial-task evidence, hypothesized overlap precedes other task evidence, with
+stable original order inside each tier. Incumbents remain fallback under the same 16-root
+cap. Guarded programs, explicit source filters and prepared access hints abstain from this
+optional acquisition step; failed, malformed, unavailable, unbound or resource-refused
+observations preserve the paid incumbent. Proposal validation runs after incumbent
+retention, within the remaining optional allowance. Source-template and source-task proposals do not compose into a
+second schedule. A delivered source's navigation carries the exact qualified observation,
+including its unreviewed and unknown-world-claim status. This changes no durable truth,
+is not a guarantee of semantic fidelity or model availability, and makes no provider call.
+
 ## Statement-key association at slot 5
 
 Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
@@ -372,8 +399,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v10`, Protocol
-36.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v12`, Protocol
+38.0.0; library field protocol 12). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

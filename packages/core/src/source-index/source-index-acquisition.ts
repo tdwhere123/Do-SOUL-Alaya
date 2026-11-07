@@ -10,14 +10,15 @@ import {
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
   type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
   type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest,
-  type SourceSemanticNominationOccurrence
+  type SourceSemanticNominationOccurrence, type QuestionTimePreference
 } from "@do-soul/alaya-protocol";
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
+import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
-import { restoreSourceTemplate, type SourceTemplateRetention } from "./source-template-restoration.js";
+import { restoreSourceTemplate } from "./source-template-restoration.js";
+import { preferTaskObservations } from "./task-observation-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -282,12 +283,12 @@ export class SourceIndexAcquisition {
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
     view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false,
-    templateRetention?: SourceTemplateRetention) {
+    preferenceRetention?: SourcePreferenceRetention) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
       observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original",
-        ...(view === "original" && templateRetention !== undefined ? { templateRetention } : {}) });
+        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}) });
     const result = query.run();
     return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
       : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
@@ -311,6 +312,7 @@ export class SourceIndexAcquisition {
  */
 class AcquisitionQuery {
   private readonly meter: SourceSemanticResourceLedger;
+  private readonly originalQuestionTime: QuestionTimePreference | undefined;
   private nativeBytes = 0;
   private navigationDigest: string | null = null;
   private queryVector: Float32Array | null = null;
@@ -341,8 +343,9 @@ class AcquisitionQuery {
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number }; associate?: boolean; templateRetention?: SourceTemplateRetention }) {
+      progress: { lexical: number; vector: number }; associate?: boolean; preferenceRetention?: SourcePreferenceRetention }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
+    this.originalQuestionTime = proposed;
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
     if (candidate?.associate === true) this.statements = new StatementKeyRetention(this.meter,
@@ -406,11 +409,26 @@ class AcquisitionQuery {
             maxRoots: this.input.allowance.max_roots, maxAttempts: this.input.allowance.max_attempts, meter: this.meter,
             absorb: resources => this.absorb(resources), refusals: this.resourceRefusals,
             ordered: keys => { this.questionTimeOrder = keys; },
-            ...(this.input.source_template === undefined || this.candidate?.templateRetention === undefined ? {} : {
+            ...(this.input.source_template === undefined && this.input.source_task_observation !== undefined &&
+              this.candidate?.preferenceRetention !== undefined && this.originalQuestionTime !== undefined ? {
+              beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
+                this.prepaidBaseBytes = preferTaskObservations({ proposal: this.input.source_task_observation!,
+                  question: this.originalQuestionTime!, query: this.input.navigation_text, original,
+                  nominations: this.nominations, occurrences: this.candidate!.retained, max_roots: this.input.allowance.max_roots,
+                  repository: this.repository, meter: this.meter, retention: this.candidate!.preferenceRetention!,
+                  association: this.statements?.finalizationProtection(this.input.allowance.max_roots,
+                    original.reduce((sum, [key]) => sum + key.length, 0)
+                      + [...this.nominations.keys()].reduce((sum, key) => sum + key.length, 0))
+                    ?? { work_units: 0, memory_bytes: 0 }, result: () => this.result(),
+                  nativeBytes: bytes => { this.nativeBytes += bytes; }, observe: observation =>
+                    this.observe("source_task_observation", () => ({ kind: "source_task_observation", observation })) });
+              }
+            } : {}),
+            ...(this.input.source_template === undefined || this.candidate?.preferenceRetention === undefined ? {} : {
               beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
                 this.prepaidBaseBytes = restoreSourceTemplate({ proposal: this.input.source_template!, original,
                   nominations: this.nominations, occurrences: this.candidate!.retained, max_roots: this.input.allowance.max_roots,
-                  repository: this.repository, meter: this.meter, retention: this.candidate!.templateRetention!,
+                  repository: this.repository, meter: this.meter, retention: this.candidate!.preferenceRetention!,
                   association: this.statements?.finalizationProtection(this.input.allowance.max_roots,
                     original.reduce((sum, [key]) => sum + key.length, 0)
                       + [...this.nominations.keys()].reduce((sum, key) => sum + key.length, 0))

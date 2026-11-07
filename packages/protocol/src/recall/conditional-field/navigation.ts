@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
 import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
+import { QualifiedTaskObservationSchema } from "./source-task-observation.js";
 
-/** Generation-local lexical statistics with question-time preference; old identities cannot execute this ranking. */
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v10" as const;
+/** Source-bound task observations can affect bounded native priority; old identities cannot execute this ranking. */
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v12" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({
@@ -17,6 +18,7 @@ export const RecallNavigationWitnessSchema = z.object({
   /** Restricted lexical capture; does not change the factual native rank. */
   domain: QuestionTimeCaptureDomainSchema.optional(),
   reference: ConditionalFieldIdSchema,
+  task_observation: QualifiedTaskObservationSchema.optional(),
   location: z.object({
     start_byte: z.number().int().nonnegative(),
     end_byte: z.number().int().positive()

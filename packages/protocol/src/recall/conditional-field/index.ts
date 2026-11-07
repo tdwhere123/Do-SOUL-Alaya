@@ -1,3 +1,6 @@
+export { SOURCE_TASK_OBSERVATION_PRODUCER_ID, SourceTaskObservationProposalSchema,
+  SourceTaskObservationDraftSchema, SourceTaskObservationFormationInputSchema, type SourceTaskObservation,
+  type SourceTaskObservationProposal, type SourceTaskObservationFormationInput, type QualifiedTaskObservation } from "./source-task-observation.js";
 export { QUESTION_TIME_PROPOSAL_PRODUCER_ID, QuestionTimePreferenceSchema,
   type QuestionTimePreference } from "./question-time.js";
 export { ORDINARY_NATIVE_FIELD_RESULT_VERSION, RecallNavigationWitnessSchema, type RecallNavigationWitness } from "./navigation.js";

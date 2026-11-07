@@ -20,6 +20,10 @@
         "kind": "handwritten",
         "reason": "Historical v3 pool vs lazy overlay dispatch plus fill-manifest persist stay one execution owner."
       },
+      "apps/bench-runner/src/runs/extraction/fill/provider-raw-attempt.ts": {
+        "kind": "handwritten",
+        "reason": "The physical raw owner binds all attempt kinds to the same immutable evidence, integrity and reservation rules."
+      },
       "packages/core/src/recall/runtime/recall-service-runner.ts": {
         "kind": "handwritten",
         "reason": "Normal request coordinator for shared budgets, snapshot admission, compilation, field execution and delivery encoding."
@@ -34,7 +38,7 @@
       },
       "packages/core/src/source-index/source-index-acquisition.ts": {
         "kind": "handwritten",
-        "reason": "One acquisition coordinator owns shared read and nomination accounting, admission, and final result; time preference and template matching/restoration are separate phase owners."
+        "reason": "One acquisition coordinator owns shared read and nomination accounting, admission, and final result; time preference, template restoration and task observation are separate phase owners."
       }
     }
   },
@@ -1142,8 +1146,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 3175,
-      "expected_sha256": "89b1ca5a12274245fed76479b4eb3584aa1ddd8ec7016515af0f3343033eb782"
+      "expected_count": 3184,
+      "expected_sha256": "ca9b25504fcdcc157abe410f8233cef35678863defa1e1808d9dd19371d41919"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",

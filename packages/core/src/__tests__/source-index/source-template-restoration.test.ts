@@ -4,7 +4,7 @@ import { SourceSemanticResourceExhausted, sourceIndexNativeRootKey,
   type SourceIndexTarget, type SourceIndexTemplateRead } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
-import type { SourceTemplateRetention } from "../../source-index/source-template-restoration.js";
+import type { SourcePreferenceRetention } from "../../source-index/question-time-preference.js";
 import { fieldSha256 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { readResources, template, templateBudget, templateStatement } from "./source-template-fixture.js";
 
@@ -32,10 +32,10 @@ function fixture() {
     budget: templateBudget, question_time: { interpretation_clock: template.interpretation_clock,
       intervals: [{ start: "2026-09-01", end: "2026-09-06" }] } };
   const observed: SourceIndexAcquisitionFact[] = [];
-  const retain = vi.fn<SourceTemplateRetention["retain"]>((capture, meter) => {
+  const retain = vi.fn<SourcePreferenceRetention["retain"]>((capture, meter) => {
     const before = meter.spentBytes; meter.retain(capture, "fixture actual nomination retention"); return meter.spentBytes - before;
   });
-  const run = (options: { proposed?: boolean; retention?: SourceTemplateRetention; budget?: typeof templateBudget } = {}) =>
+  const run = (options: { proposed?: boolean; retention?: SourcePreferenceRetention; budget?: typeof templateBudget } = {}) =>
     new SourceIndexAcquisition(repository, fieldSha256).nominateWithWitness({ ...input, ...(options.budget ? { budget: options.budget } : {}),
       ...(options.proposed === false ? {} : { source_template: template }) }, () => "admitted", "original",
     capture => { observed.push(capture()); }, true, options.retention ?? { retain });

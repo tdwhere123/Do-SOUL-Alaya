@@ -3,14 +3,7 @@ import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, SourceSemant
   type SourceSemanticNominationOccurrence, type SourceSemanticResourceBudget,
   type SourceTemplateProposal } from "@do-soul/alaya-protocol";
 import { inspectSourceTemplate, type SourceTemplateInspection } from "./source-template-matching.js";
-
-export type SourceTemplateRetention = Readonly<{
-  /** Execute the actual mandatory capture once; a changed capture is separately charged. */
-  retain: (capture: Readonly<{ result: SourceIndexAcquisitionResult;
-    witness: readonly SourceSemanticNominationOccurrence[]; question_time_order: readonly string[] }>,
-    meter: SourceSemanticResourceLedger) => number;
-  source_id?: string;
-}>;
+import type { SourcePreferenceRetention } from "./question-time-preference.js";
 export type SourceTemplateRestorationObservation = SourceTemplateInspection & Readonly<{
   restored: boolean; authorization: "admitted_prefix";
 }>;
@@ -21,7 +14,7 @@ export function restoreSourceTemplate<N extends SourceIndexRootNomination>(input
   proposal: SourceTemplateProposal; original: readonly (readonly [string, N])[];
   nominations: Map<string, N>; occurrences: readonly SourceSemanticNominationOccurrence[];
   max_roots: number; repository: SourceIndexQueryRepository; meter: SourceSemanticResourceLedger;
-  association: SourceSemanticResourceBudget; retention: SourceTemplateRetention;
+  association: SourceSemanticResourceBudget; retention: SourcePreferenceRetention;
   result: () => SourceIndexAcquisitionResult; nativeBytes: (bytes: number) => void;
   observe: (observation: SourceTemplateRestorationObservation) => void;
 }>): number | undefined {

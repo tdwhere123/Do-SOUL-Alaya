@@ -162,6 +162,7 @@ export function runConditionalFieldWorkerRecall(
 
 type NominationCapture = Omit<ReturnType<SourceIndexAcquisition["nominateWithWitness"]>, "witness"> & {
   witness: NativeSourceNomination["witness"];
+  task_observations?: NativeSourceNomination["task_observations"];
 };
 type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]>>[0];
 type AcquisitionFunding = "allowance" | "request";
@@ -183,7 +184,8 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
     allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE,
     ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }),
-    ...(input.sourceTemplate === undefined ? {} : { source_template: input.sourceTemplate }) };
+    ...(input.sourceTemplate === undefined ? {} : { source_template: input.sourceTemplate }),
+    ...(input.sourceTaskObservation === undefined ? {} : { source_task_observation: input.sourceTaskObservation }) };
   const capacity = funding === "allowance" ? repository.quoteQueryCapacity(input.workspaceId, fields.allowance) : undefined;
   const budget = capacity === undefined ? input.budget
     : SourceIndexAcquisition.quoteAllowanceBudget({ ...fields, navigation_text: input.query }, capacity);
@@ -192,10 +194,10 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   if (capacity !== undefined) meter.charge(capacity.resources.work, capacity.resources.memory_bytes, "source acquisition capacity reads");
   const run = (navigation_text: string, allowance: SourceIndexNominationAllowance, invocation: "original" | "hint") => {
     const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
-      ...(invocation === "hint" ? { question_time: undefined, source_template: undefined } : {}) }, admit, invocation,
+      ...(invocation === "hint" ? { question_time: undefined, source_template: undefined, source_task_observation: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
         observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined,
-      invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined ? undefined : {
+      invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined && input.sourceTaskObservation === undefined ? undefined : {
         ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
         retain: (capture, retentionMeter) => {
           const retained = nominationFromCaptures([capture], input.sourceId, { charged_by_caller: true });
@@ -271,7 +273,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
 }
 
-/** The same actual capture is paid either at the late template choice or after ordinary acquisition. */
+/** The same actual capture is paid either at the late preference choice or after ordinary acquisition. */
 function retainBaseNomination(captured: NativeSourceNomination, meter: SourceSemanticResourceLedger): number {
   const { association: _association, ...baseCapture } = captured, before = meter.spentBytes;
   meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
@@ -323,6 +325,9 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
     witness: membership.witness,
     ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
       captures[0].question_time_order.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
+    ...(captures[0]?.task_observations === undefined ? {} : { task_observations: captures[0].task_observations.filter(
+      observation => membership.nominations.some(row => sourceGoldRootIdentity(row.source.target)
+        === sourceGoldRootIdentity(observation.observation.source))) }),
     ...(captures[0]?.association === undefined ? {} : { association: restrictStatementAssociation(captures[0].association,
       key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
     ...(digests.original === null ? {} : { navigation_digests: { original: digests.original,

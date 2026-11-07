@@ -4,6 +4,7 @@ import {
   QueryInterpretationProposalSchema,
   QuestionTimePreferenceSchema,
   SourceTemplateProposalSchema,
+  SOURCE_TASK_OBSERVATION_PRODUCER_ID,
   compareUtcInstants,
   inspectQueryProposalStructure,
   type Guard,
@@ -15,7 +16,7 @@ import {
   type QueryProgram,
   type QueryProposalStructuralLimits
 } from "@do-soul/alaya-protocol";
-import { proposalBindsOriginalQuery } from "./compile-query-identity.js";
+import { digestOriginalQuery, proposalBindsOriginalQuery } from "./compile-query-identity.js";
 import {
   defaultQueryProposalProducerRegistry,
   effectiveQueryProposalLimits,
@@ -56,10 +57,16 @@ export function admitQueryProposal(
   interpretationClock?: string
 ): QueryProposalAdmission {
   if (proposal === undefined) return { kind: "absent" };
-  if (!proposalBindsOriginalQuery(proposal, originalQuery)) return { kind: "invalid" };
+  if (!proposalBindsOriginalQuery(proposal, originalQuery)) {
+    return rejectedOptionalObservation(proposal, originalQuery, registry, interpretationClock, "original_query_mismatch")
+      ?? { kind: "invalid" };
+  }
   if (proposal.question_time !== undefined && (!QuestionTimePreferenceSchema.safeParse(proposal.question_time).success
     || interpretationClock === undefined
-    || compareUtcInstants(proposal.question_time.interpretation_clock, interpretationClock) !== 0)) return { kind: "invalid" };
+    || compareUtcInstants(proposal.question_time.interpretation_clock, interpretationClock) !== 0)) {
+    return rejectedOptionalObservation(proposal, originalQuery, registry, interpretationClock, "question_time_clock_mismatch")
+      ?? { kind: "invalid" };
+  }
   if (proposal.source_template !== undefined && (!SourceTemplateProposalSchema.safeParse(proposal.source_template).success
     || interpretationClock === undefined
     || compareUtcInstants(proposal.source_template.interpretation_clock, interpretationClock) !== 0)) return { kind: "invalid" };
@@ -86,6 +93,22 @@ export function admitQueryProposal(
     effective_limits: effectiveLimits,
     producer
   };
+}
+
+// A rejected optional observation must not revoke raw access. Never discard an explicit program or guard;
+// unbound question time is also dropped rather than being rebound to a different question or clock.
+function rejectedOptionalObservation(proposal: QueryInterpretationProposal, originalQuery: string,
+  registry: QueryProposalProducerRegistry, clock: string | undefined, reason: string): QueryProposalAdmission | undefined {
+  if (proposal.producer_id !== SOURCE_TASK_OBSERVATION_PRODUCER_ID || proposal.source_task_observation === undefined ||
+      proposal.program !== undefined || proposal.source_template !== undefined || proposal.stored_cosine_admission !== undefined ||
+      (proposal.conditions?.length ?? 0) > 0 || (proposal.holes?.length ?? 0) > 0 || (proposal.hypotheses?.length ?? 0) > 0) return;
+  const producer = registry.lookup(proposal.producer_id, producerVersionOf(proposal));
+  const limits = effectiveQueryProposalLimits(producer, proposal.input_limits);
+  if (inspectQueryProposalStructure(proposal, limits).kind !== "ok") return rejected("resource_rejected", proposal, limits, false);
+  return admitQueryProposal({ schema_version: proposal.schema_version, original_query_digest: digestOriginalQuery(originalQuery),
+    producer_id: proposal.producer_id, ...(proposal.producer_version === undefined ? {} : { producer_version: proposal.producer_version }),
+    ...(proposal.input_limits === undefined ? {} : { input_limits: proposal.input_limits }),
+    source_task_observation: { status: "failed", reason } }, originalQuery, registry, clock);
 }
 
 export function admitProposedGuard(guard: ProposedGuard | Guard): Guard {
@@ -178,6 +201,7 @@ function producerMatchesProposal(
   }
   if (!capabilityAllows(producer, "question_time", proposal.question_time !== undefined)) return false;
   if (!capabilityAllows(producer, "source_template", proposal.source_template !== undefined)) return false;
+  if (!capabilityAllows(producer, "source_task_observation", proposal.source_task_observation !== undefined)) return false;
   if (proposal.program === undefined) return true;
   const allowed = new Set<string>(producer.allowed_grammar);
   const stack: unknown[] = [proposal.program];

@@ -159,6 +159,8 @@ export type NativeSourceNomination = Readonly<{
   witness: readonly SourceSemanticNominationOccurrence[];
   /** Bounded source permutation, separate from factual capture ranks. */
   question_time_order?: readonly string[];
+  /** Current source-bound, unreviewed observations used by the bounded preference. */
+  task_observations?: readonly import("@do-soul/alaya-protocol").QualifiedTaskObservation[];
   /** Original-query statement-key observations over admitted roots; navigation only. */
   association?: import("../../../source-index/statement-association.js").StatementAssociation;
   /** An explicitly bound source pool can include scoped or proved catalog roots. */
@@ -184,6 +186,7 @@ export type ObserverReaders = Readonly<{
     hint?: string;
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
     sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
+    sourceTaskObservation?: unknown;
   }>) => NativeSourceNomination;
   /** An admitted Q/H/C package may require a different visible source interval
    * from the native navigation window; this never changes membership or rank. */
