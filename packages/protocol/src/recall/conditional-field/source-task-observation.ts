@@ -61,9 +61,8 @@ export const SourceTaskObservationFormationInputSchema = z.object({
 }).strict().readonly();
 export type SourceTaskObservationFormationInput = z.infer<typeof SourceTaskObservationFormationInputSchema>;
 
-/** Wire-only formation draft. The host, not the producer, supplies source identities and byte coordinates. */
+/** Wire-only source-local rows. The host owns coverage, source identities and byte coordinates. */
 export const SourceTaskObservationDraftSchema = z.object({
-  status: z.enum(["ready", "partial", "unavailable"]),
   observations: z.array(z.object({
     source_ref: z.string().min(1).max(32), source_excerpt: z.string().min(1).max(1024),
     query_excerpt: z.string().min(1).max(1024),

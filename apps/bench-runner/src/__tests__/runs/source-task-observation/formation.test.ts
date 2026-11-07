@@ -1,9 +1,10 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  return installProviderFreeBoundary({ ownedTemporaryFixtures: true });
+  return installProviderFreeBoundary({ ownedTemporaryFixtures: true,
+    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href });
 });
-afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterEach(() => { expect(isolation.violations).toEqual([]); isolation.assertSafe(true); });
 afterAll(() => isolation.restore());
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -43,12 +44,14 @@ const decode = (value: unknown, captured = input(), finishReason: string | null 
 
 it("binds unique Unicode quotations to captured identities and clocks without asking the model for native metadata", () => {
   const request = buildSourceTaskObservationRequest(input());
-  expect(request.formationIdentity).toBe("source-task-observation.source-local-admission.v2");
+  expect(request.formationIdentity).toBe("source-task-observation.host-derived-coverage.v3");
+  expect(request.responseJsonSchema).toMatchObject({ required: ["observations"], additionalProperties: false });
+  expect(Object.keys(Reflect.get(request.responseJsonSchema, "properties"))).toEqual(["observations"]);
   expect(request.userPrompt).not.toContain(target(body).content_digest);
   expect(request.userPrompt).not.toContain("2026-09-17");
   expect(JSON.parse(request.userPrompt)).toEqual({ question: query, question_observation_time: clock,
     sources: [{ source_ref: "source1", source_observation_time: observed, body }] });
-  const result = decode({ status: "ready", observations: [row] });
+  const result = decode({ observations: [row] });
   expect(result).toMatchObject({ classified: "interpreted", admitted: true,
     outcome: { status: "source_task_observation", proposal: { original_query_digest: `sha256:${hash(query)}`,
       source_task_observation: { status: "ready", observations: [{ source: target(body), source_observed_at: observed,
@@ -57,37 +60,58 @@ it("binds unique Unicode quotations to captured identities and clocks without as
         event_time: { status: "interpreted", interval: { start: "2026-09-03", end: "2026-09-03" } } }] } } } });
 });
 
-it("keeps unsupported, unresolved, partial, empty, unavailable and incomplete outcomes separate", () => {
-  const nonpositive = (status: "unsupported" | "unresolved") => ({ ...row,
+it.each(["unsupported", "unresolved"] as const)(
+  "derives ready or partial coverage independently of all-%s correspondence", status => {
+  const nonpositive = (value: typeof row) => ({ ...value,
     task_correspondence: status, task_role: null, task_component: null, time_status: "unavailable",
     time_expression: null, time_anchor: null, time_start: null, time_end: null });
-  for (const status of ["unsupported", "unresolved"] as const) {
-    expect(decode({ status: "partial", observations: [nonpositive(status)] })).toMatchObject({ classified: "incomplete", admitted: true,
-      outcome: { proposal: { source_task_observation: { status: "partial", observations: [
+  const complete = decode({ observations: [nonpositive(row), nonpositive(secondRow)] }, batchInput());
+  expect(complete).toMatchObject({ classified: "interpreted", admitted: true, outcome: { diagnostics: [],
+    proposal: { source_task_observation: { status: "ready", observations: [
+      { task_correspondence: { status }, event_time: { status: "unavailable" } },
+      { task_correspondence: { status }, event_time: { status: "unavailable" } }] } } } });
+  expect(decode({ observations: [nonpositive(row)] }, batchInput())).toMatchObject({
+    classified: "incomplete", admitted: true, outcome: {
+      diagnostics: [{ reason: "missing_source_ref", source_ref: "source2" }],
+      proposal: { source_task_observation: { status: "partial", observations: [
         { task_correspondence: { status }, event_time: { status: "unavailable" } }] } } } });
+});
+
+it("keeps empty output, invalid envelopes and incomplete transport explicit without legacy summary admission", () => {
+  expect(decode({ observations: [] })).toEqual({ classified: "incomplete", admitted: false,
+    outcome: { status: "incomplete", reason: "no_admissible_observations",
+      diagnostics: [{ reason: "missing_source_ref", source_ref: "source1" }] } });
+  for (const status of ["ready", "partial", "unavailable"]) {
+    for (const observations of [[], [row]]) {
+      expect(decode({ status, observations })).toEqual({ classified: "terminal", admitted: false,
+        outcome: { status: "invalid", reason: "invalid_shape" } });
+    }
   }
-  for (const status of ["partial", "ready"]) {
-    expect(decode({ status, observations: [] })).toMatchObject({ classified: "incomplete", admitted: false,
-      outcome: { status: "incomplete", reason: "no_admissible_observations",
-        diagnostics: [{ reason: "missing_source_ref", source_ref: "source1" }] } });
+  for (const value of [null, [], {}, { observations: null }, { observations: "invalid" },
+    { observations: Array.from({ length: 17 }, () => row) }]) {
+    expect(decode(value)).toEqual({ classified: "terminal", admitted: false,
+      outcome: { status: "invalid", reason: "invalid_shape" } });
   }
-  expect(decode({ status: "unavailable", observations: [] })).toMatchObject({ classified: "abstained", admitted: false,
-    outcome: { status: "unavailable" } });
-  expect(decode({ status: "ready", observations: [row] }, input(), "length")).toMatchObject({
-    classified: "incomplete", admitted: false, outcome: { status: "incomplete" } });
+  for (const finishReason of ["length", null]) {
+    for (const rawJson of ["{", JSON.stringify({ observations: [row] })]) {
+      expect(interpretSourceTaskObservationSourceLocalDecoded(input(), { rawJson, finishReason },
+        "step-3.5-2603-low-json-schema-v1")).toEqual({
+        classified: "incomplete", admitted: false, outcome: { status: "incomplete", reason: "noncomplete" } });
+    }
+  }
 });
 
 it("rejects ambiguous or changed literals, invented refs, clocks, digests and incoherent states without repair", () => {
-  expect(decode({ status: "ready", observations: [{ ...row, source_excerpt: "iced tea" }] },
+  expect(decode({ observations: [{ ...row, source_excerpt: "iced tea" }] },
     input("iced tea and iced tea"))).toMatchObject({ outcome: { status: "incomplete", diagnostics: [{ reason: "quote_missing_or_ambiguous", source_ref: "source1", row_index: 0 }] } });
   for (const changed of [{ ...row, source_excerpt: "I tried coffee last Thursday." }, { ...row, source_ref: "source2" },
     { ...row, time_expression: "next Thursday" }, { ...row, task_role: null }]) {
-    expect(decode({ status: "ready", observations: [changed] }).admitted).toBe(false);
+    expect(decode({ observations: [changed] }).admitted).toBe(false);
   }
   const repeated = "I tried iced tea last Thursday and mentioned last Thursday.";
-  expect(decode({ status: "ready", observations: [{ ...row, source_excerpt: repeated }] }, input(repeated)))
+  expect(decode({ observations: [{ ...row, source_excerpt: repeated }] }, input(repeated)))
     .toMatchObject({ admitted: false, outcome: { diagnostics: [{ reason: "invalid_bound_observation" }] } });
-  expect(decode({ status: "ready", observations: [row, row] }).outcome).toMatchObject({ diagnostics: [
+  expect(decode({ observations: [row, row] }).outcome).toMatchObject({ diagnostics: [
     { reason: "duplicate_source_ref", row_index: 0 }, { reason: "duplicate_source_ref", row_index: 1 }] });
   expect(() => buildSourceTaskObservationRequest({ ...input(), question_time: { ...input().question_time,
     interpretation_clock: observed } })).toThrow("question_time_clock_mismatch");
@@ -96,33 +120,33 @@ it("rejects ambiguous or changed literals, invented refs, clocks, digests and in
 });
 
 it("isolates malformed, duplicate, unknown and missing source rows without selecting by role", () => {
-  const result = decode({ status: "ready", observations: [row, badSecondRow] }, batchInput());
+  const result = decode({ observations: [row, badSecondRow] }, batchInput());
   expect(result).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
     diagnostics: [{ reason: "invalid_bound_observation", source_ref: "source2", row_index: 1 }],
     proposal: { source_task_observation: { status: "partial", observations: [{ source: target(body) }] } } } });
   if (result.outcome.status !== "source_task_observation") throw new Error("missing proposal");
   expect(result.outcome.proposal.source_task_observation.observations).toHaveLength(1);
   const unsupported = { ...row, task_correspondence: "unsupported", task_role: null, task_component: null };
-  expect(decode({ status: "ready", observations: [unsupported, { ...secondRow, time_start: 123 }] }, batchInput()))
+  expect(decode({ observations: [unsupported, { ...secondRow, time_start: 123 }] }, batchInput()))
     .toMatchObject({ admitted: true, outcome: { diagnostics: [{ reason: "invalid_shape", source_ref: "source2", row_index: 1 }],
       proposal: { source_task_observation: { status: "partial", observations: [{ task_correspondence: { status: "unsupported" } }] } } } });
-  expect(decode({ status: "ready", observations: [row, { ...row, description: "hijack" }, secondRow,
+  expect(decode({ observations: [row, { ...row, description: "hijack" }, secondRow,
     { ...row, source_ref: "invented" }] }, batchInput())).toMatchObject({ admitted: true, outcome: {
       diagnostics: [{ reason: "duplicate_source_ref", source_ref: "source1", row_index: 0 },
         { reason: "duplicate_source_ref", source_ref: "source1", row_index: 1 },
         { reason: "unknown_source_ref", source_ref: "invented", row_index: 3 }],
       proposal: { source_task_observation: { status: "partial", observations: [{ source: { root_id: "second-root" } }] } } } });
-  expect(decode({ status: "ready", observations: [row] }, batchInput())).toMatchObject({ outcome: {
+  expect(decode({ observations: [row] }, batchInput())).toMatchObject({ outcome: {
     diagnostics: [{ reason: "missing_source_ref", source_ref: "source2" }],
     proposal: { source_task_observation: { status: "partial" } } } });
   expect(interpretSourceTaskObservationSourceLocalDecoded(batchInput(), { rawJson: "{", finishReason: "stop" },
     "step-3.5-2603-low-json-schema-v1")).toMatchObject({ classified: "terminal", outcome: { reason: "malformed_json" } });
-  expect(decode({ status: "ready", observations: "invalid" }, batchInput())).toMatchObject({
+  expect(decode({ observations: "invalid" }, batchInput())).toMatchObject({
     classified: "terminal", admitted: false, outcome: { reason: "invalid_shape" } });
 });
 
 it.each([{ status: "ready", classified: "interpreted" }, { status: "partial", classified: "incomplete" }] as const)(
-  "executes a $status draft through the existing ledger and raw owner without provider access", async ({ status, classified }) => {
+  "executes $status host coverage through the existing ledger and raw owner without provider access", async ({ status, classified }) => {
   const root = mkdtempSync(join(tmpdir(), "source-task-ledger-"));
   try {
     const model = "step-3.5-flash-2603", requestProfile = "step-3.5-2603-low-json-schema-v1" as const;
@@ -141,7 +165,7 @@ it.each([{ status: "ready", classified: "interpreted" }, { status: "partial", cl
     const ledger = openExtractionAttemptLedger({ cacheRoot: root, lineageDigest: lineage,
       cacheIdentity: { model, requestProfile }, startingMissing: 1, maximumAttempts: 1, maximumAttemptsPerKey: 1,
       successfulShardCeiling: 1, inspectProviderShard: () => shard });
-    const content = JSON.stringify({ status, observations: status === "ready" ? [row, secondRow] : [row, badSecondRow] });
+    const content = JSON.stringify({ observations: status === "ready" ? [row, secondRow] : [row, badSecondRow] });
     const wire = JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }],
       usage: { prompt_tokens: 15, completion_tokens: 12, total_tokens: 27 } });
     const httpResponse = { contentType: "application/json", bodyBase64: Buffer.from(wire).toString("base64"),
@@ -182,10 +206,20 @@ it.each([{ status: "ready", classified: "interpreted" }, { status: "partial", cl
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+it("separates fresh coverage cache keys from earlier raw-attempt identities", () => {
+  const material = buildSourceTaskObservationRequest(input());
+  const keyFor = (identityPrefix: string) => semanticProviderRequestCacheKey({ identityPrefix,
+    model: "step-3.5-flash-2603", requestProfile: "step-3.5-2603-low-json-schema-v1",
+    systemPrompt: material.systemPrompt, userPrompt: material.userPrompt, schema: material.responseJsonSchema,
+    maxOutputTokens: 2048, providerUrl: "https://api.stepfun.com/v1", schemaName: SOURCE_TASK_OBSERVATION_SCHEMA_NAME });
+  const freshKey = keyFor(material.formationIdentity);
+  expect(freshKey).not.toBe(keyFor("source-task-observation.source-local-admission.v2"));
+});
+
 it("retains a separately identified Step physical response through the existing raw owner", () => {
   const root = mkdtempSync(join(tmpdir(), "source-task-raw-"));
   try {
-    const content = JSON.stringify({ status: "partial", observations: [] });
+    const content = JSON.stringify({ observations: [] });
     const wire = JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] });
     const key = "a".repeat(64), lineage = "b".repeat(64), requestDigest = "c".repeat(64);
     const binding = { cacheKey: key, kind: "source_task_observation" as const, attemptLineageDigest: lineage,

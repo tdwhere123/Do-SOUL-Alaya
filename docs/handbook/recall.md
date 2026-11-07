@@ -346,6 +346,18 @@ second schedule. A delivered source's navigation carries the exact qualified obs
 including its unreviewed and unknown-world-claim status. This changes no durable truth,
 is not a guarantee of semantic fidelity or model availability, and makes no provider call.
 
+The [formation owner](../../apps/bench-runner/src/runs/source-task-observation/formation.ts)
+requests source-local rows only. It derives ready coverage when every supplied source has
+one admitted row and no row diagnostics; an admitted subset is partial. Coverage is
+relative only to the explicitly supplied set, not all eligible Recall candidates or their
+relevance. Unobserved time-preference incumbents may remain fallback. Unsupported or
+unresolved correspondence can still be available observations, never fact truth. Empty or
+no-admissible output, missing/duplicate/malformed source rows, invalid global JSON and
+incomplete transport retain explicit failures or diagnostics. The fresh
+`source-task-observation.host-derived-coverage.v3` formation/cache identity does not
+reuse earlier model-summary drafts or raw attempts. This wire-only change preserves the
+Protocol 38 runtime proposal and native selection contract.
+
 ## Statement-key association at slot 5
 
 Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
