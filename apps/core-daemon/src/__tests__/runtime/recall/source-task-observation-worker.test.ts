@@ -12,7 +12,7 @@ import { SOURCE_TASK_OBSERVATION_PRODUCER_ID, QUESTION_TIME_PROPOSAL_PRODUCER_ID
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
-import { interpretSourceTaskObservationDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
+import { interpretSourceTaskObservationSourceLocalDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, withIndexedSources, SIMULATED_CONFIGURATION } from "./source-semantic-index-acquisition.test-support.js";
 
 const query = "What tool did I use to repair the hinge last Thursday?";
@@ -32,15 +32,23 @@ const questionTime = { interpretation_clock: CLOCK, intervals: [{ start: "2026-0
 const base = { schema_version: 1, producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID,
   original_query_digest: digest(query), question_time: questionTime };
 
-function proposal(target: SourceEvidenceTarget) {
+function proposal(target: SourceEvidenceTarget, secondTarget: SourceEvidenceTarget) {
   const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
-    sources: [{ source_ref: "source1", target, source_observed_at: originals[0]!.eventTime, body: sourceText }] };
+    sources: [{ source_ref: "source1", target, source_observed_at: originals[0]!.eventTime, body: sourceText },
+      { source_ref: "source2", target: secondTarget, source_observed_at: originals[1]!.eventTime, body: standingText }] };
   const rawJson = JSON.stringify({ status: "ready", observations: [{ source_ref: "source1",
     source_excerpt: sourceEvent, query_excerpt: query, utterance_kind: "reported_event",
     description: "The speaker reports repairing a hinge with a wrench.", task_correspondence: "possible",
     task_role: "requested_event", task_component: "tool used for the hinge repair", time_status: "interpreted",
-    time_expression: "last Thursday", time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" }] });
-  const formed = interpretSourceTaskObservationDecoded(input, { rawJson, finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
+    time_expression: "last Thursday", time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" },
+    { source_ref: "source2", source_excerpt: "The repair shop offers", query_excerpt: query, utterance_kind: "standing",
+      description: "A shop discount.", task_correspondence: "unresolved", task_role: null, task_component: null,
+      time_status: "interpreted", time_expression: "last Thursday", time_anchor: "source_observation_clock",
+      time_start: "2026-09-03", time_end: "2026-09-03" }] });
+  const formed = interpretSourceTaskObservationSourceLocalDecoded(input, { rawJson, finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
+  expect(formed).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
+    diagnostics: [{ reason: "invalid_bound_observation", source_ref: "source2", row_index: 1 }],
+    proposal: { source_task_observation: { status: "partial" } } } });
   if (formed.outcome.status !== "source_task_observation") throw new Error(JSON.stringify(formed.outcome));
   return formed.outcome.proposal;
 }
@@ -65,7 +73,8 @@ it("restores a separately timed task observation before freeze and delivers it t
       return SoulMemorySearchResponseSchema.parse(output.output);
     };
     const target = fixture.targets.find(row => row.source_id === "original-0")!.target;
-    const candidate = proposal(target), baseline = await call(base), first = await call(candidate);
+    const candidate = proposal(target, fixture.targets.find(row => row.source_id === "original-1")!.target),
+      baseline = await call(base), first = await call(candidate);
     const ids = (result: typeof first) => result.index!.entries.map(entry =>
       entry.target.kind === "source_evidence" ? entry.target.root_id : "memory");
     expect(ids(baseline)).not.toContain(target.root_id);
