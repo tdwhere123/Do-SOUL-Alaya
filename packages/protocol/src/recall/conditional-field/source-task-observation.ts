@@ -74,6 +74,10 @@ export const SourceTaskObservationDraftSchema = z.object({
   observations: z.array(z.object({
     source_ref: z.string().min(1).max(32), source_excerpt: z.string().min(1).max(1024),
     query_excerpt: z.string().min(1).max(1024),
+    association_status: z.enum(["selected", "missing", "unresolved", "ambiguous"]),
+    association_ref: z.string().min(1).max(128).nullable(),
+    temporal_operand_status: z.enum(["selected", "missing", "unresolved", "ambiguous"]),
+    temporal_operand_ref: z.string().min(1).max(128).nullable(),
     utterance_kind: z.enum(["reported_event", "request", "recommendation", "standing", "prospective", "unknown"]),
     description: z.string().min(1).max(512), task_correspondence: z.enum(["possible", "unsupported", "unresolved"]),
     task_role: z.enum(["requested_event", "task_input"]).nullable(), task_component: z.string().max(256).nullable(),

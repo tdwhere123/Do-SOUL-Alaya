@@ -20,7 +20,7 @@ import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixtur
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { nominateNativeSources } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { taskInterpretationReader } from "../../../runtime/recall-read-worker/source-semantic-discovery.js";
-import { selectedTaskSource } from "./source-task-observation.test-support.js";
+import { selectedTaskSource, observationEndpointChoice } from "./source-task-observation.test-support.js";
 import { interpretSourceTaskObservationSourceLocalDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, withIndexedSources, SIMULATED_CONFIGURATION, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
@@ -133,9 +133,10 @@ it("binds a raw observation outside the nominated statement and delivers it thro
       return SoulMemorySearchResponseSchema.parse(output.output);
     };
     const source = fixture.targets.find(row => row.source_id === "original-0" && row.auxiliary === undefined)!;
-    const formed = interpretSourceTaskObservationSourceLocalDecoded({ query, interpretation_clock: CLOCK, question_time: questionTime,
-      ...selected.selection, sources: [selected.source] },
+    const input = { query, interpretation_clock: CLOCK, question_time: questionTime, ...selected.selection, sources: [selected.source] };
+    const formed = interpretSourceTaskObservationSourceLocalDecoded(input,
     { rawJson: JSON.stringify({ observations: [{ source_ref: "source1", source_excerpt: excerpt, query_excerpt: query,
+      ...observationEndpointChoice(input, "source1", selected.expectedAssociation),
       utterance_kind: "reported_event", description: "The speaker reports using a wrench.", task_correspondence: "possible",
       task_role: "requested_event", task_component: "repair tool", time_status: "unavailable", time_expression: null,
       time_anchor: null, time_start: null, time_end: null }] }), finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");

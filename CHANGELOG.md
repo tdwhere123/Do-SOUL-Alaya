@@ -17,6 +17,15 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
 
+Observation formation now lets its existing model request choose request-bound Q/C/H
+association and same-frame temporal references, with explicit missing/unresolved/ambiguous
+absence. The host resolves references; native publication, conditional proof and ranking
+remain unchanged. Internal wire/cache identity `source-task-observation.endpoint-selection.v7`
+replaces caller-preselected v6 formation input and does not reuse its raw attempts.
+Canonical MCP observations and Protocol 39.1/native v13 archive readers are unchanged;
+this internal producer correction has no public schema or SemVer step under invariant §25.
+Provider-shaped fixtures establish mechanism only, not natural availability or benefit.
+
 Protocol 39.1.0 widens task qualification binding IDs to the existing canonical
 bounded execution identity, including multi-phase prefixes (additive schema
 compatibility correction under invariant §25). It also corrects selected support

@@ -379,15 +379,30 @@ inspection. It remains bounded diagnostic evidence, not a public eligibility cen
 source relevance proof or new route. Missing/partial acquisition is not complete-empty.
 
 The [formation owner](../../apps/bench-runner/src/runs/source-task-observation/formation.ts)
-copies the caller's selected endpoints into source-local rows; it cannot manufacture
-them from generated words or dates. Ready coverage means one admitted row per supplied
-source with no row diagnostics, not coverage of all Recall candidates or relevance.
-An admitted subset is partial; malformed, missing, duplicate or incomplete rows remain
-explicit. The `source-task-observation.selected-endpoints.v6` request/cache identity
-does not readmit earlier requests or raw attempts. Legacy unbound observations remain
-parseable for source-local diagnostics and Protocol 38 archive reading, but cannot
-obtain current task-qualified preference. Temporal assertions and durable truth are
-unchanged. Mechanism tests establish no natural-data benefit.
+exposes request-bound endpoint references in its existing observation request. Its
+[catalog adapter](../../apps/bench-runner/src/runs/source-task-observation/endpoint-selection.ts)
+uses admitted Q/C, the exact supplied published H, the production correspondence
+endpoint catalog and Q branch views. It advertises every addressable predicate/frame
+association and H slot, without asserting an executable binding. The model explicitly
+chooses an association and an optional same-frame temporal operand, or reports
+`missing`, `unresolved` or `ambiguous` with null references. The host resolves only
+those supplied references to canonical `SourceTaskAssociation`; it never chooses the
+first candidate or infers endpoints from labels, dates or record time. Native publication,
+proof and temporal-support verification above remain independent and authoritative.
+
+Ready coverage means one admitted row per supplied source with no row diagnostics,
+not coverage of all Recall candidates, endpoint availability or relevance. The producer's
+separate `endpoint_selections` result preserves absence reasons without making valid raw
+rows partial. An admitted subset is partial; malformed, missing, duplicate or incomplete
+rows remain explicit. Missing prerequisites retain raw fallback. The internal
+`source-task-observation.endpoint-selection.v7` request/cache identity does not readmit
+v6 drafts or raw attempts; the retired caller-preselected formation input is rejected.
+The canonical public observation and native v13 contract are unchanged (invariant §25);
+manual MCP proposals still use their existing canonical association and native verifier.
+Legacy unbound observations remain parseable for source-local diagnostics and Protocol 38
+archive reading, but cannot obtain current task-qualified preference. Temporal assertions
+and durable truth are unchanged. Authored wire-shaped mechanism tests establish no natural
+endpoint availability, model fidelity or recall benefit.
 
 ## Statement-key association at slot 5
 

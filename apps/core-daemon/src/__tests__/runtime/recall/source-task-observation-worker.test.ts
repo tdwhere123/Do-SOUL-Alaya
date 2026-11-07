@@ -16,7 +16,7 @@ import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handle
 import { interpretSourceTaskObservationSourceLocalDecoded, buildSourceTaskObservationRequest }
   from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, withIndexedSources, SIMULATED_CONFIGURATION } from "./source-semantic-index-acquisition.test-support.js";
-import { selectedTaskSource } from "./source-task-observation.test-support.js";
+import { selectedTaskSource, observationEndpointChoice } from "./source-task-observation.test-support.js";
 
 const query = "What tool did I use to repair the hinge last Thursday?";
 const repair = "I repaired the hinge with a silver wrench on September 3.";
@@ -50,11 +50,10 @@ it("executes exact event operands before native restoration while preserving raw
       roles: [{ id: "theme", queryExcerpt: "hinge", named: true }, { id: "tool", queryExcerpt: "What tool" }] });
     const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
       ...selected.selection, sources: [selected.source] };
-    expect(JSON.parse(buildSourceTaskObservationRequest(input).userPrompt).sources[0].association)
-      .toEqual(selected.source.association);
+    expect(JSON.parse(buildSourceTaskObservationRequest(input).userPrompt).sources[0].endpoint_catalog.associations).toHaveLength(1);
     const form = (row: object) => {
       const result = interpretSourceTaskObservationSourceLocalDecoded(input,
-        { rawJson: JSON.stringify({ observations: [row] }), finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
+        { rawJson: JSON.stringify({ observations: [{ ...row, ...observationEndpointChoice(input, "source1", selected.expectedAssociation) }] }), finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
       if (result.outcome.status !== "source_task_observation") throw new Error(JSON.stringify(result.outcome));
       return result.outcome.proposal;
     };
@@ -96,7 +95,7 @@ it("executes exact event operands before native restoration while preserving raw
     expect(qualification).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
       temporal_relation: "hypothesized_disjoint", conditional_binding: {
         source_interpretation_id: selected.source.selected_interpretation.interpretation_id,
-        semantic_correspondence_id: selected.source.association.semantic_correspondence_id } });
+        semantic_correspondence_id: selected.expectedAssociation.semantic_correspondence_id } });
     expect(first.results[0]!.content_preview).toContain(repair);
     const delivered = first.results[0]!.target;
     if (delivered.kind !== "source_evidence" || delivered.span === undefined) throw new Error("source span required");
@@ -172,7 +171,7 @@ it("admits a standing input without occurrence-time support and keeps malformed 
     const input = { query: taskQuery, interpretation_clock: CLOCK, question_time: questionTime, ...selected.selection,
       sources: [selected.source, { source_ref: "source2", target: fixture.targets.find(row => row.source_id === "original-0")!.target,
         source_observed_at: originals[0]!.eventTime, body: sourceText }] };
-    const row = { ...wire, ...noTime, source_excerpt: standing, query_excerpt: taskQuery, utterance_kind: "standing" };
+    const row = { ...wire, ...noTime, ...observationEndpointChoice(input, "source1", selected.expectedAssociation), source_excerpt: standing, query_excerpt: taskQuery, utterance_kind: "standing" };
     const formation = interpretSourceTaskObservationSourceLocalDecoded(input, { rawJson: JSON.stringify({ observations: [row,
       { ...wire, source_ref: "source2", query_excerpt: taskQuery, time_start: "not-a-calendar-date" }] }), finishReason: "stop" },
     "step-3.5-2603-low-json-schema-v1");

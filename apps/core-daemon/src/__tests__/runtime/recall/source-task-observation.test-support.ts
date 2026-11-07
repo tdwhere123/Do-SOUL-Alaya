@@ -2,7 +2,7 @@ import {
   buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE_ATTRIBUTION,
   SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity,
   type SourceSemanticFrame, type SourceSemanticMention, type SourceSemanticReferent,
-  type SourceTaskAssociation
+  canonicalJson, type SourceTaskAssociation
 } from "@do-soul/alaya-protocol";
 import { createSourceSemanticInterpretationPublication, EvidenceService, fieldContractSha256,
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
@@ -11,7 +11,24 @@ import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createSourceSemanticPublication } from "../../../runtime/field/source-semantic-publication.js";
 import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
+import { buildSourceTaskObservationRequest } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, type IndexFixture } from "./source-semantic-index-acquisition.test-support.js";
+
+/** Fixture choice made against the real advertised request, never injected into formation input. */
+export function observationEndpointChoice(input: unknown, sourceRef: string, desired: SourceTaskAssociation) {
+  const visible = JSON.parse(buildSourceTaskObservationRequest(input).userPrompt) as { sources: {
+    source_ref: string; endpoint_catalog: { associations: { ref: string; association: SourceTaskAssociation }[];
+      temporal_operands: { ref: string; endpoint: SourceTaskAssociation["temporal_operand"] }[] } }[] };
+  const catalog = visible.sources.find(source => source.source_ref === sourceRef)!.endpoint_catalog;
+  const { temporal_operand, ...association } = desired;
+  const choices = catalog.associations.filter(row => canonicalJson(row.association) === canonicalJson(association));
+  if (choices.length !== 1) throw new Error("fixture association must have exactly one catalog address");
+  const operands = catalog.temporal_operands.filter(row => canonicalJson(row.endpoint) === canonicalJson(temporal_operand ?? null));
+  if (temporal_operand !== undefined && operands.length !== 1) throw new Error("fixture operand must have exactly one catalog address");
+  return { association_status: "selected", association_ref: choices[0]!.ref,
+    temporal_operand_status: temporal_operand === undefined ? "missing" : "selected",
+    temporal_operand_ref: operands[0]?.ref ?? null };
+}
 
 type AuthoredFrame = Readonly<{ id: string; text: string; predicate: string;
   roles: readonly Readonly<{ id: string; text: string; unresolved?: boolean; unexpressed?: boolean }>[] }>;
@@ -103,6 +120,7 @@ export async function selectedTaskSource(fixture: IndexFixture, input: Readonly<
       budget: { schema_version: 1, work_units: 2_000_000, memory_bytes: 32_000_000,
         page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 } }),
     selection: { query_semantics: semantics, semantic_correspondences: [c.semantic_correspondence] },
+    expectedAssociation: association,
     source: { source_ref: "source1", target: published.bound.source_target, source_observed_at: input.observedAt,
-      body: input.body, association, selected_interpretation: published.bound } };
+      body: input.body, selected_interpretation: published.bound } };
 }

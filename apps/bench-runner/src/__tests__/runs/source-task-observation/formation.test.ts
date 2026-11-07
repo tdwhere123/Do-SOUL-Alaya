@@ -31,7 +31,9 @@ const target = (text: string) => ({ kind: "source_evidence" as const, workspace_
 const input = (text = body) => ({ query, interpretation_clock: clock,
   question_time: { interpretation_clock: clock, intervals: [{ start: "2026-09-17", end: "2026-09-17" }] },
   sources: [{ source_ref: "source1", target: target(text), source_observed_at: observed, body: text }] });
-const row = { source_ref: "source1", source_excerpt: "I tried iced tea last Thursday.", query_excerpt: query,
+const missingEndpoints = { association_status: "missing", association_ref: null,
+  temporal_operand_status: "missing", temporal_operand_ref: null };
+const row = { ...missingEndpoints, source_ref: "source1", source_excerpt: "I tried iced tea last Thursday.", query_excerpt: query,
   utterance_kind: "reported_event", description: "The speaker tried iced tea.", task_correspondence: "possible",
   task_role: "requested_event", task_component: "type of drink attempted", time_status: "interpreted",
   time_expression: "last Thursday", time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" };
@@ -45,13 +47,14 @@ const decode = (value: unknown, captured = input(), finishReason: string | null 
 
 it("binds unique Unicode quotations to captured identities and clocks without asking the model for native metadata", () => {
   const request = buildSourceTaskObservationRequest(input());
-  expect(request.formationIdentity).toBe("source-task-observation.selected-endpoints.v6");
+  expect(request.formationIdentity).toBe("source-task-observation.endpoint-selection.v7");
   expect(request.responseJsonSchema).toMatchObject({ required: ["observations"], additionalProperties: false });
   expect(Object.keys(Reflect.get(request.responseJsonSchema, "properties"))).toEqual(["observations"]);
   expect(request.userPrompt).not.toContain(target(body).content_digest);
   expect(request.userPrompt).not.toContain("2026-09-17");
   expect(JSON.parse(request.userPrompt)).toEqual({ question: query, question_observation_time: clock,
-    sources: [{ source_ref: "source1", source_observation_time: observed, body }] });
+    sources: [{ source_ref: "source1", source_observation_time: observed, body,
+      endpoint_catalog: { source_ref: "source1", reason: "missing_query_or_interpretation", associations: [], temporal_operands: [] } }] });
   const result = decode({ observations: [row] });
   expect(result).toMatchObject({ classified: "interpreted", admitted: true,
     outcome: { status: "source_task_observation", proposal: { original_query_digest: `sha256:${hash(query)}`,
@@ -59,6 +62,14 @@ it("binds unique Unicode quotations to captured identities and clocks without as
         source_excerpt: { start_byte: 5, end_byte: Buffer.byteLength(body), text: row.source_excerpt },
         task_correspondence: { status: "possible", role: "requested_event" },
         event_time: { status: "interpreted", interval: { start: "2026-09-03", end: "2026-09-03" } } }] } } } });
+});
+
+it("rejects retired preselected formation input and unselected old wire rows", () => {
+  expect(() => buildSourceTaskObservationRequest({ ...input(), sources: [{ ...input().sources[0], association: {} }] })).toThrow();
+  const { association_status: _association, association_ref: _ref, temporal_operand_status: _time,
+    temporal_operand_ref: _operand, ...oldRow } = row;
+  expect(decode({ observations: [oldRow] })).toMatchObject({ admitted: false,
+    outcome: { diagnostics: [{ reason: "invalid_shape", source_ref: "source1" }] } });
 });
 
 it("advertises nullable calendar-day endpoints in the generated provider schema", () => {
@@ -120,7 +131,7 @@ it("binds earlier task inputs without converting unrelated, invalid or missing r
     sources: bodies.map((text, index) => ({ source_ref: `source${index + 1}`,
       target: { ...target(text), root_id: `power-source-${index + 1}` }, source_observed_at: observed, body: text })) };
   const unavailable = { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null };
-  const common = { query_excerpt: question, description: "A source-local report." };
+  const common = { ...missingEndpoints, query_excerpt: question, description: "A source-local report." };
   const observations = [
     { ...common, ...unavailable, source_ref: "source1", source_excerpt: bodies[0], utterance_kind: "reported_event",
       task_correspondence: "possible", task_role: "task_input", task_component: "earlier power consumption" },

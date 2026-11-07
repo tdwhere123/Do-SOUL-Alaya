@@ -18,7 +18,7 @@ import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handle
 import { interpretSourceTaskObservationSourceLocalDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, withIndexedSources, SIMULATED_CONFIGURATION, publicMcp, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
-import { selectedTaskSource } from "./source-task-observation.test-support.js";
+import { selectedTaskSource, observationEndpointChoice } from "./source-task-observation.test-support.js";
 import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 type Selected = Awaited<ReturnType<typeof selectedTaskSource>>;
@@ -40,10 +40,12 @@ function competingSources(query: string, reports: readonly string[]) {
 
 function form(query: string, selected: readonly Selected[], times: readonly object[] = selected.map(() => noTime)) {
   const first = selected[0]!;
-  const result = interpretSourceTaskObservationSourceLocalDecoded({ query, interpretation_clock: CLOCK, question_time: questionTime,
+  const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
     query_semantics: first.selection.query_semantics, semantic_correspondences: selected.flatMap(row => row.selection.semantic_correspondences),
-    sources: selected.map((row, i) => ({ ...row.source, source_ref: `source${i + 1}` })) },
+    sources: selected.map((row, i) => ({ ...row.source, source_ref: `source${i + 1}` })) };
+  const result = interpretSourceTaskObservationSourceLocalDecoded(input,
   { rawJson: JSON.stringify({ observations: selected.map((row, i) => ({ source_ref: `source${i + 1}`,
+    ...observationEndpointChoice(input, `source${i + 1}`, row.expectedAssociation),
     source_excerpt: row.source.body, query_excerpt: query, utterance_kind: "reported_event", description: "A conditional source report.",
     task_correspondence: "possible", task_role: "task_input", task_component: "reported tool", ...times[i] })) }), finishReason: "stop" },
   "step-3.5-2603-low-json-schema-v1");
@@ -88,8 +90,8 @@ function withIndependentInput(selected: Selected, query: string): Selected {
   if (received.semantic_correspondence === undefined) throw new Error(JSON.stringify(received.outcome));
   const correspondence = received.semantic_correspondence;
   return { ...selected, selection: { query_semantics: semantics, semantic_correspondences: [correspondence] },
-    source: { ...selected.source, association: { ...selected.source.association,
-      semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(correspondence, fieldContractSha256) } } };
+    expectedAssociation: { ...selected.expectedAssociation,
+      semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(correspondence, fieldContractSha256) } };
 }
 
 function assertVisible(page: Awaited<ReturnType<Awaited<ReturnType<typeof openRecall>>["call"]>>, selected: Selected) {
