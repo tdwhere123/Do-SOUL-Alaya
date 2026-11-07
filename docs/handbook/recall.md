@@ -342,7 +342,14 @@ cap. Guarded programs, explicit source filters and prepared access hints abstain
 optional acquisition step; failed, malformed, unavailable, unbound or resource-refused
 observations preserve the paid incumbent. Proposal validation runs after incumbent
 retention, within the remaining optional allowance. Source-template and source-task proposals do not compose into a
-second schedule. A delivered source's navigation carries the exact qualified observation,
+second schedule. The private native observer can capture the original admitted prefix and the time-preferred
+incumbent at the boundary before either optional inspection, even when no task proposal was supplied. Its eligibility
+is the same bounded union used by task inspection, narrowed by an explicit source id when present; the recorded
+source identities retain their complete native bindings. A guard, inactive question-time domain, unavailable read,
+partial acquisition or incomplete observer frame is not a complete empty eligibility set. This diagnostic is not a
+new route, an unbounded census, a public receipt or proof of source relevance. Restricted lexical rank facts retain
+their `question_time` domain independently of unrestricted rank and window provenance.
+A delivered source's navigation carries the exact qualified observation,
 including its unreviewed and unknown-world-claim status. This changes no durable truth,
 is not a guarantee of semantic fidelity or model availability, and makes no provider call.
 

@@ -1,5 +1,6 @@
-import type { SourceIndexTarget, SourceIndexLexicalRank, SourceIndexRootNomination,
+import type { SourceIndexTarget, SourceIndexLexicalRank, SourceIndexLexicalCandidate, SourceIndexRootNomination,
   SourceIndexQueryAdmission, SourceIndexAcquisitionResult, SourceIndexNominationAccounting } from "@do-soul/alaya-protocol";
+import { taskObservationAllowsSource, taskObservationCandidates } from "./task-observation-preference.js";
 import type { StatementAssociationAvailability } from "./statement-association.js";
 import type { SourceTemplateRestorationObservation } from "./source-template-restoration.js";
 import type { TaskObservationInspection } from "./task-observation-preference.js";
@@ -15,6 +16,12 @@ export type NativeAdmissionFact =
 export type SourceIndexAcquisitionFact = Readonly<{
   kind: "lexical_candidate"; target: SourceIndexTarget["target"];
   lane: SourceIndexLexicalRank["lane"]; rank: number; lane_rank: number; bm25: number;
+  domain?: SourceIndexLexicalRank["domain"];
+}> | Readonly<{
+  kind: "source_task_inventory"; state: "active" | "inactive" | "unavailable"; reason?: string;
+  coverage: "complete" | "partial"; original: readonly SourceIndexTarget[];
+  incumbent?: readonly SourceIndexTarget[]; eligible?: readonly SourceIndexTarget[];
+  native: Pick<SourceIndexAcquisitionResult, "lexical" | "vector" | "resource_refusals" | "accounting">;
 }> | Readonly<{
   kind: "vector_inspected"; target: SourceIndexTarget["target"];
   window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number;
@@ -45,4 +52,28 @@ export type SourceIndexAcquisitionFact = Readonly<{
 /** Kind is available without constructing a payload, including count-only inspection diagnostics. */
 export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact,
   kind: SourceIndexAcquisitionFact["kind"]) => void;
+
+/** Route ranks are local to the capture domain, not a merged ranking. */
+export function observeLexicalCandidates(candidates: readonly SourceIndexLexicalCandidate[],
+  observe: (capture: () => SourceIndexAcquisitionFact) => void, domain?: SourceIndexLexicalRank["domain"]): void {
+  for (const candidate of candidates) observe(() => ({ kind: "lexical_candidate", target: candidate.source.target,
+    lane: candidate.lexical.lane, rank: candidate.lexical.rank, lane_rank: candidate.lexical.lane_rank,
+    bm25: candidate.lexical.bm25, ...(domain === undefined ? {} : { domain }) }));
+}
+
+/** Bounded diagnostic snapshot of the exact inputs to the task preference, not a second nomination. */
+export function sourceTaskInventory<N extends SourceIndexRootNomination>(input: Readonly<{
+  state: "active" | "inactive" | "unavailable"; reason?: string; restrictedComplete: boolean; sourceId?: string;
+  original: readonly (readonly [string, N])[]; nominations: ReadonlyMap<string, N>; result: SourceIndexAcquisitionResult;
+}>): SourceIndexAcquisitionFact {
+  const { lexical, vector, resource_refusals, accounting } = input.result;
+  const partial = !input.restrictedComplete || lexical.completion !== "complete" || vector.completion !== "complete"
+    || resource_refusals.length > 0 || accounting.native_unknown > 0 || accounting.resource_refused > 0;
+  return { kind: "source_task_inventory", state: input.state, ...(input.reason === undefined ? {} : { reason: input.reason }),
+    coverage: partial ? "partial" : "complete", original: input.original.map(([, row]) => row.source),
+    ...(input.state !== "active" ? {} : { incumbent: [...input.nominations.values()].map(row => row.source),
+      eligible: [...taskObservationCandidates(input.original, input.nominations).values()].map(row => row.source)
+        .filter(source => taskObservationAllowsSource(source, input.sourceId)) }),
+    native: { lexical, vector, resource_refusals, accounting } };
+}
 

@@ -45,12 +45,43 @@ function fixture() {
   const retain = vi.fn<SourcePreferenceRetention["retain"]>((capture, meter) => {
     const before = meter.spentBytes; meter.retain(capture, "fixture actual nomination retention"); return meter.spentBytes - before;
   });
-  const run = (enabled = true, supplied: SourceTaskObservationProposal = proposal) =>
+  const run = (enabled = true, supplied: SourceTaskObservationProposal = proposal, observationSourceId?: string) =>
     new SourceIndexAcquisition(repository, fieldSha256).nominateWithWitness({ ...input,
       ...(enabled ? { source_task_observation: supplied } : {}) }, () => "admitted", "original",
-    capture => { observed.push(capture()); }, true, { retain });
-  return { originals, preferred, read, retain, run, observed, proposal };
+    capture => { observed.push(capture()); }, true, { retain }, observationSourceId);
+  return { originals, preferred, repository, read, retain, run, observed, proposal };
 }
+
+it("records the pre-observation eligibility union without a proposal and preserves partial acquisition", () => {
+  const env = fixture(), baseline = env.run(false);
+  const fact = env.observed.find(row => row.kind === "source_task_inventory");
+  expect(fact).toMatchObject({ kind: "source_task_inventory", state: "active", coverage: "partial",
+    original: env.originals.map(row => row.source), incumbent: env.preferred.map(row => row.source),
+    eligible: [...env.originals, ...env.preferred].map(row => row.source) });
+  expect(baseline.result.nominations.map(row => row.source)).toEqual(env.preferred.map(row => row.source));
+  expect(env.read).not.toHaveBeenCalled();
+});
+
+it("narrows only task eligibility for a source-bound query without a proposal", () => {
+  const env = fixture();
+  env.run(false, env.proposal, "original-0");
+  expect(env.observed.find(row => row.kind === "source_task_inventory")).toMatchObject({ state: "active",
+    original: env.originals.map(row => row.source), incumbent: env.preferred.map(row => row.source),
+    eligible: [env.originals[0]!.source] });
+});
+
+it("reports an unavailable second time-domain read without inventing an incumbent", () => {
+  const env = fixture();
+  vi.spyOn(env.repository, "readQuestionTimeDomain").mockReturnValueOnce({ status: "ready", exists: true,
+    matched_root_keys: [], resources: empty }).mockReturnValueOnce({ status: "unavailable", reason: "question_time_read_failed",
+    resources: empty });
+  const result = env.run(false);
+  expect(result.result.nominations.map(row => row.source)).toEqual(env.originals.map(row => row.source));
+  expect(env.observed).toContainEqual(expect.objectContaining({ kind: "source_task_inventory", state: "unavailable",
+    coverage: "partial", reason: "question_time_read_failed", original: env.originals.map(row => row.source) }));
+  const inventory = env.observed.find(row => row.kind === "source_task_inventory");
+  expect(inventory).not.toHaveProperty("eligible");
+});
 
 it("pays and preserves the incumbent when replacement retention is refused", () => {
   const env = fixture(), baseline = env.run(false);

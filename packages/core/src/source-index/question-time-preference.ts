@@ -35,6 +35,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   refusals: SourceIndexAcquisitionResult["resource_refusals"][number][];
   occurrences?: SourceSemanticNominationOccurrence[];
   ordered: (rootKeys: readonly string[]) => void;
+  observeInventory?: (original: readonly (readonly [string, N])[], restrictedComplete: boolean, reason?: string) => void;
   beforeFinalRetention?: (original: readonly (readonly [string, N])[]) => void;
 }>): boolean {
   const { meter, absorb, nominations, counts } = input;
@@ -45,6 +46,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   absorb(domain.resources);
   if (domain.status !== "ready") {
     input.refusals.push({ stage: "nomination", phase: domain.reason });
+    input.observeInventory?.(original, false, domain.reason);
     return true;
   }
   const matching = new Set(domain.matched_root_keys);
@@ -57,8 +59,10 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   }
   nominations.clear();
   for (const [key, row] of original) if (matching.has(key)) nominations.set(key, row);
+  let completed = false;
   try {
     input.nominate(lexical?.candidates ?? []);
+    completed = true;
   } finally {
     for (const [key, row] of original) {
       if (nominations.size >= input.maxRoots) break;
@@ -69,6 +73,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     counts.admitted -= displaced;
     counts.rejected += displaced;
     counts.nomination_limit += displaced;
+    input.observeInventory?.(original, completed && (lexical === undefined || lexical.completion === "complete"));
     input.beforeFinalRetention?.(original);
     input.ordered([...nominations.keys()]);
     if (input.occurrences !== undefined) input.occurrences.splice(0, input.occurrences.length,

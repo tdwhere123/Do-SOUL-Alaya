@@ -187,6 +187,8 @@ export type ObserverReaders = Readonly<{
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
     sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
     sourceTaskObservation?: unknown;
+    /** Private observation context; the same guard also controls task proposal forwarding. */
+    taskObservationBlock?: "access_hint" | "source_guard" | "time_window" | "program" | "conditions";
   }>) => NativeSourceNomination;
   /** An admitted Q/H/C package may require a different visible source interval
    * from the native navigation window; this never changes membership or rank. */

@@ -1,5 +1,15 @@
-import { SourceSemanticResourceExhausted, type SourceSemanticResourceBudget,
-  type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type SourceIndexLexicalCandidate,
+  type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+
+/** A statement key reaches its raw root once per lexical lane, like a best vector window. */
+export function collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[],
+  meter: SourceSemanticResourceLedger): readonly SourceIndexLexicalCandidate[] {
+  if (!candidates.some(row => row.source.auxiliary !== undefined)) return candidates;
+  meter.charge(candidates.length, 0, "statement candidate collapse");
+  const seen = new Set<string>();
+  return candidates.filter(row => row.source.auxiliary === undefined ||
+    seen.size < seen.add(`${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`).size);
+}
 
 export const STATEMENT_ASSOCIATION_KEYS_PER_ROOT = 16;
 type Retained = Readonly<{ cosine: number; embedding: Float32Array; norm: number }>;

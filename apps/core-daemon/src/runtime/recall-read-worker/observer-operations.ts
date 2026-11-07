@@ -196,7 +196,13 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
       ...(invocation === "hint" ? { question_time: undefined, source_template: undefined, source_task_observation: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
-        observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined,
+        observer.sourceIndexAcquisition(invocation, "field", () => {
+          const fact = capture();
+          return fact.kind !== "source_task_inventory" ? fact : { ...fact, context: {
+            block: input.taskObservationBlock ?? (input.sourceTemplate !== undefined ? "source_template"
+              : funding !== "allowance" ? "request_funded" : null),
+            source_id: input.sourceId ?? null } };
+        }, kind), invocation === "original" && capacity !== undefined,
       invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined && input.sourceTaskObservation === undefined ? undefined : {
         ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
         retain: (capture, retentionMeter) => {
@@ -205,7 +211,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
           prepaidCapture = retained;
           return bytes;
         }
-      });
+      }, observer === undefined ? undefined : input.sourceId);
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };

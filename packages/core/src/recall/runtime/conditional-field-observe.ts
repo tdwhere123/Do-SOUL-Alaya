@@ -152,6 +152,11 @@ export function observeField(
 function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInput,
   interpretation: QueryInterpretation): FieldEngineState {
   const task = interpretation.interpretation_proposal?.source_task_observation;
+  const taskObservationBlock = input.access_hint !== undefined ? "access_hint" as const
+    : interpretation.source_guard !== undefined ? "source_guard" as const
+    : interpretation.time_window !== undefined ? "time_window" as const
+    : interpretation.program.kind !== "epsilon" ? "program" as const
+    : (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0 ? "conditions" as const : undefined;
   const acquire = () => input.readers.nominateSources?.({ workspaceId: input.workspace_id,
     query: input.query_text, authorizedScopes: nominationScopes(input.authorized_scopes),
     ...(input.source_id === undefined ? {} : { sourceId: input.source_id }),
@@ -163,10 +168,8 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     ...(interpretation.source_guard !== undefined || interpretation.interpretation_proposal?.source_template === undefined ? {}
       : { sourceTemplate: interpretation.interpretation_proposal.source_template }),
     // Explicit guards and programs need later field facts, so optional acquisition must abstain.
-    ...(task === undefined || input.access_hint !== undefined || interpretation.source_guard !== undefined ||
-      interpretation.time_window !== undefined || interpretation.program.kind !== "epsilon" ||
-      (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0
-      ? {} : { sourceTaskObservation: task }),
+    ...(task === undefined || taskObservationBlock !== undefined ? {} : { sourceTaskObservation: task }),
+    ...(taskObservationBlock === undefined ? {} : { taskObservationBlock }),
     budget: { work_units: initial.remaining_exploration, memory_bytes: initial.remaining_memory_bytes } }) ?? null;
   let captured = input.cost === undefined ? acquire() : input.cost.time("acquire", acquire);
   const requiredNominationBytes = captured?.retained_bytes ?? null;

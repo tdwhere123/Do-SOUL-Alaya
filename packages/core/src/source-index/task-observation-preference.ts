@@ -15,6 +15,16 @@ class ObservationFailure extends Error {
   constructor(readonly status: "invalid" | "unknown", readonly reason: string) { super(reason); }
 }
 
+/** A source-bound query can inspect only that source within the native candidate union. */
+export function taskObservationAllowsSource(source: SourceIndexRootNomination["source"], sourceId: string | undefined): boolean {
+  return sourceId === undefined || source.source_id === sourceId;
+}
+
+/** The original prefix and paid incumbent are the only acquisition candidates for task evidence. */
+export function taskObservationCandidates<N>(original: readonly (readonly [string, N])[], nominations: ReadonlyMap<string, N>): Map<string, N> {
+  return new Map([...original, ...nominations.entries()]);
+}
+
 /** Optional partial task evidence is considered only within the already admitted bounded pools. */
 export function preferTaskObservations<N extends SourceIndexRootNomination>(input: Readonly<{
   proposal: unknown; question: QuestionTimePreference; query: string;
@@ -52,7 +62,7 @@ export function preferTaskObservations<N extends SourceIndexRootNomination>(inpu
     }
     const size = input.original.length + input.nominations.size;
     child.charge(size + proposal.observations.length, (size + proposal.observations.length) * 64, "source task eligible pool");
-    const candidates = new Map([...input.original, ...input.nominations.entries()]);
+    const candidates = taskObservationCandidates(input.original, input.nominations);
     const inspected = inspectTaskEvidence(proposal, candidates, input, child);
     observation = inspected.observation;
     const selected = inspected.selected;
@@ -91,7 +101,7 @@ function inspectTaskEvidence<N extends SourceIndexRootNomination>(
   const bindings = new Map<string, { source: N["source"]; rows: SourceTaskObservation[] }>();
   for (const row of proposal.observations) {
     const match = byIdentity.get(taskSourceKey(row.source, meter));
-    if (match === undefined || input.retention.source_id !== undefined && match[1].source.source_id !== input.retention.source_id) continue;
+    if (match === undefined || !taskObservationAllowsSource(match[1].source, input.retention.source_id)) continue;
     const binding = bindings.get(match[0]);
     if (binding === undefined) bindings.set(match[0], { source: match[1].source, rows: [row] });
     else binding.rows.push(row);

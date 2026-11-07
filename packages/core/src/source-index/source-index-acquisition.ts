@@ -16,7 +16,7 @@ import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embe
 import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
-import { StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
+import { collapseStatementCandidates, StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
 import { restoreSourceTemplate } from "./source-template-restoration.js";
 import { preferTaskObservations } from "./task-observation-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
@@ -43,7 +43,8 @@ type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
   acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionQueryVectorCaptureCost } from "./acquisition-prices.js";
 
-import type { NativeAdmissionFact, SourceIndexAcquisitionFact, SourceIndexAcquisitionObserver } from "./acquisition-observation.js";
+import { observeLexicalCandidates, sourceTaskInventory, type NativeAdmissionFact,
+  type SourceIndexAcquisitionFact, type SourceIndexAcquisitionObserver } from "./acquisition-observation.js";
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
@@ -283,12 +284,12 @@ export class SourceIndexAcquisition {
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
     view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false,
-    preferenceRetention?: SourcePreferenceRetention) {
+    preferenceRetention?: SourcePreferenceRetention, observationSourceId?: string) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
       observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original",
-        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}) });
+        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}), observationSourceId });
     const result = query.run();
     return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
       : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
@@ -343,7 +344,8 @@ class AcquisitionQuery {
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number }; associate?: boolean; preferenceRetention?: SourcePreferenceRetention }) {
+      progress: { lexical: number; vector: number }; associate?: boolean; preferenceRetention?: SourcePreferenceRetention;
+      observationSourceId?: string }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
     this.originalQuestionTime = proposed;
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
@@ -374,16 +376,12 @@ class AcquisitionQuery {
       } else {
         const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
           this.input.allowance.max_attempts, this.meter.remaining());
-        this.lexicalCandidates = this.collapseStatementCandidates(lexical.candidates);
+        this.lexicalCandidates = collapseStatementCandidates(lexical.candidates, this.meter);
         this.lexical = { completion: lexical.completion, reason: lexical.reason,
           index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
         if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
         this.absorb(lexical.resources);
-        for (const candidate of this.lexicalCandidates) {
-          this.observe("lexical_candidate", () => ({ kind: "lexical_candidate", target: structuredClone(candidate.source.target),
-            lane: candidate.lexical.lane, rank: candidate.lexical.rank, lane_rank: candidate.lexical.lane_rank,
-            bm25: candidate.lexical.bm25 }));
-        }
+        observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact));
       }
       this.stage = "vector";
       if (this.control !== "lexical") this.scanVectors();
@@ -402,6 +400,11 @@ class AcquisitionQuery {
           this.resourceRefusals.push({ stage: "nomination", phase: domain?.reason ?? "question_time_reader_unavailable" });
         }
         if (!active && preference?.intervals.length) this.nominatePrefix(false, cursor);
+        if (!active) this.observe("source_task_inventory", () => sourceTaskInventory({
+          state: preference?.intervals.length && (domain === undefined || domain.status === "unavailable") ? "unavailable" : "inactive",
+          reason: preference === undefined ? this.originalQuestionTime === undefined ? "question_time_not_proposed" : "question_time_no_recorded_domain"
+            : domain?.status === "unavailable" ? domain.reason : domain === undefined ? "question_time_reader_unavailable" : "question_time_domain_empty",
+          restrictedComplete: true, original: [...this.nominations.entries()], nominations: this.nominations, result: this.result() }));
         if (active) {
           this.limited ||= nativePending;
           const partial = preferQuestionTime({ repository: this.repository, workspace: this.input.workspace_id,
@@ -409,6 +412,9 @@ class AcquisitionQuery {
             maxRoots: this.input.allowance.max_roots, maxAttempts: this.input.allowance.max_attempts, meter: this.meter,
             absorb: resources => this.absorb(resources), refusals: this.resourceRefusals,
             ordered: keys => { this.questionTimeOrder = keys; },
+            observeInventory: (original, restrictedComplete, reason) => this.observe("source_task_inventory", () => sourceTaskInventory({
+              state: reason === undefined ? "active" : "unavailable", reason, restrictedComplete,
+              sourceId: this.candidate?.observationSourceId, original, nominations: this.nominations, result: this.result() })),
             ...(this.input.source_template === undefined && this.input.source_task_observation !== undefined &&
               this.candidate?.preferenceRetention !== undefined && this.originalQuestionTime !== undefined ? {
               beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
@@ -440,7 +446,8 @@ class AcquisitionQuery {
             }),
             ...(this.candidate === undefined ? {} : { occurrences: this.candidate.retained }),
             nominate: candidates => {
-              this.timeRoute = true; this.lexicalCandidates = this.collapseStatementCandidates(candidates); this.vectorCandidates = [];
+              this.timeRoute = true; this.lexicalCandidates = collapseStatementCandidates(candidates, this.meter); this.vectorCandidates = [];
+              observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact), "question_time");
               const pending = this.nominatePrefix(true); this.limited ||= pending;
             } });
           this.limited ||= partial;
@@ -639,17 +646,6 @@ class AcquisitionQuery {
     this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
       + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
-  }
-
-  /** Like a vector window, a statement key reaches its raw root once per lane: only its best-ranked
-   * key competes, so repeated statements of one root neither spend attempts nor retain occurrences. */
-  private collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[]): readonly SourceIndexLexicalCandidate[] {
-    if (!candidates.some(row => row.source.auxiliary !== undefined)) return candidates;
-    this.meter.charge(candidates.length, 0, "statement candidate collapse");
-    const seen = new Set<string>();
-    // The set grows only when this root and lane are first seen.
-    return candidates.filter(row => row.source.auxiliary === undefined ||
-      seen.size < seen.add(`${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`).size);
   }
 
   private nominatePrefix(stopAtRootLimit = false,
