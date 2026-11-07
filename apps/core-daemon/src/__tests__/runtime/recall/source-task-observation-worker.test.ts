@@ -8,300 +8,200 @@ afterEach(() => { expect(isolation.violations).toEqual([]); isolation.assertSafe
 afterAll(() => isolation.restore());
 import { RecallService, capableRecallConsumerDeclaration, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteFieldEraseBarrierRepo } from "@do-soul/alaya-storage";
-import { SOURCE_TASK_OBSERVATION_PRODUCER_ID, QUESTION_TIME_PROPOSAL_PRODUCER_ID, hashLabeledIdentity,
-  SoulMemorySearchResponseSchema, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
+import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, hashLabeledIdentity, sourceSemanticCorrespondenceIdentity,
+  SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
-import { interpretSourceTaskObservationSourceLocalDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
+import { interpretSourceTaskObservationSourceLocalDecoded, buildSourceTaskObservationRequest }
+  from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, withIndexedSources, SIMULATED_CONFIGURATION } from "./source-semantic-index-acquisition.test-support.js";
+import { selectedTaskSource } from "./source-task-observation.test-support.js";
 
 const query = "What tool did I use to repair the hinge last Thursday?";
-const prefix = `${query} `;
-const sourceEvent = "I repaired the hinge with a silver wrench last Thursday.";
-const sourceText = prefix + sourceEvent;
-const standingText = `${prefix}The repair shop offers a standing 10% discount.`;
-const preferredEvent = "I repaired the hinge with a blue wrench last Thursday.";
-const preferredText = prefix + preferredEvent;
+const repair = "I repaired the hinge with a silver wrench on September 3.";
+const lamp = "I fixed the lamp with a blue wrench on September 7.";
+const sourceText = `${query} ${repair} ${lamp}`;
+const standing = "The repair shop offers a standing 10% discount.";
 const originals = Array.from({ length: 16 }, (_, index) => ({ id: `original-${index}`,
-  text: index === 0 ? sourceText : index === 1 ? standingText : `${prefix}ordinary memory ${index}.`,
+  text: index === 0 ? sourceText : `${query} ${index === 1 ? standing : `ordinary memory ${index}.`}`,
   eventTime: "2026-09-08T00:00:00.000Z", vector: [1, 0, 0] }));
 const preferred = Array.from({ length: 16 }, (_, index) => ({ id: `preferred-${index}`,
-  text: index === 0 ? `${preferredText} ${"noise ".repeat(100)}` : `${prefix}dated event ${index}. ${"noise ".repeat(100)}`,
+  text: `${query} dated event ${index}. ${"noise ".repeat(100)}`,
   eventTime: "2026-09-17T23:00:00.000Z", vector: [-1, 0, 0] }));
 const questionTime = { interpretation_clock: CLOCK, intervals: [{ start: "2026-09-17", end: "2026-09-17" }] };
-const base = { schema_version: 1, producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID,
+const baselineProposal = { schema_version: 1, producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID,
   original_query_digest: digest(query), question_time: questionTime };
+const noTime = { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null };
+const wire = { source_ref: "source1", source_excerpt: `${repair} ${lamp}`, query_excerpt: query,
+  utterance_kind: "reported_event", description: "A source-local repair report; applicability remains unknown.",
+  task_correspondence: "possible", task_role: "task_input", task_component: "reported repair tool",
+  time_status: "interpreted", time_expression: "September 3", time_anchor: "explicit_date",
+  time_start: "2026-09-03", time_end: "2026-09-03" };
 
-function proposal(target: SourceEvidenceTarget, secondTarget: SourceEvidenceTarget, coverage: "ready" | "partial" = "partial",
-  invalidTime?: { start: string; end: string; reason: string }) {
-  const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
-    sources: [{ source_ref: "source1", target, source_observed_at: originals[0]!.eventTime, body: sourceText },
-      { source_ref: "source2", target: secondTarget, source_observed_at: originals[1]!.eventTime, body: standingText }] };
-  const rawJson = JSON.stringify({ observations: [{ source_ref: "source1",
-    source_excerpt: sourceEvent, query_excerpt: query, utterance_kind: "reported_event",
-    description: "The speaker reports repairing a hinge with a wrench.", task_correspondence: "possible",
-    task_role: "requested_event", task_component: "tool used for the hinge repair", time_status: "interpreted",
-    time_expression: "last Thursday", time_anchor: "source_observation_clock", time_start: "2026-09-03", time_end: "2026-09-03" },
-    { source_ref: "source2", source_excerpt: invalidTime === undefined ? "The repair shop offers" : standingText,
-      query_excerpt: query, utterance_kind: "standing",
-      description: "A shop discount.", task_correspondence: "unresolved", task_role: null, task_component: null,
-      ...(coverage === "partial" ? { time_status: "interpreted", time_expression: "last Thursday",
-        time_anchor: "source_observation_clock", time_start: invalidTime?.start ?? "2026-09-03",
-        time_end: invalidTime?.end ?? "2026-09-03" }
-        : { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null }) }] });
-  const formed = interpretSourceTaskObservationSourceLocalDecoded(input, { rawJson, finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
-  expect(formed).toMatchObject({ classified: coverage === "partial" ? "incomplete" : "interpreted", admitted: true, outcome: {
-    diagnostics: coverage === "partial" ? [{ reason: invalidTime?.reason ?? "invalid_bound_observation", source_ref: "source2", row_index: 1 }] : [],
-    proposal: { source_task_observation: { status: coverage } } } });
-  if (formed.outcome.status !== "source_task_observation") throw new Error(JSON.stringify(formed.outcome));
-  return formed.outcome.proposal;
-}
-
-it("restores a separately timed task observation before freeze and delivers it through real SQLite and Worker", async () => {
+it("executes exact event operands before native restoration while preserving raw fallback and frozen delivery", async () => {
   await withIndexedSources([...originals, ...preferred], async fixture => {
-    let client = await fixture.openClient();
-    const makeHandler = () => {
-      const service = new RecallService({ ...createDependencies().dependencies,
-        now: () => CLOCK, readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
-        activeConstraintsPort: client.activeConstraintsPort });
-      return createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
+    const selected = await selectedTaskSource(fixture, { sourceId: "original-0", body: sourceText,
+      observedAt: originals[0]!.eventTime, query, selectedFrame: "repair", evidence: true, temporalSlot: "date",
+      frames: [{ id: "repair", text: repair, predicate: "repaired", roles: [
+        { id: "theme", text: "hinge" }, { id: "tool", text: "silver wrench" }, { id: "date", text: "September 3" }] },
+      { id: "lamp", text: lamp, predicate: "fixed", roles: [{ id: "theme", text: "lamp" },
+        { id: "tool", text: "blue wrench" }, { id: "date", text: "September 7" }] }],
+      roles: [{ id: "theme", queryExcerpt: "hinge", named: true }, { id: "tool", queryExcerpt: "What tool" }] });
+    const input = { query, interpretation_clock: CLOCK, question_time: questionTime,
+      ...selected.selection, sources: [selected.source] };
+    expect(JSON.parse(buildSourceTaskObservationRequest(input).userPrompt).sources[0].association)
+      .toEqual(selected.source.association);
+    const form = (row: object) => {
+      const result = interpretSourceTaskObservationSourceLocalDecoded(input,
+        { rawJson: JSON.stringify({ observations: [row] }), finishReason: "stop" }, "step-3.5-2603-low-json-schema-v1");
+      if (result.outcome.status !== "source_task_observation") throw new Error(JSON.stringify(result.outcome));
+      return result.outcome.proposal;
     };
-    let handler = makeHandler();
-    const resetWorker = async () => { await client.close(); client = await fixture.openClient(); handler = makeHandler(); };
+    const proposal = form(wire), observed = proposal.source_task_observation.observations[0]!;
+    const client = await fixture.openClient();
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
+      readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
+      activeConstraintsPort: client.activeConstraintsPort });
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
     const call = async (interpretation_proposal: unknown, extra: object = {}) => {
       const output = await handler.call({ toolName: "soul.recall", arguments: { ...capableRecallConsumerDeclaration(),
         query, max_results: 5, scope_class: "project", dimension: null, domain_tags: null,
         result_kind_view: "source_only", interpretation_proposal, ...extra }, context: { workspaceId: WS, runId: "run-1",
-        sessionId: "source-task-session", agentTarget: "codex" } });
+        sessionId: "bound-task-observation", agentTarget: "codex" } });
       if (!output.ok) throw new Error(JSON.stringify(output.error));
       return SoulMemorySearchResponseSchema.parse(output.output);
     };
-    const target = fixture.targets.find(row => row.source_id === "original-0")!.target;
-    const secondTarget = fixture.targets.find(row => row.source_id === "original-1")!.target;
-    const candidate = proposal(target, secondTarget),
-      baseline = await call(base), first = await call(candidate);
-    const ids = (result: typeof first) => result.index!.entries.map(entry =>
+    const ids = (page: Awaited<ReturnType<typeof call>>) => page.index!.entries.map(entry =>
       entry.target.kind === "source_evidence" ? entry.target.root_id : "memory");
+    const target = selected.source.target;
+    const baseline = await call(baselineProposal);
     expect(ids(baseline)).not.toContain(target.root_id);
-    expect(ids(first)[0]).toBe(target.root_id);
-    for (const invalidTime of [
-      { start: "2026-09-03T00:00:00Z", end: "2026-09-03", reason: "invalid_shape" },
-      { start: "2023-02-29", end: "2023-03-01", reason: "invalid_shape" },
-      { start: "2026-09-04", end: "2026-09-03", reason: "invalid_bound_observation" }
-    ]) {
-      const partial = proposal(target, secondTarget, "partial", invalidTime);
-      expect(partial.source_task_observation.observations).toHaveLength(1);
-      const delivered = await call(partial);
-      expect(ids(delivered)).toEqual(ids(first));
-      expect(delivered.index!.entries[0]!.navigation?.task_observation)
-        .toEqual(first.index!.entries[0]!.navigation?.task_observation);
-      expect(ids(delivered).slice(1)).toEqual(ids(baseline).slice(0, 4));
+    const capture = await client.observeSourceSemantics({ max_events: 2048, max_bytes: 524288 }, () => call(proposal));
+    if (capture.outcome.status !== "success") throw capture.outcome.error;
+    const first = capture.outcome.value;
+    expect(ids(first)[0], JSON.stringify(capture.observations.flatMap(frame => frame.events)
+      .filter(event => event.kind === "source_index_acquisition").map(event => event.data))).toBe(target.root_id);
+    expect(ids(first).slice(1)).toEqual(ids(baseline).slice(0, 4));
+    const withObservation = (row: unknown) => ({ ...proposal,
+      source_task_observation: { ...proposal.source_task_observation, observations: [row] } });
+    // Only the explicit operand changes. Record clock, bytes, Q, H and C remain fixed.
+    const otherEvent = { ...observed, association: { ...observed.association!,
+      temporal_operand: { kind: "slot", frame: "lamp", slot: "date" } },
+      event_time: { status: "interpreted", expression: "September 7", anchor: "explicit_date",
+        interval: { start: "2026-09-07", end: "2026-09-07" } } };
+    expect(ids(await call(withObservation(otherEvent)))).toEqual(ids(baseline));
+    expect(ids(await call(withObservation({ ...otherEvent, association: observed.association })))).toEqual(ids(baseline));
+    const qualification = first.index!.entries[0]!.navigation!.task_observation!;
+    expect(qualification).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
+      temporal_relation: "hypothesized_disjoint", conditional_binding: {
+        source_interpretation_id: selected.source.selected_interpretation.interpretation_id,
+        semantic_correspondence_id: selected.source.association.semantic_correspondence_id } });
+    expect(first.results[0]!.content_preview).toContain(repair);
+    const delivered = first.results[0]!.target;
+    if (delivered.kind !== "source_evidence" || delivered.span === undefined) throw new Error("source span required");
+    expect(Buffer.from(sourceText).subarray(delivered.span.content_start, delivered.span.content_end).toString("utf8"))
+      .toBe(first.results[0]!.content_preview);
+    expect(delivered.span.content_start).toBeLessThanOrEqual(qualification.conditional_binding!.support_span.start_byte);
+    expect(delivered.span.content_end).toBeGreaterThanOrEqual(qualification.conditional_binding!.support_span.end_byte);
+
+    const c = selected.selection.semantic_correspondences[0]!;
+    const unresolved = { ...c, correspondences: c.correspondences.filter(row => row.query_endpoint.kind !== "referent") };
+    const unresolvedProposal = { ...proposal, source_task_observation: { ...proposal.source_task_observation,
+      semantic_correspondences: [unresolved], observations: [{ ...observed, association: { ...observed.association!,
+        semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(unresolved, fieldContractSha256) } }] } };
+    expect(ids(await call(unresolvedProposal))).toEqual(ids(baseline));
+    for (const unbound of [
+      { ...proposal.source_task_observation, query_semantics: undefined },
+      { ...proposal.source_task_observation, semantic_correspondences: [] },
+      { ...proposal.source_task_observation, observations: [{ ...observed, association: undefined }] },
+      { status: "failed", reason: "not_executed" }, { status: "ready", observations: "malformed" }
+    ]) expect(ids(await call({ ...proposal, source_task_observation: unbound }))).toEqual(ids(baseline));
+    for (const row of [
+      { ...observed, source: { ...target, source_version: "stale" } },
+      { ...observed, source: { ...target, content_digest: digest("other bytes") } },
+      { ...observed, source_observed_at: CLOCK },
+      { ...observed, source_excerpt: { ...observed.source_excerpt, text: "altered bytes" } }
+    ]) expect(ids(await call(withObservation(row)))).toEqual(ids(baseline));
+    // Descriptive text has no execution authority once endpoints are selected.
+    const relabeled = await call(withObservation({ ...observed,
+      task_correspondence: { status: "possible", role: "task_input", component: "irrelevant wording" } }));
+    expect(ids(relabeled)).toEqual(ids(first));
+    const unknownTime = await call(form({ ...wire, ...noTime }));
+    expect(ids(unknownTime)).toEqual(ids(first));
+    expect(unknownTime.index!.entries[0]!.navigation!.task_observation).toMatchObject({ temporal_relation: "unavailable",
+      world_claim: "unknown", observation: { association: { target: { kind: "evidence", input: 0 } } } });
+    for (const hard of [{ since: "2026-09-17T00:00:00.000Z" }, { until: "2026-09-07T23:59:59.999Z" }]) {
+      expect(ids(await call(proposal, hard))).toEqual(ids(await call(baselineProposal, hard)));
     }
-    const readyCandidate = proposal(target, secondTarget, "ready");
-    expect(readyCandidate.source_task_observation.observations).toHaveLength(2);
-    expect(fixture.targets).toHaveLength(32); // Ready covers the supplied pair, not the native candidate inventory.
-    const ready = await call(readyCandidate);
-    expect(ids(ready)).toEqual(ids(first));
-    expect(ready.index!.entries[0]!.navigation?.task_observation).toEqual(first.index!.entries[0]!.navigation?.task_observation);
-    for (const result of [first, ready]) {
-      expect(result.index!.entries.every(entry =>
-        entry.navigation?.task_observation?.observation.source.root_id !== secondTarget.root_id)).toBe(true);
-    }
-    expect(first.index!.result_version).toBe("ordinary-native-field.v12");
-    for (const result_version of ["ordinary-native-field.v10", "ordinary-native-field.v11"]) {
-      const outdated = await call(candidate, { continuation: { ...first.index!.continuation!, result_version } });
-      expect(outdated.index?.completeness).toMatchObject({ logical_index: "invalidated", observed_coverage: "invalidated" });
-    }
-    expect(first.index!.entries[0]!.navigation?.task_observation).toMatchObject({ semantic_status: "unreviewed",
-      world_claim: "unknown", temporal_relation: "hypothesized_disjoint", observation: { source: target } });
-    expect(first.results[0]).toBeDefined();
+    expect(ids(await call(proposal, { scope_class: "global_core" }))).toEqual([]);
     expect(first.index!.continuation).not.toBeNull();
-    const resume = { continuation: first.index!.continuation };
-    const next = await call(candidate, resume), replay = await call(candidate, resume);
-    expect(replay.results).toEqual(next.results);
-    expect(replay.index!.entries).toEqual(next.index!.entries);
-    const allIds = async (result: typeof first, input: unknown) => {
-      const found = ids(result); let continuation = result.index!.continuation;
-      for (let page = 0; continuation !== null && page < 8; page++) {
-        const next = await call(input, { continuation }); found.push(...ids(next)); continuation = next.index!.continuation;
-      }
-      expect(continuation).toBeNull(); return found;
-    };
-    expect(await allIds(baseline, base)).not.toContain(target.root_id);
-    const admitted = await allIds(first, candidate);
-    expect(admitted).toHaveLength(16); expect(admitted).toContain(target.root_id);
-
-    const laterTarget = fixture.targets.find(row => row.source_id === "preferred-0")!.target;
-    const old = candidate.source_task_observation.observations[0]!;
-    const later = { ...old, source: laterTarget, source_observed_at: preferred[0]!.eventTime,
-      source_excerpt: { start_byte: Buffer.byteLength(prefix), end_byte: Buffer.byteLength(preferredText), text: preferredEvent },
-      utterance: { kind: "reported_event", description: "The speaker reports a different hinge repair." },
-      event_time: { ...old.event_time, interval: { start: "2026-09-17", end: "2026-09-17" } } };
-    const both = { ...candidate, source_task_observation: { ...candidate.source_task_observation, observations: [old, later] } };
-    const unknownTime = { ...both, source_task_observation: { ...both.source_task_observation,
-      observations: [old, { ...later, event_time: { status: "unavailable" } }] } };
-    const overlapPage = await call(both), unknownPage = await call(unknownTime);
-    expect(ids(overlapPage).slice(0, 2)).toEqual([laterTarget.root_id, target.root_id]);
-    expect(ids(unknownPage).slice(0, 2)).toEqual([target.root_id, laterTarget.root_id]);
-    expect(overlapPage.index!.entries[0]!.navigation?.task_observation?.temporal_relation).toBe("hypothesized_overlap");
-    expect(unknownPage.index!.entries[1]!.navigation?.task_observation?.temporal_relation).toBe("unavailable");
-    expect(new Set(await allIds(overlapPage, both))).toEqual(new Set(await allIds(unknownPage, unknownTime)));
-
-    await resetWorker();
-    const standingTarget = fixture.targets.find(row => row.source_id === "original-1")!.target;
-    const standingQuery = "What discount did the repair shop offer for the hinge last Thursday?";
-    const standingBase = { ...base, original_query_digest: digest(standingQuery) };
-    const standingObservation = { ...old, source: standingTarget, source_observed_at: originals[1]!.eventTime,
-      source_excerpt: { start_byte: 0, end_byte: Buffer.byteLength(standingText), text: standingText },
-      query_excerpt: { start_byte: 0, end_byte: Buffer.byteLength(standingQuery), text: standingQuery },
-      utterance: { kind: "standing", description: "The repair shop offers a standing discount." },
-      task_correspondence: { status: "possible", role: "task_input", component: "the repair shop's discount percentage" },
-      event_time: { status: "unavailable" } };
-    const standing = { ...standingBase, producer_id: SOURCE_TASK_OBSERVATION_PRODUCER_ID,
-      source_task_observation: { status: "ready", interpretation_clock: CLOCK, observations: [standingObservation] } };
-    const standingBaseline = await call(standingBase, { query: standingQuery });
-    const standingPage = await call(standing, { query: standingQuery });
-    expect(ids(standingBaseline)).not.toContain(standingTarget.root_id);
-    expect(ids(standingPage)[0]).toBe(standingTarget.root_id);
-    expect(standingPage.index!.entries[0]!.navigation?.task_observation).toMatchObject({
-      temporal_relation: "unavailable", world_claim: "unknown", observation: { utterance: { kind: "standing" } } });
-    for (const task_correspondence of [{ status: "unresolved" }, { status: "unsupported" },
-      { status: "possible", role: "requested_event", component: "generic shop topic" }]) {
-      const generic = { ...standing, source_task_observation: { ...standing.source_task_observation,
-        observations: [{ ...standingObservation, task_correspondence }] } };
-      expect(ids(await call(generic, { query: standingQuery }))).toEqual(ids(standingBaseline));
+    const next = await call(proposal, { continuation: first.index!.continuation });
+    expect((await call(proposal, { continuation: first.index!.continuation })).results).toEqual(next.results);
+    expect(ids(next)).not.toContain(target.root_id);
+    const found = [...ids(first), ...ids(next)];
+    let continuation = next.index!.continuation;
+    for (let page = 0; continuation !== null && page < 8; page++) {
+      const nextPage = await call(proposal, { continuation }); found.push(...ids(nextPage)); continuation = nextPage.index!.continuation;
     }
-
-    await resetWorker();
-    const sameAsBaseline = async (observation: unknown) => {
-      const result = await call({ ...candidate, source_task_observation: observation });
-      expect(ids(result)).toEqual(ids(baseline));
-    };
-    const obs = candidate.source_task_observation.observations[0]!;
-    await sameAsBaseline({ ...candidate.source_task_observation, observations: [{ ...obs,
-      source_observed_at: "2026-09-09T00:00:00.000Z" }] });
-    await sameAsBaseline({ ...candidate.source_task_observation, observations: [{ ...obs,
-      source_excerpt: { ...obs.source_excerpt, text: sourceEvent.replace("silver", "golden") } }] });
-    await sameAsBaseline({ ...candidate.source_task_observation, observations: [{ ...obs,
-      query_excerpt: { ...obs.query_excerpt, text: "stale query details" } }] });
-    await sameAsBaseline({ ...candidate.source_task_observation, observations: [{ ...obs, task_correspondence: { status: "unresolved" } }] });
-    await sameAsBaseline({ ...candidate.source_task_observation, observations: [{ ...obs, task_correspondence: { status: "unsupported" } }] });
-    await sameAsBaseline({ status: "failed", reason: "provider_failed" });
-    await sameAsBaseline({ status: "unavailable", reason: "not_attempted" });
-    await sameAsBaseline({ status: "ready", observations: "malformed" });
-    await resetWorker();
-    const noObservation = await call(undefined);
-    const wrongQuery = await call({ ...candidate, original_query_digest: digest("different question") });
-    expect(ids(wrongQuery)).toEqual(ids(noObservation));
-    const wrongQuestionClock = await call({ ...candidate, question_time: { ...questionTime,
-      interpretation_clock: "2026-09-17T00:00:00.000Z" } });
-    expect(ids(wrongQuestionClock)).toEqual(ids(noObservation));
-    await resetWorker();
-    const hard = { since: "2026-09-17T00:00:00.000Z", until: "2026-09-17T23:59:59.999Z" };
-    expect(ids(await call(candidate, hard))).toEqual(ids(await call(base, hard)));
-    for (const guard of [{ since: hard.since }, { until: "2026-09-07T23:59:59.999Z" }]) {
-      expect(ids(await call(candidate, guard))).toEqual(ids(await call(base, guard)));
-    }
-    expect(ids(await call(candidate, { scope_class: "global_core" }))).toEqual([]);
-    const limited = fixture.repository.readTaskObservation(fixture.targets.find(row => row.source_id === "original-0")!,
-      { start_byte: 0, end_byte: Buffer.byteLength(sourceText) }, { work_units: 0, memory_bytes: 0 });
-    expect(limited.status).toBe("unknown");
-
-    await resetWorker();
-    const beforeErase = await call(candidate);
-    expect(ids(beforeErase)[0]).toBe(target.root_id);
-    expect(beforeErase.index!.continuation).not.toBeNull();
+    expect(continuation).toBeNull(); expect(new Set(found).size).toBe(16);
+    expect(ids(await call(undefined, { query: "silver wrench" }))).toContain(target.root_id);
+    await selected.withdraw();
+    const withdrawn = await call(proposal);
+    expect(ids(withdrawn)).toEqual(ids(baseline));
+    expect(withdrawn.index!.entries.every(entry => entry.navigation?.task_observation === undefined)).toBe(true);
+    expect(ids(await call(undefined, { query: "silver wrench" }))).toContain(target.root_id);
+    expect((await call(proposal, { continuation: first.index!.continuation })).index!.completeness.logical_index).toBe("invalidated");
     const eraser = new SqliteFieldEraseBarrierRepo(fixture.database, fieldContractSha256);
     eraser.apply({ identity: hashLabeledIdentity("erase_barrier", [WS, "source_record", target.root_id, ""], fieldContractSha256),
-      barrier_id: "erase-source-task-fixture", workspace_id: WS, generation_id: null,
+      barrier_id: "erase-bound-task-source", workspace_id: WS, generation_id: null,
       subject_kind: "source_record", subject_id: target.root_id, erased_at: CLOCK });
-    const stale = await call(candidate, { continuation: beforeErase.index!.continuation });
-    expect(stale.index?.completeness).toMatchObject({ logical_index: "invalidated", observed_coverage: "invalidated" });
-    const afterErase = await call(candidate);
-    expect(ids(afterErase)).not.toContain(target.root_id);
-    expect(afterErase.index!.entries.every(entry => entry.navigation?.task_observation?.observation.source.root_id !== target.root_id)).toBe(true);
-    await fixture.admit({ id: "original-1", text: "hinge repair discount needle replacement", eventTime: CLOCK }, "2");
-    expect(ids(await call(standing, { query: standingQuery }))).not.toContain(standingTarget.root_id);
+    const stale = await call(proposal, { continuation: first.index!.continuation });
+    expect(stale.index!.completeness.logical_index).toBe("invalidated");
+    expect(ids(await call(proposal))).not.toContain(target.root_id);
   }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, max_input_tokens: 4096 } });
-}, 30_000);
+}, 60_000);
 
-it("delivers earlier task inputs without asserting current applicability or an event-time match", async () => {
+it("admits a standing input without occurrence-time support and keeps malformed partial formation explicit", async () => {
   const taskQuery = "What discount did the repair shop offer for the hinge last Thursday?";
-  const reports = ["I used a 10% discount when repairing my hinge last Thursday.",
-    "The repair shop currently offers a standing 10% discount.", "I attended a concert last Thursday.",
-    "Can you find a repair shop discount on September 17?"];
-  const changedOriginals = originals.map((source, index) => index < reports.length
-    ? { ...source, text: prefix + reports[index]! } : source);
-  await withIndexedSources([...changedOriginals, ...preferred], async fixture => {
+  await withIndexedSources([...originals, ...preferred], async fixture => {
+    const selected = await selectedTaskSource(fixture, { sourceId: "original-1", body: originals[1]!.text,
+      observedAt: originals[1]!.eventTime, query: taskQuery, selectedFrame: "offer", evidence: true,
+      frames: [{ id: "offer", text: standing, predicate: "offers", roles: [{ id: "discount", text: "10%" }] }],
+      roles: [{ id: "discount", queryExcerpt: "What discount" }] });
+    const input = { query: taskQuery, interpretation_clock: CLOCK, question_time: questionTime, ...selected.selection,
+      sources: [selected.source, { source_ref: "source2", target: fixture.targets.find(row => row.source_id === "original-0")!.target,
+        source_observed_at: originals[0]!.eventTime, body: sourceText }] };
+    const row = { ...wire, ...noTime, source_excerpt: standing, query_excerpt: taskQuery, utterance_kind: "standing" };
+    const formation = interpretSourceTaskObservationSourceLocalDecoded(input, { rawJson: JSON.stringify({ observations: [row,
+      { ...wire, source_ref: "source2", query_excerpt: taskQuery, time_start: "not-a-calendar-date" }] }), finishReason: "stop" },
+    "step-3.5-2603-low-json-schema-v1");
+    expect(formation).toMatchObject({ classified: "incomplete", admitted: true,
+      outcome: { proposal: { source_task_observation: { status: "partial" } }, diagnostics: [{ reason: "invalid_shape" }] } });
+    if (formation.outcome.status !== "source_task_observation") throw new Error("partial observation expected");
     const client = await fixture.openClient();
-    try {
-      const service = new RecallService({ ...createDependencies().dependencies, now: () => CLOCK,
-        readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
-        activeConstraintsPort: client.activeConstraintsPort });
-      const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: service });
-      const call = async (interpretation_proposal: unknown) => {
-        const result = await handler.call({ toolName: "soul.recall", arguments: { ...capableRecallConsumerDeclaration(),
-          query: taskQuery, max_results: 5, scope_class: "project", dimension: null, domain_tags: null,
-          result_kind_view: "source_only", interpretation_proposal }, context: { workspaceId: WS, runId: "run-1",
-          sessionId: "source-task-input-session", agentTarget: "codex" } });
-        if (!result.ok) throw new Error(JSON.stringify(result.error));
-        return SoulMemorySearchResponseSchema.parse(result.output);
-      };
-      const sources = changedOriginals.slice(0, 6).map((source, index) => ({ source_ref: `source${index + 1}`,
-        target: fixture.targets.find(row => row.source_id === source.id)!.target,
-        source_observed_at: source.eventTime, body: source.text }));
-      const captured = { query: taskQuery, interpretation_clock: CLOCK, question_time: questionTime, sources };
-      const noTime = { time_status: "unavailable", time_expression: null, time_anchor: null, time_start: null, time_end: null };
-      const common = { query_excerpt: taskQuery, description: "A source-local report." };
-      const rawJson = JSON.stringify({ observations: [
-        { ...common, ...noTime, source_ref: "source1", source_excerpt: reports[0], utterance_kind: "reported_event",
-          task_correspondence: "possible", task_role: "task_input", task_component: "discount percentage" },
-        { ...common, source_ref: "source2", source_excerpt: reports[1], utterance_kind: "standing",
-          task_correspondence: "possible", task_role: "task_input", task_component: "discount percentage",
-          time_status: "interpreted", time_expression: "currently", time_anchor: "source_observation_clock",
-          time_start: "2026-09-08", time_end: "2026-09-08" },
-        { ...common, ...noTime, source_ref: "source3", source_excerpt: reports[2], utterance_kind: "reported_event",
-          task_correspondence: "unsupported", task_role: null, task_component: null },
-        { ...common, source_ref: "source4", source_excerpt: reports[3], utterance_kind: "request",
-          task_correspondence: "possible", task_role: "requested_event", task_component: "shop discount event",
-          time_status: "interpreted", time_expression: "September 17", time_anchor: "explicit_date",
-          time_start: "2026-09-17", time_end: "2026-09-17" },
-        { ...common, ...noTime, source_ref: "source5", source_excerpt: "invented quotation", utterance_kind: "request",
-          task_correspondence: "unresolved", task_role: null, task_component: null }
-      ] });
-      const formed = interpretSourceTaskObservationSourceLocalDecoded(captured, { rawJson, finishReason: "stop" },
-        "step-3.5-2603-low-json-schema-v1");
-      expect(formed).toMatchObject({ classified: "incomplete", admitted: true, outcome: {
-        diagnostics: [{ reason: "quote_missing_or_ambiguous", source_ref: "source5", row_index: 4 },
-          { reason: "missing_source_ref", source_ref: "source6" }],
-        proposal: { source_task_observation: { status: "partial" } } } });
-      if (formed.outcome.status !== "source_task_observation") throw new Error("expected a partial proposal");
-      expect(formed.outcome.proposal.source_task_observation.observations).toHaveLength(4);
-      const baseline = await call({ ...base, original_query_digest: digest(taskQuery) });
-      const result = await call(formed.outcome.proposal);
-      const rootIds = (page: typeof result) => page.index!.entries.map(entry =>
-        entry.target.kind === "source_evidence" ? entry.target.root_id : "memory");
-      expect(rootIds(baseline)).not.toContain(sources[0]!.target.root_id);
-      expect(rootIds(baseline)).not.toContain(sources[1]!.target.root_id);
-      expect(new Set(rootIds(result).slice(0, 2))).toEqual(new Set([sources[0]!.target.root_id, sources[1]!.target.root_id]));
-      expect(rootIds(result).slice(2)).toEqual(rootIds(baseline).slice(0, 3));
-      for (const source of sources.slice(2)) {
-        const entry = result.index!.entries.find(item => item.target.kind === "source_evidence" && item.target.root_id === source.target.root_id);
-        expect(entry?.navigation?.task_observation).toBeUndefined();
-      }
-      const observations = sources.slice(0, 2).map(source => result.index!.entries.find(entry =>
-        entry.target.kind === "source_evidence" && entry.target.root_id === source.target.root_id)?.navigation?.task_observation);
-      expect(observations[0]).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
-        temporal_relation: "unavailable", observation: { source: sources[0]!.target,
-          source_observed_at: sources[0]!.source_observed_at, source_excerpt: { text: reports[0] },
-          utterance: { kind: "reported_event" }, task_correspondence: { status: "possible", role: "task_input" },
-          event_time: { status: "unavailable" } } });
-      expect(observations[1]).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
-        temporal_relation: "unavailable", observation: { source: sources[1]!.target,
-          source_observed_at: sources[1]!.source_observed_at, source_excerpt: { text: reports[1] },
-          utterance: { kind: "standing" }, task_correspondence: { status: "possible", role: "task_input" },
-          event_time: { status: "interpreted", interval: { start: "2026-09-08", end: "2026-09-08" } } } });
-    } finally { await client.close(); }
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK, recallService: new RecallService({
+      ...createDependencies().dependencies, now: () => CLOCK, readSnapshot: client.readSnapshot,
+      conditionalFieldPort: client.conditionalFieldPort, activeConstraintsPort: client.activeConstraintsPort }) });
+    const call = async (proposal: unknown) => {
+      const result = await handler.call({ toolName: "soul.recall", arguments: { ...capableRecallConsumerDeclaration(),
+        query: taskQuery, max_results: 5, scope_class: "project", dimension: null, domain_tags: null,
+        result_kind_view: "source_only", interpretation_proposal: proposal }, context: { workspaceId: WS, runId: "run-1",
+        sessionId: "standing-task-input", agentTarget: "codex" } });
+      if (!result.ok) throw new Error(JSON.stringify(result.error));
+      return SoulMemorySearchResponseSchema.parse(result.output);
+    };
+    const baseline = await call({ ...baselineProposal, original_query_digest: digest(taskQuery) });
+    expect(baseline.index!.entries.every(entry => entry.target.kind !== "source_evidence"
+      || entry.target.root_id !== selected.source.target.root_id)).toBe(true);
+    const page = await call(formation.outcome.proposal);
+    expect(page.index!.entries[0]!.target).toMatchObject({ root_id: selected.source.target.root_id });
+    expect(page.index!.entries[0]!.navigation!.task_observation).toMatchObject({ temporal_relation: "unavailable",
+      world_claim: "unknown", observation: { utterance: { kind: "standing" }, association: { target: { kind: "evidence" } } } });
+    expect(page.results[0]!.content_preview).toContain(standing);
+    await fixture.admit({ id: "original-1", text: "A replacement discount record.", eventTime: CLOCK }, "2");
+    const replaced = await call(formation.outcome.proposal);
+    expect(replaced.index!.entries.every(entry => entry.target.kind !== "source_evidence"
+      || entry.target.root_id !== selected.source.target.root_id)).toBe(true);
   }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, max_input_tokens: 4096 } });
-}, 30_000);
+}, 60_000);

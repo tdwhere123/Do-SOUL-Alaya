@@ -319,67 +319,71 @@ and matching source coordinates. These are navigation witnesses, not entailment 
 event-time proof; quoted or negated text can still match a literal frame. Proposal absence
 preserves the existing path and Recall makes no new provider or embedding calls.
 
-Protocol 38.0.0 adds the opt-in `alaya.query.source-task-observation.v1` producer.
-Its [typed proposal and formation schemas](../../packages/protocol/src/recall/conditional-field/source-task-observation.ts)
-carry bounded, unreviewed source-local utterances and possible task-component
-correspondences, not Q/H/C or world claims. The optional query field accepts untrusted
-values so malformed observation payloads can be refused without rejecting raw source
-access. Core binds the original query and its clock, and compares the proposed excerpt
-and source-observation clock with Storage's current raw read. Storage rechecks each
-nominated root's currentness, dependencies and erasure, and reads a complete UTF-8
-excerpt. If discovery nominated an auxiliary statement, Storage first admits that complete
-statement binding and its dependencies, then reads from its bound current raw source.
-Excerpt coordinates address the raw source;
-the auxiliary key's `body_bytes` and supporting `source_span` are not raw excerpt bounds.
-The discovery location remains navigation provenance, not a payload restriction or a
-claim that the observed excerpt was delivered; the delivered span and preview remain
-subject to the existing bounded payload rules. A reported event possibly corresponding
-to the asked event or task input, or a standing statement possibly supplying a named task input,
-may participate in the existing bounded preference when the independently proposed
-question-time domain is active. Without that active phase the observation does not
-reorder acquisition. A standing statement's applicability is unavailable, not presumed
-current. A possible `task_input` means a source-qualified report could inform a named
-question component; it does not assert that the report is true or applies at question time.
-Unknown applicability alone does not make the correspondence unsupported or unresolved.
-Those two states concern correspondence itself and neither removes independent raw
-eligibility. Requests, recommendations and intentions do not report an occurred event.
-The model-proposed event time uses its own source clock or an explicit date, never the
-question clock. The comparison with independently proposed question intervals is
-`hypothesized_overlap`, `hypothesized_disjoint`, or `unavailable`; it does not determine
-current applicability, and overlap does not identify the event. Within
-admitted partial-task evidence, hypothesized overlap precedes other task evidence, with
-stable original order inside each tier. Incumbents remain fallback under the same 16-root
-cap. Guarded programs, explicit source filters and prepared access hints abstain from this
-optional acquisition step; failed, malformed, unavailable, unbound or resource-refused
-observations preserve the paid incumbent. Proposal validation runs after incumbent
-retention, within the remaining optional allowance. Source-template and source-task proposals do not compose into a
-second schedule. The private native observer can capture the original admitted prefix and the time-preferred
-incumbent at the boundary before either optional inspection, even when no task proposal was supplied. Its eligibility
-is the same bounded union used by task inspection, narrowed by an explicit source id when present; the recorded
-source identities retain their complete native bindings. A guard, inactive question-time domain, unavailable read,
-partial acquisition or incomplete observer frame is not a complete empty eligibility set. This diagnostic is not a
-new route, an unbounded census, a public receipt or proof of source relevance. Restricted lexical rank facts retain
-their `question_time` domain independently of unrestricted rank and window provenance.
-A delivered source's navigation carries the exact qualified observation,
-including its unreviewed and unknown-world-claim status. This changes no durable truth,
-is not a guarantee of semantic fidelity or model availability, and makes no provider call.
+Protocol 39.0.0 deepens the opt-in `alaya.query.source-task-observation.v1`
+phase. The [observation authority](../../packages/protocol/src/recall/conditional-field/source-task-observation.ts)
+carries explicit Q branch, H frame and optional temporal-slot endpoints plus the
+selected correspondence identity. The [formation input](../../packages/protocol/src/recall/conditional-field/source-task-observation-formation.ts)
+supplies Q, C and the exact selected published H. Descriptions and the retained
+legacy `task_correspondence.component` are not executable semantics. Missing Q/H/C
+or endpoints mean unavailable for this association computation, not source absence.
+
+After retaining the paid incumbent, Core binds the original query and clock and
+compares the observation excerpt and source clock with Storage's current raw read.
+Storage rechecks each nomination's currentness, dependencies and erasure. Auxiliary
+statement nominations first pass their own complete admission, then read their current
+raw source; their statement `body_bytes` and `source_span` are not raw excerpt bounds.
+The Worker loads the selected H through the existing publication/source verification
+owner in the same snapshot. No supplied interpretation ID bypasses lifecycle, scope,
+source version, digest or literal location verification.
+
+[Conditional binding](../../packages/core/src/source-index/task-observation-binding.ts)
+uses the existing Q/H/C admission and `executeSourceSemanticInterpretation` →
+`observeField` computation. Only a supported binding of the supplied Q branch/frame
+to the supplied H frame can enter the existing task preference. Existing branch-local
+evidence support remains distinct from complete-query support and task-operation execution.
+An unresolved branch is not a temporal mismatch. No possibly-equivalent C relation,
+component-string comparison, timestamp-derived event identity or confidence score is used.
+
+An interpreted interval must explicitly name a slot on that same H frame. Its bound
+referent must support the exact temporal expression at the observation's raw-source
+UTF-8 coordinates. This qualifies a fallible calendar-interval observation of that
+operand; it does not equate a date window with an entity or prove fidelity, occurrence,
+applicability or world truth. Comparison with the independently proposed question
+intervals remains `hypothesized_overlap`, `hypothesized_disjoint` or `unavailable`.
+A standing statement may supply a supported evidence-input branch without an
+occurrence-time or current-truth gate. A binding with unavailable time establishes no temporal match; its conditional Q/H/C
+claim remains only a source-local report.
+
+The independently active question-time phase, bounded original/incumbent union,
+16-root cap and existing overlap/other-task-evidence/incumbent order remain the owners.
+No support-first library queue or input-coverage selector is added. Hard guards,
+explicit source filters, prepared hints and non-epsilon programs still abstain before
+optional acquisition. Source-template and task-observation proposals do not compose
+into a second schedule. Validation, verified H reads and conditional computation share
+the remaining optional allowance; resource refusal preserves the paid incumbent.
+There is no provider call, index repair, extra quota or default promotion.
+
+Navigation retains the actual conditional-computation and binding identities, the
+unreviewed observation and its required source-support extent. The shared payload fit
+uses that explicit extent, not the discovery window, while keeping its normal byte
+limits and continuation accounting. A navigation observation is not itself a claim that
+its entire support was delivered: the result's actual span/preview remains authoritative.
+Source record, interpretation and field continuation invalidation remain independent.
+
+The private native observer captures the original and incumbent prefixes before optional
+inspection. It remains bounded diagnostic evidence, not a public eligibility census,
+source relevance proof or new route. Missing/partial acquisition is not complete-empty.
 
 The [formation owner](../../apps/bench-runner/src/runs/source-task-observation/formation.ts)
-requests source-local rows only. It derives ready coverage when every supplied source has
-one admitted row and no row diagnostics; an admitted subset is partial. Coverage is
-relative only to the explicitly supplied set, not all eligible Recall candidates or their
-relevance. Unobserved time-preference incumbents may remain fallback. Unsupported or
-unresolved correspondence can still be available observations, never fact truth. Empty or
-no-admissible output, missing/duplicate/malformed source rows, invalid global JSON and
-incomplete transport retain explicit failures or diagnostics. A source without a temporal
-expression can still supply a unique bound excerpt, with event time unavailable; missing
-rows remain missing rather than being relabeled observed. The fresh
-`source-task-observation.calendar-day-wire.v5` formation/cache identity does not
-reuse earlier requests or raw attempts. Its nullable wire endpoints derive from the
-same calendar-day schema as admission; datetime strings are not normalized. Malformed
-endpoints are refused per row as `invalid_shape`; reversed intervals remain
-`invalid_bound_observation`. Under invariant §25 this wire-only change preserves the
-Protocol 38 MCP request/response schemas, runtime proposal and native selection contract.
+copies the caller's selected endpoints into source-local rows; it cannot manufacture
+them from generated words or dates. Ready coverage means one admitted row per supplied
+source with no row diagnostics, not coverage of all Recall candidates or relevance.
+An admitted subset is partial; malformed, missing, duplicate or incomplete rows remain
+explicit. The `source-task-observation.selected-endpoints.v6` request/cache identity
+does not readmit earlier requests or raw attempts. Legacy unbound observations remain
+parseable for source-local diagnostics and Protocol 38 archive reading, but cannot
+obtain current task-qualified preference. Temporal assertions and durable truth are
+unchanged. Mechanism tests establish no natural-data benefit.
 
 ## Statement-key association at slot 5
 
@@ -434,8 +438,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v12`, Protocol
-38.0.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v13`, Protocol
+39.0.0; library field protocol 13). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

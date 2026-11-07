@@ -19,6 +19,7 @@ export type SourcePreferenceRetention = Readonly<{
     question_time_order: readonly string[]; task_observations?: readonly QualifiedTaskObservation[] }>,
     meter: SourceSemanticResourceLedger) => number;
   source_id?: string;
+  readInterpretation?: import("./task-observation-binding.js").TaskInterpretationReader;
 }>;
 
 type MutableAccounting = { -readonly [K in keyof SourceIndexNominationAccounting]: SourceIndexNominationAccounting[K] };

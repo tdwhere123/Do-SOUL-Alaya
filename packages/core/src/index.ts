@@ -6,6 +6,7 @@ export { recallExecutionRetention, recallRetentionBytes, RECALL_RETENTION_TTL_MS
 export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.js";
 export { acquireProfiledSourceIndex } from "./source-index/source-index-profiled-acquisition.js";
 export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
+export type { TaskInterpretationReader } from "./source-index/task-observation-binding.js";
 export { restrictStatementAssociation, type StatementAssociation } from "./source-index/statement-association.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";

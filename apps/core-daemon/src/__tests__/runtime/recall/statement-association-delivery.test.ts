@@ -62,7 +62,7 @@ function sourceOrder(env: Environment, readers: ObserverReaders): string[] {
   for (let page = 0; page < 10 && continuation !== null; page++) {
     const result = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(
       { ...request, ...(continuation === undefined ? {} : { continuation }) }))();
-    expect(result.index.result_version).toBe("ordinary-native-field.v12");
+    expect(result.index.result_version).toBe("ordinary-native-field.v13");
     const page = result.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : []);
     ids.push(...page); pageSizes.push(page.length);
     continuation = result.index.continuation;

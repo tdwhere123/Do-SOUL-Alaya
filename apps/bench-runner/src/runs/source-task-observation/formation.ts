@@ -2,13 +2,16 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SOURCE_TASK_OBSERVATION_PRODUCER_ID, SourceTaskObservationDraftSchema,
   SourceTaskObservationFormationInputSchema, SourceTaskObservationProposalSchema, canonicalJson, compareUtcInstants,
+  sourceSemanticCorrespondenceIdentity,
   type SourceTaskObservation, type SourceTaskObservationFormationInput } from "@do-soul/alaya-protocol";
+import { admitSourceSemanticCorrespondence, fieldContractSha256 } from "@do-soul/alaya-core";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 
 /** Fresh wire/cache identity: previous observation requests and their raw attempts are not reusable. */
-export const SOURCE_TASK_OBSERVATION_FORMATION_ID = "source-task-observation.calendar-day-wire.v5";
+export const SOURCE_TASK_OBSERVATION_FORMATION_ID = "source-task-observation.selected-endpoints.v6";
 
 export const SOURCE_TASK_OBSERVATION_SYSTEM_PROMPT = `Describe source-local task evidence, not an answer or ranking.
+When a source has a selected association, describe that exact supplied source_frame under its selected Q/H/C interpretation. An interpreted time must quote support of the supplied temporal_operand on that frame, not a date of another event. These endpoints are fixed input: do not infer, replace or invent them. If its operand is unknown or absent, report time unavailable. The host independently executes the selected branch; your descriptive task correspondence is not executable relevance.
 For each supplied source, identify one literal utterance and explain its reported role. Separate a reported event from a request, recommendation, standing statement, prospective statement or uncertainty. A request, intention or recommendation is not a report that an event occurred.
 Possible correspondence means the utterance could inform a specific question component, not that it answers the question. Set task_role to requested_event only for a report of an occurrence that could be the asked event; that possibility does not establish event identity. Use task_input for a report that could supply a named input to the task. A report about the same subject and requested input can be a possible task_input even when its applicability at question time is unknown. Describe it as a source report, without asserting that it persisted or applies later. Topical overlap, an unrelated completed event, a shared merchant, or timestamp proximity is not enough. Unsupported means the utterance does not address a question component; unresolved means its task correspondence cannot be determined. Unknown applicability alone is not non-correspondence or unresolved correspondence. For unsupported or unresolved, set task_role and task_component to null. None proves truth, occurrence, event identity or applicability.
 Quote an exact unique contiguous excerpt from the question and from that source, including for unsupported or unresolved rows. Do not normalize, paraphrase or calculate byte offsets. The source observation clock dates the record, not the described event. Interpret a source's explicit temporal expression only against that source's own clock, never the question clock. For an interpreted time, the expression must occur exactly once inside the source excerpt; use inclusive UTC calendar dates YYYY-MM-DD in time_start and time_end, and set time_anchor to source_observation_clock for relative expressions or explicit_date for a stated calendar date. If there is no expression or the interval or anchor is uncertain, use unavailable and set all four time fields to null. Matching relative words or intervals do not establish event identity or persistence. Describe only what the text supports, and leave uncertainty unresolved.
@@ -26,8 +29,12 @@ export function buildSourceTaskObservationRequest(raw: unknown) {
   const input = SourceTaskObservationFormationInputSchema.parse(raw);
   validateInput(input);
   const visible = { question: input.query, question_observation_time: input.interpretation_clock,
+    query_semantics: input.query_semantics,
     sources: input.sources.map(source => ({ source_ref: source.source_ref,
-      source_observation_time: source.source_observed_at, body: source.body })) };
+      source_observation_time: source.source_observed_at, body: source.body,
+      association: source.association, selected_interpretation: source.selected_interpretation,
+      semantic_correspondence: input.semantic_correspondences?.find(row => sourceSemanticCorrespondenceIdentity(row,
+        fieldContractSha256) === source.association?.semantic_correspondence_id) })) };
   return { formationIdentity: SOURCE_TASK_OBSERVATION_FORMATION_ID,
     systemPrompt: SOURCE_TASK_OBSERVATION_SYSTEM_PROMPT, userPrompt: JSON.stringify(visible),
     responseJsonSchema: sourceTaskObservationResponseJsonSchema() };
@@ -44,6 +51,19 @@ function validateInput(input: SourceTaskObservationFormationInput): void {
     refs.add(source.source_ref); identities.add(identity);
     if (`sha256:${createHash("sha256").update(source.body, "utf8").digest("hex")}` !== source.target.content_digest) {
       throw new Error("source_digest_mismatch");
+    }
+    if (source.association !== undefined) {
+      const correspondences = input.semantic_correspondences?.filter(row =>
+        sourceSemanticCorrespondenceIdentity(row, fieldContractSha256) === source.association!.semantic_correspondence_id) ?? [];
+      const selected = source.selected_interpretation;
+      if (selected === undefined || correspondences.length !== 1 || canonicalJson(selected.source_target) !== canonicalJson(source.target)) {
+        throw new Error("unbound_source_association");
+      }
+      const admitted = admitSourceSemanticCorrespondence({ query_semantics: input.query_semantics,
+        source_interpretation: selected.interpretation, semantic_correspondence: correspondences[0], original_query: input.query });
+      if (admitted.kind !== "admitted" || admitted.interpretation_id !== selected.interpretation_id) {
+        throw new Error("invalid_source_association_selection");
+      }
     }
   }
 }
@@ -94,6 +114,7 @@ export function interpretSourceTaskObservationSourceLocalDecoded(rawInput: unkno
           interval: { start: row.time_start, end: row.time_end } };
     if (task === undefined || time === undefined) { fail("incoherent_observation"); continue; }
     const observation = { source: source.target, source_observed_at: source.source_observed_at,
+      ...(source.association === undefined ? {} : { association: source.association }),
       source_excerpt: sourceExcerpt, query_excerpt: queryExcerpt,
       utterance: { kind: row.utterance_kind, description: row.description }, task_correspondence: task, event_time: time };
     const checked = SourceTaskObservationProposalSchema.safeParse({ status: "ready",
@@ -111,6 +132,8 @@ export function interpretSourceTaskObservationSourceLocalDecoded(rawInput: unkno
   const proposal = { schema_version: 1 as const, producer_id: SOURCE_TASK_OBSERVATION_PRODUCER_ID,
     original_query_digest: `sha256:${createHash("sha256").update(input.query, "utf8").digest("hex")}`,
     question_time: input.question_time, source_task_observation: { status,
+      ...(input.query_semantics === undefined ? {} : { query_semantics: input.query_semantics }),
+      ...(input.semantic_correspondences === undefined ? {} : { semantic_correspondences: input.semantic_correspondences }),
       interpretation_clock: input.interpretation_clock, observations } };
   // Partial coverage can supply independent observations, but must stop a no-retry window.
   return { classified: status === "partial" ? "incomplete" as const : "interpreted" as const, admitted: true,

@@ -9,7 +9,7 @@ afterEach(() => { expect(isolation.violations).toEqual([]); isolation.assertSafe
 afterAll(() => isolation.restore());
 import { RecallService, capableRecallConsumerDeclaration, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteFieldEraseBarrierRepo } from "@do-soul/alaya-storage";
-import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, SoulMemorySearchResponseSchema, SourceSemanticResourceLedger,
+import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, SoulMemorySearchResponseSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   hashLabeledIdentity, sourceIndexNativeRootKey, type SourceIndexTarget, type SourceTaskObservationProposal } from "@do-soul/alaya-protocol";
 import { fixture as storageFixture } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { publishMessages, publishStatement } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-template-fixture.js";
@@ -19,6 +19,8 @@ import { preferTaskObservations, type TaskObservationInspection }
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { nominateNativeSources } from "../../../runtime/recall-read-worker/observer-operations.js";
+import { taskInterpretationReader } from "../../../runtime/recall-read-worker/source-semantic-discovery.js";
+import { selectedTaskSource } from "./source-task-observation.test-support.js";
 import { interpretSourceTaskObservationSourceLocalDecoded } from "../../../../../bench-runner/src/runs/source-task-observation/formation.js";
 import { CLOCK, WS, digest, withIndexedSources, SIMULATED_CONFIGURATION, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
@@ -59,7 +61,9 @@ async function checkBudgetFallback(fixture: IndexFixture, source: SourceIndexTar
   vi.spyOn(fixture.repository, "readTaskObservation").mockImplementation((candidate, span, budget) => {
     const read = nativeRead(candidate, span, budget); reads.push({ budget, result: read }); return read;
   });
-  const run = (work_units: number) => {
+  const semanticStarts: number[] = [];
+  const readInterpretation = taskInterpretationReader(fixture.database, WS, ["project"]);
+  const run = (work_units: number, refuseReplacement = false) => {
     const meter = new SourceSemanticResourceLedger({ work_units, memory_bytes: 16_000_000 });
     const nominations = new Map(result.nominations.map(item => [sourceIndexNativeRootKey(item.source), item]));
     const observations: TaskObservationInspection[] = [];
@@ -67,7 +71,17 @@ async function checkBudgetFallback(fixture: IndexFixture, source: SourceIndexTar
     preferTaskObservations({ proposal, question: questionTime, query,
       original: [[sourceIndexNativeRootKey(source), row]], nominations, occurrences: [], max_roots: 16,
       repository: fixture.repository, meter, association: { work_units: 0, memory_bytes: 0 },
-      retention: { retain: (value, ledger) => { const before = ledger.spentBytes;
+      retention: { readInterpretation: (identity, ledger, nativeBytes) => {
+        const selected = readInterpretation(identity, ledger, nativeBytes);
+        const admission = SourceSemanticResourceLedger.measureRetain([selected.bound.interpretation,
+          proposal.query_semantics, proposal.semantic_correspondences![0]], ledger.remaining());
+        semanticStarts.push(work_units - ledger.work + admission.work_units);
+        return selected;
+      }, retain: (value, ledger) => { const before = ledger.spentBytes;
+        if (refuseReplacement && value.task_observations !== undefined) {
+          ledger.charge(11, 123, "fixture partial replacement");
+          throw new SourceSemanticResourceExhausted("replacement refused");
+        }
         ledger.retain(value, "fixture incumbent retention"); return ledger.spentBytes - before; } },
       result: () => result, nativeBytes: bytes => { nativeBytes += bytes; }, observe: observation => observations.push(observation) });
     return { meter, nominations: [...nominations.values()], observations, nativeBytes };
@@ -87,10 +101,24 @@ async function checkBudgetFallback(fixture: IndexFixture, source: SourceIndexTar
   expect(limited.meter.spentBytes).toBe(16_000_000 - refused.budget.memory_bytes + admission.resources.memory_bytes);
   expect(limited.observations).toContainEqual(expect.objectContaining({ status: "unknown",
     reason: "source_task_read_budget:source task excerpt" }));
+  const computationRefused = run(semanticStarts[0]! + 1);
+  expect(computationRefused.nominations).toEqual(result.nominations);
+  expect(computationRefused.nativeBytes).toBe(funded.nativeBytes);
+  expect(computationRefused.observations).toContainEqual(expect.objectContaining({ status: "unknown",
+    reason: "source_task_computation_incomplete" }));
+  const retentionRefused = run(2_000_000, true);
+  expect(retentionRefused.nominations).toEqual(result.nominations);
+  expect(retentionRefused.nativeBytes).toBe(funded.nativeBytes);
+  expect(retentionRefused.meter.spentWork).toBeGreaterThan(limited.meter.spentWork + 11);
+  expect(retentionRefused.observations).toContainEqual(expect.objectContaining({ status: "unknown", reason: "replacement refused" }));
 }
 
 it("binds a raw observation outside the nominated statement and delivers it through the real Worker and MCP", async () => {
   await withIndexedSources(sources, async fixture => {
+    const selected = await selectedTaskSource(fixture, { sourceId: "original-0", body, observedAt: originals[0]!.eventTime,
+      query, selectedFrame: "repair", evidence: true,
+      frames: [{ id: "repair", text: excerpt, predicate: "repaired", roles: [{ id: "tool", text: "silver wrench" }] }],
+      roles: [{ id: "tool", queryExcerpt: "tool" }] });
     const client = await fixture.openClient();
     const service = new RecallService({ ...createDependencies().dependencies,
       now: () => CLOCK, readSnapshot: client.readSnapshot, conditionalFieldPort: client.conditionalFieldPort,
@@ -106,7 +134,7 @@ it("binds a raw observation outside the nominated statement and delivers it thro
     };
     const source = fixture.targets.find(row => row.source_id === "original-0" && row.auxiliary === undefined)!;
     const formed = interpretSourceTaskObservationSourceLocalDecoded({ query, interpretation_clock: CLOCK, question_time: questionTime,
-      sources: [{ source_ref: "source1", target: source.target, source_observed_at: originals[0]!.eventTime, body }] },
+      ...selected.selection, sources: [selected.source] },
     { rawJson: JSON.stringify({ observations: [{ source_ref: "source1", source_excerpt: excerpt, query_excerpt: query,
       utterance_kind: "reported_event", description: "The speaker reports using a wrench.", task_correspondence: "possible",
       task_role: "requested_event", task_component: "repair tool", time_status: "unavailable", time_expression: null,

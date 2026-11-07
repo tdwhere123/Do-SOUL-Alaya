@@ -5,15 +5,13 @@ import { compareUtcInstants, sourceEvidenceRootKey, sourceIndexNativeRootKey, So
   type SourceSemanticNominationOccurrence, type SourceSemanticResourceBudget, type SourceEvidenceTarget, type SourceTaskObservation,
   type SourceTaskObservationProposal } from "@do-soul/alaya-protocol";
 import type { SourcePreferenceRetention } from "./question-time-preference.js";
+import { bindSourceTaskAssociation, TaskObservationFailure as ObservationFailure } from "./task-observation-binding.js";
 
 export type TaskObservationInspection = Readonly<{
   status: "applied" | "unchanged" | "unknown" | "invalid" | "failed" | "unavailable";
   observed: number; preferred: number; producer_coverage?: "ready" | "partial";
   invalid?: number; unavailable?: number; reason?: string;
 }>;
-class ObservationFailure extends Error {
-  constructor(readonly status: "invalid" | "unknown", readonly reason: string) { super(reason); }
-}
 
 /** A source-bound query can inspect only that source within the native candidate union. */
 export function taskObservationAllowsSource(source: SourceIndexRootNomination["source"], sourceId: string | undefined): boolean {
@@ -112,11 +110,10 @@ function inspectTaskEvidence<N extends SourceIndexRootNomination>(
     if (binding.rows.length !== 1) { invalid++; reason ??= "duplicate_source_observation"; continue; }
     const row = binding.rows[0]!;
     try {
-      const checked = bindObservation(row, binding.source, input, meter);
+      bindObservation(row, binding.source, input, meter);
       observed++;
-      const relation = row.task_correspondence;
-      if (relation.status === "possible" && (row.utterance.kind === "reported_event" ||
-        row.utterance.kind === "standing" && relation.role === "task_input")) selected.set(key, checked);
+      selected.set(key, bindSourceTaskAssociation({ row, proposal, query: input.query, question: input.question,
+        reader: input.retention.readInterpretation, meter, nativeBytes: input.nativeBytes }));
     } catch (error) {
       if (!(error instanceof ObservationFailure) || error.reason.includes("unknown_additional_cost")) throw error;
       if (error.status === "invalid") invalid++; else unavailable++;
@@ -138,7 +135,7 @@ function taskSourceKey(target: SourceEvidenceTarget, meter: SourceSemanticResour
 
 function bindObservation(row: SourceTaskObservation, source: SourceIndexRootNomination["source"], input: Readonly<{
   question: QuestionTimePreference; query: string; repository: SourceIndexQueryRepository; nativeBytes: (bytes: number) => void;
-}>, meter: SourceSemanticResourceLedger): QualifiedTaskObservation {
+}>, meter: SourceSemanticResourceLedger): void {
   const query = Buffer.from(input.query, "utf8"), quote = row.query_excerpt;
   meter.charge(query.length + quote.text.length, query.length * 2, "source task query binding");
   if (quote.end_byte > query.length || query.subarray(quote.start_byte, quote.end_byte).toString("utf8") !== quote.text) {
@@ -154,11 +151,4 @@ function bindObservation(row: SourceTaskObservation, source: SourceIndexRootNomi
         compareUtcInstants(read.source_observed_at, row.source_observed_at) !== 0)) {
     throw new ObservationFailure("invalid", "source_excerpt_or_clock_mismatch");
   }
-  const event = row.event_time, intervals = input.question.intervals;
-  meter.charge(intervals.length, 0, "source task temporal comparison");
-  const temporal_relation = row.utterance.kind !== "reported_event" || event.status !== "interpreted" || intervals.length === 0 ? "unavailable" as const
-    : intervals.some(interval => interval.start <= event.interval.end && event.interval.start <= interval.end)
-      ? "hypothesized_overlap" as const : "hypothesized_disjoint" as const;
-  return { semantic_status: "unreviewed", world_claim: "unknown", observation: row,
-    question_time: input.question, temporal_relation };
 }

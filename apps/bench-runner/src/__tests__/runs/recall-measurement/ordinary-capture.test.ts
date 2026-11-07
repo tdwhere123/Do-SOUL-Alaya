@@ -53,7 +53,7 @@ it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ord
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
   expect(installedRecallProtocolVersion()).toBe(ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION);
   expect(observation.binding).toMatchObject({ protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION, reader_protocol_package_version: ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION,
-    public_semantics: "ordinary-native-field.v12", producer_revision: capture.config.implementation_revision });
+    public_semantics: "ordinary-native-field.v13", producer_revision: capture.config.implementation_revision });
   expect(capture.config.first_request.enumeration_policy).toBe("native_query");
   expect(observation.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
     (_, index) => readJson(join(capture.execution, `${String(index + 1).padStart(2, "0")}-public-envelope.json`))));

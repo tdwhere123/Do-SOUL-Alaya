@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => isolation.restore());
-import { SourceSemanticResourceExhausted, type SourceIndexAcquisitionInput, type SourceIndexLexicalRead,
+import { type SourceIndexAcquisitionInput, type SourceIndexLexicalRead,
   type SourceIndexQueryRepository, type SourceIndexTarget, type SourceIndexTaskObservationRead, type SourceTaskObservationProposal } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
@@ -83,23 +83,7 @@ it("reports an unavailable second time-domain read without inventing an incumben
   expect(inventory).not.toHaveProperty("eligible");
 });
 
-it("pays and preserves the incumbent when replacement retention is refused", () => {
-  const env = fixture(), baseline = env.run(false);
-  env.retain.mockImplementationOnce((capture, meter) => {
-    const before = meter.spentBytes; meter.retain(capture); return meter.spentBytes - before;
-  }).mockImplementationOnce((_capture, meter) => {
-    meter.charge(11, 123, "fixture partial replacement"); throw new SourceSemanticResourceExhausted("replacement refused");
-  });
-  const result = env.run();
-  expect(result.result.nominations).toEqual(baseline.result.nominations);
-  expect(result.association).toEqual(baseline.association);
-  expect(result.result.resources.native_bytes).toBe(readResources.native_bytes);
-  expect(result.result.resources.work).toBeGreaterThan(baseline.result.resources.work + 11);
-  expect(env.observed).toContainEqual({ kind: "source_task_observation", observation: expect.objectContaining({
-    status: "unknown", reason: "replacement refused" }) });
-});
-
-it("distinguishes valid-empty from partial and does not promote an unsupported performed event", () => {
+it("distinguishes valid-empty from missing selected endpoints without promoting descriptive reports", () => {
   const env = fixture(), baseline = env.run(false);
   for (const coverage of ["ready", "partial"] as const) {
     expect(env.run(true, { ...env.proposal, status: coverage, observations: [] }).result.nominations)
@@ -113,19 +97,19 @@ it("distinguishes valid-empty from partial and does not promote an unsupported p
   expect(env.run(true, { ...env.proposal, observations: [event] }).result.nominations).toEqual(baseline.result.nominations);
   expect(env.read).toHaveBeenCalledTimes(1);
   expect(env.observed).toContainEqual({ kind: "source_task_observation", observation: {
-    status: "unchanged", observed: 1, preferred: 0, producer_coverage: "ready", invalid: 0, unavailable: 0 } });
+    status: "unknown", observed: 1, preferred: 0, producer_coverage: "ready", invalid: 0, unavailable: 1,
+    reason: "source_task_association_unavailable" } });
 });
 
-it("retains an independently bound task source when another observation has an invalid clock", () => {
-  const env = fixture(), valid = env.proposal.observations[0]!, other = env.originals[1]!;
+it("keeps an unbound report unknown while independently recording an invalid clock", () => {
+  const env = fixture(), baseline = env.run(false), valid = env.proposal.observations[0]!, other = env.originals[1]!;
   const invalid = { ...valid, source: other.source.target, source_observed_at: "2026-09-02T00:00:00.000Z",
     source_excerpt: { start_byte: 0, end_byte: Buffer.byteLength(other.body), text: other.body } };
   const result = env.run(true, { ...env.proposal, status: "partial", observations: [valid, invalid] });
-  expect(result.result.nominations[0]!.source.source_id).toBe("original-0");
-  expect(result.result.nominations.map(row => row.source.source_id)).not.toContain("original-1");
+  expect(result.result.nominations).toEqual(baseline.result.nominations);
   expect(env.observed).toContainEqual({ kind: "source_task_observation", observation: {
-    status: "applied", observed: 1, preferred: 1, producer_coverage: "partial", invalid: 1, unavailable: 0,
-    reason: "source_excerpt_or_clock_mismatch" } });
+    status: "unknown", observed: 1, preferred: 0, producer_coverage: "partial", invalid: 1, unavailable: 1,
+    reason: "source_task_association_unavailable" } });
 });
 
 it("stops the optional change if a later read has unknown additional cost", () => {

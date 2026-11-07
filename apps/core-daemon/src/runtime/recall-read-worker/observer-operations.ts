@@ -37,6 +37,7 @@ import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
 import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
+import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 
 const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
@@ -205,6 +206,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
         }, kind), invocation === "original" && capacity !== undefined,
       invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined && input.sourceTaskObservation === undefined ? undefined : {
         ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
+        readInterpretation: taskInterpretationReader(database, input.workspaceId, input.authorizedScopes),
         retain: (capture, retentionMeter) => {
           const retained = nominationFromCaptures([capture], input.sourceId, { charged_by_caller: true });
           const bytes = retainBaseNomination(retained, retentionMeter);

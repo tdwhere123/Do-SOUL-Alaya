@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 38.0.0, engine gateway 3.0.0
+## Unreleased — protocol 39.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,24 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 39.0.0 deepens opt-in task observation admission through the existing
+selected Q/H/C conditional field (`ordinary-native-field.v13`, library field protocol
+13). This is a ranking/delivery semantic **major** under invariant §25, not a new
+selector or default promotion. Formation carries exact Q branch/H frame/slot and
+correspondence identities; current source publication, conditional binding and literal
+temporal-operand support are rechecked before the existing bounded preference can act.
+Unbound/free-text observations no longer obtain that preference. Raw fallback and
+hard-guard abstention remain intact; a standing input requires no occurrence-time
+proof. Existing partial evidence-input support does not claim a complete answer or
+executed task operation.
+Navigation retains conditional identities and a support span used by the existing
+payload fit. Neither interpretation admission nor overlap establishes world truth.
+Discard old continuations and restart queries on upgrade or rollback; never relabel
+a frozen handle. Protocol 38/native v12 archives retain their original identities
+and remain readable. The v6 formation identity does not readmit v5 outputs.
+No database migration, provider call, allowance increase or natural-benefit claim
+is introduced.
 
 Protocol 38.0.0 changes ordinary source priority (`ordinary-native-field.v12`), a
 major under invariant §25. Opt-in, source-bound task observations can affect the existing

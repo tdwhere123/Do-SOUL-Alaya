@@ -4,7 +4,7 @@ import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
 import { QualifiedTaskObservationSchema } from "./source-task-observation.js";
 
 /** Source-bound task observations can affect bounded native priority; old identities cannot execute this ranking. */
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v12" as const;
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v13" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({

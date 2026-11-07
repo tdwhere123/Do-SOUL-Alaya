@@ -45,7 +45,7 @@ const decode = (value: unknown, captured = input(), finishReason: string | null 
 
 it("binds unique Unicode quotations to captured identities and clocks without asking the model for native metadata", () => {
   const request = buildSourceTaskObservationRequest(input());
-  expect(request.formationIdentity).toBe("source-task-observation.calendar-day-wire.v5");
+  expect(request.formationIdentity).toBe("source-task-observation.selected-endpoints.v6");
   expect(request.responseJsonSchema).toMatchObject({ required: ["observations"], additionalProperties: false });
   expect(Object.keys(Reflect.get(request.responseJsonSchema, "properties"))).toEqual(["observations"]);
   expect(request.userPrompt).not.toContain(target(body).content_digest);
