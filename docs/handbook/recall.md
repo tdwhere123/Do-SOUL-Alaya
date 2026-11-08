@@ -431,8 +431,9 @@ the keys are dropped and the field order is unchanged.
 Navigation applies the coverage after filtering and time preference determine the source
 order. A statement's top root is the highest-coverage root in that order, ties to the earlier
 position. Starting from the source first five with slot 1 fixed, each statement in order whose
-top lies outside the first five swaps with the last root at slots 5..2 that tops no statement;
-nothing changes if every slot 2–5 serves. No root leaves the order and memory keeps its
+top lies outside the first five replaces the last root at slots 5..2 that tops no statement;
+nothing changes if every slot 2–5 serves. All other roots keep their source order, so replaced
+roots follow directly after the first five. No root leaves the order and memory keeps its
 positions. The navigation diagnostic `evidence_coverage` reports the statement count, each
 top's source position, every injection or `no_free_slot`, and refusal.
 

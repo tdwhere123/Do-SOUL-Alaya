@@ -23,8 +23,9 @@ question-formed statements, at most 512 characters each) and identifies ordinary
 **major** under invariant §25. Bound statements are embedded locally with the query binding;
 acquisition reduces retained statement keys to per-root coverage on its own ledger, and
 navigation lets each statement's top root enter the source first five, displacing the last
-non-serving root at slots 5..2. The slot-5 two-coordinate swap is retired, and statement keys
-no longer reach field admission. Without statements the order is unchanged. Discard old
+non-serving root at slots 5..2; displaced roots follow the first five in source order. The
+slot-5 two-coordinate swap is retired, and statement keys no longer reach field admission.
+Without statements the order is unchanged. Discard old
 continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
 retain their identities and remain readable. No database migration, provider call or
 allowance increase is introduced, and no natural-data benefit is claimed.

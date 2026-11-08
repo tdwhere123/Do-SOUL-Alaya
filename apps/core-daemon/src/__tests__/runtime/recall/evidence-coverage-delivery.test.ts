@@ -104,8 +104,8 @@ it("keeps today's order without statements and injects a late witness while prot
   expect(sourceOrder(env, plain, STATEMENTS)).toEqual(baseline);
   const prepared = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   expect(sourceOrder(env, prepared)).toEqual(baseline);
-  // Round 4 tops statement two at slot 5 and is protected; round 6 replaces round 3 at slot 4.
-  const expected = [roots[0], roots[1], roots[2], roots[6], roots[4], roots[5], roots[3]];
+  // Round 4 tops statement two at slot 5 and is protected; round 6 replaces round 3, which follows at slot 6.
+  const expected = [roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]];
   expect(sourceOrder(env, prepared, STATEMENTS)).toEqual(expected);
   // Membership is unchanged: no root leaves the order.
   expect(new Set(expected)).toEqual(new Set(roots));
@@ -139,7 +139,7 @@ it("delivers the same permutation through the built worker under the production 
   const covered = await prepare(STATEMENTS);
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   const expected = sourceOrder(env, readers, STATEMENTS);
-  expect(expected).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[5], roots[3]]);
+  expect(expected).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]]);
 
   process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
   let client;

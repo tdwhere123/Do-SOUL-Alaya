@@ -191,7 +191,8 @@ export type EvidenceCoverageInjection = Readonly<{ statement: number; root_posit
   & ({ status: "injected"; slot: number } | { status: "no_free_slot" })>;
 
 /** Each statement's top root (best coverage; ties to the earlier source position) enters the first
- * five by swapping with the last slot 5..2 root that tops no statement. Slot 1 and membership are fixed.
+ * five in place of the last slot 5..2 root that tops no statement; all other roots keep base order,
+ * so displaced roots follow at slot 6. Slot 1 and membership are fixed.
  * A selected slot heuristic, not proof that the injected root answers the statement. */
 export function preferEvidenceCoverage(order: readonly string[], association: StatementAssociation,
   meter: SourceSemanticResourceLedger) {
@@ -207,17 +208,18 @@ export function preferEvidenceCoverage(order: readonly string[], association: St
     return top;
   });
   const serving = new Set(tops.flatMap(top => top === null ? [] : [order[top]!]));
-  const out = [...order], head = Math.min(5, out.length), injections: EvidenceCoverageInjection[] = [];
+  const head = Math.min(5, order.length), out = order.slice(0, head), injections: EvidenceCoverageInjection[] = [];
   tops.forEach((top, statement) => {
     if (top === null) return;
     const root = order[top]!;
-    if (out.slice(0, head).includes(root)) return;
+    if (out.includes(root)) return;
     let slot = -1;
     for (let position = head - 1; position >= 1; position--) if (!serving.has(out[position]!)) { slot = position; break; }
-    const from = out.indexOf(root);
-    if (slot < 0) { injections.push({ statement, root_position: from + 1, status: "no_free_slot" }); return; }
-    [out[slot], out[from]] = [root, out[slot]!];
-    injections.push({ statement, root_position: from + 1, status: "injected", slot: slot + 1 });
+    if (slot < 0) { injections.push({ statement, root_position: top + 1, status: "no_free_slot" }); return; }
+    out[slot] = root;
+    injections.push({ statement, root_position: top + 1, status: "injected", slot: slot + 1 });
   });
-  return { order: out, top_positions: tops.map(top => top === null ? null : top + 1), injections };
+  const chosen = new Set(out);
+  return { order: [...out, ...order.filter(root => !chosen.has(root))],
+    top_positions: tops.map(top => top === null ? null : top + 1), injections };
 }

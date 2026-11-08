@@ -33,10 +33,10 @@ function declaredRule(order: readonly string[], value: StatementAssociation): st
     if (top === null || out.slice(0, 5).includes(top)) continue;
     const slot = [4, 3, 2, 1].find(p => p < out.length && !tops.includes(out[p]!));
     if (slot === undefined) continue;
-    const from = out.indexOf(top);
-    out[from] = out[slot]!; out[slot] = top;
+    out[slot] = top;
   }
-  return out;
+  const first = out.slice(0, 5);
+  return [...first, ...order.filter(root => !first.includes(root))];
 }
 
 describe("statement key retention and evidence coverage", () => {
@@ -118,8 +118,8 @@ describe("evidence coverage permutation of the source first five", () => {
   it("injects a late top root into the last non-serving slot and protects serving roots", () => {
     const value = coverage(3, { g: [0.9, 0.1, 0.1], d: [0.2, 0.2, 0.2], c: [0.1, 0.8, 0.1], h: [0.1, 0.1, 0.7] });
     const decided = preferEvidenceCoverage(roots, value, meter());
-    // c serves statement 1 and stays; e (slot 5) then d (slot 4) are the last non-serving roots.
-    expect(decided.order).toEqual(["a", "b", "c", "h", "g", "f", "e", "d"]);
+    // c serves statement 1 and stays; e (slot 5) then d (slot 4) are replaced and follow in base order.
+    expect(decided.order).toEqual(["a", "b", "c", "h", "g", "d", "e", "f"]);
     expect(decided.top_positions).toEqual([7, 3, 8]);
     expect(decided.injections).toEqual([{ statement: 0, root_position: 7, status: "injected", slot: 5 },
       { statement: 2, root_position: 8, status: "injected", slot: 4 }]);
@@ -134,7 +134,7 @@ describe("evidence coverage permutation of the source first five", () => {
     const firstServes = coverage(1, { a: [0.9], h: [0.5] });
     expect(preferEvidenceCoverage(roots, firstServes, meter()).order).toEqual(roots);
     const tie = coverage(1, { g: [0.5], h: [0.5] });
-    expect(preferEvidenceCoverage(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "f", "e", "h"]);
+    expect(preferEvidenceCoverage(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
   });
 
   it("matches the declared rule over generated coverage, keyless roots, ties and short orders", () => {
@@ -168,7 +168,7 @@ describe("field access with evidence coverage", () => {
     expect(orderNativeFieldAccess(input, meter())).toEqual(orderNativeFieldAccess(input));
     expect(orderNativeFieldAccess(input)).toMatchObject({ status: "ordered", record_ids: base });
     const result = orderNativeFieldAccess({ ...input, association: coverage(1, { g: [0.9] }) }, meter());
-    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "g", "f", "e", "h"],
+    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "g", "e", "f", "h"],
       evidence_coverage: { status: "permuted", statements: 1, top_source_positions: [7],
         injections: [{ statement: 0, root_position: 7, status: "injected", slot: 5 }], reason: null } });
     const unchanged = orderNativeFieldAccess({ ...input, association: coverage(1, { b: [0.9] }) }, meter());
