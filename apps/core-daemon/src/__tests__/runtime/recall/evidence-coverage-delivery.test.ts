@@ -1,11 +1,12 @@
-import { afterAll, afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
 import { createHash } from "node:crypto";
-import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, type QueryInterpretationProposal } from "@do-soul/alaya-protocol";
+import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
+import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, type EvidenceCondition, type QueryInterpretationProposal } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, runConditionalFieldRecallWithReceipt, snapshotIdFromPin, type ObserverReaders } from "@do-soul/alaya-core";
 import { prepareIndexedRecallProjection } from "@do-soul/alaya-storage";
 import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
@@ -20,9 +21,13 @@ import { PROVIDER_FREE_WORKER_IMPORT } from "./source-semantic-index-acquisition
 type Environment = Awaited<ReturnType<typeof createStatementSessionEnvironment>>;
 const environments: Environment[] = [];
 afterEach(async () => { for (const environment of environments.splice(0)) await environment.close(); });
+// Witness reads never initiate segmenter loading; the daemon worker warms it for segmented indexes.
+beforeAll(async () => { expect(await warmCjkSegmentation()).toBe(true); });
 const QUERY = "zzqx", ROUNDS = 7;
-/** Statement one is witnessed only by round 6 (outside the first five); statement two only by round 4 (slot 5). */
+/** Condition one is witnessed only by round 6 (outside the first five); condition two only by round 4 (slot 5).
+ * Every statement key comes from a user message. */
 const STATEMENTS = ["The user planted bed six.", "The user planted bed four."];
+const CONDITIONS: readonly EvidenceCondition[] = STATEMENTS.map(statement => ({ statement, speaker: "user", anchors: [] }));
 const DEMANDS: Record<string, number[]> = { [QUERY]: [1, 0, 0, 0], [STATEMENTS[0]!]: [0, 0, 1, 0], [STATEMENTS[1]!]: [0, 0, 0, 1] };
 /** The production ordinary request budget used by the frozen B0 rows. */
 const PRODUCTION_BUDGET = { schema_version: 1 as const, work_units: 9984, memory_bytes: 999610,
@@ -62,25 +67,25 @@ async function publishedRounds(providerKind = "local_onnx") {
 }
 
 const DAY = START.slice(0, 10);
-const proposal = (statements: readonly string[], timed = false): QueryInterpretationProposal => ({ schema_version: 1,
+const proposal = (conditions: readonly EvidenceCondition[], timed = false): QueryInterpretationProposal => ({ schema_version: 1,
   original_query_digest: `sha256:${createHash("sha256").update(QUERY, "utf8").digest("hex")}`,
   producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID, producer_version: "1",
   ...(timed ? { question_time: { interpretation_clock: START, intervals: [{ start: DAY, end: DAY }] } } : {}),
-  ...(statements.length === 0 ? {} : { evidence_statements: statements }) });
+  ...(conditions.length === 0 ? {} : { evidence_conditions: conditions }) });
 
-function request(env: Environment, readers: ObserverReaders, statements?: readonly string[], timed = false) {
+function request(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false) {
   return { workspace_id: WORKSPACE, query_text: QUERY, readers,
     snapshot_id: snapshotIdFromPin(WORKSPACE, readers.snapshotPin!(WORKSPACE)), budget: PRODUCTION_BUDGET,
     interpretation_clock: START, as_of: START, expires_at: "2099-01-01T00:00:00.000Z", authorized_scopes: ["project"],
     enumeration_policy: "native_query" as const, result_kind_view: "source_only" as const,
     protocol_version: 1 as const, supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     supports_source_evidence: true, supports_product_updates: true,
-    ...(statements === undefined && !timed ? {} : { interpretation_proposal: proposal(statements ?? [], timed) }) };
+    ...(conditions === undefined && !timed ? {} : { interpretation_proposal: proposal(conditions ?? [], timed) }) };
 }
 
 /** Every delivered source root across continuation pages, through the real SQLite field. */
-function sourceOrder(env: Environment, readers: ObserverReaders, statements?: readonly string[], timed = false): string[] {
-  const initial = request(env, readers, statements, timed), ids: string[] = [], pageSizes: number[] = [];
+function sourceOrder(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false): string[] {
+  const initial = request(env, readers, conditions, timed), ids: string[] = [], pageSizes: number[] = [];
   let continuation: ReturnType<typeof runConditionalFieldRecallWithReceipt>["index"]["continuation"] | undefined;
   for (let page = 0; page < 10 && continuation !== null; page++) {
     const result = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(
@@ -96,38 +101,42 @@ function sourceOrder(env: Environment, readers: ObserverReaders, statements?: re
   return ids;
 }
 
-it("keeps today's order without statements and injects a late witness while protecting a serving slot", async () => {
+it("keeps today's order without conditions and injects a late typed witness while protecting a serving slot", async () => {
   const { env, roots, prepare } = await publishedRounds();
   const bare = await prepare(), covered = await prepare(STATEMENTS);
   expect(covered.evidence?.map(route => route.vector.status)).toEqual(["available", "available"]);
   const plain = createConditionalFieldObserverReaders(env.database, [], bare.vector);
   const baseline = sourceOrder(env, plain);
   expect(baseline).toEqual(roots);
-  // Statements without prepared vectors, or vectors without admitted statements, leave the order byte-identical.
-  expect(sourceOrder(env, plain, STATEMENTS)).toEqual(baseline);
+  // Conditions without prepared vectors, or vectors without admitted conditions, leave the order byte-identical.
+  expect(sourceOrder(env, plain, CONDITIONS)).toEqual(baseline);
   const prepared = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   expect(sourceOrder(env, prepared)).toEqual(baseline);
   // Round 4 tops statement two at slot 5 and is protected; round 6 replaces round 3, which follows at slot 6.
   const expected = [roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]];
-  expect(sourceOrder(env, prepared, STATEMENTS)).toEqual(expected);
+  expect(sourceOrder(env, prepared, CONDITIONS)).toEqual(expected);
   // Membership is unchanged: no root leaves the order.
   expect(new Set(expected)).toEqual(new Set(roots));
-  // A question-time window has no within-window witness guard yet: statements leave the timed order as is.
-  expect(sourceOrder(env, prepared, STATEMENTS, true)).toEqual(sourceOrder(env, prepared, undefined, true));
+  // Same vectors, but no key witnesses condition one: an assistant condition, or an anchor (from the question)
+  // that no key or message contains, leaves the order as is.
+  expect(sourceOrder(env, prepared, [{ ...CONDITIONS[0]!, speaker: "assistant" }, CONDITIONS[1]!])).toEqual(baseline);
+  expect(sourceOrder(env, prepared, [{ ...CONDITIONS[0]!, anchors: [QUERY] }, CONDITIONS[1]!])).toEqual(baseline);
+  // A question-time window has no within-window witness guard yet: conditions leave the timed order as is.
+  expect(sourceOrder(env, prepared, CONDITIONS, true)).toEqual(sourceOrder(env, prepared, undefined, true));
 
   const nominated = env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 },
-      evidenceStatements: STATEMENTS }, covered.vector, undefined, "allowance", covered.evidence))();
+      evidenceConditions: CONDITIONS }, covered.vector, undefined, "allowance", covered.evidence))();
   expect(nominated.association).toMatchObject({ statements: 2, decision: { refused: null, applied: false } });
   expect(nominated.association!.roots).toHaveLength(ROUNDS);
   expect(nominated.result?.resource_refusals).toEqual([]);
   // Request-funded library acquisition carries no association quote and never computes coverage.
   expect(env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 10_000_000, memory_bytes: 64_000_000 },
-      evidenceStatements: STATEMENTS }, covered.vector, undefined, "request", covered.evidence))().association).toBeUndefined();
+      evidenceConditions: CONDITIONS }, covered.vector, undefined, "request", covered.evidence))().association).toBeUndefined();
 });
 
-it("never embeds evidence statements through a non-local provider and keeps the base order", async () => {
+it("never embeds condition statements through a non-local provider and keeps the base order", async () => {
   const { env, roots, prepare } = await publishedRounds("recorded-fixture");
   const covered = await prepare(STATEMENTS);
   expect(covered.vector.status).toBe("available");
@@ -135,7 +144,7 @@ it("never embeds evidence statements through a non-local provider and keeps the 
     { status: "unavailable", reason: "evidence_statement_requires_local_inference" }));
   expect(covered.evidence?.every(route => route.receipt.submitted_inputs === 0)).toBe(true);
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
-  expect(sourceOrder(env, readers, STATEMENTS)).toEqual(roots);
+  expect(sourceOrder(env, readers, CONDITIONS)).toEqual(roots);
 });
 
 it("delivers the same permutation through the built worker under the production grant", async () => {
@@ -143,7 +152,7 @@ it("delivers the same permutation through the built worker under the production 
   const { env, roots, prepare } = await publishedRounds();
   const covered = await prepare(STATEMENTS);
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
-  const expected = sourceOrder(env, readers, STATEMENTS);
+  const expected = sourceOrder(env, readers, CONDITIONS);
   expect(expected).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]]);
 
   process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
@@ -152,7 +161,7 @@ it("delivers the same permutation through the built worker under the production 
   finally { process.execArgv.splice(process.execArgv.lastIndexOf(PROVIDER_FREE_WORKER_IMPORT), 1); }
   try {
     await client.ready();
-    const { readers: _readers, ...base } = request(env, readers, STATEMENTS);
+    const { readers: _readers, ...base } = request(env, readers, CONDITIONS);
     const initial = { ...base, prepared_query: covered };
     const observed = await client.observeSourceSemantics({ max_events: 2048, max_bytes: 524288, capture_page_attempts: true },
       () => client!.conditionalFieldPort.recall(initial));

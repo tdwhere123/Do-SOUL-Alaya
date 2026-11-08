@@ -92,6 +92,13 @@ export type SourceIndexTaskObservationRead = Readonly<{ resources: SourceIndexQu
   Readonly<{ status: "unknown"; reason: string }>
 );
 
+/** Statement keys of one root, aligned with the request: the host role of each key's message and,
+ * per anchor, whether every anchor token occurs in the key text or that message. Incomplete is unknown. */
+export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; witnesses: readonly Readonly<{ role: string | null; anchors: readonly boolean[] }>[] }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
@@ -101,6 +108,8 @@ export interface SourceIndexQueryRepository {
   readTemplateStatements?(source: SourceIndexTarget, budget: SourceSemanticResourceBudget): SourceIndexTemplateRead;
   readTaskObservation?(source: SourceIndexTarget, span: Readonly<{ start_byte: number; end_byte: number }>,
     budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
+  readStatementWitnesses?(keys: readonly SourceIndexTarget[], anchors: readonly string[],
+    budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */

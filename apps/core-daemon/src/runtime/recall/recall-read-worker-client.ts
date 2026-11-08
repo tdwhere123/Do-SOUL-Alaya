@@ -222,7 +222,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       else {
         const deadline = this.lifecycle.preparationDeadline();
         // Proposal admission happens later; the worker uses these vectors only for the admitted exact texts.
-        const statements = captured.interpretation_proposal?.evidence_statements;
+        const statements = captured.interpretation_proposal?.evidence_conditions?.map(condition => condition.statement);
         prepared = await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({
           workspace_id: captured.workspace_id, navigation: captured.query_text,
           ...(statements === undefined ? {} : { evidence_statements: statements }),

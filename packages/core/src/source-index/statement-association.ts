@@ -1,5 +1,6 @@
-import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type SourceIndexLexicalCandidate,
-  type SourceIndexQueryVector, type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type SourceIndexLexicalCandidate,
+  type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget, type SourceSemanticResourceBudget,
+  type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
 
 /** A statement key reaches its raw root once per lexical lane, like a best vector window. */
@@ -13,14 +14,18 @@ export function collapseStatementCandidates(candidates: readonly SourceIndexLexi
 }
 
 export const STATEMENT_ASSOCIATION_KEYS_PER_ROOT = 16;
-type Retained = Readonly<{ cosine: number; embedding: Float32Array }>;
+// The key target is the scanned page's object, kept by reference.
+type Retained = Readonly<{ cosine: number; embedding: Float32Array; key: SourceIndexTarget }>;
 
-/** Evidence statement vectors bound to the admitted proposal. Not supplied and unavailable stay distinct. */
-export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Float32Array[] }>
+/** Evidence condition vectors bound to the admitted proposal. Not supplied and unavailable stay distinct. */
+export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Float32Array[]; conditions: readonly EvidenceCondition[] }>
   | Readonly<{ status: "not_supplied" | "unavailable"; reason: string }>;
 
-/** Query/snapshot-owned evidence coverage: per root, each statement's best cosine over that root's
- * retained statement keys (null: no key). Only the field ordering decision mutates `decision`. */
+/** Reads the host role and anchor tokens of one root's retained keys, charging the acquisition ledger. */
+export type StatementWitnessReader = (keys: readonly SourceIndexTarget[], anchors: readonly string[]) => SourceIndexStatementWitnessRead | undefined;
+
+/** Query/snapshot-owned evidence coverage: per root, each condition's best cosine over that root's
+ * retained statement keys that witness it (null: none). Only the field ordering decision mutates `decision`. */
 export type StatementAssociation = Readonly<{
   roots: readonly string[];
   statements: number;
@@ -55,10 +60,11 @@ function coverageCost(keyDimensions: number, demandDimensions: number, roots: nu
     memory_bytes: demandDimensions * 4 + roots * (64 + statements * 72) };
 }
 
-/** Prepared statement vectors serve only the exact admitted texts under the query's profile. */
-export function bindEvidenceDemands(statements: readonly string[] | undefined,
+/** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
+export function bindEvidenceDemands(conditions: readonly EvidenceCondition[] | undefined,
   prepared: readonly Readonly<{ vector: SourceIndexQueryVector }>[] | undefined, query: SourceIndexQueryVector): EvidenceDemands {
-  if (statements === undefined) return { status: "not_supplied", reason: "evidence_statements_not_supplied" };
+  if (conditions === undefined) return { status: "not_supplied", reason: "evidence_conditions_not_supplied" };
+  const statements = conditions.map(condition => condition.statement);
   if (prepared === undefined || prepared.length !== statements.length) {
     return { status: "unavailable", reason: "evidence_statement_preparation_absent" };
   }
@@ -72,7 +78,7 @@ export function bindEvidenceDemands(statements: readonly string[] | undefined,
     }
     vectors.push(vector.embedding);
   }
-  return { status: "ready", vectors };
+  return { status: "ready", vectors, conditions };
 }
 
 /** Same arithmetic as the declared offline rule: one left-to-right Float64 pass over Float32 values. */
@@ -98,7 +104,7 @@ export class StatementKeyRetention {
   public constructor(private readonly meter: SourceSemanticResourceLedger,
     private readonly refused: (phase: string) => void, private readonly demands: EvidenceDemands) {}
 
-  public consider(root: string, cosine: number, embedding: Float32Array): void {
+  public consider(root: string, cosine: number, embedding: Float32Array, key: SourceIndexTarget): void {
     if (this.abandoned) return;
     if (!Number.isFinite(cosine) || this.dimensions !== undefined && embedding.length !== this.dimensions) {
       this.abandon("statement key association incompatible dimensions"); return;
@@ -110,7 +116,7 @@ export class StatementKeyRetention {
     for (const value of embedding) norm += value * value;
     if (!Number.isFinite(norm)) { this.abandon("statement key association invalid vector"); return; }
     this.dimensions ??= embedding.length;
-    const row = { cosine, embedding: embedding.slice() };
+    const row = { cosine, embedding: embedding.slice(), key };
     const at = kept.findIndex(other => other.cosine < cosine);
     if (kept.length < STATEMENT_ASSOCIATION_KEYS_PER_ROOT) this.retainedKeyCount++;
     kept.splice(at === -1 ? kept.length : at, 0, row);
@@ -129,10 +135,11 @@ export class StatementKeyRetention {
     return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
   }
 
-  private abandon(phase: string): void {
+  private abandon(phase: string, refusal = true): void {
     if (this.abandoned) return;
     this.observed = { status: "unavailable", reason: phase };
-    this.abandoned = true; this.byRoot.clear(); this.refused(phase);
+    this.abandoned = true; this.byRoot.clear();
+    if (refusal) this.refused(phase);
   }
 
   private fund(work: number, bytes: number, phase: string): boolean {
@@ -143,8 +150,10 @@ export class StatementKeyRetention {
     }
   }
 
-  /** Keys are consumed here: only per-root statement coverage leaves acquisition. */
-  public associate(roots: readonly string[]): StatementAssociation | undefined {
+  /** Keys are consumed here: only per-root condition coverage leaves acquisition. A key witnesses a
+   * condition only if its message has the condition's speaker and, when anchors exist, one anchor's
+   * tokens all occur in it; any unknown witness read leaves the whole association unavailable. */
+  public associate(roots: readonly string[], witnesses: StatementWitnessReader | undefined): StatementAssociation | undefined {
     if (this.abandoned) return undefined;
     let dimensions = 0, keyCount = 0;
     for (const root of roots) for (const row of this.byRoot.get(root) ?? []) { dimensions += row.embedding.length; keyCount++; }
@@ -162,17 +171,30 @@ export class StatementKeyRetention {
     if (demands.vectors.some(vector => vector.length !== (this.dimensions ?? vector.length) || vector.some(v => !Number.isFinite(v)))) {
       this.abandon("statement key association incompatible dimensions"); return undefined;
     }
-    const coverage = roots.map(root => {
+    const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
+    const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
+    const coverage: (number | null)[][] = [];
+    for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
-      return demands.vectors.map(vector => {
+      const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
+      if (kept.length > 0 && (read === undefined || read.status !== "ready" || read.witnesses.length !== kept.length)) {
+        const reason = read === undefined ? "statement_witness_reader_absent" : read.status === "ready" ? "statement_witness_misaligned" : read.reason;
+        this.abandon(reason, reason.startsWith("statement_witness_read_budget")); return undefined;
+      }
+      const facts = read?.status === "ready" ? read.witnesses : [];
+      coverage.push(demands.vectors.map((vector, index) => {
+        const condition = demands.conditions[index]!;
         let best: number | null = null;
-        for (const key of kept) {
+        kept.forEach((key, position) => {
+          const fact = facts[position]!;
+          if (fact.role !== condition.speaker || condition.anchors.length > 0
+            && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true)) return;
           const value = cosine(key.embedding, vector);
           if (value > (best ?? -Infinity)) best = value;
-        }
+        });
         return best;
-      });
-    });
+      }));
+    }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     return { roots: [...roots], statements, coverage, decision: { refused: null, applied: false } };

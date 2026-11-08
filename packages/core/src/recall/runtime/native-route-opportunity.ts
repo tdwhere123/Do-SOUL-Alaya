@@ -1,5 +1,5 @@
 import { CoreError } from "../../shared/errors.js";
-import { EVIDENCE_STATEMENT_LIMITS, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+import { EVIDENCE_CONDITION_LIMITS, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { preferEvidenceCoverage, type StatementAssociation } from "../../source-index/statement-association.js";
 
@@ -296,7 +296,7 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
 function validateAssociation({ roots, statements, coverage, decision }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
-  requireFact(integer(statements, 1) && statements <= EVIDENCE_STATEMENT_LIMITS.max_statements && decision !== null && typeof decision === "object",
+  requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
     "evidence coverage requires one to four statements");
   for (let i = 0; i < coverage.length; i++) {
     const row = coverage[i];

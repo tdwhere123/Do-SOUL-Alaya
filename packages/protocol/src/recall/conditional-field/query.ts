@@ -349,10 +349,19 @@ export const QueryProposalInputLimitsSchema = z
 import { QuestionTimePreferenceSchema } from "./question-time.js";
 import { SourceTemplateProposalSchema } from "./source-template.js";
 
-/** Question-formed, instance-shaped statements of needed facts; navigation demands, never source text or proof. */
-export const EVIDENCE_STATEMENT_LIMITS = Object.freeze({ max_statements: 4, max_characters: 512 } as const);
-const EvidenceStatementsSchema = z.array(z.string().min(1).max(EVIDENCE_STATEMENT_LIMITS.max_characters))
-  .min(1).max(EVIDENCE_STATEMENT_LIMITS.max_statements).readonly();
+/** Question-formed conditions: a fact one earlier message of `speaker` states, with instance names
+ * copied verbatim from the question. Navigation demands, never source text or proof. */
+export const EVIDENCE_CONDITION_LIMITS = Object.freeze({ max_conditions: 4, max_characters: 512, max_anchors: 8,
+  max_anchor_characters: 256 } as const);
+export const EvidenceConditionSchema = z.object({
+  statement: z.string().min(1).max(EVIDENCE_CONDITION_LIMITS.max_characters),
+  speaker: z.enum(["user", "assistant"]),
+  anchors: z.array(z.string().min(1).max(EVIDENCE_CONDITION_LIMITS.max_anchor_characters)
+    .refine(anchor => anchor.trim() === anchor, "anchor must not carry surrounding whitespace"))
+    .max(EVIDENCE_CONDITION_LIMITS.max_anchors).readonly()
+}).strict().readonly();
+export type EvidenceCondition = z.infer<typeof EvidenceConditionSchema>;
+const EvidenceConditionsSchema = z.array(EvidenceConditionSchema).min(1).max(EVIDENCE_CONDITION_LIMITS.max_conditions).readonly();
 
 export const QueryInterpretationProposalBodySchema = z
   .object({
@@ -363,7 +372,7 @@ export const QueryInterpretationProposalBodySchema = z
     stored_cosine_admission: StoredCosineAdmissionSchema.optional(),
     question_time: QuestionTimePreferenceSchema.optional(),
     source_template: SourceTemplateProposalSchema.optional(),
-    evidence_statements: EvidenceStatementsSchema.optional(),
+    evidence_conditions: EvidenceConditionsSchema.optional(),
     // Low-trust optional input is separately admitted; malformed observations do not revoke raw access.
     source_task_observation: z.unknown().optional(),
     conditions: z.array(ProposedGuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),

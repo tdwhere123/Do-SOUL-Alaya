@@ -17,15 +17,20 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
 
-Protocol 40.0.0 adds optional `interpretation_proposal.evidence_statements` (one to four
-question-formed statements, at most 512 characters each) and identifies ordinary results as
+Protocol 40.0.0 adds optional `interpretation_proposal.evidence_conditions` (one to four
+question-formed conditions: a statement of at most 512 characters, the `user`/`assistant`
+speaker whose message states it, and up to eight anchors copied verbatim from the question;
+an anchor absent from the question rejects the proposal) and identifies ordinary results as
 `ordinary-native-field.v14` (library field protocol 14). This is a ranking/delivery semantic
-**major** under invariant §25. Bound statements are embedded locally with the query binding;
-acquisition reduces retained statement keys to per-root coverage on its own ledger, and
-navigation lets each statement's top root enter the source first five, displacing the last
-non-serving root at slots 5..2; displaced roots follow the first five in source order. The
+**major** under invariant §25. Condition statements are embedded locally with the query binding.
+A retained statement key witnesses a condition only if the host role of its message is the
+condition's speaker and, when anchors exist, every token of one anchor occurs in the key text
+or that message; acquisition reads these facts once per message and reduces witnessing keys to
+per-root coverage on its own ledger, and navigation lets each condition's top root enter the
+source first five, displacing the last non-serving root at slots 5..2; displaced roots follow
+the first five in source order. An unknown witness read leaves the order unchanged. The
 slot-5 two-coordinate swap is retired, and statement keys no longer reach field admission.
-Without statements, or with a question-time or query time window, the order is unchanged. Discard old
+Without conditions, or with a question-time or query time window, the order is unchanged. Discard old
 continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
 retain their identities and remain readable. No database migration, provider call or
 allowance increase is introduced, and no natural-data benefit is claimed.

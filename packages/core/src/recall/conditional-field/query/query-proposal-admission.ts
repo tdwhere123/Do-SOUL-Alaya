@@ -70,6 +70,10 @@ export function admitQueryProposal(
   if (proposal.source_template !== undefined && (!SourceTemplateProposalSchema.safeParse(proposal.source_template).success
     || interpretationClock === undefined
     || compareUtcInstants(proposal.source_template.interpretation_clock, interpretationClock) !== 0)) return { kind: "invalid" };
+  // Anchors are instance names copied from the question; one not in the question is an unbound model claim.
+  if (proposal.evidence_conditions?.some(condition => condition.anchors.some(anchor => !originalQuery.includes(anchor)))) {
+    return { kind: "invalid" };
+  }
   const producer = registry.lookup(proposal.producer_id, producerVersionOf(proposal));
   const effectiveLimits = effectiveQueryProposalLimits(producer, proposal.input_limits);
   const structure = inspectQueryProposalStructure(proposal, effectiveLimits);
@@ -202,7 +206,7 @@ function producerMatchesProposal(
   if (!capabilityAllows(producer, "question_time", proposal.question_time !== undefined)) return false;
   if (!capabilityAllows(producer, "source_template", proposal.source_template !== undefined)) return false;
   if (!capabilityAllows(producer, "source_task_observation", proposal.source_task_observation !== undefined)) return false;
-  if (!capabilityAllows(producer, "evidence_statements", proposal.evidence_statements !== undefined)) return false;
+  if (!capabilityAllows(producer, "evidence_conditions", proposal.evidence_conditions !== undefined)) return false;
   if (proposal.program === undefined) return true;
   const allowed = new Set<string>(producer.allowed_grammar);
   const stack: unknown[] = [proposal.program];

@@ -1,15 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, type EvidenceCondition, type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { bindEvidenceDemands, preferEvidenceCoverage, quoteStatementAssociation, restrictStatementAssociation,
-  StatementKeyRetention, STATEMENT_ASSOCIATION_KEYS_PER_ROOT, type EvidenceDemands,
-  type StatementAssociation } from "../../source-index/statement-association.js";
+  StatementKeyRetention, STATEMENT_ASSOCIATION_KEYS_PER_ROOT, type EvidenceDemands, type StatementAssociation,
+  type StatementWitnessReader } from "../../source-index/statement-association.js";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
 import { sourceEmbeddingInputDigest } from "../../embedding-recall/source-embedding-runtime.js";
 
 const roots = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const meter = (work_units = 1e9, memory_bytes = 1e9) => new SourceSemanticResourceLedger({ work_units, memory_bytes });
-const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", vectors: vectors.map(v => Float32Array.from(v)) });
+const condition = (statement: string, speaker: EvidenceCondition["speaker"] = "user", anchors: string[] = []): EvidenceCondition =>
+  ({ statement, speaker, anchors });
+const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", vectors: vectors.map(v => Float32Array.from(v)),
+  conditions: vectors.map((_, index) => condition(`s${index}`)) });
 const noRefusal = () => { throw new Error("unexpected refusal"); };
+// Acquisition passes scanned key targets through unchanged; only identity matters here.
+const key = (id: string) => ({ root_key: id }) as unknown as SourceIndexTarget;
+const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
+/** Witness facts per key id: [role, matched anchor names]; unlisted keys are user keys matching every anchor. */
+const witnesses = (facts: Record<string, [string | null, string[]?]> = {}): StatementWitnessReader => (keys, anchors) => ({
+  status: "ready", resources: zero, witnesses: keys.map(target => {
+    const fact = facts[target.root_key];
+    return { role: fact?.[0] ?? (fact === undefined ? "user" : null),
+      anchors: anchors.map(anchor => fact === undefined || (fact[1] ?? []).includes(anchor)) };
+  }) });
 /** coverage[root] lists one value per statement; omitted roots have no statement key. */
 function coverage(statements: number, values: Record<string, (number | null)[]>): StatementAssociation {
   return { roots, statements, coverage: roots.map(root => values[root] ?? Array<null>(statements).fill(null)),
@@ -43,11 +56,11 @@ describe("statement key retention and evidence coverage", () => {
   it("keeps the stable best sixteen keys per root and scores each statement by its best retained key", () => {
     const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
     // Seventeen keys: the lowest question cosine (0) is dropped even though it matches statement 1 exactly.
-    for (let key = 0; key <= STATEMENT_ASSOCIATION_KEYS_PER_ROOT; key++) {
-      retained.consider("a", key / 100, key === 0 ? Float32Array.of(0, 1) : Float32Array.of(1, 0.5));
+    for (let index = 0; index <= STATEMENT_ASSOCIATION_KEYS_PER_ROOT; index++) {
+      retained.consider("a", index / 100, index === 0 ? Float32Array.of(0, 1) : Float32Array.of(1, 0.5), key(`a${index}`));
     }
-    retained.consider("b", 0.5, Float32Array.of(-1, 1));
-    const value = retained.associate(["b", "a", "c"])!;
+    retained.consider("b", 0.5, Float32Array.of(-1, 1), key("b0"));
+    const value = retained.associate(["b", "a", "c"], witnesses())!;
     expect(value.roots).toEqual(["b", "a", "c"]);
     expect(value.statements).toBe(2);
     expect(value.coverage[0]).toEqual([-Math.SQRT1_2, Math.SQRT1_2].map(v => expect.closeTo(v, 6)));
@@ -60,25 +73,25 @@ describe("statement key retention and evidence coverage", () => {
   });
 
   it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {
-    for (const [demands, status] of [[{ status: "not_supplied", reason: "evidence_statements_not_supplied" }, "not_requested"],
+    for (const [demands, status] of [[{ status: "not_supplied", reason: "evidence_conditions_not_supplied" }, "not_requested"],
       [{ status: "unavailable", reason: "preparation_deadline" }, "unavailable"]] as const) {
       const retained = new StatementKeyRetention(meter(), noRefusal, demands);
-      retained.consider("a", 1, Float32Array.of(1, 0));
-      expect(retained.associate(["a"])).toBeUndefined();
+      retained.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+      expect(retained.associate(["a"], witnesses())).toBeUndefined();
       expect(retained.availability()).toEqual({ status, reason: demands.reason, roots: 1, keys: 1 });
     }
     const refused: string[] = [], mismatch = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0, 0]));
-    mismatch.consider("a", 1, Float32Array.of(1, 0));
-    expect(mismatch.associate(["a"])).toBeUndefined();
+    mismatch.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+    expect(mismatch.associate(["a"], witnesses())).toBeUndefined();
     expect(refused).toEqual(["statement key association incompatible dimensions"]);
   });
 
   it("reports a funded refusal once, without returning partial coverage", () => {
     const ledger = meter(1e9, 10), refused: string[] = [];
     const retained = new StatementKeyRetention(ledger, phase => refused.push(phase), ready([1, 0]));
-    retained.consider("a", 1, Float32Array.of(1, 0));
-    retained.consider("b", 1, Float32Array.of(1, 0));
-    expect(retained.associate(["a", "b"])).toBeUndefined();
+    retained.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+    retained.consider("b", 1, Float32Array.of(1, 0), key("b0"));
+    expect(retained.associate(["a", "b"], witnesses())).toBeUndefined();
     expect(refused).toEqual(["statement key association retention"]);
   });
 
@@ -87,30 +100,65 @@ describe("statement key retention and evidence coverage", () => {
       const budget = meter(), demands = ready(...Array.from({ length: statements }, () => Array<number>(32).fill(1)));
       const retained = new StatementKeyRetention(budget, noRefusal, demands);
       const identities = Array.from({ length: 16 }, (_, index) => `${index}:${"字".repeat(1024)}`);
-      for (const root of identities) for (let key = 0; key < 16; key++) retained.consider(root, 1, new Float32Array(32).fill(1));
+      for (const root of identities) for (let index = 0; index < 16; index++) retained.consider(root, 1, new Float32Array(32).fill(1), key(`${root}:${index}`));
       const protection = retained.finalizationProtection(identities.length, identities.reduce((sum, root) => sum + root.length, 0));
       const work = budget.spentWork, bytes = budget.spentBytes;
-      budget.retain(retained.associate(identities)!);
+      budget.retain(retained.associate(identities, witnesses())!);
       expect(budget.spentWork - work).toBeLessThanOrEqual(protection.work_units);
       expect(budget.spentBytes - bytes).toBeLessThanOrEqual(protection.memory_bytes);
     }
     const quoted = new SourceSemanticResourceLedger(quoteStatementAssociation(8, 40, 64));
     const capture = new StatementKeyRetention(quoted, noRefusal, { status: "not_supplied", reason: "none" });
-    for (let i = 0; i < 40; i++) capture.consider(roots[i % 8]!, i / 40, new Float32Array(64).fill(1));
+    for (let i = 0; i < 40; i++) capture.consider(roots[i % 8]!, i / 40, new Float32Array(64).fill(1), key(`k${i}`));
     expect(quoted.remaining().work_units).toBeGreaterThanOrEqual(0);
+  });
+
+  it("scores a condition only over keys whose message has its speaker and, with anchors, one fully matched anchor", () => {
+    const demands: EvidenceDemands = { status: "ready", vectors: [Float32Array.of(1, 0), Float32Array.of(1, 0), Float32Array.of(1, 0)],
+      conditions: [condition("user fact"), condition("assistant fact", "assistant"), condition("named fact", "user", ["Rachel", "Miami"])] };
+    const retained = new StatementKeyRetention(meter(), noRefusal, demands);
+    retained.consider("a", 0.9, Float32Array.of(1, 0), key("a-user"));
+    retained.consider("a", 0.8, Float32Array.of(1, 1), key("a-assistant"));
+    retained.consider("b", 0.7, Float32Array.of(1, 0), key("b-miami"));
+    retained.consider("c", 0.6, Float32Array.of(1, 0), key("c-null-role"));
+    const value = retained.associate(["a", "b", "c"], witnesses({ "a-user": ["user"], "a-assistant": ["assistant", ["Rachel", "Miami"]],
+      "b-miami": ["user", ["Miami"]], "c-null-role": [null, ["Rachel"]] }))!;
+    expect(value.coverage[0]).toEqual([1, expect.closeTo(Math.SQRT1_2, 6), null]);
+    expect(value.coverage[1]).toEqual([1, null, 1]);
+    expect(value.coverage[2]).toEqual([null, null, null]);
+  });
+
+  it("leaves the whole association unavailable on an unknown or misaligned witness read", () => {
+    const run = (reader: StatementWitnessReader | undefined) => {
+      const refused: string[] = [], retained = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0]));
+      retained.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+      retained.consider("b", 1, Float32Array.of(1, 0), key("b0"));
+      return { value: retained.associate(["a", "b"], reader), availability: retained.availability(), refused };
+    };
+    let calls = 0;
+    const second: StatementWitnessReader = (keys, anchors) => ++calls === 1 ? witnesses()(keys, anchors)
+      : { status: "unknown", reason: "statement_witness_message_binding", resources: zero };
+    expect(run(second)).toEqual({ value: undefined, refused: [],
+      availability: { status: "unavailable", reason: "statement_witness_message_binding" } });
+    expect(run(undefined).availability).toEqual({ status: "unavailable", reason: "statement_witness_reader_absent" });
+    expect(run(() => ({ status: "ready", witnesses: [], resources: zero })).availability.reason).toBe("statement_witness_misaligned");
+    expect(run(() => ({ status: "unknown", reason: "statement_witness_read_budget:x", resources: zero })).refused)
+      .toEqual(["statement_witness_read_budget:x"]);
   });
 
   it("binds prepared vectors only to the exact admitted texts and the query profile", () => {
     const vector = (text: string, profile_id = "p") => ({ vector: { status: "available" as const, profile: {} as never, profile_id,
       input_digest: sourceEmbeddingInputDigest(text), embedding: Float32Array.of(1) } });
     const query = { status: "available" as const, profile: {} as never, profile_id: "p", input_digest: "q", embedding: Float32Array.of(1) };
-    expect(bindEvidenceDemands(undefined, [vector("x")], query)).toEqual({ status: "not_supplied", reason: "evidence_statements_not_supplied" });
-    expect(bindEvidenceDemands(["x"], undefined, query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_absent" });
-    expect(bindEvidenceDemands(["x"], [vector("y")], query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_mismatch" });
-    expect(bindEvidenceDemands(["x"], [vector("x", "other")], query).status).toBe("unavailable");
-    expect(bindEvidenceDemands(["x"], [{ vector: { status: "unavailable", reason: "preparation_deadline" } }], query))
+    const x = condition("x"), y = condition("y", "assistant", ["Y"]);
+    expect(bindEvidenceDemands(undefined, [vector("x")], query)).toEqual({ status: "not_supplied", reason: "evidence_conditions_not_supplied" });
+    expect(bindEvidenceDemands([x], undefined, query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_absent" });
+    expect(bindEvidenceDemands([x], [vector("y")], query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_mismatch" });
+    expect(bindEvidenceDemands([x], [vector("x", "other")], query).status).toBe("unavailable");
+    expect(bindEvidenceDemands([x], [{ vector: { status: "unavailable", reason: "preparation_deadline" } }], query))
       .toEqual({ status: "unavailable", reason: "preparation_deadline" });
-    expect(bindEvidenceDemands(["x", "y"], [vector("x"), vector("y")], query)).toMatchObject({ status: "ready", vectors: [expect.any(Float32Array), expect.any(Float32Array)] });
+    expect(bindEvidenceDemands([x, y], [vector("x"), vector("y")], query)).toMatchObject({ status: "ready",
+      vectors: [expect.any(Float32Array), expect.any(Float32Array)], conditions: [x, y] });
   });
 });
 

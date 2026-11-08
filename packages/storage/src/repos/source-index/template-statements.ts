@@ -2,8 +2,9 @@ import {
   SourceSemanticResourceExhausted, canonicalJson, hostOccurrenceIsMessage,
   sourceStatementArtifact, sourceIndexStatementTarget, sourceIndexNativeRootKey,
   type BoundSourceStatement, type FieldContractSha256, type HostOccurrenceInventory, type SourceStatementArtifact,
-  type SourceIndexTarget, type SourceIndexTemplateRead, type SourceSemanticResourceBudget
+  type SourceIndexStatementWitnessRead, type SourceIndexTarget, type SourceIndexTemplateRead, type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
+import { analyzeSourceIndexLexical, readSourceIndexLexicalAnalysisStatus } from "@do-soul/alaya-cjk-segmentation";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
@@ -12,7 +13,8 @@ import { readIntegerField, readRecord, readStringField } from "../shared/parse-r
 import { sourceReadCost } from "./native-source.js";
 import { QueryReadMeter, targetDecodeReservation } from "./query-read-meter.js";
 import { admitSourceIndexQueryCandidate } from "./source-index-query-reader.js";
-import { readStatementIndexTarget } from "./statement-artifact.js";
+import { readStatementIndexChunk, readStatementIndexTarget } from "./statement-artifact.js";
+import { tokenizeFtsQuery } from "../shared/fts-lane-routing.js";
 
 // Artifact ids have at most 256 Unicode scalar characters. Payload sizes are read before payloads.
 const ARTIFACT_ID_BYTES = 1024;
@@ -50,6 +52,56 @@ export function readTemplateStatements(database: StorageDatabase, records: Sqlit
     return { status: "unknown", reason: error instanceof TemplateReadUnknown ? error.message
       : error instanceof SourceSemanticResourceExhausted ? `source_template_read_budget:${error.phase}`
         : "source_template_read_failed_unknown_additional_cost", resources: meter.resources() };
+  }
+}
+
+/** Keys of one root: role from the host occurrence at the key's message span, tokens from the key text and
+ * the raw message bytes (segmented v2 query analysis, lowercased). Each message is read once. Reads never
+ * initiate segmenter loading; a cold segmenter tokenizes anchors and texts alike with raw query tokens. */
+export function readStatementWitnesses(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
+  keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget,
+  sha256: FieldContractSha256): SourceIndexStatementWitnessRead {
+  const meter = new QueryReadMeter(budget);
+  try {
+    const root = keys[0];
+    if (root === undefined) return { status: "ready", witnesses: [], resources: meter.resources() };
+    if (keys.some(key => key.auxiliary === undefined || key.source_id === null || key.target.root_kind !== "source_record"
+      || key.source_id !== root.source_id || canonicalJson(key.target) !== canonicalJson(root.target))) {
+      throw new TemplateReadUnknown("statement_witness_key_root_mismatch");
+    }
+    const context: ReadContext = { database, records, source: root, meter, sha256 }, inventory = readInventory(context);
+    const segmented = readSourceIndexLexicalAnalysisStatus() === "ready";
+    const tokens = (text: string) => {
+      meter.ledger.charge(4 * text.length, 16 * text.length + 64, "statement witness tokenization");
+      return (segmented ? analyzeSourceIndexLexical(text, "query", "v2") : tokenizeFtsQuery(text, { initializeCjk: false }))
+        .map(token => token.toLowerCase());
+    };
+    const required = anchors.map(tokens), messages = new Map<string, Readonly<{ role: string | null; tokens: readonly string[] }>>();
+    const witnesses = keys.map(key => {
+      const [start, end] = key.auxiliary!.source_span, span = `${start}:${end}`;
+      let message = messages.get(span);
+      if (message === undefined) {
+        meter.ledger.charge(inventory.occurrences.length, 0, "statement witness host occurrence binding");
+        const occurrence = inventory.occurrences.find(row => row.utf8_span[0] === start && row.utf8_span[1] === end);
+        if (occurrence === undefined || !hostOccurrenceIsMessage(occurrence)) throw new TemplateReadUnknown("statement_witness_message_binding");
+        let text = "", offset = start;
+        while (offset < end) { const part = readMessagePart(context, offset, end); text += part.text; offset += part.bytes; }
+        message = { role: occurrence.role, tokens: tokens(text) };
+        messages.set(span, message);
+      }
+      meter.ledger.reserve(1, 2 * key.body_bytes + 64, "statement witness key text");
+      const chunk = readStatementIndexChunk(database, key, key.body_bytes, 0);
+      meter.read(chunk.resources.work, chunk.resources.native_bytes);
+      if (chunk.row === null || chunk.row.content_end !== key.body_bytes) throw new TemplateReadUnknown("statement_witness_key_changed");
+      const present = new Set([...message.tokens, ...tokens(chunk.row.content)]);
+      meter.ledger.charge(anchors.length, 8 * anchors.length + 64, "statement witness anchor test");
+      return { role: message.role, anchors: required.map(need => need.length > 0 && need.every(token => present.has(token))) };
+    });
+    return { status: "ready", witnesses, resources: meter.resources() };
+  } catch (error) {
+    return { status: "unknown", reason: error instanceof TemplateReadUnknown ? error.message
+      : error instanceof SourceSemanticResourceExhausted ? `statement_witness_read_budget:${error.phase}`
+        : "statement_witness_read_failed_unknown_additional_cost", resources: meter.resources() };
   }
 }
 

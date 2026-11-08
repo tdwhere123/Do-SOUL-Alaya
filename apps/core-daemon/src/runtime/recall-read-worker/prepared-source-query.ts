@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EVIDENCE_STATEMENT_LIMITS, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema } from "@do-soul/alaya-protocol";
+import { EVIDENCE_CONDITION_LIMITS, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema } from "@do-soul/alaya-protocol";
 
 /** Parent-owned preparation crosses IPC; public requests cannot supply this material. */
 const PreparedRouteSchema = z.object({
@@ -12,4 +12,4 @@ const PreparedRouteSchema = z.object({
   ])
 }).strict();
 export const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional(),
-  evidence: z.array(PreparedRouteSchema).max(EVIDENCE_STATEMENT_LIMITS.max_statements).readonly().optional() }).strict();
+  evidence: z.array(PreparedRouteSchema).max(EVIDENCE_CONDITION_LIMITS.max_conditions).readonly().optional() }).strict();

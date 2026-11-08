@@ -164,9 +164,9 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     ...(interpretation.interpretation_proposal?.question_time === undefined ? {}
       : { questionTime: interpretation.interpretation_proposal.question_time }),
     // Coverage has no within-window witness guard yet, so a timed request keeps base order.
-    ...(interpretation.interpretation_proposal?.evidence_statements === undefined || interpretation.time_window !== undefined
+    ...(interpretation.interpretation_proposal?.evidence_conditions === undefined || interpretation.time_window !== undefined
       || interpretation.interpretation_proposal.question_time !== undefined ? {}
-      : { evidenceStatements: interpretation.interpretation_proposal.evidence_statements }),
+      : { evidenceConditions: interpretation.interpretation_proposal.evidence_conditions }),
     // Hard source guards require Field-owned facts unavailable at the acquisition seam.
     // Abstain instead of allowing a later-ineligible restoration to evict an incumbent.
     ...(interpretation.source_guard !== undefined || interpretation.interpretation_proposal?.source_template === undefined ? {}

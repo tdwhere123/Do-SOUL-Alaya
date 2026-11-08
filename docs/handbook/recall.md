@@ -411,32 +411,39 @@ archive reading, but cannot obtain current task-qualified preference. Temporal a
 and durable truth are unchanged. Authored wire-shaped mechanism tests establish no natural
 endpoint availability, model fidelity or recall benefit.
 
-## Evidence statement coverage
+## Evidence condition coverage
 
 Protocol 40.0.0 replaces the retired slot-5 two-coordinate swap. An ordinary request may
-carry `interpretation_proposal.evidence_statements`: one to four question-formed,
-instance-shaped sentences (at most 512 characters each) admitted by the question-time and
-source-template producers and bound into query identity. Before the snapshot, each statement
-is embedded with the query's own binding, one input at a time and only through local
-inference; the worker uses a vector only when its input digest and profile match the
-admitted text and the query.
+carry `interpretation_proposal.evidence_conditions`: one to four question-formed conditions,
+each a statement (at most 512 characters) that one earlier message would contain, the speaker
+of that message (`user` or `assistant`), and up to eight anchors, instance names copied
+verbatim from the question. The question-time and source-template producers may carry them;
+they are bound into query identity, and an anchor that is not a substring of the question
+makes the proposal invalid. Before the snapshot, each statement is embedded with the query's
+own binding, one input at a time and only through local inference; the worker uses a vector
+only when its input digest and profile match the admitted text and the query.
 
 Acquisition retains at most 16 statement-key vectors per root seen by the original query's
 vector scan, as before. Only allowance-funded ordinary acquisition associates; request-funded
-Source library pages do not. When statements are bound, acquisition charges exact scoring on
-its own ledger and keeps only coverage: for each root and statement, the best cosine over that
-root's retained keys (null without a key). Keys never leave acquisition. Without statements,
-the keys are dropped and the field order is unchanged. A request with a question-time or
-query time window does not bind its statements (no within-window witness guard yet), so its
-timed order is unchanged.
+Source library pages do not. When conditions are bound, acquisition reads, per root and once
+per message, the host-occurrence role at each retained key's message span and the tokens of
+the key text and of the raw message bytes (segmented v2 query analysis, lowercased; a cold
+segmenter tokenizes anchors and texts alike with raw query tokens). A key witnesses a
+condition only if its role is the condition's speaker and, when the condition has anchors,
+every token of at least one anchor is present. Coverage is, for each root and condition, the
+best cosine over that root's witnessing keys (null without one), charged on acquisition's own
+ledger. Keys never leave acquisition; an unknown or unfunded witness read discards the whole
+coverage. Without conditions, the keys are dropped and the field order is unchanged. A request
+with a question-time or query time window does not bind its conditions (no within-window
+witness guard yet), so its timed order is unchanged.
 
 Navigation applies the coverage after filtering and time preference determine the source
-order. A statement's top root is the highest-coverage root in that order, ties to the earlier
-position. Starting from the source first five with slot 1 fixed, each statement in order whose
-top lies outside the first five replaces the last root at slots 5..2 that tops no statement;
+order. A condition's top root is the highest-coverage root in that order, ties to the earlier
+position. Starting from the source first five with slot 1 fixed, each condition in order whose
+top lies outside the first five replaces the last root at slots 5..2 that tops no condition;
 nothing changes if every slot 2–5 serves. All other roots keep their source order, so replaced
 roots follow directly after the first five. No root leaves the order and memory keeps its
-positions. The navigation diagnostic `evidence_coverage` reports the statement count, each
+positions. The navigation diagnostic `evidence_coverage` reports the condition count, each
 top's source position, every injection or `no_free_slot`, and refusal.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
@@ -444,7 +451,7 @@ permutation is applied, records refusal, and cannot silently retry on a later pa
 permutation has been applied, a later underfunded request fails explicitly instead of
 reverting to baseline order. Child refusal requirements include the mandatory navigation
 reserve when translated back to the request budget. Coverage is a selection heuristic, not
-proof that the injected root answers the statement: a top can be a near duplicate or a wrong
+proof that the injected root answers the condition: a top can be a near duplicate or a wrong
 fact. Frozen, label-selected screens show gains and losses and do not establish natural-data
 acceptance.
 

@@ -456,7 +456,11 @@ class AcquisitionQuery {
             } });
           this.limited ||= partial;
         }
-        this.association = this.statements?.associate([...this.nominations.keys()]);
+        this.association = this.statements?.associate([...this.nominations.keys()], (keys, anchors) => {
+          const read = this.repository.readStatementWitnesses?.(keys, anchors, this.meter.remaining());
+          if (read !== undefined) this.absorb(read.resources);
+          return read;
+        });
       }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -637,7 +641,7 @@ class AcquisitionQuery {
         invalid_windows: this.vector.invalid_windows + 1 }; return;
     }
     if (!Number.isFinite(cosine)) return;
-    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding);
+    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding, candidate.source);
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
     const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);

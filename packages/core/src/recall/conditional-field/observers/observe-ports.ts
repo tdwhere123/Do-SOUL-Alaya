@@ -187,8 +187,8 @@ export type ObserverReaders = Readonly<{
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
     sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
     sourceTaskObservation?: unknown;
-    /** Admitted question-formed evidence statements; prepared vectors are bound to these exact texts. */
-    evidenceStatements?: readonly string[];
+    /** Admitted question-formed evidence conditions; prepared vectors are bound to their exact statements. */
+    evidenceConditions?: readonly import("@do-soul/alaya-protocol").EvidenceCondition[];
     /** Private observation context; the same guard also controls task proposal forwarding. */
     taskObservationBlock?: "access_hint" | "source_guard" | "time_window" | "program" | "conditions";
   }>) => NativeSourceNomination;

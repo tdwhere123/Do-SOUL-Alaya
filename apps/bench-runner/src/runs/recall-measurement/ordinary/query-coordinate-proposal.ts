@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID,
-  QuestionTimePreferenceSchema, QueryInterpretationProposalSchema,
+  EvidenceConditionSchema, QuestionTimePreferenceSchema, QueryInterpretationProposalSchema,
   type QueryInterpretationProposal } from "@do-soul/alaya-protocol";
 
 const CoordinateEnvelope = z.looseObject({ status: z.string(), coordinates: z.unknown().optional() });
@@ -10,11 +10,12 @@ const Coordinates = z.looseObject({ time: z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("window"), alternatives: z.array(z.object({ start: z.string(), end: z.string() })).readonly()
     .pipe(QuestionTimePreferenceSchema.unwrap().shape.intervals) })
 ]), asked_speaker: z.enum(["user", "assistant", "either"]).optional(),
-evidence_statements: z.array(z.string()).optional() });
+evidence_statements: z.array(z.string()).optional(),
+evidence_conditions: z.array(EvidenceConditionSchema).optional() });
 
 /** Bound question coordinates enter the public proposal contract. Source matching remains
  * a separate consumer decision; malformed formation is not successful absence. Evidence
- * statements travel unchanged as navigation demands beside any time or template proposal. */
+ * conditions travel unchanged as navigation demands beside any time or template proposal. */
 export function queryProposalFromCoordinates(query: string, clock: string,
   frozen: unknown): QueryInterpretationProposal | undefined {
   const envelope = CoordinateEnvelope.parse(frozen);
@@ -25,8 +26,8 @@ export function queryProposalFromCoordinates(query: string, clock: string,
       interpretation_clock: clock, asked_speaker: coordinates.asked_speaker,
       evidence_statements: coordinates.evidence_statements
     } : undefined;
-  const statements = coordinates.evidence_statements?.length ? coordinates.evidence_statements : undefined;
-  if (coordinates.time.kind !== "window" && sourceTemplate === undefined && statements === undefined) return undefined;
+  const conditions = coordinates.evidence_conditions?.length ? coordinates.evidence_conditions : undefined;
+  if (coordinates.time.kind !== "window" && sourceTemplate === undefined && conditions === undefined) return undefined;
   return QueryInterpretationProposalSchema.parse({ schema_version: 1,
     original_query_digest: `sha256:${createHash("sha256").update(query, "utf8").digest("hex")}`,
     producer_id: sourceTemplate === undefined ? QUESTION_TIME_PROPOSAL_PRODUCER_ID : SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID,
@@ -35,6 +36,6 @@ export function queryProposalFromCoordinates(query: string, clock: string,
       question_time: { interpretation_clock: clock, intervals: coordinates.time.alternatives }
     } : {}),
     ...(sourceTemplate === undefined ? {} : { source_template: sourceTemplate }),
-    ...(statements === undefined ? {} : { evidence_statements: statements })
+    ...(conditions === undefined ? {} : { evidence_conditions: conditions })
   });
 }

@@ -10,7 +10,7 @@
 //              "representation": { "kind": "paired-prefix.v1", "query_prefix": "query: ", "passage_prefix": "passage: " } }, ...]
 // Optional "env" on an arm is set for its query only (e.g. a diagnostic recall budget).
 // --coordinates FILE loads frozen question-only coordinates; only arms with "question_time": true send time proposals,
-// which also carry the coordinates' evidence_statements unchanged.
+// which also carry the coordinates' evidence_conditions unchanged.
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
 // --capture-pool adds private native observation and separately marked diagnostic rankings to each row.
 // --source-model, --source-cache and --source-artifact-digest select a separately bound Source model;
@@ -317,7 +317,7 @@ for (const id of ids) {
         ? queryProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
       if (arm.question_time === true) row.formation.question_time = { status: frozen.status,
         proposal: proposal === undefined ? "not_issued" : "issued",
-        ...(proposal?.evidence_statements === undefined ? {} : { evidence_statements: proposal.evidence_statements.length }) };
+        ...(proposal?.evidence_conditions === undefined ? {} : { evidence_conditions: proposal.evidence_conditions.length }) };
       const root = join(out, "runs", id, arm.name);
       if (captureRecallPool !== undefined && existsSync(root)) {
         throw new AlayaError("CONFLICT", "capture root already exists; prior first exposure may be unresolved");

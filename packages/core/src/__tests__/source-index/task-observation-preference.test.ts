@@ -48,7 +48,7 @@ function fixture() {
   const run = (enabled = true, supplied: SourceTaskObservationProposal = proposal, observationSourceId?: string) =>
     new SourceIndexAcquisition(repository, fieldSha256).nominateWithWitness({ ...input,
       ...(enabled ? { source_task_observation: supplied } : {}) }, () => "admitted", "original",
-    capture => { observed.push(capture()); }, { status: "ready", vectors: [Float32Array.of(1)] }, { retain }, observationSourceId);
+    capture => { observed.push(capture()); }, { status: "ready", vectors: [Float32Array.of(1)], conditions: [{ statement: "s", speaker: "user", anchors: [] }] }, { retain }, observationSourceId);
   return { originals, preferred, repository, read, retain, run, observed, proposal };
 }
 

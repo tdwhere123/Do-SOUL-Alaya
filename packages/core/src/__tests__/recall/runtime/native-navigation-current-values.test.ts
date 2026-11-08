@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { MemoryDimension, QueryViewSchema, SourceSemanticResourceLedger, sourceGoldRootIdentity, sourceRecallTarget } from "@do-soul/alaya-protocol";
+import { MemoryDimension, QueryViewSchema, SourceSemanticResourceLedger, sourceGoldRootIdentity, sourceRecallTarget,
+  type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
 import type { FieldEngineState } from "../../../recall/conditional-field/engine/field-engine.js";
@@ -90,9 +91,12 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     expect(base.status).toBe("ordered");
     const covered = (top: number) => {
       const retention = new StatementKeyRetention(new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 }),
-        () => { throw new Error("unexpected retention refusal"); }, { status: "ready", vectors: [Float32Array.of(0, 1)] });
-      targets.forEach((entry, i) => retention.consider(sourceFactKey(entry), 1, i === top ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0)));
-      return retention.associate(targets.map(sourceFactKey))!;
+        () => { throw new Error("unexpected retention refusal"); }, { status: "ready", vectors: [Float32Array.of(0, 1)], conditions: [{ statement: "s", speaker: "user", anchors: [] }] });
+      // Every key witnesses the user condition; only its vector differs.
+      targets.forEach((entry, i) => retention.consider(sourceFactKey(entry), 1, i === top ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0),
+        { root_key: sourceFactKey(entry) } as unknown as SourceIndexTarget));
+      return retention.associate(targets.map(sourceFactKey), keys => ({ status: "ready", resources: { work: 0, memory_bytes: 0,
+        native_bytes: 0, sql_internal_work: "unknown" }, witnesses: keys.map(() => ({ role: "user", anchors: [] })) }))!;
     };
     const tight = new SourceSemanticResourceLedger({ work_units: generous.spentWork + 20,
       memory_bytes: generous.spentBytes + 1024 });
