@@ -440,7 +440,9 @@ except that a session before the earliest alternative violates (a reported event
 session). Session time is never an event day. Per root and condition the matrix holds the best
 cosine over keys with every dimension satisfied (necessary; null without one) and, under a
 window, whether a key leaves only time unknown or the root has no retained key (possible). It is
-charged on acquisition's own ledger. Keys never leave acquisition; an unknown or unfunded read
+charged on acquisition's own ledger. Each cell also keeps a reference to the key behind it (the
+necessary argmax, else the first time-open key): artifact, key digest, host-message span in the
+root body and time outcome. Key vectors never leave acquisition; an unknown or unfunded read
 discards the whole matrix. Without conditions, the keys are dropped and the field order is
 unchanged. A query time window without a question-time preference does not bind conditions.
 
@@ -454,7 +456,8 @@ improves. Possible witnesses are not otherwise protected: what the conditions ca
 risk, not what they may see. All other roots keep their source order, so replaced roots follow
 directly after the first five. No root leaves the order and memory keeps its positions. The
 navigation diagnostic `evidence_coverage` reports the condition count, each top's source
-position, every injection or `no_free_slot`, and refusal.
+position and witness reference, every injection or `no_free_slot`, and refusal. References are
+diagnostic: they do not change the order and do not claim the span was delivered.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

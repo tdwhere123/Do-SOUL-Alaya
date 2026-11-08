@@ -4,7 +4,7 @@ import { sourceFactKey } from "../conditional-field/engine/binding-environment.j
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { orderNativeFieldAccess, type NativeRouteLane, type NativeRouteOccurrence } from "./native-route-opportunity.js";
-import type { EvidenceCoverageInjection } from "../../source-index/statement-association.js";
+import type { EvidenceCoverageInjection, EvidenceWitnessReference } from "../../source-index/statement-association.js";
 import { compareFieldValues } from "./index-continuation.js";
 import { CoreError } from "../../shared/errors.js";
 
@@ -35,7 +35,9 @@ export type NativeNavigationObservation = Readonly<{
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
   /** Positions are 1-based within the source order before the permutation. */
   evidence_coverage?: Readonly<{ status: "permuted" | "unchanged" | "resource_refused" | "not_run"; statements: number | null;
-    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[]; reason: string | null }>;
+    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[];
+    /** The top's witnessing key per condition; diagnostic, never an exposure claim by itself. */
+    top_witnesses?: readonly (EvidenceWitnessReference | null)[] | null; reason: string | null }>;
 }>;
 
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
