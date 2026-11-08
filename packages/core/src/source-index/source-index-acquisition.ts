@@ -15,6 +15,7 @@ import {
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
+import { preferQuestionTimeWitness } from "./question-time-witness.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { collapseStatementCandidates, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
   type StatementAssociation } from "./statement-association.js";
@@ -455,6 +456,7 @@ class AcquisitionQuery {
               const pending = this.nominatePrefix(true); this.limited ||= pending;
             } });
           this.limited ||= partial;
+          this.preferWindowWitness();
         }
         this.association = this.statements?.associate([...this.nominations.keys()], (keys, anchors) => {
           const read = this.repository.readStatementWitnesses?.(keys, anchors, this.meter.remaining());
@@ -477,6 +479,24 @@ class AcquisitionQuery {
       lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
       statement_association: this.statements?.availability() ?? { status: "not_requested", reason: "association_not_requested" } }));
     return result;
+  }
+
+  /** Optional and placement-only: refusal leaves the timed order; association finalization stays funded. */
+  private preferWindowWitness(): void {
+    const order = this.questionTimeOrder, question = this.originalQuestionTime, vector = this.input.vector;
+    if (order === undefined || question === undefined || vector.status !== "available") return;
+    const protection = this.statements?.finalizationProtection(this.input.allowance.max_roots,
+      order.reduce((sum, key) => sum + key.length, 0)) ?? { work_units: 0, memory_bytes: 0 };
+    const child = new SourceSemanticResourceLedger({ work_units: Math.max(0, this.meter.work - protection.work_units),
+      memory_bytes: Math.max(0, this.meter.bytes - protection.memory_bytes) });
+    try {
+      this.questionTimeOrder = preferQuestionTimeWitness({ order, preference: QuestionTimePreferenceSchema.parse(question),
+        sources: new Map([...this.nominations.entries()].map(([key, row]) => [key, row.source])),
+        query: vector.embedding, repository: this.repository, meter: child,
+        nativeBytes: bytes => { this.nativeBytes += bytes; } }).order;
+    } finally {
+      this.meter.charge(child.spentWork, child.spentBytes, "question time witness");
+    }
   }
 
   private result(): SourceIndexAcquisitionResult {

@@ -99,6 +99,12 @@ export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQ
   Readonly<{ status: "unknown"; reason: string }>
 );
 
+/** Stored active-generation vectors of statement keys, aligned with the request; null when a key has none. */
+export type SourceIndexStatementKeyVectorRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; vectors: readonly (Float32Array | null)[] }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
@@ -110,6 +116,7 @@ export interface SourceIndexQueryRepository {
     budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
   readStatementWitnesses?(keys: readonly SourceIndexTarget[], anchors: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
+  readStatementKeyVectors?(keys: readonly SourceIndexTarget[], budget: SourceSemanticResourceBudget): SourceIndexStatementKeyVectorRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */

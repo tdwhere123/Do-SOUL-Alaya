@@ -455,6 +455,21 @@ proof that the injected root answers the condition: a top can be a near duplicat
 fact. Frozen, label-selected screens show gains and losses and do not establish natural-data
 acceptance.
 
+## Question-time stated-event witness
+
+A request with a question-time preference whose alternatives start on or before its clock reads
+the statements of each admitted root (the template-statement reader: host-verified role and the
+message's session time). A user statement witnesses the window when its key text states an event
+day inside an alternative: relative terms resolve from the statement's session day, dated terms
+stand, and year-less month/day, numeric month/day, CJK month/day and bare weekdays take their
+latest occurrence on or before the session (`statementEventIntervals`). Session time alone is
+never a witness. The witness whose dated key vector is nearest the query vector (stored
+active-generation key vectors; ties to the earlier position) enters the source first five in place
+of the last slot 5..2 root that neither witnesses the window nor may lie in it — a root with no
+stated time and a session inside a window, or one whose read is unknown, is kept. Roots after the
+first five keep their order. The step is optional on the acquisition ledger after association
+finalization is protected; refusal or an unknown read leaves the timed order.
+
 ## Versioned cutoff measurement
 
 Current bench-runner visibility uses `consumer-message-visibility-v2`: admitted whole-message

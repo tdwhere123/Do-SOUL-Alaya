@@ -35,6 +35,15 @@ continuations and restart queries on upgrade or rollback; Protocol 39.x/native v
 retain their identities and remain readable. No database migration, provider call or
 allowance increase is introduced, and no natural-data benefit is claimed.
 
+A question-time request now also checks its admitted roots for a stated event day: a user
+statement whose text dates its event inside a window alternative (relative terms, dated and
+year-less calendar days, numeric month/day and weekdays, read against the statement's session
+day; CJK forms included). The witness nearest the query enters the source first five in place of
+the last slot 5..2 root that is neither a witness nor possibly in the window (no stated time and
+a session in it, or unread). Session time alone never witnesses; membership never changes; any
+unknown read or refused optional budget keeps the timed order. Storage adds a statement-key
+vector read; no migration.
+
 Observation formation now lets its existing model request choose request-bound Q/C/H
 association and same-frame temporal references, with explicit missing/unresolved/ambiguous
 absence. The host resolves references; native publication, conditional proof and ranking
