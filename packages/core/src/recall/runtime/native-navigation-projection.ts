@@ -4,6 +4,7 @@ import { sourceFactKey } from "../conditional-field/engine/binding-environment.j
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { orderNativeFieldAccess, type NativeRouteLane, type NativeRouteOccurrence } from "./native-route-opportunity.js";
+import type { EvidenceCoverageInjection } from "../../source-index/statement-association.js";
 import { compareFieldValues } from "./index-continuation.js";
 import { CoreError } from "../../shared/errors.js";
 
@@ -32,8 +33,9 @@ export type NativeNavigationObservation = Readonly<{
   status: "ordered" | "non_total" | "resource_refused"; total: number; truncated: boolean;
   navigation_refusal?: Readonly<{ phase: string; constraints: SourceSemanticResourceExhausted["constraints"] | null }>;
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
-  statement_association?: Readonly<{ status: "swapped" | "unchanged" | "resource_refused" | "not_run"; source_slot: 5;
-    replacement_global_rank: number | null; replaced_global_rank: number | null; mixed_at_5_changed: boolean; reason: string }>;
+  /** Positions are 1-based within the source order before the permutation. */
+  evidence_coverage?: Readonly<{ status: "permuted" | "unchanged" | "resource_refused" | "not_run"; statements: number | null;
+    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[]; reason: string | null }>;
 }>;
 
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
@@ -130,7 +132,7 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
   try {
     const { input, navigation, catalog } = captureNativeNavigation(state, meter);
     // Keep the mandatory coordinate/reference pass and a conservative comparison allowance
-    // available even if optional association spends its entire child grant and then refuses.
+    // available even if optional evidence coverage spends its entire child grant and then refuses.
     const coordinates = input.lanes.reduce((sum, lane) => sum + (lane.state === "exact-captured" ? lane.occurrences.length : 0), 0)
       + (input.memory.state === "exact-captured" ? input.memory.occurrences.length : 0)
       + (input.question_time?.capture.state === "exact-captured" ? input.question_time.capture.occurrences.length : 0) + catalog.size;
@@ -170,10 +172,9 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     const shared = { witnessFor: (target: RecallTargetRef) => witnesses.get(sourceFactKey(target)),
       values: { size: result.length, at: (index: number) => result[index] } };
     try { observe?.(() => ({ status: ordered.status === "ordered" ? "ordered" : "non_total", total: result.length,
-      statement_association: input.association === undefined ? {
-        status: "not_run", source_slot: 5, replacement_global_rank: null, replaced_global_rank: null,
-        mixed_at_5_changed: false, reason: "association_absent_at_navigation"
-      } : "statement_association" in ordered ? ordered.statement_association : undefined,
+      evidence_coverage: input.association === undefined ? { status: "not_run", statements: null,
+        top_source_positions: null, injections: [], reason: "coverage_absent_at_navigation" }
+        : "evidence_coverage" in ordered ? ordered.evidence_coverage : undefined,
       truncated: result.length > 128, entries: result.slice(0, 128).map(value => ({ target: structuredClone(value.state.target),
         access_ordinal: witnesses.get(sourceFactKey(value.state.target))?.access_ordinal ?? null })) })); }
     catch { /* Diagnostic capture cannot change the native result. */ }

@@ -4,6 +4,7 @@ import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, s
 import {
   SourceIndexAcquisition,
   restrictStatementAssociation,
+  bindEvidenceDemands,
   authorizeSourceIndexScope,
   assertRecallConsumerCompatibility,
   authorizedScopesFromAdmission,
@@ -64,7 +65,8 @@ export function runConditionalFieldWorkerRecall(
   observer?.queryVector(payload.prepared_query?.vector);
   const base: ObserverReaders = reserved.permitted && payload.cancelled !== true
     ? adapters.readers ?? (payload.prepared_query === undefined && observer === undefined ? readersFor(runtime)
-      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer)) : {};
+      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
+        "allowance", payload.prepared_query?.evidence)) : {};
   const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
     ...base, nominateSources: input => {
       const nomination = base.nominateSources!(input);
@@ -167,15 +169,17 @@ type NominationCapture = Omit<ReturnType<SourceIndexAcquisition["nominateWithWit
 };
 type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]>>[0];
 type AcquisitionFunding = "allowance" | "request";
+type PreparedEvidence = Parameters<typeof bindEvidenceDemands>[1];
 
 /** Native acquisition is the only source filter and cost owner. A prepared hint is a
  * second route under the same allowance, never a replacement for original work; a
  * query-lease source restriction narrows the acquired membership, not only identity.
- * Only the allowance quote prices statement-key association, so request-funded pages never associate.
+ * Only the allowance quote prices statement-key association, so request-funded pages never associate;
+ * keys yield evidence coverage only for the admitted statements' bound prepared vectors.
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
   queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver,
-  funding: AcquisitionFunding = "allowance"): NativeSourceNomination {
+  funding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence): NativeSourceNomination {
   const repository = new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true });
   const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
   const admit: Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1] = (scope, source) => {
@@ -203,7 +207,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
             block: input.taskObservationBlock ?? (input.sourceTemplate !== undefined ? "source_template"
               : funding !== "allowance" ? "request_funded" : null),
             source_id: input.sourceId ?? null } };
-        }, kind), invocation === "original" && capacity !== undefined,
+        }, kind), invocation === "original" && capacity !== undefined ? demands : undefined,
       invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined && input.sourceTaskObservation === undefined ? undefined : {
         ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
         readInterpretation: taskInterpretationReader(database, input.workspaceId, input.authorizedScopes),
@@ -217,6 +221,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
+  const demands = bindEvidenceDemands(input.evidenceStatements, evidence, queryVector);
   const originalBudget = meter.remaining(), original = run(input.query, fields.allowance, "original");
   const hintBudget = meter.remaining(), hintAllowance = {
     max_attempts: fields.allowance.max_attempts - original.result.accounting.attempted,
@@ -347,7 +352,7 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = [],
   queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" },
-  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance"): ObserverReaders {
+  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
@@ -361,7 +366,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   );
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
-    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding),
+    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding, evidence),
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,

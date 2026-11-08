@@ -411,40 +411,39 @@ archive reading, but cannot obtain current task-qualified preference. Temporal a
 and durable truth are unchanged. Authored wire-shaped mechanism tests establish no natural
 endpoint availability, model fidelity or recall benefit.
 
-## Statement-key association at slot 5
+## Evidence statement coverage
 
-Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
-that dominates it on two separate coordinates: question similarity (the best cosine between
-the original query and the root's statement keys) and link to slots 1–4 (the best cosine
-between any statement key of the two roots, same generation). Dominance means at least as
-high on both and higher on one; the earliest dominating root in access order swaps with slot
-5. The coordinates are compared, never combined into a score, and there is no threshold.
-A root without observed statement keys sits at -1, the floor of both coordinates: it never
-displaces the root at slot 5, and at slot 5 it yields to the earliest later root with any observed key.
+Protocol 40.0.0 replaces the retired slot-5 two-coordinate swap. An ordinary request may
+carry `interpretation_proposal.evidence_statements`: one to four question-formed,
+instance-shaped sentences (at most 512 characters each) admitted by the question-time and
+source-template producers and bound into query identity. Before the snapshot, each statement
+is embedded with the query's own binding, one input at a time and only through local
+inference; the worker uses a vector only when its input digest and profile match the
+admitted text and the query.
+
 Acquisition retains at most 16 statement-key vectors per root seen by the original query's
-vector scan. Only allowance-funded ordinary acquisition associates; request-funded Source
-library pages do not. Protocol 35.0.0 retains the bounded vectors as explicit nomination data,
-then computes exact pairs on demand after filtering and time preference determine the source
-order. Navigation pays for every comparison before execution. The snapshot-owned triangular
-cache reserves all numeric cells up front; null means uncomputed and -1 means a computed floor.
-Continuations reuse completed pairs; reordering can demand additional pairs. No vectors hide in
-a closure, and incompatible dimensions refuse the optional association.
+vector scan, as before. Only allowance-funded ordinary acquisition associates; request-funded
+Source library pages do not. When statements are bound, acquisition charges exact scoring on
+its own ledger and keeps only coverage: for each root and statement, the best cosine over that
+root's retained keys (null without a key). Keys never leave acquisition. Without statements,
+the keys are dropped and the field order is unchanged.
 
-This plan reduces comparison work while increasing retained memory compared with an eager
-matrix. Both are metered separately. Optional retention or comparison exhaustion preserves
-base nominations/order before any swap is selected, records refusal, and cannot silently retry
-the swap on a later page. After a swap has been selected, a later underfunded request fails
-explicitly instead of reverting to baseline order. Child refusal requirements include the
-mandatory navigation reserve when translated back to the request budget.
-The retained state includes the vectors, cache capacity and fixed-size refusal state. Acquisition
-receipts retain work already spent even when optional vectors cannot fit in the field.
+Navigation applies the coverage after filtering and time preference determine the source
+order. A statement's top root is the highest-coverage root in that order, ties to the earlier
+position. Starting from the source first five with slot 1 fixed, each statement in order whose
+top lies outside the first five swaps with the last root at slots 5..2 that tops no statement;
+nothing changes if every slot 2–5 serves. No root leaves the order and memory keeps its
+positions. The navigation diagnostic `evidence_coverage` reports the statement count, each
+top's source position, every injection or `no_free_slot`, and refusal.
 
-Memory positions and the first four source slots remain unchanged. The fifth source can be
-outside mixed Top-5. Navigation diagnostics report the exchanged global ranks and whether
-mixed Top-5 changed. Two-coordinate dominance is a limited heuristic, not a guarantee of
-complementary evidence: a relevant duplicate can displace a necessary fact. Frozen,
-label-selected screens show gains and losses; neither source hits nor complete annotation
-exposure establish full support sufficiency or natural-data acceptance.
+Optional retention or ordering exhaustion preserves base nominations/order before any
+permutation is applied, records refusal, and cannot silently retry on a later page. After a
+permutation has been applied, a later underfunded request fails explicitly instead of
+reverting to baseline order. Child refusal requirements include the mandatory navigation
+reserve when translated back to the request budget. Coverage is a selection heuristic, not
+proof that the injected root answers the statement: a top can be a near duplicate or a wrong
+fact. Frozen, label-selected screens show gains and losses and do not establish natural-data
+acceptance.
 
 ## Versioned cutoff measurement
 
@@ -464,8 +463,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v13`, Protocol
-39.2.0; library field protocol 13). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v14`, Protocol
+40.0.0; library field protocol 14). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

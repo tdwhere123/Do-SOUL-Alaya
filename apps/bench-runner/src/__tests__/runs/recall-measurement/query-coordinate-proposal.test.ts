@@ -23,6 +23,19 @@ describe("frozen query-coordinate adapter", () => {
       ...window.coordinates, asked_speaker: "either", evidence_statements: statements
     } })?.source_template).toBeUndefined();
   });
+  it("passes Qv2 evidence statements through unchanged, even without a time window or known speaker", () => {
+    const statements = ["I attended <event> on <date>.", "The <event> was in <place>."];
+    expect(queryProposalFromCoordinates(query, clock, { ...window, coordinates: { ...window.coordinates, evidence_statements: statements } })
+      ?.evidence_statements).toEqual(statements);
+    const only = queryProposalFromCoordinates(query, clock, { status: "formed", coordinates: { time: { kind: "absent" },
+      asked_speaker: "either", evidence_statements: statements } })!;
+    expect(only.producer_id).toBe(QUESTION_TIME_PROPOSAL_PRODUCER_ID);
+    expect(Object.keys(only).sort()).toEqual(["evidence_statements", "original_query_digest", "producer_id", "producer_version", "schema_version"]);
+    expect(queryProposalFromCoordinates(query, clock, { status: "formed", coordinates: { time: { kind: "absent" },
+      evidence_statements: [] } })).toBeUndefined();
+    expect(() => queryProposalFromCoordinates(query, clock, { status: "formed", coordinates: { time: { kind: "absent" },
+      evidence_statements: Array(5).fill("too many") } })).toThrow();
+  });
   it("admits only calendar coordinates and retains their union without annotations", () => {
     const proposal = queryProposalFromCoordinates(query, clock, window)!;
     expect(proposal.producer_id).toBe(QUESTION_TIME_PROPOSAL_PRODUCER_ID);

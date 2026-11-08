@@ -161,7 +161,7 @@ export type NativeSourceNomination = Readonly<{
   question_time_order?: readonly string[];
   /** Current source-bound, unreviewed observations used by the bounded preference. */
   task_observations?: readonly import("@do-soul/alaya-protocol").QualifiedTaskObservation[];
-  /** Original-query statement-key observations over admitted roots; navigation only. */
+  /** Evidence statement coverage over admitted roots from original-query statement keys; navigation only. */
   association?: import("../../../source-index/statement-association.js").StatementAssociation;
   /** An explicitly bound source pool can include scoped or proved catalog roots. */
   admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
@@ -172,7 +172,7 @@ export type NativeSourceNomination = Readonly<{
   /** Fresh work funded by the ordinary acquisition allowance; absent on a prepaid library capture. */
   acquisition_resources?: SourceIndexAcquisitionResult["resources"];
   retained_bytes?: number;
-  /** Optional statement vectors/cache within retained_bytes; can be discarded before field admission. */
+  /** Optional evidence coverage within retained_bytes; can be discarded before field admission. */
   association_retained_bytes?: number;
 }>;
 
@@ -187,6 +187,8 @@ export type ObserverReaders = Readonly<{
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
     sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
     sourceTaskObservation?: unknown;
+    /** Admitted question-formed evidence statements; prepared vectors are bound to these exact texts. */
+    evidenceStatements?: readonly string[];
     /** Private observation context; the same guard also controls task proposal forwarding. */
     taskObservationBlock?: "access_hint" | "source_guard" | "time_window" | "program" | "conditions";
   }>) => NativeSourceNomination;

@@ -1,5 +1,6 @@
 import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type SourceIndexLexicalCandidate,
-  type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+  type SourceIndexQueryVector, type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
 
 /** A statement key reaches its raw root once per lexical lane, like a best vector window. */
 export function collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[],
@@ -12,50 +13,76 @@ export function collapseStatementCandidates(candidates: readonly SourceIndexLexi
 }
 
 export const STATEMENT_ASSOCIATION_KEYS_PER_ROOT = 16;
-type Retained = Readonly<{ cosine: number; embedding: Float32Array; norm: number }>;
-type StatementKey = Readonly<{ embedding: readonly number[]; norm: number }>;
+type Retained = Readonly<{ cosine: number; embedding: Float32Array }>;
 
-/** Query/snapshot-owned observations, never a global cache. Keys and every possible cache cell are
- * explicit retained data. Root remapping preserves their indices and key-set identity. Null is an
- * uncomputed link, -1 is a computed floor. Only the pair owner below writes the bounded cache. */
+/** Evidence statement vectors bound to the admitted proposal. Not supplied and unavailable stay distinct. */
+export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Float32Array[] }>
+  | Readonly<{ status: "not_supplied" | "unavailable"; reason: string }>;
+
+/** Query/snapshot-owned evidence coverage: per root, each statement's best cosine over that root's
+ * retained statement keys (null: no key). Only the field ordering decision mutates `decision`. */
 export type StatementAssociation = Readonly<{
   roots: readonly string[];
-  question: readonly number[];
-  keys: readonly (readonly StatementKey[])[];
-  link: (number | null)[][];
-  /** Once optional computation is refused it cannot silently retry for free on a later page. */
-  refusal: { phase: number | null; swap_selected: boolean };
+  statements: number;
+  coverage: readonly (readonly (number | null)[])[];
+  /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
+  decision: { refused: string | null; applied: boolean };
 }>;
 
 /** Internal diagnostics, never part of the retained association graph or its resource quote. */
 export type StatementAssociationAvailability = Readonly<{
-  status: "not_requested" | "ready" | "unavailable"; reason: string | null; roots?: number; keys?: number;
+  status: "not_requested" | "ready" | "unavailable"; reason: string | null; roots?: number; keys?: number; statements?: number;
 }>;
 export type StatementAssociationRetentionObservation = Readonly<{
   stage: "source_retention" | "field_admission"; status: "retained" | "discarded" | "absent";
   reason: string | null; required_bytes: number | null; available_bytes: number; retained_bytes: number | null;
 }>;
 
-const refusalPhases = ["statement key association validation", "statement key association ordering",
-  "statement key association lookup", "statement key association link"] as const;
-export function refuseStatementAssociation(value: StatementAssociation, phase: string): void {
-  const index = refusalPhases.indexOf(phase as typeof refusalPhases[number]);
-  value.refusal.phase = index < 0 ? refusalPhases.length : index;
-}
-export function statementAssociationRefusalReason(value: StatementAssociation): string | null {
-  return value.refusal.phase === null ? null : refusalPhases[value.refusal.phase] ?? "statement key association resource refusal";
-}
-
 const retentionBytes = (dimensions: number) => dimensions * 4 + 48;
-const observationBytes = (roots: number) => (roots + roots * (roots - 1) / 2) * 8;
 
-/** Includes conversion and conservative plain-data retention. Pair work is paid by navigation only
- * when requested, after scope, source order and time preference are known. */
+/** Includes key capture and a conservative retained-graph bound. Statement scoring is
+ * charged on the same acquisition ledger when evidence statements are supplied. */
 export function quoteStatementAssociation(roots: number, windows: number, dimensions: number): SourceSemanticResourceBudget {
   const retainedKeys = Math.min(windows, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT);
   return { work_units: windows * dimensions + retainedKeys * (dimensions * 2 + 16) + roots * roots,
     memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 80 + 1024)
       + roots * roots * 128 + 4096 };
+}
+
+/** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
+function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number): SourceSemanticResourceBudget {
+  return { work_units: keyDimensions * statements + demandDimensions + roots * statements,
+    memory_bytes: demandDimensions * 4 + roots * (64 + statements * 72) };
+}
+
+/** Prepared statement vectors serve only the exact admitted texts under the query's profile. */
+export function bindEvidenceDemands(statements: readonly string[] | undefined,
+  prepared: readonly Readonly<{ vector: SourceIndexQueryVector }>[] | undefined, query: SourceIndexQueryVector): EvidenceDemands {
+  if (statements === undefined) return { status: "not_supplied", reason: "evidence_statements_not_supplied" };
+  if (prepared === undefined || prepared.length !== statements.length) {
+    return { status: "unavailable", reason: "evidence_statement_preparation_absent" };
+  }
+  const vectors: Float32Array[] = [];
+  for (const [index, route] of prepared.entries()) {
+    const vector = route.vector;
+    if (vector.status !== "available") return { status: "unavailable", reason: vector.reason };
+    if (vector.input_digest !== sourceEmbeddingInputDigest(statements[index]!)
+      || query.status === "available" && vector.profile_id !== query.profile_id) {
+      return { status: "unavailable", reason: "evidence_statement_preparation_mismatch" };
+    }
+    vectors.push(vector.embedding);
+  }
+  return { status: "ready", vectors };
+}
+
+/** Same arithmetic as the declared offline rule: one left-to-right Float64 pass over Float32 values. */
+function cosine(key: Float32Array, demand: Float32Array): number {
+  let dot = 0, keyNorm = 0, demandNorm = 0;
+  for (let i = 0; i < key.length; i++) {
+    const a = key[i]!, b = demand[i]!;
+    dot += a * b; keyNorm += a * a; demandNorm += b * b;
+  }
+  return dot / Math.sqrt(keyNorm * demandNorm);
 }
 
 /** Optional retention cannot cancel the underlying scan or nomination. */
@@ -69,7 +96,7 @@ export class StatementKeyRetention {
   public availability(): StatementAssociationAvailability { return { ...this.observed }; }
 
   public constructor(private readonly meter: SourceSemanticResourceLedger,
-    private readonly refused: (phase: string) => void) {}
+    private readonly refused: (phase: string) => void, private readonly demands: EvidenceDemands) {}
 
   public consider(root: string, cosine: number, embedding: Float32Array): void {
     if (this.abandoned) return;
@@ -83,7 +110,7 @@ export class StatementKeyRetention {
     for (const value of embedding) norm += value * value;
     if (!Number.isFinite(norm)) { this.abandon("statement key association invalid vector"); return; }
     this.dimensions ??= embedding.length;
-    const row = { cosine, embedding: embedding.slice(), norm: Math.sqrt(norm) };
+    const row = { cosine, embedding: embedding.slice() };
     const at = kept.findIndex(other => other.cosine < cosine);
     if (kept.length < STATEMENT_ASSOCIATION_KEYS_PER_ROOT) this.retainedKeyCount++;
     kept.splice(at === -1 ? kept.length : at, 0, row);
@@ -92,12 +119,14 @@ export class StatementKeyRetention {
   }
 
   /** Numeric conservative protection for any final root membership, before optional reads.
-   * It includes the existing conversion and retained graph bound without traversing vectors. */
+   * It includes key capture, statement scoring and retained coverage without traversing vectors. */
   public finalizationProtection(roots: number, rootCharacters: number): SourceSemanticResourceBudget {
     if (this.abandoned) return { work_units: 0, memory_bytes: 0 };
-    const cost = quoteStatementAssociation(roots,
-      Math.min(this.retainedKeyCount, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT), this.dimensions ?? 0);
-    return { ...cost, memory_bytes: cost.memory_bytes + rootCharacters * 4 };
+    const keys = Math.min(this.retainedKeyCount, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT), dimensions = this.dimensions ?? 0;
+    const cost = quoteStatementAssociation(roots, keys, dimensions);
+    const vectors = this.demands.status === "ready" ? this.demands.vectors : [];
+    const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length);
+    return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
   }
 
   private abandon(phase: string): void {
@@ -114,91 +143,81 @@ export class StatementKeyRetention {
     }
   }
 
-  /** No pair is evaluated before the consumer knows source order. Plain vectors keep the complete
-   * retained graph visible to nomination and continuation resource owners. */
+  /** Keys are consumed here: only per-root statement coverage leaves acquisition. */
   public associate(roots: readonly string[]): StatementAssociation | undefined {
     if (this.abandoned) return undefined;
     let dimensions = 0, keyCount = 0;
     for (const root of roots) for (const row of this.byRoot.get(root) ?? []) { dimensions += row.embedding.length; keyCount++; }
-    if (!this.fund(dimensions + roots.length, dimensions * 8 + keyCount * 128 + roots.length * 128 + observationBytes(roots.length),
-      "statement key association capture")) return undefined;
-    const kept = roots.map(root => this.byRoot.get(root) ?? []);
-    const result: StatementAssociation = { roots: [...roots], question: kept.map(rows => rows[0]?.cosine ?? -1),
-      keys: kept.map(rows => rows.map(row => ({ embedding: Array.from(row.embedding), norm: row.norm }))),
-      link: roots.map((_, i) => Array<number | null>(i).fill(null)), refusal: { phase: null, swap_selected: false } };
-    this.observed = { status: "ready", reason: null, roots: roots.length, keys: keyCount };
+    const counts = { roots: roots.length, keys: keyCount };
+    const demands = this.demands;
+    if (demands.status !== "ready" || demands.vectors.length === 0) {
+      this.observed = demands.status === "ready" ? { status: "unavailable", reason: "evidence_statements_empty", ...counts }
+        : { status: demands.status === "not_supplied" ? "not_requested" : "unavailable", reason: demands.reason, ...counts };
+      this.byRoot.clear(); return undefined;
+    }
+    const statements = demands.vectors.length;
+    const demandDimensions = demands.vectors.reduce((sum, vector) => sum + vector.length, 0);
+    const cost = coverageCost(dimensions, demandDimensions, roots.length, statements);
+    if (!this.fund(cost.work_units, cost.memory_bytes, "statement key evidence coverage")) return undefined;
+    if (demands.vectors.some(vector => vector.length !== (this.dimensions ?? vector.length) || vector.some(v => !Number.isFinite(v)))) {
+      this.abandon("statement key association incompatible dimensions"); return undefined;
+    }
+    const coverage = roots.map(root => {
+      const kept = this.byRoot.get(root) ?? [];
+      return demands.vectors.map(vector => {
+        let best: number | null = null;
+        for (const key of kept) {
+          const value = cosine(key.embedding, vector);
+          if (value > (best ?? -Infinity)) best = value;
+        }
+        return best;
+      });
+    });
+    this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
-    return result;
+    return { roots: [...roots], statements, coverage, decision: { refused: null, applied: false } };
   }
 }
 
-/** One exact symmetric-pair authority. Charge before comparisons; cache capacity was retained at
- * capture. Repeated navigation pays lookup work but never recomputes a completed pair. */
-export function statementAssociationLink(value: StatementAssociation, left: number, right: number,
-  meter: SourceSemanticResourceLedger): number {
-  meter.charge(1, 0, "statement key association lookup");
-  if (left === right) return -1;
-  const i = Math.min(left, right), j = Math.max(left, right);
-  const cached = value.link[j]![i];
-  if (cached !== null) return cached!;
-  const first = value.keys[i]!, second = value.keys[j]!;
-  const work = first.reduce((sum, key) => sum + key.embedding.length * second.length, 0);
-  meter.charge(work, 0, "statement key association link");
-  let best = -1;
-  for (const a of first) for (const b of second) {
-    if (a.embedding.length !== b.embedding.length) throw new TypeError("statement association dimensions differ");
-    let dot = 0;
-    for (let d = 0; d < a.embedding.length; d++) dot += a.embedding[d]! * b.embedding[d]!;
-    const cosine = a.norm === 0 || b.norm === 0 ? -1 : dot / (a.norm * b.norm);
-    if (cosine > best) best = cosine;
-  }
-  value.link[j]![i] = best;
-  return best;
-}
-
-/** Membership filtering retains only the corresponding vectors and cached pairs. */
+/** Membership filtering keeps each retained root's coverage and the shared decision state. */
 export function restrictStatementAssociation(association: StatementAssociation,
   keep: (root: string) => boolean): StatementAssociation {
   const indices = association.roots.flatMap((root, index) => keep(root) ? [index] : []);
-  return { roots: indices.map(i => association.roots[i]!), question: indices.map(i => association.question[i]!),
-    keys: indices.map(i => association.keys[i]!), refusal: association.refusal,
-    link: indices.map((i, row) => indices.slice(0, row).map(j => association.link[Math.max(i, j)]![Math.min(i, j)]!)) };
+  return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
+    coverage: indices.map(i => association.coverage[i]!), decision: association.decision };
 }
 
-/** A limited source-slot heuristic, not proof of complementary evidence or mixed-cutoff gain.
- * Keep four source roots, then swap slot five with the earliest two-coordinate dominator. */
-export function preferAssociatedSlot(order: readonly string[], association: StatementAssociation,
-  meter: SourceSemanticResourceLedger): readonly string[] {
-  if (order.length < 6 || association.refusal.phase !== null) return order;
-  try {
-    meter.charge(order.length + association.roots.length, (order.length + association.roots.length) * 16,
-      "statement key association ordering");
-    const out = [...order];
-    const index = new Map(association.roots.map((root, i) => [root, i]));
-    const slot = index.get(out[4]!);
-    if (slot === undefined) return out;
-    const others = out.slice(0, 4).flatMap(root => index.has(root) ? [index.get(root)!] : []);
-    const linkTo = (i: number) => Math.max(-1, ...others.map(o => statementAssociationLink(association, i, o, meter)));
-    const slotQuestion = association.question[slot]!, slotLink = linkTo(slot);
-    for (let position = 5; position < out.length; position++) {
-      const candidate = index.get(out[position]!);
-      if (candidate === undefined) continue;
-      const question = association.question[candidate]!;
-      // A lower question coordinate cannot dominate, so its links are not demanded.
-      if (question < slotQuestion) continue;
-      const link = linkTo(candidate);
-      if (link >= slotLink && (question > slotQuestion || link > slotLink)) {
-        association.refusal.swap_selected = true;
-        [out[4], out[position]] = [out[position]!, out[4]!]; return out;
-      }
-    }
-    return out;
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    // A later small page must not replace an already selected permutation with baseline order.
-    // Links remain cached, but inspecting a changed order still requires its own funded work.
-    if (association.refusal.swap_selected) throw error;
-    refuseStatementAssociation(association, error.phase);
-  }
-  return order;
+export type EvidenceCoverageInjection = Readonly<{ statement: number; root_position: number }
+  & ({ status: "injected"; slot: number } | { status: "no_free_slot" })>;
+
+/** Each statement's top root (best coverage; ties to the earlier source position) enters the first
+ * five by swapping with the last slot 5..2 root that tops no statement. Slot 1 and membership are fixed.
+ * A selected slot heuristic, not proof that the injected root answers the statement. */
+export function preferEvidenceCoverage(order: readonly string[], association: StatementAssociation,
+  meter: SourceSemanticResourceLedger) {
+  const statements = association.statements;
+  meter.charge(order.length * (statements + 2), order.length * 16 + statements * 128, "evidence statement coverage ordering");
+  const index = new Map(association.roots.map((root, i) => [root, i]));
+  const tops = Array.from({ length: statements }, (_, statement) => {
+    let top: number | null = null, best = -Infinity;
+    order.forEach((root, position) => {
+      const row = index.get(root), value = row === undefined ? null : association.coverage[row]![statement]!;
+      if (value !== null && value > best) { top = position; best = value; }
+    });
+    return top;
+  });
+  const serving = new Set(tops.flatMap(top => top === null ? [] : [order[top]!]));
+  const out = [...order], head = Math.min(5, out.length), injections: EvidenceCoverageInjection[] = [];
+  tops.forEach((top, statement) => {
+    if (top === null) return;
+    const root = order[top]!;
+    if (out.slice(0, head).includes(root)) return;
+    let slot = -1;
+    for (let position = head - 1; position >= 1; position--) if (!serving.has(out[position]!)) { slot = position; break; }
+    const from = out.indexOf(root);
+    if (slot < 0) { injections.push({ statement, root_position: from + 1, status: "no_free_slot" }); return; }
+    [out[slot], out[from]] = [root, out[slot]!];
+    injections.push({ statement, root_position: from + 1, status: "injected", slot: slot + 1 });
+  });
+  return { order: out, top_positions: tops.map(top => top === null ? null : top + 1), injections };
 }

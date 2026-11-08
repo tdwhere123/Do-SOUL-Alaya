@@ -26,7 +26,7 @@ import type { SourceSemanticObservationScope } from "./source-semantic-observati
 
 type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
 export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string; supplemental_navigation?: string;
-  signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
+  evidence_statements?: readonly string[]; signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
 export type SourceSemanticsExecutionPort = Readonly<{
   execute(input: SourceSemanticsPublicPayload): Promise<SourceSemanticWorkerResult>;
   withExecutionScope<T>(input: { signal?: AbortSignal; timeoutMs: number },
@@ -221,8 +221,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         vector: { status: "unavailable", reason } };
       else {
         const deadline = this.lifecycle.preparationDeadline();
+        // Proposal admission happens later; the worker uses these vectors only for the admitted exact texts.
+        const statements = captured.interpretation_proposal?.evidence_statements;
         prepared = await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({
           workspace_id: captured.workspace_id, navigation: captured.query_text,
+          ...(statements === undefined ? {} : { evidence_statements: statements }),
           signal: deadline.signal, remainingMs: () => deadline.remainingMs() }));
         deadline.check();
       }

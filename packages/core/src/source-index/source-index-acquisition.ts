@@ -16,7 +16,8 @@ import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embe
 import { CoreError } from "../shared/errors.js";
 import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
-import { collapseStatementCandidates, StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
+import { collapseStatementCandidates, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
+  type StatementAssociation } from "./statement-association.js";
 import { restoreSourceTemplate } from "./source-template-restoration.js";
 import { preferTaskObservations } from "./task-observation-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
@@ -32,12 +33,12 @@ type RetainedNomination = {
 };
 
 type SourceQueryPreparationInput = Readonly<{
-  navigation: string; supplemental_navigation?: string; selection: SourceIndexSelection | null;
+  navigation: string; supplemental_navigation?: string; evidence_statements?: readonly string[]; selection: SourceIndexSelection | null;
   bind: (options: SourceEmbeddingBindingOptions) => Promise<SourceEmbeddingBindingResult>;
   signal: AbortSignal; remainingMs: () => number;
 }>;
 type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
-type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
+type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute; evidence?: readonly PreparedRoute[] }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
@@ -155,7 +156,7 @@ export class SourceIndexAcquisition {
       return Object.freeze({ vector: capturedVector, receipt: captureSourceSemanticQueryPreparation(route.receipt) });
     };
     const primary = captureRoute(prepared);
-    return Object.freeze({ ...primary,
+    return Object.freeze({ ...primary, ...(prepared.evidence === undefined ? {} : { evidence: Object.freeze(prepared.evidence.map(captureRoute)) }),
       ...(prepared.supplemental === undefined ? {} : { supplemental: captureRoute(prepared.supplemental) }) });
   }
 
@@ -167,26 +168,27 @@ export class SourceIndexAcquisition {
     const capturedControl = control;
     if (capturedControl === "lexical") {
       SourceIndexAcquisition.assertControl({ control: capturedControl, navigation: input.navigation });
-      return {
-        vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested },
-        receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested")
-      };
+      return { vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested },
+        receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested") };
     }
     if (capturedControl !== undefined && capturedControl !== "vector" && capturedControl !== "dual") {
       throw new CoreError("VALIDATION", "invalid source acquisition channel control");
     }
-    const { navigation, supplemental_navigation, signal, remainingMs } = input;
+    const { navigation, supplemental_navigation, signal, remainingMs } = input, statements = input.evidence_statements?.slice();
     const selection = structuredClone(input.selection), bind = input.bind;
     let binding: Promise<SourceEmbeddingBindingResult> | undefined;
     const captured = { navigation, selection, signal, remainingMs,
       bind: (options: SourceEmbeddingBindingOptions) => binding ??= bind(options) };
-    const original = await SourceIndexAcquisition.prepareRoute(captured);
+    const primary = await SourceIndexAcquisition.prepareRoute(captured), evidence: PreparedRoute[] = [];
+    // Evidence statements reuse the query binding one input at a time, and only through local inference.
+    for (const statement of statements ?? []) evidence.push(await SourceIndexAcquisition.prepareRoute({ ...captured, navigation: statement }, true));
+    const original = statements === undefined ? primary : { ...primary, evidence };
     if (supplemental_navigation === undefined || supplemental_navigation === navigation) return original;
     const supplemental = await SourceIndexAcquisition.prepareRoute({ ...captured, navigation: supplemental_navigation });
     return { ...original, supplemental };
   }
 
-  private static async prepareRoute(input: SourceQueryPreparationInput): Promise<PreparedRoute> {
+  private static async prepareRoute(input: SourceQueryPreparationInput, localOnly = false): Promise<PreparedRoute> {
     const navigation = input.navigation, selection = input.selection, started = performance.now();
     const bind = input.bind, signal = input.signal, remainingMs = input.remainingMs;
     const digest = sourceEmbeddingInputDigest(navigation);
@@ -222,6 +224,7 @@ export class SourceIndexAcquisition {
       if (profileId !== selection.profile_id || canonicalJson(actual) !== canonicalJson(profile) ||
           sourceIndexProfileId(actual, sourceEmbeddingSha256) !== selection.profile_id) return unavailable("selected_profile_mismatch");
       const method = actual.provider_kind === "local_onnx" ? "local_inference" : "external_api";
+      if (localOnly && method !== "local_inference") return unavailable("evidence_statement_requires_local_inference");
       receipt = { ...receipt, method, submitted_inputs: 1, execution_work: "unknown",
         external_api_attempts: method === "local_inference" ? 0 : null };
       const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation, role: "query" }]);
@@ -280,15 +283,16 @@ export class SourceIndexAcquisition {
 
   /** Runtime capture retains every admitted occurrence before root occupancy is projected.
    * The caller owns the snapshot and the returned inventory's lifetime. Statement-key association runs
-   * only on request for the original view, whose budget must include `quoteStatementAssociation`.
+   * only on request for the original view, whose budget must include `quoteStatementAssociation`;
+   * its keys yield coverage only for supplied evidence statements.
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
-    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false,
+    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate?: EvidenceDemands,
     preferenceRetention?: SourcePreferenceRetention, observationSourceId?: string) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
-      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original",
+      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: view === "original" ? associate : undefined,
         ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}), observationSourceId });
     const result = query.run();
     return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
@@ -344,14 +348,14 @@ class AcquisitionQuery {
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number }; associate?: boolean; preferenceRetention?: SourcePreferenceRetention;
+      progress: { lexical: number; vector: number }; associate?: EvidenceDemands; preferenceRetention?: SourcePreferenceRetention;
       observationSourceId?: string }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
     this.originalQuestionTime = proposed;
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
-    if (candidate?.associate === true) this.statements = new StatementKeyRetention(this.meter,
-      phase => this.resourceRefusals.push({ stage: this.stage, phase }));
+    if (candidate?.associate !== undefined) this.statements = new StatementKeyRetention(this.meter,
+      phase => this.resourceRefusals.push({ stage: this.stage, phase }), candidate.associate);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
     this.vector = { completion: "not_run", state: null, reason: "validation_not_run", inspected_windows: 0,

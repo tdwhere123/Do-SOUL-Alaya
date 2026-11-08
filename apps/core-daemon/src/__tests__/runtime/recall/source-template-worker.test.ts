@@ -48,7 +48,7 @@ it("restores a current statement-bound source through real SQLite, built Worker 
       producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID, original_query_digest: digest("needle"), question_time: time } });
     expect(baseline.index!.entries.every(entry => entry.target.kind === "source_evidence" && entry.target.root_id !== wanted)).toBe(true);
     const first = await call({ interpretation_proposal: proposal });
-    expect(first.index!.result_version).toBe("ordinary-native-field.v13");
+    expect(first.index!.result_version).toBe("ordinary-native-field.v14");
     expect(first.index!.entries[0]!.target).toMatchObject({ root_kind: "source_record", root_id: wanted });
     expect(first.index!.continuation).not.toBeNull();
     const oldVersion = await call({ interpretation_proposal: proposal, continuation: {

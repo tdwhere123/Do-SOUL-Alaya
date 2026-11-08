@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 39.2.0, engine gateway 3.0.0
+## Unreleased — protocol 40.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,18 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 40.0.0 adds optional `interpretation_proposal.evidence_statements` (one to four
+question-formed statements, at most 512 characters each) and identifies ordinary results as
+`ordinary-native-field.v14` (library field protocol 14). This is a ranking/delivery semantic
+**major** under invariant §25. Bound statements are embedded locally with the query binding;
+acquisition reduces retained statement keys to per-root coverage on its own ledger, and
+navigation lets each statement's top root enter the source first five, displacing the last
+non-serving root at slots 5..2. The slot-5 two-coordinate swap is retired, and statement keys
+no longer reach field admission. Without statements the order is unchanged. Discard old
+continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
+retain their identities and remain readable. No database migration, provider call or
+allowance increase is introduced, and no natural-data benefit is claimed.
 
 Observation formation now lets its existing model request choose request-bound Q/C/H
 association and same-frame temporal references, with explicit missing/unresolved/ambiguous

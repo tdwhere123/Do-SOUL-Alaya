@@ -79,6 +79,9 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
           ...(parts.interpretation_proposal.source_template === undefined ? {} : {
             source_template: parts.interpretation_proposal.source_template
           }),
+          ...(parts.interpretation_proposal.evidence_statements === undefined ? {} : {
+            evidence_statements: parts.interpretation_proposal.evidence_statements
+          }),
           ...(parts.interpretation_proposal.source_task_observation === undefined ? {} : {
             source_task_observation: parts.interpretation_proposal.source_task_observation
           }),

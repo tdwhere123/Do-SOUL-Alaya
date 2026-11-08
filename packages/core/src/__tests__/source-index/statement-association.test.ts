@@ -1,130 +1,158 @@
 import { describe, expect, it } from "vitest";
 import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
-import { preferAssociatedSlot, quoteStatementAssociation, restrictStatementAssociation, StatementKeyRetention,
-  statementAssociationLink, statementAssociationRefusalReason,
-  STATEMENT_ASSOCIATION_KEYS_PER_ROOT, type StatementAssociation } from "../../source-index/statement-association.js";
+import { bindEvidenceDemands, preferEvidenceCoverage, quoteStatementAssociation, restrictStatementAssociation,
+  StatementKeyRetention, STATEMENT_ASSOCIATION_KEYS_PER_ROOT, type EvidenceDemands,
+  type StatementAssociation } from "../../source-index/statement-association.js";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
+import { sourceEmbeddingInputDigest } from "../../embedding-recall/source-embedding-runtime.js";
 
-const roots = ["a", "b", "c", "d", "e", "f", "g"];
+const roots = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const meter = (work_units = 1e9, memory_bytes = 1e9) => new SourceSemanticResourceLedger({ work_units, memory_bytes });
-function association(question: Record<string, number>, links: Record<string, number>): StatementAssociation {
-  return { roots, question: roots.map(root => question[root] ?? 0.1), keys: roots.map(() => []), refusal: { phase: null, swap_selected: false },
-    link: roots.map((left, i) => roots.slice(0, i).map(right => links[[left, right].sort().join("")] ?? 0.1)) };
+const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", vectors: vectors.map(v => Float32Array.from(v)) });
+const noRefusal = () => { throw new Error("unexpected refusal"); };
+/** coverage[root] lists one value per statement; omitted roots have no statement key. */
+function coverage(statements: number, values: Record<string, (number | null)[]>): StatementAssociation {
+  return { roots, statements, coverage: roots.map(root => values[root] ?? Array<null>(statements).fill(null)),
+    decision: { refused: null, applied: false } };
 }
-const select = (order: readonly string[], value: StatementAssociation) => preferAssociatedSlot(order, value, meter());
 
-it.each([0, 1, 16])("protects actual finalization and complete plain-graph retention with %i keys per root", count => {
-  const budget = meter(), retained = new StatementKeyRetention(budget, () => { throw new Error("unexpected refusal"); });
-  const identities = Array.from({ length: 16 }, (_, index) => `${index}:${"字".repeat(1024)}`);
-  for (const root of identities) for (let key = 0; key < count; key++) {
-    retained.consider(root, 1, Float32Array.from({ length: 32 }, () => 1));
+/** Independent statement of the declared rule over root indices, used as an oracle. */
+function declaredRule(order: readonly string[], value: StatementAssociation): string[] {
+  const score = (root: string, d: number) => value.coverage[value.roots.indexOf(root)]?.[d] ?? null;
+  const tops: (string | null)[] = [];
+  for (let d = 0; d < value.statements; d++) {
+    let best: string | null = null;
+    for (const root of order) {
+      const s = score(root, d);
+      if (s !== null && (best === null || s > score(best, d)!)) best = root;
+    }
+    tops.push(best);
   }
-  const protection = retained.finalizationProtection(identities.length, identities.reduce((sum, root) => sum + root.length, 0));
-  const work = budget.spentWork, bytes = budget.spentBytes, graph = retained.associate(identities)!;
-  budget.retain(graph);
-  expect(budget.spentWork - work).toBeLessThanOrEqual(protection.work_units);
-  expect(budget.spentBytes - bytes).toBeLessThanOrEqual(protection.memory_bytes);
-});
+  const out = [...order];
+  for (const top of tops) {
+    if (top === null || out.slice(0, 5).includes(top)) continue;
+    const slot = [4, 3, 2, 1].find(p => p < out.length && !tops.includes(out[p]!));
+    if (slot === undefined) continue;
+    const from = out.indexOf(top);
+    out[from] = out[slot]!; out[slot] = top;
+  }
+  return out;
+}
 
-describe("statement association source-slot heuristic", () => {
-  it("chooses the earliest two-coordinate dominator, not a weighted score", () => {
-    expect(select(roots, association({ e: 0.3, f: 0.4, g: 0.5 }, { ae: 0.2, af: 0.2, bg: 0.6 })))
-      .toEqual(["a", "b", "c", "d", "f", "e", "g"]);
-    expect(select(roots, association({ e: 0.3, f: 0.9, g: 0.1 }, { ae: 0.5, af: 0.2, bg: 0.9 }))).toEqual(roots);
+describe("statement key retention and evidence coverage", () => {
+  it("keeps the stable best sixteen keys per root and scores each statement by its best retained key", () => {
+    const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
+    // Seventeen keys: the lowest question cosine (0) is dropped even though it matches statement 1 exactly.
+    for (let key = 0; key <= STATEMENT_ASSOCIATION_KEYS_PER_ROOT; key++) {
+      retained.consider("a", key / 100, key === 0 ? Float32Array.of(0, 1) : Float32Array.of(1, 0.5));
+    }
+    retained.consider("b", 0.5, Float32Array.of(-1, 1));
+    const value = retained.associate(["b", "a", "c"])!;
+    expect(value.roots).toEqual(["b", "a", "c"]);
+    expect(value.statements).toBe(2);
+    expect(value.coverage[0]).toEqual([-Math.SQRT1_2, Math.SQRT1_2].map(v => expect.closeTo(v, 6)));
+    expect(value.coverage[1]![0]).toBeCloseTo(1 / Math.sqrt(1.25), 6);
+    expect(value.coverage[1]![1]).toBeCloseTo(0.5 / Math.sqrt(1.25), 6);
+    expect(value.coverage[2]).toEqual([null, null]);
+    expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 17 - 1 + 1, statements: 2 });
+    expect(restrictStatementAssociation(value, root => root !== "b")).toEqual({ roots: ["a", "c"], statements: 2,
+      coverage: [value.coverage[1], value.coverage[2]], decision: value.decision });
   });
-  it("preserves a tied slot, a keyless candidate and an unassociated incumbent", () => {
-    expect(select(roots, association({}, {}))).toEqual(roots);
-    expect(select(roots, association({ f: -1, g: -1 }, {}))).toEqual(roots);
-    const restricted = restrictStatementAssociation(association({ f: 0.9 }, { af: 0.9 }), root => root !== "e");
-    expect(select(roots, restricted)).toEqual(roots);
-    expect(select(roots.slice(0, 5), association({}, {}))).toEqual(roots.slice(0, 5));
-  });
-  it("does not imply complementary evidence quality from coherent cosine dominance", () => {
-    const retained = new StatementKeyRetention(meter(), () => { throw new Error("unexpected refusal"); });
-    for (const root of roots) retained.consider(root, root === "e" ? 0.6 : 1,
-      root === "e" ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0));
-    const result = select(roots, retained.associate(roots)!);
-    const requiredEvidence = new Set(["a", "e"]);
-    expect([...requiredEvidence].every(root => roots.slice(0, 5).includes(root))).toBe(true);
-    expect([...requiredEvidence].every(root => result.slice(0, 5).includes(root))).toBe(false);
-    expect(new Set(result)).toEqual(new Set(roots));
-  });
-});
 
-describe("statement key retention and demanded pairs", () => {
-  it("keeps the stable best sixteen keys and computes no pair at capture", () => {
-    const retained = new StatementKeyRetention(meter(), () => { throw new Error("unexpected refusal"); });
-    for (let i = 0; i < STATEMENT_ASSOCIATION_KEYS_PER_ROOT + 4; i++) retained.consider("a", i / 100, Float32Array.of(1, 0));
-    retained.consider("b", 0.5, Float32Array.of(0, 1));
-    retained.consider("b", 0.4, Float32Array.of(1, 1));
-    expect(retained.availability()).toEqual({ status: "unavailable", reason: "association_capture_not_reached" });
-    const value = retained.associate(["a", "b", "c"])!;
-    expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 18 });
-    expect(value.question).toEqual([0.19, 0.5, -1]);
-    expect(value.keys[0]).toHaveLength(16);
-    expect(value.link).toEqual([[], [null], [null, null]]);
-    expect(statementAssociationLink(value, 0, 1, meter())).toBeCloseTo(Math.SQRT1_2);
-    expect(statementAssociationLink(value, 0, 2, meter())).toBe(-1);
-    expect(value.link[2]![1]).toBeNull();
-  });
-  it("charges every exact comparison once and preserves prepaid cache capacity across reuse", () => {
-    const retained = new StatementKeyRetention(meter(), () => { throw new Error("unexpected refusal"); });
-    for (const root of roots) retained.consider(root, 0.5, Float32Array.of(1, 0, 0, 0));
-    const value = retained.associate(roots)!, resource = meter();
-    const before = SourceSemanticResourceLedger.measureRetain(value, resource.remaining());
-    expect(preferAssociatedSlot(roots, value, resource)).toEqual(roots);
-    // Four seeds times the three remaining roots, never the six seed/seed or three tail/tail pairs.
-    expect(value.link.flat().filter(link => link !== null)).toHaveLength(12);
-    const spent = resource.spentWork;
-    preferAssociatedSlot(roots, value, resource);
-    expect(resource.spentWork - spent).toBe(roots.length * 2 + 12);
-    expect(SourceSemanticResourceLedger.measureRetain(value, resource.remaining())).toEqual(before);
-    const restricted = restrictStatementAssociation(value, root => root !== "b");
-    expect(statementAssociationLink(restricted, 0, 3, meter(1))).toBe(1);
-  });
-  it("rejects incompatible dimensions and never disrupts later base-vector nomination", () => {
-    const refused: string[] = [], retained = new StatementKeyRetention(meter(), phase => refused.push(phase));
-    retained.consider("a", 0.2, Float32Array.of(1, 0));
-    retained.consider("b", 0.3, Float32Array.of(1, 0, 0));
-    retained.consider("c", 0.4, Float32Array.of(1, 0));
-    expect(retained.associate(roots)).toBeUndefined();
+  it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {
+    for (const [demands, status] of [[{ status: "not_supplied", reason: "evidence_statements_not_supplied" }, "not_requested"],
+      [{ status: "unavailable", reason: "preparation_deadline" }, "unavailable"]] as const) {
+      const retained = new StatementKeyRetention(meter(), noRefusal, demands);
+      retained.consider("a", 1, Float32Array.of(1, 0));
+      expect(retained.associate(["a"])).toBeUndefined();
+      expect(retained.availability()).toEqual({ status, reason: demands.reason, roots: 1, keys: 1 });
+    }
+    const refused: string[] = [], mismatch = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0, 0]));
+    mismatch.consider("a", 1, Float32Array.of(1, 0));
+    expect(mismatch.associate(["a"])).toBeUndefined();
     expect(refused).toEqual(["statement key association incompatible dimensions"]);
-    expect(retained.availability()).toEqual({ status: "unavailable", reason: "statement key association incompatible dimensions" });
   });
-  it("reports retention refusal once, without returning partial data", () => {
-    const refused: string[] = [], retained = new StatementKeyRetention(meter(1e9, 10), phase => refused.push(phase));
-    retained.consider("a", 0.5, Float32Array.of(1, 0));
-    retained.consider("b", 0.5, Float32Array.of(1, 0));
-    expect(retained.associate(roots)).toBeUndefined();
+
+  it("reports a funded refusal once, without returning partial coverage", () => {
+    const ledger = meter(1e9, 10), refused: string[] = [];
+    const retained = new StatementKeyRetention(ledger, phase => refused.push(phase), ready([1, 0]));
+    retained.consider("a", 1, Float32Array.of(1, 0));
+    retained.consider("b", 1, Float32Array.of(1, 0));
+    expect(retained.associate(["a", "b"])).toBeUndefined();
     expect(refused).toEqual(["statement key association retention"]);
-    expect(retained.availability()).toEqual({ status: "unavailable", reason: "statement key association retention" });
   });
-  it("persists a pair refusal without free retries or a partial swap", () => {
-    const retained = new StatementKeyRetention(meter(), () => { throw new Error("unexpected refusal"); });
-    for (const root of roots) retained.consider(root, 0.5, Float32Array.of(1, 0, 0, 0));
-    const value = retained.associate(roots)!, tight = meter(roots.length * 2 + 1);
-    const before = SourceSemanticResourceLedger.measureRetain(value, meter().remaining());
-    expect(preferAssociatedSlot(roots, value, tight)).toEqual(roots);
-    expect(statementAssociationRefusalReason(value)).toBe("statement key association link");
-    expect(value.link.flat().every(link => link === null)).toBe(true);
-    const retry = meter();
-    expect(preferAssociatedSlot(roots, value, retry)).toEqual(roots);
-    expect(retry.spentWork).toBe(0);
-    expect(SourceSemanticResourceLedger.measureRetain(value, meter().remaining())).toEqual(before);
+
+  it("protects actual scoring and retained coverage within the finalization reserve", () => {
+    for (const statements of [1, 4]) {
+      const budget = meter(), demands = ready(...Array.from({ length: statements }, () => Array<number>(32).fill(1)));
+      const retained = new StatementKeyRetention(budget, noRefusal, demands);
+      const identities = Array.from({ length: 16 }, (_, index) => `${index}:${"字".repeat(1024)}`);
+      for (const root of identities) for (let key = 0; key < 16; key++) retained.consider(root, 1, new Float32Array(32).fill(1));
+      const protection = retained.finalizationProtection(identities.length, identities.reduce((sum, root) => sum + root.length, 0));
+      const work = budget.spentWork, bytes = budget.spentBytes;
+      budget.retain(retained.associate(identities)!);
+      expect(budget.spentWork - work).toBeLessThanOrEqual(protection.work_units);
+      expect(budget.spentBytes - bytes).toBeLessThanOrEqual(protection.memory_bytes);
+    }
+    const quoted = new SourceSemanticResourceLedger(quoteStatementAssociation(8, 40, 64));
+    const capture = new StatementKeyRetention(quoted, noRefusal, { status: "not_supplied", reason: "none" });
+    for (let i = 0; i < 40; i++) capture.consider(roots[i % 8]!, i / 40, new Float32Array(64).fill(1));
+    expect(quoted.remaining().work_units).toBeGreaterThanOrEqual(0);
   });
-  it("quotes capture and complete explicit retained data before allocation", () => {
-    const dimensions = 64, windows = 40;
-    const ledger = new SourceSemanticResourceLedger(quoteStatementAssociation(roots.length, windows, dimensions));
-    const retained = new StatementKeyRetention(ledger, () => { throw new Error("quote must fund capture"); });
-    for (let i = 0; i < windows; i++) retained.consider(roots[i % roots.length]!, i / windows, new Float32Array(dimensions).fill(1));
-    const value = retained.associate(roots)!;
-    expect(value).toBeDefined();
-    ledger.retain(value, "retained association");
-    expect(ledger.remaining().memory_bytes).toBeGreaterThanOrEqual(0);
+
+  it("binds prepared vectors only to the exact admitted texts and the query profile", () => {
+    const vector = (text: string, profile_id = "p") => ({ vector: { status: "available" as const, profile: {} as never, profile_id,
+      input_digest: sourceEmbeddingInputDigest(text), embedding: Float32Array.of(1) } });
+    const query = { status: "available" as const, profile: {} as never, profile_id: "p", input_digest: "q", embedding: Float32Array.of(1) };
+    expect(bindEvidenceDemands(undefined, [vector("x")], query)).toEqual({ status: "not_supplied", reason: "evidence_statements_not_supplied" });
+    expect(bindEvidenceDemands(["x"], undefined, query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_absent" });
+    expect(bindEvidenceDemands(["x"], [vector("y")], query)).toEqual({ status: "unavailable", reason: "evidence_statement_preparation_mismatch" });
+    expect(bindEvidenceDemands(["x"], [vector("x", "other")], query).status).toBe("unavailable");
+    expect(bindEvidenceDemands(["x"], [{ vector: { status: "unavailable", reason: "preparation_deadline" } }], query))
+      .toEqual({ status: "unavailable", reason: "preparation_deadline" });
+    expect(bindEvidenceDemands(["x", "y"], [vector("x"), vector("y")], query)).toMatchObject({ status: "ready", vectors: [expect.any(Float32Array), expect.any(Float32Array)] });
   });
 });
 
-describe("field association diagnostics", () => {
+describe("evidence coverage permutation of the source first five", () => {
+  it("injects a late top root into the last non-serving slot and protects serving roots", () => {
+    const value = coverage(3, { g: [0.9, 0.1, 0.1], d: [0.2, 0.2, 0.2], c: [0.1, 0.8, 0.1], h: [0.1, 0.1, 0.7] });
+    const decided = preferEvidenceCoverage(roots, value, meter());
+    // c serves statement 1 and stays; e (slot 5) then d (slot 4) are the last non-serving roots.
+    expect(decided.order).toEqual(["a", "b", "c", "h", "g", "f", "e", "d"]);
+    expect(decided.top_positions).toEqual([7, 3, 8]);
+    expect(decided.injections).toEqual([{ statement: 0, root_position: 7, status: "injected", slot: 5 },
+      { statement: 2, root_position: 8, status: "injected", slot: 4 }]);
+  });
+
+  it("keeps the order when every slot 2-5 serves, never moves slot 1 and breaks ties to the earlier position", () => {
+    const full = coverage(4, { b: [0.9, 0, 0, 0], c: [0, 0.9, 0, 0], d: [0, 0, 0.9, 0], e: [0, 0, 0, 0.9] });
+    expect(preferEvidenceCoverage(roots, full, meter()).order).toEqual(roots);
+    const saturated = coverage(4, { b: [0.9, 0, 0, 0], c: [0, 0.9, 0, 0], d: [0, 0, 0.9, 0], e: [0, 0, 0, 0.5], f: [0, 0, 0, 0.5],
+      g: [0, 0, 0, 0.5] });
+    expect(preferEvidenceCoverage(roots, saturated, meter()).order).toEqual(roots);
+    const firstServes = coverage(1, { a: [0.9], h: [0.5] });
+    expect(preferEvidenceCoverage(roots, firstServes, meter()).order).toEqual(roots);
+    const tie = coverage(1, { g: [0.5], h: [0.5] });
+    expect(preferEvidenceCoverage(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "f", "e", "h"]);
+  });
+
+  it("matches the declared rule over generated coverage, keyless roots, ties and short orders", () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let trial = 0; trial < 400; trial++) {
+      const statements = 1 + Math.floor(random() * 4), length = 1 + Math.floor(random() * roots.length);
+      const values: Record<string, (number | null)[]> = {};
+      for (const root of roots) if (random() > 0.2) {
+        values[root] = Array.from({ length: statements }, () => Math.round(random() * 4) / 4);
+      }
+      const value = coverage(statements, values), order = [...roots].sort(() => random() - 0.5).slice(0, length);
+      expect(preferEvidenceCoverage(order, value, meter()).order).toEqual(declaredRule(order, value));
+    }
+  });
+});
+
+describe("field access with evidence coverage", () => {
   const occurrences = roots.map((root, i) => ({ reference: `o-${root}`, root_key: root, native_rank: i + 1 }));
   const memory = [{ reference: "memory", root_key: "m", native_rank: 1 }];
   const lanes: NativeRouteLane[] = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"].map((lane, i) => ({
@@ -134,32 +162,41 @@ describe("field association diagnostics", () => {
     pool: [...roots, "m"].map(record_id => ({ record_id, catalog_position: null })), acquired_root_keys: [...roots, "m"],
     associations: [...occurrences, ...memory].map(row => ({ occurrence_reference: row.reference, root_key: row.root_key, record_id: row.root_key })),
     unvisited_sources: true };
-  it("reports the actual mixed ranks while preserving memory positions and all original sources", () => {
-    const value = association({ e: 0.1, f: 0.2 }, {}), result = orderNativeFieldAccess({ ...input, association: value }, meter());
-    expect(result.status).toBe("ordered");
-    if (result.status !== "ordered") throw new Error("expected total order");
-    expect(result.record_ids).toEqual(["a", "m", "b", "c", "d", "f", "e", "g"]);
-    expect(result).toHaveProperty("statement_association", { status: "swapped", source_slot: 5,
-      replacement_global_rank: 7, replaced_global_rank: 6, mixed_at_5_changed: false, reason: "question_and_link_dominance" });
-    expect(new Set(result.record_ids)).toEqual(new Set([...roots, "m"]));
+  const base = ["a", "m", "b", "c", "d", "e", "f", "g", "h"];
+
+  it("is byte-identical without coverage and permutes source slots only, preserving memory positions", () => {
+    expect(orderNativeFieldAccess(input, meter())).toEqual(orderNativeFieldAccess(input));
+    expect(orderNativeFieldAccess(input)).toMatchObject({ status: "ordered", record_ids: base });
+    const result = orderNativeFieldAccess({ ...input, association: coverage(1, { g: [0.9] }) }, meter());
+    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "g", "f", "e", "h"],
+      evidence_coverage: { status: "permuted", statements: 1, top_source_positions: [7],
+        injections: [{ statement: 0, root_position: 7, status: "injected", slot: 5 }], reason: null } });
+    const unchanged = orderNativeFieldAccess({ ...input, association: coverage(1, { b: [0.9] }) }, meter());
+    expect(unchanged).toMatchObject({ record_ids: base, evidence_coverage: { status: "unchanged", injections: [] } });
   });
-  it("preserves base access when even optional validation is unfunded", () => {
-    const result = orderNativeFieldAccess({ ...input, association: association({ f: 0.9 }, {}) }, meter(0));
-    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "e", "f", "g"],
-      statement_association: { status: "resource_refused", mixed_at_5_changed: false } });
+
+  it("keeps base access and records refusal when the optional ordering is unfunded", () => {
+    const value = coverage(1, { g: [0.9] });
+    expect(orderNativeFieldAccess({ ...input, association: value }, meter(0))).toMatchObject({ status: "ordered", record_ids: base,
+      evidence_coverage: { status: "resource_refused", top_source_positions: null, reason: "evidence statement coverage validation" } });
+    // A refused permutation is not retried for free on a later, larger page.
+    expect(orderNativeFieldAccess({ ...input, association: value }, meter())).toMatchObject({ record_ids: base,
+      evidence_coverage: { status: "resource_refused" } });
   });
-  it("refuses a smaller later budget instead of undoing the selected source permutation", () => {
-    const value = association({ e: 0.1, f: 0.2 }, {});
+
+  it("refuses a smaller later budget instead of undoing an applied permutation", () => {
+    const value = coverage(1, { g: [0.9] });
     const first = orderNativeFieldAccess({ ...input, association: value }, meter());
-    expect(first).toMatchObject({ statement_association: { status: "swapped" } });
+    expect(value.decision).toEqual({ refused: null, applied: true });
     expect(() => orderNativeFieldAccess({ ...input, association: value }, meter(0))).toThrow(/budget exhausted/u);
-    expect(value.refusal.phase).toBeNull();
-    const resumed = orderNativeFieldAccess({ ...input, association: value }, meter());
-    expect(resumed).toEqual(first);
+    expect(orderNativeFieldAccess({ ...input, association: value }, meter())).toEqual(first);
   });
-  it("rejects malformed cache shape rather than using a fabricated association", () => {
-    const value = association({}, {});
-    value.link[0] = [0.9];
-    expect(() => orderNativeFieldAccess({ ...input, association: value }, meter())).toThrow(/triangular link/u);
+
+  it("rejects malformed coverage rather than using fabricated data", () => {
+    const value = coverage(2, { g: [0.9, 0.1] });
+    (value.coverage as (number | null)[][])[6] = [0.9];
+    expect(() => orderNativeFieldAccess({ ...input, association: value }, meter())).toThrow(/one finite value or null/u);
+    expect(() => orderNativeFieldAccess({ ...input, association: { ...coverage(1, {}), statements: 5,
+      coverage: roots.map(() => Array<null>(5).fill(null)) } }, meter())).toThrow(/one to four/u);
   });
 });

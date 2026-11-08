@@ -69,8 +69,11 @@ an existing request does, so it is an invariant §25 major.
 Protocol 34.0.0 identifies ordinary results as `ordinary-native-field.v9`: question-time
 preference spans the recorded window from its start to the interpretation clock, and source
 slot 5 may yield to a later root that dominates it on statement-key question similarity and
-link to slots 1–4 ([recall handbook](../../docs/handbook/recall.md#statement-key-association-at-slot-5)).
-Old continuations cannot execute the new order (invariant §25 major).
+link to slots 1–4. Old continuations cannot execute the new order (invariant §25 major).
+Protocol 40.0.0 retires that swap and identifies ordinary results as `ordinary-native-field.v14`:
+optional proposal `evidence_statements` can permute the source first five by statement-key
+coverage ([recall handbook](../../docs/handbook/recall.md#evidence-statement-coverage)); library
+field protocol 14. Old continuations cannot execute the new order (invariant §25 major).
 
 Protocol 31.0.0 adds message-bound `source-statements-v1` artifacts shared by
 memory publication and lexical/vector SourceIndex navigation. Ordinary results are

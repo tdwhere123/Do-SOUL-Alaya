@@ -202,6 +202,7 @@ function producerMatchesProposal(
   if (!capabilityAllows(producer, "question_time", proposal.question_time !== undefined)) return false;
   if (!capabilityAllows(producer, "source_template", proposal.source_template !== undefined)) return false;
   if (!capabilityAllows(producer, "source_task_observation", proposal.source_task_observation !== undefined)) return false;
+  if (!capabilityAllows(producer, "evidence_statements", proposal.evidence_statements !== undefined)) return false;
   if (proposal.program === undefined) return true;
   const allowed = new Set<string>(producer.allowed_grammar);
   const stack: unknown[] = [proposal.program];

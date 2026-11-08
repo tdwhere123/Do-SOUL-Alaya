@@ -13,7 +13,8 @@ const Coordinates = z.looseObject({ time: z.discriminatedUnion("kind", [
 evidence_statements: z.array(z.string()).optional() });
 
 /** Bound question coordinates enter the public proposal contract. Source matching remains
- * a separate consumer decision; malformed formation is not successful absence. */
+ * a separate consumer decision; malformed formation is not successful absence. Evidence
+ * statements travel unchanged as navigation demands beside any time or template proposal. */
 export function queryProposalFromCoordinates(query: string, clock: string,
   frozen: unknown): QueryInterpretationProposal | undefined {
   const envelope = CoordinateEnvelope.parse(frozen);
@@ -24,7 +25,8 @@ export function queryProposalFromCoordinates(query: string, clock: string,
       interpretation_clock: clock, asked_speaker: coordinates.asked_speaker,
       evidence_statements: coordinates.evidence_statements
     } : undefined;
-  if (coordinates.time.kind !== "window" && sourceTemplate === undefined) return undefined;
+  const statements = coordinates.evidence_statements?.length ? coordinates.evidence_statements : undefined;
+  if (coordinates.time.kind !== "window" && sourceTemplate === undefined && statements === undefined) return undefined;
   return QueryInterpretationProposalSchema.parse({ schema_version: 1,
     original_query_digest: `sha256:${createHash("sha256").update(query, "utf8").digest("hex")}`,
     producer_id: sourceTemplate === undefined ? QUESTION_TIME_PROPOSAL_PRODUCER_ID : SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID,
@@ -32,6 +34,7 @@ export function queryProposalFromCoordinates(query: string, clock: string,
     ...(coordinates.time.kind === "window" ? {
       question_time: { interpretation_clock: clock, intervals: coordinates.time.alternatives }
     } : {}),
-    ...(sourceTemplate === undefined ? {} : { source_template: sourceTemplate })
+    ...(sourceTemplate === undefined ? {} : { source_template: sourceTemplate }),
+    ...(statements === undefined ? {} : { evidence_statements: statements })
   });
 }

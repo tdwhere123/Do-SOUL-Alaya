@@ -38,7 +38,7 @@ function fixture() {
   const run = (options: { proposed?: boolean; retention?: SourcePreferenceRetention; budget?: typeof templateBudget } = {}) =>
     new SourceIndexAcquisition(repository, fieldSha256).nominateWithWitness({ ...input, ...(options.budget ? { budget: options.budget } : {}),
       ...(options.proposed === false ? {} : { source_template: template }) }, () => "admitted", "original",
-    capture => { observed.push(capture()); }, true, options.retention ?? { retain });
+    capture => { observed.push(capture()); }, { status: "ready", vectors: [Float32Array.of(1)] }, options.retention ?? { retain });
   return { original, preferred, readTemplateStatements, observed, retain, run };
 }
 

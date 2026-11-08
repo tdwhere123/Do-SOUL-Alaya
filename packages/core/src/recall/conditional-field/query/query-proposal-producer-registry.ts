@@ -22,7 +22,8 @@ export const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
   "stored_cosine_admission",
   "question_time",
   "source_template",
-  "source_task_observation"
+  "source_task_observation",
+  "evidence_statements"
 ] as const;
 
 export type QueryProposalProducerCapability = (typeof QUERY_PROPOSAL_PRODUCER_CAPABILITIES)[number];
@@ -81,10 +82,10 @@ export class QueryProposalProducerRegistry {
 const PRODUCTION_RECORDS: readonly QueryProposalProducerRecord[] = [
   queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID),
   queryProposalProducerRecord(QUESTION_TIME_PROPOSAL_PRODUCER_ID, {
-    capabilities: ["question_time"], allowed_grammar: []
+    capabilities: ["question_time", "evidence_statements"], allowed_grammar: []
   }),
   queryProposalProducerRecord(SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID, {
-    capabilities: ["question_time", "source_template"], allowed_grammar: []
+    capabilities: ["question_time", "source_template", "evidence_statements"], allowed_grammar: []
   }),
   queryProposalProducerRecord(SOURCE_TASK_OBSERVATION_PRODUCER_ID, {
     capabilities: ["question_time", "source_task_observation"], allowed_grammar: []

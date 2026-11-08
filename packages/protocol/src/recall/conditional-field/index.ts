@@ -41,6 +41,7 @@ export {
   ClaimDemandSchema,
   ClaimRequiredClaimSchema,
   EnumerationPolicySchema,
+  EVIDENCE_STATEMENT_LIMITS,
   GuardIntervalSchema,
   GuardKindSchema,
   GuardSchema,
