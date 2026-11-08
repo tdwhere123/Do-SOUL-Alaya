@@ -96,7 +96,7 @@ it("uses current unreachable values after a same-cardinality navigation projecti
       targets.forEach((entry, i) => retention.consider(sourceFactKey(entry), 1, i === top ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0),
         { root_key: sourceFactKey(entry) } as unknown as SourceIndexTarget));
       return retention.associate(targets.map(sourceFactKey), keys => ({ status: "ready", resources: { work: 0, memory_bytes: 0,
-        native_bytes: 0, sql_internal_work: "unknown" }, witnesses: keys.map(() => ({ role: "user", anchors: [] })) }))!;
+        native_bytes: 0, sql_internal_work: "unknown" }, session_time: null, witnesses: keys.map(() => ({ role: "user", anchors: [], statement: "" })) }))!;
     };
     const tight = new SourceSemanticResourceLedger({ work_units: generous.spentWork + 20,
       memory_bytes: generous.spentBytes + 1024 });

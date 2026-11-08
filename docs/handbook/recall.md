@@ -430,45 +430,40 @@ per message, the host-occurrence role at each retained key's message span and th
 the key text and of the raw message bytes (segmented v2 query analysis, lowercased; a cold
 segmenter tokenizes anchors and texts alike with raw query tokens). A key witnesses a
 condition only if its role is the condition's speaker and, when the condition has anchors,
-every token of at least one anchor is present. Coverage is, for each root and condition, the
-best cosine over that root's witnessing keys (null without one), charged on acquisition's own
-ledger. Keys never leave acquisition; an unknown or unfunded witness read discards the whole
-coverage. Without conditions, the keys are dropped and the field order is unchanged. A request
-with a question-time or query time window does not bind its conditions (no within-window
-witness guard yet), so its timed order is unchanged.
+every token of at least one anchor is present. With a question-time preference whose
+alternatives start on or before its clock, the window is also each condition's time dimension:
+the witness read returns each key's text and the root's recorded event time (the session), and
+`statementEventIntervals` reads the event days the key states against that session (relative
+terms, dated and year-less calendar days, numeric and CJK month/day, bare weekdays). A stated
+day inside an alternative satisfies, stated days all outside violate; an undated key is unknown,
+except that a session before the earliest alternative violates (a reported event precedes its
+session). Session time is never an event day. Per root and condition the matrix holds the best
+cosine over keys with every dimension satisfied (necessary; null without one) and, under a
+window, whether a key leaves only time unknown or the root has no retained key (possible). It is
+charged on acquisition's own ledger. Keys never leave acquisition; an unknown or unfunded read
+discards the whole matrix. Without conditions, the keys are dropped and the field order is
+unchanged. A query time window without a question-time preference does not bind conditions.
 
-Navigation applies the coverage after filtering and time preference determine the source
-order. A condition's top root is the highest-coverage root in that order, ties to the earlier
-position. Starting from the source first five with slot 1 fixed, each condition in order whose
-top lies outside the first five replaces the last root at slots 5..2 that tops no condition;
-nothing changes if every slot 2–5 serves. All other roots keep their source order, so replaced
-roots follow directly after the first five. No root leaves the order and memory keeps its
-positions. The navigation diagnostic `evidence_coverage` reports the condition count, each
-top's source position, every injection or `no_free_slot`, and refusal.
+Navigation applies one selection after filtering and time preference determine the source
+order. A condition's top root is its highest-scoring necessary witness in that order, ties to
+the earlier position. Starting from the source first five with slot 1 fixed, each condition in
+order whose top lies outside the first five replaces the slot 5..2 that maximizes, in order,
+the number of conditions whose top is in the first five and the number of conditions with any
+necessary or possible witness there (ties: the lowest slot), and only if that pair strictly
+improves. Possible witnesses are not otherwise protected: what the conditions cannot see is the
+risk, not what they may see. All other roots keep their source order, so replaced roots follow
+directly after the first five. No root leaves the order and memory keeps its positions. The
+navigation diagnostic `evidence_coverage` reports the condition count, each top's source
+position, every injection or `no_free_slot`, and refusal.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a
 permutation has been applied, a later underfunded request fails explicitly instead of
 reverting to baseline order. Child refusal requirements include the mandatory navigation
-reserve when translated back to the request budget. Coverage is a selection heuristic, not
-proof that the injected root answers the condition: a top can be a near duplicate or a wrong
+reserve when translated back to the request budget. The selection is over observed witnesses,
+not proof that the injected root answers the condition: a top can be a near duplicate or a wrong
 fact. Frozen, label-selected screens show gains and losses and do not establish natural-data
 acceptance.
-
-## Question-time stated-event witness
-
-A request with a question-time preference whose alternatives start on or before its clock reads
-the statements of each admitted root (the template-statement reader: host-verified role and the
-message's session time). A user statement witnesses the window when its key text states an event
-day inside an alternative: relative terms resolve from the statement's session day, dated terms
-stand, and year-less month/day, numeric month/day, CJK month/day and bare weekdays take their
-latest occurrence on or before the session (`statementEventIntervals`). Session time alone is
-never a witness. The witness whose dated key vector is nearest the query vector (stored
-active-generation key vectors; ties to the earlier position) enters the source first five in place
-of the last slot 5..2 root that neither witnesses the window nor may lie in it — a root with no
-stated time and a session inside a window, or one whose read is unknown, is kept. Roots after the
-first five keep their order. The step is optional on the acquisition ledger after association
-finalization is protected; refusal or an unknown read leaves the timed order.
 
 ## Versioned cutoff measurement
 

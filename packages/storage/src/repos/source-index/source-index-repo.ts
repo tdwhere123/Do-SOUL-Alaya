@@ -24,7 +24,6 @@ import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceInd
   readSourceIndexVectorCandidates, quoteSourceIndexQueryCapacity } from "./source-index-query-reader.js";
 import { readQuestionTimeDomain } from "./question-time-domain.js";
 import { readStatementWitnesses, readTemplateStatements } from "./template-statements.js";
-import { readStatementKeyVectors } from "./statement-key-vectors.js";
 import { readTaskObservation } from "./task-observation.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
@@ -71,9 +70,6 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     return this.atomic(() => readStatementWitnesses(this.database, this.records, keys, anchors, budget, this.sha256), "read");
   }
 
-  public readStatementKeyVectors(keys: readonly SourceIndexTarget[], budget: SourceSemanticResourceBudget) {
-    return this.atomic(() => readStatementKeyVectors(this.database, keys, budget), "read");
-  }
 
   public readTaskObservation(source: SourceIndexTarget, span: Readonly<{ start_byte: number; end_byte: number }>,
     budget: SourceSemanticResourceBudget) {

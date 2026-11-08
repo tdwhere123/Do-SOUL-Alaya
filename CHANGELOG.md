@@ -25,24 +25,18 @@ an anchor absent from the question rejects the proposal) and identifies ordinary
 **major** under invariant §25. Condition statements are embedded locally with the query binding.
 A retained statement key witnesses a condition only if the host role of its message is the
 condition's speaker and, when anchors exist, every token of one anchor occurs in the key text
-or that message; acquisition reads these facts once per message and reduces witnessing keys to
-per-root coverage on its own ledger, and navigation lets each condition's top root enter the
-source first five, displacing the last non-serving root at slots 5..2; displaced roots follow
-the first five in source order. An unknown witness read leaves the order unchanged. The
-slot-5 two-coordinate swap is retired, and statement keys no longer reach field admission.
-Without conditions, or with a question-time or query time window, the order is unchanged. Discard old
+or that message; under a question-time window the key must also state an event day inside it
+(read against the root's recorded session time; undated keys stay possible unless the session
+precedes the window). Acquisition reduces these facts to a per-root witness matrix on its own
+ledger, and navigation makes one selection: each condition's top necessary witness enters the
+source first five at the slot 5..2 that maximizes the conditions with their top there, then the
+conditions with any witness there; displaced roots follow the first five in source order. An
+unknown witness read leaves the order unchanged. The slot-5 two-coordinate swap is retired, and
+statement keys no longer reach field admission. Without conditions, or with only a query time
+window, the order is unchanged. Discard old
 continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
 retain their identities and remain readable. No database migration, provider call or
 allowance increase is introduced, and no natural-data benefit is claimed.
-
-A question-time request now also checks its admitted roots for a stated event day: a user
-statement whose text dates its event inside a window alternative (relative terms, dated and
-year-less calendar days, numeric month/day and weekdays, read against the statement's session
-day; CJK forms included). The witness nearest the query enters the source first five in place of
-the last slot 5..2 root that is neither a witness nor possibly in the window (no stated time and
-a session in it, or unread). Session time alone never witnesses; membership never changes; any
-unknown read or refused optional budget keeps the timed order. Storage adds a statement-key
-vector read; no migration.
 
 Observation formation now lets its existing model request choose request-bound Q/C/H
 association and same-frame temporal references, with explicit missing/unresolved/ambiguous

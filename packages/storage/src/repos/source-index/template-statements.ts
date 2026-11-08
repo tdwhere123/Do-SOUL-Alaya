@@ -56,15 +56,16 @@ export function readTemplateStatements(database: StorageDatabase, records: Sqlit
 }
 
 /** Keys of one root: role from the host occurrence at the key's message span, tokens from the key text and
- * the raw message bytes (segmented v2 query analysis, lowercased). Each message is read once. Reads never
- * initiate segmenter loading; a cold segmenter tokenizes anchors and texts alike with raw query tokens. */
+ * the raw message bytes (segmented v2 query analysis, lowercased), the key text, and the root's recorded
+ * event time. Each message is read once. Reads never initiate segmenter loading; a cold segmenter
+ * tokenizes anchors and texts alike with raw query tokens. */
 export function readStatementWitnesses(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
   keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget,
   sha256: FieldContractSha256): SourceIndexStatementWitnessRead {
   const meter = new QueryReadMeter(budget);
   try {
     const root = keys[0];
-    if (root === undefined) return { status: "ready", witnesses: [], resources: meter.resources() };
+    if (root === undefined) return { status: "ready", session_time: null, witnesses: [], resources: meter.resources() };
     if (keys.some(key => key.auxiliary === undefined || key.source_id === null || key.target.root_kind !== "source_record"
       || key.source_id !== root.source_id || canonicalJson(key.target) !== canonicalJson(root.target))) {
       throw new TemplateReadUnknown("statement_witness_key_root_mismatch");
@@ -77,6 +78,7 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
         .map(token => token.toLowerCase());
     };
     const required = anchors.map(tokens), messages = new Map<string, Readonly<{ role: string | null; tokens: readonly string[] }>>();
+    let session: string | null | undefined;
     const witnesses = keys.map(key => {
       const [start, end] = key.auxiliary!.source_span, span = `${start}:${end}`;
       let message = messages.get(span);
@@ -85,7 +87,10 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
         const occurrence = inventory.occurrences.find(row => row.utf8_span[0] === start && row.utf8_span[1] === end);
         if (occurrence === undefined || !hostOccurrenceIsMessage(occurrence)) throw new TemplateReadUnknown("statement_witness_message_binding");
         let text = "", offset = start;
-        while (offset < end) { const part = readMessagePart(context, offset, end); text += part.text; offset += part.bytes; }
+        while (offset < end) {
+          const part = readMessagePart(context, offset, end);
+          text += part.text; offset += part.bytes; session ??= part.eventTime;
+        }
         message = { role: occurrence.role, tokens: tokens(text) };
         messages.set(span, message);
       }
@@ -95,9 +100,10 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
       if (chunk.row === null || chunk.row.content_end !== key.body_bytes) throw new TemplateReadUnknown("statement_witness_key_changed");
       const present = new Set([...message.tokens, ...tokens(chunk.row.content)]);
       meter.ledger.charge(anchors.length, 8 * anchors.length + 64, "statement witness anchor test");
-      return { role: message.role, anchors: required.map(need => need.length > 0 && need.every(token => present.has(token))) };
+      return { role: message.role, anchors: required.map(need => need.length > 0 && need.every(token => present.has(token))),
+        statement: chunk.row.content };
     });
-    return { status: "ready", witnesses, resources: meter.resources() };
+    return { status: "ready", session_time: session ?? null, witnesses, resources: meter.resources() };
   } catch (error) {
     return { status: "unknown", reason: error instanceof TemplateReadUnknown ? error.message
       : error instanceof SourceSemanticResourceExhausted ? `statement_witness_read_budget:${error.phase}`
@@ -200,5 +206,5 @@ function readMessagePart({ records, source, meter }: ReadContext, offset: number
   if (read.invalidOffset || read.record?.source_body == null || read.prefixBytes === 0 || offset + read.prefixBytes > end) {
     throw new TemplateReadUnknown("source_template_source_incomplete");
   }
-  return { text: read.record.source_body, bytes: read.prefixBytes };
+  return { text: read.record.source_body, bytes: read.prefixBytes, eventTime: read.record.event_time };
 }

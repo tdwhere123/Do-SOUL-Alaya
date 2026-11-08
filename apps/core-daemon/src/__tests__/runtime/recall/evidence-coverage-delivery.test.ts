@@ -25,7 +25,7 @@ afterEach(async () => { for (const environment of environments.splice(0)) await 
 beforeAll(async () => { expect(await warmCjkSegmentation()).toBe(true); });
 const QUERY = "zzqx", ROUNDS = 7;
 /** Condition one is witnessed only by round 6 (outside the first five); condition two only by round 4 (slot 5).
- * Every statement key comes from a user message. */
+ * Every statement key comes from a user message; only round 6's key states its day ("today"). */
 const STATEMENTS = ["The user planted bed six.", "The user planted bed four."];
 const CONDITIONS: readonly EvidenceCondition[] = STATEMENTS.map(statement => ({ statement, speaker: "user", anchors: [] }));
 const DEMANDS: Record<string, number[]> = { [QUERY]: [1, 0, 0, 0], [STATEMENTS[0]!]: [0, 0, 1, 0], [STATEMENTS[1]!]: [0, 0, 0, 1] };
@@ -43,10 +43,11 @@ async function publishedRounds(providerKind = "local_onnx") {
   const env = await createStatementSessionEnvironment(); environments.push(env);
   const turns = Array.from({ length: ROUNDS }, (_, k) => [{ role: "user" as const, content: `Round ${k}: I planted bed ${k}.` },
     { role: "assistant" as const, content: "Noted." }]);
-  await env.capture({ container: CONTAINER, messages: hostMessages(turns) });
+  // The host reports when the session happened; it is each root's recorded event time.
+  await env.capture({ container: CONTAINER, messages: hostMessages(turns, 0, START) });
   env.advance(STATEMENT_SESSION_IDLE_MS);
   await env.processSession(env.provider(text => text.startsWith("Round ")
-    ? [{ text: `The user planted a garden bed (${text.slice(0, 7)}).`, relation: "garden" }] : []));
+    ? [{ text: `The user planted a garden bed (${text.slice(0, 7)})${text.startsWith("Round 6") ? " today" : ""}.`, relation: "garden" }] : []));
   const roots = env.roots();
   expect(roots).toHaveLength(ROUNDS);
   const config = configuration(providerKind);
@@ -121,8 +122,12 @@ it("keeps today's order without conditions and injects a late typed witness whil
   // that no key or message contains, leaves the order as is.
   expect(sourceOrder(env, prepared, [{ ...CONDITIONS[0]!, speaker: "assistant" }, CONDITIONS[1]!])).toEqual(baseline);
   expect(sourceOrder(env, prepared, [{ ...CONDITIONS[0]!, anchors: [QUERY] }, CONDITIONS[1]!])).toEqual(baseline);
-  // A question-time window has no within-window witness guard yet: conditions leave the timed order as is.
-  expect(sourceOrder(env, prepared, CONDITIONS, true)).toEqual(sourceOrder(env, prepared, undefined, true));
+  // Under a question window the window is each condition's time dimension: round 6 states its day inside it and
+  // stays a necessary witness; round 4 is undated, so condition two has only possible witnesses and no top.
+  const timed = sourceOrder(env, prepared, undefined, true);
+  expect(timed.slice(0, 5)).not.toContain(roots[6]);
+  expect(sourceOrder(env, prepared, CONDITIONS, true)).toEqual([...timed.slice(0, 4), roots[6], ...timed.slice(4).filter(root => root !== roots[6])]);
+  expect(sourceOrder(env, prepared, [CONDITIONS[1]!], true)).toEqual(timed);
 
   const nominated = env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 },

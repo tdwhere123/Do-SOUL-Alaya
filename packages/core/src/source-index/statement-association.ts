@@ -1,6 +1,7 @@
-import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type SourceIndexLexicalCandidate,
-  type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget, type SourceSemanticResourceBudget,
-  type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { statementEventIntervals } from "@do-soul/alaya-graph-algorithms";
+import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
+  type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget,
+  type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
 
 /** A statement key reaches its raw root once per lexical lane, like a best vector window. */
@@ -24,12 +25,38 @@ export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Floa
 /** Reads the host role and anchor tokens of one root's retained keys, charging the acquisition ledger. */
 export type StatementWitnessReader = (keys: readonly SourceIndexTarget[], anchors: readonly string[]) => SourceIndexStatementWitnessRead | undefined;
 
-/** Query/snapshot-owned evidence coverage: per root, each condition's best cosine over that root's
- * retained statement keys that witness it (null: none). Only the field ordering decision mutates `decision`. */
+/** Question window as UTC civil-day bounds: alternatives starting on or before the question clock. */
+export type EvidenceWindow = Readonly<{ intervals: readonly (readonly [number, number])[]; earliest: number }>;
+
+const civilDay = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
+
+export function evidenceWindow(preference: QuestionTimePreference | undefined): EvidenceWindow | undefined {
+  if (preference === undefined) return undefined;
+  const clock = preference.interpretation_clock.slice(0, 10);
+  const intervals = preference.intervals.filter(window => window.start <= clock)
+    .map(window => [civilDay(window.start), civilDay(window.end)] as const);
+  return intervals.length === 0 ? undefined : { intervals, earliest: Math.min(...intervals.map(([start]) => start)) };
+}
+
+/** Time dimension of one key: a stated event day inside the window satisfies, stated days all outside violate;
+ * with none stated, a session before the window violates (a reported event precedes its session), else unknown. */
+function keyTime(statement: string, session: number | null, window: EvidenceWindow): "satisfied" | "violated" | "unknown" {
+  if (session === null) return "unknown";
+  const days = statementEventIntervals(statement, session);
+  if (days.length > 0) return days.some(span => window.intervals.some(([from, to]) => span.startDay <= to && span.endDay >= from))
+    ? "satisfied" : "violated";
+  return session < window.earliest ? "violated" : "unknown";
+}
+
+/** Query/snapshot-owned witness matrix. Per root and condition, `coverage` is the best cosine over the
+ * root's retained keys that necessarily witness it (every dimension satisfied; null: none); under a question
+ * window, `possible` marks roots with a key whose only open dimension is time, or with no retained key.
+ * Only the field ordering decision mutates `decision`. */
 export type StatementAssociation = Readonly<{
   roots: readonly string[];
   statements: number;
   coverage: readonly (readonly (number | null)[])[];
+  possible?: readonly (readonly boolean[])[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
 }>;
@@ -150,10 +177,12 @@ export class StatementKeyRetention {
     }
   }
 
-  /** Keys are consumed here: only per-root condition coverage leaves acquisition. A key witnesses a
+  /** Keys are consumed here: only the per-root witness matrix leaves acquisition. A key witnesses a
    * condition only if its message has the condition's speaker and, when anchors exist, one anchor's
-   * tokens all occur in it; any unknown witness read leaves the whole association unavailable. */
-  public associate(roots: readonly string[], witnesses: StatementWitnessReader | undefined): StatementAssociation | undefined {
+   * tokens all occur in it; under a window its time dimension must hold (unknown: possible). Any
+   * unknown witness read leaves the whole association unavailable. */
+  public associate(roots: readonly string[], witnesses: StatementWitnessReader | undefined,
+    window?: EvidenceWindow): StatementAssociation | undefined {
     if (this.abandoned) return undefined;
     let dimensions = 0, keyCount = 0;
     for (const root of roots) for (const row of this.byRoot.get(root) ?? []) { dimensions += row.embedding.length; keyCount++; }
@@ -173,7 +202,7 @@ export class StatementKeyRetention {
     }
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
-    const coverage: (number | null)[][] = [];
+    const coverage: (number | null)[][] = [], possible: boolean[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
       const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
@@ -182,22 +211,33 @@ export class StatementKeyRetention {
         this.abandon(reason, reason.startsWith("statement_witness_read_budget")); return undefined;
       }
       const facts = read?.status === "ready" ? read.witnesses : [];
+      const session = read?.status === "ready" && read.session_time !== null ? civilDay(read.session_time) : null;
+      let times: readonly ("satisfied" | "violated" | "unknown")[] | undefined;
+      if (window !== undefined) {
+        const characters = facts.reduce((sum, fact) => sum + fact.statement.length, 0);
+        if (!this.fund(characters + facts.length, 8 * characters + 64, "statement key event time")) return undefined;
+        times = facts.map(fact => keyTime(fact.statement, session, window));
+      }
+      const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
       coverage.push(demands.vectors.map((vector, index) => {
         const condition = demands.conditions[index]!;
         let best: number | null = null;
         kept.forEach((key, position) => {
-          const fact = facts[position]!;
+          const fact = facts[position]!, time = times?.[position] ?? "satisfied";
           if (fact.role !== condition.speaker || condition.anchors.length > 0
-            && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true)) return;
+            && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") return;
+          if (time === "unknown") { open[index] = true; return; }
           const value = cosine(key.embedding, vector);
           if (value > (best ?? -Infinity)) best = value;
         });
         return best;
       }));
+      possible.push(open);
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
-    return { roots: [...roots], statements, coverage, decision: { refused: null, applied: false } };
+    return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
+      decision: { refused: null, applied: false } };
   }
 }
 
@@ -206,40 +246,59 @@ export function restrictStatementAssociation(association: StatementAssociation,
   keep: (root: string) => boolean): StatementAssociation {
   const indices = association.roots.flatMap((root, index) => keep(root) ? [index] : []);
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
-    coverage: indices.map(i => association.coverage[i]!), decision: association.decision };
+    coverage: indices.map(i => association.coverage[i]!),
+    ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
+    decision: association.decision };
 }
 
 export type EvidenceCoverageInjection = Readonly<{ statement: number; root_position: number }
   & ({ status: "injected"; slot: number } | { status: "no_free_slot" })>;
 
-/** Each statement's top root (best coverage; ties to the earlier source position) enters the first
- * five in place of the last slot 5..2 root that tops no statement; all other roots keep base order,
- * so displaced roots follow at slot 6. Slot 1 and membership are fixed.
- * A selected slot heuristic, not proof that the injected root answers the statement. */
-export function preferEvidenceCoverage(order: readonly string[], association: StatementAssociation,
+/** One selection over the witness matrix, lexicographic over conditions: first the conditions whose top
+ * (best-scoring necessary witness; ties to the earlier position) is in the first five, then the conditions
+ * with any necessary or possible witness there, then source order. Each condition in order whose top lies
+ * outside the first five replaces the slot 5..2 that maximizes that pair (ties: the lowest slot), only if it
+ * strictly improves. Slot 1 and membership are fixed; displaced roots follow the first five in source order.
+ * A selection over observed witnesses, not proof that the injected root answers the condition. */
+export function selectEvidenceWitnesses(order: readonly string[], association: StatementAssociation,
   meter: SourceSemanticResourceLedger) {
-  const statements = association.statements;
-  meter.charge(order.length * (statements + 2), order.length * 16 + statements * 128, "evidence statement coverage ordering");
+  const statements = association.statements, head = Math.min(5, order.length);
+  meter.charge(order.length * (statements + 2) + 4 * statements * statements * head,
+    order.length * 16 + statements * 128, "evidence witness selection");
   const index = new Map(association.roots.map((root, i) => [root, i]));
+  const necessary = (root: string, statement: number) => {
+    const row = index.get(root); return row === undefined ? null : association.coverage[row]![statement]!;
+  };
+  const witnessed = (root: string, statement: number) => necessary(root, statement) !== null
+    || association.possible?.[index.get(root) ?? -1]?.[statement] === true;
   const tops = Array.from({ length: statements }, (_, statement) => {
     let top: number | null = null, best = -Infinity;
     order.forEach((root, position) => {
-      const row = index.get(root), value = row === undefined ? null : association.coverage[row]![statement]!;
+      const value = necessary(root, statement);
       if (value !== null && value > best) { top = position; best = value; }
     });
     return top;
   });
-  const serving = new Set(tops.flatMap(top => top === null ? [] : [order[top]!]));
-  const head = Math.min(5, order.length), out = order.slice(0, head), injections: EvidenceCoverageInjection[] = [];
+  const topRoots = tops.flatMap(top => top === null ? [] : [order[top]!]);
+  const objective = (first: readonly string[]) => [topRoots.filter(root => first.includes(root)).length,
+    Array.from({ length: statements }, (_, statement) => first.some(root => witnessed(root, statement))).filter(Boolean).length] as const;
+  const better = (a: readonly number[], b: readonly number[]) => a[0]! > b[0]! || a[0] === b[0] && a[1]! > b[1]!;
+  const out = order.slice(0, head), injections: EvidenceCoverageInjection[] = [];
   tops.forEach((top, statement) => {
     if (top === null) return;
     const root = order[top]!;
     if (out.includes(root)) return;
-    let slot = -1;
-    for (let position = head - 1; position >= 1; position--) if (!serving.has(out[position]!)) { slot = position; break; }
-    if (slot < 0) { injections.push({ statement, root_position: top + 1, status: "no_free_slot" }); return; }
-    out[slot] = root;
-    injections.push({ statement, root_position: top + 1, status: "injected", slot: slot + 1 });
+    let best: { slot: number; value: readonly number[] } | undefined;
+    for (let slot = head - 1; slot >= 1; slot--) {
+      const trial = out.slice(); trial[slot] = root;
+      const value = objective(trial);
+      if (best === undefined || better(value, best.value)) best = { slot, value };
+    }
+    if (best === undefined || !better(best.value, objective(out))) {
+      injections.push({ statement, root_position: top + 1, status: "no_free_slot" }); return;
+    }
+    out[best.slot] = root;
+    injections.push({ statement, root_position: top + 1, status: "injected", slot: best.slot + 1 });
   });
   const chosen = new Set(out);
   return { order: [...out, ...order.filter(root => !chosen.has(root))],

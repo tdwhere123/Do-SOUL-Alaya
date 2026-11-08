@@ -1,7 +1,7 @@
 import { CoreError } from "../../shared/errors.js";
 import { EVIDENCE_CONDITION_LIMITS, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
-import { preferEvidenceCoverage, type StatementAssociation } from "../../source-index/statement-association.js";
+import { selectEvidenceWitnesses, type StatementAssociation } from "../../source-index/statement-association.js";
 
 // One demand, four views/operators. This is not a caller-configurable strategy registry.
 const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"] as const;
@@ -255,12 +255,12 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
     : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
   const originalSources = current.filter(id => !memoryIds.has(id));
-  let decided: ReturnType<typeof preferEvidenceCoverage> | undefined;
+  let decided: ReturnType<typeof selectEvidenceWitnesses> | undefined;
   if (association.decision.refused === null) {
     try {
       optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
       validateAssociation(association);
-      decided = preferEvidenceCoverage(originalSources, association, optional);
+      decided = selectEvidenceWitnesses(originalSources, association, optional);
       if (decided.order.some((id, i) => id !== originalSources[i])) association.decision.applied = true;
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -293,7 +293,7 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function validateAssociation({ roots, statements, coverage, decision }: StatementAssociation): void {
+function validateAssociation({ roots, statements, coverage, possible, decision }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
   requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
@@ -304,6 +304,9 @@ function validateAssociation({ roots, statements, coverage, decision }: Statemen
       && row.every((value, j) => Object.hasOwn(row, j) && (value === null || Number.isFinite(value))),
     "evidence coverage must hold one finite value or null per statement");
   }
+  requireFact(possible === undefined || Array.isArray(possible) && possible.length === roots.length
+    && possible.every(row => Array.isArray(row) && row.length === statements && row.every(value => typeof value === "boolean")),
+  "possible witnesses must hold one boolean per root and statement");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

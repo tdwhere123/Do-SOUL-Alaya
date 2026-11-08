@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { QUERY_BUDGET, expectQueryResources, fixture, type Fixture } from "./source-index-query-fixture.js";
+import { WORKSPACE } from "./source-index-fixture.js";
 import { publishMessages, publishStatement } from "./source-template-fixture.js";
 
 const environments: Fixture[] = [];
@@ -18,14 +19,23 @@ describe("statement key witnesses", () => {
     const assistant = publishStatement(environment, input, "assistant", 1);
     const anchors = ["Rachel", "rachel MIAMI", "Coastal", "Paris", "上海", "咖啡机", "北京"];
     const read = environment.index.readStatementWitnesses([named.source, rewritten.source, assistant.source], anchors, QUERY_BUDGET);
-    expect(read).toMatchObject({ status: "ready", witnesses: [
-      { role: "user", anchors: [true, true, false, false, false, false, false] },
+    expect(read).toMatchObject({ status: "ready", session_time: null, witnesses: [
+      { role: "user", anchors: [true, true, false, false, false, false, false], statement: "I met Rachel in Miami.\nreported event" },
       // The rewritten key keeps its message's names and adds its own.
-      { role: "user", anchors: [true, true, true, false, false, false, false] },
-      { role: "assistant", anchors: [false, false, false, false, true, true, false] }] });
+      { role: "user", anchors: [true, true, true, false, false, false, false], statement: "I took a Coastal trip.\ntrip" },
+      { role: "assistant", anchors: [false, false, false, false, true, true, false], statement: "你在上海买了咖啡机。\nreported event" }] });
     expectQueryResources(read.resources);
     expect(read.resources.native_bytes).toBeGreaterThan(0);
     expect(environment.index.readStatementWitnesses([], anchors, QUERY_BUDGET)).toMatchObject({ status: "ready", witnesses: [] });
+  });
+
+  it("returns the root's recorded event time as the session time", () => {
+    const environment = setup();
+    const input = publishMessages(environment, [{ role: "user", text: "Last Saturday I ran a 5K." }], "timed", WORKSPACE,
+      "2023-03-06T10:00:00.000Z");
+    const read = environment.index.readStatementWitnesses([publishStatement(environment, input, "timed").source], [], QUERY_BUDGET);
+    expect(read).toMatchObject({ status: "ready", session_time: "2023-03-06T10:00:00.000Z",
+      witnesses: [{ role: "user", anchors: [], statement: "Last Saturday I ran a 5K.\nreported event" }] });
   });
 
   it("is unknown for raw roots, keys of different roots, and an unfunded read", () => {

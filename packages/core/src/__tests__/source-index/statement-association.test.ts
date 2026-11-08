@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SourceSemanticResourceLedger, type EvidenceCondition, type SourceIndexTarget } from "@do-soul/alaya-protocol";
-import { bindEvidenceDemands, preferEvidenceCoverage, quoteStatementAssociation, restrictStatementAssociation,
+import { bindEvidenceDemands, evidenceWindow, selectEvidenceWitnesses, quoteStatementAssociation, restrictStatementAssociation,
   StatementKeyRetention, STATEMENT_ASSOCIATION_KEYS_PER_ROOT, type EvidenceDemands, type StatementAssociation,
   type StatementWitnessReader } from "../../source-index/statement-association.js";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
@@ -16,22 +16,26 @@ const noRefusal = () => { throw new Error("unexpected refusal"); };
 // Acquisition passes scanned key targets through unchanged; only identity matters here.
 const key = (id: string) => ({ root_key: id }) as unknown as SourceIndexTarget;
 const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
-/** Witness facts per key id: [role, matched anchor names]; unlisted keys are user keys matching every anchor. */
-const witnesses = (facts: Record<string, [string | null, string[]?]> = {}): StatementWitnessReader => (keys, anchors) => ({
-  status: "ready", resources: zero, witnesses: keys.map(target => {
+/** Witness facts per key id: [role, matched anchor names, key text]; unlisted keys are user keys matching every anchor. */
+const witnesses = (facts: Record<string, [string | null, string[]?, string?]> = {}, session: string | null = null): StatementWitnessReader =>
+  (keys, anchors) => ({ status: "ready", resources: zero, session_time: session, witnesses: keys.map(target => {
     const fact = facts[target.root_key];
     return { role: fact?.[0] ?? (fact === undefined ? "user" : null),
-      anchors: anchors.map(anchor => fact === undefined || (fact[1] ?? []).includes(anchor)) };
+      anchors: anchors.map(anchor => fact === undefined || (fact[1] ?? []).includes(anchor)), statement: fact?.[2] ?? "" };
   }) });
 /** coverage[root] lists one value per statement; omitted roots have no statement key. */
-function coverage(statements: number, values: Record<string, (number | null)[]>): StatementAssociation {
+function coverage(statements: number, values: Record<string, (number | null)[]>, open?: Record<string, boolean[]>): StatementAssociation {
   return { roots, statements, coverage: roots.map(root => values[root] ?? Array<null>(statements).fill(null)),
+    ...(open === undefined ? {} : { possible: roots.map(root => open[root] ?? Array<boolean>(statements).fill(false)) }),
     decision: { refused: null, applied: false } };
 }
 
-/** Independent statement of the declared rule over root indices, used as an oracle. */
+/** Independent oracle: for each condition in order whose top is outside the first five, try every slot 2-5
+ * and keep the lexicographically best (tops present, conditions witnessed) strict improvement, lowest slot on ties. */
 function declaredRule(order: readonly string[], value: StatementAssociation): string[] {
-  const score = (root: string, d: number) => value.coverage[value.roots.indexOf(root)]?.[d] ?? null;
+  const at = (root: string) => value.roots.indexOf(root);
+  const score = (root: string, d: number) => at(root) < 0 ? null : value.coverage[at(root)]![d]!;
+  const seen = (root: string, d: number) => score(root, d) !== null || at(root) >= 0 && value.possible?.[at(root)]![d] === true;
   const tops: (string | null)[] = [];
   for (let d = 0; d < value.statements; d++) {
     let best: string | null = null;
@@ -41,14 +45,19 @@ function declaredRule(order: readonly string[], value: StatementAssociation): st
     }
     tops.push(best);
   }
-  const out = [...order];
+  const rank = (first: string[]) => tops.filter(t => t !== null && first.includes(t)).length * 100
+    + Array.from({ length: value.statements }, (_, d) => first.some(root => seen(root, d))).filter(Boolean).length;
+  const first = order.slice(0, 5);
   for (const top of tops) {
-    if (top === null || out.slice(0, 5).includes(top)) continue;
-    const slot = [4, 3, 2, 1].find(p => p < out.length && !tops.includes(out[p]!));
-    if (slot === undefined) continue;
-    out[slot] = top;
+    if (top === null || first.includes(top)) continue;
+    let pick = -1, pickRank = rank(first);
+    for (const slot of [4, 3, 2, 1]) {
+      if (slot >= first.length) continue;
+      const trial = [...first]; trial[slot] = top;
+      if (rank(trial) > pickRank) { pick = slot; pickRank = rank(trial); }
+    }
+    if (pick >= 0) first[pick] = top;
   }
-  const first = out.slice(0, 5);
   return [...first, ...order.filter(root => !first.includes(root))];
 }
 
@@ -128,6 +137,35 @@ describe("statement key retention and evidence coverage", () => {
     expect(value.coverage[2]).toEqual([null, null, null]);
   });
 
+  it("adds the window as a time dimension: stated days decide, undated keys stay possible unless the session precedes it", () => {
+    const window = evidenceWindow({ interpretation_clock: "2023-04-01T00:00:00.000Z", intervals: [
+      { start: "2023-03-01", end: "2023-03-31" }, { start: "2023-05-01", end: "2023-05-31" }] })!;
+    expect(window).toEqual({ intervals: [[Date.UTC(2023, 2, 1), Date.UTC(2023, 2, 31)]], earliest: Date.UTC(2023, 2, 1) });
+    expect(evidenceWindow({ interpretation_clock: "2023-04-01T00:00:00.000Z", intervals: [{ start: "2023-05-01", end: "2023-05-31" }] }))
+      .toBeUndefined();
+    const run = (session: string | null, facts: Record<string, [string | null, string[]?, string?]>, keys: string[]) => {
+      const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
+      keys.forEach((id, i) => retained.consider("a", 1 - i / 10, Float32Array.of(1, i), key(id)));
+      return retained.associate(["a", "z"], witnesses(facts, session), window)!;
+    };
+    // "last Saturday" said on 2023-03-06 is 2023-03-04: inside March, necessary with that key's cosine.
+    const inside = run("2023-03-06T10:00:00.000Z", { k0: ["user", [], "Last Saturday I ran a 5K."], k1: ["user", [], "I like running."] }, ["k0", "k1"]);
+    expect(inside.coverage).toEqual([[1], [null]]);
+    expect(inside.possible).toEqual([[true], [true]]);
+    // A stated day outside the window violates; an undated key after the window opens is possible.
+    const outside = run("2023-04-20T10:00:00.000Z", { k0: ["user", [], "On April 2 I ran a 5K."], k1: ["user", [], "I like running."] }, ["k0", "k1"]);
+    expect(outside.coverage).toEqual([[null], [null]]);
+    expect(outside.possible).toEqual([[true], [true]]);
+    // A session before the window bounds an undated report; an assistant key never witnesses a user condition.
+    const before = run("2023-02-10T10:00:00.000Z", { k0: ["user", [], "I like running."], k1: ["assistant", [], "On March 3 you ran."] }, ["k0", "k1"]);
+    expect(before.possible).toEqual([[false], [true]]);
+    expect(run(null, { k0: ["user", [], "On April 2 I ran a 5K."] }, ["k0"]).possible).toEqual([[true], [true]]);
+    // Without a window the matrix has no possible dimension and time is not read.
+    const plain = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
+    plain.consider("a", 1, Float32Array.of(1, 0), key("k0"));
+    expect(plain.associate(["a"], witnesses({ k0: ["user", [], "On April 2 I ran."] }, "2023-04-20T10:00:00.000Z"))).not.toHaveProperty("possible");
+  });
+
   it("leaves the whole association unavailable on an unknown or misaligned witness read", () => {
     const run = (reader: StatementWitnessReader | undefined) => {
       const refused: string[] = [], retained = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0]));
@@ -141,7 +179,7 @@ describe("statement key retention and evidence coverage", () => {
     expect(run(second)).toEqual({ value: undefined, refused: [],
       availability: { status: "unavailable", reason: "statement_witness_message_binding" } });
     expect(run(undefined).availability).toEqual({ status: "unavailable", reason: "statement_witness_reader_absent" });
-    expect(run(() => ({ status: "ready", witnesses: [], resources: zero })).availability.reason).toBe("statement_witness_misaligned");
+    expect(run(() => ({ status: "ready", session_time: null, witnesses: [], resources: zero })).availability.reason).toBe("statement_witness_misaligned");
     expect(run(() => ({ status: "unknown", reason: "statement_witness_read_budget:x", resources: zero })).refused)
       .toEqual(["statement_witness_read_budget:x"]);
   });
@@ -165,7 +203,7 @@ describe("statement key retention and evidence coverage", () => {
 describe("evidence coverage permutation of the source first five", () => {
   it("injects a late top root into the last non-serving slot and protects serving roots", () => {
     const value = coverage(3, { g: [0.9, 0.1, 0.1], d: [0.2, 0.2, 0.2], c: [0.1, 0.8, 0.1], h: [0.1, 0.1, 0.7] });
-    const decided = preferEvidenceCoverage(roots, value, meter());
+    const decided = selectEvidenceWitnesses(roots, value, meter());
     // c serves statement 1 and stays; e (slot 5) then d (slot 4) are replaced and follow in base order.
     expect(decided.order).toEqual(["a", "b", "c", "h", "g", "d", "e", "f"]);
     expect(decided.top_positions).toEqual([7, 3, 8]);
@@ -173,16 +211,28 @@ describe("evidence coverage permutation of the source first five", () => {
       { statement: 2, root_position: 8, status: "injected", slot: 4 }]);
   });
 
+  it("keeps a condition's only witness in the first five and displaces roots no condition sees", () => {
+    // g tops statement 0; e (slot 5) is statement 1's only witness, possible under the window; d witnesses nothing.
+    const value = coverage(2, { g: [0.9, null], b: [null, null] }, { e: [false, true], b: [true, false] });
+    expect(selectEvidenceWitnesses(roots, value, meter()).order).toEqual(["a", "b", "c", "g", "e", "d", "f", "h"]);
+    // A root possible only for the condition whose top enters is not protected: the lowest slot goes.
+    const single = coverage(1, { g: [0.9] }, { b: [true], c: [true], d: [true], e: [true] });
+    expect(selectEvidenceWitnesses(roots, single, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
+    // Replacing another condition's top never improves the pair, so a fully topped first five stays.
+    const topped = coverage(2, { b: [0.9, null], c: [null, 0.9], g: [0.95, null] });
+    expect(selectEvidenceWitnesses(roots, topped, meter()).order.slice(0, 5)).toEqual(["a", "b", "c", "d", "g"]);
+  });
+
   it("keeps the order when every slot 2-5 serves, never moves slot 1 and breaks ties to the earlier position", () => {
     const full = coverage(4, { b: [0.9, 0, 0, 0], c: [0, 0.9, 0, 0], d: [0, 0, 0.9, 0], e: [0, 0, 0, 0.9] });
-    expect(preferEvidenceCoverage(roots, full, meter()).order).toEqual(roots);
+    expect(selectEvidenceWitnesses(roots, full, meter()).order).toEqual(roots);
     const saturated = coverage(4, { b: [0.9, 0, 0, 0], c: [0, 0.9, 0, 0], d: [0, 0, 0.9, 0], e: [0, 0, 0, 0.5], f: [0, 0, 0, 0.5],
       g: [0, 0, 0, 0.5] });
-    expect(preferEvidenceCoverage(roots, saturated, meter()).order).toEqual(roots);
+    expect(selectEvidenceWitnesses(roots, saturated, meter()).order).toEqual(roots);
     const firstServes = coverage(1, { a: [0.9], h: [0.5] });
-    expect(preferEvidenceCoverage(roots, firstServes, meter()).order).toEqual(roots);
+    expect(selectEvidenceWitnesses(roots, firstServes, meter()).order).toEqual(roots);
     const tie = coverage(1, { g: [0.5], h: [0.5] });
-    expect(preferEvidenceCoverage(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
+    expect(selectEvidenceWitnesses(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
   });
 
   it("matches the declared rule over generated coverage, keyless roots, ties and short orders", () => {
@@ -190,12 +240,14 @@ describe("evidence coverage permutation of the source first five", () => {
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
     for (let trial = 0; trial < 400; trial++) {
       const statements = 1 + Math.floor(random() * 4), length = 1 + Math.floor(random() * roots.length);
-      const values: Record<string, (number | null)[]> = {};
+      const values: Record<string, (number | null)[]> = {}, open: Record<string, boolean[]> = {};
       for (const root of roots) if (random() > 0.2) {
-        values[root] = Array.from({ length: statements }, () => Math.round(random() * 4) / 4);
+        values[root] = Array.from({ length: statements }, () => random() < 0.4 ? null : Math.round(random() * 4) / 4);
+        open[root] = Array.from({ length: statements }, () => random() < 0.3);
       }
-      const value = coverage(statements, values), order = [...roots].sort(() => random() - 0.5).slice(0, length);
-      expect(preferEvidenceCoverage(order, value, meter()).order).toEqual(declaredRule(order, value));
+      const value = coverage(statements, values, trial % 2 === 0 ? open : undefined);
+      const order = [...roots].sort(() => random() - 0.5).slice(0, length);
+      expect(selectEvidenceWitnesses(order, value, meter()).order).toEqual(declaredRule(order, value));
     }
   });
 });

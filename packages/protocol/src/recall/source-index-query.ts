@@ -92,16 +92,12 @@ export type SourceIndexTaskObservationRead = Readonly<{ resources: SourceIndexQu
   Readonly<{ status: "unknown"; reason: string }>
 );
 
-/** Statement keys of one root, aligned with the request: the host role of each key's message and,
- * per anchor, whether every anchor token occurs in the key text or that message. Incomplete is unknown. */
+/** Statement keys of one root, aligned with the request: the host role of each key's message, per anchor
+ * whether every anchor token occurs in the key text or that message, and the key text; `session_time` is
+ * the root's recorded event time. Incomplete is unknown. */
 export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQueryResources }> & (
-  Readonly<{ status: "ready"; witnesses: readonly Readonly<{ role: string | null; anchors: readonly boolean[] }>[] }> |
-  Readonly<{ status: "unknown"; reason: string }>
-);
-
-/** Stored active-generation vectors of statement keys, aligned with the request; null when a key has none. */
-export type SourceIndexStatementKeyVectorRead = Readonly<{ resources: SourceIndexQueryResources }> & (
-  Readonly<{ status: "ready"; vectors: readonly (Float32Array | null)[] }> |
+  Readonly<{ status: "ready"; session_time: string | null;
+    witnesses: readonly Readonly<{ role: string | null; anchors: readonly boolean[]; statement: string }>[] }> |
   Readonly<{ status: "unknown"; reason: string }>
 );
 
@@ -116,7 +112,6 @@ export interface SourceIndexQueryRepository {
     budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
   readStatementWitnesses?(keys: readonly SourceIndexTarget[], anchors: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
-  readStatementKeyVectors?(keys: readonly SourceIndexTarget[], budget: SourceSemanticResourceBudget): SourceIndexStatementKeyVectorRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */
