@@ -61,23 +61,26 @@ async function publishedRounds(providerKind = "local_onnx") {
   return { env, roots, prepare };
 }
 
-const proposal = (statements: readonly string[]): QueryInterpretationProposal => ({ schema_version: 1,
+const DAY = START.slice(0, 10);
+const proposal = (statements: readonly string[], timed = false): QueryInterpretationProposal => ({ schema_version: 1,
   original_query_digest: `sha256:${createHash("sha256").update(QUERY, "utf8").digest("hex")}`,
-  producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID, producer_version: "1", evidence_statements: statements });
+  producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID, producer_version: "1",
+  ...(timed ? { question_time: { interpretation_clock: START, intervals: [{ start: DAY, end: DAY }] } } : {}),
+  ...(statements.length === 0 ? {} : { evidence_statements: statements }) });
 
-function request(env: Environment, readers: ObserverReaders, statements?: readonly string[]) {
+function request(env: Environment, readers: ObserverReaders, statements?: readonly string[], timed = false) {
   return { workspace_id: WORKSPACE, query_text: QUERY, readers,
     snapshot_id: snapshotIdFromPin(WORKSPACE, readers.snapshotPin!(WORKSPACE)), budget: PRODUCTION_BUDGET,
     interpretation_clock: START, as_of: START, expires_at: "2099-01-01T00:00:00.000Z", authorized_scopes: ["project"],
     enumeration_policy: "native_query" as const, result_kind_view: "source_only" as const,
     protocol_version: 1 as const, supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     supports_source_evidence: true, supports_product_updates: true,
-    ...(statements === undefined ? {} : { interpretation_proposal: proposal(statements) }) };
+    ...(statements === undefined && !timed ? {} : { interpretation_proposal: proposal(statements ?? [], timed) }) };
 }
 
 /** Every delivered source root across continuation pages, through the real SQLite field. */
-function sourceOrder(env: Environment, readers: ObserverReaders, statements?: readonly string[]): string[] {
-  const initial = request(env, readers, statements), ids: string[] = [], pageSizes: number[] = [];
+function sourceOrder(env: Environment, readers: ObserverReaders, statements?: readonly string[], timed = false): string[] {
+  const initial = request(env, readers, statements, timed), ids: string[] = [], pageSizes: number[] = [];
   let continuation: ReturnType<typeof runConditionalFieldRecallWithReceipt>["index"]["continuation"] | undefined;
   for (let page = 0; page < 10 && continuation !== null; page++) {
     const result = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(
@@ -109,6 +112,8 @@ it("keeps today's order without statements and injects a late witness while prot
   expect(sourceOrder(env, prepared, STATEMENTS)).toEqual(expected);
   // Membership is unchanged: no root leaves the order.
   expect(new Set(expected)).toEqual(new Set(roots));
+  // A question-time window has no within-window witness guard yet: statements leave the timed order as is.
+  expect(sourceOrder(env, prepared, STATEMENTS, true)).toEqual(sourceOrder(env, prepared, undefined, true));
 
   const nominated = env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 0, memory_bytes: 0 },

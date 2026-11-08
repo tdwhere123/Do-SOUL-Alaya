@@ -426,7 +426,9 @@ vector scan, as before. Only allowance-funded ordinary acquisition associates; r
 Source library pages do not. When statements are bound, acquisition charges exact scoring on
 its own ledger and keeps only coverage: for each root and statement, the best cosine over that
 root's retained keys (null without a key). Keys never leave acquisition. Without statements,
-the keys are dropped and the field order is unchanged.
+the keys are dropped and the field order is unchanged. A request with a question-time or
+query time window does not bind its statements (no within-window witness guard yet), so its
+timed order is unchanged.
 
 Navigation applies the coverage after filtering and time preference determine the source
 order. A statement's top root is the highest-coverage root in that order, ties to the earlier
