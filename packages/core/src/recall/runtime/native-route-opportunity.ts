@@ -288,12 +288,12 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   const evidence_coverage = { status: association.decision.refused !== null ? "resource_refused" as const
     : injected ? "permuted" as const : "unchanged" as const, statements: association.statements,
     top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
-    top_witnesses: decided?.top_witnesses ?? null, reason: association.decision.refused };
+    reason: association.decision.refused };
   return { ...ordered, evidence_coverage, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function validateAssociation({ roots, statements, coverage, possible, witnesses, decision }: StatementAssociation): void {
+function validateAssociation({ roots, statements, coverage, possible, decision }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
   requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
@@ -307,9 +307,6 @@ function validateAssociation({ roots, statements, coverage, possible, witnesses,
   requireFact(possible === undefined || Array.isArray(possible) && possible.length === roots.length
     && possible.every(row => Array.isArray(row) && row.length === statements && row.every(value => typeof value === "boolean")),
   "possible witnesses must hold one boolean per root and statement");
-  requireFact(witnesses === undefined || Array.isArray(witnesses) && witnesses.length === roots.length
-    && witnesses.every(row => Array.isArray(row) && row.length === statements && row.every(cell => cell === null || typeof cell === "object")),
-  "witness references must hold one reference or null per root and statement");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

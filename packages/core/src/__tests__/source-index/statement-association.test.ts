@@ -15,9 +15,6 @@ const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", v
 const noRefusal = () => { throw new Error("unexpected refusal"); };
 // Acquisition passes scanned key targets through unchanged; only identity matters here.
 const key = (id: string) => ({ root_key: id }) as unknown as SourceIndexTarget;
-/** A statement key bound to one host message span of its root. */
-const auxKey = (id: string, start: number) => ({ root_key: id, auxiliary: { artifact_id: `art-${id}`, key_digest: `dig-${id}`,
-  source_span: [start, start + 10] } }) as unknown as SourceIndexTarget;
 const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
 /** Witness facts per key id: [role, matched anchor names, key text]; unlisted keys are user keys matching every anchor. */
 const witnesses = (facts: Record<string, [string | null, string[]?, string?]> = {}, session: string | null = null): StatementWitnessReader =>
@@ -81,7 +78,7 @@ describe("statement key retention and evidence coverage", () => {
     expect(value.coverage[2]).toEqual([null, null]);
     expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 17 - 1 + 1, statements: 2 });
     expect(restrictStatementAssociation(value, root => root !== "b")).toEqual({ roots: ["a", "c"], statements: 2,
-      coverage: [value.coverage[1], value.coverage[2]], witnesses: [value.witnesses![1], value.witnesses![2]], decision: value.decision });
+      coverage: [value.coverage[1], value.coverage[2]], decision: value.decision });
   });
 
   it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {
@@ -167,30 +164,6 @@ describe("statement key retention and evidence coverage", () => {
     const plain = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
     plain.consider("a", 1, Float32Array.of(1, 0), key("k0"));
     expect(plain.associate(["a"], witnesses({ k0: ["user", [], "On April 2 I ran."] }, "2023-04-20T10:00:00.000Z"))).not.toHaveProperty("possible");
-  });
-
-  it("keeps the key behind each cell: the argmax necessary key, else the first time-open key", () => {
-    const window = evidenceWindow({ interpretation_clock: "2023-04-01T00:00:00.000Z", intervals: [{ start: "2023-03-01", end: "2023-03-31" }] })!;
-    const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
-    retained.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
-    retained.consider("a", 0.8, Float32Array.of(0.6, 0.8), auxKey("k1", 20));
-    retained.consider("a", 0.7, Float32Array.of(0, 1), auxKey("k2", 40));
-    retained.consider("b", 0.5, Float32Array.of(1, 0), auxKey("k3", 0));
-    const facts: Record<string, [string | null, string[]?, string?]> = {
-      k0: ["user", [], "Last Saturday I ran a 5K."], k1: ["user", [], "On March 2 I swam."], k2: ["user", [], "I like running."],
-      k3: ["user", [], "I like swimming."] };
-    const timed = retained.associate(["a", "b"], witnesses(facts, "2023-03-06T10:00:00.000Z"), window)!;
-    const ref = (id: string, start: number, time: "satisfied" | "unknown" | null) =>
-      ({ artifact_id: `art-${id}`, key_digest: `dig-${id}`, source_span: [start, start + 10], time });
-    // k2 is undated (unknown): statement 1's necessary argmax is k1, not k2's exact match.
-    expect(timed.witnesses).toEqual([[ref("k0", 0, "satisfied"), ref("k1", 20, "satisfied")], [ref("k3", 0, "unknown"), ref("k3", 0, "unknown")]]);
-    expect(timed.coverage[1]).toEqual([null, null]);
-    const plain = new StatementKeyRetention(meter(), noRefusal, ready([0, 1]));
-    plain.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
-    plain.consider("a", 0.8, Float32Array.of(0, 1), key("k1"));
-    plain.consider("c", 0.8, Float32Array.of(0, 1), auxKey("k4", 0));
-    // Without a window time is null; a key without a statement binding has no reference; a keyless root none.
-    expect(plain.associate(["a", "c", "z"], witnesses())!.witnesses).toEqual([[null], [ref("k4", 0, null)], [null]]);
   });
 
   it("leaves the whole association unavailable on an unknown or misaligned witness read", () => {
@@ -300,20 +273,6 @@ describe("field access with evidence coverage", () => {
         injections: [{ statement: 0, root_position: 7, status: "injected", slot: 5 }], reason: null } });
     const unchanged = orderNativeFieldAccess({ ...input, association: coverage(1, { b: [0.9] }) }, meter());
     expect(unchanged).toMatchObject({ record_ids: base, evidence_coverage: { status: "unchanged", injections: [] } });
-  });
-
-  it("reports each condition's top witness reference without changing the order", () => {
-    const value = coverage(2, { b: [null, 0.2], g: [0.9, null] });
-    const reference = { artifact_id: "art-g", key_digest: "dig-g", source_span: [5, 9] as const, time: null };
-    const withRefs = { ...value, witnesses: roots.map(root => root === "g" ? [reference, null] : [null, null]) };
-    const plain = orderNativeFieldAccess({ ...input, association: value }, meter());
-    const traced = orderNativeFieldAccess({ ...input, association: withRefs }, meter());
-    const order = (result: object) => { const { evidence_coverage: _, ...rest } = result as Record<string, unknown>; return rest; };
-    expect(order(traced)).toEqual(order(plain));
-    expect(traced).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "g", "e", "f", "h"] });
-    expect(traced).toMatchObject({ evidence_coverage: { top_source_positions: [7, 2], top_witnesses: [reference, null] } });
-    expect(() => orderNativeFieldAccess({ ...input, association: { ...withRefs, decision: { refused: null, applied: false },
-      witnesses: withRefs.witnesses.slice(1) } }, meter())).toThrow(/one reference or null/u);
   });
 
   it("keeps base access and records refusal when the optional ordering is unfunded", () => {

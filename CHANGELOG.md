@@ -30,8 +30,7 @@ or that message; under a question-time window the key must also state an event d
 precedes the window). Acquisition reduces these facts to a per-root witness matrix on its own
 ledger, and navigation makes one selection: each condition's top necessary witness enters the
 source first five at the slot 5..2 that maximizes the conditions with their top there, then the
-conditions with any witness there; displaced roots follow the first five in source order. The
-navigation diagnostic reports each top's witnessing key and host-message span. An
+conditions with any witness there; displaced roots follow the first five in source order. An
 unknown witness read leaves the order unchanged. The slot-5 two-coordinate swap is retired, and
 statement keys no longer reach field admission. Without conditions, or with only a query time
 window, the order is unchanged. Discard old

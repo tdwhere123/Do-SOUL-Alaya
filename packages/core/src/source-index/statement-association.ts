@@ -57,15 +57,9 @@ export type StatementAssociation = Readonly<{
   statements: number;
   coverage: readonly (readonly (number | null)[])[];
   possible?: readonly (readonly boolean[])[];
-  /** Per cell, the key behind the necessary value (argmax), else the first time-open key; null: none. */
-  witnesses?: readonly (readonly (EvidenceWitnessReference | null)[])[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
 }>;
-
-/** One statement key's host message (UTF-8 span of the root body) and its time outcome (null: no window). */
-export type EvidenceWitnessReference = Readonly<{ artifact_id: string; key_digest: string;
-  source_span: readonly [number, number]; time: "satisfied" | "unknown" | null }>;
 
 /** Internal diagnostics, never part of the retained association graph or its resource quote. */
 export type StatementAssociationAvailability = Readonly<{
@@ -88,7 +82,6 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
-// A cell's 72 bytes bound its value, open flag and a reference to an already retained key target.
 function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number): SourceSemanticResourceBudget {
   return { work_units: keyDimensions * statements + demandDimensions + roots * statements,
     memory_bytes: demandDimensions * 4 + roots * (64 + statements * 72) };
@@ -209,10 +202,7 @@ export class StatementKeyRetention {
     }
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
-    const coverage: (number | null)[][] = [], possible: boolean[][] = [], references: (EvidenceWitnessReference | null)[][] = [];
-    const reference = (key: SourceIndexTarget, time: EvidenceWitnessReference["time"]): EvidenceWitnessReference | null =>
-      key.auxiliary === undefined ? null : { artifact_id: key.auxiliary.artifact_id, key_digest: key.auxiliary.key_digest,
-        source_span: key.auxiliary.source_span, time };
+    const coverage: (number | null)[][] = [], possible: boolean[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
       const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
@@ -229,28 +219,25 @@ export class StatementKeyRetention {
         times = facts.map(fact => keyTime(fact.statement, session, window));
       }
       const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
-      const cells: (EvidenceWitnessReference | null)[] = [];
       coverage.push(demands.vectors.map((vector, index) => {
         const condition = demands.conditions[index]!;
-        let best: number | null = null, argmax: Retained | undefined, firstOpen: Retained | undefined;
+        let best: number | null = null;
         kept.forEach((key, position) => {
           const fact = facts[position]!, time = times?.[position] ?? "satisfied";
           if (fact.role !== condition.speaker || condition.anchors.length > 0
             && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") return;
-          if (time === "unknown") { open[index] = true; firstOpen ??= key; return; }
+          if (time === "unknown") { open[index] = true; return; }
           const value = cosine(key.embedding, vector);
-          if (value > (best ?? -Infinity)) { best = value; argmax = key; }
+          if (value > (best ?? -Infinity)) best = value;
         });
-        const timed = window === undefined ? null : "satisfied";
-        cells.push(argmax !== undefined ? reference(argmax.key, timed) : firstOpen !== undefined ? reference(firstOpen.key, "unknown") : null);
         return best;
       }));
-      possible.push(open); references.push(cells);
+      possible.push(open);
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
-      witnesses: references, decision: { refused: null, applied: false } };
+      decision: { refused: null, applied: false } };
   }
 }
 
@@ -261,7 +248,6 @@ export function restrictStatementAssociation(association: StatementAssociation,
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
     coverage: indices.map(i => association.coverage[i]!),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
-    ...(association.witnesses === undefined ? {} : { witnesses: indices.map(i => association.witnesses![i]!) }),
     decision: association.decision };
 }
 
@@ -315,9 +301,6 @@ export function selectEvidenceWitnesses(order: readonly string[], association: S
     injections.push({ statement, root_position: top + 1, status: "injected", slot: best.slot + 1 });
   });
   const chosen = new Set(out);
-  const reference = (statement: number, top: number | null) => top === null ? null
-    : association.witnesses?.[index.get(order[top]!)!]?.[statement] ?? null;
   return { order: [...out, ...order.filter(root => !chosen.has(root))],
-    top_positions: tops.map(top => top === null ? null : top + 1), injections,
-    top_witnesses: tops.map((top, statement) => reference(statement, top)) };
+    top_positions: tops.map(top => top === null ? null : top + 1), injections };
 }
