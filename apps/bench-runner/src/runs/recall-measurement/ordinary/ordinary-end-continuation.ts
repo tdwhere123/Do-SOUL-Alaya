@@ -113,7 +113,7 @@ async function recall(daemon: BenchDaemonHandle, request: Record<string, unknown
 /**
  * Scored reading order of the end-continuation reader: the delivered slots, then each continued
  * slot's last span re-read from the last message end at or before its cut (conservative bytes),
- * followed by its prefix when the slot opened mid-root.
+ * followed by its whole prefix when the slot opened mid-root.
  */
 export function endContinuationReading(intervals: readonly Interval[], record: OrdinaryEndContinuation,
   messageEnds: (rootId: string) => readonly number[]): {
@@ -139,9 +139,12 @@ export function endContinuationReading(intervals: readonly Interval[], record: O
         extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
       }
     }
-    for (const part of parts) if (part.part === "prefix") {
-      continued += part.span.content_end - part.span.content_start;
-      extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span: part.span }, span: part.span });
+    // The prefix is read contiguously from byte 0, so it is scored as one span.
+    const prefix = parts.filter(part => part.part === "prefix").at(-1)?.span;
+    if (prefix !== undefined) {
+      continued += prefix.content_end;
+      const span = { ...prefix, content_start: 0 };
+      extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
     }
   }
   return { intervals: [...intervals, ...extra], cut, completed, initial_bytes: initial, continuation_bytes: continued };

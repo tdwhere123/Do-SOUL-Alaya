@@ -109,13 +109,15 @@ it("reads the prefix of a slot that opened mid-root after the rest of that root"
     { slot_index: 1, target: at("s", span(10, 20, true)), span: span(10, 20, true) },
     { slot_index: 2, target: at("t", span(0, 20, true)), span: span(0, 20, true) }
   ].map(interval => OrdinaryRecallSourceIntervalSchema.parse(interval));
-  const record = OrdinaryEndContinuationSchema.parse({ cut_slots: 2, completed_slots: 2, payload_calls: 3, issues: [], latency_ms: 1,
+  const record = OrdinaryEndContinuationSchema.parse({ cut_slots: 2, completed_slots: 2, payload_calls: 4, issues: [], latency_ms: 1,
     continuations: [
       { slot_index: 0, target: at("r", span(50, 90, true)), span: span(50, 90, true) },
-      { slot_index: 0, target: at("r", span(0, 30, false)), span: span(0, 30, false), part: "prefix" },
+      { slot_index: 0, target: at("r", span(0, 12, false)), span: span(0, 12, false), part: "prefix" },
+      { slot_index: 0, target: at("r", span(12, 30, false)), span: span(12, 30, false), part: "prefix" },
       { slot_index: 1, target: at("s", span(0, 10, false)), span: span(0, 10, false), part: "prefix" }
     ] });
-  // Message ends before the opening never pull the forward re-read back into the prefix.
+  // Message ends before the opening never pull the forward re-read back into the prefix; a prefix
+  // read in several calls is scored as one span, so a message across a call boundary is seen whole.
   const reading = endContinuationReading(intervals, record, root => root === "r" ? [12, 30, 50, 90] : [10, 20]);
   expect(reading.intervals.slice(3).map(interval => [interval.slot_index, interval.span!.content_start, interval.span!.content_end]))
     .toEqual([[0, 50, 90], [0, 0, 30], [1, 0, 10]]);
