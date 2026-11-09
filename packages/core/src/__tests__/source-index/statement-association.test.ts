@@ -187,6 +187,15 @@ describe("statement key retention and evidence coverage", () => {
     both.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
     both.consider("a", 0.8, Float32Array.of(0, 0.6), auxKey("k1", 20));
     expect(both.associate(["a"], witnesses({}))!.openings).toEqual([{ statement: 0, span: [0, 30] }]);
+    // An assistant witness takes the prompt it answers; a root with no witness opens at its first message.
+    const asked: EvidenceDemands = { status: "ready", vectors: [Float32Array.of(0, 1)], conditions: [condition("s0", "assistant")] };
+    const reply = new StatementKeyRetention(meter(), noRefusal, asked);
+    reply.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
+    reply.consider("a", 0.8, Float32Array.of(0, 1), auxKey("k1", 20));
+    reply.consider("b", 0.7, Float32Array.of(0, 1), auxKey("k2", 40));
+    reply.consider("b", 0.6, Float32Array.of(0, 1), auxKey("k3", 60));
+    expect(reply.associate(["a", "b"], witnesses({ k1: ["assistant"] }))!.openings)
+      .toEqual([{ statement: 0, span: [0, 30] }, { statement: null, span: [0, 50] }]);
     expect(bindEvidenceDemands([condition("s")], [{ vector: { status: "available", embedding: Float32Array.of(1),
       profile_id: "p", input_digest: sourceEmbeddingInputDigest("s") } as never }], { status: "available", profile_id: "p" } as never, "derived"))
       .toMatchObject({ status: "ready", derived: true });
@@ -325,6 +334,9 @@ describe("field access with evidence coverage", () => {
     const opened = { ...coverage(1, { b: [0.9] }), openings: roots.map((root, i) => root === "b" ? { statement: 0, span: [i, i + 4] as const } : null) };
     expect(orderNativeFieldAccess({ ...input, association: opened }, meter())).toMatchObject({
       evidence_openings: [{ root: "b", statement: 0, support_span: { start_byte: 1, end_byte: 5 } }] });
+    const first = { ...opened, openings: roots.map((root, i) => root === "c" ? { statement: null, span: [0, i + 4] as const } : null) };
+    const unit = orderNativeFieldAccess({ ...input, association: first }, meter()) as { evidence_openings: unknown[] };
+    expect(unit.evidence_openings).toEqual([{ root: "c", support_span: { start_byte: 0, end_byte: 6 } }]);
     expect(() => orderNativeFieldAccess({ ...input, association: { ...opened, decision: { refused: null, applied: false },
       openings: roots.map(() => ({ statement: 3, span: [0, 4] as const })) } }, meter())).toThrow(/witness openings/u);
   });

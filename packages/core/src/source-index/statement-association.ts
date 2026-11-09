@@ -58,16 +58,18 @@ export type StatementAssociation = Readonly<{
   statements: number;
   coverage: readonly (readonly (number | null)[])[];
   possible?: readonly (readonly boolean[])[];
-  /** Derived relation only: per cell, the host-message span of the key behind the necessary value. */
+  /** Derived relation only: per cell, the host-message span of the key behind the necessary value
+   * (with the prompt an assistant witness answers). */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
-  /** Per root, the byte range of its necessary witness messages over all conditions, with its best
-   * condition: delivery opens there (null: no necessary cell). */
+  /** Per root, its delivery unit: the byte range of its necessary witness messages (with the prompt an
+   * assistant witness answers) and its best condition, or its first keyed message (null: no keys). */
   openings?: readonly (EvidenceOpening | null)[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
 }>;
 
-export type EvidenceOpening = Readonly<{ statement: number; span: readonly [number, number] }>;
+/** `statement: null`: no witness; the root's first unit. */
+export type EvidenceOpening = Readonly<{ statement: number | null; span: readonly [number, number] }>;
 
 /** Internal diagnostics, never part of the retained association graph or its resource quote. */
 export type StatementAssociationAvailability = Readonly<{
@@ -233,6 +235,12 @@ export class StatementKeyRetention {
       }
       const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
       const cells: ((readonly [number, number]) | null)[] = [];
+      // A reply depends on the prompt it answers: an assistant witness takes the user message before it.
+      const sourceSpan = (position: number) => kept[position]!.key.auxiliary?.source_span;
+      const prompt = (start: number) => kept.reduce<readonly [number, number] | null>((found, _key, position) => {
+        const at = sourceSpan(position);
+        return facts[position]!.role === "user" && at !== undefined && at[1] <= start && (found === null || at[1] > found[1]) ? at : found;
+      }, null);
       coverage.push(demands.vectors.map((vector, index) => {
         const condition = demands.conditions[index]!;
         let best: number | null = null, span: (readonly [number, number]) | null = null;
@@ -244,7 +252,8 @@ export class StatementKeyRetention {
           const value = cosine(key.embedding, vector);
           if (value > (best ?? -Infinity)) { best = value; span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span]; }
         });
-        cells.push(span);
+        const asked = span !== null && condition.speaker === "assistant" ? prompt((span as readonly [number, number])[0]) : null;
+        cells.push(span === null || asked === null ? span : [asked[0], (span as readonly [number, number])[1]]);
         return best;
       }));
       possible.push(open); spans.push(cells);
@@ -253,7 +262,9 @@ export class StatementKeyRetention {
       let top = -1, lo = Infinity, hi = -Infinity;
       row.forEach((value, index) => { const cell = cells[index]; if (value === null || cell == null) return;
         lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]); if (top < 0 || value > row[top]!) top = index; });
-      openings.push(top < 0 ? null : { statement: top, span: [lo, hi] });
+      // A root without a necessary cell delivers its first keyed message (the unit), from byte 0.
+      const first = kept.reduce((end, _key, position) => Math.min(end, sourceSpan(position)?.[1] ?? Infinity), Infinity);
+      openings.push(top >= 0 ? { statement: top, span: [lo, hi] } : Number.isFinite(first) ? { statement: null, span: [0, first] } : null);
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();

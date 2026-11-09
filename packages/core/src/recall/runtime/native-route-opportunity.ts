@@ -291,10 +291,10 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
     top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
     variants: variants.map(row => ({ statement: row.statement, root_position: row.root_position })),
     reason: association.decision.refused };
-  // Every root with a necessary cell opens at that witness message; a variant keeps its condition's message.
+  // Every root opens at its unit (witness messages, else its first message); a variant keeps its own.
   const openings = decided === undefined || association.openings === undefined ? []
     : association.roots.flatMap((root, i) => { const opening = association.openings![i];
-      return opening == null ? [] : [{ root, statement: opening.statement,
+      return opening == null ? [] : [{ root, ...(opening.statement === null ? {} : { statement: opening.statement }),
         support_span: { start_byte: opening.span[0], end_byte: opening.span[1] } }]; });
   return { ...ordered, evidence_coverage, evidence_variants: variants, evidence_openings: openings, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
@@ -319,9 +319,9 @@ function validateAssociation({ roots, statements, coverage, possible, spans, ope
       || Array.isArray(cell) && cell.length === 2 && integer(cell[0]!) && integer(cell[1]!, 1) && cell[1]! > cell[0]!)),
   "witness spans must hold one byte range or null per root and statement");
   requireFact(openings === undefined || Array.isArray(openings) && openings.length === roots.length
-    && openings.every(cell => cell === null || integer(cell.statement) && cell.statement < statements && Array.isArray(cell.span)
+    && openings.every(cell => cell === null || (cell.statement === null || integer(cell.statement) && cell.statement < statements) && Array.isArray(cell.span)
       && cell.span.length === 2 && integer(cell.span[0]!) && integer(cell.span[1]!, 1) && cell.span[1]! > cell.span[0]!),
-  "witness openings must hold one statement and byte range or null per root");
+  "witness openings must hold one statement or none and a byte range, or null, per root");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

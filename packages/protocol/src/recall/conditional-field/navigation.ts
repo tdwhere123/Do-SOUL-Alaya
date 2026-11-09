@@ -23,11 +23,12 @@ export const RecallNavigationWitnessSchema = z.object({
     start_byte: z.number().int().nonnegative(),
     end_byte: z.number().int().positive()
   }).strict().refine(value => value.end_byte > value.start_byte).readonly().optional(),
-  /** Where delivery opens: the root's necessary witness messages over all conditions, or for a moved root the
-   * message of another instance of a placed condition. The rest of the root stays reachable by payload
-   * continuation. `location` never narrows. */
+  /** Where delivery opens: the root's unit — its necessary witness messages over all conditions with the
+   * prompt an assistant witness answers, or (no `condition`) its first message; for a moved root the message
+   * of another instance of a placed condition. The rest of the root stays reachable by payload continuation.
+   * `location` never narrows. */
   evidence_variant: z.object({
-    condition: z.number().int().nonnegative(),
+    condition: z.number().int().nonnegative().optional(),
     support_span: z.object({
       start_byte: z.number().int().nonnegative(),
       end_byte: z.number().int().positive()

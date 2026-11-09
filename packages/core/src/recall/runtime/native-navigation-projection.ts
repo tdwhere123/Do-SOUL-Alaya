@@ -173,7 +173,7 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       const witness = witnesses.get(opening.root);
       if (witness === undefined || witness.evidence_variant !== undefined) continue;
       meter.charge(1, 64, "evidence witness opening");
-      witnesses.set(opening.root, { ...witness, evidence_variant: { condition: opening.statement, support_span: opening.support_span } });
+      witnesses.set(opening.root, { ...witness, evidence_variant: { ...(opening.statement === undefined ? {} : { condition: opening.statement }), support_span: opening.support_span } });
     }
     meter.charge(values.length, values.length * 8, "field navigation value references");
     const result = [...values].sort((left, right) => {
