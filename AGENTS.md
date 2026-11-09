@@ -39,6 +39,38 @@ architecture authority.
   where possible; ask when an unresolved choice changes the intended behavior
   or authorization. Continue work already authorized without repeated approval.
 
+## Research and delegation
+
+- For uncertain algorithm directions, prefer cheap offline counterfactuals on
+  existing frozen evidence before production changes or paid generation. Ask
+  which missing information could change the decision; separate source
+  availability, instance/binding information, the selection objective and actual
+  delivery. A useful observation column is not automatically a useful selector.
+- Freeze the inputs, intervention, controls and acceptance before measuring.
+  Keep gold out of selectors; confine manual oracle inputs to explicitly
+  labelled diagnostic arms, never production features. An oracle bound,
+  correlation or root-level replay shortlists a direction; it does not prove
+  that the information is producible or that native delivery improves.
+- Follow surviving evidence to its causal owner, then verify the affected
+  runtime boundary. Do not keep adding ranking rules or protection conditions
+  after failed substitutions. This is a research preference, not an extra gate
+  for ordinary small fixes.
+- The lead owns the main line: diagnosis, design, implementation and integration.
+  Delegate only necessary, independently deliverable outcomes that leave useful
+  non-overlapping work for the lead. Do not create a research/design/review relay
+  or delegate merely to increase concurrency.
+- Use explicit `xai/grok-4.6` with `thinking=xhigh` for frozen benchmark,
+  profiling and result/accounting execution. Use
+  `openai-codex/gpt-6-astra` with `thinking=medium` only when a bounded
+  auxiliary outcome genuinely needs it; otherwise work directly. These routes
+  concern coding-agent assistance, not paid experimental model allocations.
+- Give an executor the verified revision, immutable inputs, commands, expected
+  per-item outcomes, stop conditions and required artifacts. It must not redesign
+  the experiment, change budgets or retry outside that contract. Keep heavy runs
+  serialized and their runtime/input trees untouched; the lead verifies results.
+  Report decisions, results and material blockers rather than dispatch chatter.
+  Never pass a subagent turn limit.
+
 ## Code quality
 
 - **One semantic authority:** each policy, schema, identity, canonicalization,
