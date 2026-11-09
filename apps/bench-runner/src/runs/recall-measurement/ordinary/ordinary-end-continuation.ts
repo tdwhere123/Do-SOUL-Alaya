@@ -111,17 +111,21 @@ async function recall(daemon: BenchDaemonHandle, request: Record<string, unknown
 }
 
 /**
- * Scored reading order of the end-continuation reader: the delivered slots, then each continued
- * slot's last span re-read from the last message end at or before its cut (conservative bytes),
+ * Scored reading order of the end-continuation reader: the delivered slots, where a slot cut inside the
+ * witness range it opened at reads on to that range's end before the next slot; then each continued
+ * slot's rest re-read from the last message end at or before where it resumes (conservative bytes),
  * followed by its whole prefix when the slot opened mid-root.
  */
 export function endContinuationReading(intervals: readonly Interval[], record: OrdinaryEndContinuation,
   messageEnds: (rootId: string) => readonly number[]): {
     intervals: Interval[]; cut: number; completed: number; initial_bytes: number; continuation_bytes: number;
   } {
-  const extra: Interval[] = [];
+  const first: Interval[] = [], extra: Interval[] = [];
   let cut = 0, completed = 0, initial = 0, continued = 0;
+  const from = (interval: Interval & { span: NonNullable<Interval["span"]> }, at: number) => Math.max(interval.span.content_start,
+    interval.target.kind === "source_evidence" ? messageEnds(interval.target.root_id).filter(end => end <= at).at(-1) ?? 0 : 0);
   for (const interval of intervals) {
+    first.push(interval);
     if (interval.span === null) continue;
     initial += interval.span.content_end - interval.span.content_start;
     if (interval.target.kind !== "source_evidence") continue;
@@ -130,13 +134,22 @@ export function endContinuationReading(intervals: readonly Interval[], record: O
       cut += 1;
       const last = parts.filter(part => part.part === undefined).at(-1)?.span;
       if (last !== undefined) {
-        const cutAt = interval.span.content_end;
-        const from = Math.max(interval.span.content_start,
-          messageEnds(interval.target.root_id).filter(end => end <= cutAt).at(-1) ?? 0);
         if (last.content_complete) completed += 1;
-        continued += last.content_end - from;
-        const span = { ...last, content_start: from };
-        extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
+        let resume = interval.span.content_end;
+        const unit = interval.opening_end;
+        if (unit !== undefined && unit > resume && unit <= last.content_end) {
+          const start = from(interval as Interval & { span: NonNullable<Interval["span"]> }, resume);
+          const span = { ...last, content_start: start, content_end: unit, content_complete: unit === last.content_end };
+          continued += unit - start;
+          first.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
+          resume = unit;
+        }
+        if (resume < last.content_end) {
+          const start = unit !== undefined && resume === unit ? unit : from(interval as Interval & { span: NonNullable<Interval["span"]> }, resume);
+          continued += last.content_end - start;
+          const span = { ...last, content_start: start };
+          extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
+        }
       }
     }
     // The prefix is read contiguously from byte 0, so it is scored as one span.
@@ -147,5 +160,5 @@ export function endContinuationReading(intervals: readonly Interval[], record: O
       extra.push({ slot_index: interval.slot_index, target: { ...interval.target, span }, span });
     }
   }
-  return { intervals: [...intervals, ...extra], cut, completed, initial_bytes: initial, continuation_bytes: continued };
+  return { intervals: [...first, ...extra], cut, completed, initial_bytes: initial, continuation_bytes: continued };
 }

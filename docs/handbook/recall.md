@@ -466,12 +466,14 @@ variant: its navigation witness carries `evidence_variant`, and payload hydratio
 host message instead of the root's prefix. Its later bytes remain reachable by payload continuation.
 Nothing in the first five moves; without the relation the order is unchanged.
 
-Whenever conditions are admitted, each root also keeps one opening: the host-message span of its
-best-scoring necessary cell. Every delivered root with an opening (and no variant) opens there, so a
-reader meets the witnessing message before the rest of the root. Nothing is dropped: the root's later
+Whenever conditions are admitted, each root also keeps one opening: the byte range of its messages
+that necessarily witness some condition (over all conditions, not only the best one). Every delivered
+root with an opening (and no variant) opens there, so a reader meets the witnessing messages before the
+rest of the root. Nothing is dropped: the root's later
 bytes follow by payload continuation, and its prefix is one explicit range away
 (`payload_continuation.start_offset: 0`, `end_offset` = the opening). The bench end-continuation reader
-reads that prefix last, so every slot still ends with its whole body.
+reads a cut opening on to its range end before the next slot, then the rest of each root, then the
+prefix last, so every slot still ends with its whole body.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

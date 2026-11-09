@@ -353,7 +353,8 @@ export class RecallReadWorkerLifecycle {
     const scope = operation === "conditionalField.sourceSemantics" || operation === "conditionalField.recall" || operation === "conditionalField.acknowledge"
       ? this.observations.getStore() : undefined;
     const observe = scope === undefined ? undefined : (value: unknown) => {
-      if (scope.rows.length >= 16) { scope.overflow = true; return; }
+      // Two frames per page; a ten-slot window can need one page per slot.
+      if (scope.rows.length >= 32) { scope.overflow = true; return; }
       scope.rows.push(readSourceSemanticObservation(value, id));
     };
     return new Promise<T>((resolve, reject) => {

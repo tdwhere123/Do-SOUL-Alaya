@@ -60,7 +60,8 @@ export type StatementAssociation = Readonly<{
   possible?: readonly (readonly boolean[])[];
   /** Derived relation only: per cell, the host-message span of the key behind the necessary value. */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
-  /** Per root, its best necessary cell's host-message span: delivery opens there (null: no necessary cell). */
+  /** Per root, the byte range of its necessary witness messages over all conditions, with its best
+   * condition: delivery opens there (null: no necessary cell). */
   openings?: readonly (EvidenceOpening | null)[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
@@ -247,10 +248,12 @@ export class StatementKeyRetention {
         return best;
       }));
       possible.push(open); spans.push(cells);
+      // The opening covers every message of the root that necessarily witnesses some condition.
       const row = coverage.at(-1)!;
-      let top = -1;
-      row.forEach((value, index) => { if (value !== null && cells[index] !== null && (top < 0 || value > row[top]!)) top = index; });
-      openings.push(top < 0 ? null : { statement: top, span: cells[top]! });
+      let top = -1, lo = Infinity, hi = -Infinity;
+      row.forEach((value, index) => { const cell = cells[index]; if (value === null || cell == null) return;
+        lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]); if (top < 0 || value > row[top]!) top = index; });
+      openings.push(top < 0 ? null : { statement: top, span: [lo, hi] });
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();

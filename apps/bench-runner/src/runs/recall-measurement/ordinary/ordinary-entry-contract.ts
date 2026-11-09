@@ -50,7 +50,9 @@ export const OrdinaryRecallEntryInputSchema = z.object({
 export const OrdinaryRecallSourceIntervalSchema = z.object({
   slot_index: z.number().int().nonnegative(),
   target: RecallTargetRefSchema,
-  span: SourceDeliveredSpanSchema.nullable()
+  span: SourceDeliveredSpanSchema.nullable(),
+  /** End of the witness range the slot opened at (navigation `evidence_variant`), when it opened at one. */
+  opening_end: z.number().int().positive().optional()
 }).strict();
 /** After the membership window, each cut slot read on from its delivered end until complete. */
 export const OrdinaryEndContinuationSchema = z.object({

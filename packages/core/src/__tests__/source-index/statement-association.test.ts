@@ -180,8 +180,13 @@ describe("statement key retention and evidence coverage", () => {
     // k1 is an assistant message: statement 1 (user) is witnessed only by k0 on root a.
     expect(fill({ ...ready([1, 0], [0, 1]) as Extract<EvidenceDemands, { status: "ready" }>, derived: true }).spans).toEqual([[[0, 10], [0, 10]], [null, null], [null, null]]);
     expect(fill(ready([1, 0], [0, 1]))).not.toHaveProperty("spans");
-    // Every root opens at its best necessary cell's message, with or without a derived relation.
+    // Every root opens at its necessary witness messages, with or without a derived relation.
     expect(fill(ready([1, 0], [0, 1])).openings).toEqual([{ statement: 0, span: [0, 10] }, null, null]);
+    // Two conditions witnessed by two messages of one root: the opening covers both, the best condition names it.
+    const both = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
+    both.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
+    both.consider("a", 0.8, Float32Array.of(0, 0.6), auxKey("k1", 20));
+    expect(both.associate(["a"], witnesses({}))!.openings).toEqual([{ statement: 0, span: [0, 30] }]);
     expect(bindEvidenceDemands([condition("s")], [{ vector: { status: "available", embedding: Float32Array.of(1),
       profile_id: "p", input_digest: sourceEmbeddingInputDigest("s") } as never }], { status: "available", profile_id: "p" } as never, "derived"))
       .toMatchObject({ status: "ready", derived: true });
