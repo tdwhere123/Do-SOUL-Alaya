@@ -373,6 +373,9 @@ export const QueryInterpretationProposalBodySchema = z
     question_time: QuestionTimePreferenceSchema.optional(),
     source_template: SourceTemplateProposalSchema.optional(),
     evidence_conditions: EvidenceConditionsSchema.optional(),
+    /** The question asks for a result computed across stated facts (total, count, difference, order,
+     * comparison), so a condition may need several instances. Only meaningful with evidence_conditions. */
+    evidence_relation: z.literal("derived").optional(),
     // Low-trust optional input is separately admitted; malformed observations do not revoke raw access.
     source_task_observation: z.unknown().optional(),
     conditions: z.array(ProposedGuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),

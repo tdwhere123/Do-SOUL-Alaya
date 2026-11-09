@@ -15,6 +15,9 @@ const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", v
 const noRefusal = () => { throw new Error("unexpected refusal"); };
 // Acquisition passes scanned key targets through unchanged; only identity matters here.
 const key = (id: string) => ({ root_key: id }) as unknown as SourceIndexTarget;
+/** A statement key bound to one host message span of its root. */
+const auxKey = (id: string, start: number) => ({ root_key: id, auxiliary: { artifact_id: `art-${id}`, key_digest: `dig-${id}`,
+  source_span: [start, start + 10] } }) as unknown as SourceIndexTarget;
 const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
 /** Witness facts per key id: [role, matched anchor names, key text]; unlisted keys are user keys matching every anchor. */
 const witnesses = (facts: Record<string, [string | null, string[]?, string?]> = {}, session: string | null = null): StatementWitnessReader =>
@@ -166,6 +169,22 @@ describe("statement key retention and evidence coverage", () => {
     expect(plain.associate(["a"], witnesses({ k0: ["user", [], "On April 2 I ran."] }, "2023-04-20T10:00:00.000Z"))).not.toHaveProperty("possible");
   });
 
+  it("keeps each cell's witnessing host-message span only under a derived relation", () => {
+    const fill = (demands: EvidenceDemands) => {
+      const retained = new StatementKeyRetention(meter(), noRefusal, demands);
+      retained.consider("a", 0.9, Float32Array.of(1, 0), auxKey("k0", 0));
+      retained.consider("a", 0.8, Float32Array.of(0, 1), auxKey("k1", 20));
+      retained.consider("b", 0.7, Float32Array.of(0, 1), key("k2"));
+      return retained.associate(["a", "b", "z"], witnesses({ k1: ["assistant"] }))!;
+    };
+    // k1 is an assistant message: statement 1 (user) is witnessed only by k0 on root a.
+    expect(fill({ ...ready([1, 0], [0, 1]) as Extract<EvidenceDemands, { status: "ready" }>, derived: true }).spans).toEqual([[[0, 10], [0, 10]], [null, null], [null, null]]);
+    expect(fill(ready([1, 0], [0, 1]))).not.toHaveProperty("spans");
+    expect(bindEvidenceDemands([condition("s")], [{ vector: { status: "available", embedding: Float32Array.of(1),
+      profile_id: "p", input_digest: sourceEmbeddingInputDigest("s") } as never }], { status: "available", profile_id: "p" } as never, "derived"))
+      .toMatchObject({ status: "ready", derived: true });
+  });
+
   it("leaves the whole association unavailable on an unknown or misaligned witness read", () => {
     const run = (reader: StatementWitnessReader | undefined) => {
       const refused: string[] = [], retained = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0]));
@@ -235,6 +254,19 @@ describe("evidence coverage permutation of the source first five", () => {
     expect(selectEvidenceWitnesses(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
   });
 
+  it("moves each placed top's rank 2-5 witnesses from outside the first five after it, as witness variants", () => {
+    const span = (s: number) => [s, s + 10] as const;
+    const value = { ...coverage(2, { b: [0.9, null], h: [0.8, 0.2], f: [0.7, null], c: [0.6, null], g: [0.5, null], e: [0.4, null], d: [null, 0.3] }),
+      spans: roots.map((root, i) => root === "g" ? [null, null] : [span(10 * i), span(10 * i + 5)]) };
+    const decided = selectEvidenceWitnesses(roots, value, meter());
+    // Condition 0: top b; ranks 2-5 are h, f, c (in the first five), g (no span). Condition 1: top d; h is already moved.
+    expect(decided.order).toEqual(["a", "b", "c", "d", "e", "h", "f", "g"]);
+    expect(decided.variants).toEqual([
+      { root: "h", statement: 0, root_position: 8, support_span: { start_byte: 70, end_byte: 80 } },
+      { root: "f", statement: 0, root_position: 6, support_span: { start_byte: 50, end_byte: 60 } }]);
+    expect(selectEvidenceWitnesses(roots, coverage(2, { b: [0.9, null], h: [0.8, 0.2] }), meter()).variants).toEqual([]);
+  });
+
   it("matches the declared rule over generated coverage, keyless roots, ties and short orders", () => {
     let seed = 7;
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -273,6 +305,16 @@ describe("field access with evidence coverage", () => {
         injections: [{ statement: 0, root_position: 7, status: "injected", slot: 5 }], reason: null } });
     const unchanged = orderNativeFieldAccess({ ...input, association: coverage(1, { b: [0.9] }) }, meter());
     expect(unchanged).toMatchObject({ record_ids: base, evidence_coverage: { status: "unchanged", injections: [] } });
+  });
+
+  it("places witness variants after the first five source slots and reports them", () => {
+    const value = { ...coverage(1, { b: [0.9], h: [0.8] }), spans: roots.map((_, i) => [[i, i + 5] as const]) };
+    const result = orderNativeFieldAccess({ ...input, association: value }, meter());
+    expect(result).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "e", "h", "f", "g"],
+      evidence_coverage: { status: "permuted", injections: [], variants: [{ statement: 0, root_position: 8 }] },
+      evidence_variants: [{ root: "h", statement: 0, support_span: { start_byte: 7, end_byte: 12 } }] });
+    expect(() => orderNativeFieldAccess({ ...input, association: { ...value, decision: { refused: null, applied: false },
+      spans: roots.map(() => [[5, 5] as const]) } }, meter())).toThrow(/one byte range or null/u);
   });
 
   it("keeps base access and records refusal when the optional ordering is unfunded", () => {

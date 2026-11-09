@@ -43,6 +43,16 @@ describe("evidence condition proposal authority", () => {
     }
   });
 
+  it("admits a derived relation only beside conditions and binds it into query identity", () => {
+    const derived = compile({ ...proposal, evidence_relation: "derived" });
+    expect(derived.status).toBe("partial");
+    expect(derived.interpretation_proposal?.evidence_relation).toBe("derived");
+    expect(derived.query_id).not.toBe(compile().query_id);
+    const { evidence_conditions: _conditions, ...bare } = proposal;
+    expect(compile({ ...bare, evidence_relation: "derived" }).status).toBe("malformed");
+    expect(QueryInterpretationProposalSchema.safeParse({ ...proposal, evidence_relation: "single" }).success).toBe(false);
+  });
+
   it("keeps absent conditions out of existing producer identity material", () => {
     const { evidence_conditions: _conditions, ...absent } = proposal;
     expect(compile(absent).query_id).toBe(compile({ ...absent, evidence_conditions: undefined }).query_id);

@@ -454,7 +454,17 @@ improves. Possible witnesses are not otherwise protected: what the conditions ca
 risk, not what they may see. All other roots keep their source order, so replaced roots follow
 directly after the first five. No root leaves the order and memory keeps its positions. The
 navigation diagnostic `evidence_coverage` reports the condition count, each top's source
-position, every injection or `no_free_slot`, and refusal.
+position, every injection or `no_free_slot`, every witness variant, and refusal.
+
+When the proposal also states `evidence_relation: "derived"` (the question asks for a result
+computed across stated facts: a total, count, difference, order or comparison), a condition may need
+several instances. Acquisition then keeps, per matrix cell, the host-message span of the key behind
+the necessary value. After the selection, each condition whose top is in the first five brings its
+rank 2–5 necessary witnesses (score order, ties to the earlier position) on roots outside the first
+five, without repeats, directly after the first five. Each such root is delivered once, as a witness
+variant: its navigation witness carries `evidence_variant`, and payload hydration reads exactly that
+host message instead of the root's prefix. Its later bytes remain reachable by payload continuation.
+Nothing in the first five moves; without the relation the order and bytes are unchanged.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

@@ -35,7 +35,8 @@ export type NativeNavigationObservation = Readonly<{
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
   /** Positions are 1-based within the source order before the permutation. */
   evidence_coverage?: Readonly<{ status: "permuted" | "unchanged" | "resource_refused" | "not_run"; statements: number | null;
-    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[]; reason: string | null }>;
+    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[];
+    variants?: readonly Readonly<{ statement: number; root_position: number }>[]; reason: string | null }>;
 }>;
 
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
@@ -161,6 +162,12 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
         ...(task === undefined ? {} : { task_observation: task }) };
       meter.charge(1, 0, "bound catalog access coordinate");
       witnesses.set(key, placed);
+    }
+    for (const variant of "evidence_variants" in ordered ? ordered.evidence_variants : []) {
+      const witness = witnesses.get(variant.root);
+      if (witness === undefined) continue;
+      meter.charge(1, 64, "evidence witness variant");
+      witnesses.set(variant.root, { ...witness, evidence_variant: { condition: variant.statement, support_span: variant.support_span } });
     }
     meter.charge(values.length, values.length * 8, "field navigation value references");
     const result = [...values].sort((left, right) => {

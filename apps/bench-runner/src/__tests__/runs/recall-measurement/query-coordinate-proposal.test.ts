@@ -29,6 +29,12 @@ describe("frozen query-coordinate adapter", () => {
     const proposal = queryProposalFromCoordinates(query, clock, { ...window, coordinates: { ...window.coordinates,
       evidence_statements: ["Template only."], evidence_conditions: conditions } })!;
     expect(proposal.evidence_conditions).toEqual(conditions);
+    expect(proposal).not.toHaveProperty("evidence_relation");
+    expect(queryProposalFromCoordinates(query, clock, { ...window, coordinates: { ...window.coordinates,
+      evidence_conditions: conditions, evidence_relation: "derived" } })?.evidence_relation).toBe("derived");
+    // A relation without conditions has nothing to qualify.
+    expect(queryProposalFromCoordinates(query, clock, { ...window, coordinates: { ...window.coordinates,
+      evidence_relation: "derived" } })).not.toHaveProperty("evidence_relation");
     // Qv2 evidence statements stay template input, never conditions.
     expect(proposal).not.toHaveProperty("evidence_statements");
     const only = queryProposalFromCoordinates(query, clock, { status: "formed", coordinates: { time: { kind: "absent" },

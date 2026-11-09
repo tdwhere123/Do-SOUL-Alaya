@@ -19,7 +19,8 @@ export const STATEMENT_ASSOCIATION_KEYS_PER_ROOT = 16;
 type Retained = Readonly<{ cosine: number; embedding: Float32Array; key: SourceIndexTarget }>;
 
 /** Evidence condition vectors bound to the admitted proposal. Not supplied and unavailable stay distinct. */
-export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Float32Array[]; conditions: readonly EvidenceCondition[] }>
+export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Float32Array[]; conditions: readonly EvidenceCondition[];
+  derived?: boolean }>
   | Readonly<{ status: "not_supplied" | "unavailable"; reason: string }>;
 
 /** Reads the host role and anchor tokens of one root's retained keys, charging the acquisition ledger. */
@@ -57,6 +58,8 @@ export type StatementAssociation = Readonly<{
   statements: number;
   coverage: readonly (readonly (number | null)[])[];
   possible?: readonly (readonly boolean[])[];
+  /** Derived relation only: per cell, the host-message span of the key behind the necessary value. */
+  spans?: readonly (readonly (readonly [number, number] | null)[])[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
 }>;
@@ -82,14 +85,17 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
-function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number): SourceSemanticResourceBudget {
-  return { work_units: keyDimensions * statements + demandDimensions + roots * statements,
-    memory_bytes: demandDimensions * 4 + roots * (64 + statements * 72) };
+// A retained span cell is one array node and two integers.
+function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number,
+  spans = false): SourceSemanticResourceBudget {
+  return { work_units: keyDimensions * statements + demandDimensions + roots * statements * (spans ? 2 : 1),
+    memory_bytes: demandDimensions * 4 + roots * (64 + statements * (spans ? 72 + 192 : 72) + (spans ? 64 : 0)) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
 export function bindEvidenceDemands(conditions: readonly EvidenceCondition[] | undefined,
-  prepared: readonly Readonly<{ vector: SourceIndexQueryVector }>[] | undefined, query: SourceIndexQueryVector): EvidenceDemands {
+  prepared: readonly Readonly<{ vector: SourceIndexQueryVector }>[] | undefined, query: SourceIndexQueryVector,
+  relation?: "derived"): EvidenceDemands {
   if (conditions === undefined) return { status: "not_supplied", reason: "evidence_conditions_not_supplied" };
   const statements = conditions.map(condition => condition.statement);
   if (prepared === undefined || prepared.length !== statements.length) {
@@ -105,7 +111,7 @@ export function bindEvidenceDemands(conditions: readonly EvidenceCondition[] | u
     }
     vectors.push(vector.embedding);
   }
-  return { status: "ready", vectors, conditions };
+  return { status: "ready", vectors, conditions, ...(relation === "derived" ? { derived: true } : {}) };
 }
 
 /** Same arithmetic as the declared offline rule: one left-to-right Float64 pass over Float32 values. */
@@ -158,7 +164,8 @@ export class StatementKeyRetention {
     const keys = Math.min(this.retainedKeyCount, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT), dimensions = this.dimensions ?? 0;
     const cost = quoteStatementAssociation(roots, keys, dimensions);
     const vectors = this.demands.status === "ready" ? this.demands.vectors : [];
-    const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length);
+    const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length,
+      this.demands.status === "ready" && this.demands.derived === true);
     return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
   }
 
@@ -195,14 +202,14 @@ export class StatementKeyRetention {
     }
     const statements = demands.vectors.length;
     const demandDimensions = demands.vectors.reduce((sum, vector) => sum + vector.length, 0);
-    const cost = coverageCost(dimensions, demandDimensions, roots.length, statements);
+    const cost = coverageCost(dimensions, demandDimensions, roots.length, statements, demands.derived === true);
     if (!this.fund(cost.work_units, cost.memory_bytes, "statement key evidence coverage")) return undefined;
     if (demands.vectors.some(vector => vector.length !== (this.dimensions ?? vector.length) || vector.some(v => !Number.isFinite(v)))) {
       this.abandon("statement key association incompatible dimensions"); return undefined;
     }
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
-    const coverage: (number | null)[][] = [], possible: boolean[][] = [];
+    const coverage: (number | null)[][] = [], possible: boolean[][] = [], spans: ((readonly [number, number]) | null)[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
       const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
@@ -219,25 +226,27 @@ export class StatementKeyRetention {
         times = facts.map(fact => keyTime(fact.statement, session, window));
       }
       const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
+      const cells: ((readonly [number, number]) | null)[] = [];
       coverage.push(demands.vectors.map((vector, index) => {
         const condition = demands.conditions[index]!;
-        let best: number | null = null;
+        let best: number | null = null, span: (readonly [number, number]) | null = null;
         kept.forEach((key, position) => {
           const fact = facts[position]!, time = times?.[position] ?? "satisfied";
           if (fact.role !== condition.speaker || condition.anchors.length > 0
             && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") return;
           if (time === "unknown") { open[index] = true; return; }
           const value = cosine(key.embedding, vector);
-          if (value > (best ?? -Infinity)) best = value;
+          if (value > (best ?? -Infinity)) { best = value; span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span]; }
         });
+        cells.push(span);
         return best;
       }));
-      possible.push(open);
+      possible.push(open); spans.push(cells);
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
-      decision: { refused: null, applied: false } };
+      ...(demands.derived === true ? { spans } : {}), decision: { refused: null, applied: false } };
   }
 }
 
@@ -248,8 +257,13 @@ export function restrictStatementAssociation(association: StatementAssociation,
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
     coverage: indices.map(i => association.coverage[i]!),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
+    ...(association.spans === undefined ? {} : { spans: indices.map(i => association.spans![i]!) }),
     decision: association.decision };
 }
+
+/** Another instance of a placed condition, delivered as its witness message after the first five. */
+export type EvidenceWitnessVariant = Readonly<{ root: string; statement: number; root_position: number;
+  support_span: Readonly<{ start_byte: number; end_byte: number }> }>;
 
 export type EvidenceCoverageInjection = Readonly<{ statement: number; root_position: number }
   & ({ status: "injected"; slot: number } | { status: "no_free_slot" })>;
@@ -259,6 +273,8 @@ export type EvidenceCoverageInjection = Readonly<{ statement: number; root_posit
  * with any necessary or possible witness there, then source order. Each condition in order whose top lies
  * outside the first five replaces the slot 5..2 that maximizes that pair (ties: the lowest slot), only if it
  * strictly improves. Slot 1 and membership are fixed; displaced roots follow the first five in source order.
+ * Under a derived relation, each placed top's condition then brings its rank 2-5 witnesses from roots outside the first
+ * five, in condition and rank order, delivered as their witness messages; nothing in the first five moves.
  * A selection over observed witnesses, not proof that the injected root answers the condition. */
 export function selectEvidenceWitnesses(order: readonly string[], association: StatementAssociation,
   meter: SourceSemanticResourceLedger) {
@@ -300,7 +316,24 @@ export function selectEvidenceWitnesses(order: readonly string[], association: S
     out[best.slot] = root;
     injections.push({ statement, root_position: top + 1, status: "injected", slot: best.slot + 1 });
   });
-  const chosen = new Set(out);
-  return { order: [...out, ...order.filter(root => !chosen.has(root))],
-    top_positions: tops.map(top => top === null ? null : top + 1), injections };
+  const chosen = new Set(out), variants: EvidenceWitnessVariant[] = [];
+  // Derived relation: each placed top's condition brings its rank 2-5 witnesses from outside the first five.
+  if (association.spans !== undefined) {
+    meter.charge(statements * order.length * 4, statements * 5 * 64, "evidence witness variants");
+    tops.forEach((top, statement) => {
+      if (top === null || !chosen.has(order[top]!)) return;
+      const ranked = order.map((root, position) => ({ root, position, value: necessary(root, statement) }))
+        .filter((row): row is { root: string; position: number; value: number } => row.value !== null)
+        .sort((a, b) => b.value - a.value || a.position - b.position).slice(1, 5);
+      for (const { root, position } of ranked) {
+        const span = association.spans![index.get(root)!]![statement];
+        if (chosen.has(root) || span == null) continue;
+        chosen.add(root);
+        variants.push({ root, statement, root_position: position + 1, support_span: { start_byte: span[0], end_byte: span[1] } });
+      }
+    });
+  }
+  const moved = variants.map(row => row.root);
+  return { order: [...out, ...moved, ...order.filter(root => !chosen.has(root))],
+    top_positions: tops.map(top => top === null ? null : top + 1), injections, variants };
 }

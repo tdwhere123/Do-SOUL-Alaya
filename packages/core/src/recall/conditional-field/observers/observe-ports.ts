@@ -189,6 +189,7 @@ export type ObserverReaders = Readonly<{
     sourceTaskObservation?: unknown;
     /** Admitted question-formed evidence conditions; prepared vectors are bound to their exact statements. */
     evidenceConditions?: readonly import("@do-soul/alaya-protocol").EvidenceCondition[];
+    evidenceRelation?: "derived";
     /** Private observation context; the same guard also controls task proposal forwarding. */
     taskObservationBlock?: "access_hint" | "source_guard" | "time_window" | "program" | "conditions";
   }>) => NativeSourceNomination;

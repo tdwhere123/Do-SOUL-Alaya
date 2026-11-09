@@ -11,7 +11,8 @@ const Coordinates = z.looseObject({ time: z.discriminatedUnion("kind", [
     .pipe(QuestionTimePreferenceSchema.unwrap().shape.intervals) })
 ]), asked_speaker: z.enum(["user", "assistant", "either"]).optional(),
 evidence_statements: z.array(z.string()).optional(),
-evidence_conditions: z.array(EvidenceConditionSchema).optional() });
+evidence_conditions: z.array(EvidenceConditionSchema).optional(),
+evidence_relation: z.literal("derived").optional() });
 
 /** Bound question coordinates enter the public proposal contract. Source matching remains
  * a separate consumer decision; malformed formation is not successful absence. Evidence
@@ -36,6 +37,7 @@ export function queryProposalFromCoordinates(query: string, clock: string,
       question_time: { interpretation_clock: clock, intervals: coordinates.time.alternatives }
     } : {}),
     ...(sourceTemplate === undefined ? {} : { source_template: sourceTemplate }),
-    ...(conditions === undefined ? {} : { evidence_conditions: conditions })
+    ...(conditions === undefined ? {} : { evidence_conditions: conditions,
+      ...(coordinates.evidence_relation === undefined ? {} : { evidence_relation: coordinates.evidence_relation }) })
   });
 }

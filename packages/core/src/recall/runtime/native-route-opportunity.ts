@@ -261,7 +261,7 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
       optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
       validateAssociation(association);
       decided = selectEvidenceWitnesses(originalSources, association, optional);
-      if (decided.order.some((id, i) => id !== originalSources[i])) association.decision.applied = true;
+      if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0) association.decision.applied = true;
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       // A later small page must not replace an already applied permutation with base order.
@@ -285,15 +285,17 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   let cursor = 0;
   const recordIds = current.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
   const injected = decided?.injections.some(row => row.status === "injected") === true;
+  const variants = decided?.variants ?? [];
   const evidence_coverage = { status: association.decision.refused !== null ? "resource_refused" as const
-    : injected ? "permuted" as const : "unchanged" as const, statements: association.statements,
+    : injected || variants.length > 0 ? "permuted" as const : "unchanged" as const, statements: association.statements,
     top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
+    variants: variants.map(row => ({ statement: row.statement, root_position: row.root_position })),
     reason: association.decision.refused };
-  return { ...ordered, evidence_coverage, preferred_record_ids: recordIds,
+  return { ...ordered, evidence_coverage, evidence_variants: variants, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function validateAssociation({ roots, statements, coverage, possible, decision }: StatementAssociation): void {
+function validateAssociation({ roots, statements, coverage, possible, spans, decision }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
   requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
@@ -307,6 +309,10 @@ function validateAssociation({ roots, statements, coverage, possible, decision }
   requireFact(possible === undefined || Array.isArray(possible) && possible.length === roots.length
     && possible.every(row => Array.isArray(row) && row.length === statements && row.every(value => typeof value === "boolean")),
   "possible witnesses must hold one boolean per root and statement");
+  requireFact(spans === undefined || Array.isArray(spans) && spans.length === roots.length
+    && spans.every(row => Array.isArray(row) && row.length === statements && row.every(cell => cell === null
+      || Array.isArray(cell) && cell.length === 2 && integer(cell[0]!) && integer(cell[1]!, 1) && cell[1]! > cell[0]!)),
+  "witness spans must hold one byte range or null per root and statement");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

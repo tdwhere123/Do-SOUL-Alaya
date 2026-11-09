@@ -68,31 +68,38 @@ async function publishedRounds(providerKind = "local_onnx") {
 }
 
 const DAY = START.slice(0, 10);
-const proposal = (conditions: readonly EvidenceCondition[], timed = false): QueryInterpretationProposal => ({ schema_version: 1,
+const proposal = (conditions: readonly EvidenceCondition[], timed = false, derived = false): QueryInterpretationProposal => ({ schema_version: 1,
   original_query_digest: `sha256:${createHash("sha256").update(QUERY, "utf8").digest("hex")}`,
   producer_id: QUESTION_TIME_PROPOSAL_PRODUCER_ID, producer_version: "1",
   ...(timed ? { question_time: { interpretation_clock: START, intervals: [{ start: DAY, end: DAY }] } } : {}),
-  ...(conditions.length === 0 ? {} : { evidence_conditions: conditions }) });
+  ...(conditions.length === 0 ? {} : { evidence_conditions: conditions, ...(derived ? { evidence_relation: "derived" as const } : {}) }) });
 
-function request(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false) {
+function request(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false, derived = false) {
   return { workspace_id: WORKSPACE, query_text: QUERY, readers,
     snapshot_id: snapshotIdFromPin(WORKSPACE, readers.snapshotPin!(WORKSPACE)), budget: PRODUCTION_BUDGET,
     interpretation_clock: START, as_of: START, expires_at: "2099-01-01T00:00:00.000Z", authorized_scopes: ["project"],
     enumeration_policy: "native_query" as const, result_kind_view: "source_only" as const,
     protocol_version: 1 as const, supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     supports_source_evidence: true, supports_product_updates: true,
-    ...(conditions === undefined && !timed ? {} : { interpretation_proposal: proposal(conditions ?? [], timed) }) };
+    ...(conditions === undefined && !timed ? {} : { interpretation_proposal: proposal(conditions ?? [], timed, derived) }) };
 }
 
 /** Every delivered source root across continuation pages, through the real SQLite field. */
 function sourceOrder(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false): string[] {
-  const initial = request(env, readers, conditions, timed), ids: string[] = [], pageSizes: number[] = [];
+  return sourceDelivery(env, readers, conditions, timed).map(row => row.root);
+}
+
+function sourceDelivery(env: Environment, readers: ObserverReaders, conditions?: readonly EvidenceCondition[], timed = false,
+  derived = false): { root: string; span: readonly [number, number] | null }[] {
+  const initial = request(env, readers, conditions, timed, derived), ids: { root: string; span: readonly [number, number] | null }[] = [],
+    pageSizes: number[] = [];
   let continuation: ReturnType<typeof runConditionalFieldRecallWithReceipt>["index"]["continuation"] | undefined;
   for (let page = 0; page < 10 && continuation !== null; page++) {
     const result = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(
       { ...initial, ...(continuation === undefined ? {} : { continuation }) }))();
     expect(result.index.result_version).toBe("ordinary-native-field.v14");
-    const delivered = result.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : []);
+    const delivered = result.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [{ root: entry.target.root_id,
+      span: entry.target.span === undefined ? null : [entry.target.span.content_start, entry.target.span.content_end] as const }] : []);
     ids.push(...delivered); pageSizes.push(delivered.length);
     continuation = result.index.continuation;
   }
@@ -139,6 +146,24 @@ it("keeps today's order without conditions and injects a late typed witness whil
   expect(env.database.connection.transaction(() => nominateNativeSources(env.database,
     { workspaceId: WORKSPACE, query: QUERY, authorizedScopes: ["project"], budget: { work_units: 10_000_000, memory_bytes: 64_000_000 },
       evidenceConditions: CONDITIONS }, covered.vector, undefined, "request", covered.evidence))().association).toBeUndefined();
+});
+
+it("delivers another instance of a placed condition as its witness message under a derived relation", async () => {
+  const { env, roots, prepare } = await publishedRounds();
+  const covered = await prepare(STATEMENTS);
+  const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
+  const plain = sourceDelivery(env, readers, CONDITIONS), derived = sourceDelivery(env, readers, CONDITIONS, false, true);
+  // Condition two's top (round 4) is in the first five; its next witnesses are rounds 0-3, and only round 3 is outside.
+  expect(derived.map(row => row.root)).toEqual(plain.map(row => row.root));
+  expect(derived.filter(row => row.root !== roots[3])).toEqual(plain.filter(row => row.root !== roots[3]));
+  const before = plain.find(row => row.root === roots[3])!.span!, variant = derived.find(row => row.root === roots[3])!.span!;
+  expect(before[0]).toBe(0);
+  // Exactly round 3's user message: the statement key's host span, not the root's prefix.
+  const body = env.database.connection.prepare("select source_body from source_records where record_id=?").get(roots[3]) as { source_body: string };
+  const text = Buffer.from(body.source_body, "utf8").subarray(variant[0], variant[1]).toString("utf8");
+  expect(variant[0]).toBeGreaterThan(0);
+  expect(text).toContain("Round 3: I planted bed 3.");
+  expect(text).not.toContain("Noted.");
 });
 
 it("never embeds condition statements through a non-local provider and keeps the base order", async () => {

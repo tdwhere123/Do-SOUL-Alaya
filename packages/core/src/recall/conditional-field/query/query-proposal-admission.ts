@@ -74,6 +74,7 @@ export function admitQueryProposal(
   if (proposal.evidence_conditions?.some(condition => condition.anchors.some(anchor => !originalQuery.includes(anchor)))) {
     return { kind: "invalid" };
   }
+  if (proposal.evidence_relation !== undefined && proposal.evidence_conditions === undefined) return { kind: "invalid" };
   const producer = registry.lookup(proposal.producer_id, producerVersionOf(proposal));
   const effectiveLimits = effectiveQueryProposalLimits(producer, proposal.input_limits);
   const structure = inspectQueryProposalStructure(proposal, effectiveLimits);

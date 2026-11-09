@@ -221,7 +221,7 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
-  const demands = bindEvidenceDemands(input.evidenceConditions, evidence, queryVector);
+  const demands = bindEvidenceDemands(input.evidenceConditions, evidence, queryVector, input.evidenceRelation);
   const originalBudget = meter.remaining(), original = run(input.query, fields.allowance, "original");
   const hintBudget = meter.remaining(), hintAllowance = {
     max_attempts: fields.allowance.max_attempts - original.result.accounting.attempted,

@@ -124,10 +124,11 @@ export class BoundedIndexPayload {
         continue;
       }
       if (entry.target.kind === "source_evidence") {
-        // Navigation locates a root, not its evidence. Only an explicit proof
-        // support range narrows delivery; ordinary roots start in document order.
+        // Navigation locates a root, not its evidence. Only an explicit proof support range or a
+        // witness variant's host message narrows delivery; ordinary roots start in document order.
         const location = this.input.readers.sourceRootPayloadRange?.(entry.target)
-          ?? entry.navigation?.task_observation?.conditional_binding?.support_span;
+          ?? entry.navigation?.task_observation?.conditional_binding?.support_span
+          ?? entry.navigation?.evidence_variant?.support_span;
         const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining, location);
         remaining = hydrated.remaining;
         if (hydrated.retryable) retryable = true;

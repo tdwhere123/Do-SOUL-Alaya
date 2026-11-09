@@ -22,7 +22,15 @@ export const RecallNavigationWitnessSchema = z.object({
   location: z.object({
     start_byte: z.number().int().nonnegative(),
     end_byte: z.number().int().positive()
-  }).strict().refine(value => value.end_byte > value.start_byte).readonly().optional()
+  }).strict().refine(value => value.end_byte > value.start_byte).readonly().optional(),
+  /** Another instance of a placed condition: delivery reads only this witness message. Locate-only `location` never narrows. */
+  evidence_variant: z.object({
+    condition: z.number().int().nonnegative(),
+    support_span: z.object({
+      start_byte: z.number().int().nonnegative(),
+      end_byte: z.number().int().positive()
+    }).strict().refine(value => value.end_byte > value.start_byte).readonly()
+  }).strict().readonly().optional()
 }).strict().readonly();
 
 export type RecallNavigationWitness = z.infer<typeof RecallNavigationWitnessSchema>;
