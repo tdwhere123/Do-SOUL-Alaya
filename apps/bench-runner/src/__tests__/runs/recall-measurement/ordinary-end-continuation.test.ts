@@ -97,3 +97,27 @@ it("re-reads a continued slot from the last message end at or before its cut", (
   expect(earlier.intervals[2]!.span).toMatchObject({ content_start: 12, content_end: 90 });
   expect(earlier).toMatchObject({ cut: 1, completed: 1, initial_bytes: 60, continuation_bytes: 78 });
 });
+
+it("reads the prefix of a slot that opened mid-root after the rest of that root", () => {
+  const span = (start: number, end: number, complete: boolean) => ({
+    content_start: start, content_end: end, retained_extent: "body" as const, content_complete: complete, original_complete: complete
+  });
+  const at = (root: string, part: ReturnType<typeof span>) => sourceRecallTarget({ workspace_id: "w", root_kind: "source_record",
+    root_id: root, source_version: "v", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null, span: part });
+  const intervals = [
+    { slot_index: 0, target: at("r", span(30, 50, false)), span: span(30, 50, false) },
+    { slot_index: 1, target: at("s", span(10, 20, true)), span: span(10, 20, true) },
+    { slot_index: 2, target: at("t", span(0, 20, true)), span: span(0, 20, true) }
+  ].map(interval => OrdinaryRecallSourceIntervalSchema.parse(interval));
+  const record = OrdinaryEndContinuationSchema.parse({ cut_slots: 2, completed_slots: 2, payload_calls: 3, issues: [], latency_ms: 1,
+    continuations: [
+      { slot_index: 0, target: at("r", span(50, 90, true)), span: span(50, 90, true) },
+      { slot_index: 0, target: at("r", span(0, 30, false)), span: span(0, 30, false), part: "prefix" },
+      { slot_index: 1, target: at("s", span(0, 10, false)), span: span(0, 10, false), part: "prefix" }
+    ] });
+  // Message ends before the opening never pull the forward re-read back into the prefix.
+  const reading = endContinuationReading(intervals, record, root => root === "r" ? [12, 30, 50, 90] : [10, 20]);
+  expect(reading.intervals.slice(3).map(interval => [interval.slot_index, interval.span!.content_start, interval.span!.content_end]))
+    .toEqual([[0, 50, 90], [0, 0, 30], [1, 0, 10]]);
+  expect(reading).toMatchObject({ cut: 1, completed: 1, initial_bytes: 50, continuation_bytes: 80 });
+});

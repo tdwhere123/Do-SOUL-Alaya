@@ -81,7 +81,7 @@ describe("statement key retention and evidence coverage", () => {
     expect(value.coverage[2]).toEqual([null, null]);
     expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 17 - 1 + 1, statements: 2 });
     expect(restrictStatementAssociation(value, root => root !== "b")).toEqual({ roots: ["a", "c"], statements: 2,
-      coverage: [value.coverage[1], value.coverage[2]], decision: value.decision });
+      coverage: [value.coverage[1], value.coverage[2]], openings: [value.openings![1], value.openings![2]], decision: value.decision });
   });
 
   it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {
@@ -180,6 +180,8 @@ describe("statement key retention and evidence coverage", () => {
     // k1 is an assistant message: statement 1 (user) is witnessed only by k0 on root a.
     expect(fill({ ...ready([1, 0], [0, 1]) as Extract<EvidenceDemands, { status: "ready" }>, derived: true }).spans).toEqual([[[0, 10], [0, 10]], [null, null], [null, null]]);
     expect(fill(ready([1, 0], [0, 1]))).not.toHaveProperty("spans");
+    // Every root opens at its best necessary cell's message, with or without a derived relation.
+    expect(fill(ready([1, 0], [0, 1])).openings).toEqual([{ statement: 0, span: [0, 10] }, null, null]);
     expect(bindEvidenceDemands([condition("s")], [{ vector: { status: "available", embedding: Float32Array.of(1),
       profile_id: "p", input_digest: sourceEmbeddingInputDigest("s") } as never }], { status: "available", profile_id: "p" } as never, "derived"))
       .toMatchObject({ status: "ready", derived: true });
@@ -315,6 +317,11 @@ describe("field access with evidence coverage", () => {
       evidence_variants: [{ root: "h", statement: 0, support_span: { start_byte: 7, end_byte: 12 } }] });
     expect(() => orderNativeFieldAccess({ ...input, association: { ...value, decision: { refused: null, applied: false },
       spans: roots.map(() => [[5, 5] as const]) } }, meter())).toThrow(/one byte range or null/u);
+    const opened = { ...coverage(1, { b: [0.9] }), openings: roots.map((root, i) => root === "b" ? { statement: 0, span: [i, i + 4] as const } : null) };
+    expect(orderNativeFieldAccess({ ...input, association: opened }, meter())).toMatchObject({
+      evidence_openings: [{ root: "b", statement: 0, support_span: { start_byte: 1, end_byte: 5 } }] });
+    expect(() => orderNativeFieldAccess({ ...input, association: { ...opened, decision: { refused: null, applied: false },
+      openings: roots.map(() => ({ statement: 3, span: [0, 4] as const })) } }, meter())).toThrow(/witness openings/u);
   });
 
   it("keeps base access and records refusal when the optional ordering is unfunded", () => {

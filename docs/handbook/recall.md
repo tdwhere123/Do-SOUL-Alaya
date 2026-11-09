@@ -464,7 +464,14 @@ rank 2–5 necessary witnesses (score order, ties to the earlier position) on ro
 five, without repeats, directly after the first five. Each such root is delivered once, as a witness
 variant: its navigation witness carries `evidence_variant`, and payload hydration reads exactly that
 host message instead of the root's prefix. Its later bytes remain reachable by payload continuation.
-Nothing in the first five moves; without the relation the order and bytes are unchanged.
+Nothing in the first five moves; without the relation the order is unchanged.
+
+Whenever conditions are admitted, each root also keeps one opening: the host-message span of its
+best-scoring necessary cell. Every delivered root with an opening (and no variant) opens there, so a
+reader meets the witnessing message before the rest of the root. Nothing is dropped: the root's later
+bytes follow by payload continuation, and its prefix is one explicit range away
+(`payload_continuation.start_offset: 0`, `end_offset` = the opening). The bench end-continuation reader
+reads that prefix last, so every slot still ends with its whole body.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

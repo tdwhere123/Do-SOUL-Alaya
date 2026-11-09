@@ -58,7 +58,9 @@ export const OrdinaryEndContinuationSchema = z.object({
   completed_slots: z.number().int().nonnegative(),
   payload_calls: z.number().int().nonnegative(),
   continuations: z.array(z.object({
-    slot_index: z.number().int().nonnegative(), target: RecallTargetRefSchema, span: SourceDeliveredSpanSchema
+    slot_index: z.number().int().nonnegative(), target: RecallTargetRefSchema, span: SourceDeliveredSpanSchema,
+    /** The bytes before a slot that opened mid-root, read after the rest of the root. */
+    part: z.literal("prefix").optional()
   }).strict()),
   issues: z.array(z.string().min(1)),
   latency_ms: z.number().finite().nonnegative()

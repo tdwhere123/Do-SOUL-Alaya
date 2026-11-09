@@ -148,22 +148,33 @@ it("keeps today's order without conditions and injects a late typed witness whil
       evidenceConditions: CONDITIONS }, covered.vector, undefined, "request", covered.evidence))().association).toBeUndefined();
 });
 
-it("delivers another instance of a placed condition as its witness message under a derived relation", async () => {
+it("opens every witnessing root at its witness message and keeps its prefix reachable", async () => {
   const { env, roots, prepare } = await publishedRounds();
   const covered = await prepare(STATEMENTS);
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
-  const plain = sourceDelivery(env, readers, CONDITIONS), derived = sourceDelivery(env, readers, CONDITIONS, false, true);
-  // Condition two's top (round 4) is in the first five; its next witnesses are rounds 0-3, and only round 3 is outside.
-  expect(derived.map(row => row.root)).toEqual(plain.map(row => row.root));
-  expect(derived.filter(row => row.root !== roots[3])).toEqual(plain.filter(row => row.root !== roots[3]));
-  const before = plain.find(row => row.root === roots[3])!.span!, variant = derived.find(row => row.root === roots[3])!.span!;
-  expect(before[0]).toBe(0);
-  // Exactly round 3's user message: the statement key's host span, not the root's prefix.
-  const body = env.database.connection.prepare("select source_body from source_records where record_id=?").get(roots[3]) as { source_body: string };
-  const text = Buffer.from(body.source_body, "utf8").subarray(variant[0], variant[1]).toString("utf8");
-  expect(variant[0]).toBeGreaterThan(0);
-  expect(text).toContain("Round 3: I planted bed 3.");
-  expect(text).not.toContain("Noted.");
+  const bare = sourceDelivery(env, createConditionalFieldObserverReaders(env.database, [], (await prepare()).vector));
+  expect(bare.every(row => row.span?.[0] === 0)).toBe(true);
+  const opened = sourceDelivery(env, readers, CONDITIONS), derived = sourceDelivery(env, readers, CONDITIONS, false, true);
+  const body = (root: string) => Buffer.from((env.database.connection.prepare("select source_body from source_records where record_id=?")
+    .get(root) as { source_body: string }).source_body, "utf8");
+  // Every round's user key witnesses the conditions, so each root opens at exactly its user message.
+  for (const { root, span } of opened) {
+    const text = body(root).subarray(span![0], span![1]).toString("utf8");
+    expect(span![0]).toBeGreaterThan(0);
+    expect(text).toContain(`Round ${roots.indexOf(root)}: I planted bed ${roots.indexOf(root)}.`);
+    expect(text).not.toContain("Noted.");
+  }
+  // The derived relation moves no further root here; its variants open at the same messages.
+  expect(derived).toEqual(opened);
+  // The prefix before an opening is one explicit range away.
+  const initial = request(env, readers, CONDITIONS), first = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(initial))();
+  const target = first.index.entries.find(row => row.target.kind === "source_evidence")!.target;
+  if (target.kind !== "source_evidence") throw new Error("source entry required");
+  const start = target.span!.content_start;
+  const prefix = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt({ ...initial, continuation: first.index.continuation!,
+    payload_continuation: { schema_version: 1, purpose: "payload_expansion", target, start_offset: 0, end_offset: start } }))();
+  const got = prefix.index.entries.find(row => row.target.kind === "source_evidence" && row.target.root_id === target.root_id);
+  expect(got?.target).toMatchObject({ span: { content_start: 0, content_end: start } });
 });
 
 it("never embeds condition statements through a non-local provider and keeps the base order", async () => {

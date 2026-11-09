@@ -60,9 +60,13 @@ export type StatementAssociation = Readonly<{
   possible?: readonly (readonly boolean[])[];
   /** Derived relation only: per cell, the host-message span of the key behind the necessary value. */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
+  /** Per root, its best necessary cell's host-message span: delivery opens there (null: no necessary cell). */
+  openings?: readonly (EvidenceOpening | null)[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
 }>;
+
+export type EvidenceOpening = Readonly<{ statement: number; span: readonly [number, number] }>;
 
 /** Internal diagnostics, never part of the retained association graph or its resource quote. */
 export type StatementAssociationAvailability = Readonly<{
@@ -85,11 +89,11 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
-// A retained span cell is one array node and two integers.
+// A retained span cell is one array node and two integers; each root keeps one opening.
 function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number,
   spans = false): SourceSemanticResourceBudget {
-  return { work_units: keyDimensions * statements + demandDimensions + roots * statements * (spans ? 2 : 1),
-    memory_bytes: demandDimensions * 4 + roots * (64 + statements * (spans ? 72 + 192 : 72) + (spans ? 64 : 0)) };
+  return { work_units: keyDimensions * statements + demandDimensions + roots * (statements * (spans ? 2 : 1) + 1),
+    memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72) + (spans ? 64 : 0)) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
@@ -210,6 +214,7 @@ export class StatementKeyRetention {
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
     const coverage: (number | null)[][] = [], possible: boolean[][] = [], spans: ((readonly [number, number]) | null)[][] = [];
+    const openings: (EvidenceOpening | null)[] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
       const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
@@ -242,11 +247,15 @@ export class StatementKeyRetention {
         return best;
       }));
       possible.push(open); spans.push(cells);
+      const row = coverage.at(-1)!;
+      let top = -1;
+      row.forEach((value, index) => { if (value !== null && cells[index] !== null && (top < 0 || value > row[top]!)) top = index; });
+      openings.push(top < 0 ? null : { statement: top, span: cells[top]! });
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
-      ...(demands.derived === true ? { spans } : {}), decision: { refused: null, applied: false } };
+      ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
   }
 }
 
@@ -258,6 +267,7 @@ export function restrictStatementAssociation(association: StatementAssociation,
     coverage: indices.map(i => association.coverage[i]!),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
     ...(association.spans === undefined ? {} : { spans: indices.map(i => association.spans![i]!) }),
+    ...(association.openings === undefined ? {} : { openings: indices.map(i => association.openings![i]!) }),
     decision: association.decision };
 }
 

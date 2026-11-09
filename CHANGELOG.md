@@ -34,7 +34,9 @@ conditions with any witness there; displaced roots follow the first five in sour
 unknown witness read leaves the order unchanged. The slot-5 two-coordinate swap is retired, and
 statement keys no longer reach field admission. A proposal may add `evidence_relation: "derived"`;
 then each placed condition's rank 2–5 witnesses from outside the first five follow it, each delivered
-as its witness message (navigation witness `evidence_variant`). Without conditions, or with only a query time
+as its witness message (navigation witness `evidence_variant`). With any admitted conditions, every root
+that necessarily witnesses one opens at its best witness message (same field); its prefix stays
+reachable by an explicit payload range. Without conditions, or with only a query time
 window, the order is unchanged. Discard old
 continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
 retain their identities and remain readable. No database migration, provider call or
