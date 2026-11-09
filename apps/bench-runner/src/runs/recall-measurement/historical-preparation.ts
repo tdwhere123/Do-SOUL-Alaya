@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
@@ -36,8 +36,9 @@ function captureFiles(paths: readonly string[]) {
 }
 
 /** Artifact-bound admission, not an assertion that today's preparation implementation is equal.
- * No original SQLite connection is opened. A byte-identical read copy is qualified with the same
- * generation/receipt validators; the ordinary daemon independently migrates its own restored copy. */
+ * No original SQLite connection is opened during recall. A byte-identical read copy is qualified with the
+ * same generation/receipt validators, the ordinary daemon migrates its own restored copy, and `finish`
+ * releases the read copy once the originals are proven unchanged. */
 export function admitHistoricalRecallPreparation(input: {
   version: string; producerRevision: string; configPath: string; root: string;
 }): { config: SemanticChainConfig; identity: string; finish: () => void } {
@@ -84,6 +85,8 @@ export function admitHistoricalRecallPreparation(input: {
   return { config, identity, finish: () => {
     const after = captureFiles(paths);
     if (canonicalJson(before) !== canonicalJson(after)) throw new AlayaError("CONFLICT", "historical preparation originals changed during recall");
-    writeChainArtifact(join(root, "originals-after.json"), { unchanged: true, original_files: after });
+    // Copies outlive no question: a cohort of them is tens of gigabytes.
+    for (const suffix of ["", "-wal", "-shm", "-journal"]) rmSync(`${copy}${suffix}`, { force: true });
+    writeChainArtifact(join(root, "originals-after.json"), { unchanged: true, original_files: after, private_copy_released: true });
   } };
 }

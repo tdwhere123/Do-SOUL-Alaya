@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fixture, publishSource, buildReady, configuration, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { computeExtractionAuthorityWorktreeRevision } from "../../../runs/extraction/authority/inspection.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
-import { SemanticChainConfigSchema, chainIdentity, assertChainSnapshot, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
+import { SemanticChainConfigSchema, chainIdentity, assertChainSnapshot, readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import { inspectSemanticChainSourceIndex, prepareSemanticChainSourceIndex } from "../../../runs/recall-measurement/source-index-binding.js";
 import { admitHistoricalRecallPreparation, assertHistoricalRecallProducer, HISTORICAL_RECALL_PREPARATION } from "../../../runs/recall-measurement/historical-preparation.js";
 
@@ -60,10 +60,23 @@ it("admits an artifact-bound private read copy without opening or changing origi
   await expect(prepareSemanticChainSourceIndex({ ...admitted.config, source_index: undefined, consumer_snapshot_path: undefined },
     f.execution, join(f.root, "forbidden-prepare"))).rejects.toThrow(/recall-only consumer/u);
   expect(existsSync(join(f.root, "forbidden-prepare"))).toBe(false);
+  const copy = admitted.config.consumer_snapshot_path!;
+  writeFileSync(copy, "corrupt private copy");
+  expect(() => assertChainSnapshot(admitted.config)).toThrow(/private snapshot changed/u);
   admitted.finish();
   expect([f.configPath, f.receiptPath, f.snapshot, `${f.snapshot}-wal`, `${f.snapshot}-shm`].map(path => readFileSync(path))).toEqual(before);
-  writeFileSync(admitted.config.consumer_snapshot_path!, "corrupt private copy");
-  expect(() => assertChainSnapshot(admitted.config)).toThrow(/private snapshot changed/u);
+  // The copy does not outlive its question; the originals stay authoritative.
+  expect(existsSync(copy)).toBe(false);
+  expect(readChainArtifact(join(f.input.root, "originals-after.json"))).toMatchObject({ unchanged: true, private_copy_released: true });
+});
+
+it("keeps the private copy when the originals changed during recall", () => {
+  const f = sealed();
+  const admitted = admitHistoricalRecallPreparation(f.input);
+  const copy = admitted.config.consumer_snapshot_path!;
+  writeFileSync(`${f.snapshot}-shm`, "changed during recall");
+  expect(() => admitted.finish()).toThrow(/originals changed/u);
+  expect(existsSync(copy)).toBe(true);
 });
 
 it.each(["missing-config", "missing-receipt", "corrupt-receipt", "corrupt-db", "wal", "wrong-producer"])("refuses %s without preparing or accepting an alternate identity", fault => {

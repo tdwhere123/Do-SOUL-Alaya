@@ -358,7 +358,11 @@ for (const id of ids) {
     } catch (error) {
       Object.assign(row, { status: error instanceof AlayaError && error.code === "UNAVAILABLE" ? "unavailable" : "error",
         error: error instanceof Error ? error.message : String(error) });
-    } finally { preparation?.finish?.(); }
+    } finally {
+      preparation?.finish?.();
+      // The private copy is gone; scoring reads the byte-identical original.
+      if (row.historical_preparation !== undefined && row.snapshot !== undefined) row.snapshot = row.historical_preparation.original_snapshot;
+    }
     row.elapsed_ms = Math.round(performance.now() - started);
     appendFileSync(rowsPath, `${JSON.stringify(row)}\n`);
     process.stdout.write(`${id} ${arm.name} ${row.status} ${row.elapsed_ms}ms${row.error ? ` ${row.error}` : ""}\n`);
