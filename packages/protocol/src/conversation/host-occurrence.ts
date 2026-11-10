@@ -3,6 +3,7 @@ import { AlayaError } from "../shared/alaya-error.js";
 import { BoundedIdSchema, BoundedLabelSchema, IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { FieldContractDigestSchema, formatFieldContractDigest, type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
+import { HostSourceDependenciesSchema } from "./host-source-dependency.js";
 
 export const HOST_OCCURRENCE_CONTRACT = "host-occurrence-v1" as const;
 export const HOST_OCCURRENCE_LIMITS = Object.freeze({ count: 256, inventoryBytes: 65_536, occurrenceBytes: 16_384 });
@@ -26,7 +27,8 @@ export const HostOccurrenceSchema = z.object({
   completeness: z.enum(["complete", "excerpt", "unknown"]),
   fidelity: z.enum(["original_bytes", "normalized", "unknown"]),
   // Host-asserted message time; its authority is the inventory issuer, never Alaya's receipt.
-  host_reported_at: IsoDatetimeStringSchema.optional()
+  host_reported_at: IsoDatetimeStringSchema.optional(),
+  semantic_dependencies: HostSourceDependenciesSchema.optional()
 }).strict().superRefine((value, context) => {
   if (value.utf8_span[1] < value.utf8_span[0]) {
     context.addIssue({ code: "custom", message: "invalid host occurrence extent" });

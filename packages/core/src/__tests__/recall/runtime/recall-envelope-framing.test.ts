@@ -21,6 +21,33 @@ const index: InformationIndex = {
     page_budget: 1, identity_tie_break: "serialization" }
 };
 
+it("preserves an exactly fitting ordinary envelope when prerequisite bytes exceed the actual encoded residual", () => {
+  const source = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "ordinary",
+    source_version: "1", content_digest: `sha256:${"c".repeat(64)}`, evidence_object_id: null,
+    association_milligrades: 500, hypothesis_id: "source", output_binding: "source", program_state: "matched", time_state: "current" });
+  const entry = { ...source, target: { ...source.target, span: { content_start: 0, content_end: 8,
+    retained_extent: "body" as const, content_complete: true, original_complete: true } } };
+  const page = { ...index, entries: [entry], as_of: request.as_of }, key = indexEntryCacheKey(entry);
+  const previews = new Map([[key, "ordinary"]]);
+  const meter = () => new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const ordinary = fitProjectedRecallPage({ index: page, previews, metadata: {}, meter: meter(), request_digest: "fit-dependency",
+    request: { ...request, delivery_budget: { max_total_tokens: 100_000, max_encoded_bytes: 1_000_000 } } });
+  const reference = { source_id: "context", root_id: "context", source_version: "1",
+    content_digest: `sha256:${"d".repeat(64)}`, occurrence_id: "message" };
+  const metadata = { [key]: { semantic_dependencies: { status: "complete" as const,
+    roots: [{ occurrence_id: "source-message", utf8_span: [0, 8] as const, dependencies: [reference] }],
+    prerequisites: [{ reference, status: "delivered" as const, utf8_span: [0, 5000] as const,
+      content_span: [0, 5000] as const, content: "a".repeat(5000), dependencies: [] }] } } };
+  const fitted = fitProjectedRecallPage({ index: page, previews, metadata, meter: meter(), request_digest: "fit-dependency",
+    request: { ...request, delivery_budget: { max_total_tokens: 100_000, max_encoded_bytes: ordinary.bytes } } });
+  expect(fitted.fits).toBe(true);
+  expect(fitted.bytes).toBe(ordinary.bytes);
+  expect(fitted.index).toEqual(ordinary.index);
+  expect([...fitted.previews]).toEqual([...ordinary.previews]);
+  expect(fitted.metadata[key]?.semantic_dependencies).toBeUndefined();
+  expect(encodeIndexResults(fitted.index, fitted.previews, 100_000, fitted.metadata)[0]?.semantic_dependencies).toBeUndefined();
+});
+
 it.each(["[payload omitted]", "[payload omitted] trailing text"])(
   "retains literal omission-marker text through fitting: %s", text => {
     const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "literal",

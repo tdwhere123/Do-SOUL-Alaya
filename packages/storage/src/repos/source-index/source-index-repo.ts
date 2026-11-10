@@ -25,6 +25,7 @@ import { SourceIndexTargetCapture, admitSourceIndexQueryCandidate, readSourceInd
 import { readQuestionTimeDomain } from "./question-time-domain.js";
 import { readStatementWitnesses, readTemplateStatements } from "./template-statements.js";
 import { readTaskObservation } from "./task-observation.js";
+import { readHostDependency } from "./host-dependency.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
@@ -54,6 +55,12 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   public quoteQueryCapacity(workspaceId: string, allowance: SourceIndexNominationAllowance) {
     BoundedIdSchema.parse(workspaceId);
     return this.atomic(() => quoteSourceIndexQueryCapacity(this.database, workspaceId, allowance), "read");
+  }
+
+  public readHostDependency(workspaceId: string, reference: import("@do-soul/alaya-protocol").SourceIndexHostDependencyReference,
+    occurrenceId: string | null, budget: SourceSemanticResourceBudget, admit: import("@do-soul/alaya-protocol").SourceIndexScopeAdmission,
+    window?: Readonly<{ start_offset?: number; byte_limit: number; metadata_only?: boolean }>) {
+    return this.atomic(() => readHostDependency(this.database, this.records, workspaceId, reference, occurrenceId, budget, admit, window), "read");
   }
 
   public readQuestionTimeDomain(workspaceId: string, preference: QuestionTimePreference,

@@ -14,6 +14,7 @@ import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ClaimLifecycleStateSchema } from "../memory/claim-form.js";
 import { SourceDisclosureSchema, sourceDisclosure } from "../recall/source-disclosure.js";
+import { HostDependencyExposureSchema } from "../conversation/host-dependency-exposure.js";
 import { PathGovernanceClassSchema } from "../relations/path-relation.js";
 import {
   RecallBudgetStateSchema,
@@ -64,6 +65,7 @@ export const MemorySearchResultSchema = z
     // Absent on historical results; display text never proves payload availability.
     payload_available: z.boolean().optional(),
     source_disclosure: SourceDisclosureSchema.optional(),
+    semantic_dependencies: HostDependencyExposureSchema.optional(),
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
     hypothesis_id: NonEmptyStringSchema.optional(),
     program_state: NonEmptyStringSchema.optional(),

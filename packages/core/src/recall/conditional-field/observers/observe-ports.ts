@@ -238,6 +238,14 @@ export type ObserverReaders = Readonly<{
     readonly nativeByteLimit?: number;
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
+  readonly sourceDependencies?: (input: Readonly<{
+    target: import("@do-soul/alaya-protocol").SourceEvidenceTarget;
+    span: readonly [number, number]; authorizedScopes: readonly string[] | null;
+    budget: import("@do-soul/alaya-protocol").SourceSemanticResourceBudget;
+    byteLimit?: number;
+    continuation?: Readonly<{ reference: import("@do-soul/alaya-protocol").HostSourceDependency;
+      start_offset: number; source_occurrence_id: string; source_span: readonly [number, number] }>;
+  }>) => import("../../runtime/source-dependency-delivery.js").SourceDependencyDeliveryRead;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;

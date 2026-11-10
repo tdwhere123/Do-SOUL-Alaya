@@ -1,6 +1,6 @@
 import type { SqliteConnection } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { HOST_SESSION_LIMITS } from "@do-soul/alaya-protocol";
+import { HOST_SESSION_LIMITS, HOST_OCCURRENCE_LIMITS } from "@do-soul/alaya-protocol";
 
 /** Message identity survives binding and erasure; bodies exist only while admission is pending. */
 export type HostSessionLedgerMessage = Readonly<{
@@ -9,6 +9,7 @@ export type HostSessionLedgerMessage = Readonly<{
   completeness: "complete" | "excerpt"; fidelity: "original_bytes" | "normalized" | "unknown";
   host_reported_at: string | null; content_digest: string; run_id: string; producer: string; admitted_at: string;
   pending_body: string | null; round_index: number | null; round_root_id: string | null; erased: number;
+  semantic_dependencies_json: string | null; semantic_dependencies_digest: string | null;
 }>;
 export type HostSessionRound = Readonly<{ round_index: number; root_id: string; run_id: string }>;
 type HostSessionCaptureHealth = Readonly<{
@@ -20,7 +21,8 @@ export type HostSessionRoundIntent = Readonly<{ round_index: number; root_id: st
   members: readonly HostSessionLedgerMessage[] }>;
 
 const COLUMNS = `workspace_id, container_key, message_id, position, container_scope, container_id, role, completeness,
-  fidelity, host_reported_at, content_digest, run_id, producer, admitted_at, pending_body, round_index, round_root_id, erased`;
+  fidelity, host_reported_at, content_digest, run_id, producer, admitted_at, pending_body, round_index, round_root_id, erased,
+  semantic_dependencies_json, semantic_dependencies_digest`;
 
 export class HostSessionLedger {
   public constructor(private readonly connection: SqliteConnection) {}
@@ -51,10 +53,14 @@ export class HostSessionLedger {
     return row.position;
   }
 
-  public insert(message: Omit<HostSessionLedgerMessage, "round_index" | "round_root_id" | "erased"> & { pending_body: string }): void {
+  public insert(message: Omit<HostSessionLedgerMessage, "round_index" | "round_root_id" | "erased" | "semantic_dependencies_json" | "semantic_dependencies_digest"> & {
+    pending_body: string; semantic_dependencies_json?: string | null; semantic_dependencies_digest?: string | null
+  }): void {
     this.connection.prepare(`INSERT INTO host_session_messages (${COLUMNS})
       VALUES (@workspace_id, @container_key, @message_id, @position, @container_scope, @container_id, @role, @completeness,
-        @fidelity, @host_reported_at, @content_digest, @run_id, @producer, @admitted_at, @pending_body, NULL, NULL, 0)`).run(message);
+        @fidelity, @host_reported_at, @content_digest, @run_id, @producer, @admitted_at, @pending_body, NULL, NULL, 0,
+        @semantic_dependencies_json, @semantic_dependencies_digest)`).run({ semantic_dependencies_json: null,
+          semantic_dependencies_digest: null, ...message });
   }
 
   /** Only messages not already assigned to an immutable round may be paired. */
@@ -100,11 +106,13 @@ export class HostSessionLedger {
       .all(workspaceId, containerKey, limit) as { round_index: number; root_id: string; state: "pending" | "erased_pending" }[];
     const members = this.connection.prepare(`SELECT ${COLUMNS} FROM host_session_messages
       WHERE workspace_id = ? AND container_key = ? AND round_index = ? ORDER BY position LIMIT 2`);
-    const size = this.connection.prepare(`SELECT COALESCE(length(CAST(pending_body AS BLOB)), 0) AS bytes
+    const size = this.connection.prepare(`SELECT COALESCE(length(CAST(pending_body AS BLOB)), 0) AS bytes,
+      COALESCE(length(CAST(semantic_dependencies_json AS BLOB)), 0) AS dependency_bytes
       FROM host_session_messages WHERE workspace_id = ? AND container_key = ? AND round_index = ? LIMIT 3`);
     return rounds.map(round => {
-      const bound = size.all(workspaceId, containerKey, round.round_index) as { bytes: number }[];
-      if (bound.length < 1 || bound.length > 2 || bound.some(member => member.bytes > HOST_SESSION_LIMITS.contentBytes)) {
+      const bound = size.all(workspaceId, containerKey, round.round_index) as { bytes: number; dependency_bytes: number }[];
+      if (bound.length < 1 || bound.length > 2 || bound.some(member => member.bytes > HOST_SESSION_LIMITS.contentBytes
+        || member.dependency_bytes > HOST_OCCURRENCE_LIMITS.occurrenceBytes)) {
         throw new StorageError("CONFLICT", "host session round exceeds retained membership or body bounds");
       }
       return { ...round, members: members.all(workspaceId, containerKey, round.round_index) as HostSessionLedgerMessage[] };
@@ -125,7 +133,7 @@ export class HostSessionLedger {
         WHERE workspace_id = ? AND container_key = ? AND round_index = ? AND root_id = ?
           AND state IN ('pending', 'erased_pending') RETURNING state`)
         .get(workspaceId, containerKey, index, rootId) as { state: "done" | "erased" } | undefined;
-      if (changed !== undefined) this.connection.prepare(`UPDATE host_session_messages SET pending_body = NULL
+      if (changed !== undefined) this.connection.prepare(`UPDATE host_session_messages SET pending_body = NULL, semantic_dependencies_json = NULL
         WHERE workspace_id = ? AND container_key = ? AND round_index = ? AND round_root_id = ?`)
         .run(workspaceId, containerKey, index, rootId);
       return changed?.state ?? null;

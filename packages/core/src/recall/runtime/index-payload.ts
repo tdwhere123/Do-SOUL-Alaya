@@ -26,7 +26,7 @@ export const MEMORY_PAYLOAD_READ_RESERVE = 2 + SOURCE_IDENTITY_HYDRATE_RESERVE;
 
 export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
-  public readonly sourceMetadata: Record<string, RecallSourceMetadata> = {};
+  public sourceMetadata: Record<string, RecallSourceMetadata> = {};
   public remainingMemoryBytes: number;
   private nativeVisits = 0;
   private nativeRows = 0;
@@ -43,6 +43,7 @@ export class BoundedIndexPayload {
     readonly previewCache?: Readonly<Record<string, string>>;
     readonly readers: ObserverReaders;
     readonly workspaceId: string;
+    readonly authorizedScopes?: readonly string[] | null;
     readonly asOf?: string;
     readonly remainingMemoryBytes: number;
     /** Surface delivery envelope in bytes; hydrated text is a bounded prefix of it. */
@@ -170,7 +171,44 @@ export class BoundedIndexPayload {
       rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
+    remaining = this.prepareDependencies(entries, remaining);
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
+  }
+
+  /** All ordinary source payloads are hydrated before optional contextual prerequisites. */
+  private prepareDependencies(entries: readonly IndexEntry[], remaining: number): number {
+    const reader = this.input.readers.sourceDependencies;
+    if (reader === undefined || this.input.authorizedScopes === undefined) return remaining;
+    // Traversal work is at most two units per JSON byte, plus the codec and row entries.
+    // Protect framing of the announced envelope before offering any optional read work.
+    const framing = 2 * (2 + entries.length + Math.ceil(2 * (this.input.contentByteBudget ?? 0) / 1024));
+    if (remaining <= framing) return remaining;
+    let optionalBytes = Math.max(0, (this.input.contentByteBudget ?? this.remainingMemoryBytes)
+      - entries.reduce((sum, entry) => sum + Buffer.byteLength(this.previews.get(indexEntryCacheKey(entry)) ?? ""), 0));
+    for (const entry of entries) {
+      if (entry.target.kind !== "source_evidence" || entry.target.root_kind !== "source_record") continue;
+      const key = indexEntryCacheKey(entry), span = this.deliveredSpans.get(sourceEvidenceRootKey(entry.target));
+      if (span === undefined || this.sourceMetadata[key]?.semantic_dependencies !== undefined) continue;
+      const dependency = this.input.payloadContinuation?.dependency;
+      const origin = this.input.payloadContinuation?.target;
+      const sourceSpan = origin?.kind === "source_evidence" ? origin.span : undefined;
+      if (dependency !== undefined && sourceSpan === undefined) continue;
+      const read = reader({ target: entry.target, span: [span.content_start, span.content_end],
+        authorizedScopes: this.input.authorizedScopes,
+        byteLimit: Math.min(optionalBytes, dependency === undefined ? optionalBytes : this.input.payloadContinuation?.byte_budget ?? optionalBytes),
+        ...(dependency === undefined || sourceSpan === undefined ? {} : { continuation: { ...dependency,
+          source_span: [sourceSpan.content_start, sourceSpan.content_end] as const } }),
+        budget: { work_units: Math.max(0, remaining - framing), memory_bytes: this.remainingMemoryBytes } });
+      remaining -= read.resources.work;
+      this.nativeVisits += read.resources.work; this.nativeBytes += read.resources.native_bytes;
+      this.consumeSourceMemory(read.resources.memory_bytes, key);
+      const bytes = Buffer.byteLength(JSON.stringify(read.exposure));
+      if (bytes > this.remainingMemoryBytes) continue;
+      this.consumeSourceMemory(bytes, key);
+      this.sourceMetadata[key] = { ...this.sourceMetadata[key], semantic_dependencies: read.exposure };
+      optionalBytes = Math.max(0, optionalBytes - bytes);
+    }
+    return remaining;
   }
 
   public takeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number; readonly native_rows: number;

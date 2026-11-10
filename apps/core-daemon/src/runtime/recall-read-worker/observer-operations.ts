@@ -6,6 +6,7 @@ import {
   restrictStatementAssociation,
   bindEvidenceDemands,
   authorizeSourceIndexScope,
+  readSourceDependencyDelivery,
   assertRecallConsumerCompatibility,
   authorizedScopesFromAdmission,
   captureIndexPreviews,
@@ -366,6 +367,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   );
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
+    sourceDependencies: input => readSourceDependencyDelivery(new SqliteSourceIndexRepository(database, fieldContractSha256), input),
     nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding, evidence),
     lexical: (input) => memory.lexical(
       input.workspaceId,

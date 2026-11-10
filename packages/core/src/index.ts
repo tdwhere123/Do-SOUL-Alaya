@@ -92,6 +92,7 @@ export {
 export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
 export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, authorizeSourceIndexScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
+export { readSourceDependencyDelivery } from "./recall/runtime/source-dependency-delivery.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,

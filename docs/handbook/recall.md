@@ -634,6 +634,28 @@ replayed window admits nothing and a changed body conflicts. A message over the
 contract's 16 KB limit is refused; a producer that holds longer text sends an honest
 `excerpt`.
 
+Host messages may explicitly declare `semantic_dependencies`: contextual prerequisites,
+not factual support or extraction-context invalidation. Each reference binds the same
+workspace's exact source ID, record ID, version, content digest and occurrence ID.
+Capture returns `message_sources` for available closed messages; hosts can reuse these
+references in later captures. Absence means unknown; `[]` records an explicit known-empty
+declaration. Historical captures retain unknown. A trusted host or pinned-dataset issuer
+owns these assertions; reported excerpts cannot assert them. The immutable ledger replay
+digest includes the declaration, and pending dependency JSON is scrubbed with the body.
+
+Delivery reads the source-owned inventory, checks target currentness and erase barriers,
+and uses the ordinary source scope authority before reading prerequisite bytes. Traversal
+is charged, cycle bounded and source bound. Unavailable, denied, unknown and limited
+dependencies leave ordinary authorized source access intact. `semantic_dependencies` in
+the response reports partial exposure whenever full bound prerequisite bytes do not fit;
+prepared bytes alone do not establish complete exposure or semantic sufficiency.
+To continue an omitted or partial prerequisite, retain the ordinary result's continuation
+and target, then send `payload_continuation.dependency` with its `reference`, the original
+`source_occurrence_id` and `start_offset` (`next_offset` from the last exposure, or zero).
+`byte_budget` bounds that read. The server uses the previously delivered source interval,
+not a caller-supplied interval, and rechecks the explicit graph, versions, scope and erasure.
+An unrelated target or an occurrence outside that prior interval cannot authorize bytes.
+
 Exact retention requires the existing source and verified matching inventory;
 a descriptor cannot import provenance into an empty store. Lossless transfer uses
 sealed SQLite copies. Changes require a new source revision and later recorded

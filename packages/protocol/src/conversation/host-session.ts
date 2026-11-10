@@ -4,6 +4,7 @@ import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { renderOfficialApiSourceCorpus } from "../garden/source-corpus.js";
 import { HostIdentifierSchema, HostOccurrenceSchema, HostScopedReferenceSchema, type HostOccurrence, type HostScopedReference } from "./host-occurrence.js";
+import { HostSourceDependenciesSchema, HostSourceDependencySchema } from "./host-source-dependency.js";
 
 /** One host conversation captured message by message; every producer admits through this contract. */
 export const HOST_SESSION_CONTRACT = "host-session-v1" as const;
@@ -20,7 +21,8 @@ export const HostSessionMessageSchema = z.object({
     .refine(value => !/[\uD800-\uDFFF]/u.test(value), "Unicode scalar text required"),
   completeness: z.enum(["complete", "excerpt"]),
   fidelity: z.enum(["original_bytes", "normalized", "unknown"]),
-  host_reported_at: IsoDatetimeStringSchema.optional()
+  host_reported_at: IsoDatetimeStringSchema.optional(),
+  semantic_dependencies: HostSourceDependenciesSchema.optional()
 }).strict().readonly();
 export type HostSessionMessage = z.infer<typeof HostSessionMessageSchema>;
 
@@ -37,6 +39,13 @@ export const HostSessionCaptureRequestSchema = z.object({
       context.addIssue({ code: "custom", message: "host messages must have unique ids and increasing positions" });
     }
     ids.add(message.message_id);
+    // Even a pending message must fit its eventual occurrence before any ledger write.
+    // Two maximum-sized messages plus role separators bound both coordinate widths.
+    const extent = 2 * HOST_SESSION_LIMITS.contentBytes + 64;
+    const represented = HostOccurrenceSchema.safeParse(hostSessionOccurrence(value.container, message,
+      [extent - 1, extent], message.fidelity));
+    if (!represented.success) context.addIssue({ code: "custom", path: ["messages", index],
+      message: "host message metadata cannot fit a retained occurrence" });
   });
 }).readonly();
 export type HostSessionCaptureRequest = z.infer<typeof HostSessionCaptureRequestSchema>;
@@ -48,7 +57,10 @@ export const HostSessionCaptureResponseSchema = z.object({
   pending_message_count: NonNegativeIntSchema,
   admitted_round_count: NonNegativeIntSchema,
   /** Accepted rounds whose source admission or audit is still pending; absent on older servers. */
-  pending_round_count: NonNegativeIntSchema.optional()
+  pending_round_count: NonNegativeIntSchema.optional(),
+  /** Version-bound references for this request's available, closed messages; pending/erased are omitted. */
+  message_sources: z.array(z.object({ message_id: HostIdentifierSchema, source: HostSourceDependencySchema })
+    .strict().readonly()).max(HOST_SESSION_LIMITS.messagesPerRequest).readonly().optional()
 }).strict().readonly();
 export type HostSessionCaptureResponse = z.infer<typeof HostSessionCaptureResponseSchema>;
 
@@ -95,14 +107,19 @@ export function hostSessionRoundSource(container: HostScopedReference, container
   const rendered = renderOfficialApiSourceCorpus("", messages);
   const occurrences = rendered.occurrences.map(row => {
     const message = messages[row.message_index]!;
-    return HostOccurrenceSchema.parse({ occurrence_id: message.message_id, utf8_span: row.utf8_span, role: message.role,
-      channel: null, author_ref: null, container_ref: container, upstream_message_ref: null,
-      upstream_position: message.position, completeness: message.completeness,
-      // Rendering can only lose original bytes; a host-normalized message never regains them.
-      fidelity: message.fidelity === "original_bytes" ? row.fidelity : message.fidelity,
-      ...(message.host_reported_at === undefined ? {} : { host_reported_at: message.host_reported_at }) });
+    return HostOccurrenceSchema.parse(hostSessionOccurrence(container, message, row.utf8_span,
+      message.fidelity === "original_bytes" ? row.fidelity : message.fidelity));
   });
   return Object.freeze({ source_id: hostSessionRoundSourceId(containerKey, roundIndex),
     source_version: HOST_SESSION_CONTRACT, content: rendered.content, occurrences: Object.freeze(occurrences),
     event_time: messages[0]?.host_reported_at ?? null });
+}
+
+function hostSessionOccurrence(container: HostScopedReference, message: HostSessionMessage,
+  span: readonly [number, number], fidelity: HostOccurrence["fidelity"]) {
+  return { occurrence_id: message.message_id, utf8_span: span, role: message.role,
+    channel: null, author_ref: null, container_ref: container, upstream_message_ref: null,
+    upstream_position: message.position, completeness: message.completeness, fidelity,
+    ...(message.host_reported_at === undefined ? {} : { host_reported_at: message.host_reported_at }),
+    ...(message.semantic_dependencies === undefined ? {} : { semantic_dependencies: message.semantic_dependencies }) };
 }

@@ -85,4 +85,24 @@ describe("source structural membership fitting", () => {
     expect(completeSourceDeliveryEnd("猫", [-1, 0, 1, 2, 1.5, NaN, 4])).toBeUndefined();
     expect(completeSourceDeliveryEnd("猫tail", [3, 7])).toBe(7);
   });
+
+  it("fits the complete ordinary page before optional prerequisite metadata or bytes", () => {
+    const { index, previews, metadata } = sourcePage([first, second], false);
+    const ordinary = encodeIndexResults(index, previews, 2000, metadata);
+    expect(ordinary.map(row => row.content_preview)).toEqual([first, second]);
+    const cost = ordinary.reduce((sum, row) => sum + row.budget_state.token_estimate, 0);
+    const reference = { source_id: "context", root_id: "context", source_version: "1",
+      content_digest: `sha256:${"c".repeat(64)}`, occurrence_id: "context-message" };
+    const withDependencies = { ...metadata, [indexEntryCacheKey(index.entries[0]!)]: {
+      ...metadata[indexEntryCacheKey(index.entries[0]!)], semantic_dependencies: { status: "complete" as const,
+        roots: [{ occurrence_id: "source-message", utf8_span: [0, 300] as const, dependencies: [reference] }],
+        prerequisites: [{ reference, status: "delivered" as const, utf8_span: [0, 5000] as const,
+          content_span: [0, 5000] as const, content: "context ".repeat(625), dependencies: [] }] }
+    } };
+    for (const allowance of [cost, cost + 10, cost + 200]) {
+      const fitted = encodeIndexResults(index, previews, allowance, withDependencies);
+      expect(fitted.map(row => [row.content_preview, row.target])).toEqual(ordinary.map(row => [row.content_preview, row.target]));
+      expect(fitted.some(row => row.semantic_dependencies?.status === "complete")).toBe(false);
+    }
+  });
 });

@@ -94,25 +94,31 @@ export function projectFromField(
     }
     if (fitted.interruption !== undefined) throw framingInterruption(fitted.interruption, fitted.observation);
     if (!fitted.fits || stableCanonicalStringify(fitted.index) !== stableCanonicalStringify(replayed)
+      || stableCanonicalStringify(fitted.metadata) !== stableCanonicalStringify(surface?.metadata ?? {})
       || replayed.entries.some(entry => fitted.previews.get(indexEntryCacheKey(entry))
         !== surface?.previews.get(indexEntryCacheKey(entry)))) {
       throw pageResourceRefusal({ message: "Recall replay cannot fit its unchanged public envelope",
         fit: fitted.observation });
     }
-    attachIndexSurfaces(replayed, fitted.previews, surface?.metadata ?? {});
+    attachIndexSurfaces(replayed, fitted.previews, fitted.metadata);
     retain?.({ ...retained, remaining_memory_bytes: meter.bytes, ...remainingWorkFields(retained, meter.work) });
     return replayed;
   }
+  const payloadRequest = input.payload_continuation;
+  const prior = payloadRequest?.dependency === undefined ? undefined : deliveredPayloadEntry(queryKey, payloadRequest.target);
+  const payloadContinuation = prior?.entry.target.kind === "source_evidence" && payloadRequest !== undefined
+    ? { ...payloadRequest, target: prior.entry.target } : payloadRequest;
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
+    authorizedScopes: input.authorized_scopes,
     asOf: interpretation.interpretation_clock,
     contentByteBudget: deliveryBudgetOf(input).max_encoded_bytes,
     ordinaryDeliveryUnit: (sourceDeliveryConditions(interpretation)?.length ?? 0) > 0,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
     onSourceReadFailure: work => cost.add("payload", work),
-    ...(input.payload_continuation === undefined
+    ...(payloadContinuation === undefined
       ? {}
-      : { payloadContinuation: input.payload_continuation }) });
+      : { payloadContinuation }) });
   const context = { state, input, interpretation, snapshot, payload, projectionProgress, queryKey, requestDigest, retain, cost, restored,
     progress_delivery: progressDelivery, preparation_origin: state };
   return input.payload_continuation === undefined ? projectMembershipPage(context) : projectPayloadPage(context);
@@ -220,6 +226,7 @@ function fitPageEnvelope(context: ProjectionContext, assembled: InformationIndex
     cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
   }
   payload.remainingMemoryBytes = meter.bytes;
+  payload.sourceMetadata = { ...fitted.metadata };
   if (fitted.interruption !== undefined) {
     return { index: assembled, previews: payload.previews, interruption: fitted.interruption,
       remaining_work: meter.work, remaining_memory_bytes: meter.bytes };
@@ -283,6 +290,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
       request_digest: context.requestDigest, allowance, fit: fitted })); }
     catch { /* Diagnostic consumers cannot change fitting or issuance. */ }
     candidate.payload.remainingMemoryBytes = meter.bytes + prepared.retention_bytes;
+    candidate.payload.sourceMetadata = { ...fitted.metadata };
     // A refused fit is never a committed delivery, including an empty membership.
     // Resource interruption is separate from a measured oversized envelope.
     if (fitted.interruption !== undefined) {

@@ -2,9 +2,17 @@ import type { SourceSemanticResourceBudget } from "../garden/source-semantic-res
 import type { QuestionTimePreference } from "./conditional-field/question-time.js";
 import type { SourceTemplateProposal } from "./conditional-field/source-template.js";
 import type { BoundSourceStatement } from "../garden/source-statements.js";
-import type { HostOccurrenceInventory } from "../conversation/host-occurrence.js";
 import type { SourceIndexProfile, SourceIndexTarget } from "./source-index.js";
 import { SourceSemanticAcquisitionSchema, type SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
+import type { HostOccurrence, HostOccurrenceInventory } from "../conversation/host-occurrence.js";
+import type { HostSourceDependency } from "../conversation/host-source-dependency.js";
+
+export type SourceIndexHostDependencyReference = Omit<HostSourceDependency, "occurrence_id" | "source_id"> & { source_id?: string };
+export type SourceIndexHostDependencyRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; source: SourceIndexTarget; inventory: HostOccurrenceInventory;
+    occurrence?: HostOccurrence; text?: string; content_span?: readonly [number, number]; content_complete?: boolean }> |
+  Readonly<{ status: "unknown" | "unavailable" | "denied" | "invalid" | "resource_limited"; reason: string }>
+);
 
 /** Private acquisition input, not an MCP vector input or an inference-usage receipt. */
 export type SourceIndexQueryVector = Readonly<{
@@ -112,6 +120,10 @@ type SourceIndexHostInventoryRead = Readonly<
 
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
+  /** Null occurrence reads metadata only. Authorization precedes inventory/payload access. */
+  readHostDependency?(workspaceId: string, reference: SourceIndexHostDependencyReference, occurrenceId: string | null,
+    budget: SourceSemanticResourceBudget, admit: SourceIndexScopeAdmission,
+    window?: Readonly<{ start_offset?: number; byte_limit: number; metadata_only?: boolean }>): SourceIndexHostDependencyRead;
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
     budget: SourceSemanticResourceBudget, questionTime?: QuestionTimePreference): SourceIndexLexicalRead;
   readQuestionTimeDomain?(workspaceId: string, preference: QuestionTimePreference, rootKeys: readonly string[],

@@ -58,9 +58,12 @@ describe("usage feedback and recall capture nothing", () => {
     const harness = await createHandlerHarness();
     const request = { container: ROUTING_CONTAINER, messages: routingTurn() };
 
-    expect(unwrapOk(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,
-      context: defaultContext() }))).toEqual({ container_key: hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256),
+    const captured = unwrapOk(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,
+      context: defaultContext() }));
+    expect(captured).toMatchObject({ container_key: hostSessionContainerKey(ROUTING_CONTAINER, fieldContractSha256),
       admitted_message_count: 2, replayed_message_count: 0, pending_message_count: 0, admitted_round_count: 1, pending_round_count: 0 });
+    expect(captured).toHaveProperty("message_sources", expect.arrayContaining(request.messages.map(message =>
+      expect.objectContaining({ message_id: message.message_id, source: expect.objectContaining({ occurrence_id: message.message_id }) }))));
     expect(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,
       context: noRunContext() })).toMatchObject({ ok: false });
     expect(unwrapOk(await harness.handler.call({ toolName: "soul.capture_host_session", arguments: request,

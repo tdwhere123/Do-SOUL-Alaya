@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  AlayaError, HostSessionCaptureRequestSchema, hostSessionContainerKey, hostSessionRoundSource, pairHostSessionRounds,
+  AlayaError, HostSessionCaptureRequestSchema, HostSourceDependenciesSchema, hostSessionContainerKey, hostSessionRoundSource, pairHostSessionRounds,
   hashContentDigest, hashSourceRecordId, canonicalJson,
   type HostScopedReference, type HostSessionCaptureResponse, type HostSessionMessage, type SourceAdmissionContext,
   type SourceAdmissionPort, type SourceAdmissionRequest, type SourceRecordIdentity
@@ -99,7 +99,15 @@ export function createHostSessionCapture(ports: HostSessionCapturePorts): HostSe
       closeStatementChunks(ports, input.workspaceId, key);
       return { container_key: key, admitted_message_count: counts.admitted, replayed_message_count: counts.replayed,
         pending_message_count: ports.ledger.openTail(input.workspaceId, key).length, admitted_round_count: rounds,
-        pending_round_count: ports.ledger.pendingRoundCount(input.workspaceId, key) };
+        pending_round_count: ports.ledger.pendingRoundCount(input.workspaceId, key),
+        message_sources: request.messages.flatMap(message => {
+          const row = ports.ledger.find(input.workspaceId, key, message.message_id);
+          if (row?.round_root_id == null || row.erased !== 0) return [];
+          const source = ports.admission.findReceipt!(input.workspaceId, row.round_root_id, { workspaceId: input.workspaceId });
+          return source === null ? [] : [{ message_id: message.message_id, source: {
+            source_id: source.source_id, root_id: source.identity, source_version: source.source_version,
+            content_digest: source.content_digest, occurrence_id: message.message_id } }];
+        }) };
     },
     async sweepIdle(issuer) {
       const nowMs = Date.parse(ports.now());
@@ -170,7 +178,9 @@ function admitMessages(ports: HostSessionCapturePorts, input: Readonly<{
         position: message.position, container_scope: input.container.scope, container_id: input.container.id,
         role: message.role, completeness: message.completeness, fidelity: message.fidelity,
         host_reported_at: message.host_reported_at ?? null, content_digest: digest, run_id: input.runId,
-        producer: input.issuer.producer, admitted_at: admittedAt, pending_body: message.content });
+        producer: input.issuer.producer, admitted_at: admittedAt, pending_body: message.content,
+        semantic_dependencies_json: message.semantic_dependencies === undefined ? null : canonicalJson(message.semantic_dependencies),
+        semantic_dependencies_digest: dependenciesDigest(message) });
       highest = message.position;
       admitted += 1;
     }
@@ -254,13 +264,19 @@ function ledgerMessage(row: HostSessionLedgerMessage): HostSessionMessage {
   if (row.pending_body === null) throw new AlayaError("CONFLICT", "host session round member lost its pending body");
   return { message_id: row.message_id, position: row.position, role: row.role, content: row.pending_body,
     completeness: row.completeness, fidelity: row.fidelity,
-    ...(row.host_reported_at === null ? {} : { host_reported_at: row.host_reported_at }) };
+    ...(row.host_reported_at === null ? {} : { host_reported_at: row.host_reported_at }),
+    ...(row.semantic_dependencies_json === null ? {} : {
+      semantic_dependencies: HostSourceDependenciesSchema.parse(JSON.parse(row.semantic_dependencies_json)) }) };
 }
 
 function sameMessage(row: HostSessionLedgerMessage, message: HostSessionMessage, digest: string): boolean {
   return row.position === message.position && row.role === message.role && row.completeness === message.completeness &&
     row.fidelity === message.fidelity && row.host_reported_at === (message.host_reported_at ?? null) &&
-    row.content_digest === digest;
+    row.content_digest === digest && row.semantic_dependencies_digest === dependenciesDigest(message);
+}
+
+function dependenciesDigest(message: HostSessionMessage): string | null {
+  return message.semantic_dependencies === undefined ? null : contentDigest(canonicalJson(message.semantic_dependencies));
 }
 
 function sourceRootId(source: ReturnType<typeof hostSessionRoundSource>): string {

@@ -70,7 +70,8 @@ export interface RecallEvidenceSemanticActivationReceipt {
 export type RecallSourceMetadata = Readonly<
   Partial<Pick<MemoryEntry, "evidence_refs" | "dimension" | "scope_class">>
   & Pick<RecallCandidate, "staged_warnings" | "source_lookup_reasons" | "source_disclosure">
-  & { delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries }
+  & { delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
+    semantic_dependencies?: import("@do-soul/alaya-protocol").HostDependencyExposure }
 >;
 
 export interface RecallResult {

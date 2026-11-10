@@ -206,6 +206,14 @@ function instrumentObserverReaders(
     ...(readers.sourceRoot === undefined ? {} : {
       sourceRoot: (input) => chargeNativePage(counters, readers.sourceRoot!(input))
     }),
+    ...(readers.sourceDependencies === undefined ? {} : {
+      sourceDependencies: input => {
+        const read = readers.sourceDependencies!(input);
+        counters.native_visits = addKnownCounter(counters.native_visits, read.resources.work);
+        counters.bytes_read = addKnownCounter(counters.bytes_read, read.resources.native_bytes);
+        return read;
+      }
+    }),
     ...(readers.relation === undefined ? {} : {
       relation: (input) => chargeNativePage(counters, readers.relation!(input))
     }),
