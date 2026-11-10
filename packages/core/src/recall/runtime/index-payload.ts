@@ -262,12 +262,17 @@ export class BoundedIndexPayload {
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
+    if (ordinaryUnit && page.row.delivery_boundaries?.status === "unavailable"
+      && page.row.delivery_boundaries.reason === "resource_limited") {
+      return { ok: false, remaining: nextRemaining, retryable: true };
+    }
     // Choose the ordinary unit before envelope fitting, independently of semantic key retention.
     // The chosen range survives an envelope clip; it is not the transmitted fragment.
     const boundaries = page.row.delivery_boundaries;
     const end = !ordinaryUnit ? undefined : boundaries?.status === "available"
       ? (sourceDeliveryEnds(boundaries, offset)?.find(value => value > 0)
         ?? boundaries.first_end_offset ?? page.row.delivery_fallback_end) : page.row.delivery_fallback_end;
+    if (ordinaryUnit && end === undefined) return { ok: false, remaining: nextRemaining, retryable: true };
     if (end !== undefined) this.deliveryUnits.set(sourceEvidenceRootKey(target), { start_byte: offset, end_byte: end });
     const content = end === undefined ? page.row.content : Buffer.from(page.row.content).subarray(0, end).toString("utf8");
     const truncated = page.resourceLimited === true || page.row.content_complete === false || content !== page.row.content;

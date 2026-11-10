@@ -484,7 +484,8 @@ prefix last, so every slot still ends with its whole body.
 Within that admitted-condition domain, a root with no retained opening independently opens through its
 first recorded message end, otherwise its first recorded line end. The charged metadata lookup can
 locate that end beyond the hydrated fragment without reading the whole unit. With unavailable or
-empty boundaries, the verified first retained UTF-8 storage chunk is the fallback unit. The chosen
+empty boundaries, the verified first retained UTF-8 storage chunk is the fallback unit. A resource-limited
+lookup defers payload until it can establish the unit, rather than selecting another fallback. The chosen
 range is retained as `evidence_variant.support_span` without `condition`, even when only a fragment
 fits the page; it is independent of page sharing and association preparation/retention. Continuation
 starts at the exposed end, can finish the declared unit, then reach every remaining byte. No-condition

@@ -6,11 +6,12 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => isolation.restore());
-import { SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, SoulInterpretationRequestSchema,
-  type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, SoulInterpretationRequestSchema,
+  indexEntryCacheKey, sourceIndexEntry, type IndexEntry, type InformationIndex, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
+import { BoundedIndexPayload } from "../../../../../../packages/core/src/recall/runtime/index-payload.js";
 import { fieldContractSha256, RecallService, capableRecallConsumerDeclaration,
   runConditionalFieldRecallWithReceipt, captureIndexPreviews, captureIndexSourceMetadata,
-  encodeIndexResults, snapshotIdFromPin, type ConditionalFieldRecallRequest } from "@do-soul/alaya-core";
+  encodeIndexResults, snapshotIdFromPin, type ConditionalFieldRecallRequest, type ObserverReaders } from "@do-soul/alaya-core";
 import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
@@ -333,5 +334,45 @@ it("charges native boundary lookup and distinguishes known absence, unreadable a
     expect(page.nativeWork).toBe(absent.nativeWork);
     expect(page.metadataBytes).toBe(absent.metadataBytes);
     expect(page.row?.delivery_boundaries).toEqual(absent.row?.delivery_boundaries);
+  });
+});
+
+it("defers a unit lookup that loses residual work to a peer and recovers the same unit with fresh funding", async () => {
+  await withIndexedSources(sources, async fixture => {
+    const native = createConditionalFieldObserverReaders(fixture.database);
+    const entries: IndexEntry[] = fixture.targets.map((source, ordinal) => ({
+      ...sourceIndexEntry({ ...source.target, association_milligrades: 500 }),
+      navigation: { contract: "native-query-navigation.v1", query_digest: `sha256:${"a".repeat(64)}`,
+        view: "original", operator: "bound_catalog", ordinal, reference: `fixture:${ordinal}` }
+    }));
+    const index: InformationIndex = { schema_version: 1, query_id: `sha256:${"a".repeat(64)}`,
+      snapshot_id: `sha256:${"b".repeat(64)}`, as_of: CLOCK, result_version: ORDINARY_NATIVE_FIELD_RESULT_VERSION,
+      entries, continuation: null,
+      completeness: { schema_version: 1, logical_index: "open", observed_coverage: "unknown",
+        transport: "complete", payload: "complete", representation: "complete" },
+      representation: { schema_version: 1, policy: "construct_index_then_page_then_payload",
+        page_budget: 2, identity_tie_break: "serialization" } };
+    const observed: ReturnType<NonNullable<ObserverReaders["sourceRoot"]>>[] = [];
+    const make = () => new BoundedIndexPayload({ workspaceId: WS, asOf: CLOCK, ordinaryDeliveryUnit: true,
+      remainingMemoryBytes: 100_000, contentByteBudget: 1500, manifestationFor: () => "excerpt", readers: {
+        ...native, sourceRoot: input => { const page = native.sourceRoot!(input); observed.push(page); return page; }
+      } });
+    const shared = make();
+    // Ten work pays the first root's native read, first end and payload bookkeeping.
+    // The remaining eight can hydrate its peer, but cannot execute that peer's endpoint lookup.
+    expect(shared.finalize(entries, 18)).toMatchObject({ remaining: 1, complete: false, retryable: true });
+    expect(observed[0]!.row?.delivery_boundaries).toEqual({ status: "available", spans: [{ purpose: "line", end_offset: lineEnd }] });
+    expect(observed[1]!.row?.delivery_boundaries).toEqual({ status: "unavailable", reason: "resource_limited" });
+    expect(shared.previews.has(indexEntryCacheKey(entries[0]!))).toBe(true);
+    expect(shared.previews.has(indexEntryCacheKey(entries[1]!))).toBe(false);
+    const sharedIndex = shared.applyDeliveredSpans(index);
+    expect(sharedIndex.entries[0]!.navigation?.evidence_variant?.support_span).toEqual({ start_byte: 0, end_byte: lineEnd });
+    expect(sharedIndex.entries[1]!.navigation?.evidence_variant).toBeUndefined();
+    expect(shared.takeWork()).toMatchObject({ native_visits: 13 });
+    const recovered = make();
+    recovered.finalize([entries[1]!], 10);
+    const alone = recovered.applyDeliveredSpans({ ...index, entries: [entries[1]!] });
+    expect(alone.entries[0]!.navigation?.evidence_variant?.support_span).toEqual({ start_byte: 0, end_byte: lineEnd });
+    expect(recovered.previews.get(indexEntryCacheKey(entries[1]!))).toBe(firstLine);
   });
 });

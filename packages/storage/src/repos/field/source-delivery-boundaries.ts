@@ -68,6 +68,7 @@ export function readSourceDeliveryBoundaries(database: StorageDatabase, sha256: 
       afterEnd = span.end_offset;
       afterRow = nextCursor;
       spans.push({ purpose: AddressableSourceSpanPurposeSchema.parse(span.purpose), end_offset: span.end_offset });
+      if (firstUnit) return { boundaries: { status: "available", spans }, nativeWork, metadataBytes, rowsRead };
     }
     return unavailable("resource_limited");
   } catch {
