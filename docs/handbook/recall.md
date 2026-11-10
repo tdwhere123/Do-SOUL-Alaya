@@ -649,6 +649,8 @@ is charged, cycle bounded and source bound. Unavailable, denied, unknown and lim
 dependencies leave ordinary authorized source access intact. `semantic_dependencies` in
 the response reports partial exposure whenever full bound prerequisite bytes do not fit;
 prepared bytes alone do not establish complete exposure or semantic sufficiency.
+An omitted dependency exposure remains unknown; a non-host source without a captured
+host inventory does not acquire a synthetic empty declaration or exposure.
 To continue an omitted or partial prerequisite, retain the ordinary result's continuation
 and target, then send `payload_continuation.dependency` with its `reference`, the original
 `source_occurrence_id` and `start_offset` (`next_offset` from the last exposure, or zero).

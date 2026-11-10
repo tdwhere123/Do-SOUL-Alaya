@@ -9,7 +9,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { installProviderFreeBoundary } from "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.ts";
 
 // Shared by the test host and its authored IPC child; installed before application imports.
-const boundary = installProviderFreeBoundary();
+const boundary = installProviderFreeBoundary({ descendantPreload: import.meta.url });
 const restores = [];
 const deny = () => { boundary.violations.push("network"); throw new Error("Authored embedding fixture forbids network"); };
 for (const [owner, keys] of [[globalThis, ["fetch"]], [http, ["request", "get"]],
@@ -22,7 +22,7 @@ for (const [owner, keys] of [[globalThis, ["fetch"]], [http, ["request", "get"]]
   }
 }
 syncBuiltinESMExports();
-export const isolation = { violations: boundary.violations, restore() {
+export const isolation = { violations: boundary.violations, evidence: boundary.evidence, assertSafe: boundary.assertSafe, restore() {
   for (const restore of restores.reverse()) restore();
   boundary.restore(); syncBuiltinESMExports();
 } };

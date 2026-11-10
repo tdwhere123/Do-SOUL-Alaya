@@ -203,6 +203,11 @@ export class BoundedIndexPayload {
       remaining -= read.resources.work;
       this.nativeVisits += read.resources.work; this.nativeBytes += read.resources.native_bytes;
       this.consumeSourceMemory(read.resources.memory_bytes, key);
+      // No host inventory means no captured dependency declaration to encode.
+      // Omitted response metadata remains unknown; explicit occurrence-level
+      // unknown, known-empty and partial/failure exposures still cross the boundary.
+      if (read.exposure.status === "unknown" && read.exposure.roots.length === 0
+        && read.exposure.prerequisites.length === 0) continue;
       const bytes = Buffer.byteLength(JSON.stringify(read.exposure));
       if (bytes > this.remainingMemoryBytes - retentionBytes) continue;
       this.consumeSourceMemory(bytes, key);

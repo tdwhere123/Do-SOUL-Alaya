@@ -4,9 +4,12 @@ const guard = await vi.hoisted(async () => {
   const { isolation } = await import(/* @vite-ignore */ url.href);
   return { isolation, preload: url.href };
 });
-afterAll(() => { expect(guard.isolation.violations).toEqual([]); guard.isolation.restore(); });
+afterAll(() => {
+  try { expect(guard.isolation.violations).toEqual([]); guard.isolation.assertSafe(true); }
+  finally { guard.isolation.restore(); }
+});
 import { fork } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -152,5 +155,15 @@ it("prepares admitted message windows through real SQLite and guarded child IPC,
     await client.close(); database.close({ optimize: false }); rmSync(directory, { recursive: true, force: true });
     expect(children).toHaveLength(1);
     expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true);
+    const { root, member: parent } = guard.isolation.evidence;
+    const members = readFileSync(join(root, "members.jsonl"), "utf8").trim().split("\n")
+      .map(line => JSON.parse(line) as { member: string });
+    const registered = members.flatMap(({ member }) => {
+      const entry = JSON.parse(readFileSync(join(root, member, "entry.json"), "utf8"));
+      return entry.parent !== parent ? [] : [{ member, entry,
+        ready: JSON.parse(readFileSync(join(root, member, "ready.json"), "utf8")) }];
+    }).find(actor => actor.ready.pid === children[0]!.pid);
+    expect(registered).toMatchObject({ entry: { kind: "fork", parent }, ready: { pid: children[0]!.pid, thread: 0 } });
+    expect(registered!.member).not.toBe(parent);
   }
 });

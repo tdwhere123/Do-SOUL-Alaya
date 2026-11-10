@@ -25,7 +25,9 @@ async function history(size: number): Promise<Environment> {
   const copyInventory = db.prepare(`INSERT INTO source_host_inventories SELECT workspace_id, ?,
     json_set(canonical_inventory, '$.occurrences[0].occurrence_id', ?, '$.occurrences[0].upstream_position', ?)
     FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?`);
-  const addMessage = db.prepare(`INSERT INTO host_session_messages
+  const addMessage = db.prepare(`INSERT INTO host_session_messages (
+    workspace_id, container_key, message_id, position, container_scope, container_id, role, completeness, fidelity,
+    host_reported_at, content_digest, run_id, producer, admitted_at, pending_body, round_index, round_root_id, erased)
     SELECT workspace_id, container_key, ?, ?, container_scope, container_id, role, completeness, fidelity, host_reported_at,
       content_digest, run_id, producer, admitted_at, NULL, ?, ?, 0 FROM host_session_messages
     WHERE workspace_id = ? AND container_key = ? AND message_id = 'message-0'`);

@@ -206,9 +206,18 @@ it("refits aligned payload after an actual encoded-envelope shrink without losin
       authorized_scopes: ["project"], enumeration_policy: "native_query", result_kind_view: "source_only",
       ...capableRecallConsumerDeclaration(), delivery_budget: { max_total_tokens: 2000, max_encoded_bytes: 100_000 } };
     let wideBytes = 0;
+    const wideAttempts: number[] = [];
     const wide = runConditionalFieldRecallWithReceipt({ ...request, delivery_context: `sha256:${fieldContractSha256("wide")}`,
-      observe_page_fit: fit => { if (fit.index.entries.length === 2 && fit.fits) wideBytes = fit.bytes; } });
+      observe_page_fit: fit => {
+        if (fit.index.entries.length > 0) wideAttempts.push(fit.index.entries.length);
+        if (fit.index.entries.length === 2 && fit.fits) wideBytes = fit.bytes;
+      } });
     expect(wide.index.entries).toHaveLength(2);
+    expect(wideAttempts).toEqual([2]);
+    const wideRows = encodeIndexResults(wide.index, captureIndexPreviews(wide.index, readers, WS),
+      2000, captureIndexSourceMetadata(wide.index));
+    expect(wideRows).toHaveLength(2);
+    expect(wideRows.every(row => row.semantic_dependencies === undefined)).toBe(true);
     expect(wideBytes).toBeGreaterThan(0);
     const attempts: number[] = [];
     const shrunk = runConditionalFieldRecallWithReceipt({ ...request, delivery_context: `sha256:${fieldContractSha256("narrow")}`,
