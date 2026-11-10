@@ -27,7 +27,7 @@ Object.defineProperty(globalThis, installation, { value: instance });
 
 // The shared guard owns credential filtering/file refusal. This stricter local
 // inference fixture also forbids loopback and non-fetch transports.
-const shared = installProviderFreeBoundary();
+const shared = installProviderFreeBoundary({ descendantPreload: import.meta.url });
 const activeReferences = [];
 for (const owner of [fs, fsp]) for (const key of ["readFile", "readFileSync", "open", "openSync", "createReadStream"]) {
   if (typeof owner[key] === "function") activeReferences.push({ owner, key, value: owner[key] });

@@ -13,9 +13,13 @@ import dns from "node:dns";
 // retain normal compiler resolution while require uses Node's source loader.
 const require = createRequire(import.meta.url);
 const { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } = require("./provider-free-isolation.ts") as typeof import("./provider-free-isolation.js");
-const { installProviderFreeDescendants } = require("./provider-free-descendants.ts") as typeof import("./provider-free-descendants.js");
+const { installProviderFreeDescendants, providerFreeDescendantPreload } = require("./provider-free-descendants.ts") as typeof import("./provider-free-descendants.js");
 
 type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
+const installationKey = Symbol.for("alaya.provider-free-boundary-installations");
+const actor = process as typeof process & { [installationKey]?: symbol[] };
+// Native preloads and Vitest share the process hooks even when their module caches differ.
+const installations = actor[installationKey] ??= [];
 
 /** Install before application imports. The portable unit entry may admit files
  * inside fresh directories created by that test process; existing temp paths,
@@ -24,6 +28,8 @@ type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
 export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFixtures?: boolean; descendantPreload?: string }> = {}) {
   const restores: (() => void)[] = [], violations: string[] = [];
   const isolation = new ProviderFreeIsolation();
+  const installation = Symbol("provider-free-boundary");
+  let restored = false;
   const fixtures = new Map<string, FixtureDirectory>();
   const deny = (kind: string): never => {
     violations.push(kind);
@@ -49,11 +55,10 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     .map(key => [key, environment[key]]));
   process.env = isolation.environment(process.env);
   restores.push(() => { process.env = environment; });
-  if (options.descendantPreload !== undefined) {
-    const preload = `--import=${options.descendantPreload}`;
-    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${preload}`.trim();
-    restores.push(installProviderFreeDescendants(isolation, options.descendantPreload));
-  }
+  const descendantPreload = options.descendantPreload ?? providerFreeDescendantPreload;
+  const preload = `--import=${descendantPreload}`;
+  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${preload}`.trim();
+  restores.push(installProviderFreeDescendants(isolation, descendantPreload));
 
   const remember = (value: unknown) => {
     const path = fs.realpathSync(String(value)), stat = fs.lstatSync(path);
@@ -112,8 +117,12 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
   }
   syncBuiltinESMExports();
   isolation.ready();
+  installations.push(installation);
   return { violations, evidence: { ...isolation.binding }, signalFailureExitCode: ISOLATION_SIGNAL_FAILURE_EXIT,
     assertSafe: (requireSettled = false) => isolation.assertSafe(requireSettled), restore: () => {
+    if (restored) return;
+    if (installations.at(-1) !== installation) throw new Error("Provider-free boundaries must restore in reverse installation order");
+    installations.pop(); restored = true;
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };

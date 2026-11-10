@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import workers from "node:worker_threads";
+import net from "node:net";
 import { expect, it } from "vitest";
 import { installProviderFreeBoundary } from "./provider-free-boundary.js";
+const nativeSpawnSync = childProcess.spawnSync.bind(childProcess);
 
 it("keeps a caught parent refusal sticky even if the public violation list is cleared", () => {
   const isolation = installProviderFreeBoundary();
@@ -19,7 +22,7 @@ it("keeps a caught parent refusal sticky even if the public violation list is cl
 
 it.each(["spawn", "spawnSync", "execFile", "execFileSync", "promisifiedExecFile"] as const)(
   "propagates the signal through %s with a replaced environment", async method => {
-    const isolation = installProviderFreeBoundary({ descendantPreload: new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href });
+    const isolation = installProviderFreeBoundary();
     const args = ["-e", "try{require('node:fs').readFileSync('/nonexistent-isolation-fixture/auth.json')}catch{}"];
     try {
       if (method === "spawn") {
@@ -68,12 +71,85 @@ it("registers a CLI eval before application import even when inherited loader op
   } finally { isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true }); }
 });
 
+it.each([
+  ["neutral-first", "plain"], ["neutral-first", "quoted-equals"], ["neutral-first", "quoted-pair"],
+  ["custom-first", "plain"], ["custom-first", "quoted-equals"], ["custom-first", "quoted-pair"]
+])("preserves inherited options with %s installation and %s imports", (order, syntax) => {
+  const original = { environment: process.env, fetch: globalThis.fetch, read: readFileSync,
+    connect: net.Socket.prototype.connect, spawn: childProcess.spawnSync, worker: workers.Worker };
+  const customPreload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const neutralPreload = new URL("./provider-free-descendant-bootstrap.mjs", import.meta.url).href;
+  const customOptions = { descendantPreload: customPreload };
+  const first = installProviderFreeBoundary(order === "neutral-first" ? {} : customOptions);
+  const second = installProviderFreeBoundary(order === "neutral-first" ? customOptions : {});
+  let secondActive = true;
+  const unrelated = `--conditions="retained --import=${neutralPreload}"`;
+  const offeredImport = (value: string) => syntax === "quoted-equals" ? `--import="${value}"`
+    : syntax === "quoted-pair" ? `--import "${value}"` : `--import=${value}`;
+  const capture = () => childProcess.spawnSync(process.execPath,
+    ["-e", "console.log(JSON.stringify({fixture:process.env.E0_TEST_GARDEN_KEY!==undefined,options:process.env.NODE_OPTIONS}))"],
+    { env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} ${offeredImport(neutralPreload)} ${offeredImport(customPreload)} ${unrelated}` },
+      encoding: "utf8", timeout: 15_000 });
+  try {
+    expect(() => first.restore()).toThrow("reverse installation order");
+    const strict = capture();
+    expect(strict.status, strict.stderr).toBe(0);
+    expect(JSON.parse(strict.stdout)).toMatchObject({ fixture: true });
+    expect(JSON.parse(strict.stdout).options).toContain(unrelated);
+    second.restore();
+    secondActive = false;
+    const plain = capture();
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(JSON.parse(plain.stdout)).toMatchObject({ fixture: order === "custom-first" });
+    expect(JSON.parse(plain.stdout).options).toContain(unrelated);
+    expect(() => first.assertSafe(true)).not.toThrow();
+    const inner = installProviderFreeBoundary();
+    try { expect(() => readFileSync("/nonexistent-isolation-fixture/auth.json")).toThrow("credential file"); }
+    finally { inner.restore(); }
+    expect(() => readFileSync("/nonexistent-isolation-fixture/auth.json")).toThrow("credential file");
+  } finally {
+    if (secondActive) second.restore();
+    first.restore();
+    expect(process.env).toBe(original.environment);
+    expect(globalThis.fetch).toBe(original.fetch);
+    expect(readFileSync).toBe(original.read);
+    expect(net.Socket.prototype.connect).toBe(original.connect);
+    expect(childProcess.spawnSync).toBe(original.spawn);
+    expect(workers.Worker).toBe(original.worker);
+    rmSync(first.evidence.root, { recursive: true, force: true });
+  }
+});
+
+it("returns, registers and terminates a real Worker subclass installed after the boundary", async () => {
+  const isolation = installProviderFreeBoundary(), NativeWorker = workers.Worker;
+  class FixtureWorker extends NativeWorker {}
+  workers.Worker = FixtureWorker;
+  let actor: workers.Worker | undefined;
+  try {
+    actor = new workers.Worker(`const {parentPort,threadId}=require('node:worker_threads');
+      parentPort.postMessage({binding:JSON.parse(process.env.ALAYA_PROVIDER_FREE_ISOLATION),thread:threadId});
+      setInterval(()=>{},1000);`, { eval: true, env: {}, execArgv: [] });
+    expect(actor).toBeInstanceOf(FixtureWorker);
+    const observed = await new Promise<{ binding: typeof isolation.evidence; thread: number }>((resolve, reject) => {
+      actor!.once("message", resolve); actor!.once("error", reject);
+    });
+    expect(observed.binding.member).not.toBe(isolation.evidence.member);
+    expect(JSON.parse(readFileSync(join(observed.binding.root, observed.binding.member, "ready.json"), "utf8")))
+      .toEqual({ pid: process.pid, thread: observed.thread });
+    await actor.terminate(); actor = undefined;
+    expect(() => isolation.assertSafe(true)).not.toThrow();
+  } finally {
+    if (actor !== undefined) await actor.terminate();
+    workers.Worker = NativeWorker; isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true });
+  }
+});
+
 it("rejects an inherited parent identity without descendant registration before application entry", () => {
   const isolation = installProviderFreeBoundary();
   try {
     const guard = new URL("./provider-free-boundary.ts", import.meta.url).href;
     const env = { ...process.env }; delete env.NODE_OPTIONS;
-    const result = childProcess.spawnSync(process.execPath, ["--input-type=module", "--eval", `
+    const result = nativeSpawnSync(process.execPath, ["--input-type=module", "--eval", `
       const { installProviderFreeBoundary } = await import(${JSON.stringify(guard)});
       installProviderFreeBoundary();
       console.log("application entered");
