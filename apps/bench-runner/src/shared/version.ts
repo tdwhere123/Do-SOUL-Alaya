@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,7 +72,7 @@ function defaultResolveBenchCommitFromGit(): string {
   // git --short is adaptive (>= 7 chars when a 7-char prefix is ambiguous);
   // slice to the 7-char contract this function name and the env path above
   // both guarantee, so the result is always exactly 7 hex chars.
-  return execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" })
+  return execFileSync("git", ["rev-parse", "--short=7", "HEAD"], { encoding: "utf8" })
     .trim()
     .slice(0, 7);
 }
