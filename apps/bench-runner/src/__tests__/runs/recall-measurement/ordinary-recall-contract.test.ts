@@ -21,12 +21,12 @@ it.each([
   ["29.0.0", "ordinary-native-field.v6"], ["30.0.0", "ordinary-native-field.v7"], ["31.0.0", "ordinary-native-field.v8"],
   ["32.0.0", "ordinary-native-field.v8"], ["33.0.0", "ordinary-native-field.v8"], ["34.0.0", "ordinary-native-field.v9"],
   ["34.1.0", "ordinary-native-field.v9"], ["35.0.0", "ordinary-native-field.v9"], ["36.0.0", "ordinary-native-field.v10"],
-  ["37.0.0", "ordinary-native-field.v11"], ["38.0.0", "ordinary-native-field.v12"], ["39.0.0", "ordinary-native-field.v13"], ["39.1.0", "ordinary-native-field.v13"], ["39.2.0", "ordinary-native-field.v13"], ["40.0.0", "ordinary-native-field.v14"]
+  ["37.0.0", "ordinary-native-field.v11"], ["38.0.0", "ordinary-native-field.v12"], ["39.0.0", "ordinary-native-field.v13"], ["39.1.0", "ordinary-native-field.v13"], ["39.2.0", "ordinary-native-field.v13"], ["40.0.0", "ordinary-native-field.v14"], ["41.0.0", "ordinary-native-field.v15"]
 ])("admits only the reviewed native archive version pair for %s", (version, semantics) => {
   expect(nativeRecallArchiveSemantics(version)).toBe(semantics);
   const config = { ...fixture, protocol_package_version: version, public_semantics: semantics };
   expect(OrdinaryRecallMultiSourceConfigSchema.safeParse(config).success).toBe(true);
-  for (const other of ["ordinary-native-field.v4", "ordinary-native-field.v5", "ordinary-native-field.v6", "ordinary-native-field.v7", "ordinary-native-field.v8", "ordinary-native-field.v9", "ordinary-native-field.v10", "ordinary-native-field.v11", "ordinary-native-field.v12", "ordinary-native-field.v13", "ordinary-native-field.v14"]) {
+  for (const other of ["ordinary-native-field.v4", "ordinary-native-field.v5", "ordinary-native-field.v6", "ordinary-native-field.v7", "ordinary-native-field.v8", "ordinary-native-field.v9", "ordinary-native-field.v10", "ordinary-native-field.v11", "ordinary-native-field.v12", "ordinary-native-field.v13", "ordinary-native-field.v14", "ordinary-native-field.v15"]) {
     if (other !== semantics) expect(OrdinaryRecallMultiSourceConfigSchema.safeParse({ ...config,
       public_semantics: other }).success).toBe(false);
   }
@@ -35,7 +35,7 @@ it.each([
   }).success).toBe(false);
 });
 
-it.each(["26.0.0", "27.1.0", "28.1.0", "29.1.0", "30.1.0", "31.1.0", "33.1.0", "35.1.0", "36.1.0", "37.1.0", "38.1.0", "39.3.0"])("does not infer native archive support for %s", version => {
+it.each(["26.0.0", "27.1.0", "28.1.0", "29.1.0", "30.1.0", "31.1.0", "33.1.0", "35.1.0", "36.1.0", "37.1.0", "38.1.0", "39.3.0", "40.1.0", "41.1.0"])("does not infer native archive support for %s", version => {
   expect(nativeRecallArchiveSemantics(version)).toBeUndefined();
   expect(OrdinaryRecallMultiSourceConfigSchema.safeParse({ ...fixture,
     protocol_package_version: version, public_semantics: "ordinary-native-field.v5"

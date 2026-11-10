@@ -92,7 +92,7 @@ it("delivers a later vector hit from the root start through the built worker and
       return SoulMemorySearchResponseSchema.parse(response.output);
     };
     const first = await call(request);
-    expect(first.index?.result_version).toBe("ordinary-native-field.v14");
+    expect(first.index?.result_version).toBe("ordinary-native-field.v15");
     expect(first.index?.entries[0]?.navigation).toMatchObject({ operator: "source_vector",
       location: { start_byte: 256, end_byte: 384 } });
     expect(first.results[0]?.content_preview).toBe(prefix);
@@ -110,16 +110,18 @@ it("delivers a later vector hit from the root start through the built worker and
     expect(expanded.results[0]?.content_preview).toBe(Buffer.from(body).subarray(256, 320).toString("utf8"));
     expect(expanded.results[0]?.target).toMatchObject({ span: { content_start: 256, content_end: 320, content_complete: false } });
     expect(repeated.results).toEqual(expanded.results);
-    const obsolete = await call({ ...continuation,
-      continuation: { ...first.index!.continuation, result_version: "ordinary-native-field.v3" } });
-    expect(obsolete).toMatchObject({ results: [], index: { continuation: null,
-      completeness: { logical_index: "invalidated" } } });
+    for (const result_version of ["ordinary-native-field.v3", "ordinary-native-field.v14"]) {
+      const obsolete = await call({ ...continuation,
+        continuation: { ...first.index!.continuation, result_version } });
+      expect(obsolete).toMatchObject({ results: [], index: { continuation: null,
+        completeness: { logical_index: "invalidated" } } });
+    }
     // The same native hit in the library uses the new identity; explicit semantic
     // proof ranges are covered separately by the library computation tests.
     const library = await publicMcp(client)({ operation: "recall", accepts_unreviewed_conditional_results: true,
       original_query: "needle", semantic_correspondences: [], authorized_scopes: SCOPES,
       budget: { ...QUERY_BUDGET, page_budget: 1 }, output_byte_limit: 100_000 });
-    expect(library).toMatchObject({ protocol_version: 14, results: [{ content_preview: prefix }] });
+    expect(library).toMatchObject({ protocol_version: 15, results: [{ content_preview: prefix }] });
   }, { ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, window_bytes: 128 } });
 });
 
@@ -133,7 +135,7 @@ it("delivers recorded lines through SQLite, built worker and MCP and replays the
     if (first.operation !== "recall" || first.protocol_version !== SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION) {
       throw new Error("current field delivery required");
     }
-    expect(first.index.result_version).toBe("ordinary-native-field.v14");
+    expect(first.index.result_version).toBe("ordinary-native-field.v15");
     expect(first.results).toHaveLength(1);
     expect(first.results[0]?.content_preview).toBe(firstLine);
     expect(first.results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: lineEnd, content_complete: false } });

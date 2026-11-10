@@ -100,7 +100,7 @@ function sourceDelivery(env: Environment, readers: ObserverReaders, conditions?:
   for (let page = 0; page < 10 && continuation !== null; page++) {
     const result = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(
       { ...initial, ...(continuation === undefined ? {} : { continuation }) }))();
-    expect(result.index.result_version).toBe("ordinary-native-field.v14");
+    expect(result.index.result_version).toBe("ordinary-native-field.v15");
     const delivered = result.index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [{ root: entry.target.root_id,
       span: entry.target.span === undefined ? null : [entry.target.span.content_start, entry.target.span.content_end] as const }] : []);
     ids.push(...delivered); pageSizes.push(delivered.length);
