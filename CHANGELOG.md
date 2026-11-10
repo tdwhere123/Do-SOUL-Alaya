@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 40.0.0, engine gateway 3.0.0
+## Unreleased — protocol 41.0.0, engine gateway 3.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -16,6 +16,26 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+
+Protocol 41.0.0 identifies ordinary results as `ordinary-native-field.v15` (library
+field protocol 15), a delivery semantic **major** under invariant §25. Delivery units
+use the admitted host inventory, including unkeyed messages and keyless roots. Within
+the admitted-condition domain, roots outside the association use a stable recorded
+unit or verified retained-chunk fallback; insufficient metadata budget defers the
+read without choosing a different unit. Declared ranges remain separate from actual
+exposure, and all remaining source bytes stay reachable through continuation.
+
+Trusted host capture may declare source/version/digest-bound `semantic_dependencies`
+and returns `message_sources` for closed messages. Missing declarations remain unknown;
+an explicit empty array is known-empty. Ordinary pages finish before optional dependency
+reads and exposure consume remaining resources. Bounded dependency continuation proves
+reachability from the previously delivered source occurrence and rechecks scope,
+currentness and erasure. These contextual prerequisites are not factual support.
+Migration 045 retains pending dependency metadata and replay digests; erasure scrubs
+the metadata with the message body. Discard old continuations and restart on upgrade
+or rollback. Protocol 40/native v14 captures retain their archive identities. To run
+an older binary after migration, restore a retained pre-migration database; do not
+downgrade the live database. No natural-data acceptance or allocation gain is claimed.
 
 Protocol 40.0.0 adds optional `interpretation_proposal.evidence_conditions` (one to four
 question-formed conditions: a statement of at most 512 characters, the `user`/`assistant`
