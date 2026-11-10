@@ -112,10 +112,12 @@ export type RecallPageAttempt = Readonly<{
 export function fitProjectedRecallPage(input: Readonly<{
   index: InformationIndex; previews: ReadonlyMap<string, string>; metadata: Readonly<Record<string, RecallSourceMetadata>>;
   request: ConditionalFieldRecallRequest; request_digest: string; meter: SourceSemanticResourceLedger;
+  /** A measured ordinary envelope may be reused while adding optional prerequisites. */
+  ordinary_fit?: RecallPageFit;
 }>): RecallPageFit {
   const budget = deliveryBudgetOf(input.request);
   let codecInvocations = 0;
-  let encoding: RecallResultEncodingObservation | null = null;
+  let encoding: RecallResultEncodingObservation | null = input.ordinary_fit?.observation.encoding ?? null;
   const initialWork = input.meter.spentWork, initialBytes = input.meter.spentBytes;
   const finish = (fit: Omit<RecallPageFit, "observation" | "metadata"> & {
     metadata?: Readonly<Record<string, RecallSourceMetadata>>
@@ -136,6 +138,7 @@ export function fitProjectedRecallPage(input: Readonly<{
   // No page is framed for free: below the envelope floor the attempt is refused
   // before the codec runs.
   if (input.meter.work < ENVELOPE_PHASES + input.index.entries.length) {
+    if (input.ordinary_fit !== undefined) return input.ordinary_fit;
     return finish({ index: input.index, previews: new Map(), bytes: 0, result_count: 0, fits: false,
       interruption: "work" });
   }
@@ -153,18 +156,21 @@ export function fitProjectedRecallPage(input: Readonly<{
     }
   });
   try {
-    framing.begin();
-    let results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
-      () => framing.entry(), observation => { encoding = observation; }, { dependency_byte_limit: 0 });
-    const index = frameEncodedIndex(input.index, results);
+    let results: ReturnType<typeof encodeIndexResults> = [];
+    if (input.ordinary_fit === undefined) {
+      framing.begin();
+      results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
+        () => framing.entry(), observation => { encoding = observation; }, { dependency_byte_limit: 0 });
+    }
+    const index = input.ordinary_fit?.index ?? frameEncodedIndex(input.index, results);
     // Availability comes from hydration and fitting, never from source text.
-    const previews = new Map(index.entries.flatMap((entry, offset) => {
+    const previews = input.ordinary_fit?.previews ?? new Map(index.entries.flatMap((entry, offset) => {
       const preview = results[offset]?.content_preview;
       return preview === undefined || results[offset]?.payload_available !== true ? []
         : [[indexEntryCacheKey(entry), input.previews.get(indexEntryCacheKey(entry)) === ""
           && entry.target.kind === "source_evidence" && preview === "[empty source]" ? "" : preview] as const];
     }));
-    let metadata = encodedDependencyMetadata(input.metadata, input.index, results);
+    let metadata = input.ordinary_fit?.metadata ?? encodedDependencyMetadata(input.metadata, input.index, results);
     const encode = (rows: typeof results, sourceMetadata: typeof metadata) => {
       framing.enterCodec(); codecInvocations++;
       return input.request.encode_page === undefined ? encodeRecallPageResponse({
@@ -176,7 +182,8 @@ export function fitProjectedRecallPage(input: Readonly<{
     }) : input.request.encode_page(captureRecallData(index), codecPreviews(previews),
       captureRecallData(sourceMetadata), codecMeter);
     };
-    let bytes = framing.measure(encode(results, metadata));
+    let bytes = input.ordinary_fit?.bytes ?? framing.measure(encode(results, metadata));
+    let resultCount = input.ordinary_fit?.result_count ?? results.length;
     const surplus = Math.max(0, budget.max_encoded_bytes - bytes);
     if (surplus > 0 && Object.values(input.metadata).some(row => row.semantic_dependencies !== undefined)) {
       try {
@@ -189,7 +196,9 @@ export function fitProjectedRecallPage(input: Readonly<{
           const measured = optionalFraming.measure(encode(optional, fittedMetadata));
           // A codec can contribute extra framing. Keep the already fitted ordinary
           // envelope if optional prerequisites exceed its actual residual.
-          if (measured <= budget.max_encoded_bytes) { results = optional; metadata = fittedMetadata; bytes = measured; }
+          if (measured <= budget.max_encoded_bytes) {
+            results = optional; metadata = fittedMetadata; bytes = measured; resultCount = optional.length;
+          }
         }
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -197,8 +206,8 @@ export function fitProjectedRecallPage(input: Readonly<{
         // remains charged even when it cannot finish, and exposes no prepared bytes.
       }
     }
-    const fits = results.length === index.entries.length && bytes <= budget.max_encoded_bytes;
-    return finish({ index, previews, metadata, bytes, result_count: results.length, fits });
+    const fits = resultCount === index.entries.length && bytes <= budget.max_encoded_bytes;
+    return finish({ index, previews, metadata, bytes, result_count: resultCount, fits });
   } catch (error) {
     if (framing.interrupted) {
       return finish({ index: input.index, previews: new Map(), bytes: framing.measuredBytes, result_count: 0, fits: false,

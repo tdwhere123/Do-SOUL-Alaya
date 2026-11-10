@@ -171,12 +171,13 @@ export class BoundedIndexPayload {
       rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
-    remaining = this.prepareDependencies(entries, remaining);
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
   }
 
-  /** All ordinary source payloads are hydrated before optional contextual prerequisites. */
-  private prepareDependencies(entries: readonly IndexEntry[], remaining: number): number {
+  /** Called only after ordinary explanation, commit preparation and envelope fitting.
+   * The caller's exact ordinary retention reservation is unavailable to optional reads.
+   */
+  public prepareDependencies(entries: readonly IndexEntry[], remaining: number, retentionBytes = 0): number {
     const reader = this.input.readers.sourceDependencies;
     if (reader === undefined || this.input.authorizedScopes === undefined) return remaining;
     // Traversal work is at most two units per JSON byte, plus the codec and row entries.
@@ -187,7 +188,7 @@ export class BoundedIndexPayload {
       - entries.reduce((sum, entry) => sum + Buffer.byteLength(this.previews.get(indexEntryCacheKey(entry)) ?? ""), 0));
     for (const entry of entries) {
       if (entry.target.kind !== "source_evidence" || entry.target.root_kind !== "source_record") continue;
-      const key = indexEntryCacheKey(entry), span = this.deliveredSpans.get(sourceEvidenceRootKey(entry.target));
+      const key = indexEntryCacheKey(entry), span = entry.target.span ?? this.deliveredSpans.get(sourceEvidenceRootKey(entry.target));
       if (span === undefined || this.sourceMetadata[key]?.semantic_dependencies !== undefined) continue;
       const dependency = this.input.payloadContinuation?.dependency;
       const origin = this.input.payloadContinuation?.target;
@@ -198,12 +199,12 @@ export class BoundedIndexPayload {
         byteLimit: Math.min(optionalBytes, dependency === undefined ? optionalBytes : this.input.payloadContinuation?.byte_budget ?? optionalBytes),
         ...(dependency === undefined || sourceSpan === undefined ? {} : { continuation: { ...dependency,
           source_span: [sourceSpan.content_start, sourceSpan.content_end] as const } }),
-        budget: { work_units: Math.max(0, remaining - framing), memory_bytes: this.remainingMemoryBytes } });
+        budget: { work_units: Math.max(0, remaining - framing), memory_bytes: Math.max(0, this.remainingMemoryBytes - retentionBytes) } });
       remaining -= read.resources.work;
       this.nativeVisits += read.resources.work; this.nativeBytes += read.resources.native_bytes;
       this.consumeSourceMemory(read.resources.memory_bytes, key);
       const bytes = Buffer.byteLength(JSON.stringify(read.exposure));
-      if (bytes > this.remainingMemoryBytes) continue;
+      if (bytes > this.remainingMemoryBytes - retentionBytes) continue;
       this.consumeSourceMemory(bytes, key);
       this.sourceMetadata[key] = { ...this.sourceMetadata[key], semantic_dependencies: read.exposure };
       optionalBytes = Math.max(0, optionalBytes - bytes);

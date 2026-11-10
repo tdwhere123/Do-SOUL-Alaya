@@ -15,7 +15,7 @@ export type SourceDependencyDeliveryRead = Readonly<{
  * The encoder still owns exposure: fitting may omit prepared prerequisite bytes. Nothing
  * here changes membership or the independent referring source's availability.
  */
-export function readSourceDependencyDelivery(repository: SourceIndexQueryRepository, input: Readonly<{
+export function readSourceDependencyDelivery(repository: Pick<SourceIndexQueryRepository, "readHostDependency">, input: Readonly<{
   target: SourceEvidenceTarget; span: readonly [number, number]; authorizedScopes: readonly string[] | null;
   budget: SourceSemanticResourceBudget;
   byteLimit?: number;
@@ -113,7 +113,10 @@ export function readSourceDependencyDelivery(repository: SourceIndexQueryReposit
     }
     if (roots.length === 0) status = "unknown";
     else if (prerequisites.length === 0 && roots.every(row => row.dependencies === undefined)) status = "unknown";
-    if (!reached) { status = "partial"; prerequisites.push({ status: "invalid" }); }
+    if (!reached) {
+      status = "partial";
+      if (prerequisites.length < HOST_DEPENDENCY_EXPOSURE_LIMIT) prerequisites.push({ status: "invalid" });
+    }
     return result();
   } catch (error) {
     status = "partial";

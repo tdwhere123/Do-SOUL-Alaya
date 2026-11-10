@@ -1,9 +1,9 @@
 import { nativeNavigationProjection, type NativeFieldNavigation } from "./native-navigation-projection.js";
 import { captureRecallPageAttempt, deliveryBudgetOf, fitProjectedRecallPage, framingReserve, framingInterruption, pageResourceRefusal,
-  type RecallPageInterruption, type RecallPageFitObservation } from "./recall-page-fit.js";
+  type RecallPageInterruption, type RecallPageFitObservation, type RecallPageFit } from "./recall-page-fit.js";
 import type { RecallProgressDelivery } from "./recall-progress-delivery.js";
 import { payloadExpansionCompleteness } from "../conditional-field/completeness-report.js";
-import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger,
+import { ORDINARY_NATIVE_FIELD_RESULT_VERSION, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema, sharedProductIdentity, indexEntryCacheKey,
   productStateKeyFromIndexEntry, sourceEvidenceRootTarget, stableCanonicalStringify,
   type FieldSnapshot, type InformationIndex, type QueryInterpretation } from "@do-soul/alaya-protocol";
@@ -235,8 +235,48 @@ function fitPageEnvelope(context: ProjectionContext, assembled: InformationIndex
     throw pageResourceRefusal({ message: "Recall page cannot fit its required public envelope",
       fit: fitted.observation });
   }
-  return { index: fitted.index, previews: fitted.previews,
-    remaining_work: meter.work, remaining_memory_bytes: meter.bytes };
+  const optional = fitOptionalDependencies(context, payload, fitted, meter.work);
+  return { index: optional.fit.index, previews: optional.fit.previews,
+    remaining_work: optional.remaining, remaining_memory_bytes: payload.remainingMemoryBytes };
+}
+
+/** The measured ordinary page is a valid fallback before optional native reads.
+ * Its exact commit reservation remains unavailable to dependency reads and codecs.
+ */
+function fitOptionalDependencies(context: Pick<ProjectionContext, "input" | "requestDigest" | "cost">,
+  payload: BoundedIndexPayload, ordinary: RecallPageFit, allowance: number, retentionBytes = 0) {
+  let remaining = allowance;
+  let failed = false;
+  try { remaining = context.cost.time("payload", () => payload.prepareDependencies(ordinary.index.entries, remaining, retentionBytes)); }
+  catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted) && !(error instanceof CoreError)) throw error;
+    failed = true;
+  } finally {
+    const spent = payload.takeWork();
+    context.cost.add("payload", spent);
+    if (failed) remaining = Math.max(0, allowance - spent.native_visits);
+  }
+  if (failed) { payload.sourceMetadata = { ...ordinary.metadata }; return { fit: ordinary, remaining }; }
+  if (!Object.values(payload.sourceMetadata).some(row => row.semantic_dependencies !== undefined)) {
+    return { fit: ordinary, remaining };
+  }
+  const meter = new SourceSemanticResourceLedger({ work_units: remaining,
+    memory_bytes: Math.max(0, payload.remainingMemoryBytes - retentionBytes) });
+  let optional;
+  try {
+    optional = context.cost.time("index", () => fitProjectedRecallPage({ index: ordinary.index,
+      previews: ordinary.previews, metadata: payload.sourceMetadata, request: context.input,
+      request_digest: context.requestDigest, meter, ordinary_fit: ordinary }));
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted) && !(error instanceof CoreError)) throw error;
+    optional = ordinary;
+  } finally {
+    context.cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
+  }
+  payload.remainingMemoryBytes = meter.bytes + retentionBytes;
+  const fit = optional.fits && optional.interruption === undefined ? optional : ordinary;
+  payload.sourceMetadata = { ...fit.metadata };
+  return { fit, remaining: meter.work };
 }
 
 /** Preserve the resource split while carrying one cumulative remaining allowance. */
@@ -277,7 +317,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     const meter = new SourceSemanticResourceLedger({ work_units: available + candidate.framing,
       memory_bytes: candidate.payload.remainingMemoryBytes - prepared.retention_bytes });
     const allowance = { work_units: meter.work, memory_bytes: meter.bytes };
-    let fitted;
+    let fitted: RecallPageFit;
     try {
       fitted = context.cost.time("index", () => fitProjectedRecallPage({ index: prepared.index,
         previews: candidate.payload.previews, metadata: candidate.payload.sourceMetadata,
@@ -291,16 +331,21 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     catch { /* Diagnostic consumers cannot change fitting or issuance. */ }
     candidate.payload.remainingMemoryBytes = meter.bytes + prepared.retention_bytes;
     candidate.payload.sourceMetadata = { ...fitted.metadata };
+    let remaining = meter.work;
+    if (fitted.fits && fitted.interruption === undefined) {
+      const optional = fitOptionalDependencies(current, candidate.payload, fitted, remaining, prepared.retention_bytes);
+      fitted = optional.fit; remaining = optional.remaining;
+    }
     // A refused fit is never a committed delivery, including an empty membership.
     // Resource interruption is separate from a measured oversized envelope.
     if (fitted.interruption !== undefined) {
-      return commitInterruptedMembership(current, candidate, meter.work, fitted.interruption, fitted.observation);
+      return commitInterruptedMembership(current, candidate, remaining, fitted.interruption, fitted.observation);
     }
     // Dropping every member of a nonempty page is a resource refusal, not a
     // valid-empty delivery: the field still holds undelivered membership.
     if (fitted.fits && !(droppedNonEmpty && prepared.index.entries.length === 0)) {
       const committed = commitPreparedIndex({ prepared: { ...prepared, retained: {
-        ...prepared.retained, ...remainingWorkFields(prepared.retained, meter.work) } },
+        ...prepared.retained, ...remainingWorkFields(prepared.retained, remaining) } },
         index: fitted.index, previews: fitted.previews, payload: candidate.payload, cost: context.cost });
       context.retain?.(committed.retained);
       return committed.index;
@@ -317,7 +362,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     // narrower retry so framing and hydration work is never restored or double-spent.
     width = Math.min(width - 1, fitted.result_count, candidate.index.entries.length - 1);
     current = { ...context, state: {
-      ...candidate.retained, ...remainingWorkFields(candidate.retained, meter.work),
+      ...candidate.retained, ...remainingWorkFields(candidate.retained, remaining),
       remaining_memory_bytes: candidate.payload.remainingMemoryBytes },
       projectionProgress: context.projectionProgress, navigation: candidate.navigation };
   }

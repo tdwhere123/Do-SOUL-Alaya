@@ -8,7 +8,8 @@ import {
   HostSessionMessageSchema, hashLabeledIdentity, hashSourceRecordId, hashContentDigest, hostSessionRoundSource, indexEntryCacheKey, sourceIndexTarget,
   type HostSessionMessage, type HostSourceDependency, type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
-import { encodeIndexResults, fieldContractSha256, snapshotIdFromPin } from "@do-soul/alaya-core";
+import { encodeIndexResults, fieldContractSha256, snapshotIdFromPin, runConditionalFieldRecallWithReceipt,
+  captureIndexPreviews } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, prepareIndexedRecallProjection } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { CONTAINER, CONTAINER_KEY, START, WORKSPACE, createStatementSessionEnvironment, hostMessages } from "../../garden/statement-session-fixture.js";
@@ -176,6 +177,19 @@ it("delivers dependencies through the built worker and limits encoded exposure w
       enumeration_policy: "native_query" as const, result_kind_view: "source_only" as const, protocol_version: 1 as const,
       supported_result_kinds: ["memory_entry", "source_evidence"] as const, supports_source_evidence: true, supports_product_updates: true,
       delivery_budget: { max_total_tokens: 1000, max_encoded_bytes: 1_000_000 } };
+    const ordinary = runConditionalFieldRecallWithReceipt({ ...request,
+      delivery_context: `sha256:${fieldContractSha256("ordinary-memory")}`, readers: { ...readers, sourceDependencies: undefined } });
+    let optionalReads = 0;
+    const pressured = runConditionalFieldRecallWithReceipt({ ...request,
+      delivery_context: `sha256:${fieldContractSha256("dependency-memory")}`, readers: { ...readers, sourceDependencies: input => {
+        optionalReads++;
+        // A bounded reader may legitimately consume its entire offered logical allocation.
+        return { exposure: { status: "partial", roots: [], prerequisites: [] }, resources: {
+          work: 1, native_bytes: 0, memory_bytes: input.budget.memory_bytes, sql_internal_work: "unknown" } };
+      } } });
+    expect(optionalReads).toBeGreaterThan(0);
+    expect(pressured.index.entries).toEqual(ordinary.index.entries);
+    expect([...captureIndexPreviews(pressured.index, {}, WORKSPACE)]).toEqual([...captureIndexPreviews(ordinary.index, {}, WORKSPACE)]);
     const page = await client.conditionalFieldPort.recall(request);
     expect(page.index.entries).toHaveLength(1);
     const previews = new Map(Object.entries(page.previews)), metadata = page.source_metadata ?? {};
