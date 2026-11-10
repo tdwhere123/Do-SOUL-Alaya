@@ -42,7 +42,7 @@ type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRou
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
-  acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionQueryVectorCaptureCost } from "./acquisition-prices.js";
+  acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionEnvelopeAndInputCaptureCost } from "./acquisition-prices.js";
 
 import { observeLexicalCandidates, sourceTaskInventory, type NativeAdmissionFact,
   type SourceIndexAcquisitionFact, type SourceIndexAcquisitionObserver } from "./acquisition-observation.js";
@@ -57,28 +57,7 @@ export class SourceIndexAcquisition {
   public static readonly channelNotRequested = "acquisition_channel_not_requested";
 
   /** Planning quotation of envelope and input capture. Not a debit. Named consumer: acquireRoute. */
-  public static quoteEnvelopeAndInputCapture(
-    route: Readonly<{ navigation: string; vector: SourceIndexQueryVector; max_roots: number }>,
-    allowance: SourceSemanticResourceBudget, planner?: SourceSemanticResourceLedger
-  ): SourceSemanticResourceBudget {
-    const navigation = SourceSemanticResourceLedger.measureRetain(
-      route.navigation, planner?.remaining() ?? allowance, planner);
-    const vectorInput = SourceSemanticResourceLedger.measureRetain(
-      route.vector.status === "available" ? route.vector.profile : route.vector.reason,
-      planner?.remaining() ?? {
-        work_units: allowance.work_units - navigation.work_units,
-        memory_bytes: allowance.memory_bytes - navigation.memory_bytes
-      }, planner);
-    const envelope = acquisitionResultEnvelopeCost(route.max_roots);
-    const digest = acquisitionNavigationDigestCost(route.navigation);
-    const capture = acquisitionQueryVectorCaptureCost(route.vector);
-    return {
-      work_units: envelope.work_units + navigation.work_units + digest.work_units +
-        vectorInput.work_units + capture.work_units,
-      memory_bytes: envelope.memory_bytes + navigation.memory_bytes + digest.memory_bytes +
-        vectorInput.memory_bytes + capture.memory_bytes
-    };
-  }
+  public static quoteEnvelopeAndInputCapture = acquisitionEnvelopeAndInputCaptureCost;
 
   /** Fail closed before bind or SQL. Omitted control is production both-channels. */
   public static assertControl(input: Readonly<{
