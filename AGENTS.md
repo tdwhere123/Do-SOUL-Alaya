@@ -1,11 +1,10 @@
 # AGENTS.md
 
-Canonical agent instructions for this repository. `CLAUDE.md` adds Plan Mode
-only.
+Canonical repository instructions. `CLAUDE.md` adds Claude-specific Plan Mode rules.
 
 ## File rules
 
-- Repository markdown in this file is English-only.
+- This file is English-only.
 - Read and write source as UTF-8 without BOM.
 - Do not read files larger than 30 KB in full; use targeted reads or `rg`.
 
@@ -39,7 +38,7 @@ architecture authority.
   where possible; ask when an unresolved choice changes the intended behavior
   or authorization. Continue work already authorized without repeated approval.
 
-## Research and delegation
+## Research
 
 - For uncertain algorithm directions, prefer cheap offline counterfactuals on
   existing frozen evidence before production changes or paid generation. Ask
@@ -55,32 +54,13 @@ architecture authority.
   runtime boundary. Do not keep adding ranking rules or protection conditions
   after failed substitutions. This is a research preference, not an extra gate
   for ordinary small fixes.
-- The lead owns the main line: diagnosis, design, implementation and integration.
-  Delegate only necessary, independently deliverable outcomes that leave useful
-  non-overlapping work for the lead. Do not create a research/design/review relay
-  or delegate merely to increase concurrency.
-- Use explicit `xai/grok-4.6` with `thinking=xhigh` for frozen benchmark,
-  profiling and result/accounting execution. Use
-  `openai-codex/gpt-6-astra` with `thinking=medium` only when a bounded
-  auxiliary outcome genuinely needs it; otherwise work directly. These routes
-  concern coding-agent assistance, not paid experimental model allocations.
-- Give an executor the verified revision, immutable inputs, commands, expected
-  per-item outcomes, stop conditions and required artifacts. It must not redesign
-  the experiment, change budgets or retry outside that contract. Keep heavy runs
-  serialized and their runtime/input trees untouched; the lead verifies results.
-  Report decisions, results and material blockers rather than dispatch chatter.
-  Never pass a subagent turn limit.
 
 ## Code quality
 
-- **One semantic authority:** each policy, schema, identity, canonicalization,
-  digest material, state-transition rule, and side-effect contract must have one
-  authoritative definition and a clear owner. Locate that owner before adding
-  or changing a rule; trace the actual entry, producers, and affected consumers.
-- **Reuse semantics:** consumers must call, derive from, or adapt the authority
-  without redefining its rules. Different-looking code can duplicate a rule;
-  similar-looking code can serve different contracts. Sharing a hash function
-  does not unify independently defined digest inputs or canonicalization.
+- **One semantic authority:** locate the owner of each policy, schema, identity,
+  canonicalization, digest input, transition and side-effect contract. Trace its
+  entry, producers and consumers; consumers reuse or adapt that authority, not
+  redefine its rules. Sharing a hash function alone does not unify digest inputs.
 - **No bypasses:** callers must use the entry that owns the applicable
   authorization, validation, containment, transition, transaction, or audit.
   Lower-level primitives belong behind that owner. Fix shared defects there
@@ -103,19 +83,12 @@ architecture authority.
 
 ## Naming and comments
 
-- Name production and test files, directories, symbols, fixtures, and test
-  suites/cases for their domain responsibility, behavior, or failure condition.
-  A name must be understandable without reading the plan that created it.
-- Do not introduce plan titles, task/card/checkpoint IDs, wave labels,
-  experiment IDs, ticket IDs, or review-finding numbers into names or comments.
-  Keep task provenance in plans, worklogs, PR descriptions, or commit messages.
-  For example, use `worker-close-reopen.test.ts` instead of
-  `review-r3-fix-27.test.ts`. Actual protocol versions and externally required
-  identifiers remain part of their contracts; renaming them requires the
-  corresponding compatibility or migration work.
-- Comments explain non-obvious reasons, invariants, ordering, or constraints.
-  Regression test names describe the triggering condition and expected behavior.
-  Apply naming fixes within the task's scope; avoid unrelated rename campaigns.
+- Name files, symbols, fixtures and tests for domain responsibility or behavior,
+  not plan/card/wave/ticket IDs. Keep task provenance in plans, worklogs or commit
+  messages. Protocol versions and externally required identifiers retain their
+  compatibility obligations.
+- Comments explain non-obvious reasons, invariants and ordering. Regression test
+  names describe the trigger and expected behavior. Avoid unrelated renaming.
 
 ## Structure and size budgets
 
@@ -123,16 +96,12 @@ architecture authority.
 - **Deep modules, not micro-files:** split only at a domain, phase, side-effect,
   or reuse boundary. Do not create one-use pass-through wrappers, single-call
   helpers, or tiny barrels merely to satisfy a line count.
-- **Size budgets:**
-  - Source files: target **under 500** lines. At **500+**, review cohesion and
-    name the reason to keep or split it. At **800+**, split before adding behavior.
-  - Functions: target **under 50** lines. At **80+**, review phase and branch
-    cohesion. At **120+**, split before extending code that mixes decisions or
-    effects. A cohesive declarative table or schema is not improved by arbitrary
-    extraction.
-  - The live `ci:repository-structure` check is authoritative: 500–799 lines
-    require review, while handwritten source at 800+ lines fails. Generated,
-    declarative, and test-support exceptions must remain explicitly classified.
+- **Size budgets:** source files target <500 lines; at 500+ explain cohesion, and
+  at 800+ split before adding behavior. Functions target <50 lines; review at 80+,
+  and split mixed decisions/effects before extending at 120+. Do not split
+  cohesive declarative tables merely for size. `pnpm ci:repository-structure`
+  and its [policy](scripts/ci/repository-structure-policy.json) own enforcement
+  and explicitly classified exceptions.
 - **Layout:** flat is fine when names and ownership remain predictable. At
   roughly **10–12** sibling modules, review the directory; create a subfolder
   only for a real domain or phase boundary, not to reduce a file count. Do not
@@ -164,48 +133,21 @@ architecture authority.
 
 ## Architecture
 
-`@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-cjk-segmentation` →
-Node CJK; `@do-soul/alaya-core` → truth
-boundary; `apps/core-daemon` wires; Garden is fire-and-forget.
-EventPublisher-owned transitions are EventLog-first; receipt-first audit paths
-follow their own contract. Audit precedes notification. Detail:
-[`docs/handbook/architecture.md`](docs/handbook/architecture.md).
+Package boundaries, Garden lifecycle and write ordering belong to the
+[architecture handbook](docs/handbook/architecture.md). EventPublisher transitions
+are EventLog-first; receipt-first paths have a different owner. Audit precedes
+notification.
 
-Recall live runtime is the conditional-field route. Do not implement from
-flood / SliceKey / four-strategies prose. Owner: `docs/handbook/recall.md`.
+The live [recall contract](docs/handbook/recall.md) is the conditional-field route,
+not historical flood, SliceKey or four-strategies prose.
 
-## Commands
+## Commands and environment
 
-CLI quickstart: `README.md`.
-
-```bash
-pnpm install
-pnpm build
-pnpm test
-pnpm exec vitest run --project @do-soul/alaya-<package>
-
-pnpm --dir apps/core-daemon dev
-pnpm exec alaya doctor
-pnpm exec alaya install
-pnpm exec alaya attach codex
-pnpm exec alaya status
-pnpm exec alaya tools list
-pnpm exec alaya tools call soul.recall '{"query":"project decisions"}' --json
-```
-
-`pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
-outside the monorepo.
-
-## Cursor Cloud
-
-Cloud agents do code review and landing only; benchmark runs stay on local
-hosts (see `docs/bench-history/README.md`).
-
-- **Node 24:** `.cursor/environment.json` installs Node 24 via nvm before
-  `pnpm install` and `pnpm build`. Do not lower repo `engines` to match a
-  stale pod.
-- **CodeGraph:** if `.codegraph/` is missing, skip CodeGraph and use normal
-  search/read.
+Use [README.md](README.md#quickstart) for installation/CLI commands and
+[package.json](package.json) for scripts, engines and package-manager versions;
+do not lower engine requirements to fit a stale environment.
+Targeted tests: `pnpm exec vitest run --project @do-soul/alaya-<package>`.
+Benchmark runs stay on local hosts; cloud agents are for review and landing.
 
 ## Generated paths
 
@@ -213,26 +155,19 @@ Do not treat as source truth: `dist/`, `var/`, `data/`, `node_modules/`.
 
 ## Benchmark artifacts
 
-Policy: `docs/bench-history/README.md`.
+Follow the [storage policy](docs/bench-history/README.md). Never commit generated
+results or model caches; preserve complete archives, findings and latest pointers.
 
-- Experiments → gitignored `.do-it/bench-runs/`; never commit. Put new
-  evidence in an existing collection (`source-access`, `source-delivery`,
-  `semantic-production`, `native-chain`, `finite-evaluation`, or `archive`).
-  Do not add a top-level directory. Maintenance rules are in
-  `.do-it/bench-runs/README.md`.
-- Generated history and baselines → gitignored `.bench-artifacts/history/`.
-- Generated extraction caches → gitignored `.bench-artifacts/cache/`.
-- `docs/bench-history/` retains maintained reproduction docs, dataset pins, and
-  sampling manifests only. Preserve complete local archives, including findings
-  and latest pointers; do not commit generated results or model caches.
+- Experiments: `.do-it/bench-runs/`, in existing collections only; follow its
+  local `README.md` for retention and protected inputs.
+- Generated history/baselines: `.bench-artifacts/history/`; extraction caches:
+  `.bench-artifacts/cache/`.
+- `docs/bench-history/`: maintained reproduction docs, dataset pins and sampling
+  manifests only.
 
 ## CodeGraph
 
-Local code-intelligence graph (MCP + CLI). Each **git worktree needs its own
-index** — do not borrow the main checkout's `.codegraph/`.
-
-- **On every new worktree:** from that worktree root run `codegraph init -i`
-  before relying on `codegraph_explore` / `codegraph explore`.
-- After init, the MCP server auto-syncs edits in that tree; if a response
-  flags pending sync, `Read` the named files directly.
-- If `.codegraph/` is missing, skip CodeGraph and use normal search/read.
+Each worktree needs its own index: run `codegraph init -i` there before relying
+on CodeGraph; never borrow another tree's `.codegraph/`. If no index exists, use
+normal search/read. If a response flags stale or pending sync, read the files
+directly.
