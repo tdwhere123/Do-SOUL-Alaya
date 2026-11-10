@@ -25,6 +25,7 @@ import { rolesFrom } from "./semantic-attribution.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 import { continuationConsumerIdentity } from "./recall-consumer-compatibility.js";
 import { CoreError } from "../../shared/errors.js";
+import { sourceDeliveryConditions } from "./source-delivery-prefix.js";
 
 const RESULT_VERSION = ORDINARY_NATIVE_FIELD_RESULT_VERSION;
 type ProjectionContext = Readonly<{
@@ -106,6 +107,7 @@ export function projectFromField(
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
     asOf: interpretation.interpretation_clock,
     contentByteBudget: deliveryBudgetOf(input).max_encoded_bytes,
+    ordinaryDeliveryUnit: (sourceDeliveryConditions(interpretation)?.length ?? 0) > 0,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
     onSourceReadFailure: work => cost.add("payload", work),
     ...(input.payload_continuation === undefined

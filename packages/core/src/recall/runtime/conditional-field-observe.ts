@@ -2,6 +2,7 @@ import { meterReaders } from "./observer-reader-budget.js";
 import { nativeSourceReaders } from "./native-source-observer.js";
 import { nominationScopes } from "./captured-recall-request.js";
 import { observationSettled } from "./index-continuation.js";
+import { sourceDeliveryConditions } from "./source-delivery-prefix.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   SNAPSHOT_PIN_NATIVE_WORK,
@@ -164,10 +165,9 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
     ...(interpretation.interpretation_proposal?.question_time === undefined ? {}
       : { questionTime: interpretation.interpretation_proposal.question_time }),
     // A question window becomes the conditions' time dimension; a query window alone has no witness rule.
-    ...(interpretation.interpretation_proposal?.evidence_conditions === undefined
-      || interpretation.interpretation_proposal.question_time === undefined && interpretation.time_window !== undefined ? {}
-      : { evidenceConditions: interpretation.interpretation_proposal.evidence_conditions,
-        ...(interpretation.interpretation_proposal.evidence_relation === undefined ? {}
+    ...(sourceDeliveryConditions(interpretation) === undefined ? {}
+      : { evidenceConditions: sourceDeliveryConditions(interpretation),
+        ...(interpretation.interpretation_proposal?.evidence_relation === undefined ? {}
           : { evidenceRelation: interpretation.interpretation_proposal.evidence_relation }) }),
     // Hard source guards require Field-owned facts unavailable at the acquisition seam.
     // Abstain instead of allowing a later-ineligible restoration to evict an incumbent.

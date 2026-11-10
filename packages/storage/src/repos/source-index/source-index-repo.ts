@@ -66,8 +66,8 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     return this.atomic(() => readTemplateStatements(this.database, this.records, source, budget, this.sha256), "read");
   }
 
-  public readStatementWitnesses(keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget) {
-    return this.atomic(() => readStatementWitnesses(this.database, this.records, keys, anchors, budget, this.sha256), "read");
+  public readStatementWitnesses(source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget) {
+    return this.atomic(() => readStatementWitnesses(this.database, this.records, source, keys, anchors, budget, this.sha256), "read");
   }
 
 

@@ -2,6 +2,7 @@ import type { SourceSemanticResourceBudget } from "../garden/source-semantic-res
 import type { QuestionTimePreference } from "./conditional-field/question-time.js";
 import type { SourceTemplateProposal } from "./conditional-field/source-template.js";
 import type { BoundSourceStatement } from "../garden/source-statements.js";
+import type { HostOccurrenceInventory } from "../conversation/host-occurrence.js";
 import type { SourceIndexProfile, SourceIndexTarget } from "./source-index.js";
 import { SourceSemanticAcquisitionSchema, type SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
 
@@ -94,12 +95,20 @@ export type SourceIndexTaskObservationRead = Readonly<{ resources: SourceIndexQu
 
 /** Statement keys of one root, aligned with the request: the host role of each key's message, per anchor
  * whether every anchor token occurs in the key text or that message, and the key text; `session_time` is
- * the root's recorded event time. Incomplete is unknown. */
+ * the root's recorded event time. The physical inventory includes unkeyed occurrences and is read even
+ * for zero keys. Incomplete witness reading is unknown, never a successful empty witness set. */
 export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQueryResources }> & (
   Readonly<{ status: "ready"; session_time: string | null;
+    inventory: SourceIndexHostInventoryRead;
     witnesses: readonly Readonly<{ role: string | null; anchors: readonly boolean[]; statement: string }>[] }> |
   Readonly<{ status: "unknown"; reason: string }>
 );
+
+/** Complete source-owned physical inventory. Captured-empty is authoritative; other states are not absence. */
+type SourceIndexHostInventoryRead = Readonly<
+  | { status: "captured"; inventory: HostOccurrenceInventory }
+  | { status: "unknown" | "unavailable" | "invalid" | "resource_limited" }
+>;
 
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
@@ -110,7 +119,7 @@ export interface SourceIndexQueryRepository {
   readTemplateStatements?(source: SourceIndexTarget, budget: SourceSemanticResourceBudget): SourceIndexTemplateRead;
   readTaskObservation?(source: SourceIndexTarget, span: Readonly<{ start_byte: number; end_byte: number }>,
     budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
-  readStatementWitnesses?(keys: readonly SourceIndexTarget[], anchors: readonly string[],
+  readStatementWitnesses?(source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;

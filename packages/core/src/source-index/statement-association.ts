@@ -1,5 +1,5 @@
 import { statementEventIntervals } from "@do-soul/alaya-graph-algorithms";
-import { sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
+import { HOST_OCCURRENCE_LIMITS, hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
   type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget,
   type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
@@ -24,7 +24,7 @@ export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Floa
   | Readonly<{ status: "not_supplied" | "unavailable"; reason: string }>;
 
 /** Reads the host role and anchor tokens of one root's retained keys, charging the acquisition ledger. */
-export type StatementWitnessReader = (keys: readonly SourceIndexTarget[], anchors: readonly string[]) => SourceIndexStatementWitnessRead | undefined;
+export type StatementWitnessReader = (root: string, keys: readonly SourceIndexTarget[], anchors: readonly string[]) => SourceIndexStatementWitnessRead | undefined;
 
 /** Question window as UTC civil-day bounds: alternatives starting on or before the question clock. */
 export type EvidenceWindow = Readonly<{ intervals: readonly (readonly [number, number])[]; earliest: number }>;
@@ -62,7 +62,7 @@ export type StatementAssociation = Readonly<{
    * (with the prompt an assistant witness answers). */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
   /** Per root, its delivery unit: the byte range of its necessary witness messages (with the prompt an
-   * assistant witness answers) and its best condition, or its first keyed message (null: no keys). */
+   * assistant witness answers) and its best condition, or its first admitted message (null: unavailable). */
   openings?: readonly (EvidenceOpening | null)[];
   /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
   decision: { refused: string | null; applied: boolean };
@@ -173,7 +173,9 @@ export class StatementKeyRetention {
     const vectors = this.demands.status === "ready" ? this.demands.vectors : [];
     const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length,
       this.demands.status === "ready" && this.demands.derived === true);
-    return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
+    const occurrences = vectors.length === 0 ? 0 : roots * HOST_OCCURRENCE_LIMITS.count;
+    return { work_units: cost.work_units + scoring.work_units + occurrences * (vectors.length + 1),
+      memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 + occurrences * 8 };
   }
 
   private abandon(phase: string, refusal = true): void {
@@ -220,12 +222,16 @@ export class StatementKeyRetention {
     const openings: (EvidenceOpening | null)[] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
-      const read = kept.length === 0 ? undefined : witnesses?.(kept.map(row => row.key), anchors);
+      const read = witnesses?.(root, kept.map(row => row.key), anchors);
       if (kept.length > 0 && (read === undefined || read.status !== "ready" || read.witnesses.length !== kept.length)) {
         const reason = read === undefined ? "statement_witness_reader_absent" : read.status === "ready" ? "statement_witness_misaligned" : read.reason;
         this.abandon(reason, reason.startsWith("statement_witness_read_budget")); return undefined;
       }
       const facts = read?.status === "ready" ? read.witnesses : [];
+      const inventory = read?.status === "ready" && read.inventory.status === "captured" ? read.inventory.inventory : undefined;
+      const occurrences = inventory?.occurrences ?? [];
+      if (!this.fund(occurrences.length * (statements + 1), occurrences.length * 8, "statement witness physical inventory")) return undefined;
+      const messages = occurrences.filter(hostOccurrenceIsMessage);
       const session = read?.status === "ready" && read.session_time !== null ? civilDay(read.session_time) : null;
       let times: readonly ("satisfied" | "violated" | "unknown")[] | undefined;
       if (window !== undefined) {
@@ -236,10 +242,9 @@ export class StatementKeyRetention {
       const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
       const cells: ((readonly [number, number]) | null)[] = [];
       // A reply depends on the prompt it answers: an assistant witness takes the user message before it.
-      const sourceSpan = (position: number) => kept[position]!.key.auxiliary?.source_span;
-      const prompt = (start: number) => kept.reduce<readonly [number, number] | null>((found, _key, position) => {
-        const at = sourceSpan(position);
-        return facts[position]!.role === "user" && at !== undefined && at[1] <= start && (found === null || at[1] > found[1]) ? at : found;
+      const prompt = (start: number) => messages.reduce<readonly [number, number] | null>((found, message) => {
+        const at = message.utf8_span;
+        return message.role === "user" && at[1] <= start && (found === null || at[1] > found[1]) ? at : found;
       }, null);
       coverage.push(demands.vectors.map((vector, index) => {
         const condition = demands.conditions[index]!;
@@ -262,8 +267,8 @@ export class StatementKeyRetention {
       let top = -1, lo = Infinity, hi = -Infinity;
       row.forEach((value, index) => { const cell = cells[index]; if (value === null || cell == null) return;
         lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]); if (top < 0 || value > row[top]!) top = index; });
-      // A root without a necessary cell delivers its first keyed message (the unit), from byte 0.
-      const first = kept.reduce((end, _key, position) => Math.min(end, sourceSpan(position)?.[1] ?? Infinity), Infinity);
+      // Keys nominate witnesses; physical messages, including unkeyed ones, define ordinary units.
+      const first = messages[0]?.utf8_span[1] ?? Infinity;
       openings.push(top >= 0 ? { statement: top, span: [lo, hi] } : Number.isFinite(first) ? { statement: null, span: [0, first] } : null);
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };

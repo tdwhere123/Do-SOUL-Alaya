@@ -469,13 +469,23 @@ Nothing in the first five moves; without the relation the order is unchanged.
 Whenever conditions are admitted, each root also keeps one opening, its delivery unit: the byte range
 of its messages that necessarily witness some condition (over all conditions, not only the best one),
 extended back to the user message an assistant witness answers (a reply depends on its prompt, not the
-reverse). A root with no necessary witness opens at its first keyed message (`evidence_variant` without
-`condition`). Every delivered root with an opening (and no variant) opens there, so first deliveries are
+reverse). A root with no necessary witness opens through its first admitted physical message
+(`evidence_variant` without `condition`), including when that message or the whole root has no semantic key. The source-owned
+witness read returns the complete admitted host inventory; keys nominate witnesses and do not define
+physical message existence. Captured-empty, unknown, unavailable, invalid and resource-limited inventory
+remain distinct, and inventory reads share the acquisition ledger. Every delivered root with an opening
+(and no variant) opens there, so first deliveries are
 units and no longer depend on which roots share a page. Nothing is dropped: the root's later
 bytes follow by payload continuation, and its prefix is one explicit range away
 (`payload_continuation.start_offset: 0`, `end_offset` = the opening). The bench end-continuation reader
 reads a cut opening on to its range end before the next slot, then the rest of each root, then the
 prefix last, so every slot still ends with its whole body.
+
+Within that admitted-condition domain, a root with no retained opening independently opens through its
+first recorded message end, otherwise its first recorded line end. This unit is chosen before page
+fitting, even when association preparation or retention is unavailable. A unit beyond the bounded
+hydration window, or unavailable/empty boundaries, uses a nonempty bounded UTF-8 prefix; continuation
+starts at the exposed end and retains every remaining byte. No-condition delivery is unchanged.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

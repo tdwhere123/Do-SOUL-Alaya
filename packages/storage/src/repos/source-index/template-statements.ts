@@ -60,17 +60,25 @@ export function readTemplateStatements(database: StorageDatabase, records: Sqlit
  * event time. Each message is read once. Reads never initiate segmenter loading; a cold segmenter
  * tokenizes anchors and texts alike with raw query tokens. */
 export function readStatementWitnesses(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
-  keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget,
+  source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget,
   sha256: FieldContractSha256): SourceIndexStatementWitnessRead {
   const meter = new QueryReadMeter(budget);
   try {
-    const root = keys[0];
-    if (root === undefined) return { status: "ready", session_time: null, witnesses: [], resources: meter.resources() };
+    const root = source;
     if (keys.some(key => key.auxiliary === undefined || key.source_id === null || key.target.root_kind !== "source_record"
       || key.source_id !== root.source_id || canonicalJson(key.target) !== canonicalJson(root.target))) {
       throw new TemplateReadUnknown("statement_witness_key_root_mismatch");
     }
-    const context: ReadContext = { database, records, source: root, meter, sha256 }, inventory = readInventory(context);
+    const context: ReadContext = { database, records, source: root, meter, sha256 };
+    const inventoryRead = readInventoryResult(context);
+    if (inventoryRead.status !== "captured" || inventoryRead.inventory === undefined) {
+      if (keys.length > 0) throw new TemplateReadUnknown(`source_template_host_${inventoryRead.status}`);
+      return { status: "ready", session_time: null, inventory: { status: inventoryRead.status === "captured" ? "invalid" : inventoryRead.status },
+        witnesses: [], resources: meter.resources() };
+    }
+    const inventory = inventoryRead.inventory;
+    if (keys.length === 0) return { status: "ready", session_time: null, inventory: { status: "captured", inventory },
+      witnesses: [], resources: meter.resources() };
     const segmented = readSourceIndexLexicalAnalysisStatus() === "ready";
     const tokens = (text: string) => {
       meter.ledger.charge(4 * text.length, 16 * text.length + 64, "statement witness tokenization");
@@ -103,7 +111,7 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
       return { role: message.role, anchors: required.map(need => need.length > 0 && need.every(token => present.has(token))),
         statement: chunk.row.content };
     });
-    return { status: "ready", session_time: session ?? null, witnesses, resources: meter.resources() };
+    return { status: "ready", session_time: session ?? null, inventory: { status: "captured", inventory }, witnesses, resources: meter.resources() };
   } catch (error) {
     return { status: "unknown", reason: error instanceof TemplateReadUnknown ? error.message
       : error instanceof SourceSemanticResourceExhausted ? `statement_witness_read_budget:${error.phase}`
@@ -137,12 +145,17 @@ function readArtifactHeader({ database, source, meter }: ReadContext, after: str
 }
 
 function readInventory({ records, source, meter }: ReadContext): HostOccurrenceInventory {
+  const read = readInventoryResult({ records, source, meter });
+  if (read.status !== "captured" || read.inventory === undefined) throw new TemplateReadUnknown(`source_template_host_${read.status}`);
+  return read.inventory;
+}
+
+function readInventoryResult({ records, source, meter }: Pick<ReadContext, "records" | "source" | "meter">) {
   const read = records.readHostInventory({ workspaceId: source.target.workspace_id, recordId: source.target.root_id,
     sourceVersion: source.target.source_version, contentDigest: source.target.content_digest, authorizedScopes: null,
     workLimit: meter.ledger.work, nativeByteLimit: meter.ledger.bytes, memoryLimit: meter.ledger.bytes });
   meter.absorbQuery({ work: read.work, native_bytes: read.nativeBytes, memory_bytes: read.memory, sql_internal_work: "unknown" });
-  if (read.status !== "captured" || read.inventory === undefined) throw new TemplateReadUnknown(`source_template_host_${read.status}`);
-  return read.inventory;
+  return read;
 }
 
 function readArtifact(context: ReadContext, header: ArtifactHeader) {

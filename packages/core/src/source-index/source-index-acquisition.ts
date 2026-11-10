@@ -456,8 +456,8 @@ class AcquisitionQuery {
             } });
           this.limited ||= partial;
         }
-        this.association = this.statements?.associate([...this.nominations.keys()], (keys, anchors) => {
-          const read = this.repository.readStatementWitnesses?.(keys, anchors, this.meter.remaining());
+        this.association = this.statements?.associate([...this.nominations.keys()], (root, keys, anchors) => {
+          const read = this.repository.readStatementWitnesses?.(this.nominations.get(root)!.source, keys, anchors, this.meter.remaining());
           if (read !== undefined) this.absorb(read.resources);
           return read;
         }, evidenceWindow(this.originalQuestionTime));

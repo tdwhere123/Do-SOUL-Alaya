@@ -6,7 +6,7 @@ const isolation = await vi.hoisted(async () => {
 afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
 import { createHash } from "node:crypto";
 import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
-import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, type EvidenceCondition, type QueryInterpretationProposal } from "@do-soul/alaya-protocol";
+import { QUESTION_TIME_PROPOSAL_PRODUCER_ID, indexEntryCacheKey, type EvidenceCondition, type QueryInterpretationProposal } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, runConditionalFieldRecallWithReceipt, snapshotIdFromPin, type ObserverReaders } from "@do-soul/alaya-core";
 import { prepareIndexedRecallProjection } from "@do-soul/alaya-storage";
 import { STATEMENT_SESSION_IDLE_MS } from "../../../garden/statement-session/statement-session-closure.js";
@@ -39,15 +39,18 @@ function configuration(providerKind: string) {
 }
 
 /** Rounds rank by their message vectors in round order; each round has one statement key. */
-async function publishedRounds(providerKind = "local_onnx") {
+async function publishedRounds(providerKind = "local_onnx", keyRole: "user" | "assistant" = "user", unkeyedRound = -1) {
   const env = await createStatementSessionEnvironment(); environments.push(env);
   const turns = Array.from({ length: ROUNDS }, (_, k) => [{ role: "user" as const, content: `Round ${k}: I planted bed ${k}.` },
-    { role: "assistant" as const, content: "Noted." }]);
+    { role: "assistant" as const, content: keyRole === "user" ? "Noted." : `Noted. Round ${k}.` }]);
   // The host reports when the session happened; it is each root's recorded event time.
   await env.capture({ container: CONTAINER, messages: hostMessages(turns, 0, START) });
   env.advance(STATEMENT_SESSION_IDLE_MS);
-  await env.processSession(env.provider(text => text.startsWith("Round ")
-    ? [{ text: `The user planted a garden bed (${text.slice(0, 7)})${text.startsWith("Round 6") ? " today" : ""}.`, relation: "garden" }] : []));
+  await env.processSession(env.provider(text => {
+    if (text.includes(`Round ${unkeyedRound}`)) return [];
+    return (keyRole === "user" ? text.startsWith("Round ") : text.startsWith("Noted."))
+      ? [{ text: `The user planted a garden bed (${text.slice(0, 7)})${text.startsWith("Round 6") ? " today" : ""}.`, relation: "garden" }] : [];
+  }));
   const roots = env.roots();
   expect(roots).toHaveLength(ROUNDS);
   const config = configuration(providerKind);
@@ -187,6 +190,65 @@ it("never embeds condition statements through a non-local provider and keeps the
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   expect(sourceOrder(env, readers, CONDITIONS)).toEqual(roots);
 });
+
+it("uses unkeyed physical messages for prompt openings and ordinary roots through the built worker", async () => {
+  assertBuiltWorker();
+  const { env, roots, prepare } = await publishedRounds("local_onnx", "assistant", 0);
+  const covered = await prepare(STATEMENTS), bare = await prepare();
+  const conditions = CONDITIONS.map(condition => ({ ...condition, speaker: "assistant" as const }));
+  const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
+  const body = (root: string) => (env.database.connection.prepare("SELECT source_body FROM source_records WHERE record_id=?")
+    .get(root) as { source_body: string }).source_body;
+  const messages = (root: string) => (env.database.connection.prepare("SELECT canonical_inventory FROM source_host_inventories WHERE record_id=?")
+    .get(root) as { canonical_inventory: string }).canonical_inventory;
+  for (const row of sourceDelivery(env, createConditionalFieldObserverReaders(env.database, [], bare.vector))) {
+    expect(row.span).toEqual([0, Buffer.byteLength(body(row.root))]);
+  }
+  const units = new Map(roots.map((root, index) => {
+    const occurrences = JSON.parse(messages(root)).occurrences as { utf8_span: [number, number] }[];
+    return [root, index === 0 ? [0, occurrences[0]!.utf8_span[1]] : [occurrences[0]!.utf8_span[0], occurrences[1]!.utf8_span[1]]];
+  }));
+  const delivered = sourceDelivery(env, readers, conditions);
+  expect(new Set(delivered.map(row => row.root))).toEqual(new Set(roots));
+  for (const row of delivered) expect(row.span).toEqual(units.get(row.root));
+  process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
+  let client;
+  try { client = createRecallReadWorkerClient({ databaseFilename: env.filename, workerUrl: builtWorkerUrl, workerCount: 1 })!; }
+  finally { process.execArgv.splice(process.execArgv.lastIndexOf(PROVIDER_FREE_WORKER_IMPORT), 1); }
+  try {
+    await client.ready();
+    const { readers: _readers, ...base } = request(env, readers, conditions);
+    // No prepared conditions means no association. Ordinary delivery still opens one physical unit.
+    const run = async (pageBudget: number) => {
+      const initial = { ...base, budget: { ...base.budget, page_budget: pageBudget }, prepared_query: bare };
+      const seen: { root: string; span: readonly [number, number] }[] = [];
+      let page = await client!.conditionalFieldPort.recall(initial);
+      for (let count = 0; count < 10; count++) {
+        for (const entry of page.index.entries) if (entry.target.kind === "source_evidence") {
+          const span = entry.target.span!;
+          const occurrences = JSON.parse(messages(entry.target.root_id)).occurrences as { utf8_span: [number, number] }[];
+          expect([span.content_start, span.content_end]).toEqual([0, occurrences[0]!.utf8_span[1]]);
+          expect(page.previews[indexEntryCacheKey(entry)]).toBe(Buffer.from(body(entry.target.root_id)).subarray(0, span.content_end).toString("utf8"));
+          seen.push({ root: entry.target.root_id, span: [span.content_start, span.content_end] });
+        }
+        if (page.index.continuation === null) return seen;
+        await client!.conditionalFieldPort.acknowledge!(page.preparation_id!, page.index, new Map(Object.entries(page.previews)));
+        if (count === 0) {
+          const entry = page.index.entries[0]!, target = entry.target;
+          if (target.kind !== "source_evidence") throw new Error("source entry required");
+          const tail = await client!.conditionalFieldPort.recall({ ...initial, continuation: page.index.continuation,
+            payload_continuation: { schema_version: 1, purpose: "payload_expansion", target,
+              start_offset: target.span!.content_end, byte_budget: 65536 } });
+          expect(Object.values(tail.previews)).toContain(Buffer.from(body(target.root_id)).subarray(target.span!.content_end).toString("utf8"));
+          expect(tail.index.entries[0]!.target).toMatchObject({ span: { content_complete: true } });
+        }
+        page = await client!.conditionalFieldPort.recall({ ...initial, continuation: page.index.continuation });
+      }
+      throw new Error("membership continuation did not finish");
+    };
+    expect(await run(1)).toEqual(await run(5));
+  } finally { await client.close(); }
+}, 30_000);
 
 it("delivers the same permutation through the built worker under the production grant", async () => {
   assertBuiltWorker();

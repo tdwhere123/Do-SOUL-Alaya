@@ -20,6 +20,7 @@ import { SOURCE_IDENTITY_HYDRATE_RESERVE, sourceNativeReadCounts, validateSource
 import { createContentPreview } from "./recall-service-helpers.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+import { sourceDeliveryEnds } from "./source-delivery-prefix.js";
 
 export const MEMORY_PAYLOAD_READ_RESERVE = 2 + SOURCE_IDENTITY_HYDRATE_RESERVE;
 
@@ -45,6 +46,8 @@ export class BoundedIndexPayload {
     readonly remainingMemoryBytes: number;
     /** Surface delivery envelope in bytes; hydrated text is a bounded prefix of it. */
     readonly contentByteBudget?: number;
+    /** Admitted-condition delivery opens ordinary roots at one physical unit even without association. */
+    readonly ordinaryDeliveryUnit?: boolean;
     readonly manifestationFor: (objectId: string) => ManifestationState;
     readonly payloadContinuation?: PayloadContinuationRequest;
     readonly onSourceReadFailure?: (work: Readonly<{ native_visits?: number; native_bytes?: number }>) => void;
@@ -256,7 +259,13 @@ export class BoundedIndexPayload {
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
-    const truncated = page.resourceLimited === true || page.row.content_complete === false;
+    // Choose the ordinary unit before envelope fitting, independently of semantic key retention.
+    // An oversized or unavailable unit falls back to this bounded literal prefix; continuation keeps its tail.
+    const ends = continuation === undefined && location === undefined && this.input.ordinaryDeliveryUnit
+      ? sourceDeliveryEnds(page.row.delivery_boundaries, offset) : undefined;
+    const end = ends?.find(value => value > 0);
+    const content = end === undefined ? page.row.content : Buffer.from(page.row.content).subarray(0, end).toString("utf8");
+    const truncated = page.resourceLimited === true || page.row.content_complete === false || content !== page.row.content;
     const metadata = sourceMetadataFrom(page.row, this.input.asOf, target.root_kind);
     const requiredBytes = metadata.source_disclosure === undefined || this.sourceMetadata[cacheKey]?.source_disclosure !== undefined
       ? 0 : Buffer.byteLength(JSON.stringify([cacheKey, metadata]), "utf8");
@@ -265,13 +274,13 @@ export class BoundedIndexPayload {
       return { ok: false, remaining: nextRemaining, retryable: true };
     }
     this.consumeSourceMemory(requiredBytes, cacheKey);
-    this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
+    this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate({ ...page.row, content }, offset, !truncated));
     {
       rememberPreview(
         this.previews,
         cacheKey,
         undefined,
-        page.row.content
+        content
       );
       if (metadata.dimension !== undefined || metadata.scope_class !== undefined
         || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined

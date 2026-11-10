@@ -21,7 +21,13 @@ const auxKey = (id: string, start: number) => ({ root_key: id, auxiliary: { arti
 const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
 /** Witness facts per key id: [role, matched anchor names, key text]; unlisted keys are user keys matching every anchor. */
 const witnesses = (facts: Record<string, [string | null, string[]?, string?]> = {}, session: string | null = null): StatementWitnessReader =>
-  (keys, anchors) => ({ status: "ready", resources: zero, session_time: session, witnesses: keys.map(target => {
+  (_root, keys, anchors) => ({ status: "ready", resources: zero, session_time: session,
+    inventory: { status: "captured", inventory: { contract: "host-occurrence-v1",
+      issuer: { namespace: "test", workspace_id: "test", producer: "test", basis: "pinned_dataset" },
+      occurrences: keys.flatMap(target => target.auxiliary === undefined ? [] : [{ occurrence_id: target.root_key,
+        utf8_span: target.auxiliary.source_span, role: facts[target.root_key]?.[0] ?? "user", channel: null,
+        author_ref: null, container_ref: null, upstream_message_ref: null, upstream_position: null,
+        completeness: "complete", fidelity: "original_bytes" }]) } }, witnesses: keys.map(target => {
     const fact = facts[target.root_key];
     return { role: fact?.[0] ?? (fact === undefined ? "user" : null),
       anchors: anchors.map(anchor => fact === undefined || (fact[1] ?? []).includes(anchor)), statement: fact?.[2] ?? "" };
@@ -209,12 +215,12 @@ describe("statement key retention and evidence coverage", () => {
       return { value: retained.associate(["a", "b"], reader), availability: retained.availability(), refused };
     };
     let calls = 0;
-    const second: StatementWitnessReader = (keys, anchors) => ++calls === 1 ? witnesses()(keys, anchors)
+    const second: StatementWitnessReader = (root, keys, anchors) => ++calls === 1 ? witnesses()(root, keys, anchors)
       : { status: "unknown", reason: "statement_witness_message_binding", resources: zero };
     expect(run(second)).toEqual({ value: undefined, refused: [],
       availability: { status: "unavailable", reason: "statement_witness_message_binding" } });
     expect(run(undefined).availability).toEqual({ status: "unavailable", reason: "statement_witness_reader_absent" });
-    expect(run(() => ({ status: "ready", session_time: null, witnesses: [], resources: zero })).availability.reason).toBe("statement_witness_misaligned");
+    expect(run(() => ({ status: "ready", session_time: null, inventory: { status: "unknown" }, witnesses: [], resources: zero })).availability.reason).toBe("statement_witness_misaligned");
     expect(run(() => ({ status: "unknown", reason: "statement_witness_read_budget:x", resources: zero })).refused)
       .toEqual(["statement_witness_read_budget:x"]);
   });
