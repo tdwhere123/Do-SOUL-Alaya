@@ -63,6 +63,7 @@ export type BoundedSourceRecordRead = Readonly<{
   readonly record: FieldSourceRecordRow | null;
   readonly bodyBytes: number;
   readonly prefixBytes: number;
+  readonly chunkEnd?: number;
   readonly invalidOffset: boolean;
   readonly evidenceVerified: boolean;
   readonly nativeBytes: number;
@@ -100,8 +101,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly listEvidenceBindingsStatement;
 
   public readDeliveryBoundaries(workspaceId: string, recordId: string, window: Readonly<{ start: number; end: number }>,
-    workLimit: number, byteLimit: number) {
-    return readSourceDeliveryBoundaries(this.database, this.sha256, workspaceId, recordId, window, workLimit, byteLimit);
+    workLimit: number, byteLimit: number, firstUnit = false) {
+    return readSourceDeliveryBoundaries(this.database, this.sha256, workspaceId, recordId, window, workLimit, byteLimit, firstUnit);
   }
 
   public constructor(
@@ -407,7 +408,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     const dependencies = source === null ? { available: false, work: 0, metadataBytes: 0, resourceLimited: false, unavailable: true }
       : readSourceProjectionDependencies(this.database, source, CURRENT_RECORD_ORDER, allowance);
     const body = !dependencies.available || typeof row.source_body_bytes !== "number"
-      ? { prefix: null, nativeBytes: 0, metadataBytes: 0 }
+      ? { prefix: null, nativeBytes: 0, metadataBytes: 0, chunkEnd: undefined }
       : readRetainedSourceChunk(this.database, { workspaceId: row.workspace_id as string, kind: "source_record",
         rootId: row.record_id as string, revision: row.source_version as string, digest: row.content_digest as string },
       offset, byteLimit, row.source_body_bytes);
@@ -415,7 +416,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       evidence_verified: verified ? 1 : 0,
       source_body_bytes: !dependencies.available && !dependencies.resourceLimited && !dependencies.unavailable ? 0
         : row.source_body_bytes ?? (row.body_retained === 1 ? 1 : 0), source_body_prefix: body.prefix,
-      dependency_work: dependencies.work, resource_limited: dependencies.resourceLimited,
+      chunk_end: body.chunkEnd, dependency_work: dependencies.work, resource_limited: dependencies.resourceLimited,
       native_bytes: body.nativeBytes, metadata_bytes: nativeMetadataBytes + body.metadataBytes + dependencies.metadataBytes }, byteLimit, offset);
   }
 
@@ -549,7 +550,8 @@ function parseBoundedSourceRecord(
   const bodyBytes = readIntegerField(row, "source_body_bytes");
   const prefix = prefixBuffer(row.source_body_prefix);
   const metadataBytes = readIntegerField(row, "metadata_bytes");
-  const receipt = { evidenceVerified: row.evidence_verified === 1, nativeBytes: readIntegerField(row, "native_bytes"), metadataBytes,
+  const receipt = { ...(typeof row.chunk_end === "number" ? { chunkEnd: row.chunk_end } : {}),
+    evidenceVerified: row.evidence_verified === 1, nativeBytes: readIntegerField(row, "native_bytes"), metadataBytes,
     dependencyWork: readIntegerField(row, "dependency_work"), ...(row.resource_limited === true ? { resourceLimited: true } : {}) };
   if (row.metadata_limited === 1) return { record: null, bodyBytes, prefixBytes: 0, invalidOffset: false, ...receipt };
   if (prefix === null) {

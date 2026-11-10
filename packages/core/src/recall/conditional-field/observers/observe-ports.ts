@@ -83,6 +83,7 @@ export type SourceRootObserverRow = Readonly<{
   readonly retained_extent?: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
   readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
+  readonly delivery_fallback_end?: number;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly original_complete?: boolean;
   readonly scope_class?: string;
@@ -225,6 +226,7 @@ export type ObserverReaders = Readonly<{
   readonly sourceRoot?: (input: Readonly<{
     /** Actual caller phase; absent on older readers means unclassified, not observation. */
     readonly purpose?: "observation" | "payload";
+    readonly firstDeliveryUnit?: boolean;
     readonly workspaceId: string;
     readonly rootKind: SourceEvidenceRootKind;
     readonly rootId: string;

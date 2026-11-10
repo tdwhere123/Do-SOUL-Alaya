@@ -482,10 +482,13 @@ reads a cut opening on to its range end before the next slot, then the rest of e
 prefix last, so every slot still ends with its whole body.
 
 Within that admitted-condition domain, a root with no retained opening independently opens through its
-first recorded message end, otherwise its first recorded line end. This unit is chosen before page
-fitting, even when association preparation or retention is unavailable. A unit beyond the bounded
-hydration window, or unavailable/empty boundaries, uses a nonempty bounded UTF-8 prefix; continuation
-starts at the exposed end and retains every remaining byte. No-condition delivery is unchanged.
+first recorded message end, otherwise its first recorded line end. The charged metadata lookup can
+locate that end beyond the hydrated fragment without reading the whole unit. With unavailable or
+empty boundaries, the verified first retained UTF-8 storage chunk is the fallback unit. The chosen
+range is retained as `evidence_variant.support_span` without `condition`, even when only a fragment
+fits the page; it is independent of page sharing and association preparation/retention. Continuation
+starts at the exposed end, can finish the declared unit, then reach every remaining byte. No-condition
+delivery is unchanged.
 
 Optional retention or ordering exhaustion preserves base nominations/order before any
 permutation is applied, records refusal, and cannot silently retry on a later page. After a

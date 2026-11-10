@@ -1,5 +1,5 @@
 import { statementEventIntervals } from "@do-soul/alaya-graph-algorithms";
-import { HOST_OCCURRENCE_LIMITS, hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
+import { hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
   type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget,
   type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
@@ -173,9 +173,7 @@ export class StatementKeyRetention {
     const vectors = this.demands.status === "ready" ? this.demands.vectors : [];
     const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length,
       this.demands.status === "ready" && this.demands.derived === true);
-    const occurrences = vectors.length === 0 ? 0 : roots * HOST_OCCURRENCE_LIMITS.count;
-    return { work_units: cost.work_units + scoring.work_units + occurrences * (vectors.length + 1),
-      memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 + occurrences * 8 };
+    return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
   }
 
   private abandon(phase: string, refusal = true): void {

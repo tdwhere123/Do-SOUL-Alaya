@@ -33,6 +33,7 @@ export class BoundedIndexPayload {
   private nativeBytes = 0;
   private admittedBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
+  private readonly deliveryUnits = new Map<string, Readonly<{ start_byte: number; end_byte: number }>>();
   // Source previews are re-read on every page, so their bytes are page-local, not field retention.
   private sourceBytes = 0;
   private readonly sourcePreviewKeys = new Set<string>();
@@ -231,6 +232,7 @@ export class BoundedIndexPayload {
       return { ok: false, remaining, retryable: false };
     }
     const continuation = this.payloadContinuationFor(target);
+    const ordinaryUnit = continuation === undefined && location === undefined && this.input.ordinaryDeliveryUnit === true;
     const offset = continuation?.start_offset ?? location?.start_byte ?? 0;
     const byteLimit = Math.min(hydrateByteLimit(continuation, this.remainingMemoryBytes,
       this.input.readers.sourceRootMetadataByteLimit ?? 0, this.input.contentByteBudget),
@@ -240,6 +242,7 @@ export class BoundedIndexPayload {
     }
     const page = reader({
       purpose: "payload",
+      ...(ordinaryUnit ? { firstDeliveryUnit: true } : {}),
       workspaceId: this.input.workspaceId,
       rootKind: target.root_kind,
       rootId: target.root_id,
@@ -260,10 +263,12 @@ export class BoundedIndexPayload {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
     // Choose the ordinary unit before envelope fitting, independently of semantic key retention.
-    // An oversized or unavailable unit falls back to this bounded literal prefix; continuation keeps its tail.
-    const ends = continuation === undefined && location === undefined && this.input.ordinaryDeliveryUnit
-      ? sourceDeliveryEnds(page.row.delivery_boundaries, offset) : undefined;
-    const end = ends?.find(value => value > 0);
+    // The chosen range survives an envelope clip; it is not the transmitted fragment.
+    const boundaries = page.row.delivery_boundaries;
+    const end = !ordinaryUnit ? undefined : boundaries?.status === "available"
+      ? (sourceDeliveryEnds(boundaries, offset)?.find(value => value > 0)
+        ?? boundaries.first_end_offset ?? page.row.delivery_fallback_end) : page.row.delivery_fallback_end;
+    if (end !== undefined) this.deliveryUnits.set(sourceEvidenceRootKey(target), { start_byte: offset, end_byte: end });
     const content = end === undefined ? page.row.content : Buffer.from(page.row.content).subarray(0, end).toString("utf8");
     const truncated = page.resourceLimited === true || page.row.content_complete === false || content !== page.row.content;
     const metadata = sourceMetadataFrom(page.row, this.input.asOf, target.root_kind);
@@ -304,7 +309,10 @@ export class BoundedIndexPayload {
       evidence_object_id: entry.target.evidence_object_id,
       span
     });
-    const next = { ...entry, target: stamped };
+    const unit = this.deliveryUnits.get(sourceEvidenceRootKey(entry.target));
+    const next = { ...entry, target: stamped,
+      ...(unit === undefined || entry.navigation === undefined ? {} : {
+        navigation: { ...entry.navigation, evidence_variant: { support_span: unit } } }) };
     const previousKey = indexEntryCacheKey(entry);
     const nextKey = indexEntryCacheKey(next);
     if (previousKey !== nextKey) {

@@ -39,9 +39,9 @@ function configuration(providerKind: string) {
 }
 
 /** Rounds rank by their message vectors in round order; each round has one statement key. */
-async function publishedRounds(providerKind = "local_onnx", keyRole: "user" | "assistant" = "user", unkeyedRound = -1) {
+async function publishedRounds(providerKind = "local_onnx", keyRole: "user" | "assistant" = "user", unkeyedRound = -1, suffix = "") {
   const env = await createStatementSessionEnvironment(); environments.push(env);
-  const turns = Array.from({ length: ROUNDS }, (_, k) => [{ role: "user" as const, content: `Round ${k}: I planted bed ${k}.` },
+  const turns = Array.from({ length: ROUNDS }, (_, k) => [{ role: "user" as const, content: `Round ${k}: I planted bed ${k}.${suffix}` },
     { role: "assistant" as const, content: keyRole === "user" ? "Noted." : `Noted. Round ${k}.` }]);
   // The host reports when the session happened; it is each root's recorded event time.
   await env.capture({ container: CONTAINER, messages: hostMessages(turns, 0, START) });
@@ -241,6 +241,67 @@ it("uses unkeyed physical messages for prompt openings and ordinary roots throug
               start_offset: target.span!.content_end, byte_budget: 65536 } });
           expect(Object.values(tail.previews)).toContain(Buffer.from(body(target.root_id)).subarray(target.span!.content_end).toString("utf8"));
           expect(tail.index.entries[0]!.target).toMatchObject({ span: { content_complete: true } });
+        }
+        page = await client!.conditionalFieldPort.recall({ ...initial, continuation: page.index.continuation });
+      }
+      throw new Error("membership continuation did not finish");
+    };
+    expect(await run(1)).toEqual(await run(5));
+  } finally { await client.close(); }
+}, 30_000);
+
+it.each(["oversized", "empty", "unreadable"] as const)("keeps the chosen %s unit range stable while transmitting bounded fragments", async mode => {
+  assertBuiltWorker();
+  const { env, roots, prepare } = await publishedRounds("local_onnx", "user", -1, "猫😀".repeat(700));
+  const bare = await prepare(), readers = createConditionalFieldObserverReaders(env.database, [], bare.vector);
+  const expectedEnds = new Map(roots.map(root => {
+    const message = env.database.connection.prepare("SELECT end_offset FROM source_spans WHERE record_id=? AND purpose='message' ORDER BY end_offset LIMIT 1")
+      .get(root) as { end_offset: number };
+    const chunk = env.database.connection.prepare("SELECT octet_length(body) AS bytes FROM retained_source_chunks WHERE root_id=? AND start_offset=0")
+      .get(root) as { bytes: number };
+    expect(message.end_offset).toBeGreaterThan(4096);
+    return [root, mode === "oversized" ? message.end_offset : chunk.bytes];
+  }));
+  if (mode === "empty") env.database.connection.prepare("DELETE FROM source_spans").run();
+  if (mode === "unreadable") env.database.connection.prepare("UPDATE source_spans SET producer_version='corrupt'").run();
+  process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
+  let client;
+  try { client = createRecallReadWorkerClient({ databaseFilename: env.filename, workerUrl: builtWorkerUrl, workerCount: 1 })!; }
+  finally { process.execArgv.splice(process.execArgv.lastIndexOf(PROVIDER_FREE_WORKER_IMPORT), 1); }
+  try {
+    await client.ready();
+    const { readers: _readers, ...base } = request(env, readers, CONDITIONS);
+    const run = async (pageBudget: number) => {
+      const initial = { ...base, budget: { ...base.budget, page_budget: pageBudget }, prepared_query: bare };
+      const ranges: [string, number, number][] = [];
+      let page = await client!.conditionalFieldPort.recall(initial), reconstructed = false;
+      for (let count = 0; count < 10; count++) {
+        for (const entry of page.index.entries) if (entry.target.kind === "source_evidence") {
+          const range = entry.navigation?.evidence_variant?.support_span;
+          expect(range).toEqual({ start_byte: 0, end_byte: expectedEnds.get(entry.target.root_id) });
+          ranges.push([entry.target.root_id, range!.start_byte, range!.end_byte]);
+        }
+        if (page.index.continuation === null) { expect(reconstructed).toBe(true); return ranges; }
+        await client!.conditionalFieldPort.acknowledge!(page.preparation_id!, page.index, new Map(Object.entries(page.previews)));
+        const entry = page.index.entries.find(row => row.target.kind === "source_evidence" && row.target.root_id === roots[1]);
+        if (entry?.target.kind === "source_evidence") {
+          let target = entry.target, joined = page.previews[indexEntryCacheKey(entry)]!;
+          const range = entry.navigation!.evidence_variant!.support_span;
+          for (let part = 0; !target.span!.content_complete && part < 10; part++) {
+            const offset = target.span!.content_end;
+            const expanded = await client!.conditionalFieldPort.recall({ ...initial, continuation: page.index.continuation,
+              payload_continuation: { schema_version: 1, purpose: "payload_expansion", target, start_offset: offset,
+                ...(offset < range.end_byte ? { end_offset: range.end_byte } : {}), byte_budget: 2048 } });
+            const row = expanded.index.entries[0]!;
+            if (row.target.kind !== "source_evidence") throw new Error("source expansion required");
+            expect(row.target.span!.content_start).toBe(offset);
+            expect(row.target.span!.content_end).toBeGreaterThan(offset);
+            joined += expanded.previews[indexEntryCacheKey(row)]!; target = row.target;
+          }
+          expect(target.span!.content_complete).toBe(true);
+          const source = env.database.connection.prepare("SELECT source_body FROM source_records WHERE record_id=?")
+            .get(target.root_id) as { source_body: string };
+          expect(joined).toBe(source.source_body); reconstructed = true;
         }
         page = await client!.conditionalFieldPort.recall({ ...initial, continuation: page.index.continuation });
       }

@@ -32,7 +32,7 @@ export function writeRetainedSourceChunks(database: Pick<StorageDatabase, "conne
 }
 
 export function readRetainedSourceChunk(database: StorageDatabase, identity: ChunkIdentity,
-  offset: number, byteLimit: number, bodyBytes: number): Readonly<{ prefix: Buffer | null; nativeBytes: number; metadataBytes: number }> {
+  offset: number, byteLimit: number, bodyBytes: number): Readonly<{ prefix: Buffer | null; nativeBytes: number; metadataBytes: number; chunkEnd?: number }> {
   if (offset === bodyBytes) return { prefix: Buffer.alloc(0), nativeBytes: 0, metadataBytes: 0 };
   if (offset > bodyBytes) return { prefix: null, nativeBytes: 0, metadataBytes: 0 };
   const chunk = cachedReadStatement(database, `SELECT start_offset, body, body_digest FROM retained_source_chunks
@@ -46,7 +46,7 @@ export function readRetainedSourceChunk(database: StorageDatabase, identity: Chu
   }
   const local = offset - chunk.start_offset;
   return { prefix: local >= chunk.body.length ? null : chunk.body.subarray(local, local + byteLimit),
-    nativeBytes: chunk.body.length, metadataBytes: 72 };
+    nativeBytes: chunk.body.length, metadataBytes: 72, chunkEnd: chunk.start_offset + chunk.body.length };
 }
 
 function chunkDigest(identity: ChunkIdentity, start: number, bytes: Buffer): string {

@@ -53,3 +53,14 @@ it("falls back to line ends in the window when the root records no message", () 
   const bounded = reader.hydrate("workspace-1", target, 1500, 0, 500_000, (page.nativeWork ?? 0) - 1, true);
   expect(bounded.row?.delivery_boundaries).toEqual({ status: "unavailable", reason: "resource_limited" });
 });
+
+it("reads an oversized first unit end without hydrating it and retains a stable verified chunk fallback", () => {
+  const { reader, target } = rootWithLines(800, [20_000, 80_000]);
+  const fragments = [100, 1500].map(limit => reader.hydrate("workspace-1", target, limit, 0, 100_000, 1000, true, true));
+  for (const [index, page] of fragments.entries()) {
+    expect(page.row?.content_end).toBe([100, 1500][index]);
+    expect(page.row?.delivery_boundaries).toEqual({ status: "available", spans: [], first_end_offset: 20_000 });
+    expect(page.row?.delivery_fallback_end).toBe(4096);
+  }
+  expect(fragments[0]!.metadataBytes).toBe(fragments[1]!.metadataBytes);
+});

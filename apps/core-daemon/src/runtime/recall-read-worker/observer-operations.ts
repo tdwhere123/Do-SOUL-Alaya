@@ -433,7 +433,8 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         // 12288 is the retained chunk+metadata reservation; logical clip is separate.
         input.nativeByteLimit ?? Math.max(input.byteLimit ?? 65536, 12_288),
         input.workLimit,
-        input.purpose === "payload"
+        input.purpose === "payload",
+        input.firstDeliveryUnit === true
       );
       return {
         row: page.row === null ? null : toSourceRootObserverRow(page.row),
