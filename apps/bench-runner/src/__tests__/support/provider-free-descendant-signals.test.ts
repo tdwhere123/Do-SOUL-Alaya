@@ -39,6 +39,52 @@ it.each(["spawn", "spawnSync", "execFile", "execFileSync", "promisifiedExecFile"
   }
 );
 
+it("registers a CLI eval before application import even when inherited loader options are removed", () => {
+  const preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const isolation = installProviderFreeBoundary({ descendantPreload: preload });
+  try {
+    const env: NodeJS.ProcessEnv = { ...process.env, PROVIDER_FIXTURE_API_KEY: "synthetic" };
+    delete env.NODE_OPTIONS;
+    const result = childProcess.spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      const { readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const binding = JSON.parse(process.env.ALAYA_PROVIDER_FREE_ISOLATION);
+      const read = name => JSON.parse(readFileSync(join(binding.root, binding.member, name), "utf8"));
+      // The eval body stands for application entry: readiness must already exist.
+      console.log(JSON.stringify({ binding, entry: read("entry.json"), ready: read("ready.json"),
+        credentialPresent: process.env.PROVIDER_FIXTURE_API_KEY !== undefined, pid: process.pid }));
+    `], { env, encoding: "utf8", timeout: 15_000 });
+    expect(result.error, result.stderr).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    const observed = JSON.parse(result.stdout);
+    expect(observed.binding.root).toBe(isolation.evidence.root);
+    expect(observed.binding.identity).toBe(isolation.evidence.identity);
+    expect(observed.binding.member).not.toBe(isolation.evidence.member);
+    expect(observed.entry).toEqual({ parent: isolation.evidence.member, kind: "spawnSync" });
+    expect(observed.ready).toEqual({ pid: observed.pid, thread: 0 });
+    expect(observed.pid).not.toBe(process.pid);
+    expect(observed.credentialPresent).toBe(false);
+    expect(() => isolation.assertSafe(true)).not.toThrow();
+  } finally { isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true }); }
+});
+
+it("rejects an inherited parent identity without descendant registration before application entry", () => {
+  const isolation = installProviderFreeBoundary();
+  try {
+    const guard = new URL("./provider-free-boundary.ts", import.meta.url).href;
+    const env = { ...process.env }; delete env.NODE_OPTIONS;
+    const result = childProcess.spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      const { installProviderFreeBoundary } = await import(${JSON.stringify(guard)});
+      installProviderFreeBoundary();
+      console.log("application entered");
+    `], { env, encoding: "utf8", timeout: 15_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Unregistered isolation descendant");
+    expect(result.stdout).toBe("");
+  } finally { isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true }); }
+});
+
 it("refuses shell dispatch before any unregistered Node descendant can start", async () => {
   const isolation = installProviderFreeBoundary({ descendantPreload: new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href });
   try {
