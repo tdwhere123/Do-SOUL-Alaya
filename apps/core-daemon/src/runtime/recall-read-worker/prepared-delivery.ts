@@ -87,10 +87,10 @@ function settlePrepared(id: string, prepared: Prepared,
     throw error;
   }
   // An acknowledgment retry must neither retain source closures nor advance a successor.
-  // Release closures without a fallible post-commit capacity admission. The
-  // original reservation remains conservative until this execution expires.
+  // The committed field is now charged by its own record; keep only the retry record's charge.
   prepared.issue = undefined;
   prepared.metadata = {};
+  recallExecutionRetention.reduce(`prepared:${id}`, recallRetentionBytes(prepared));
   return prepared.receipt;
 }
 

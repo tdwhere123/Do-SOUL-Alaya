@@ -16,18 +16,63 @@ describe("Recall execution lease retention", () => {
     expect(store.snapshot()).toEqual({ entries: 0, executions: 0, retained_bytes: 0 });
   });
 
-  it("refuses oversized and workspace-over-cap records without evicting valid executions", () => {
-    const store = new RecallExecutionRetention(5_000, 2_000, 100);
-    const small = { execution: "a", workspace: "one", bytes: 1_000, handles: ["a"], value: { retained: true } };
+  it("evicts the least-recently-used other execution of the workspace instead of refusing", () => {
+    const store = new RecallExecutionRetention(10_000, 3_000, 60_000);
+    const removed = vi.fn(); store.subscribe(removed);
+    const row = (execution: string, workspace = "one") =>
+      ({ execution, workspace, bytes: 1_000, handles: [`h-${execution}`], value: { execution } });
+    store.set("field:a", row("a"));
+    store.set("field:b", row("b"));
+    store.set("field:c", row("c", "two"));
+    expect(store.get("field:a")).toEqual({ execution: "a" });
+    store.set("field:d", row("d"));
+    expect(removed).toHaveBeenCalledWith({ handles: ["h-b"], reason: "evicted" });
+    expect(store.executionFor("h-a")).toBe("a");
+    expect(store.executionFor("h-c")).toBe("c");
+    expect(store.executionFor("h-d")).toBe("d");
+    store.invalidate("a"); store.invalidate("c"); store.invalidate("d");
+  });
+
+  it("never evicts the incoming execution and refuses without evicting when nothing can make room", () => {
+    const store = new RecallExecutionRetention(5_000, 3_000, 60_000);
+    const removed = vi.fn(); store.subscribe(removed);
+    const small = { execution: "a", workspace: "one", bytes: 1_000, handles: ["a"], value: {} };
     store.set("field:a", small);
-    expect(() => store.set("field:b", { ...small, execution: "b", handles: ["b"] }))
+    store.set("page:a", { ...small, handles: ["page-a"] });
+    expect(() => store.set("prepared:a", { ...small, handles: ["ack-a"] }))
       .toThrowError(expect.objectContaining({ details: expect.objectContaining({ resource: "execution_retention" }) }));
-    store.set("field:c", { ...small, execution: "c", workspace: "two", handles: ["c"] });
-    expect(store.executionFor("a")).toBe("a");
-    expect(store.executionFor("c")).toBe("c");
-    expect(() => store.set("oversized", { ...small, bytes: 10_000 })).toThrow();
+    store.set("field:b", { ...small, execution: "b", workspace: "two", handles: ["b"] });
+    expect(() => store.set("oversized", { ...small, execution: "c", bytes: 10_000 })).toThrow();
+    expect(removed).not.toHaveBeenCalled();
     expect(store.snapshot().executions).toBe(2);
-    store.invalidate("a"); store.invalidate("c");
+    store.invalidate("a"); store.invalidate("b");
+  });
+
+  it("restores evicted executions when the evicting transaction rolls back", () => {
+    const store = new RecallExecutionRetention(10_000, 1_500, 60_000);
+    const removed = vi.fn(); store.subscribe(removed);
+    const kept = { kept: true };
+    store.set("field:a", { execution: "a", workspace: "one", bytes: 1_000, handles: ["h-a"], value: kept });
+    expect(() => store.transaction(() => {
+      store.set("field:b", { execution: "b", workspace: "one", bytes: 1_000, handles: ["h-b"], value: {} });
+      throw new Error("stale field");
+    })).toThrow("stale field");
+    expect(store.get("field:a")).toBe(kept);
+    expect(removed).not.toHaveBeenCalled();
+    store.invalidate("a");
+  });
+
+  it("lowers a record's charge without refusing or changing its value", () => {
+    const store = new RecallExecutionRetention(10_000, 10_000, 60_000);
+    const value = { settled: true };
+    store.set("prepared:a", { execution: "a", workspace: "one", bytes: 5_000, handles: ["ack-a"], value });
+    const before = store.snapshot().retained_bytes;
+    store.reduce("prepared:a", 100);
+    expect(store.snapshot().retained_bytes).toBe(before - 4_900);
+    store.reduce("prepared:a", 9_000);
+    expect(store.snapshot().retained_bytes).toBe(before - 4_900);
+    expect(store.get("prepared:a")).toBe(value);
+    store.invalidate("a");
   });
 
   it("rolls back an unsuccessful page and field transaction without revoking prior handles", () => {
