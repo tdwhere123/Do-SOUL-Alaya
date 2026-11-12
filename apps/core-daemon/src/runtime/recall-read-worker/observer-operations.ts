@@ -38,6 +38,8 @@ import { storedMeasurementReaders } from "./stored-measurement-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
+import { MEMBER_INDEX_OVERFLOW, memberIndexInputsOf, rememberMemberIndexInputs, renderMemberIndex,
+  type MemberIndexInputs } from "./member-index.js";
 import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
 import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
@@ -68,10 +70,12 @@ export function runConditionalFieldWorkerRecall(
     ? adapters.readers ?? (payload.prepared_query === undefined && observer === undefined ? readersFor(runtime)
       : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
         "allowance", payload.prepared_query?.evidence)) : {};
-  const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
+  let memberInputs: MemberIndexInputs | undefined;
+  const readers: ObserverReaders = base.nominateSources === undefined ? base : {
     ...base, nominateSources: input => {
       const nomination = base.nominateSources!(input);
-      observer.nomination(nomination);
+      if (nomination !== null && typeof nomination === "object") memberInputs ??= memberIndexInputsOf(nomination);
+      observer?.nomination(nomination);
       return nomination;
     }
   };
@@ -154,13 +158,18 @@ export function runConditionalFieldWorkerRecall(
     entry, metadata: source_metadata[indexEntryCacheKey(entry)] ?? null })) }));
   const issuedDeliveryId = executed.delivery_id ?? issuedDeliveryIdOf(executed.index);
   const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
+  const firstPage = payload.continuation == null && payload.payload_continuation === undefined;
+  const member_index = !firstPage || memberInputs === undefined ? undefined
+    : renderMemberIndex(runtime.database, workspaceId, memberInputs, new Set(index.entries.flatMap(entry =>
+      entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])), index.entries.length);
   return {
     execution_receipt: executed.execution_receipt,
     index,
     previews: Object.fromEntries(previews),
     source_metadata,
     preparation_id: preparationId,
-    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
+    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId }),
+    ...(member_index === undefined || member_index.length === 0 ? {} : { member_index })
   };
 }
 
@@ -218,7 +227,8 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
           prepaidCapture = retained;
           return bytes;
         }
-      }, observer === undefined ? undefined : input.sourceId);
+      }, observer === undefined ? undefined : input.sourceId,
+      invocation === "original" && capacity !== undefined ? MEMBER_INDEX_OVERFLOW : 0);
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
@@ -280,11 +290,16 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     native_bytes: result.resources.native_bytes + capacity.resources.native_bytes,
     memory_bytes: meter.spentBytes
   };
-  return { ...baseCapture, ...(retainedAssociation === undefined ? {} : { association: retainedAssociation }),
+  const nomination: NativeSourceNomination = { ...baseCapture, ...(retainedAssociation === undefined ? {} : { association: retainedAssociation }),
     association_retained_bytes: associationRetainedBytes, retained_bytes: baseRetainedBytes + associationRetainedBytes,
     acquisition_resources: resources, result: { ...result, resources,
       resource_refusals: association !== undefined && retainedAssociation === undefined
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
+  const binding = original.result.vector.state !== null && "binding" in original.result.vector.state ? original.result.vector.state.binding : null;
+  rememberMemberIndexInputs(nomination, { pool: result.nominations.map(row => row.source),
+    overflow: original.index_members ?? [], conditions: demands.status === "ready" ? demands.vectors : [],
+    generation: binding?.generation_id ?? null });
+  return nomination;
 }
 
 /** The same actual capture is paid either at the late preference choice or after ordinary acquisition. */

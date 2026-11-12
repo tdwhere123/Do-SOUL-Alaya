@@ -230,6 +230,23 @@ export const SoulMemorySearchRequestSchema = z
   })
   .readonly();
 
+/** First page only: one source-bound line per further member after the ranked results (pool members
+ * not on this page, then roots refused only by the nomination limit). A line is an interpretation of the
+ * listed statements, never ranking evidence; `statement_ids` open with soul.open_pointer. */
+export const RecallMemberIndexLineSchema = z
+  .object({
+    label: z.string().regex(/^R\d{2,3}$/u),
+    root_id: NonEmptyStringSchema,
+    date: z.string().max(64).nullable(),
+    line: z.string().max(4096),
+    producer: z.enum(["source-statements-v1", "first-message"]),
+    statement_ids: z.array(NonEmptyStringSchema).max(64).readonly(),
+    in_pool: z.boolean()
+  })
+  .strict()
+  .readonly();
+export type RecallMemberIndexLine = z.infer<typeof RecallMemberIndexLineSchema>;
+
 export const SoulMemorySearchResponseSchema = z
   .object({
     delivery_id: NonEmptyStringSchema,
@@ -256,7 +273,8 @@ export const SoulMemorySearchResponseSchema = z
     index: InformationIndexSchema.optional(),
     order_status: OrderStatusSchema.optional(),
     page_purpose: PagePurposeSchema.optional(),
-    product_updates: z.array(ProductUpdateSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
+    product_updates: z.array(ProductUpdateSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    member_index: z.array(RecallMemberIndexLineSchema).max(128).readonly().optional()
   })
   .strict()
   .readonly();

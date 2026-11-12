@@ -12,6 +12,7 @@ import {
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
   QueryViewSchema,
+  RecallMemberIndexLineSchema,
   RecallTargetKindSchema,
   RequestBudgetSchema,
   ResultKindViewSchema,
@@ -118,7 +119,8 @@ export const ConditionalFieldRecallPortResultSchema = z
     source_metadata: z.record(z.string(), z.unknown()).optional(),
     issued_delivery_id: z.string().optional(),
     preparation_id: z.string().optional(),
-    execution_receipt: z.unknown().optional()
+    execution_receipt: z.unknown().optional(),
+    member_index: z.array(RecallMemberIndexLineSchema).max(128).optional()
   })
   .strict()
   .readonly();

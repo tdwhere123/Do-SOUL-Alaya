@@ -12,6 +12,7 @@ export function encodeRecallPageResponse(input: Readonly<{
   active_constraints: readonly import("@do-soul/alaya-protocol").SoulActiveConstraint[];
   active_constraints_count: number | null; active_constraints_completeness?: "complete" | "incomplete";
   degradation_reason: import("@do-soul/alaya-protocol").SoulMemorySearchDegradationReason | null;
+  member_index?: readonly import("@do-soul/alaya-protocol").RecallMemberIndexLine[];
 }>) {
   return SoulMemorySearchResponseSchema.parse({ ...input, protocol_version: RECALL_CONSUMER_PROTOCOL_VERSION, total_count: input.results.length,
     ...(input.index.order_status === undefined ? {} : { order_status: input.index.order_status }),

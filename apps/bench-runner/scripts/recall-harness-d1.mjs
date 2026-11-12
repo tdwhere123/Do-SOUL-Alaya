@@ -12,6 +12,7 @@
 // --coordinates FILE loads frozen question-only coordinates; only arms with "question_time": true send time proposals,
 // which also carry the coordinates' evidence_conditions unchanged.
 // --shard i/n keeps every n-th question; shards may share --out and --cache.
+// --capture-first-page records the first page's results and member index (task-level consumer screens).
 // --capture-pool adds private native observation and separately marked diagnostic rankings to each row.
 // --source-model, --source-cache and --source-artifact-digest select a separately bound Source model;
 // --model and --model-cache select Memory; --model-artifact-digest binds its sealed tree.
@@ -59,6 +60,7 @@ const { values } = parseArgs({ options: {
   "prepared-cache": { type: "string" }, "prepared-revision": { type: "string" }, "historical-preparation": { type: "string" },
   "warm-memory": { type: "boolean", default: false },
   "capture-pool": { type: "boolean", default: false }, "diagnostic-vectors": { type: "string" },
+  "capture-first-page": { type: "boolean", default: false },
   reader: { type: "string", default: "current" }
 } });
 if (!values.out || !values.arms) throw new AlayaError("VALIDATION", "--out and --arms are required");
@@ -350,6 +352,12 @@ for (const id of ids) {
         intervals: query.source_intervals, pages: query.page_count,
         first_page_slots: query.pages[0]?.occupied_slots ?? null,
         ...(query.end_continuation === undefined ? {} : { end_continuation: query.end_continuation }) });
+      if (values["capture-first-page"]) {
+        const first = query.pages[0]?.output;
+        row.first_page = first == null ? null : { results: first.results.map(result => ({ target: result.target,
+          object_kind: result.object_kind, content_preview: result.content_preview, payload_available: result.payload_available })),
+          member_index: first.member_index ?? [] };
+      }
       if (captureRecallPool !== undefined) {
         try { row.pool_capture = await captureRecallPool({ row, query, observation, generation: config.source_index?.index,
           coordinates: frozen, vectorCache: diagnosticVectors }); }

@@ -267,14 +267,16 @@ export class SourceIndexAcquisition {
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
     view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate?: EvidenceDemands,
-    preferenceRetention?: SourcePreferenceRetention, observationSourceId?: string) {
+    preferenceRetention?: SourcePreferenceRetention, observationSourceId?: string, indexMembers = 0) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
       observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: view === "original" ? associate : undefined,
-        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}), observationSourceId });
+        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}), observationSourceId,
+        indexMembers: view === "original" ? indexMembers : 0 });
     const result = query.run();
-    return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
+    return { result, witness: retained, ...(indexMembers > 0 && view === "original" ? { index_members: query.indexMembers } : {}),
+      ...(query.questionTimeOrder === undefined ? {}
       : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
       ...(query.prepaidBaseBytes === undefined ? {} : { prepaid_base_bytes: query.prepaidBaseBytes }) };
   }
@@ -320,6 +322,10 @@ class AcquisitionQuery {
   public questionTimeOrder?: readonly string[];
   public association?: StatementAssociation;
   public prepaidBaseBytes?: number;
+  /** Admitted roots refused only by the root limit, in attempt order; listed, never nominated. */
+  public readonly indexMembers: SourceIndexTarget[] = [];
+  private readonly indexMemberKeys = new Set<string>();
+  private indexMembersClosed = false;
   private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
@@ -328,7 +334,7 @@ class AcquisitionQuery {
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
       progress: { lexical: number; vector: number }; associate?: EvidenceDemands; preferenceRetention?: SourcePreferenceRetention;
-      observationSourceId?: string }) {
+      observationSourceId?: string; indexMembers?: number }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
     this.originalQuestionTime = proposed;
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
@@ -743,13 +749,26 @@ class AcquisitionQuery {
     }
     if (this.nominations.size >= this.input.allowance.max_roots) {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
-      this.observeNomination(channel, source, "nomination_limit"); return;
+      this.observeNomination(channel, source, "nomination_limit");
+      this.retainIndexMember(key, source); return;
     }
     this.meter.charge(1, 192, "source nomination reference retention");
     this.retainOccurrence(source, lexical, vector);
     this.nominations.set(key, { source, lexical: lexical === null ? [] : [lexical], vector });
     this.counts.admitted++;
     this.observeNomination(channel, source, "admitted");
+  }
+
+  private retainIndexMember(key: string, source: SourceIndexTarget): void {
+    if (this.indexMembersClosed || this.indexMembers.length >= (this.candidate?.indexMembers ?? 0)
+      || this.indexMemberKeys.has(key)) return;
+    try { this.meter.charge(1, 192, "source index member reference retention"); }
+    catch (error) {
+      // An unfunded listing ends the list; it never changes the nominated prefix or its completion.
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      this.indexMembersClosed = true; return;
+    }
+    this.indexMemberKeys.add(key); this.indexMembers.push(source);
   }
 
   private retainOccurrence(source: SourceIndexTarget, lexical: SourceIndexLexicalRank | null,
