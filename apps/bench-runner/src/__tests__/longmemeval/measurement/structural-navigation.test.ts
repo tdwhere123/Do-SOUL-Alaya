@@ -82,11 +82,12 @@ it("caps seed/read policy and rejects caller-provided seed identities", () => {
     expect(StructuralNavigationSchema.safeParse({ contract: STRUCTURAL_NAVIGATION_METHOD, mode: "adjacent", ...extra }).success).toBe(false);
   }
 });
-it("runs authored compiled SQLite seed admission, shared-cost failures, literal delivery and frozen scoring", { timeout: 180_000 }, async () => {
+// The compiled proof is many sequential CLI children; 170s crossed Darwin CI load after a long shard.
+it("runs authored compiled SQLite seed admission, shared-cost failures, literal delivery and frozen scoring", { timeout: 300_000 }, async () => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const { fileURLToPath } = await import("node:url");
   const { stdout } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL("../../support/structural-navigation-proof.mjs", import.meta.url))],
-    { timeout: 170_000, env: process.env });
+    { timeout: 280_000, env: process.env });
   expect(JSON.parse(stdout)).toMatchObject({ status: "passed", scratch_removed: true, provider_calls: 0 });
 });

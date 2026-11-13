@@ -8,7 +8,10 @@ import { expect, it } from "vitest";
 
 const harness = fileURLToPath(new URL("../../../scripts/recall-harness-d1.mjs", import.meta.url));
 const ids = ["isolation-first", "isolation-second"];
-const modes = ["parent", "fork", "worker", "worker-terminate", "worker-unsettled", "unexpected-signal",
+// Node reports a child's self-SIGKILL on Windows as exit 1 with no signal, the same
+// observation as process.exit(1), so isolation cannot classify it as descendant_signal_unknown.
+const modes = ["parent", "fork", "worker", "worker-terminate", "worker-unsettled",
+  ...(process.platform === "win32" ? [] : ["unexpected-signal"]),
   "signal-unreadable", "signal-write-failed", "local", "local-child"] as const;
 
 it.each(modes)("D1 preserves raw rows and fixed census while classifying %s independently from isolation", async mode => {
