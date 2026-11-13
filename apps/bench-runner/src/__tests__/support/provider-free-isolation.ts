@@ -118,7 +118,7 @@ export class ProviderFreeIsolation {
       }
       for (const member of members) {
         // A child CLI shares the parent journal; sibling SIGKILL/violation records are not its campaign status.
-        if (!this.inLineage(member, entries)) continue;
+        if (!this.inLineage(member, id => entries.get(id)?.parent)) continue;
         const names = fs.readdirSync(join(this.binding.root, member));
         if (!names.includes("ready.json") && names.includes("exit.json")) reasons.push(`unconfirmed_descendant:${member}`);
         if (requireSettled && member !== this.binding.member && !names.includes("exit.json")) {
@@ -157,12 +157,12 @@ export class ProviderFreeIsolation {
     }
   }
 
-  private inLineage(member: string, entries: ReadonlyMap<string, Entry>): boolean {
+  private inLineage(member: string, parentOf: (id: string) => unknown): boolean {
     if (member === this.binding.member) return true;
     const seen = new Set<string>();
-    for (let parent = entries.get(member)?.parent; typeof parent === "string"; parent = entries.get(parent)?.parent) {
+    for (let parent = parentOf(member); typeof parent === "string"; parent = parentOf(parent)) {
       if (parent === this.binding.member) return true;
-      if (seen.has(parent) || !entries.has(parent)) return false;
+      if (seen.has(parent)) return false;
       seen.add(parent);
     }
     return false;
