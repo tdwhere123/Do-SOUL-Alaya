@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { SOURCE_TASK_OBSERVATION_PRODUCER_ID, SourceTaskObservationDraftSchema,
+import { AlayaError, SOURCE_TASK_OBSERVATION_PRODUCER_ID, SourceTaskObservationDraftSchema,
   SourceTaskObservationFormationInputSchema, SourceTaskObservationProposalSchema, canonicalJson, compareUtcInstants,
   type SourceTaskObservation, type SourceTaskObservationFormationInput } from "@do-soul/alaya-protocol";
 import { buildObservationEndpointCatalogs, resolveObservationEndpointSelection } from "./endpoint-selection.js";
@@ -40,15 +40,17 @@ export function buildSourceTaskObservationRequest(raw: unknown) {
 
 function validateInput(input: SourceTaskObservationFormationInput): void {
   if (compareUtcInstants(input.question_time.interpretation_clock, input.interpretation_clock) !== 0) {
-    throw new Error("question_time_clock_mismatch");
+    throw new AlayaError("VALIDATION", "question_time_clock_mismatch");
   }
   const refs = new Set<string>(), identities = new Set<string>();
   for (const source of input.sources) {
     const identity = canonicalJson(source.target);
-    if (refs.has(source.source_ref) || identities.has(identity)) throw new Error("duplicate_source_input");
+    if (refs.has(source.source_ref) || identities.has(identity)) {
+      throw new AlayaError("VALIDATION", "duplicate_source_input");
+    }
     refs.add(source.source_ref); identities.add(identity);
     if (`sha256:${createHash("sha256").update(source.body, "utf8").digest("hex")}` !== source.target.content_digest) {
-      throw new Error("source_digest_mismatch");
+      throw new AlayaError("VALIDATION", "source_digest_mismatch");
     }
   }
 }
