@@ -71,6 +71,21 @@ it("registers a CLI eval before application import even when inherited loader op
   } finally { isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true }); }
 });
 
+it("does not rewrite a later CLI child's successful exit from a sibling's recorded violation", () => {
+  const preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const isolation = installProviderFreeBoundary({ descendantPreload: preload });
+  try {
+    childProcess.spawnSync(process.execPath, ["-e",
+      "try{require('node:fs').readFileSync('/nonexistent-isolation-fixture/auth.json')}catch{}"],
+      { env: {}, encoding: "utf8", timeout: 15_000 });
+    const later = childProcess.spawnSync(process.execPath, ["--input-type=module", "--eval", "console.log('ok')"],
+      { env: { ...process.env }, encoding: "utf8", timeout: 15_000 });
+    expect(later.status, later.stderr).toBe(0);
+    expect(later.stdout.trim()).toBe("ok");
+    expect(() => isolation.assertSafe(true)).toThrow("violation:credential file");
+  } finally { isolation.restore(); rmSync(isolation.evidence.root, { recursive: true, force: true }); }
+});
+
 it.each([
   ["neutral-first", "plain"], ["neutral-first", "quoted-equals"], ["neutral-first", "quoted-pair"],
   ["custom-first", "plain"], ["custom-first", "quoted-equals"], ["custom-first", "quoted-pair"]
