@@ -3,9 +3,20 @@ import {
   mergeFtsLanes,
   splitFtsLanes,
   tokenizeFtsQuery,
+  ftsSurfaceTokens,
   TRIGRAM_MIN_CODEPOINTS,
   type FtsLaneHit
 } from "../../recall/fts-search-policy.js";
+
+it("keeps ordered FTS surface spans without folding, segmentation, deduplication or length filtering", () => {
+  const text = "😀A a A_1,甲乙 café café 𝒜";
+  const tokens = ftsSurfaceTokens(text);
+  expect(tokens.map(token => token.text)).toEqual(["A", "a", "A_1", "甲乙", "café", "cafe", "𝒜"]);
+  expect(tokens.map(token => text.slice(token.start, token.end))).toEqual(tokens.map(token => token.text));
+  expect(tokens[0]).toEqual({ text: "A", start: 2, end: 3 });
+  expect(tokens.at(-1)!.end - tokens.at(-1)!.start).toBe(2);
+  expect(ftsSurfaceTokens("x ".repeat(20))).toHaveLength(20);
+});
 
 describe("splitFtsLanes", () => {
   it("routes plain word tokens to the porter lane", () => {

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SourceIndexAcquisition, authorizeSourceIndexScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { StorageDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
-import { AlayaError, hashContentDigest } from "@do-soul/alaya-protocol";
+import { AlayaError, hashContentDigest, SourceIndexTargetSchema, sourceIndexRootKey } from "@do-soul/alaya-protocol";
 import { readCjkSegmentationStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { withRecallSnapshot } from "./recall-bound-snapshot.mjs";
 import { projectHostContainer } from "./recall-host-container.mjs";
@@ -101,13 +101,42 @@ function routeRows(events, inventory, witness) {
     const channel = fact.kind === "lexical_candidate" ? "lexical" : "vector";
     const name = `${fact.invocation}-${channel}`;
     const root = keyOf(fact.target), recorded = witness.find(item => item.view === fact.invocation
-      && item.route.kind === channel && item.route.native_rank === fact.rank && keyOf(item.source.target) === root);
+      && item.domain === fact.domain && item.route.kind === channel && item.route.native_rank === fact.rank
+      && keyOf(item.source.target) === root);
     if (!inventory.has(root)) continue;
     const window = fact.window ?? recorded?.route.window ?? recorded?.route.hit ?? null, host = sourceFact(inventory.get(root));
     (routes[name] ??= []).push({ rank: fact.rank, root_id: root, window, matched_role: matchedRole(window, host),
-      lane: fact.lane ?? null, lane_rank: fact.lane_rank ?? null, host });
+      ...(fact.domain === undefined ? {} : { domain: fact.domain }), lane: fact.lane ?? null, lane_rank: fact.lane_rank ?? null, host });
   }
   return routes;
+}
+
+/** These facts are emitted before optional task/template inspection, never reconstructed from ranks. */
+function taskInventory(events, observation, rejected) {
+  const facts = events.filter(event => event.kind === "source_index_acquisition"
+    && event.data?.kind === "source_task_inventory" && event.data.invocation === "original");
+  if (facts.length !== 1) return { status: "unavailable", reason: facts.length ? "ambiguous_inventory" : "inventory_not_observed" };
+  const event = facts[0], fact = event.data, context = fact.context;
+  const validSources = sources => Array.isArray(sources) && sources.every(source => SourceIndexTargetSchema.safeParse(source).success
+    && source.target.workspace_id === event.binding.workspace_id && source.root_key === sourceIndexRootKey(source.target, source.auxiliary));
+  if (!context || !(context.source_id === null || typeof context.source_id === "string") ||
+      !(context.block === null || typeof context.block === "string") ||
+      !["active", "inactive", "unavailable"].includes(fact.state) ||
+      !["complete", "partial"].includes(fact.coverage) || !validSources(fact.original) || fact.original.length > 16 ||
+      !fact.native || !fact.native.lexical || !fact.native.vector || !Array.isArray(fact.native.resource_refusals) || !fact.native.accounting ||
+      fact.state === "active" && (!validSources(fact.incumbent) || fact.incumbent.length > 16 ||
+        !validSources(fact.eligible) || fact.eligible.length > 32 ||
+        context.source_id !== null && fact.eligible.some(source => source.source_id !== context.source_id))) {
+    return { status: "unavailable", reason: "inventory_invalid" };
+  }
+  const captured = { request_id: event.request_id, binding: event.binding, original_prefix: fact.original,
+    coverage: fact.coverage, native: fact.native, context };
+  const incomplete = observation.status !== "available" || rejected.length > 0;
+  if (context.block !== null) return { status: incomplete ? "partial" : "not_applicable", reason: context.block, ...captured };
+  if (fact.state !== "active") return { status: fact.state === "unavailable" ? "unavailable" : incomplete ? "partial" : "not_applicable",
+    reason: fact.reason ?? "question_time_unavailable", ...captured };
+  return { status: fact.coverage === "complete" && observation.status === "available" && rejected.length === 0 ? "complete" : "partial",
+    ...captured, time_preferred_incumbent: fact.incumbent, eligibility: fact.eligible };
 }
 
 export function diagnosticRanking(db, snapshot, workspace, question, vector, generation, inventory, coordinates, vectorCache, nativeIndex) {
@@ -190,8 +219,10 @@ export function diagnosticRanking(db, snapshot, workspace, question, vector, gen
 
 /** No labels or answer text are accepted by this boundary. */
 export async function captureRecallPool({ row, query, observation, generation, coordinates, vectorCache }) {
-  if (observation === undefined) return { status: "unavailable", issues: ["ordinary_observation_missing"] };
-  if (query.pages[0]?.request.scope_class !== "project") return { status: "unavailable", issues: ["unsupported_scope"] };
+  if (observation === undefined) return { status: "unavailable", issues: ["ordinary_observation_missing"],
+    task_observation_inventory: { status: "unavailable", reason: "ordinary_observation_missing" } };
+  if (query.pages[0]?.request.scope_class !== "project") return { status: "unavailable", issues: ["unsupported_scope"],
+    task_observation_inventory: { status: "unavailable", reason: "unsupported_scope" } };
   if (observation.observations.some(frame => frame.events.some(event =>
     event.kind === "source_query_vector" && event.data?.status === "available"))) await warmCjkSegmentation();
   return withRecallSnapshot(row, snapshot => {
@@ -199,8 +230,9 @@ export async function captureRecallPool({ row, query, observation, generation, c
     try {
     const inventory = readInventory(db, row.workspace), allEvents = listEvents(observation);
     const events = allEvents.filter(event => activeFrame(event, row.workspace, query.snapshot_identity?.as_of));
-    const rejected = observation.observations.filter(frame => (frame.execution !== "success" || frame.events.some(event =>
+    const rejected = observation.observations.filter(frame => (frame.execution !== "success" || frame.dropped_events > 0 || frame.events.some(event =>
       event.kind === "field_nomination" || event.kind === "field_access_order" || event.kind === "source_index_routes"
+        || event.kind === "source_index_acquisition" && ["source_template_restoration", "source_task_inventory"].includes(event.data?.kind)
         || event.kind === "field_page_metadata" || event.kind === "field_page_attempt"))
       && !frame.events.some(event => activeFrame({ ...event, binding: frame.facts?.binding ?? null,
         frame_status: frame.status, execution: frame.execution, facts_complete: frame.facts?.complete === true,
@@ -219,7 +251,10 @@ export async function captureRecallPool({ row, query, observation, generation, c
     else if (nomination.result === null) issues.push("native_nomination_unavailable");
     if (nominated.length > 16) issues.push("native_nomination_exceeds_bound");
     if (nominated.some(item => !inventory.has(item.source.target.root_id))) issues.push("nominated_root_metadata_unavailable");
-    if (events.some(event => event.dropped_events > 0)) issues.push("native_progress_events_dropped");
+    if (observation.observations.some(frame => frame.dropped_events > 0)) issues.push("native_progress_events_dropped");
+    const templateEvents = events.filter(event => event.kind === "source_index_acquisition"
+      && event.data?.kind === "source_template_restoration").map(event => ({ request_id: event.request_id,
+        binding: event.binding, phase: event.phase, ...event.data }));
     const rankKinds = ["lexical_candidate", "vector_ranked"].flatMap(kind => ["original", "hint"].map(view => `source_index_${view}_${kind}`));
     if (events.some(event => rankKinds.some(kind => (event.diagnostics?.omitted_counts?.[kind] ?? 0) > 0))) {
       issues.push("native_route_rank_detail_overflow");
@@ -259,13 +294,23 @@ export async function captureRecallPool({ row, query, observation, generation, c
     return { status: issues.length ? "partial" : "captured", issues, observation_status: observation.status,
       source_revision: query.snapshot_identity, generation, routes: routeRows(events, inventory, witness),
       route_phases: events.filter(event => event.kind === "source_index_routes").map(event => event.data),
+      task_observation_inventory: taskInventory(events, observation, rejected),
       pool: nominated.map(item => ({ ...item, host: sourceFact(inventory.get(item.source.target.root_id)) })), rejected_frames: rejected,
       access_orders: orders, page_metadata: pageMetadata, page_attempts: pageAttempts, witness,
+      source_template_restoration: {
+        status: observation.status !== "available" || rejected.length > 0 ? "partial"
+          : templateEvents.length > 0 ? "captured" : "not_observed",
+        events: templateEvents },
+      association_lifecycle: events.flatMap(event => event.kind === "statement_association_retention"
+        ? [{ request_id: event.request_id, ...event.data }]
+        : event.kind === "source_index_acquisition" && event.data.kind === "acquisition_complete"
+          && event.data.invocation === "original" && event.data.statement_association !== undefined
+          ? [{ request_id: event.request_id, stage: "acquisition", ...event.data.statement_association }] : []),
       diagnostic_beyond_allowance: { rankings: diagnostic, sibling_scope: "first_five_containers",
         sibling_scope_status: missingContainers.length ? "partial" : "complete", missing_container_roots: missingContainers,
         siblings: siblings.map(sourceFact), native_work: "not_measured" },
-      observation_limits: events.map(event => ({ request_id: event.request_id, dropped_events: event.dropped_events,
-        diagnostics: event.diagnostics })).filter((row, index, rows) => rows.findIndex(other => other.request_id === row.request_id) === index),
+      observation_limits: observation.observations.map(frame => ({ request_id: frame.request_id,
+        dropped_events: frame.dropped_events, diagnostics: frame.diagnostics ?? null })),
       pages: observedPages.map(page => ({
         request: page.request, output: page.output, occupied_slots: page.occupied_slots })) };
     } finally { db.close(); }

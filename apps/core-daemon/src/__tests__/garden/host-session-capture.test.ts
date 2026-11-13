@@ -38,8 +38,14 @@ describe("host session capture contract", { timeout: 30_000 }, () => {
     expect(sliding.roots()).toHaveLength(3);
     expect(records(sliding).listByWorkspace(WORKSPACE).map(row => row.record_id).sort())
       .toEqual([...sliding.roots()].sort());
-    expect(await sliding.capture({ container: CONTAINER, messages: SIX })).toEqual({ container_key: CONTAINER_KEY,
-      admitted_message_count: 0, replayed_message_count: 6, pending_message_count: 0, admitted_round_count: 0, pending_round_count: 0 });
+    const replay = await sliding.capture({ container: CONTAINER, messages: SIX });
+    expect(replay).toEqual({ container_key: CONTAINER_KEY,
+      admitted_message_count: 0, replayed_message_count: 6, pending_message_count: 0, admitted_round_count: 0, pending_round_count: 0,
+      message_sources: SIX.map((message, index) => {
+        const source = records(sliding).findById(WORKSPACE, sliding.roots()[Math.floor(index / 2)]!)!;
+        return { message_id: message.message_id, source: { source_id: source.source_id, root_id: source.record_id,
+          source_version: source.source_version, content_digest: source.content_digest, occurrence_id: message.message_id } };
+      }) });
   });
 
   it("refuses a whole request on any conflict and admits none of its messages", async () => {

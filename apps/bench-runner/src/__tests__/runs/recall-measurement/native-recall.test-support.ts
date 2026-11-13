@@ -10,7 +10,8 @@ export const QUESTION = "Which project was mentioned?";
 export const HIDDEN_SOURCE = "ARCHIVE_ONLY_PRIVATE_END";
 export const HIDDEN_GOLD = "EVALUATOR_ONLY_GOLD";
 
-export async function nativeRecallFixture(sourceText: string | readonly string[] = `Project Aster was mentioned. ${"Other project context. ".repeat(2000)}${HIDDEN_SOURCE}`) {
+export async function nativeRecallFixture(sourceText: string | readonly string[] = `Project Aster was mentioned. ${"Other project context. ".repeat(2000)}${HIDDEN_SOURCE}`,
+  dates?: readonly string[]) {
   const root = mkdtempSync(join(tmpdir(), "native-recall-capture-"));
   const data = join(root, "data"), meta = join(root, "meta"), development = join(root, "development");
   mkdirSync(data); mkdirSync(meta);
@@ -18,7 +19,7 @@ export async function nativeRecallFixture(sourceText: string | readonly string[]
   const sessions = sources.map((_, index) => index === 0 ? "project-session" : `project-session-${index}`);
   const dataset = JSON.stringify([{ question_id: "project", question_type: "fixture", question: QUESTION,
     answer: HIDDEN_GOLD, question_date: "2023/09/13 (Wed) 00:00", haystack_session_ids: sessions,
-    haystack_dates: sources.map(() => "2023/09/12 (Tue) 00:00"), answer_session_ids: ["project-session"],
+    haystack_dates: sources.map((_, index) => dates?.[index] ?? "2023/09/12 (Tue) 00:00"), answer_session_ids: ["project-session"],
     haystack_sessions: sources.map(content => [{ role: "user", content }]) }]);
   const digest = createHash("sha256").update(dataset).digest("hex");
   writeFileSync(join(data, "longmemeval_s.json"), dataset);

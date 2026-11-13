@@ -1,7 +1,9 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  return installProviderFreeBoundary({
+    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+  });
 });
 
 import { execFile } from "node:child_process";
@@ -21,8 +23,44 @@ import { observeOrdinaryEntry } from "../../../runs/recall-measurement/ordinary/
 const roots: string[] = [];
 afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
-  isolation.restore();
+  try { isolation.assertSafe(true); }
+  finally { isolation.restore(); }
   expect(isolation.violations).toEqual([]);
+});
+
+it("preserves bound template observations without interpreting missing or truncated capture as abstention", async () => {
+  const fixture = await ordinaryIndexedSnapshot(["Project Aster was mentioned."]); roots.push(fixture.root);
+  const query = fixture.queries[0]!;
+  const observations: OrdinaryEntryObservation[] = [];
+  const execution = await executeOrdinaryRecallEntry({ config: fixture.config, root: join(fixture.root, "template-observer"),
+    queries: [{ query_key: query.query_key, original_query: query.original_query }] }, (_key, value) => observations.push(value));
+  const captured = execution.rows[0]!, observed = observations[0]!;
+  const frame = observed.observations.find(item => item.events.some(event => event.kind === "field_nomination"))!;
+  const pool = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-harness-pool.mjs", import.meta.url))).href);
+  const row = { snapshot: fixture.config.snapshot_path, snapshot_sha256: fixture.config.snapshot_sha256,
+    workspace: fixture.config.workspace_id };
+  const capture = (observation: unknown) => pool.captureRecallPool({ row, query: captured, observation });
+  const missing = await capture(observed);
+  expect(missing.source_template_restoration).toEqual({ status: "not_observed", events: [] });
+  const data = { kind: "source_template_restoration", invocation: "original", index_binding: frame.facts?.binding?.index,
+    observation: { status: "unique", inspected_roots: 16, matched_roots: 1, restored: true, authorization: "admitted_prefix",
+      match: { source_hole_span: { start_byte: 12, end_byte: 31 }, statement_hole_span: { start_byte: 8, end_byte: 27 } } } };
+  const event = { kind: "source_index_acquisition", phase: "nomination", data };
+  const withEvent = { ...frame, events: [...frame.events, event] };
+  const observation = { ...observed, observations: observed.observations.map(item => item === frame ? withEvent : item) };
+  const result = await capture(observation);
+  expect(result.source_template_restoration).toEqual({ status: "captured", events: [{ request_id: frame.request_id,
+    binding: frame.facts?.binding, phase: "nomination", ...data }] });
+  for (const change of [
+    { dropped_events: 1, events: [] },
+    { facts: { ...frame.facts, binding: { ...frame.facts?.binding, workspace_id: "different" } } }
+  ]) {
+    const rejected = await capture({ ...observed, observations: [{ ...withEvent, ...change }] });
+    expect(rejected.source_template_restoration).toEqual({ status: "partial", events: [] });
+    expect(rejected.issues).toContain("ordinary_capture_frame_rejected");
+    expect(rejected.observation_limits).toEqual([{ request_id: frame.request_id,
+      dropped_events: change.dropped_events ?? frame.dropped_events, diagnostics: frame.diagnostics ?? null }]);
+  }
 });
 
 it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on a mismatched baseline", async () => {
@@ -73,6 +111,9 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
   const poolCapture = await pool.captureRecallPool({ row, query: captured, observation: observed });
   expect(poolCapture.status).toBe("captured");
   expect(poolCapture.pool.length).toBeGreaterThan(0);
+  expect(poolCapture.association_lifecycle.map((fact: { stage: string }) => fact.stage))
+    .toEqual(["acquisition", "source_retention", "field_admission"]);
+  expect(poolCapture.access_orders[0].evidence_coverage.status).toBe("not_run");
   expect(poolCapture.diagnostic_beyond_allowance.rankings.status).toBe("unavailable");
   const nativeIndex = observed!.observations.find(frame => frame.events.some(event => event.kind === "field_nomination"))?.facts?.binding?.index;
   expect(nativeIndex).toBeTruthy();

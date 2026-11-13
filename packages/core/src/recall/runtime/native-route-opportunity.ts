@@ -1,8 +1,7 @@
 import { CoreError } from "../../shared/errors.js";
-import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+import { EVIDENCE_CONDITION_LIMITS, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
-import { preferAssociatedSlot, refuseStatementAssociation, statementAssociationRefusalReason,
-  type StatementAssociation } from "../../source-index/statement-association.js";
+import { selectEvidenceWitnesses, type StatementAssociation } from "../../source-index/statement-association.js";
 
 // One demand, four views/operators. This is not a caller-configurable strategy registry.
 const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"] as const;
@@ -245,25 +244,28 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   association?: StatementAssociation;
 }, meter?: SourceSemanticResourceLedger, mandatoryReserve: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 }) {
   const ordered = orderTimedFieldAccess(input);
-  if (input.association === undefined) return ordered;
-  requireFact(meter !== undefined, "statement association requires a navigation resource ledger");
+  const association = input.association;
+  if (association === undefined) return ordered;
+  requireFact(meter !== undefined, "evidence coverage requires a navigation resource ledger");
   const optional = new SourceSemanticResourceLedger({
     work_units: Math.max(0, meter!.work - mandatoryReserve.work_units),
     memory_bytes: Math.max(0, meter!.bytes - mandatoryReserve.memory_bytes) });
-  // Association may swap source slot 5 with a later source root; memory keeps its positions.
+  // Coverage permutes source slots only; memory keeps its observed positions.
   const memoryIds = new Set(ordered.trace.filter(row => row.lane === "memory-lexical").map(row => row.record_id));
   const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
     : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
   const originalSources = current.filter(id => !memoryIds.has(id));
-  let sources: readonly string[] = originalSources;
-  if (input.association.refusal.phase === null) {
+  let decided: ReturnType<typeof selectEvidenceWitnesses> | undefined;
+  if (association.decision.refused === null) {
     try {
-      optional.charge(input.association.roots.length * input.association.roots.length, 0, "statement key association validation");
-      validateAssociation(input.association);
-      sources = preferAssociatedSlot(originalSources, input.association, optional);
+      optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
+      validateAssociation(association);
+      decided = selectEvidenceWitnesses(originalSources, association, optional);
+      if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0) association.decision.applied = true;
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      if (input.association.refusal.swap_selected) throw new SourceSemanticResourceExhausted(error.phase,
+      // A later small page must not replace an already applied permutation with base order.
+      if (association.decision.applied) throw new SourceSemanticResourceExhausted(error.phase,
         error.constraints === undefined ? undefined : {
           ...(error.constraints.work === undefined ? {} : { work: {
             required: error.constraints.work.required + mandatoryReserve.work_units,
@@ -272,43 +274,54 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
             required: error.constraints.memory.required + mandatoryReserve.memory_bytes,
             available: meter!.bytes - optional.spentBytes } })
         });
-      refuseStatementAssociation(input.association, error.phase);
+      association.decision.refused = error.phase;
+      decided = undefined;
     } finally {
       // The child limits optional work; it does not forgive work already performed on refusal.
-      meter!.charge(optional.spentWork, optional.spentBytes, "statement key association executed");
+      meter!.charge(optional.spentWork, optional.spentBytes, "evidence statement coverage executed");
     }
   }
+  const sources = decided?.order ?? originalSources;
   let cursor = 0;
   const recordIds = current.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
-  const changed = originalSources[4] !== sources[4];
-  const from = changed ? current.indexOf(sources[4]!) + 1 : null;
-  const to = changed ? current.indexOf(originalSources[4]!) + 1 : null;
-  const refusal = statementAssociationRefusalReason(input.association);
-  const statement_association = { status: refusal !== null ? "resource_refused" as const
-    : changed ? "swapped" as const : "unchanged" as const,
-    source_slot: 5 as const, replacement_global_rank: from, replaced_global_rank: to,
-    mixed_at_5_changed: to !== null && to <= 5 && from !== null && from > 5,
-    reason: refusal ?? (changed ? "question_and_link_dominance" : "no_dominating_source") };
-  return { ...ordered, statement_association, preferred_record_ids: recordIds,
+  const injected = decided?.injections.some(row => row.status === "injected") === true;
+  const variants = decided?.variants ?? [];
+  const evidence_coverage = { status: association.decision.refused !== null ? "resource_refused" as const
+    : injected || variants.length > 0 ? "permuted" as const : "unchanged" as const, statements: association.statements,
+    top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
+    variants: variants.map(row => ({ statement: row.statement, root_position: row.root_position })),
+    reason: association.decision.refused };
+  // Every root opens at its unit (witness messages, else its first message); a variant keeps its own.
+  const openings = decided === undefined || association.openings === undefined ? []
+    : association.roots.flatMap((root, i) => { const opening = association.openings![i];
+      return opening == null ? [] : [{ root, ...(opening.statement === null ? {} : { statement: opening.statement }),
+        support_span: { start_byte: opening.span[0], end_byte: opening.span[1] } }]; });
+  return { ...ordered, evidence_coverage, evidence_variants: variants, evidence_openings: openings, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function validateAssociation({ roots, question, link, keys }: StatementAssociation): void {
-  requireFact(Array.isArray(roots) && Array.isArray(question) && Array.isArray(link)
-    && new Set(roots).size === roots.length, "association roots must be distinct identities");
-  requireFact(question.length === roots.length && link.length === roots.length,
-    "association must be one finite question value and one triangular link row per root");
-  for (let i = 0; i < roots.length; i++) {
-    requireFact(Object.hasOwn(roots, i) && nonempty(roots[i]!), "association roots must be distinct identities");
-    const row = link[i];
-    requireFact(Object.hasOwn(question, i) && Number.isFinite(question[i]) && Object.hasOwn(link, i)
-      && Array.isArray(row) && row.length === i,
-    "association must be one finite question value and one triangular link row per root");
-    for (let j = 0; j < i; j++) requireFact(Object.hasOwn(row, j) && (row[j] === null || Number.isFinite(row[j])),
-      "association must be one finite question value and one triangular link row per root");
+function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision }: StatementAssociation): void {
+  requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
+    && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
+  requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
+    "evidence coverage requires one to four statements");
+  for (let i = 0; i < coverage.length; i++) {
+    const row = coverage[i];
+    requireFact(Object.hasOwn(coverage, i) && Array.isArray(row) && row.length === statements
+      && row.every((value, j) => Object.hasOwn(row, j) && (value === null || Number.isFinite(value))),
+    "evidence coverage must hold one finite value or null per statement");
   }
-  requireFact(keys.length === roots.length && keys.every(row => Array.isArray(row)
-    && row.every(key => Array.isArray(key.embedding) && Number.isFinite(key.norm))), "association keys must be retained vector data");
+  requireFact(possible === undefined || Array.isArray(possible) && possible.length === roots.length
+    && possible.every(row => Array.isArray(row) && row.length === statements && row.every(value => typeof value === "boolean")),
+  "possible witnesses must hold one boolean per root and statement");
+  requireFact(spans === undefined || Array.isArray(spans) && spans.length === roots.length
+    && spans.every(row => Array.isArray(row) && row.length === statements && row.every(cell => cell === null
+      || Array.isArray(cell) && cell.length === 2 && integer(cell[0]!) && integer(cell[1]!, 1) && cell[1]! > cell[0]!)),
+  "witness spans must hold one byte range or null per root and statement");
+  requireFact(openings === undefined || Array.isArray(openings) && openings.length === roots.length
+    && openings.every(cell => cell === null || (cell.statement === null || integer(cell.statement) && cell.statement < statements) && Array.isArray(cell.span)
+      && cell.span.length === 2 && integer(cell.span[0]!) && integer(cell.span[1]!, 1) && cell.span[1]! > cell.span[0]!),
+  "witness openings must hold one statement or none and a byte range, or null, per root");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

@@ -6,7 +6,8 @@ export { recallExecutionRetention, recallRetentionBytes, RECALL_RETENTION_TTL_MS
 export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.js";
 export { acquireProfiledSourceIndex } from "./source-index/source-index-profiled-acquisition.js";
 export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
-export { restrictStatementAssociation, type StatementAssociation } from "./source-index/statement-association.js";
+export type { TaskInterpretationReader } from "./source-index/task-observation-binding.js";
+export { bindEvidenceDemands, restrictStatementAssociation, statementKeyCosine, type StatementAssociation } from "./source-index/statement-association.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
 export * from "./governance/bankruptcy/budget-bankruptcy-service.js";
@@ -91,6 +92,7 @@ export {
 export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
 export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, authorizeSourceIndexScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
+export { readSourceDependencyDelivery } from "./recall/runtime/source-dependency-delivery.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,

@@ -104,7 +104,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
       if (source.target.root_kind !== "source_record" || source.source_id === null) throw new Error("record-only fixture requires a native source id");
       return { ...source, source_id: source.source_id };
     });
-    expect(targets).toHaveLength(indexed.length);
+    expect(targets.filter(target => target.auxiliary === undefined)).toHaveLength(indexed.length);
     const outsideTransaction = () => { expect(database.connection.inTransaction).toBe(false); };
     let backfillAxis: NonNullable<IndexedSource["vector"]> = [0, 1, 0];
     const backfillBinding = simulatedBinding(selection,
@@ -122,7 +122,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     }
     expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
     expect(repository.generation(WS, generation.generation_id)).toMatchObject({ status: "ready",
-      enumeration_complete: true, target_count: indexed.length, completed_count: indexed.length });
+      enumeration_complete: true, target_count: targets.length, completed_count: targets.length });
     // Later real admissions make coverage partial without fabricating or changing the active generation.
     for (const source of sources.filter(source => source.indexed === false)) await admit(source);
     const queryBinding = simulatedBinding(selection, () => [1, 0, 0], outsideTransaction);

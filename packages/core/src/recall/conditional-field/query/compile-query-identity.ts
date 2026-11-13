@@ -76,6 +76,18 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
             ?? QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION,
           stored_cosine_admission: parts.interpretation_proposal.stored_cosine_admission ?? null,
           question_time: parts.interpretation_proposal.question_time ?? null,
+          ...(parts.interpretation_proposal.source_template === undefined ? {} : {
+            source_template: parts.interpretation_proposal.source_template
+          }),
+          ...(parts.interpretation_proposal.evidence_conditions === undefined ? {} : {
+            evidence_conditions: parts.interpretation_proposal.evidence_conditions
+          }),
+          ...(parts.interpretation_proposal.evidence_relation === undefined ? {} : {
+            evidence_relation: parts.interpretation_proposal.evidence_relation
+          }),
+          ...(parts.interpretation_proposal.source_task_observation === undefined ? {} : {
+            source_task_observation: parts.interpretation_proposal.source_task_observation
+          }),
           conditions: parts.interpretation_proposal.conditions ?? null,
           input_limits: parts.proposal_effective_limits ?? parts.interpretation_proposal.input_limits ?? null,
           program: parts.interpretation_proposal.program ?? null,

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { MemoryDimension, QueryViewSchema, SourceSemanticResourceLedger, sourceGoldRootIdentity, sourceRecallTarget } from "@do-soul/alaya-protocol";
+import { MemoryDimension, QueryViewSchema, SourceSemanticResourceLedger, sourceGoldRootIdentity, sourceRecallTarget,
+  type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
 import type { FieldEngineState } from "../../../recall/conditional-field/engine/field-engine.js";
@@ -38,8 +39,11 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     let retained: FieldEngineState | undefined;
     const captured = { ...initial, native_sources: { result: null, witness: [], admitted_roots: [target],
       catalog_positions: { [sourceGoldRootIdentity(target)]: 0 } } };
+    const refusalObservations: unknown[] = [];
     const workRefused = nativeNavigationProjection(captured, [],
-      new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 100_000 }));
+      new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 100_000 }), capture => refusalObservations.push(capture()));
+    expect(refusalObservations).toEqual([expect.objectContaining({ status: "resource_refused", entries: [],
+      navigation_refusal: { phase: expect.any(String), constraints: { work: { required: 1, available: 0 } } } })]);
     expect(workRefused).toMatchObject({ status: "resource_refused", constraints: { work: { required: 2, available: 1 } } });
     const memoryRefused = nativeNavigationProjection(captured, [],
       new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 0 }));
@@ -77,7 +81,7 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     expect(diagnostic.status).toBe(ordinary.status);
     expect(Array.from({ length: diagnostic.values.size }, (_, index) => diagnostic.values.at(index)))
       .toEqual(Array.from({ length: ordinary.values.size }, (_, index) => ordinary.values.at(index)));
-    // The optional pair phase must not consume the later mandatory coordinate/sort allowance.
+    // Optional evidence coverage must not consume the later mandatory coordinate/sort allowance.
     // This is the full projection entry, not only the source-slot helper's fallback.
     const targets = Array.from({ length: 6 }, (_, i) => ({ ...target, root_id: `catalog-${i}` }));
     const baseState = { ...captured, native_sources: { result: null, witness: [], admitted_roots: targets,
@@ -85,29 +89,30 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     const generous = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 });
     const base = nativeNavigationProjection(baseState, values, generous);
     expect(base.status).toBe("ordered");
-    const retention = new StatementKeyRetention(new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 }),
-      () => { throw new Error("unexpected retention refusal"); });
-    for (const entry of targets) retention.consider(sourceFactKey(entry), 0.5, new Float32Array(128).fill(1));
-    const association = retention.associate(targets.map(sourceFactKey))!;
-    const tight = new SourceSemanticResourceLedger({ work_units: generous.spentWork + 47,
+    const covered = (top: number) => {
+      const retention = new StatementKeyRetention(new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 }),
+        () => { throw new Error("unexpected retention refusal"); }, { status: "ready", vectors: [Float32Array.of(0, 1)], conditions: [{ statement: "s", speaker: "user", anchors: [] }] });
+      // Every key witnesses the user condition; only its vector differs.
+      targets.forEach((entry, i) => retention.consider(sourceFactKey(entry), 1, i === top ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0),
+        { root_key: sourceFactKey(entry) } as unknown as SourceIndexTarget));
+      return retention.associate(targets.map(sourceFactKey), (_root, keys) => ({ status: "ready", resources: { work: 0, memory_bytes: 0,
+        native_bytes: 0, sql_internal_work: "unknown" }, session_time: null, inventory: { status: "unknown" },
+        witnesses: keys.map(() => ({ role: "user", anchors: [], statement: "" })) }))!;
+    };
+    const tight = new SourceSemanticResourceLedger({ work_units: generous.spentWork + 20,
       memory_bytes: generous.spentBytes + 1024 });
     let optionalStatus: string | undefined;
-    const preserved = nativeNavigationProjection({ ...baseState, native_sources: { ...baseState.native_sources, association } },
-      values, tight, capture => { optionalStatus = capture().statement_association?.status; });
+    const preserved = nativeNavigationProjection({ ...baseState, native_sources: { ...baseState.native_sources, association: covered(5) } },
+      values, tight, capture => { optionalStatus = capture().evidence_coverage?.status; });
     expect(preserved.status).toBe("ordered");
     expect(optionalStatus).toBe("resource_refused");
     expect(tight.spentWork).toBeGreaterThan(generous.spentWork);
     expect(Array.from({ length: preserved.values.size }, (_, i) => preserved.values.at(i)))
       .toEqual(Array.from({ length: base.values.size }, (_, i) => base.values.at(i)));
-    const selected = new StatementKeyRetention(new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 }),
-      () => { throw new Error("unexpected retention refusal"); });
-    targets.forEach((entry, i) => selected.consider(sourceFactKey(entry), i === 4 ? 0.6 : 1,
-      i === 4 ? Float32Array.of(0.6, 0.8) : Float32Array.of(1, 0)));
-    const selectedState = { ...baseState, native_sources: { ...baseState.native_sources,
-      association: selected.associate(targets.map(sourceFactKey))! } };
+    const selectedState = { ...baseState, native_sources: { ...baseState.native_sources, association: covered(5) } };
     const funded = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 });
     expect(nativeNavigationProjection(selectedState, values, funded()).status).toBe("ordered");
-    expect(selectedState.native_sources.association.refusal.swap_selected).toBe(true);
+    expect(selectedState.native_sources.association.decision).toEqual({ refused: null, applied: true });
     const laterRefusal = nativeNavigationProjection(selectedState, values, new SourceSemanticResourceLedger({
       work_units: generous.spentWork, memory_bytes: 1_000_000 }));
     expect(laterRefusal.status).toBe("resource_refused");
@@ -118,7 +123,7 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     expect(laterMemoryRefusal.status).toBe("resource_refused");
     if (laterMemoryRefusal.status !== "resource_refused") throw new Error("expected later navigation memory refusal");
     expect(laterMemoryRefusal.constraints!.memory!.required).toBeGreaterThan(laterMemoryRefusal.constraints!.memory!.available);
-    expect(selectedState.native_sources.association.refusal.phase).toBeNull();
+    expect(selectedState.native_sources.association.decision.refused).toBeNull();
     expect(nativeNavigationProjection(selectedState, values, funded()).status).toBe("ordered");
     const changed: FieldEngineState = { ...retained, projection_progress: undefined, binding: { ...retained.binding,
       snapshot: { ...retained.binding.snapshot, values: retained.binding.snapshot.values.map(value => ({ ...value,

@@ -12,15 +12,17 @@ import { nativeRecallFixture } from "./native-recall.test-support.js";
 
 /** Derive a separately bound, indexed snapshot without mutating the replay's
  * sealed SQLite input or relabelling its historical admission. */
-export async function ordinaryIndexedSnapshot(sourceText: readonly string[]) {
-  const native = await nativeRecallFixture(sourceText), plan = native.admitted.plan;
+export async function ordinaryIndexedSnapshot(sourceText: readonly string[], options?: Readonly<{
+  dates?: readonly string[]; vectors?: readonly (readonly number[])[]
+}>) {
+  const native = await nativeRecallFixture(sourceText, options?.dates), plan = native.admitted.plan;
   const snapshot = join(native.root, "ordinary-indexed.sqlite");
   copyFileSync(plan.config.snapshot_path, snapshot);
   const database = initDatabase({ filename: snapshot });
   try {
     // These authored vectors are a provider-free simulation. A full-source
     // window keeps this fixture about public pagination, not vector windowing.
-    await publishIndexedGeneration(database, sourceText.map(text => ({ text })), {
+    await publishIndexedGeneration(database, sourceText.map((text, index) => ({ text, vector: options?.vectors?.[index] })), {
       ...SIMULATED_CONFIGURATION, profile: { ...SIMULATED_CONFIGURATION.profile, window_bytes: 16384 }
     }, plan.config.workspace_id);
     database.connection.pragma("wal_checkpoint(TRUNCATE)");

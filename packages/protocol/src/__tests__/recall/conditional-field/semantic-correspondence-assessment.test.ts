@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
+import { z } from "zod";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
-  SourceSemanticCorrespondenceAssessmentSchema, buildSourceSemanticCorrespondenceEndpointCatalog,
+  SourceSemanticCorrespondenceAssessmentSchema, SourceSemanticEndpointCatalogCapacityError, buildSourceSemanticCorrespondenceEndpointCatalog,
   countSourceSemanticCorrespondenceJsonBytes, materializeSourceSemanticCorrespondenceAssessment
 } from "../../../recall/conditional-field/index.js";
 import type { SourceSemanticQuery } from "../../../recall/conditional-field/semantic-query.js";
@@ -64,6 +65,35 @@ it("advertises named query referents, predicates, and slots without pairing or u
   expect(catalog.source_endpoints.map((row) => row.kind)).toEqual(["referent", "frame", "slot"]);
   expect(catalog.source_endpoints.some((row) => row.referent === "rUnknown")).toBe(false);
   expect(JSON.stringify(catalog)).not.toMatch(/sha256:/u);
+});
+
+it.each(["query", "source"] as const)("distinguishes %s catalog capacity from other validation without truncation", side => {
+  const frames = Array.from({ length: 128 }, (_, i) => ({ ...interpretation.frames[0]!, id: `f${i}` }));
+  const queryFrames = Array.from({ length: 128 }, (_, i) => ({ ...query.alternatives[0]!.frames[0]!, id: `q${i}` }));
+  const fullQuery = side === "query" ? { ...query, alternatives: [{ ...query.alternatives[0]!, frames: queryFrames }] } : query;
+  const fullSource = side === "source" ? { ...interpretation, frames } : interpretation;
+  const atLimitQuery = side === "query" ? { ...fullQuery, alternatives: [{ ...fullQuery.alternatives[0]!,
+    frames: queryFrames.map((frame, i) => i === 127 ? { ...frame, role_requirements: [] } : frame) }] } : query;
+  const atLimitSource = side === "source" ? { ...fullSource,
+    frames: frames.map((frame, i) => i === 127 ? { ...frame, slots: [] } : frame) } : interpretation;
+  const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(atLimitQuery,
+    [{ source_interpretation_handle: "source1", interpretation: atLimitSource }]);
+  expect(catalog[side === "query" ? "query_endpoints" : "source_endpoints"]).toHaveLength(256);
+  let failure: unknown;
+  try { buildSourceSemanticCorrespondenceEndpointCatalog(fullQuery, [{ source_interpretation_handle: "source1", interpretation: fullSource }]); }
+  catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(SourceSemanticEndpointCatalogCapacityError);
+  expect(failure).toBeInstanceOf(z.ZodError);
+  expect(failure).toMatchObject({ endpoint_kind: side, limit: 256, attempted: 257 });
+});
+
+it("does not classify malformed catalog entries as capacity refusal", () => {
+  let failure: unknown;
+  try { buildSourceSemanticCorrespondenceEndpointCatalog(query, [{
+    source_interpretation_handle: "source1", interpretation: { ...interpretation, frames: [{ ...interpretation.frames[0]!, id: "" }] }
+  }]); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(z.ZodError);
+  expect(failure).not.toBeInstanceOf(SourceSemanticEndpointCatalogCapacityError);
 });
 
 it("requires every query endpoint to be assessed and lowers only positive equivalents", () => {

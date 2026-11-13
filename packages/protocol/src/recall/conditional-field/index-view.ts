@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HostSourceDependencySchema } from "../../conversation/host-source-dependency.js";
 import { RecallNavigationWitnessSchema } from "./navigation.js";
 import { InterpretationNodeCoordinateSchema } from "./interpretation-coordinate.js";
 import {
@@ -219,10 +220,18 @@ export const PayloadContinuationRequestSchema = z
     target: RecallTargetRefSchema,
     start_offset: z.number().int().nonnegative().optional(),
     end_offset: z.number().int().nonnegative().optional(),
-    byte_budget: NonNegativeIntSchema.optional()
+    byte_budget: NonNegativeIntSchema.optional(),
+    /** Contextual prerequisite reached from this already-delivered, version-bound source member. */
+    dependency: z.object({ reference: HostSourceDependencySchema, start_offset: NonNegativeIntSchema,
+      source_occurrence_id: HostSourceDependencySchema.unwrap().shape.occurrence_id })
+      .strict().readonly().optional()
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.dependency !== undefined && (value.target.kind !== "source_evidence"
+      || value.start_offset !== undefined || value.end_offset !== undefined)) {
+      context.addIssue({ code: "custom", message: "dependency continuation uses its own offset and a source member target" });
+    }
     if (value.end_offset !== undefined && value.start_offset !== undefined
       && value.end_offset <= value.start_offset) {
       context.addIssue({

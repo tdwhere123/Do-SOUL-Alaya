@@ -83,6 +83,7 @@ export type SourceRootObserverRow = Readonly<{
   readonly retained_extent?: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
   readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
+  readonly delivery_fallback_end?: number;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly original_complete?: boolean;
   readonly scope_class?: string;
@@ -159,7 +160,9 @@ export type NativeSourceNomination = Readonly<{
   witness: readonly SourceSemanticNominationOccurrence[];
   /** Bounded source permutation, separate from factual capture ranks. */
   question_time_order?: readonly string[];
-  /** Original-query statement-key observations over admitted roots; navigation only. */
+  /** Current source-bound, unreviewed observations used by the bounded preference. */
+  task_observations?: readonly import("@do-soul/alaya-protocol").QualifiedTaskObservation[];
+  /** Evidence statement coverage over admitted roots from original-query statement keys; navigation only. */
   association?: import("../../../source-index/statement-association.js").StatementAssociation;
   /** An explicitly bound source pool can include scoped or proved catalog roots. */
   admitted_roots?: readonly import("@do-soul/alaya-protocol").SourceEvidenceTarget[];
@@ -170,7 +173,7 @@ export type NativeSourceNomination = Readonly<{
   /** Fresh work funded by the ordinary acquisition allowance; absent on a prepaid library capture. */
   acquisition_resources?: SourceIndexAcquisitionResult["resources"];
   retained_bytes?: number;
-  /** Optional statement vectors/cache within retained_bytes; can be discarded before field admission. */
+  /** Optional evidence coverage within retained_bytes; can be discarded before field admission. */
   association_retained_bytes?: number;
 }>;
 
@@ -183,6 +186,13 @@ export type ObserverReaders = Readonly<{
     /** Prepared access hint; a discovery proposal, never proof of relevance. */
     hint?: string;
     questionTime?: import("@do-soul/alaya-protocol").QuestionTimePreference;
+    sourceTemplate?: import("@do-soul/alaya-protocol").SourceTemplateProposal;
+    sourceTaskObservation?: unknown;
+    /** Admitted question-formed evidence conditions; prepared vectors are bound to their exact statements. */
+    evidenceConditions?: readonly import("@do-soul/alaya-protocol").EvidenceCondition[];
+    evidenceRelation?: "derived";
+    /** Private observation context; the same guard also controls task proposal forwarding. */
+    taskObservationBlock?: "access_hint" | "source_guard" | "time_window" | "program" | "conditions";
   }>) => NativeSourceNomination;
   /** An admitted Q/H/C package may require a different visible source interval
    * from the native navigation window; this never changes membership or rank. */
@@ -216,6 +226,7 @@ export type ObserverReaders = Readonly<{
   readonly sourceRoot?: (input: Readonly<{
     /** Actual caller phase; absent on older readers means unclassified, not observation. */
     readonly purpose?: "observation" | "payload";
+    readonly firstDeliveryUnit?: boolean;
     readonly workspaceId: string;
     readonly rootKind: SourceEvidenceRootKind;
     readonly rootId: string;
@@ -227,6 +238,14 @@ export type ObserverReaders = Readonly<{
     readonly nativeByteLimit?: number;
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
+  readonly sourceDependencies?: (input: Readonly<{
+    target: import("@do-soul/alaya-protocol").SourceEvidenceTarget;
+    span: readonly [number, number]; authorizedScopes: readonly string[] | null;
+    budget: import("@do-soul/alaya-protocol").SourceSemanticResourceBudget;
+    byteLimit?: number;
+    continuation?: Readonly<{ reference: import("@do-soul/alaya-protocol").HostSourceDependency;
+      start_offset: number; source_occurrence_id: string; source_span: readonly [number, number] }>;
+  }>) => import("../../runtime/source-dependency-delivery.js").SourceDependencyDeliveryRead;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;

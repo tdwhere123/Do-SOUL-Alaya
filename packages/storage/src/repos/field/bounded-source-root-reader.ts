@@ -42,6 +42,7 @@ export type SourceRootRow = Readonly<{
   readonly retained_extent: "body" | "excerpt" | "gist";
   readonly source_representation?: SourceRepresentation;
   readonly delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
+  readonly delivery_fallback_end?: number;
   readonly scope_class?: string;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
@@ -169,18 +170,19 @@ export class SqliteSourceRootRecallReader {
     offset = 0,
     nativeByteLimit = byteLimit,
     workLimit = Number.MAX_SAFE_INTEGER,
-    deliveryBoundaries = false
+    deliveryBoundaries = false,
+    firstDeliveryUnit = false
   ): SourceRootHydratePage {
     if (!Number.isSafeInteger(nativeByteLimit) || nativeByteLimit < 0) throw new Error("invalid source-root native byte limit");
     if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION || workLimit < 5) return {
       row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
-    const page = this.read(workspaceId, target, byteLimit, offset, { nativeByteLimit, workLimit });
+    const page = this.read(workspaceId, target, byteLimit, offset, { nativeByteLimit, workLimit }, firstDeliveryUnit);
     if (!deliveryBoundaries || page.row === null || page.unavailable) return page;
     const read = target.root_kind === "source_record"
       ? this.records.readDeliveryBoundaries(workspaceId, target.root_id,
         { start: page.row.content_start, end: page.row.content_end },
         Math.max(0, workLimit - (page.nativeWork ?? page.rowsRead)),
-        Math.max(0, nativeByteLimit - page.bytesRead - (page.metadataBytes ?? 0)))
+        Math.max(0, nativeByteLimit - page.bytesRead - (page.metadataBytes ?? 0)), firstDeliveryUnit)
       : { boundaries: { status: "available" as const, spans: [] }, nativeWork: 0, metadataBytes: 0, rowsRead: 0 };
     return { ...page, row: { ...page.row, delivery_boundaries: read.boundaries }, rowsRead: page.rowsRead + read.rowsRead,
       metadataBytes: (page.metadataBytes ?? 0) + read.metadataBytes,
@@ -192,7 +194,8 @@ export class SqliteSourceRootRecallReader {
     target: SourceEvidenceTarget,
     byteLimit: number,
     offset: number,
-    allowance?: SourceRecordReadAllowance
+    allowance?: SourceRecordReadAllowance,
+    firstDeliveryUnit = false
   ): SourceRootHydratePage {
     if (
       !Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > DEFAULT_BYTE_LIMIT
@@ -207,7 +210,7 @@ export class SqliteSourceRootRecallReader {
       if (bounded === null) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
-      const mapped = mapBoundedRecord(bounded, offset);
+      const mapped = mapBoundedRecord(bounded, offset, firstDeliveryUnit);
       if (bounded.resourceLimited) return { row: null, rowsRead: 1, bytesRead: bounded.nativeBytes,
         metadataBytes: bounded.metadataBytes, nativeWork: 5 + bounded.dependencyWork, unavailable: false, resourceLimited: true };
       return { ...hydrateMapped(mapped, target, bounded.nativeBytes), metadataBytes: bounded.metadataBytes,
@@ -217,7 +220,7 @@ export class SqliteSourceRootRecallReader {
     if (capsule === null) {
       return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
     }
-    const mapped = mapBoundedCapsule(capsule, byteLimit, offset);
+    const mapped = mapBoundedCapsule(capsule, byteLimit, offset, firstDeliveryUnit);
     if (mapped === null || !sameSourceIdentity(mapped, target)) {
       return { row: null, rowsRead: 1, bytesRead: capsule.nativeBytes,
         metadataBytes: capsuleMetadataBytes(capsule), nativeWork: 2, unavailable: true };
@@ -432,7 +435,7 @@ function emptyPage(truncated: boolean, committedThrough: string | null): SourceR
   };
 }
 
-function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): SourceRootRow | null {
+function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number, firstDeliveryUnit = false): SourceRootRow | null {
   if (read.invalidOffset || read.record === null || read.record.source_body === null) return null;
   const end = offset + read.prefixBytes;
   return {
@@ -440,6 +443,7 @@ function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): Source
     content: read.record.source_body,
     content_start: offset,
     content_end: end,
+    ...(!firstDeliveryUnit || read.chunkEnd === undefined ? {} : { delivery_fallback_end: read.chunkEnd }),
     content_complete: end === read.bodyBytes
   };
 }
@@ -484,7 +488,8 @@ function sourceScopeClass(
 export function mapBoundedCapsule(
   capsule: BoundedCapsuleSource,
   byteLimit: number,
-  offset: number
+  offset: number,
+  firstDeliveryUnit = false
 ): SourceRootRow | null {
   if (capsule.prefix === null || capsule.digest === null || capsule.body_bytes === null
     || offset > capsule.body_bytes || (capsule.prefix.length > 0 && (capsule.prefix[0]! & 0xc0) === 0x80)) return null;
@@ -501,6 +506,7 @@ export function mapBoundedCapsule(
     content: text,
     content_start: offset,
     content_end: offset + Buffer.byteLength(text, "utf8"),
+    ...(!firstDeliveryUnit || capsule.chunkEnd === undefined ? {} : { delivery_fallback_end: capsule.chunkEnd }),
     content_complete: offset + Buffer.byteLength(text, "utf8") === capsule.body_bytes,
     // Capsule gist/excerpt are retained reductions, not the original body.
     original_complete: false,

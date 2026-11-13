@@ -6,7 +6,7 @@ import {
   type StorageDatabase,
   type initDatabase
 } from "@do-soul/alaya-storage";
-import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul/source-read";
 import { createBoundRecallPathReadPorts, type RecallPathReadBind } from "../recall/recall-path-read-bind.js";
 
 export interface RecallReadWorkerRuntime {

@@ -73,6 +73,7 @@ export function pageResourceRefusal(input: Readonly<{ message: string } & (
 export type RecallPageFit = Readonly<{
   readonly index: InformationIndex;
   readonly previews: ReadonlyMap<string, string>;
+  readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
   /** Exact size after a completed scan; measured prefix only on interruption.
    * Zero with interruption means no bytes measured, not an empty envelope. */
   readonly bytes: number;
@@ -111,13 +112,17 @@ export type RecallPageAttempt = Readonly<{
 export function fitProjectedRecallPage(input: Readonly<{
   index: InformationIndex; previews: ReadonlyMap<string, string>; metadata: Readonly<Record<string, RecallSourceMetadata>>;
   request: ConditionalFieldRecallRequest; request_digest: string; meter: SourceSemanticResourceLedger;
+  /** A measured ordinary envelope may be reused while adding optional prerequisites. */
+  ordinary_fit?: RecallPageFit;
 }>): RecallPageFit {
   const budget = deliveryBudgetOf(input.request);
   let codecInvocations = 0;
-  let encoding: RecallResultEncodingObservation | null = null;
+  let encoding: RecallResultEncodingObservation | null = input.ordinary_fit?.observation.encoding ?? null;
   const initialWork = input.meter.spentWork, initialBytes = input.meter.spentBytes;
-  const finish = (fit: Omit<RecallPageFit, "observation">): RecallPageFit => {
-    const observed = { ...fit, observation: {
+  const finish = (fit: Omit<RecallPageFit, "observation" | "metadata"> & {
+    metadata?: Readonly<Record<string, RecallSourceMetadata>>
+  }): RecallPageFit => {
+    const observed = { ...fit, metadata: fit.metadata ?? input.metadata, observation: {
       measurement: fit.interruption === undefined ? "complete" as const : "interrupted" as const,
       expected_result_count: input.index.entries.length,
       representation_page_budget: input.index.representation.page_budget,
@@ -133,6 +138,7 @@ export function fitProjectedRecallPage(input: Readonly<{
   // No page is framed for free: below the envelope floor the attempt is refused
   // before the codec runs.
   if (input.meter.work < ENVELOPE_PHASES + input.index.entries.length) {
+    if (input.ordinary_fit !== undefined) return input.ordinary_fit;
     return finish({ index: input.index, previews: new Map(), bytes: 0, result_count: 0, fits: false,
       interruption: "work" });
   }
@@ -150,30 +156,58 @@ export function fitProjectedRecallPage(input: Readonly<{
     }
   });
   try {
-    framing.begin();
-    const results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
-      () => framing.entry(), observation => { encoding = observation; });
-    const index = frameEncodedIndex(input.index, results);
+    let results: ReturnType<typeof encodeIndexResults> = [];
+    if (input.ordinary_fit === undefined) {
+      framing.begin();
+      results = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
+        () => framing.entry(), observation => { encoding = observation; }, { dependency_byte_limit: 0 });
+    }
+    const index = input.ordinary_fit?.index ?? frameEncodedIndex(input.index, results);
     // Availability comes from hydration and fitting, never from source text.
-    const previews = new Map(index.entries.flatMap((entry, offset) => {
+    const previews = input.ordinary_fit?.previews ?? new Map(index.entries.flatMap((entry, offset) => {
       const preview = results[offset]?.content_preview;
       return preview === undefined || results[offset]?.payload_available !== true ? []
         : [[indexEntryCacheKey(entry), input.previews.get(indexEntryCacheKey(entry)) === ""
           && entry.target.kind === "source_evidence" && preview === "[empty source]" ? "" : preview] as const];
     }));
-    framing.enterCodec();
-    codecInvocations++;
-    const envelope = input.request.encode_page === undefined ? encodeRecallPageResponse({
-      delivery_id: `delivery_${preparedDeliveryId(input.request_digest, index)}`, index, results,
+    let metadata = input.ordinary_fit?.metadata ?? encodedDependencyMetadata(input.metadata, input.index, results);
+    const encode = (rows: typeof results, sourceMetadata: typeof metadata) => {
+      framing.enterCodec(); codecInvocations++;
+      return input.request.encode_page === undefined ? encodeRecallPageResponse({
+      delivery_id: `delivery_${preparedDeliveryId(input.request_digest, index)}`, index, results: rows,
       active_constraints: input.request.governance?.constraints ?? [],
       active_constraints_count: input.request.governance?.total_count ?? null,
       active_constraints_completeness: input.request.governance?.completeness ?? "incomplete",
       degradation_reason: null
     }) : input.request.encode_page(captureRecallData(index), codecPreviews(previews),
-      captureRecallData(input.metadata), codecMeter);
-    const bytes = framing.measure(envelope);
-    const fits = results.length === index.entries.length && bytes <= budget.max_encoded_bytes;
-    return finish({ index, previews, bytes, result_count: results.length, fits });
+      captureRecallData(sourceMetadata), codecMeter);
+    };
+    let bytes = input.ordinary_fit?.bytes ?? framing.measure(encode(results, metadata));
+    let resultCount = input.ordinary_fit?.result_count ?? results.length;
+    const surplus = Math.max(0, budget.max_encoded_bytes - bytes);
+    if (surplus > 0 && Object.values(input.metadata).some(row => row.semantic_dependencies !== undefined)) {
+      try {
+        const optional = encodeIndexResults(input.index, input.previews, budget.max_total_tokens, input.metadata,
+          () => framing.entry(), undefined, { dependency_byte_limit: surplus });
+        if (optional.some(row => row.semantic_dependencies !== undefined)) {
+          const fittedMetadata = encodedDependencyMetadata(input.metadata, input.index, optional);
+          const optionalFraming = new RecallEnvelopeFraming(input.meter);
+          optionalFraming.begin();
+          const measured = optionalFraming.measure(encode(optional, fittedMetadata));
+          // A codec can contribute extra framing. Keep the already fitted ordinary
+          // envelope if optional prerequisites exceed its actual residual.
+          if (measured <= budget.max_encoded_bytes) {
+            results = optional; metadata = fittedMetadata; bytes = measured; resultCount = optional.length;
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        // The ordinary envelope already fitted and was measured; optional work
+        // remains charged even when it cannot finish, and exposes no prepared bytes.
+      }
+    }
+    const fits = resultCount === index.entries.length && bytes <= budget.max_encoded_bytes;
+    return finish({ index, previews, metadata, bytes, result_count: resultCount, fits });
   } catch (error) {
     if (framing.interrupted) {
       return finish({ index: input.index, previews: new Map(), bytes: framing.measuredBytes, result_count: 0, fits: false,
@@ -188,6 +222,23 @@ export function fitProjectedRecallPage(input: Readonly<{
       cause: error, details: { outcome: "codec_failed", resource: "public_envelope" }
     });
   }
+}
+
+function encodedDependencyMetadata(metadata: Readonly<Record<string, RecallSourceMetadata>>, index: InformationIndex,
+  results: ReturnType<typeof encodeIndexResults>): Readonly<Record<string, RecallSourceMetadata>> {
+  const fitted = Object.fromEntries(Object.entries(metadata).map(([key, value]) => {
+    const { semantic_dependencies: _prepared, ...ordinary } = value;
+    return [key, ordinary];
+  }));
+  index.entries.forEach((entry, offset) => {
+    const key = indexEntryCacheKey(entry), existing = metadata[key];
+    if (existing?.semantic_dependencies === undefined) return;
+    const { semantic_dependencies: _prepared, ...ordinary } = existing;
+    fitted[key] = { ...ordinary, ...(results[offset]?.semantic_dependencies === undefined ? {}
+      : { semantic_dependencies: results[offset]!.semantic_dependencies }) };
+    if (results[offset] !== undefined) fitted[indexEntryCacheKey({ ...entry, target: results[offset]!.target })] = fitted[key]!;
+  });
+  return fitted;
 }
 
 /** Snapshot only the current candidate's own inputs, without retaining producer references. */

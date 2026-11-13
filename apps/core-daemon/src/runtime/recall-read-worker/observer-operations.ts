@@ -1,10 +1,12 @@
-import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, SourceSemanticResourceLedger,
   SourceSemanticResourceExhausted, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
   SourceIndexAcquisition,
   restrictStatementAssociation,
+  bindEvidenceDemands,
   authorizeSourceIndexScope,
+  readSourceDependencyDelivery,
   assertRecallConsumerCompatibility,
   authorizedScopesFromAdmission,
   captureIndexPreviews,
@@ -16,27 +18,26 @@ import {
   reserveSnapshotPinWork,
   snapshotIdFromPin,
   toSourceObserverRow,
-  toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
   type ConditionalFieldRecallRequest,
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
   SqliteSourceIndexRepository,
-  SqliteEvidenceCapsuleRepo,
-  SqliteFieldSourceRecordRepo,
   SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
   SqliteRelationRecallReader,
-  SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { withWorkerActualCost } from "../recall/worker-actual-cost.js";
 import { storedMeasurementReaders } from "./stored-measurement-readers.js";
+import { sourceRootReaders } from "./source-root-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
+import { MEMBER_INDEX_OVERFLOW, renderMemberIndex, type MemberIndexInputs } from "./member-index.js";
 import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
+import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 
 const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
@@ -52,6 +53,7 @@ export function runConditionalFieldWorkerRecall(
   adapters: Readonly<{ readers?: ObserverReaders; encode_page?: ConditionalFieldRecallRequest["encode_page"];
     observe_page_fit?: ConditionalFieldRecallRequest["observe_page_fit"];
     observe_navigation?: ConditionalFieldRecallRequest["observe_navigation"];
+    observe_source_association?: ConditionalFieldRecallRequest["observe_source_association"];
     observer?: SourceSemanticObserver;
     capture_budget_work?: (work: number | undefined) => void }> = {}
 ): ConditionalFieldRecallPortResult {
@@ -60,18 +62,10 @@ export function runConditionalFieldWorkerRecall(
   const reserved = reserveSnapshotPinWork(payload.budget);
   const observer = adapters.observer;
   observer?.queryVector(payload.prepared_query?.vector);
-  const base: ObserverReaders = reserved.permitted && payload.cancelled !== true
-    ? adapters.readers ?? (payload.prepared_query === undefined && observer === undefined ? readersFor(runtime)
-      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer)) : {};
-  const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
-    ...base, nominateSources: input => {
-      const nomination = base.nominateSources!(input);
-      observer.event("field_nomination", "observe", () => ({ result: nomination.result, witness: nomination.witness,
-        admitted_roots: nomination.admitted_roots, question_time_order: nomination.question_time_order,
-        association: nomination.association }));
-      return nomination;
-    }
-  };
+  const firstPage = payload.continuation == null && payload.payload_continuation === undefined;
+  const assembled = reserved.permitted && payload.cancelled !== true
+    ? workerReaders(runtime, payload, adapters.readers, observer, firstPage) : undefined;
+  const readers: ObserverReaders = assembled?.readers ?? {};
   let governance = payload.governance;
   const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
     ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
@@ -93,6 +87,8 @@ export function runConditionalFieldWorkerRecall(
       : capture => observer.pageAttempt(capture),
     observe_navigation: adapters.observe_navigation ?? (observer === undefined ? undefined
       : capture => observer.event("field_access_order", "index", capture)),
+    observe_source_association: adapters.observe_source_association ?? (observer === undefined ? undefined
+      : capture => observer.associationRetention(capture)),
     delivery_budget: payload.delivery_budget,
     delivery_context: payload.delivery_context,
     ...(payload.prepared_query === undefined ? {} : { prepared_query: payload.prepared_query }),
@@ -149,28 +145,58 @@ export function runConditionalFieldWorkerRecall(
     entry, metadata: source_metadata[indexEntryCacheKey(entry)] ?? null })) }));
   const issuedDeliveryId = executed.delivery_id ?? issuedDeliveryIdOf(executed.index);
   const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
+  const memberInputs = firstPage ? assembled?.memberInputs() : undefined;
+  const member_index = memberInputs === undefined ? undefined
+    : renderMemberIndex(new SqliteSourceIndexRepository(runtime.database, fieldContractSha256), memberInputs,
+      new Set(index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])),
+      index.entries.length);
   return {
     execution_receipt: executed.execution_receipt,
     index,
     previews: Object.fromEntries(previews),
     source_metadata,
     preparation_id: preparationId,
-    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
+    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId }),
+    ...(member_index === undefined || member_index.length === 0 ? {} : { member_index })
   };
 }
 
-type NominationCapture = ReturnType<SourceIndexAcquisition["nominateWithWitness"]>;
+/** A first page builds its own readers so its nomination can hand the member-index inputs to this call only. */
+function workerReaders(runtime: RecallReadWorkerRuntime, payload: ConditionalFieldRecallWorkerPayload,
+  injected: ObserverReaders | undefined, observer: SourceSemanticObserver | undefined, firstPage: boolean) {
+  let memberInputs: MemberIndexInputs | undefined;
+  const base: ObserverReaders = injected ?? (payload.prepared_query === undefined && observer === undefined && !firstPage
+    ? readersFor(runtime)
+    : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
+      "allowance", payload.prepared_query?.evidence, firstPage ? inputs => { memberInputs ??= inputs; } : undefined));
+  const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
+    ...base, nominateSources: input => {
+      const nomination = base.nominateSources!(input);
+      observer.nomination(nomination);
+      return nomination;
+    }
+  };
+  return { readers, memberInputs: () => memberInputs };
+}
+
+type NominationCapture = Omit<ReturnType<SourceIndexAcquisition["nominateWithWitness"]>, "witness"> & {
+  witness: NativeSourceNomination["witness"];
+  task_observations?: NativeSourceNomination["task_observations"];
+};
 type NominationInput = Parameters<NonNullable<ObserverReaders["nominateSources"]>>[0];
 type AcquisitionFunding = "allowance" | "request";
+type PreparedEvidence = Parameters<typeof bindEvidenceDemands>[1];
 
 /** Native acquisition is the only source filter and cost owner. A prepared hint is a
  * second route under the same allowance, never a replacement for original work; a
  * query-lease source restriction narrows the acquired membership, not only identity.
- * Only the allowance quote prices statement-key association, so request-funded pages never associate.
+ * Only the allowance quote prices statement-key association, so request-funded pages never associate;
+ * keys yield evidence coverage only for the admitted statements' bound prepared vectors.
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
   queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver,
-  funding: AcquisitionFunding = "allowance"): NativeSourceNomination {
+  funding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence,
+  onMemberIndex?: (inputs: MemberIndexInputs) => void): NativeSourceNomination {
   const repository = new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true });
   const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
   const admit: Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1] = (scope, source) => {
@@ -179,20 +205,41 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
   };
   const fields = { workspace_id: input.workspaceId, vector: queryVector,
     allowance: NATIVE_SOURCE_NOMINATION_ALLOWANCE,
-    ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }) };
+    ...(input.questionTime === undefined ? {} : { question_time: input.questionTime }),
+    ...(input.sourceTemplate === undefined ? {} : { source_template: input.sourceTemplate }),
+    ...(input.sourceTaskObservation === undefined ? {} : { source_task_observation: input.sourceTaskObservation }) };
   const capacity = funding === "allowance" ? repository.quoteQueryCapacity(input.workspaceId, fields.allowance) : undefined;
   const budget = capacity === undefined ? input.budget
     : SourceIndexAcquisition.quoteAllowanceBudget({ ...fields, navigation_text: input.query }, capacity);
   const meter = new SourceSemanticResourceLedger(budget);
+  let prepaidCapture: NativeSourceNomination | undefined;
   if (capacity !== undefined) meter.charge(capacity.resources.work, capacity.resources.memory_bytes, "source acquisition capacity reads");
   const run = (navigation_text: string, allowance: SourceIndexNominationAllowance, invocation: "original" | "hint") => {
     const capture = acquisition.nominateWithWitness({ ...fields, allowance, navigation_text, budget: meter.remaining(),
-      ...(invocation === "hint" ? { question_time: undefined } : {}) }, admit, invocation,
+      ...(invocation === "hint" ? { question_time: undefined, source_template: undefined, source_task_observation: undefined } : {}) }, admit, invocation,
       observer === undefined ? undefined : (capture, kind) =>
-        observer.sourceIndexAcquisition(invocation, "field", capture, kind), invocation === "original" && capacity !== undefined);
+        observer.sourceIndexAcquisition(invocation, "field", () => {
+          const fact = capture();
+          return fact.kind !== "source_task_inventory" ? fact : { ...fact, context: {
+            block: input.taskObservationBlock ?? (input.sourceTemplate !== undefined ? "source_template"
+              : funding !== "allowance" ? "request_funded" : null),
+            source_id: input.sourceId ?? null } };
+        }, kind), invocation === "original" && capacity !== undefined ? demands : undefined,
+      invocation !== "original" || capacity === undefined || input.sourceTemplate === undefined && input.sourceTaskObservation === undefined ? undefined : {
+        ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
+        readInterpretation: taskInterpretationReader(database, input.workspaceId, input.authorizedScopes),
+        retain: (capture, retentionMeter) => {
+          const retained = nominationFromCaptures([capture], input.sourceId, { charged_by_caller: true });
+          const bytes = retainBaseNomination(retained, retentionMeter);
+          prepaidCapture = retained;
+          return bytes;
+        }
+      }, observer === undefined ? undefined : input.sourceId,
+      invocation === "original" && capacity !== undefined ? MEMBER_INDEX_OVERFLOW : 0);
     meter.charge(capture.result.resources.work, capture.result.resources.memory_bytes, "source native acquisition");
     return capture;
   };
+  const demands = bindEvidenceDemands(input.evidenceConditions, evidence, queryVector, input.evidenceRelation);
   const originalBudget = meter.remaining(), original = run(input.query, fields.allowance, "original");
   const hintBudget = meter.remaining(), hintAllowance = {
     max_attempts: fields.allowance.max_attempts - original.result.accounting.attempted,
@@ -212,18 +259,24 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       ...(hint === undefined ? {} : { supplemental: [phase(hint, hintBudget, hintAllowance)] }) },
       beyond_observed_prefix: "unknown_not_nomination_limit" };
   });
-  const captured = nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId,
-    capacity === undefined ? undefined : { charged_by_caller: true });
+  const captured = prepaidCapture === undefined ? nominationFromCaptures(hint === undefined ? [original] : [original, hint], input.sourceId,
+    capacity === undefined ? undefined : { charged_by_caller: true }) : {
+    ...prepaidCapture, result: { ...original.result, nominations: prepaidCapture.result!.nominations },
+    ...(original.association === undefined ? {} : { association: restrictStatementAssociation(original.association,
+      key => prepaidCapture!.result!.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) })
+  };
   // Library requests already have an explicit outer resource ledger; their field
   // must continue paying acquisition from that request, without an ordinary allowance.
-  if (capacity === undefined) return captured;
+  if (capacity === undefined) {
+    observer?.associationRetention(() => ({ stage: "source_retention", status: captured.association === undefined ? "absent" : "retained",
+      reason: "request_funded_acquisition", required_bytes: null, available_bytes: meter.bytes, retained_bytes: null }));
+    return captured;
+  }
   const result = captured.result!;
   const { association, ...baseCapture } = captured;
-  const beforeRetention = meter.spentBytes;
-  meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
-    acquisition_resources: result.resources }, "source retained nomination");
-  const baseRetainedBytes = meter.spentBytes - beforeRetention;
+  const baseRetainedBytes = original.prepaid_base_bytes ?? retainBaseNomination(captured, meter);
   let retainedAssociation = association, associationRetainedBytes = 0;
+  const associationAvailableBytes = meter.bytes;
   if (association !== undefined) {
     const beforeAssociation = meter.spentBytes;
     try {
@@ -234,16 +287,34 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       retainedAssociation = undefined;
     }
   }
+  observer?.associationRetention(() => ({ stage: "source_retention",
+    status: retainedAssociation !== undefined ? "retained" : association !== undefined ? "discarded" : "absent",
+    reason: retainedAssociation !== undefined ? null : association !== undefined ? "source_retained_statement_association" : "association_not_provided",
+    required_bytes: retainedAssociation === undefined ? null : associationRetainedBytes,
+    available_bytes: associationAvailableBytes, retained_bytes: associationRetainedBytes }));
   const resources = {
     ...result.resources, work: meter.spentWork,
     native_bytes: result.resources.native_bytes + capacity.resources.native_bytes,
     memory_bytes: meter.spentBytes
   };
-  return { ...baseCapture, ...(retainedAssociation === undefined ? {} : { association: retainedAssociation }),
+  const nomination: NativeSourceNomination = { ...baseCapture, ...(retainedAssociation === undefined ? {} : { association: retainedAssociation }),
     association_retained_bytes: associationRetainedBytes, retained_bytes: baseRetainedBytes + associationRetainedBytes,
     acquisition_resources: resources, result: { ...result, resources,
       resource_refusals: association !== undefined && retainedAssociation === undefined
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
+  const binding = original.result.vector.state !== null && "binding" in original.result.vector.state ? original.result.vector.state.binding : null;
+  onMemberIndex?.({ pool: result.nominations.map(row => row.source), overflow: original.index_members ?? [],
+    conditions: demands.status === "ready" ? demands.vectors : [],
+    vectors: binding === null ? null : { generation_id: binding.generation_id, dimensions: binding.dimensions } });
+  return nomination;
+}
+
+/** The same actual capture is paid either at the late preference choice or after ordinary acquisition. */
+function retainBaseNomination(captured: NativeSourceNomination, meter: SourceSemanticResourceLedger): number {
+  const { association: _association, ...baseCapture } = captured, before = meter.spentBytes;
+  meter.retain({ ...baseCapture, association: null, retained_bytes: 0, association_retained_bytes: 0,
+    acquisition_resources: captured.result!.resources }, "source retained nomination");
+  return meter.spentBytes - before;
 }
 
 /** Frozen captures are already paid; reuse reports their real membership and totals. */
@@ -290,6 +361,9 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
     witness: membership.witness,
     ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
       captures[0].question_time_order.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
+    ...(captures[0]?.task_observations === undefined ? {} : { task_observations: captures[0].task_observations.filter(
+      observation => membership.nominations.some(row => sourceGoldRootIdentity(row.source.target)
+        === sourceGoldRootIdentity(observation.observation.source))) }),
     ...(captures[0]?.association === undefined ? {} : { association: restrictStatementAssociation(captures[0].association,
       key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
     ...(digests.original === null ? {} : { navigation_digests: { original: digests.original,
@@ -301,21 +375,19 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = [],
   queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" },
-  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance"): ObserverReaders {
+  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence,
+  onMemberIndex?: (inputs: MemberIndexInputs) => void): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
-  const sourceRoots = new SqliteSourceRootRecallReader(
-    new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
-    new SqliteEvidenceCapsuleRepo(database)
-  );
   const kindsSql = database.connection.prepare(
     `SELECT relation_kind AS kind FROM relation_assertions
      WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
   );
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
-    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding),
+    sourceDependencies: input => readSourceDependencyDelivery(new SqliteSourceIndexRepository(database, fieldContractSha256), input),
+    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding, evidence, onMemberIndex),
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,
@@ -337,63 +409,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         resourceLimited: page.resourceLimited
       };
     },
-    sourceRootMetadataByteLimit: 8192,
-    sourceRootChunkByteLimit: 4096,
-    sourceRoots: (input) => {
-      const page = sourceRoots.page({
-        workspaceId: input.workspaceId,
-        query: input.query,
-        limit: input.limit,
-        nativeLimit: input.nativeLimit,
-        workLimit: input.workLimit,
-        afterCursor: input.afterCursor,
-        byteLimit: input.byteLimit,
-        nativeByteLimit: input.nativeByteLimit
-      });
-      return {
-        rows: page.rows.map(toSourceRootObserverRow),
-        nativeVisits: page.nativeVisits,
-        nativeBytes: page.nativeBytes,
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        metadataBytes: page.metadataBytes,
-        nativeWork: page.nativeWork,
-        truncated: page.truncated,
-        committedThrough: page.committedThrough,
-        unavailable: page.unavailable
-      };
-    },
-    sourceRoot: (input) => {
-      if (input.revision === undefined || input.digest === undefined) {
-        return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
-      }
-      const page = sourceRoots.hydrate(
-        input.workspaceId,
-        sourceRecallTarget({
-          workspace_id: input.workspaceId,
-          root_kind: input.rootKind,
-          root_id: input.rootId,
-          source_version: input.revision,
-          content_digest: input.digest,
-          evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
-        }),
-        input.byteLimit ?? 65536,
-        input.offset ?? 0,
-        // 12288 is the retained chunk+metadata reservation; logical clip is separate.
-        input.nativeByteLimit ?? Math.max(input.byteLimit ?? 65536, 12_288),
-        input.workLimit,
-        input.purpose === "payload"
-      );
-      return {
-        row: page.row === null ? null : toSourceRootObserverRow(page.row),
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        metadataBytes: page.metadataBytes,
-        nativeWork: page.nativeWork,
-        unavailable: page.unavailable,
-        resourceLimited: page.resourceLimited
-      };
-    },
+    ...sourceRootReaders(database),
     relation: (input) => relation.read(
       input.workspaceId,
       input.subject,

@@ -318,7 +318,9 @@ function capturedCall(
 function sourceIntervals(output: SoulMemorySearchResponse): SourceInterval[] {
   return output.results.flatMap((row, slot_index) => {
     if (row.target.kind !== "source_evidence" || row.target.span === undefined) return [];
-    return [{ slot_index, target: row.target, span: row.target.span }];
+    const opening = output.index?.entries[slot_index]?.navigation?.evidence_variant?.support_span;
+    const opened = opening !== undefined && opening.start_byte === row.target.span.content_start;
+    return [{ slot_index, target: row.target, span: row.target.span, ...(opened ? { opening_end: opening.end_byte } : {}) }];
   });
 }
 

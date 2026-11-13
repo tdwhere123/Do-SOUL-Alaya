@@ -91,6 +91,8 @@ export {
   SoulRecallTokenizerHintSchema,
   SoulRecallHostContextSchema,
   SoulMemorySearchRequestSchema,
+  RecallMemberIndexLineSchema,
+  type RecallMemberIndexLine,
   type MemorySearchResult,
   type SoulActiveConstraintGovernanceState,
   type SoulActiveConstraint,

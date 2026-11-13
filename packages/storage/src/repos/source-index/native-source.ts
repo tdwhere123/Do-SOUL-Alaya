@@ -49,7 +49,8 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
     if (source.auxiliary !== undefined) {
       const artifact = readStatementIndexTarget(database, source.target.workspace_id, source.auxiliary.artifact_id, budget);
       Object.assign(resources, artifact.resources);
-      if (artifact.status === "partial") return { status: "partial" as const, reason: "read_budget" as const, resources };
+      if (artifact.status === "resource_limited") return { status: "partial" as const, reason: "read_budget" as const, resources };
+      if (artifact.status === "partial") return { status: "partial" as const, reason: "native_source_unavailable" as const, resources };
       if (artifact.status === "absent" || artifact.status === "stale" || canonicalJson(artifact.source) !== canonicalJson(source)) {
         return { status: "stale" as const, reason: "statement_changed", resources };
       }

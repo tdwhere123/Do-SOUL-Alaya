@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
-import type { SourceIndexAcquisition } from "@do-soul/alaya-core";
+import type { NativeSourceNomination, SourceIndexAcquisition, ConditionalFieldRecallRequest } from "@do-soul/alaya-core";
 import type { SourceIndexQueryVector } from "@do-soul/alaya-protocol";
 import { SourceSemanticNativeFactsSchema, SourceSemanticObservationFacts, type SourceSemanticNativeFacts } from "./source-semantic-provenance.js";
 
@@ -211,6 +211,21 @@ export class SourceSemanticObserver {
     this.event("source_query_vector", "field", () => vector === undefined
       ? { status: "unavailable", reason: "query_vector_unprovided" }
       : vector.status === "unavailable" ? vector : { ...vector, embedding: Array.from(vector.embedding) });
+  }
+
+  /** Nomination facts are not the retained computation graph. Statement keys never leave
+   * acquisition; the later field_access_order event owns the coverage permutation and refusal. */
+  nomination(value: NativeSourceNomination): void {
+    this.event("field_nomination", "observe", () => ({ result: value.result, witness: value.witness,
+      admitted_roots: value.admitted_roots, question_time_order: value.question_time_order,
+      association: value.association === undefined ? undefined : {
+        representation: "retained-evidence-coverage.v1", roots: value.association.roots,
+        statements: value.association.statements, coverage: value.association.coverage, decision: value.association.decision
+      }, beyond_observed_prefix: "unknown_not_nomination_limit" }));
+  }
+
+  associationRetention(capture: Parameters<NonNullable<ConditionalFieldRecallRequest["observe_source_association"]>>[0]): void {
+    this.event("statement_association_retention", "field", capture);
   }
 
   pageAttempt(capture: () => unknown): void {

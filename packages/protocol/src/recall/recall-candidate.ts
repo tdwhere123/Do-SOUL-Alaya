@@ -12,6 +12,7 @@ import { ActivationWeightsSchema } from "./recall-policy.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
 import { RecallTargetRefSchema, SourceEvidenceTargetSchema } from "./conditional-field/product-identity.js";
 import { SourceDisclosureSchema, sourceDisclosure } from "./source-disclosure.js";
+import { HostDependencyExposureSchema } from "../conversation/host-dependency-exposure.js";
 
 const SourceLookupRoleSchema = z.object({ role: BoundedLabelSchema, phrase: z.string().min(1).max(4096) }).strict().readonly();
 const SourceLookupReasonSchema = z.object({
@@ -109,6 +110,7 @@ export const RecallCandidateSchema = z
     // Historical candidates omit this field; current producers retain hydration state.
     payload_available: z.boolean().optional(),
     source_disclosure: SourceDisclosureSchema.optional(),
+    semantic_dependencies: HostDependencyExposureSchema.optional(),
     token_estimate: NonNegativeIntSchema,
     manifestation: ManifestationStateSchema,
     // invariant: memory products require these; source_evidence omits them unless

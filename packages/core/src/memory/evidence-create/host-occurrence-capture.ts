@@ -21,6 +21,9 @@ export function captureHostStructure(request: SourceAdmissionRequest, recordId: 
     if (issuerBinding === undefined) throw new CoreError("VALIDATION", "host capture requires trusted admission context");
     const issuer = HostCaptureIssuerSchema.parse(issuerBinding(structuredClone(request)));
     if (issuer.workspace_id !== request.workspace_id) throw new CoreError("VALIDATION", "host issuer workspace mismatch");
+    if (issuer.basis === "reported_excerpt" && request.host_occurrences.some(row => row.semantic_dependencies !== undefined)) {
+      throw new CoreError("VALIDATION", "reported excerpts cannot assert host semantic dependencies");
+    }
     if (issuer.basis === "reported_excerpt" && request.host_occurrences.some(row =>
       row.completeness !== "excerpt" || row.author_ref !== null || row.container_ref !== null ||
       row.upstream_message_ref !== null || row.upstream_position !== null)) {

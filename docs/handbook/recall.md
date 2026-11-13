@@ -56,6 +56,9 @@ worker affinity and MCP/CLI encoding. `PathRelation` is a rebuildable
 current/as-of projection of immutable governed relation history, not another
 ontology or a license to infer proof from graph connectivity (invariant §12).
 Recall performs no provider call, embedding generation or index backfill.
+The read worker imports source locator binding and semantic unit indexing from
+`@do-soul/alaya-soul/source-read`. This entry re-exports their existing Soul
+owners without loading the Garden and tool barrel; both remain eager imports.
 
 ## Conditional meaning
 
@@ -287,40 +290,215 @@ permutes source positions in the mixed access schedule, preserving memory positi
 and native order within each source tier. Continuations retain that frozen order;
 public navigation exposes factual capture provenance and the separate access ordinal.
 
-## Statement-key association at slot 5
+Protocol 36.0.0 adds optional `source_template` to the ordinary interpretation proposal.
+Producer `alaya.query.source-template.v1` may supply it and question time, bound to the
+original query digest and interpretation clock. Its known asked host role and exactly
+one evidence statement with one nonempty `<...>` hole define a narrow navigation frame.
+Protocol's FTS surface-token owner preserves ordered Unicode letter/number/underscore
+tokens and their offsets, including case and duplicates; it does not normalize, segment,
+stem or truncate. Both literal sides must occur contiguously and in order with at least
+one intervening token in a current statement and its own bound retained host message.
+The occurrence must be complete; exact retained bytes do not claim upstream original-byte
+fidelity. Session-context messages cannot supply either side. UTF-16 token positions are explicitly
+converted to UTF-8 source positions.
 
-Protocol 34.0.0 lets source slot 5 of the field access order yield to a later source root
-that dominates it on two separate coordinates: question similarity (the best cosine between
-the original query and the root's statement keys) and link to slots 1–4 (the best cosine
-between any statement key of the two roots, same generation). Dominance means at least as
-high on both and higher on one; the earliest dominating root in access order swaps with slot
-5. The coordinates are compared, never combined into a score, and there is no threshold.
-A root without observed statement keys sits at -1, the floor of both coordinates: it never
-displaces the root at slot 5, and at slot 5 it yields to the earliest later root with any observed key.
+After active soft time preference completes, acquisition inspects every eligible root
+from the original admitted prefix (at most 16). Known empty current artifacts are
+nonmatches; partial, stale, unread or refused evidence leaves uniqueness unknown.
+Exactly one matching root may be restored only when time preference displaced it;
+it precedes the incumbent nominations under the unchanged 16-root cap. Authorization,
+source restrictions and hard time filters remain authoritative. An explicit hard source
+guard disables template inspection: acquisition lacks the later Field facts needed to
+prove eligibility, so it preserves the incumbent. The complete incumbent
+capture is retained before optional inspection, while a conservative association bound
+protects finalization and graph retention. Optional reads and replacement capture use
+only the remaining allowance and remain charged on refusal; the paid incumbent survives.
+Association is finalized once after membership is settled. The observation records its
+source/artifact identities, current bindings, index binding, admitted-prefix authorization
+and matching source coordinates. These are navigation witnesses, not entailment or
+event-time proof; quoted or negated text can still match a literal frame. Proposal absence
+preserves the existing path and Recall makes no new provider or embedding calls.
+
+Protocol 39.0.0 deepens the opt-in `alaya.query.source-task-observation.v1`
+phase. The [observation authority](../../packages/protocol/src/recall/conditional-field/source-task-observation.ts)
+carries explicit Q branch, H frame and optional temporal-slot endpoints plus the
+selected correspondence identity. The [formation input](../../packages/protocol/src/recall/conditional-field/source-task-observation-formation.ts)
+supplies Q, C and the exact selected published H. Descriptions and the retained
+legacy `task_correspondence.component` are not executable semantics. Missing Q/H/C
+or endpoints mean unavailable for this association computation, not source absence.
+
+After retaining the paid incumbent, Core binds the original query and clock and
+compares the observation excerpt and source clock with Storage's current raw read.
+Storage rechecks each nomination's currentness, dependencies and erasure. Auxiliary
+statement nominations first pass their own complete admission, then read their current
+raw source; their statement `body_bytes` and `source_span` are not raw excerpt bounds.
+The Worker loads the selected H through the existing publication/source verification
+owner in the same snapshot. No supplied interpretation ID bypasses lifecycle, scope,
+source version, digest or literal location verification.
+
+[Conditional binding](../../packages/core/src/source-index/task-observation-binding.ts)
+uses the existing Q/H/C admission and `executeSourceSemanticInterpretation` →
+`observeField` computation. Only a supported binding of the supplied Q branch/frame
+to the supplied H frame can enter the existing task preference. Existing branch-local
+evidence support remains distinct from complete-query support and task-operation execution.
+An unresolved branch is not a temporal mismatch. No possibly-equivalent C relation,
+component-string comparison, timestamp-derived event identity or confidence score is used.
+
+An interpreted interval must explicitly name a slot on that same H frame. Its bound
+referent must support the exact temporal expression at the observation's raw-source
+UTF-8 coordinates. This qualifies a fallible calendar-interval observation of that
+operand; it does not equate a date window with an entity or prove fidelity, occurrence,
+applicability or world truth. Comparison with the independently proposed question
+intervals remains `hypothesized_overlap`, `hypothesized_disjoint` or `unavailable`.
+A standing statement may supply a supported evidence-input branch without an
+occurrence-time or current-truth gate. A binding with unavailable time establishes no temporal match; its conditional Q/H/C
+claim remains only a source-local report.
+
+The independently active question-time phase, bounded original/incumbent union,
+16-root cap and existing overlap/other-task-evidence/incumbent order remain the owners.
+No support-first library queue or input-coverage selector is added. Hard guards,
+explicit source filters, prepared hints and non-epsilon programs still abstain before
+optional acquisition. Source-template and task-observation proposals do not compose
+into a second schedule. Validation, verified H reads and conditional computation share
+the remaining optional allowance; resource refusal preserves the paid incumbent.
+There is no provider call, index repair, extra quota or default promotion.
+
+Protocol 39.1.0 corrects qualification identity and support closure. Navigation retains
+the actual conditional-computation and canonical bounded binding identities, including
+multi-phase prefixes, without renaming them. The required support
+extent comes from the selected binding's full executed proof closure through the existing
+dependency/location owners, not the union of independent proofs. An unlocated independent
+input cannot revoke the selected located input; an unlocated selected dependency still
+prevents qualification. The shared payload fit uses that explicit extent, not the discovery window, while keeping its normal byte
+limits and continuation accounting. A navigation observation is not itself a claim that
+its entire support was delivered: the result's actual span/preview remains authoritative.
+Source record, interpretation and field continuation invalidation remain independent.
+
+The private native observer captures the original and incumbent prefixes before optional
+inspection. It remains bounded diagnostic evidence, not a public eligibility census,
+source relevance proof or new route. Missing/partial acquisition is not complete-empty.
+
+The [formation owner](../../apps/bench-runner/src/runs/source-task-observation/formation.ts)
+exposes request-bound endpoint references in its existing observation request. Its
+[catalog adapter](../../apps/bench-runner/src/runs/source-task-observation/endpoint-selection.ts)
+uses admitted Q/C, the exact supplied published H, the production correspondence
+endpoint catalog and Q branch views. It advertises every addressable predicate/frame
+association and H slot, without asserting an executable binding. The model explicitly
+chooses an association and an optional same-frame temporal operand, or reports
+`missing`, `unresolved` or `ambiguous` with null references. The host resolves only
+those supplied references to canonical `SourceTaskAssociation`; it never chooses the
+first candidate or infers endpoints from labels, dates or record time. Native publication,
+proof and temporal-support verification above remain independent and authoritative.
+
+Ready coverage means one admitted row per supplied source with no row diagnostics,
+not coverage of all Recall candidates, endpoint availability or relevance. The producer's
+separate `endpoint_selections` result preserves absence reasons without making valid raw
+rows partial. Catalog capacity refusal is source-local: the catalog owner's typed refusal
+emits `endpoint_catalog_capacity_exhausted` with its side, limit and attempted count,
+not a truncated catalog or a claim of no evidence. Formation retains that host reason
+as `catalog_reason`/`catalog_capacity` independently of the model's selection status;
+valid raw rows and selectable neighbors survive. Other validation or unexpected errors
+are not caught as capacity. Protocol 39.2 adds the typed catalog error export for this
+producer; existing MCP schema signatures and native v13 semantics remain unchanged.
+An admitted subset is partial; malformed, missing, duplicate or incomplete
+rows remain explicit. Missing prerequisites retain raw fallback. The internal
+`source-task-observation.endpoint-selection.v7` request/cache identity does not readmit
+v6 drafts or raw attempts; the retired caller-preselected formation input is rejected.
+The canonical public observation and native v13 contract are unchanged (invariant §25);
+manual MCP proposals still use their existing canonical association and native verifier.
+Legacy unbound observations remain parseable for source-local diagnostics and Protocol 38
+archive reading, but cannot obtain current task-qualified preference. Temporal assertions
+and durable truth are unchanged. Authored wire-shaped mechanism tests establish no natural
+endpoint availability, model fidelity or recall benefit.
+
+## Evidence condition coverage
+
+Protocol 40.0.0 replaces the retired slot-5 two-coordinate swap. An ordinary request may
+carry `interpretation_proposal.evidence_conditions`: one to four question-formed conditions,
+each a statement (at most 512 characters) that one earlier message would contain, the speaker
+of that message (`user` or `assistant`), and up to eight anchors, instance names copied
+verbatim from the question. The question-time and source-template producers may carry them;
+they are bound into query identity, and an anchor that is not a substring of the question
+makes the proposal invalid. Before the snapshot, each statement is embedded with the query's
+own binding, one input at a time and only through local inference; the worker uses a vector
+only when its input digest and profile match the admitted text and the query.
+
 Acquisition retains at most 16 statement-key vectors per root seen by the original query's
-vector scan. Only allowance-funded ordinary acquisition associates; request-funded Source
-library pages do not. Protocol 35.0.0 retains the bounded vectors as explicit nomination data,
-then computes exact pairs on demand after filtering and time preference determine the source
-order. Navigation pays for every comparison before execution. The snapshot-owned triangular
-cache reserves all numeric cells up front; null means uncomputed and -1 means a computed floor.
-Continuations reuse completed pairs; reordering can demand additional pairs. No vectors hide in
-a closure, and incompatible dimensions refuse the optional association.
+vector scan, as before. Only allowance-funded ordinary acquisition associates; request-funded
+Source library pages do not. When conditions are bound, acquisition reads, per root and once
+per message, the host-occurrence role at each retained key's message span and the tokens of
+the key text and of the raw message bytes (segmented v2 query analysis, lowercased; a cold
+segmenter tokenizes anchors and texts alike with raw query tokens). A key witnesses a
+condition only if its role is the condition's speaker and, when the condition has anchors,
+every token of at least one anchor is present. With a question-time preference whose
+alternatives start on or before its clock, the window is also each condition's time dimension:
+the witness read returns each key's text and the root's recorded event time (the session), and
+`statementEventIntervals` reads the event days the key states against that session (relative
+terms, dated and year-less calendar days, numeric and CJK month/day, bare weekdays). A stated
+day inside an alternative satisfies, stated days all outside violate; an undated key is unknown,
+except that a session before the earliest alternative violates (a reported event precedes its
+session). Session time is never an event day. Per root and condition the matrix holds the best
+cosine over keys with every dimension satisfied (necessary; null without one) and, under a
+window, whether a key leaves only time unknown or the root has no retained key (possible). It is
+charged on acquisition's own ledger. Keys never leave acquisition; an unknown or unfunded read
+discards the whole matrix. Without conditions, the keys are dropped and the field order is
+unchanged. A query time window without a question-time preference does not bind conditions.
 
-This plan reduces comparison work while increasing retained memory compared with an eager
-matrix. Both are metered separately. Optional retention or comparison exhaustion preserves
-base nominations/order before any swap is selected, records refusal, and cannot silently retry
-the swap on a later page. After a swap has been selected, a later underfunded request fails
-explicitly instead of reverting to baseline order. Child refusal requirements include the
-mandatory navigation reserve when translated back to the request budget.
-The retained state includes the vectors, cache capacity and fixed-size refusal state. Acquisition
-receipts retain work already spent even when optional vectors cannot fit in the field.
+Navigation applies one selection after filtering and time preference determine the source
+order. A condition's top root is its highest-scoring necessary witness in that order, ties to
+the earlier position. Starting from the source first five with slot 1 fixed, each condition in
+order whose top lies outside the first five replaces the slot 5..2 that maximizes, in order,
+the number of conditions whose top is in the first five and the number of conditions with any
+necessary or possible witness there (ties: the lowest slot), and only if that pair strictly
+improves. Possible witnesses are not otherwise protected: what the conditions cannot see is the
+risk, not what they may see. All other roots keep their source order, so replaced roots follow
+directly after the first five. No root leaves the order and memory keeps its positions. The
+navigation diagnostic `evidence_coverage` reports the condition count, each top's source
+position, every injection or `no_free_slot`, every witness variant, and refusal.
 
-Memory positions and the first four source slots remain unchanged. The fifth source can be
-outside mixed Top-5. Navigation diagnostics report the exchanged global ranks and whether
-mixed Top-5 changed. Two-coordinate dominance is a limited heuristic, not a guarantee of
-complementary evidence: a relevant duplicate can displace a necessary fact. Frozen,
-label-selected screens show gains and losses; neither source hits nor complete annotation
-exposure establish full support sufficiency or natural-data acceptance.
+When the proposal also states `evidence_relation: "derived"` (the question asks for a result
+computed across stated facts: a total, count, difference, order or comparison), a condition may need
+several instances. Acquisition then keeps, per matrix cell, the host-message span of the key behind
+the necessary value. After the selection, each condition whose top is in the first five brings its
+rank 2–5 necessary witnesses (score order, ties to the earlier position) on roots outside the first
+five, without repeats, directly after the first five. Each such root is delivered once, as a witness
+variant: its navigation witness carries `evidence_variant`, and payload hydration reads exactly that
+host message instead of the root's prefix. Its later bytes remain reachable by payload continuation.
+Nothing in the first five moves; without the relation the order is unchanged.
+
+Whenever conditions are admitted, each root also keeps one opening, its delivery unit: the byte range
+of its messages that necessarily witness some condition (over all conditions, not only the best one),
+extended back to the user message an assistant witness answers (a reply depends on its prompt, not the
+reverse). A root with no necessary witness opens through its first admitted physical message
+(`evidence_variant` without `condition`), including when that message or the whole root has no semantic key. The source-owned
+witness read returns the complete admitted host inventory; keys nominate witnesses and do not define
+physical message existence. Captured-empty, unknown, unavailable, invalid and resource-limited inventory
+remain distinct, and inventory reads share the acquisition ledger. Every delivered root with an opening
+(and no variant) opens there, so first deliveries are
+units and no longer depend on which roots share a page. Nothing is dropped: the root's later
+bytes follow by payload continuation, and its prefix is one explicit range away
+(`payload_continuation.start_offset: 0`, `end_offset` = the opening). The bench end-continuation reader
+reads a cut opening on to its range end before the next slot, then the rest of each root, then the
+prefix last, so every slot still ends with its whole body.
+
+Within that admitted-condition domain, a root with no retained opening independently opens through its
+first recorded message end, otherwise its first recorded line end. The charged metadata lookup can
+locate that end beyond the hydrated fragment without reading the whole unit. With unavailable or
+empty boundaries, the verified first retained UTF-8 storage chunk is the fallback unit. A resource-limited
+lookup defers payload until it can establish the unit, rather than selecting another fallback. The chosen
+range is retained as `evidence_variant.support_span` without `condition`, even when only a fragment
+fits the page; it is independent of page sharing and association preparation/retention. Continuation
+starts at the exposed end, can finish the declared unit, then reach every remaining byte. No-condition
+delivery is unchanged.
+
+Optional retention or ordering exhaustion preserves base nominations/order before any
+permutation is applied, records refusal, and cannot silently retry on a later page. After a
+permutation has been applied, a later underfunded request fails explicitly instead of
+reverting to baseline order. Child refusal requirements include the mandatory navigation
+reserve when translated back to the request budget. The selection is over observed witnesses,
+not proof that the injected root answers the condition: a top can be a near duplicate or a wrong
+fact. Frozen, label-selected screens show gains and losses and do not establish natural-data
+acceptance.
 
 ## Versioned cutoff measurement
 
@@ -340,8 +518,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v9`, Protocol
-34.1.0; library field protocol 12). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v15`, Protocol
+41.0.0; library field protocol 15). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.
@@ -371,6 +549,17 @@ The cut is a page-fitting boundary, not a relevance judgement; measured on LongM
 reading the first pages and then continuing their cut sources (≈ 9 KB more for the first
 five) is what reaches the recall floor, while reordering or deferring cut members loses
 the 2 KB guard.
+
+The first page also carries an optional `member_index` (Protocol 41.1.0): one line per
+further member after the ranked results, up to 32 roots in total — pool roots not on the
+page, then up to 16 roots that acquisition refused only by its nomination limit. A line
+joins the member's existing source statements by best cosine of their stored key vectors
+to the caller's evidence conditions (first message when it has none), clipped at 218 B.
+Member reads reuse the source template reader's currentness, erase and statement-binding
+checks; an erased, changed or unreadable member is omitted, and a read-budget refusal ends
+the list without touching the ranked page. It lets the consumer see and choose beyond the ranked five; it is never ranking evidence
+and does not change the pool, accounting or ranked stream. Pool members read through
+continuation; listed statements open with `soul.open_pointer`.
 
 See [Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts).
 `RecallNavigationWitness` records original/hint view, native operator,
@@ -455,6 +644,30 @@ Erased round text is not re-admitted: the ledger keeps each message's digest, so
 replayed window admits nothing and a changed body conflicts. A message over the
 contract's 16 KB limit is refused; a producer that holds longer text sends an honest
 `excerpt`.
+
+Host messages may explicitly declare `semantic_dependencies`: contextual prerequisites,
+not factual support or extraction-context invalidation. Each reference binds the same
+workspace's exact source ID, record ID, version, content digest and occurrence ID.
+Capture returns `message_sources` for available closed messages; hosts can reuse these
+references in later captures. Absence means unknown; `[]` records an explicit known-empty
+declaration. Historical captures retain unknown. A trusted host or pinned-dataset issuer
+owns these assertions; reported excerpts cannot assert them. The immutable ledger replay
+digest includes the declaration, and pending dependency JSON is scrubbed with the body.
+
+Delivery reads the source-owned inventory, checks target currentness and erase barriers,
+and uses the ordinary source scope authority before reading prerequisite bytes. Traversal
+is charged, cycle bounded and source bound. Unavailable, denied, unknown and limited
+dependencies leave ordinary authorized source access intact. `semantic_dependencies` in
+the response reports partial exposure whenever full bound prerequisite bytes do not fit;
+prepared bytes alone do not establish complete exposure or semantic sufficiency.
+An omitted dependency exposure remains unknown; a non-host source without a captured
+host inventory does not acquire a synthetic empty declaration or exposure.
+To continue an omitted or partial prerequisite, retain the ordinary result's continuation
+and target, then send `payload_continuation.dependency` with its `reference`, the original
+`source_occurrence_id` and `start_offset` (`next_offset` from the last exposure, or zero).
+`byte_budget` bounds that read. The server uses the previously delivered source interval,
+not a caller-supplied interval, and rechecks the explicit graph, versions, scope and erasure.
+An unrelated target or an occurrence outside that prior interval cannot authorize bytes.
 
 Exact retention requires the existing source and verified matching inventory;
 a descriptor cannot import provenance into an empty store. Lossless transfer uses
@@ -765,8 +978,8 @@ Neither is live runtime authority.
 
 The local ordinary capture reader admits the explicit historical producer versions
 14.1.0–20.0.0 listed in its schema, plus exact native 27.0.0/v4, 28.0.0/v5,
-29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0–34.1.0/v9 and current
-35.0.0/v9 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
+29.0.0/v6, 30.0.0/v7, 31.0.0–33.0.0/v8, historical 34.0.0–35.0.0/v9 and current
+36.0.0/v10 pairs. Earlier captures retain `conditional-field-source-only-v1` and their
 canonical request policy. Every native pair requires its matching
 `ordinary-native-field.vN` public semantics and result/continuation version,
 `native_query`, and current compact disclosures; cross-pairs are refused. This is offline

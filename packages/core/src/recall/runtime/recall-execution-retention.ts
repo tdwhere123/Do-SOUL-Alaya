@@ -4,13 +4,17 @@ export const RECALL_RETENTION_TTL_MS = 5 * 60_000;
 type Retained = Readonly<{ execution: string; workspace: string; bytes: number;
   handles: readonly string[]; value: unknown; deadline?: number }>;
 export type RecallRetentionRemoval = Readonly<{ handles: readonly string[];
-  reason: "expired" | "discarded" | "invalidated" }>;
+  reason: "expired" | "discarded" | "invalidated" | "evicted" }>;
 
-/** Process-local execution leases. Capacity refusal never evicts another valid
- * execution. Shared immutable nodes are conservatively charged per retained root. */
+/** Process-local execution leases. A record that does not fit evicts whole
+ * least-recently-used other executions of its workspace; it is refused only when
+ * evicting all of them would still not make room. Shared immutable nodes are
+ * conservatively charged per retained root. */
 export class RecallExecutionRetention {
   private readonly records = new Map<string, Retained>();
   private readonly deadlines = new Map<string, number>();
+  private readonly touched = new Map<string, number>();
+  private clock = 0;
   private readonly listeners = new Set<(event: RecallRetentionRemoval) => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private bytes = 0;
@@ -20,7 +24,12 @@ export class RecallExecutionRetention {
     private readonly workspaceCapacity = 64 * 1024 * 1024,
     private readonly ttl = RECALL_RETENTION_TTL_MS) {}
 
-  get<T>(key: string): T | undefined { this.sweep(); return this.records.get(key)?.value as T | undefined; }
+  get<T>(key: string): T | undefined {
+    this.sweep();
+    const row = this.records.get(key);
+    if (row !== undefined) this.touch(row.execution);
+    return row?.value as T | undefined;
+  }
   values<T>(prefix: string): readonly T[] {
     this.sweep();
     return [...this.records].filter(([key]) => key.startsWith(prefix)).map(([, row]) => row.value as T);
@@ -39,6 +48,7 @@ export class RecallExecutionRetention {
     if (this.transactionEvents !== undefined) return work();
     const records = new Map(this.records);
     const deadlines = new Map(this.deadlines);
+    const touched = new Map(this.touched);
     const bytes = this.bytes;
     this.transactionEvents = [];
     let result: T;
@@ -51,6 +61,8 @@ export class RecallExecutionRetention {
       for (const [key, row] of records) this.records.set(key, row);
       this.deadlines.clear();
       for (const [key, deadline] of deadlines) this.deadlines.set(key, deadline);
+      this.touched.clear();
+      for (const [key, tick] of touched) this.touched.set(key, tick);
       this.bytes = bytes;
       throw error;
     } finally { this.transactionEvents = undefined; this.schedule(); }
@@ -61,19 +73,17 @@ export class RecallExecutionRetention {
   set(key: string, row: Retained): void {
     this.sweep();
     const previous = this.records.get(key);
-    const bytes = Math.ceil(row.bytes) + 256 + key.length * 2 + row.handles.reduce((sum, id) => sum + 64 + id.length * 2, 0);
-    let workspaceBytes = 0;
-    for (const [id, retained] of this.records) {
-      if (id !== key && retained.workspace === row.workspace) workspaceBytes += retained.bytes;
-    }
-    if (!Number.isFinite(row.bytes) || row.bytes < 0 || this.bytes - (previous?.bytes ?? 0) + bytes > this.capacity
-      || workspaceBytes + bytes > this.workspaceCapacity) {
+    const bytes = charge(key, row.bytes, row.handles);
+    const victims = Number.isFinite(row.bytes) && row.bytes >= 0 ? this.victimsFor(key, row, bytes) : undefined;
+    if (victims === undefined) {
       throw new CoreError("CONFLICT", "Recall execution retention capacity exhausted", {
         details: { outcome: "resource_exhausted", resource: "execution_retention", required_bytes: bytes,
           retained_bytes: this.bytes, capacity_bytes: this.capacity, workspace_capacity_bytes: this.workspaceCapacity }
       });
     }
+    for (const execution of victims) this.invalidate(execution, "evicted");
     this.records.set(key, { ...row, bytes });
+    this.touch(row.execution);
     this.bytes += bytes - (previous?.bytes ?? 0);
     this.deadlines.set(row.execution, Math.min(this.deadlines.get(row.execution) ?? Date.now() + this.ttl,
       row.deadline ?? Number.POSITIVE_INFINITY));
@@ -85,7 +95,10 @@ export class RecallExecutionRetention {
     this.records.delete(key);
     this.bytes -= row.bytes;
     const remaining = [...this.records.values()];
-    if (!remaining.some(value => value.execution === row.execution)) this.deadlines.delete(row.execution);
+    if (!remaining.some(value => value.execution === row.execution)) {
+      this.deadlines.delete(row.execution);
+      this.touched.delete(row.execution);
+    }
     const handles = row.handles.filter(handle => !remaining.some(value => value.handles.includes(handle)));
     if (handles.length > 0) {
       const event = { handles, reason };
@@ -93,6 +106,15 @@ export class RecallExecutionRetention {
       else this.notify(event);
     }
     this.schedule();
+  }
+  /** Lowers a record's charge once part of what it held is released; never refuses. */
+  reduce(key: string, bytes: number): void {
+    const row = this.records.get(key);
+    if (row === undefined || !Number.isFinite(bytes) || bytes < 0) return;
+    const charged = charge(key, bytes, row.handles);
+    if (charged >= row.bytes) return;
+    this.records.set(key, { ...row, bytes: charged });
+    this.bytes -= row.bytes - charged;
   }
   invalidate(execution: string, reason: RecallRetentionRemoval["reason"] = "invalidated"): void {
     for (const [key, row] of this.records) if (row.execution === execution) this.delete(key, reason);
@@ -104,6 +126,28 @@ export class RecallExecutionRetention {
   snapshot(): Readonly<{ entries: number; executions: number; retained_bytes: number }> {
     this.sweep();
     return { entries: this.records.size, executions: this.deadlines.size, retained_bytes: this.bytes };
+  }
+  private touch(execution: string): void { this.touched.set(execution, ++this.clock); }
+  /** Least-recently-used other executions of the same workspace whose removal makes `bytes` fit, or undefined
+   * if none can. Another workspace's leases are never evicted to make room. */
+  private victimsFor(key: string, row: Retained, bytes: number): readonly string[] | undefined {
+    let total = this.bytes - (this.records.get(key)?.bytes ?? 0) + bytes;
+    let workspace = bytes;
+    const owned = new Map<string, number>();
+    for (const [id, retained] of this.records) {
+      if (id === key || retained.workspace !== row.workspace) continue;
+      workspace += retained.bytes;
+      if (retained.execution !== row.execution) owned.set(retained.execution, (owned.get(retained.execution) ?? 0) + retained.bytes);
+    }
+    const victims: string[] = [];
+    const order = [...owned.keys()].sort((a, b) => (this.touched.get(a) ?? 0) - (this.touched.get(b) ?? 0));
+    for (const execution of order) {
+      if (total <= this.capacity && workspace <= this.workspaceCapacity) break;
+      victims.push(execution);
+      total -= owned.get(execution)!;
+      workspace -= owned.get(execution)!;
+    }
+    return total <= this.capacity && workspace <= this.workspaceCapacity ? victims : undefined;
   }
   private sweep(): void {
     for (const [execution, deadline] of this.deadlines) {
@@ -126,6 +170,10 @@ export class RecallExecutionRetention {
       Math.max(1, deadline - Date.now()));
     this.timer.unref?.();
   }
+}
+
+function charge(key: string, bytes: number, handles: readonly string[]): number {
+  return Math.ceil(bytes) + 256 + key.length * 2 + handles.reduce((sum, id) => sum + 64 + id.length * 2, 0);
 }
 
 /** Conservative JS retention quote, including Maps/Sets and UTF-16 strings.

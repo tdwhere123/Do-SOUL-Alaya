@@ -7,7 +7,8 @@ import {
   type Continuation,
   type BoundedActiveConstraintsResult,
   type InformationIndex,
-  type QueryInterpretation
+  type QueryInterpretation,
+  type RecallMemberIndexLine
 } from "@do-soul/alaya-protocol";
 import {
   compileConditionalFieldQuery,
@@ -95,6 +96,7 @@ export type ConditionalFieldRecallResult = RecallResult & Readonly<{
   readonly provider_calls: number | null;
   readonly garden_enqueue: 0;
   readonly issued_delivery_id?: string;
+  readonly member_index?: readonly RecallMemberIndexLine[];
   readonly acknowledge_delivery?: (index: InformationIndex, previews: ReadonlyMap<string, string>) => Promise<void>;
   readonly discard_delivery?: () => Promise<void>;
 }>;
@@ -106,6 +108,7 @@ export type ConditionalFieldRecallPortResult = Readonly<{
   readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
   readonly issued_delivery_id?: string;
   readonly preparation_id?: string;
+  readonly member_index?: readonly RecallMemberIndexLine[];
 }>;
 
 export type ConditionalFieldRecallPort = Readonly<{
@@ -157,6 +160,7 @@ async function executeCapturedRecall(context: RecallExecutionContext, params: Re
   let preparedId: string | undefined;
   let acknowledge: ConditionalFieldRecallResult["acknowledge_delivery"];
   let discard: ConditionalFieldRecallResult["discard_delivery"];
+  let memberIndex: ConditionalFieldRecallResult["member_index"];
   try {
     const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
       const port = fieldDeps(context).conditionalFieldPort;
@@ -181,6 +185,7 @@ async function executeCapturedRecall(context: RecallExecutionContext, params: Re
         }
         previews = recalled.previews;
         sourceMetadata = recalled.source_metadata;
+        memberIndex = response.member_index;
         executionReceipt = recalled.execution_receipt;
         return recalled.index;
       }
@@ -203,7 +208,8 @@ async function executeCapturedRecall(context: RecallExecutionContext, params: Re
         (sent.prepared_query?.receipt.external_api_attempts === null ? null : 0),
       execution_receipt: executionReceipt,
       ...(params.defer_delivery ? { acknowledge_delivery: acknowledge, discard_delivery: discard ?? (async () => {}) } : {}),
-      ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
+      ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId }),
+      ...(memberIndex === undefined ? {} : { member_index: memberIndex })
     };
   } catch (error) {
     try { await discard?.(); } catch { /* Preserve the original delivery failure. */ }
@@ -383,6 +389,7 @@ function runCompiledConditionalFieldRecall(
     budget: executionBudget,
     as_of: input.as_of,
     readers: input.readers,
+    observe_source_association: input.observe_source_association,
     cost,
     on_atomic_work_block: recordWorkBlock,
     on_retained_progress: () => { observationAdvanced = true; },

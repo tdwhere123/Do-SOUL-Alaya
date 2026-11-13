@@ -20,6 +20,10 @@
         "kind": "handwritten",
         "reason": "Historical v3 pool vs lazy overlay dispatch plus fill-manifest persist stay one execution owner."
       },
+      "apps/bench-runner/src/runs/extraction/fill/provider-raw-attempt.ts": {
+        "kind": "handwritten",
+        "reason": "The physical raw owner binds all attempt kinds to the same immutable evidence, integrity and reservation rules."
+      },
       "packages/core/src/recall/runtime/recall-service-runner.ts": {
         "kind": "handwritten",
         "reason": "Normal request coordinator for shared budgets, snapshot admission, compilation, field execution and delivery encoding."
@@ -31,6 +35,10 @@
       "packages/core/src/recall/conditional-field/observers/observe.ts": {
         "kind": "handwritten",
         "reason": "Native observer port contracts, cursor validation and action dispatch; source and measurement algorithms have separate owners."
+      },
+      "packages/core/src/source-index/source-index-acquisition.ts": {
+        "kind": "handwritten",
+        "reason": "One acquisition coordinator owns shared read and nomination accounting, admission, and final result; time preference, template restoration and task observation are separate phase owners."
       }
     }
   },
@@ -1138,14 +1146,14 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 3169,
-      "expected_sha256": "fcb9c53d42d42b0e43605f18b5b48aac9693a6e67482a27f77a18deb5c9c2ee0"
+      "expected_count": 3201,
+      "expected_sha256": "55d0bfc737446c6e0905535e90f9207746531e3254d333d0f10624679ee3111b"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
       "path": "packages/graph-algorithms/src/index.ts",
-      "expected_count": 24,
-      "expected_sha256": "2071fa670bb187a02b08fad6fd1767bfc1a9ca35ee70be89f0ccea0c02113157"
+      "expected_count": 26,
+      "expected_sha256": "ff88150d5d3d3e7900a1ab1b849a34f9959c39d584eef3f85e34d5954a596301"
     },
     {
       "specifier": "@do-soul/alaya-cjk-segmentation",
@@ -1156,8 +1164,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1025,
-      "expected_sha256": "873b965ceca7b6efb2378ac2c84a44a35be7942dd06ae095986d7716630bacca"
+      "expected_count": 1029,
+      "expected_sha256": "a996d243f0c70f266f2ab1c5fcb5eb5ac8f384c5f1ad7f7dd11b0be519acc959"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",

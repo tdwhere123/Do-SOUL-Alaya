@@ -1,0 +1,105 @@
+import { z } from "zod";
+import { BoundedIdSchema, IsoDatetimeStringSchema } from "../../shared/schema-primitives.js";
+import { SourceEvidenceTargetSchema } from "./product-identity.js";
+import { QuestionTimeIntervalSchema, QuestionTimePreferenceSchema } from "./question-time.js";
+import { SourceSemanticHandleSchema } from "../../garden/source-semantic-draft.js";
+import { SourceSemanticQuerySchema, SourceSemanticQueryTargetSchema } from "./semantic-query.js";
+import { SourceSemanticCorrespondenceSchema, SourceSemanticSourceEndpointSchema } from "./semantic-correspondence.js";
+import { Sha256DigestSchema } from "./common.js";
+
+/** Explicit endpoints under one selected Q/H/C hypothesis, never inferred from labels. */
+export const SourceTaskAssociationSchema = z.object({
+  semantic_correspondence_id: Sha256DigestSchema,
+  alternative: z.number().int().nonnegative(), target: SourceSemanticQueryTargetSchema,
+  query_frame: SourceSemanticHandleSchema, source_frame: SourceSemanticHandleSchema,
+  temporal_operand: SourceSemanticSourceEndpointSchema.options[2].optional()
+}).strict().readonly();
+export type SourceTaskAssociation = z.infer<typeof SourceTaskAssociationSchema>;
+
+export const SourceTaskSemanticSelectionFields = {
+  query_semantics: SourceSemanticQuerySchema.optional(),
+  semantic_correspondences: z.array(SourceSemanticCorrespondenceSchema).max(16).readonly().optional()
+};
+
+/** Opt-in source-local hypotheses, not complete Q/H/C or admitted world claims. */
+export const SOURCE_TASK_OBSERVATION_PRODUCER_ID = "alaya.query.source-task-observation.v1";
+
+const LiteralSpan = z.object({
+  start_byte: z.number().int().nonnegative(), end_byte: z.number().int().positive(),
+  text: z.string().min(1).max(1024)
+}).strict().refine(value => value.end_byte - value.start_byte === new TextEncoder().encode(value.text).length).readonly();
+
+const SourceTaskObservationSchema = z.object({
+  source: SourceEvidenceTargetSchema.refine(value => value.root_kind === "source_record" && value.span === undefined),
+  source_observed_at: IsoDatetimeStringSchema.nullable(),
+  association: SourceTaskAssociationSchema.optional(),
+  source_excerpt: LiteralSpan,
+  query_excerpt: LiteralSpan,
+  utterance: z.object({
+    kind: z.enum(["reported_event", "request", "recommendation", "standing", "prospective", "unknown"]),
+    description: z.string().min(1).max(512)
+  }).strict().readonly(),
+  // Legacy descriptive observation remains diagnostic only; selected Q/H/C owns executable correspondence.
+  task_correspondence: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("possible"), role: z.enum(["requested_event", "task_input"]),
+      component: z.string().min(1).max(256) }).strict().readonly(),
+    z.object({ status: z.literal("unsupported") }).strict().readonly(),
+    z.object({ status: z.literal("unresolved") }).strict().readonly()
+  ]),
+  // This source-local time is not a persistence or answer-time applicability judgment.
+  event_time: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("unavailable") }).strict().readonly(),
+    z.object({ status: z.literal("interpreted"), expression: z.string().min(1).max(256),
+      anchor: z.enum(["source_observation_clock", "explicit_date"]), interval: QuestionTimeIntervalSchema }).strict().readonly()
+  ])
+}).strict().superRefine((value, context) => {
+  if (value.event_time.status === "interpreted" && (value.source_excerpt.text.indexOf(value.event_time.expression) < 0 ||
+    value.source_excerpt.text.indexOf(value.event_time.expression) !== value.source_excerpt.text.lastIndexOf(value.event_time.expression) ||
+    value.event_time.anchor === "source_observation_clock" && value.source_observed_at === null)) {
+    context.addIssue({ code: "custom", message: "event time needs a unique exact source expression and its declared clock" });
+  }
+}).readonly();
+export type SourceTaskObservation = z.infer<typeof SourceTaskObservationSchema>;
+
+/** Partial does not assert that unmentioned sources lack task evidence. */
+export const SourceTaskObservationProposalSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.enum(["ready", "partial"]), interpretation_clock: IsoDatetimeStringSchema, ...SourceTaskSemanticSelectionFields,
+    observations: z.array(SourceTaskObservationSchema).max(16).readonly() }).strict().readonly(),
+  z.object({ status: z.enum(["failed", "unavailable"]), reason: z.string().min(1).max(256) }).strict().readonly()
+]);
+export type SourceTaskObservationProposal = z.infer<typeof SourceTaskObservationProposalSchema>;
+
+/** Wire-only source-local rows. The host owns coverage, source identities and byte coordinates. */
+export const SourceTaskObservationDraftSchema = z.object({
+  observations: z.array(z.object({
+    source_ref: z.string().min(1).max(32), source_excerpt: z.string().min(1).max(1024),
+    query_excerpt: z.string().min(1).max(1024),
+    association_status: z.enum(["selected", "missing", "unresolved", "ambiguous"]),
+    association_ref: z.string().min(1).max(128).nullable(),
+    temporal_operand_status: z.enum(["selected", "missing", "unresolved", "ambiguous"]),
+    temporal_operand_ref: z.string().min(1).max(128).nullable(),
+    utterance_kind: z.enum(["reported_event", "request", "recommendation", "standing", "prospective", "unknown"]),
+    description: z.string().min(1).max(512), task_correspondence: z.enum(["possible", "unsupported", "unresolved"]),
+    task_role: z.enum(["requested_event", "task_input"]).nullable(), task_component: z.string().max(256).nullable(),
+    time_status: z.enum(["interpreted", "unavailable"]), time_expression: z.string().max(256).nullable(),
+    time_anchor: z.enum(["source_observation_clock", "explicit_date"]).nullable(),
+    // Derive wire endpoints from admission's calendar coordinates; ordering stays source-local at binding.
+    time_start: QuestionTimeIntervalSchema.unwrap().shape.start.nullable(),
+    time_end: QuestionTimeIntervalSchema.unwrap().shape.end.nullable()
+  }).strict()).max(16).readonly()
+}).strict().readonly();
+/** The relation compares hypotheses only; applicability remains unknown and overlap never establishes event identity. */
+export const QualifiedTaskObservationSchema = z.object({
+  semantic_status: z.literal("unreviewed"), world_claim: z.literal("unknown"),
+  observation: SourceTaskObservationSchema,
+  question_time: QuestionTimePreferenceSchema,
+  temporal_relation: z.enum(["hypothesized_overlap", "hypothesized_disjoint", "unavailable"]),
+  // Optional for the Protocol 38 archive reader only; current preference emits a bound witness.
+  conditional_binding: z.object({
+    source_interpretation_id: Sha256DigestSchema, query_semantics_id: Sha256DigestSchema,
+    semantic_correspondence_id: Sha256DigestSchema, conditional_computation_id: Sha256DigestSchema,
+    binding_id: BoundedIdSchema,
+    support_span: z.object({ start_byte: z.number().int().nonnegative(), end_byte: z.number().int().positive() }).strict().readonly()
+  }).strict().readonly().optional()
+}).strict().readonly();
+export type QualifiedTaskObservation = z.infer<typeof QualifiedTaskObservationSchema>;

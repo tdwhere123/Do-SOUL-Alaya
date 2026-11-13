@@ -348,18 +348,22 @@ describe("captured Source execution and the single inherited deadline (synthetic
     const clock = controlDeadlineClock();
     const h = await queryClient({ capture: true, publishInterpretation: true, requestTimeoutMs: 150 });
     const posts = observePosts();
-    const nativeTerminate = Worker.prototype.terminate;
-    const terminate = vi.spyOn(Worker.prototype, "terminate");
-    // Hold the termination request so a real late fixture message can reach the quarantined transport.
     const exit = deferred();
-    terminate.mockImplementation(async function (this: Worker) { await exit.promise; return await nativeTerminate.call(this); });
+    let restoreTermination = () => {};
     try {
       const input = initialQuery();
       if (input.request.kind !== "prepare_query") throw new Error("query expected");
       const pending = h.client.sourceSemanticsPort!.execute({ ...input, request: { ...input.request, access_hint: "fixture-hold" } });
       const rejected = expect(pending).rejects.toThrow("timed out after 150ms");
-      await posts.firstPost; await clock.advance(150); await rejected;
+      await posts.firstPost;
       const owner = posts.calls()[0]!.worker;
+      const nativeTerminate = owner.terminate;
+      // Hold the actual guarded instance so a late reply reaches the quarantined transport.
+      const terminate = vi.spyOn(owner, "terminate").mockImplementation(async () => {
+        await exit.promise; return await nativeTerminate.call(owner);
+      });
+      restoreTermination = () => terminate.mockRestore();
+      await clock.advance(150); await rejected;
       expect(terminate).toHaveBeenCalledTimes(1);
       let settled = false;
       const next = h.client.sourceSemanticsPort!.execute(initialQuery()).finally(() => { settled = true; });
@@ -381,7 +385,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
       expect(() => SourceSemanticsPublicPayloadSchema.parse(staleReason)).not.toThrow();
       await expect(h.client.sourceSemanticsPort!.execute(staleReason)).rejects.toThrow("Recall delivery worker unavailable");
       expect(posts.calls()).toHaveLength(2);
-    } finally { exit.resolve(); terminate.mockRestore(); await h.cleanup(); }
+    } finally { exit.resolve(); restoreTermination(); await h.cleanup(); }
   });
 });
 

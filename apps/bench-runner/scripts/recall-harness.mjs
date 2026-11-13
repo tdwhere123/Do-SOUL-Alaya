@@ -76,7 +76,7 @@ if (sourceOptions.every(Boolean) && !values["model-artifact-digest"]) {
 const { publishSourceSemanticSnapshot } = await import(pathToFileURL(join(dist, "runs/snapshot/source-records/publish.js")).href);
 const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist, "runs/recall-measurement/source-index-binding.js")).href);
 const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
-const { questionTimeProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/question-time-proposal.js")).href);
+const { queryProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/query-coordinate-proposal.js")).href);
 const { chainIdentity } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
 const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
 const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
@@ -215,7 +215,7 @@ for (const id of ids) {
       const frozen = coordinates.get(id);
       if (arm.question_time === true && frozen === undefined) throw new AlayaError("VALIDATION", `missing frozen coordinates for ${id}`);
       const proposal = arm.question_time === true
-        ? questionTimeProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
+        ? queryProposalFromCoordinates(question.question, clockOf(question.question_date), frozen) : undefined;
       const root = join(out, "runs", id, arm.name);
       if (captureRecallPool !== undefined && existsSync(root)) {
         throw new AlayaError("CONFLICT", "capture root already exists; prior first exposure may be unresolved");

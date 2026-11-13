@@ -1,11 +1,9 @@
-import { existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import(
     "../../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js"
@@ -70,26 +68,6 @@ const SOURCE_BODY = "record-only surface root for mixed recall";
 const OPEN = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
 const databases = new Set<StorageDatabase>();
 const directories: string[] = [];
-
-beforeAll(() => {
-  const daemonRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
-  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
-  const overlay = join(daemonRoot, "dist/node_modules/@do-soul");
-  mkdirSync(overlay, { recursive: true });
-  mkdirSync(join(repoRoot, "packages/core/dist/node_modules/@do-soul"), { recursive: true });
-  for (const [from, to] of [
-    [join(overlay, "alaya-core"), join(repoRoot, "packages/core")],
-    [join(overlay, "alaya-protocol"), join(repoRoot, "packages/protocol")],
-    [join(overlay, "alaya-storage"), join(repoRoot, "packages/storage")],
-    [join(overlay, "alaya-soul"), join(repoRoot, "packages/soul")],
-    [join(overlay, "alaya-graph-algorithms"), join(repoRoot, "packages/graph-algorithms")],
-    [join(repoRoot, "packages/core/dist/node_modules/@do-soul/alaya-protocol"), join(repoRoot, "packages/protocol")],
-    [join(repoRoot, "packages/core/dist/node_modules/@do-soul/alaya-graph-algorithms"),
-      join(repoRoot, "packages/graph-algorithms")]
-  ] as const) {
-    if (!existsSync(from)) symlinkSync(to, from);
-  }
-});
 
 afterEach(async () => {
   for (const database of databases) database.close();

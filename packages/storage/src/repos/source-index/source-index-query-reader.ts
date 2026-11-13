@@ -1,9 +1,9 @@
 import {
   CJK_SCRIPT_PATTERN, TRIGRAM_MIN_CODEPOINTS, SourceIndexTargetSchema, SOURCE_INDEX_MAX_WINDOWS,
-  SourceIndexOperationError, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, canonicalJson, hashContentDigest,
+  SourceIndexOperationError, SourceSemanticResourceExhausted, canonicalJson, hashContentDigest,
   sourceIndexRootKey, splitFtsLanes,
   type QuestionTimePreference, type FieldContractSha256, type SourceIndexLexicalCandidate, type SourceIndexLexicalRead, type SourceIndexQueryAdmission,
-  type SourceIndexQueryResources, type SourceIndexResources, type SourceIndexTarget,
+  type SourceIndexTarget,
   type SourceIndexNominationAllowance, type SourceIndexQueryCapacity,
   type SourceIndexVectorBinding, type SourceIndexVectorCandidate, type SourceIndexVectorCursor,
   type SourceIndexVectorQueryState, type SourceIndexVectorRead, type SourceSemanticResourceBudget
@@ -21,6 +21,7 @@ import { assertIndexPageLimit, guardSourceIndexTarget, SOURCE_INDEX_STANDALONE_B
 import { questionTimeSql } from "./question-time-domain.js";
 import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
 import { lexicalDomainTables } from "./lexical-domain.js";
+import { QueryReadMeter, targetDecodeReservation } from "./query-read-meter.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
 // Only schema-owned immutable targets whose canonical identity was checked here
@@ -59,40 +60,6 @@ export class SourceIndexTargetCapture {
     if (this.rows?.has(source.root_key)) return;
     meter.ledger.charge(1, 40, "source target capture reference");
     this.rows?.set(source.root_key, source);
-  }
-}
-class QueryReadMeter {
-  readonly ledger: SourceSemanticResourceLedger;
-  private nativeBytes = 0;
-  constructor(budget: SourceSemanticResourceBudget) {
-    for (const value of [budget.work_units, budget.memory_bytes]) {
-      if (!Number.isSafeInteger(value) || value < 0) throw new StorageError("VALIDATION_FAILED", "invalid source query budget");
-    }
-    this.ledger = new SourceSemanticResourceLedger(budget);
-  }
-  read(work: number, bytes: number): void {
-    this.ledger.charge(work, bytes, "source index query read"); this.nativeBytes += bytes;
-  }
-  /** Rows of one batch are already read from SQLite: pay each in order. Once the ledger refuses, the unpaid
-   * remainder is charged as far as the budget reaches and always counts as native bytes, so no read goes unaccounted. */
-  readRows(rowBytes: readonly number[]): SourceSemanticResourceExhausted | null {
-    for (let paid = 0; paid < rowBytes.length; paid++) {
-      try { this.read(1, rowBytes[paid]!); } catch (error) {
-        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-        for (let unpaid = paid; unpaid < rowBytes.length; unpaid++) {
-          this.ledger.charge(Math.min(1, this.ledger.work), Math.min(rowBytes[unpaid]!, this.ledger.bytes), "source index query read");
-          this.nativeBytes += rowBytes[unpaid]!;
-        }
-        return error;
-      }
-    }
-    return null;
-  }
-  absorb(resources: SourceIndexResources): void { this.read(resources.work, resources.native_bytes); }
-  remaining() { return { work: this.ledger.work, native_bytes: this.ledger.bytes }; }
-  resources(): SourceIndexQueryResources {
-    return { work: this.ledger.spentWork, native_bytes: this.nativeBytes,
-      memory_bytes: this.ledger.spentBytes, sql_internal_work: "unknown" };
   }
 }
 // Decoding a target charges its JSON bytes as work, and a valid target is larger than this: rows past what
@@ -145,9 +112,6 @@ export function quoteSourceIndexQueryCapacity(database: StorageDatabase, workspa
   };
 }
 
-function targetDecodeReservation(bytes: number): SourceSemanticResourceBudget {
-  return { work_units: 129 + bytes, memory_bytes: 4096 + 5 * bytes };
-}
 function vectorDecodeReservation(bytes: number, dimensions: number): SourceSemanticResourceBudget {
   const target = targetDecodeReservation(bytes);
   return { work_units: target.work_units + dimensions, memory_bytes: target.memory_bytes + 64 + dimensions * 8 };

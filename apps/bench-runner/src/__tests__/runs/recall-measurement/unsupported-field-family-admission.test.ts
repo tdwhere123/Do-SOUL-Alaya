@@ -1,7 +1,9 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  return installProviderFreeBoundary({
+    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+  });
 });
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -26,7 +28,13 @@ import { SemanticChainConfigSchema, chainIdentity, readChainArtifact, writeChain
 import { measureLongMemEvalAcquisition, summarizeLongMemEvalAcquisition } from "../../../runs/longmemeval-semantic/acquisition-measurement.js";
 
 const roots: string[] = [];
-afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); isolation.restore(); });
+afterAll(() => {
+  try { expect(isolation.violations).toEqual([]); isolation.assertSafe(true); }
+  finally {
+    isolation.restore();
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const SOURCE_TEXT = "The blue stone is kept in the cedar box.";
 const DIGEST = `sha256:${"c".repeat(64)}`;
@@ -244,6 +252,7 @@ function compiledConsumerChain(f: Awaited<ReturnType<typeof fixture>>, evaluator
     const archivedIngress = protocol.SoulInterpretationRequestSchema.safeParse({ operation: "recall", ...shared,
       continuation: ${JSON.stringify(archived)} });
     if (isolation.violations.length !== 0) throw new Error("provider-free violations");
+    isolation.assertSafe(true);
     console.log(JSON.stringify({ cli, row: measured.result.rows[0], capture: admitted.rows[0],
       ingress: { public: publicIngress.success, worker: workerIngress.success, archived: archivedIngress.success } }));
   `], { env, encoding: "utf8", timeout: 120_000 });

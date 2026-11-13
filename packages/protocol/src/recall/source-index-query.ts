@@ -1,7 +1,18 @@
 import type { SourceSemanticResourceBudget } from "../garden/source-semantic-resources.js";
 import type { QuestionTimePreference } from "./conditional-field/question-time.js";
+import type { SourceTemplateProposal } from "./conditional-field/source-template.js";
+import type { BoundSourceStatement } from "../garden/source-statements.js";
 import type { SourceIndexProfile, SourceIndexTarget } from "./source-index.js";
 import { SourceSemanticAcquisitionSchema, type SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
+import type { HostOccurrence, HostOccurrenceInventory } from "../conversation/host-occurrence.js";
+import type { HostSourceDependency } from "../conversation/host-source-dependency.js";
+
+export type SourceIndexHostDependencyReference = Omit<HostSourceDependency, "occurrence_id" | "source_id"> & { source_id?: string };
+export type SourceIndexHostDependencyRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; source: SourceIndexTarget; inventory: HostOccurrenceInventory;
+    occurrence?: HostOccurrence; text?: string; content_span?: readonly [number, number]; content_complete?: boolean }> |
+  Readonly<{ status: "unknown" | "unavailable" | "denied" | "invalid" | "resource_limited"; reason: string }>
+);
 
 /** Private acquisition input, not an MCP vector input or an inference-usage receipt. */
 export type SourceIndexQueryVector = Readonly<{
@@ -74,12 +85,54 @@ export type SourceIndexQuestionTimeDomain = Readonly<{ resources: SourceIndexQue
   Readonly<{ status: "unavailable"; reason: "question_time_read_budget" | "question_time_read_failed" }>
 );
 
+/** Complete enumerates all current H artifacts for this admitted native root, including known empty.
+ * Each row binds its own current host message; context messages are never candidate evidence.
+ */
+export type SourceIndexTemplateRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "complete"; statements: readonly Readonly<{
+    source: SourceIndexTarget; bound: BoundSourceStatement;
+  }>[] }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
+/** A complete literal excerpt and its native source-observation clock, or an explicitly unknown read. */
+export type SourceIndexTaskObservationRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; text: string; source_observed_at: string | null }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
+/** Statement keys of one root, aligned with the request: the host role of each key's message, per anchor
+ * whether every anchor token occurs in the key text or that message, and the key text; `session_time` is
+ * the root's recorded event time. The physical inventory includes unkeyed occurrences and is read even
+ * for zero keys. Incomplete witness reading is unknown, never a successful empty witness set. */
+export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQueryResources }> & (
+  Readonly<{ status: "ready"; session_time: string | null;
+    inventory: SourceIndexHostInventoryRead;
+    witnesses: readonly Readonly<{ role: string | null; anchors: readonly boolean[]; statement: string }>[] }> |
+  Readonly<{ status: "unknown"; reason: string }>
+);
+
+/** Complete source-owned physical inventory. Captured-empty is authoritative; other states are not absence. */
+type SourceIndexHostInventoryRead = Readonly<
+  | { status: "captured"; inventory: HostOccurrenceInventory }
+  | { status: "unknown" | "unavailable" | "invalid" | "resource_limited" }
+>;
+
 /** Mechanical reads behind Core acquisition; no caller-selected generation or ANN authority. */
 export interface SourceIndexQueryRepository {
+  /** Null occurrence reads metadata only. Authorization precedes inventory/payload access. */
+  readHostDependency?(workspaceId: string, reference: SourceIndexHostDependencyReference, occurrenceId: string | null,
+    budget: SourceSemanticResourceBudget, admit: SourceIndexScopeAdmission,
+    window?: Readonly<{ start_offset?: number; byte_limit: number; metadata_only?: boolean }>): SourceIndexHostDependencyRead;
   readLexicalCandidates(workspaceId: string, navigationText: string, limit: number,
     budget: SourceSemanticResourceBudget, questionTime?: QuestionTimePreference): SourceIndexLexicalRead;
   readQuestionTimeDomain?(workspaceId: string, preference: QuestionTimePreference, rootKeys: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexQuestionTimeDomain;
+  readTemplateStatements?(source: SourceIndexTarget, budget: SourceSemanticResourceBudget): SourceIndexTemplateRead;
+  readTaskObservation?(source: SourceIndexTarget, span: Readonly<{ start_byte: number; end_byte: number }>,
+    budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
+  readStatementWitnesses?(source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[],
+    budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */
@@ -92,6 +145,9 @@ export type SourceIndexAcquisitionInput = Readonly<{
   workspace_id: string; navigation_text: string; vector: SourceIndexQueryVector;
   allowance: SourceIndexNominationAllowance; budget: SourceSemanticResourceBudget;
   question_time?: QuestionTimePreference;
+  source_template?: SourceTemplateProposal;
+  /** Untrusted optional proposal; acquisition admits it after protecting the incumbent. */
+  source_task_observation?: unknown;
 }>;
 /** Bounded schedule completion, never a source-absence certificate. Leaf-safe semantic authority only. */
 export type SourceIndexAcquisitionResult = SourceSemanticAcquisition;

@@ -1,7 +1,9 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  return installProviderFreeBoundary({
+    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+  });
 });
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -15,8 +17,13 @@ import { ACQUISITION_METRICS } from "../../../runs/longmemeval-semantic/acquisit
 import { prepareRefusalReportFixture } from "./refusal-report.test-support.js";
 
 const roots: string[] = [];
-afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true });
-  expect(isolation.violations).toEqual([]); isolation.restore(); });
+afterAll(() => {
+  try { expect(isolation.violations).toEqual([]); isolation.assertSafe(true); }
+  finally {
+    isolation.restore();
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
 
 it("keeps refused and absent rows in the real mixed report without consulting their labels or losing costs", async () => {
   const f = await prepareRefusalReportFixture(); roots.push(f.root);
@@ -112,6 +119,7 @@ it("emits the compiled CLI refusal report with actual null exposure and a no-lab
     const code = await runLongMemEvalSemanticLauncher(["measure", "--root", ${JSON.stringify(f.experiment)},
       "--replay", ${JSON.stringify(f.replayPath)}, "--evaluator-root", ${JSON.stringify(join(f.root, "compiled-evaluator"))}]);
     assert.equal(code, 0); assert.equal(globalThis.labelReads, 0); assert.deepEqual(boundary.violations, []);
+    boundary.assertSafe(true);
     console.log("GUARD:" + JSON.stringify({ labelReads: globalThis.labelReads, violations: boundary.violations,
       serializedExposure: archives.slice(0, 2).map(row => row.rows[0].first_exposure === null ? "null" : "present"),
       missingDelivery: !Object.hasOwn(archives[3].rows[0], "response") }));

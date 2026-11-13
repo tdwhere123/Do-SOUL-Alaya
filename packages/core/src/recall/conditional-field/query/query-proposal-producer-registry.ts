@@ -1,6 +1,8 @@
 import {
   QUERY_PROPOSAL_PROGRAM_KINDS,
   QUESTION_TIME_PROPOSAL_PRODUCER_ID,
+  SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID,
+  SOURCE_TASK_OBSERVATION_PRODUCER_ID,
   QUERY_PROPOSAL_TRANSPORT_LIMITS,
   tightenQueryProposalLimits,
   type QueryInterpretationProposal,
@@ -18,7 +20,10 @@ export const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
   "holes",
   "hypotheses",
   "stored_cosine_admission",
-  "question_time"
+  "question_time",
+  "source_template",
+  "source_task_observation",
+  "evidence_conditions"
 ] as const;
 
 export type QueryProposalProducerCapability = (typeof QUERY_PROPOSAL_PRODUCER_CAPABILITIES)[number];
@@ -77,7 +82,13 @@ export class QueryProposalProducerRegistry {
 const PRODUCTION_RECORDS: readonly QueryProposalProducerRecord[] = [
   queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID),
   queryProposalProducerRecord(QUESTION_TIME_PROPOSAL_PRODUCER_ID, {
-    capabilities: ["question_time"], allowed_grammar: []
+    capabilities: ["question_time", "evidence_conditions"], allowed_grammar: []
+  }),
+  queryProposalProducerRecord(SOURCE_TEMPLATE_PROPOSAL_PRODUCER_ID, {
+    capabilities: ["question_time", "source_template", "evidence_conditions"], allowed_grammar: []
+  }),
+  queryProposalProducerRecord(SOURCE_TASK_OBSERVATION_PRODUCER_ID, {
+    capabilities: ["question_time", "source_task_observation"], allowed_grammar: []
   })
 ];
 

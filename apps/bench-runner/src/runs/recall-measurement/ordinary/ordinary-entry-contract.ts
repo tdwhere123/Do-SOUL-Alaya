@@ -50,7 +50,9 @@ export const OrdinaryRecallEntryInputSchema = z.object({
 export const OrdinaryRecallSourceIntervalSchema = z.object({
   slot_index: z.number().int().nonnegative(),
   target: RecallTargetRefSchema,
-  span: SourceDeliveredSpanSchema.nullable()
+  span: SourceDeliveredSpanSchema.nullable(),
+  /** End of the witness range the slot opened at (navigation `evidence_variant`), when it opened at one. */
+  opening_end: z.number().int().positive().optional()
 }).strict();
 /** After the membership window, each cut slot read on from its delivered end until complete. */
 export const OrdinaryEndContinuationSchema = z.object({
@@ -58,7 +60,9 @@ export const OrdinaryEndContinuationSchema = z.object({
   completed_slots: z.number().int().nonnegative(),
   payload_calls: z.number().int().nonnegative(),
   continuations: z.array(z.object({
-    slot_index: z.number().int().nonnegative(), target: RecallTargetRefSchema, span: SourceDeliveredSpanSchema
+    slot_index: z.number().int().nonnegative(), target: RecallTargetRefSchema, span: SourceDeliveredSpanSchema,
+    /** The bytes before a slot that opened mid-root, read after the rest of the root. */
+    part: z.literal("prefix").optional()
   }).strict()),
   issues: z.array(z.string().min(1)),
   latency_ms: z.number().finite().nonnegative()

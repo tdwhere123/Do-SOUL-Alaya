@@ -63,7 +63,7 @@ function run(f: Fixture, program?: string, optIn = true, readRoots: readonly str
     `--allow-fs-read=${gitExecutable}`, `--allow-fs-write=${f.out}`,
     "--import", preload.href, "--import", strict, ...argv], {
     // Discover through the physical executable directory, not an alias requiring directory read grants.
-    cwd: f.root, env: { PATH: dirname(gitExecutable), LANG: "C", LC_ALL: "C" },
+    cwd: f.root, env: { PATH: dirname(gitExecutable), LANG: "C", LC_ALL: "C", TMPDIR: f.out, TEMP: f.out, TMP: f.out },
     encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024
   });
 }

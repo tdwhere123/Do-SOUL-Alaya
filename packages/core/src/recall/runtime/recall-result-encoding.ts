@@ -5,6 +5,7 @@ import { previewTokenEstimate } from "./recall-service-helpers.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
 import { CoreError } from "../../shared/errors.js";
+import { fitSourceDependencyExposure } from "./source-dependency-delivery.js";
 
 export function encodeRecallResult(
   index: InformationIndex,
@@ -42,6 +43,9 @@ export function encodeRecallResult(
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
       payload_available: excerpts[offset] !== undefined,
+      ...(metadata?.semantic_dependencies === undefined ? {} : { semantic_dependencies: fitSourceDependencyExposure(
+        metadata.semantic_dependencies, entry.target.kind === "source_evidence" && entry.target.span !== undefined
+          ? [entry.target.span.content_start, entry.target.span.content_end] : undefined, Number.MAX_SAFE_INTEGER) }),
       ...(entry.target.kind !== "source_evidence" ? {} : { source_disclosure: kind === "semantic_proof"
         ? qualifySourceDisclosure(metadata?.source_disclosure ?? projectSourceDisclosure({
           material_kind: entry.target.root_kind === "source_record" ? "original_body"

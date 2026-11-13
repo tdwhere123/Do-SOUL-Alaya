@@ -33,6 +33,7 @@ export {
 } from "./absolute-temporal-window.js";
 
 export { extractTemporalTerms } from "./temporal-terms.js";
+export { statementEventIntervals, type EventDayInterval } from "./statement-event-time.js";
 
 export {
   parseRelativeTemporalTerm,

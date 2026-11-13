@@ -8,14 +8,137 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 35.0.0, engine gateway 3.0.0
+## Unreleased — protocol 41.1.0, engine gateway 3.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
-`@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
+Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
+(`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the
+delivered ranked page it lists one line per further member, up to 32 roots including
+the ranked ones: pool roots not on the page, then up to 16 roots refused only by the
+nomination limit. A line joins the member's existing source statements (best cosine of
+their stored key vectors to the caller's evidence conditions), or its first message when
+it has none, clipped at 218 bytes. Member reads go through the source template reader's
+currentness, erase and statement-binding checks; a member that is erased, changed or
+unreadable is omitted, never listed empty, and a read-budget refusal ends the list. Listing
+draws no acquisition resources. Lines are
+interpretation, not ranking evidence: the nominated pool, accounting, ranked stream and
+`ordinary-native-field.v15` semantics are unchanged, and no model call is added. Engine gateway 3.1.0 names the field in the
+`soul.recall` description (additive description change). Protocol 41.0.0 captures keep their archive identity.
+
+Recall execution retention evicts only least-recently-used other executions of the same
+workspace when a new record does not fit, and refuses rather than evict another workspace.
+A continuation of an evicted execution reads as invalidated, as after expiry.
+
+Protocol 41.0.0 identifies ordinary results as `ordinary-native-field.v15` (library
+field protocol 15), a delivery semantic **major** under invariant §25. Delivery units
+use the admitted host inventory, including unkeyed messages and keyless roots. Within
+the admitted-condition domain, roots outside the association use a stable recorded
+unit or verified retained-chunk fallback; insufficient metadata budget defers the
+read without choosing a different unit. Declared ranges remain separate from actual
+exposure, and all remaining source bytes stay reachable through continuation.
+
+Trusted host capture may declare source/version/digest-bound `semantic_dependencies`
+and returns `message_sources` for closed messages. Missing declarations remain unknown;
+an explicit empty array is known-empty. Ordinary pages finish before optional dependency
+reads and exposure consume remaining resources. Bounded dependency continuation proves
+reachability from the previously delivered source occurrence and rechecks scope,
+currentness and erasure. These contextual prerequisites are not factual support.
+Migration 045 retains pending dependency metadata and replay digests; erasure scrubs
+the metadata with the message body. Discard old continuations and restart on upgrade
+or rollback. Protocol 40/native v14 captures retain their archive identities. To run
+an older binary after migration, restore a retained pre-migration database; do not
+downgrade the live database. No natural-data acceptance or allocation gain is claimed.
+
+Protocol 40.0.0 adds optional `interpretation_proposal.evidence_conditions` (one to four
+question-formed conditions: a statement of at most 512 characters, the `user`/`assistant`
+speaker whose message states it, and up to eight anchors copied verbatim from the question;
+an anchor absent from the question rejects the proposal) and identifies ordinary results as
+`ordinary-native-field.v14` (library field protocol 14). This is a ranking/delivery semantic
+**major** under invariant §25. Condition statements are embedded locally with the query binding.
+A retained statement key witnesses a condition only if the host role of its message is the
+condition's speaker and, when anchors exist, every token of one anchor occurs in the key text
+or that message; under a question-time window the key must also state an event day inside it
+(read against the root's recorded session time; undated keys stay possible unless the session
+precedes the window). Acquisition reduces these facts to a per-root witness matrix on its own
+ledger, and navigation makes one selection: each condition's top necessary witness enters the
+source first five at the slot 5..2 that maximizes the conditions with their top there, then the
+conditions with any witness there; displaced roots follow the first five in source order. An
+unknown witness read leaves the order unchanged. The slot-5 two-coordinate swap is retired, and
+statement keys no longer reach field admission. A proposal may add `evidence_relation: "derived"`;
+then each placed condition's rank 2–5 witnesses from outside the first five follow it, each delivered
+as its witness message (navigation witness `evidence_variant`). With any admitted conditions, every root
+that necessarily witnesses one opens at the range of its witness messages, with the prompt an assistant
+witness answers, and every other associated root at its first message (same field; `condition` is now
+optional and absent for a first-message unit); its prefix stays reachable by an explicit payload range. Without conditions, or with only a query time
+window, the order is unchanged. Discard old
+continuations and restart queries on upgrade or rollback; Protocol 39.x/native v13 archives
+retain their identities and remain readable. No database migration, provider call or
+allowance increase is introduced, and no natural-data benefit is claimed.
+
+Observation formation now lets its existing model request choose request-bound Q/C/H
+association and same-frame temporal references, with explicit missing/unresolved/ambiguous
+absence. The host resolves references; native publication, conditional proof and ranking
+remain unchanged. Internal wire/cache identity `source-task-observation.endpoint-selection.v7`
+replaces caller-preselected v6 formation input and does not reuse its raw attempts.
+Canonical MCP observations and Protocol 39.1/native v13 archive readers are unchanged;
+this internal producer correction has no public schema or SemVer step under invariant §25.
+Provider-shaped fixtures establish mechanism only, not natural availability or benefit.
+Protocol 39.2.0 adds the public `SourceSemanticEndpointCatalogCapacityError` export
+for the observation producer, an additive minor under invariant §25. Catalog capacity
+refusal is isolated per source with an owner-issued diagnostic; valid raw coverage and
+independently selectable neighbors survive. The 256-endpoint cap, under-capacity v7
+requests, public schema signatures and native v13/library 13 semantics are unchanged.
+Protocol 39.0/39.1 archives retain their existing exact mappings.
+
+Protocol 39.1.0 widens task qualification binding IDs to the existing canonical
+bounded execution identity, including multi-phase prefixes (additive schema
+compatibility correction under invariant §25). It also corrects selected support
+closure without redefining the native v13 policy or field-library protocol 13.
+The Protocol 39.0/native v13 archive mapping remains readable.
+
+Protocol 39.0.0 deepens opt-in task observation admission through the existing
+selected Q/H/C conditional field (`ordinary-native-field.v13`, library field protocol
+13). This is a ranking/delivery semantic **major** under invariant §25, not a new
+selector or default promotion. Formation carries exact Q branch/H frame/slot and
+correspondence identities; current source publication, conditional binding and literal
+temporal-operand support are rechecked before the existing bounded preference can act.
+Unbound/free-text observations no longer obtain that preference. Raw fallback and
+hard-guard abstention remain intact; a standing input requires no occurrence-time
+proof. Existing partial evidence-input support does not claim a complete answer or
+executed task operation.
+Navigation retains canonical bounded execution binding IDs, including multi-phase
+prefixes, and a support span used by the existing payload fit. That span requires the
+selected actual binding's complete proof closure; independent unlocated inputs cannot
+revoke its support. These corrections complete the unreleased Protocol 39 major
+contract in 39.1.0. Neither interpretation admission nor overlap establishes world truth.
+Discard old continuations and restart queries on upgrade or rollback; never relabel
+a frozen handle. Protocol 38/native v12 archives retain their original identities
+and remain readable. The v6 formation identity does not readmit v5 outputs.
+No database migration, provider call, allowance increase or natural-benefit claim
+is introduced.
+
+Protocol 38.0.0 changes ordinary source priority (`ordinary-native-field.v12`), a
+major under invariant §25. Opt-in, source-bound task observations can affect the existing
+bounded preference, with literal source/query and clock admission and unreviewed temporal
+qualification. This is neither Q/H/C proof nor a default provider call. Old continuations
+must be discarded and queries restarted; rollback restores the prior runtime and starts
+new queries, never reinterprets a frozen handle. Protocol 37 / native v11 remain distinct
+historical identities and are not repurposed. No database migration is introduced.
+
+Protocol 36.0.0 changes ordinary source priority (`ordinary-native-field.v10`).
+A query-and-clock-bound source template may restore one uniquely matching original
+root displaced by soft time preference, after checking its current statement and own
+retained host message. Mandatory capture and association costs are protected before optional
+inspection; unknown or refused inspection preserves the incumbent. This is navigation
+evidence, not event-time or entailment proof. Old continuation handles are rejected;
+restart the query after upgrading. No query-time model call or allowance increase is added.
 
 Protocol 35.0.0 separates ordinary Recall execution ownership from semantic
 query identity and bounds retained execution and delivery state. This is a

@@ -142,7 +142,7 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
     AND name LIKE 'source_erase_recovery_%'`).all() as { name: string }[];
   for (const { name } of recoveryTriggers) env.database.connection.exec(`DROP TRIGGER "${name}"`);
   env.database.connection.exec(`DROP TABLE source_erase_closure_progress; DROP TABLE source_erase_repair_control;
-    DROP INDEX idx_source_erase_recovery_subject; DELETE FROM schema_version WHERE version = 44;`);
+    DROP INDEX idx_source_erase_recovery_subject; DELETE FROM schema_version WHERE version IN (44, 45);`);
   env.database.connection.exec(`DROP TABLE host_session_rounds; DROP TABLE host_session_planning; DROP TABLE host_session_tail_boundaries;
     DROP TABLE host_session_sweeps;
     DROP TRIGGER host_session_message_container_insert; DROP TABLE host_session_containers;

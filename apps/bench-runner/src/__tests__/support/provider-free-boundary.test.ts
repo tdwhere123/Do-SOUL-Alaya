@@ -5,9 +5,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import childProcess from "node:child_process";
 import workerThreads from "node:worker_threads";
+import net from "node:net";
+import http from "node:http";
+import dgram from "node:dgram";
+import dns from "node:dns";
 import type { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { installProviderFreeBoundary } from "./provider-free-boundary.js";
+import { isKernelWriteLeaseIpcAddress } from "../../runs/extraction/fill/manifest/kernel-write-lease.js";
 
 // An outer provider-free run may already guard descendants with its own preload;
 // that guard appends its import after ours and is not part of this unit's argv.
@@ -99,6 +104,46 @@ it("leaves local fixture transport available without following redirects", async
     expect(native).toHaveBeenCalledWith("http://127.0.0.1:1234/fixture", { redirect: "error" });
     expect(isolation.violations).toEqual([]);
   } finally { isolation.restore(); globalThis.fetch = original; }
+});
+
+it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UDP and DNS", async () => {
+  const isolation = installProviderFreeBoundary();
+  let okRequests = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === "/redirect") { res.writeHead(302, { location: "/ok" }); res.end(); }
+    else { okRequests++; res.end("ok"); }
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  const request = (path: string) => new Promise<string>((resolve, reject) => {
+    http.get(`http://localhost:${port}${path}`, response => {
+      let body = ""; response.on("data", chunk => { body += chunk; }); response.on("end", () => resolve(body));
+    }).on("error", reject);
+  });
+  try {
+    await expect(request("/ok")).resolves.toBe("ok");
+    await expect(fetch(`http://localhost:${port}/ok`).then(response => response.text())).resolves.toBe("ok");
+    await expect(request("/redirect")).rejects.toThrow("HTTP redirect");
+    expect(okRequests).toBe(2);
+    expect(() => net.connect(443, "192.0.2.1")).toThrow("non-loopback socket");
+    expect(() => net.connect("/tmp/nonexistent-provider-fixture.sock")).toThrow("non-loopback socket");
+    const digest = "a".repeat(64);
+    const lease = process.platform === "linux" ? `\0alaya-extraction-cache-write-${digest}`
+      : process.platform === "win32" ? `\\\\.\\pipe\\alaya-w-${digest.slice(0, 16)}`
+      : `/tmp/alaya-w-${digest.slice(0, 16)}.sock`;
+    expect(isKernelWriteLeaseIpcAddress(lease)).toBe(true);
+    expect(() => { const socket = net.connect(lease); socket.on("error", () => undefined); socket.destroy(); }).not.toThrow();
+    expect(() => { const socket = net.connect({ path: lease }); socket.on("error", () => undefined); socket.destroy(); }).not.toThrow();
+    expect(() => dgram.createSocket("udp4")).toThrow("UDP transport");
+    expect(() => dns.resolve4("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
+    expect(() => dns.lookup("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
+    expect(() => dns.promises.lookup("provider-fixture.invalid")).toThrow("DNS lookup");
+    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "UDP transport",
+      "DNS lookup", "DNS lookup", "DNS lookup"]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    isolation.restore();
+  }
 });
 
 it.each(["supplied", "default", "already-present"] as const)("preserves repeated fork flags and provider refusal with %s execArgv", async mode => {

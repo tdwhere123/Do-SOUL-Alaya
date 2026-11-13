@@ -4,6 +4,7 @@ import { RECALL_CONSUMER_PROTOCOL_VERSION } from "./recall-consumer-compatibilit
 import { projectSourceDisclosure } from "./source-disclosure.js";
 import { completeSourceDeliveryEnd, sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
 import { displayRecallPreview, projectPayloadCompleteness } from "./recall-result-encoding.js";
+import { fitSourceDependencyExposure } from "./source-dependency-delivery.js";
 
 /** The same complete envelope is sized by the field and returned by MCP. */
 export function encodeRecallPageResponse(input: Readonly<{
@@ -11,6 +12,7 @@ export function encodeRecallPageResponse(input: Readonly<{
   active_constraints: readonly import("@do-soul/alaya-protocol").SoulActiveConstraint[];
   active_constraints_count: number | null; active_constraints_completeness?: "complete" | "incomplete";
   degradation_reason: import("@do-soul/alaya-protocol").SoulMemorySearchDegradationReason | null;
+  member_index?: readonly import("@do-soul/alaya-protocol").RecallMemberIndexLine[];
 }>) {
   return SoulMemorySearchResponseSchema.parse({ ...input, protocol_version: RECALL_CONSUMER_PROTOCOL_VERSION, total_count: input.results.length,
     ...(input.index.order_status === undefined ? {} : { order_status: input.index.order_status }),
@@ -24,6 +26,7 @@ export type RecallPageSourceMetadata = Readonly<Record<string, Readonly<{
   source_lookup_reasons?: RecallCandidate["source_lookup_reasons"];
   source_disclosure?: RecallCandidate["source_disclosure"];
   delivery_boundaries?: import("@do-soul/alaya-protocol").SourceDeliveryBoundaries;
+  semantic_dependencies?: import("@do-soul/alaya-protocol").HostDependencyExposure;
 }>>>;
 
 /** Numeric evidence from the existing encoder decisions, never a second fit policy. */
@@ -38,7 +41,8 @@ export type RecallResultEncodingObservation = Readonly<{
  */
 export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMap<string, string> = new Map(),
   maxTotalTokens = 2_000, sourceMetadata: RecallPageSourceMetadata = {}, onEntry?: () => void,
-  observe?: (observation: RecallResultEncodingObservation) => void): readonly MemorySearchResult[] {
+  observe?: (observation: RecallResultEncodingObservation) => void,
+  options: Readonly<{ dependency_byte_limit?: number }> = {}): readonly MemorySearchResult[] {
   if (index.result_version.startsWith("ordinary-native-field.")
     && index.result_version !== ORDINARY_NATIVE_FIELD_RESULT_VERSION) {
     throw new AlayaError("CONFLICT", "ordinary field result version is unsupported for delivery");
@@ -97,10 +101,12 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       // units still make UTF-8 progress instead of indefinitely deferring.
       if (fresh !== null && completeSourceDeliveryEnd(fresh.preview, boundaryEnds) !== undefined) break;
     }
-    const content = fitted?.preview ?? "[payload omitted]", tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
+    const content = fitted?.preview ?? "[payload omitted]";
+    const target = deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined);
+    const tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
     usedTokens += tokenEstimate;
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
-      target: deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined),
+      target,
       relevance_score: score, content_preview: content,
       payload_available: fitted !== null && retainedPreview !== undefined,
       ...(disclosure === undefined ? {} : { source_disclosure: disclosure }), evidence_pointers: evidencePointers,
@@ -113,9 +119,30 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
         remaining_tokens: Math.max(0, maxTotalTokens - usedTokens), within_budget: true } });
   }
+  // Every ordinary row and byte has already fitted. Optional prerequisites may
+  // consume only the page's residual, never the next ordinary row's allowance.
+  let dependencyAllowance = Math.min(options.dependency_byte_limit ?? Infinity, Math.max(0, maxTotalTokens - usedTokens));
+  for (let offset = 0; offset < encoded.length; offset++) {
+    const row = encoded[offset]!, entry = rows[offset]!.entry;
+    const dependencies = metadataDependency(entry, sourceMetadata, rows[offset]!.objectId);
+    if (dependencies === undefined) continue;
+    const span = row.target.kind === "source_evidence" ? row.target.span : undefined;
+    const exposure = fitSourceDependencyExposure(dependencies,
+      span === undefined ? undefined : [span.content_start, span.content_end], Math.max(0, dependencyAllowance - 26));
+    if (exposure === undefined) continue;
+    const bytes = Buffer.byteLength(JSON.stringify({ semantic_dependencies: exposure })) - 2;
+    dependencyAllowance -= bytes; usedTokens += bytes;
+    encoded[offset] = { ...row, semantic_dependencies: exposure, budget_state: { ...row.budget_state,
+      token_estimate: row.budget_state.token_estimate + bytes,
+      remaining_tokens: Math.max(0, maxTotalTokens - usedTokens) } };
+  }
   observe?.({ candidate_count: rows.length, result_count: encoded.length, used_tokens: usedTokens,
     count_limited_entries: index.entries.length - rows.length, metadata_block: metadataBlock });
   return encoded;
+}
+
+function metadataDependency(entry: InformationIndex["entries"][number], metadata: RecallPageSourceMetadata, objectId: string | undefined) {
+  return (metadata[indexEntryCacheKey(entry)] ?? (objectId === undefined ? undefined : metadata[objectId]))?.semantic_dependencies;
 }
 
 export function frameEncodedIndex(index: InformationIndex, results: readonly MemorySearchResult[]): InformationIndex {

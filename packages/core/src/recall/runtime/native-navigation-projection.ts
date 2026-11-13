@@ -4,6 +4,7 @@ import { sourceFactKey } from "../conditional-field/engine/binding-environment.j
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { orderNativeFieldAccess, type NativeRouteLane, type NativeRouteOccurrence } from "./native-route-opportunity.js";
+import type { EvidenceCoverageInjection } from "../../source-index/statement-association.js";
 import { compareFieldValues } from "./index-continuation.js";
 import { CoreError } from "../../shared/errors.js";
 
@@ -29,10 +30,13 @@ export type NativeFieldNavigation =
     values: Readonly<{ size: number; at: (index: number) => FieldValue | undefined }> }>;
 
 export type NativeNavigationObservation = Readonly<{
-  status: "ordered" | "non_total"; total: number; truncated: boolean;
+  status: "ordered" | "non_total" | "resource_refused"; total: number; truncated: boolean;
+  navigation_refusal?: Readonly<{ phase: string; constraints: SourceSemanticResourceExhausted["constraints"] | null }>;
   entries: readonly Readonly<{ target: RecallTargetRef; access_ordinal: number | null }>[];
-  statement_association?: Readonly<{ status: "swapped" | "unchanged" | "resource_refused"; source_slot: 5;
-    replacement_global_rank: number | null; replaced_global_rank: number | null; mixed_at_5_changed: boolean; reason: string }>;
+  /** Positions are 1-based within the source order before the permutation. */
+  evidence_coverage?: Readonly<{ status: "permuted" | "unchanged" | "resource_refused" | "not_run"; statements: number | null;
+    top_source_positions: readonly (number | null)[] | null; injections: readonly EvidenceCoverageInjection[];
+    variants?: readonly Readonly<{ statement: number; root_position: number }>[]; reason: string | null }>;
 }>;
 
 function captureNativeNavigation(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
@@ -129,7 +133,7 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
   try {
     const { input, navigation, catalog } = captureNativeNavigation(state, meter);
     // Keep the mandatory coordinate/reference pass and a conservative comparison allowance
-    // available even if optional association spends its entire child grant and then refuses.
+    // available even if optional evidence coverage spends its entire child grant and then refuses.
     const coordinates = input.lanes.reduce((sum, lane) => sum + (lane.state === "exact-captured" ? lane.occurrences.length : 0), 0)
       + (input.memory.state === "exact-captured" ? input.memory.occurrences.length : 0)
       + (input.question_time?.capture.state === "exact-captured" ? input.question_time.capture.occurrences.length : 0) + catalog.size;
@@ -142,15 +146,34 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       : ordered.status === "ordered" ? ordered.record_ids
         : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
     const positions = new Map(recordIds.map((key, index) => [key, index]));
+    const observations = state.native_sources?.task_observations ?? [];
+    meter.charge(observations.length, observations.length * 32, "source task observation coordinates");
+    const tasks = new Map(observations.map(item => [sourceFactKey(item.observation.source), item]));
     for (const row of ordered.trace) if (row.decision === "placed") {
-      const witness = { ...navigation.get(row.occurrence.reference)!, access_ordinal: positions.get(row.record_id)! };
+      const task = tasks.get(row.record_id);
+      const witness = { ...navigation.get(row.occurrence.reference)!, access_ordinal: positions.get(row.record_id)!,
+        ...(task === undefined ? {} : { task_observation: task }) };
       meter.charge(1, 0, "field access coordinate");
       witnesses.set(row.record_id, witness);
     }
     for (const [key, witness] of catalog) if (!witnesses.has(key) && positions.has(key)) {
-      const placed = { ...witness, access_ordinal: positions.get(key)! };
+      const task = tasks.get(key);
+      const placed = { ...witness, access_ordinal: positions.get(key)!,
+        ...(task === undefined ? {} : { task_observation: task }) };
       meter.charge(1, 0, "bound catalog access coordinate");
       witnesses.set(key, placed);
+    }
+    for (const variant of "evidence_variants" in ordered ? ordered.evidence_variants : []) {
+      const witness = witnesses.get(variant.root);
+      if (witness === undefined) continue;
+      meter.charge(1, 64, "evidence witness variant");
+      witnesses.set(variant.root, { ...witness, evidence_variant: { condition: variant.statement, support_span: variant.support_span } });
+    }
+    for (const opening of "evidence_openings" in ordered ? ordered.evidence_openings : []) {
+      const witness = witnesses.get(opening.root);
+      if (witness === undefined || witness.evidence_variant !== undefined) continue;
+      meter.charge(1, 64, "evidence witness opening");
+      witnesses.set(opening.root, { ...witness, evidence_variant: { ...(opening.statement === undefined ? {} : { condition: opening.statement }), support_span: opening.support_span } });
     }
     meter.charge(values.length, values.length * 8, "field navigation value references");
     const result = [...values].sort((left, right) => {
@@ -162,7 +185,9 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     const shared = { witnessFor: (target: RecallTargetRef) => witnesses.get(sourceFactKey(target)),
       values: { size: result.length, at: (index: number) => result[index] } };
     try { observe?.(() => ({ status: ordered.status === "ordered" ? "ordered" : "non_total", total: result.length,
-      ...("statement_association" in ordered ? { statement_association: ordered.statement_association } : {}),
+      evidence_coverage: input.association === undefined ? { status: "not_run", statements: null,
+        top_source_positions: null, injections: [], reason: "coverage_absent_at_navigation" }
+        : "evidence_coverage" in ordered ? ordered.evidence_coverage : undefined,
       truncated: result.length > 128, entries: result.slice(0, 128).map(value => ({ target: structuredClone(value.state.target),
         access_ordinal: witnesses.get(sourceFactKey(value.state.target))?.access_ordinal ?? null })) })); }
     catch { /* Diagnostic capture cannot change the native result. */ }
@@ -171,6 +196,10 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
       : { status: "non_total", missing_record_ids: ordered.missing_record_ids, ...shared };
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    // Detach nested costs: the operational refusal below still reads this error.
+    try { observe?.(() => ({ status: "resource_refused", total: values.length, truncated: values.length > 0,
+      entries: [], navigation_refusal: { phase: error.phase, constraints: structuredClone(error.constraints ?? null) } })); }
+    catch { /* Refusal evidence cannot replace the native resource outcome. */ }
     // Never substitute another order on resource failure or commit a partial sort.
     return { status: "resource_refused" as const,
       ...(error.constraints === undefined ? {} : { constraints: {

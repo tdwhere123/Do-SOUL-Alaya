@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Worker } from "node:worker_threads";
+export { isKernelWriteLeaseIpcAddress } from "./kernel-write-lease-ipc.js";
 
 const STARTING = 0;
 const ACTIVE = 1;
 const OCCUPIED = 2;
-const FAILED = 3;
 const RELEASED = 4;
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 
@@ -21,7 +21,7 @@ const publish = (value) => {
 };
 const server = net.createServer();
 server.once("error", (error) => {
-  publish(error && error.code === "EADDRINUSE" ? 2 : 3);
+  publish(error && error.code === "EADDRINUSE" ? ${OCCUPIED} : 3);
 });
 server.listen(workerData.address, () => publish(1));
 parentPort.once("message", () => {
@@ -157,3 +157,4 @@ function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
   const dir = process.platform === "darwin" ? "/tmp" : tmpdir();
   return join(dir, `alaya-w-${digest.slice(0, 16)}.sock`);
 }
+

@@ -20,18 +20,20 @@ import { SOURCE_IDENTITY_HYDRATE_RESERVE, sourceNativeReadCounts, validateSource
 import { createContentPreview } from "./recall-service-helpers.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+import { sourceDeliveryEnds } from "./source-delivery-prefix.js";
 
 export const MEMORY_PAYLOAD_READ_RESERVE = 2 + SOURCE_IDENTITY_HYDRATE_RESERVE;
 
 export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
-  public readonly sourceMetadata: Record<string, RecallSourceMetadata> = {};
+  public sourceMetadata: Record<string, RecallSourceMetadata> = {};
   public remainingMemoryBytes: number;
   private nativeVisits = 0;
   private nativeRows = 0;
   private nativeBytes = 0;
   private admittedBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
+  private readonly deliveryUnits = new Map<string, Readonly<{ start_byte: number; end_byte: number }>>();
   // Source previews are re-read on every page, so their bytes are page-local, not field retention.
   private sourceBytes = 0;
   private readonly sourcePreviewKeys = new Set<string>();
@@ -41,10 +43,13 @@ export class BoundedIndexPayload {
     readonly previewCache?: Readonly<Record<string, string>>;
     readonly readers: ObserverReaders;
     readonly workspaceId: string;
+    readonly authorizedScopes?: readonly string[] | null;
     readonly asOf?: string;
     readonly remainingMemoryBytes: number;
     /** Surface delivery envelope in bytes; hydrated text is a bounded prefix of it. */
     readonly contentByteBudget?: number;
+    /** Admitted-condition delivery opens ordinary roots at one physical unit even without association. */
+    readonly ordinaryDeliveryUnit?: boolean;
     readonly manifestationFor: (objectId: string) => ManifestationState;
     readonly payloadContinuation?: PayloadContinuationRequest;
     readonly onSourceReadFailure?: (work: Readonly<{ native_visits?: number; native_bytes?: number }>) => void;
@@ -124,9 +129,11 @@ export class BoundedIndexPayload {
         continue;
       }
       if (entry.target.kind === "source_evidence") {
-        // Navigation locates a root, not its evidence. Only an explicit proof
-        // support range narrows delivery; ordinary roots start in document order.
-        const location = this.input.readers.sourceRootPayloadRange?.(entry.target);
+        // Navigation locates a root, not its evidence. Only an explicit proof support range or a
+        // witness variant's host message narrows delivery; ordinary roots start in document order.
+        const location = this.input.readers.sourceRootPayloadRange?.(entry.target)
+          ?? entry.navigation?.task_observation?.conditional_binding?.support_span
+          ?? entry.navigation?.evidence_variant?.support_span;
         const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining, location);
         remaining = hydrated.remaining;
         if (hydrated.retryable) retryable = true;
@@ -165,6 +172,49 @@ export class BoundedIndexPayload {
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
+  }
+
+  /** Called only after ordinary explanation, commit preparation and envelope fitting.
+   * The caller's exact ordinary retention reservation is unavailable to optional reads.
+   */
+  public prepareDependencies(entries: readonly IndexEntry[], remaining: number, retentionBytes = 0): number {
+    const reader = this.input.readers.sourceDependencies;
+    if (reader === undefined || this.input.authorizedScopes === undefined) return remaining;
+    // Traversal work is at most two units per JSON byte, plus the codec and row entries.
+    // Protect framing of the announced envelope before offering any optional read work.
+    const framing = 2 * (2 + entries.length + Math.ceil(2 * (this.input.contentByteBudget ?? 0) / 1024));
+    if (remaining <= framing) return remaining;
+    let optionalBytes = Math.max(0, (this.input.contentByteBudget ?? this.remainingMemoryBytes)
+      - entries.reduce((sum, entry) => sum + Buffer.byteLength(this.previews.get(indexEntryCacheKey(entry)) ?? ""), 0));
+    for (const entry of entries) {
+      if (entry.target.kind !== "source_evidence" || entry.target.root_kind !== "source_record") continue;
+      const key = indexEntryCacheKey(entry), span = entry.target.span ?? this.deliveredSpans.get(sourceEvidenceRootKey(entry.target));
+      if (span === undefined || this.sourceMetadata[key]?.semantic_dependencies !== undefined) continue;
+      const dependency = this.input.payloadContinuation?.dependency;
+      const origin = this.input.payloadContinuation?.target;
+      const sourceSpan = origin?.kind === "source_evidence" ? origin.span : undefined;
+      if (dependency !== undefined && sourceSpan === undefined) continue;
+      const read = reader({ target: entry.target, span: [span.content_start, span.content_end],
+        authorizedScopes: this.input.authorizedScopes,
+        byteLimit: Math.min(optionalBytes, dependency === undefined ? optionalBytes : this.input.payloadContinuation?.byte_budget ?? optionalBytes),
+        ...(dependency === undefined || sourceSpan === undefined ? {} : { continuation: { ...dependency,
+          source_span: [sourceSpan.content_start, sourceSpan.content_end] as const } }),
+        budget: { work_units: Math.max(0, remaining - framing), memory_bytes: Math.max(0, this.remainingMemoryBytes - retentionBytes) } });
+      remaining -= read.resources.work;
+      this.nativeVisits += read.resources.work; this.nativeBytes += read.resources.native_bytes;
+      this.consumeSourceMemory(read.resources.memory_bytes, key);
+      // No host inventory means no captured dependency declaration to encode.
+      // Omitted response metadata remains unknown; explicit occurrence-level
+      // unknown, known-empty and partial/failure exposures still cross the boundary.
+      if (read.exposure.status === "unknown" && read.exposure.roots.length === 0
+        && read.exposure.prerequisites.length === 0) continue;
+      const bytes = Buffer.byteLength(JSON.stringify(read.exposure));
+      if (bytes > this.remainingMemoryBytes - retentionBytes) continue;
+      this.consumeSourceMemory(bytes, key);
+      this.sourceMetadata[key] = { ...this.sourceMetadata[key], semantic_dependencies: read.exposure };
+      optionalBytes = Math.max(0, optionalBytes - bytes);
+    }
+    return remaining;
   }
 
   public takeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number; readonly native_rows: number;
@@ -226,6 +276,7 @@ export class BoundedIndexPayload {
       return { ok: false, remaining, retryable: false };
     }
     const continuation = this.payloadContinuationFor(target);
+    const ordinaryUnit = continuation === undefined && location === undefined && this.input.ordinaryDeliveryUnit === true;
     const offset = continuation?.start_offset ?? location?.start_byte ?? 0;
     const byteLimit = Math.min(hydrateByteLimit(continuation, this.remainingMemoryBytes,
       this.input.readers.sourceRootMetadataByteLimit ?? 0, this.input.contentByteBudget),
@@ -235,6 +286,7 @@ export class BoundedIndexPayload {
     }
     const page = reader({
       purpose: "payload",
+      ...(ordinaryUnit ? { firstDeliveryUnit: true } : {}),
       workspaceId: this.input.workspaceId,
       rootKind: target.root_kind,
       rootId: target.root_id,
@@ -254,7 +306,20 @@ export class BoundedIndexPayload {
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
-    const truncated = page.resourceLimited === true || page.row.content_complete === false;
+    if (ordinaryUnit && page.row.delivery_boundaries?.status === "unavailable"
+      && page.row.delivery_boundaries.reason === "resource_limited") {
+      return { ok: false, remaining: nextRemaining, retryable: true };
+    }
+    // Choose the ordinary unit before envelope fitting, independently of semantic key retention.
+    // The chosen range survives an envelope clip; it is not the transmitted fragment.
+    const boundaries = page.row.delivery_boundaries;
+    const end = !ordinaryUnit ? undefined : boundaries?.status === "available"
+      ? (sourceDeliveryEnds(boundaries, offset)?.find(value => value > 0)
+        ?? boundaries.first_end_offset ?? page.row.delivery_fallback_end) : page.row.delivery_fallback_end;
+    if (ordinaryUnit && end === undefined) return { ok: false, remaining: nextRemaining, retryable: true };
+    if (end !== undefined) this.deliveryUnits.set(sourceEvidenceRootKey(target), { start_byte: offset, end_byte: end });
+    const content = end === undefined ? page.row.content : Buffer.from(page.row.content).subarray(0, end).toString("utf8");
+    const truncated = page.resourceLimited === true || page.row.content_complete === false || content !== page.row.content;
     const metadata = sourceMetadataFrom(page.row, this.input.asOf, target.root_kind);
     const requiredBytes = metadata.source_disclosure === undefined || this.sourceMetadata[cacheKey]?.source_disclosure !== undefined
       ? 0 : Buffer.byteLength(JSON.stringify([cacheKey, metadata]), "utf8");
@@ -263,13 +328,13 @@ export class BoundedIndexPayload {
       return { ok: false, remaining: nextRemaining, retryable: true };
     }
     this.consumeSourceMemory(requiredBytes, cacheKey);
-    this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
+    this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate({ ...page.row, content }, offset, !truncated));
     {
       rememberPreview(
         this.previews,
         cacheKey,
         undefined,
-        page.row.content
+        content
       );
       if (metadata.dimension !== undefined || metadata.scope_class !== undefined
         || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined
@@ -293,7 +358,10 @@ export class BoundedIndexPayload {
       evidence_object_id: entry.target.evidence_object_id,
       span
     });
-    const next = { ...entry, target: stamped };
+    const unit = this.deliveryUnits.get(sourceEvidenceRootKey(entry.target));
+    const next = { ...entry, target: stamped,
+      ...(unit === undefined || entry.navigation === undefined ? {} : {
+        navigation: { ...entry.navigation, evidence_variant: { support_span: unit } } }) };
     const previousKey = indexEntryCacheKey(entry);
     const nextKey = indexEntryCacheKey(next);
     if (previousKey !== nextKey) {

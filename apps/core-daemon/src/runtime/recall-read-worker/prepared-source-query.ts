@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema } from "@do-soul/alaya-protocol";
+import { EVIDENCE_CONDITION_LIMITS, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema } from "@do-soul/alaya-protocol";
 
 /** Parent-owned preparation crosses IPC; public requests cannot supply this material. */
 const PreparedRouteSchema = z.object({
@@ -11,4 +11,5 @@ const PreparedRouteSchema = z.object({
       input_digest: z.string(), embedding: z.custom<Float32Array>(value => value instanceof Float32Array) }).strict()
   ])
 }).strict();
-export const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional() }).strict();
+export const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional(),
+  evidence: z.array(PreparedRouteSchema).max(EVIDENCE_CONDITION_LIMITS.max_conditions).readonly().optional() }).strict();

@@ -1,4 +1,12 @@
-import type { SourceDeliveryBoundaries } from "@do-soul/alaya-protocol";
+import type { QueryInterpretation, SourceDeliveryBoundaries } from "@do-soul/alaya-protocol";
+
+/** The admitted-condition delivery domain is shared by acquisition and payload projection. */
+export function sourceDeliveryConditions(interpretation: QueryInterpretation) {
+  const proposal = interpretation.interpretation_proposal;
+  return proposal?.evidence_conditions === undefined
+    || proposal.question_time === undefined && interpretation.time_window !== undefined
+    ? undefined : proposal.evidence_conditions;
+}
 
 /** Core owns the delivery unit order. Storage supplies recorded span facts only.
  * The message purpose is produced by host-occurrence admission, never inferred.

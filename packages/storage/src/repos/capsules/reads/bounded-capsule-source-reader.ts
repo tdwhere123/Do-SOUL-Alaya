@@ -11,6 +11,7 @@ export type BoundedCapsuleSource = Readonly<{
   digest: string | null;
   body_bytes: number | null;
   prefix: Buffer | null;
+  chunkEnd?: number;
   nativeBytes: number;
   metadataBytes?: number;
   linked: number;

@@ -98,6 +98,7 @@ export interface RecallUsageHandlerDependencies {
       readonly provider_calls?: number | null;
       readonly garden_enqueue?: 0;
       readonly issued_delivery_id?: string;
+      readonly member_index?: readonly import("@do-soul/alaya-protocol").RecallMemberIndexLine[];
       readonly execution_receipt?: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt;
       readonly acknowledge_delivery?: (index: import("@do-soul/alaya-protocol").InformationIndex, previews: ReadonlyMap<string, string>) => Promise<void>;
       readonly discard_delivery?: () => Promise<void>;
@@ -328,7 +329,8 @@ function buildRecallResponse(
       },
       explainabilityPartial
     ),
-    index: recallResult.index
+    index: recallResult.index,
+    ...(recallResult.member_index === undefined ? {} : { member_index: recallResult.member_index })
   });
 }
 

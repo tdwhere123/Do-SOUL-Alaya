@@ -356,7 +356,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
 
 /** Scrub both assigned intents and legacy unbound copies whose retained host inventory proves membership. */
 function scrubHostSessionBodies(database: StorageDatabase, workspaceId: string, sourceIds: readonly string[]): void {
-  const clear = database.connection.prepare(`UPDATE host_session_messages AS m SET pending_body = NULL, erased = 1
+  const clear = database.connection.prepare(`UPDATE host_session_messages AS m SET pending_body = NULL, semantic_dependencies_json = NULL, erased = 1
     WHERE m.workspace_id = ? AND (m.round_root_id = ? OR EXISTS (
       SELECT 1 FROM source_host_inventories i JOIN json_each(i.canonical_inventory, '$.occurrences') o
       JOIN source_records s ON s.workspace_id = i.workspace_id AND s.record_id = i.record_id

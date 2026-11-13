@@ -24,12 +24,13 @@ type Read = Readonly<{ boundaries: SourceDeliveryBoundaries; nativeWork: number;
 
 /** Called only after the root reader has validated the pinned readable source.
  * Delivery uses one unit (message if the root records any, else line) and only
- * ends inside the hydrated window, so only those rows are read.
+ * ends inside the hydrated window, so only those rows are read. First-unit
+ * delivery also reads its first end beyond that window, without body hydration.
  * A bounded prefix of that window is not a complete boundary set.
  */
 export function readSourceDeliveryBoundaries(database: StorageDatabase, sha256: FieldContractSha256,
   workspaceId: string, recordId: string, window: Readonly<{ start: number; end: number }>,
-  workLimit: number, byteLimit: number): Read {
+  workLimit: number, byteLimit: number, firstUnit = false): Read {
   // The first row only needs end > window.start; (end, rowid) is the keyset after it.
   let nativeWork = 0, metadataBytes = 0, rowsRead = 0, afterEnd = window.start, afterRow = Number.MAX_SAFE_INTEGER;
   const spans: Extract<SourceDeliveryBoundaries, { status: "available" }>["spans"][number][] = [];
@@ -44,7 +45,9 @@ export function readSourceDeliveryBoundaries(database: StorageDatabase, sha256: 
     const statement = database.connection.prepare(select);
     while (nativeWork < workLimit && byteLimit - metadataBytes >= ROW_BYTES + 16) {
       nativeWork++;
-      const raw = statement.get(workspaceId, recordId, purpose, window.end, afterEnd, afterEnd, afterRow);
+      // The first unit is a physical fact even when its end exceeds this hydrated fragment.
+      const raw = statement.get(workspaceId, recordId, purpose, firstUnit && spans.length === 0 ? Number.MAX_SAFE_INTEGER : window.end,
+        afterEnd, afterEnd, afterRow);
       if (raw === undefined) return { boundaries: { status: "available", spans }, nativeWork, metadataBytes, rowsRead };
       rowsRead++;
       const row = readRecord(raw, "source delivery boundary");
@@ -59,10 +62,13 @@ export function readSourceDeliveryBoundaries(database: StorageDatabase, sha256: 
       const span = fieldSourceSpanParser.parse(fields);
       verifyPersistedSourceSpan(span, sha256);
       const advanced = span.end_offset > afterEnd || (span.end_offset === afterEnd && nextCursor > afterRow);
-      if (span.purpose !== purpose || span.end_offset > window.end || !advanced) return unavailable("unreadable");
+      if (span.purpose !== purpose || !advanced) return unavailable("unreadable");
+      if (span.end_offset > window.end) return {
+        boundaries: { status: "available", spans, first_end_offset: span.end_offset }, nativeWork, metadataBytes, rowsRead };
       afterEnd = span.end_offset;
       afterRow = nextCursor;
       spans.push({ purpose: AddressableSourceSpanPurposeSchema.parse(span.purpose), end_offset: span.end_offset });
+      if (firstUnit) return { boundaries: { status: "available", spans }, nativeWork, metadataBytes, rowsRead };
     }
     return unavailable("resource_limited");
   } catch {

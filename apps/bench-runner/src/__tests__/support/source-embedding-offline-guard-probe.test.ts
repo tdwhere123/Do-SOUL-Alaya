@@ -377,7 +377,11 @@ if (config.reconfigure) {
   try { await import(raised.href); } catch (error) { errors.push(error.message); }
 }
 if (config.mutateEnv) process.env.ALAYA_SOURCE_EMBEDDING_OFFLINE_INPUT_CAP = "3";
-const handle = cp.fork(productionChild, [], { execArgv: [], env: process.env, silent: true });
+// The production IPC owner removes inherited loader flags before its guarded fork.
+const childEnvironment = { ...process.env };
+delete childEnvironment.NODE_OPTIONS;
+if (config.unsafeLoader) childEnvironment.NODE_OPTIONS = "--require=untrusted-loader";
+const handle = cp.fork(productionChild, [], { execArgv: [], env: childEnvironment, silent: true });
 handle.stderr.resume();
 const observed = [];
 handle.on("message", message => { if (message.ok === true) observed.push(message); });
@@ -444,7 +448,7 @@ it("proves installed references and unused frozen caps rather than accepting a m
 
 type BoundaryOptions = {
   query?: string; perSend?: string; bypassParent?: boolean; throwForward?: boolean;
-  reconfigure?: boolean; mutateEnv?: boolean; captureGetter?: boolean;
+  reconfigure?: boolean; mutateEnv?: boolean; captureGetter?: boolean; unsafeLoader?: boolean;
 };
 type BoundaryResult = {
   errors: string[]; observed: Array<{ id: number; inputs?: Array<{ text: string }> }>;
@@ -477,6 +481,12 @@ function runBoundary(messages: Record<string, unknown>[], options: BoundaryOptio
 const allocation = (inputs: number, bytes: number) => `source_input_cap=${inputs}&source_utf8_byte_cap=${bytes}`;
 const source = (...texts: string[]) => ipc("embed_source", {
   inputs: texts.map((text, index) => ({ input_id: String(index), text }))
+});
+it("refuses unsafe inherited loader flags before the production fork", () => {
+  const result = runBoundary([], { query: allocation(1, 4), unsafeLoader: true });
+  expect(result.status).toBe(1);
+  expect(result.value).toBeNull();
+  expect(result.stderr).toContain("unexpected subprocess or production fork configuration");
 });
 function checkedBoundary(messages: Record<string, unknown>[], options: BoundaryOptions = {}): BoundaryResult {
   const result = runBoundary(messages, options);

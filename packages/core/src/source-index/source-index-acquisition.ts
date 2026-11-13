@@ -10,13 +10,16 @@ import {
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
   type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
   type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest,
-  type SourceSemanticNominationOccurrence
+  type SourceSemanticNominationOccurrence, type QuestionTimePreference
 } from "@do-soul/alaya-protocol";
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { preferQuestionTime, recordedQuestionTime } from "./question-time-preference.js";
+import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
-import { StatementKeyRetention, quoteStatementAssociation, type StatementAssociation } from "./statement-association.js";
+import { collapseStatementCandidates, evidenceWindow, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
+  type StatementAssociation } from "./statement-association.js";
+import { restoreSourceTemplate } from "./source-template-restoration.js";
+import { preferTaskObservations } from "./task-observation-preference.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
   sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
   type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
@@ -30,53 +33,19 @@ type RetainedNomination = {
 };
 
 type SourceQueryPreparationInput = Readonly<{
-  navigation: string; supplemental_navigation?: string; selection: SourceIndexSelection | null;
+  navigation: string; supplemental_navigation?: string; evidence_statements?: readonly string[]; selection: SourceIndexSelection | null;
   bind: (options: SourceEmbeddingBindingOptions) => Promise<SourceEmbeddingBindingResult>;
   signal: AbortSignal; remainingMs: () => number;
 }>;
 type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
-type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
+type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute; evidence?: readonly PreparedRoute[] }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
-  acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionQueryVectorCaptureCost } from "./acquisition-prices.js";
+  acquisitionQueryBindingCost, acquisitionQueryVectorNormCost, acquisitionEnvelopeAndInputCaptureCost } from "./acquisition-prices.js";
 
-type NativeAdmissionFact =
-  | Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>, "status" | "reason">
-  | Pick<Extract<SourceIndexQueryAdmission, { status: "resource_limited" }>, "status" | "reason" | "phase">;
-
-/** Core-owned acquisition facts. Not a public receipt, protocol schema or daemon type.
- * Rank on vector_ranked exists only after the whole finalized ranked set is retained.
- */
-export type SourceIndexAcquisitionFact = Readonly<{
-  kind: "lexical_candidate"; target: SourceIndexTarget["target"];
-  lane: SourceIndexLexicalRank["lane"]; rank: number; lane_rank: number; bm25: number;
-}> | Readonly<{
-  kind: "vector_inspected"; target: SourceIndexTarget["target"];
-  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number;
-}> | Readonly<{
-  kind: "vector_ranked"; target: SourceIndexTarget["target"];
-  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number; rank: number;
-}> | Readonly<{
-  kind: "nomination_attempt"; channel: "lexical" | "vector"; target: SourceIndexTarget["target"];
-  disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
-    | "stale" | "native_unknown" | "resource_refused" | "rejected";
-  /** Native admission status/reason/phase. Absent when the attempt never returned one. */
-  admission?: NativeAdmissionFact;
-  /** Previous retained gold-root target when this attempt merged as a duplicate. Absent otherwise. */
-  merge_target?: SourceIndexTarget["target"];
-  /** Producer-owned refusal recorded for this attempt. Absent when none was recorded.
-   * Reuses result resource_refusals semantics; not a native admission. */
-  resource_refusal?: QueryResourceRefusal;
-}> | Readonly<{
-  kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
-  accounting: SourceIndexNominationAccounting;
-  lexical_completion: SourceIndexAcquisitionResult["lexical"]["completion"];
-  vector_completion: SourceIndexAcquisitionResult["vector"]["completion"];
-}>;
-/** Kind is available without constructing a payload, including count-only inspection diagnostics. */
-export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact,
-  kind: SourceIndexAcquisitionFact["kind"]) => void;
+import { observeLexicalCandidates, sourceTaskInventory, type NativeAdmissionFact,
+  type SourceIndexAcquisitionFact, type SourceIndexAcquisitionObserver } from "./acquisition-observation.js";
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
@@ -88,28 +57,7 @@ export class SourceIndexAcquisition {
   public static readonly channelNotRequested = "acquisition_channel_not_requested";
 
   /** Planning quotation of envelope and input capture. Not a debit. Named consumer: acquireRoute. */
-  public static quoteEnvelopeAndInputCapture(
-    route: Readonly<{ navigation: string; vector: SourceIndexQueryVector; max_roots: number }>,
-    allowance: SourceSemanticResourceBudget, planner?: SourceSemanticResourceLedger
-  ): SourceSemanticResourceBudget {
-    const navigation = SourceSemanticResourceLedger.measureRetain(
-      route.navigation, planner?.remaining() ?? allowance, planner);
-    const vectorInput = SourceSemanticResourceLedger.measureRetain(
-      route.vector.status === "available" ? route.vector.profile : route.vector.reason,
-      planner?.remaining() ?? {
-        work_units: allowance.work_units - navigation.work_units,
-        memory_bytes: allowance.memory_bytes - navigation.memory_bytes
-      }, planner);
-    const envelope = acquisitionResultEnvelopeCost(route.max_roots);
-    const digest = acquisitionNavigationDigestCost(route.navigation);
-    const capture = acquisitionQueryVectorCaptureCost(route.vector);
-    return {
-      work_units: envelope.work_units + navigation.work_units + digest.work_units +
-        vectorInput.work_units + capture.work_units,
-      memory_bytes: envelope.memory_bytes + navigation.memory_bytes + digest.memory_bytes +
-        vectorInput.memory_bytes + capture.memory_bytes
-    };
-  }
+  public static quoteEnvelopeAndInputCapture = acquisitionEnvelopeAndInputCaptureCost;
 
   /** Fail closed before bind or SQL. Omitted control is production both-channels. */
   public static assertControl(input: Readonly<{
@@ -187,7 +135,7 @@ export class SourceIndexAcquisition {
       return Object.freeze({ vector: capturedVector, receipt: captureSourceSemanticQueryPreparation(route.receipt) });
     };
     const primary = captureRoute(prepared);
-    return Object.freeze({ ...primary,
+    return Object.freeze({ ...primary, ...(prepared.evidence === undefined ? {} : { evidence: Object.freeze(prepared.evidence.map(captureRoute)) }),
       ...(prepared.supplemental === undefined ? {} : { supplemental: captureRoute(prepared.supplemental) }) });
   }
 
@@ -199,26 +147,27 @@ export class SourceIndexAcquisition {
     const capturedControl = control;
     if (capturedControl === "lexical") {
       SourceIndexAcquisition.assertControl({ control: capturedControl, navigation: input.navigation });
-      return {
-        vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested },
-        receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested")
-      };
+      return { vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested },
+        receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested") };
     }
     if (capturedControl !== undefined && capturedControl !== "vector" && capturedControl !== "dual") {
       throw new CoreError("VALIDATION", "invalid source acquisition channel control");
     }
-    const { navigation, supplemental_navigation, signal, remainingMs } = input;
+    const { navigation, supplemental_navigation, signal, remainingMs } = input, statements = input.evidence_statements?.slice();
     const selection = structuredClone(input.selection), bind = input.bind;
     let binding: Promise<SourceEmbeddingBindingResult> | undefined;
     const captured = { navigation, selection, signal, remainingMs,
       bind: (options: SourceEmbeddingBindingOptions) => binding ??= bind(options) };
-    const original = await SourceIndexAcquisition.prepareRoute(captured);
+    const primary = await SourceIndexAcquisition.prepareRoute(captured), evidence: PreparedRoute[] = [];
+    // Evidence statements reuse the query binding one input at a time, and only through local inference.
+    for (const statement of statements ?? []) evidence.push(await SourceIndexAcquisition.prepareRoute({ ...captured, navigation: statement }, true));
+    const original = statements === undefined ? primary : { ...primary, evidence };
     if (supplemental_navigation === undefined || supplemental_navigation === navigation) return original;
     const supplemental = await SourceIndexAcquisition.prepareRoute({ ...captured, navigation: supplemental_navigation });
     return { ...original, supplemental };
   }
 
-  private static async prepareRoute(input: SourceQueryPreparationInput): Promise<PreparedRoute> {
+  private static async prepareRoute(input: SourceQueryPreparationInput, localOnly = false): Promise<PreparedRoute> {
     const navigation = input.navigation, selection = input.selection, started = performance.now();
     const bind = input.bind, signal = input.signal, remainingMs = input.remainingMs;
     const digest = sourceEmbeddingInputDigest(navigation);
@@ -254,6 +203,7 @@ export class SourceIndexAcquisition {
       if (profileId !== selection.profile_id || canonicalJson(actual) !== canonicalJson(profile) ||
           sourceIndexProfileId(actual, sourceEmbeddingSha256) !== selection.profile_id) return unavailable("selected_profile_mismatch");
       const method = actual.provider_kind === "local_onnx" ? "local_inference" : "external_api";
+      if (localOnly && method !== "local_inference") return unavailable("evidence_statement_requires_local_inference");
       receipt = { ...receipt, method, submitted_inputs: 1, execution_work: "unknown",
         external_api_attempts: method === "local_inference" ? 0 : null };
       const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation, role: "query" }]);
@@ -312,17 +262,23 @@ export class SourceIndexAcquisition {
 
   /** Runtime capture retains every admitted occurrence before root occupancy is projected.
    * The caller owns the snapshot and the returned inventory's lifetime. Statement-key association runs
-   * only on request for the original view, whose budget must include `quoteStatementAssociation`.
+   * only on request for the original view, whose budget must include `quoteStatementAssociation`;
+   * its keys yield coverage only for supplied evidence statements.
    */
   public nominateWithWitness(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
-    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate = false) {
+    view: "original" | "hint" = "original", observer?: SourceIndexAcquisitionObserver, associate?: EvidenceDemands,
+    preferenceRetention?: SourcePreferenceRetention, observationSourceId?: string, indexMembers = 0) {
     validateInput(input, admitScope);
     const retained: SourceSemanticNominationOccurrence[] = [];
     const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, undefined,
-      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: associate && view === "original" });
+      observer, { view, grouped: false, retained, progress: { lexical: 0, vector: 0 }, associate: view === "original" ? associate : undefined,
+        ...(view === "original" && preferenceRetention !== undefined ? { preferenceRetention } : {}), observationSourceId,
+        indexMembers: view === "original" ? indexMembers : 0 });
     const result = query.run();
-    return { result, witness: retained, ...(query.questionTimeOrder === undefined ? {}
-      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }) };
+    return { result, witness: retained, ...(indexMembers > 0 && view === "original" ? { index_members: query.indexMembers } : {}),
+      ...(query.questionTimeOrder === undefined ? {}
+      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
+      ...(query.prepaidBaseBytes === undefined ? {} : { prepaid_base_bytes: query.prepaidBaseBytes }) };
   }
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
@@ -342,6 +298,7 @@ export class SourceIndexAcquisition {
  */
 class AcquisitionQuery {
   private readonly meter: SourceSemanticResourceLedger;
+  private readonly originalQuestionTime: QuestionTimePreference | undefined;
   private nativeBytes = 0;
   private navigationDigest: string | null = null;
   private queryVector: Float32Array | null = null;
@@ -364,6 +321,10 @@ class AcquisitionQuery {
   private timeRoute = false;
   public questionTimeOrder?: readonly string[];
   public association?: StatementAssociation;
+  public prepaidBaseBytes?: number;
+  /** Admitted roots refused only by the root limit, in attempt order; listed, never nominated. */
+  public readonly indexMembers: SourceIndexTarget[] = [];
+  private readonly indexMemberKeys = new Set<string>();
   private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
@@ -371,12 +332,14 @@ class AcquisitionQuery {
     private readonly control?: SourceAcquisitionChannelControl,
     private readonly observer?: SourceIndexAcquisitionObserver,
     private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
-      progress: { lexical: number; vector: number }; associate?: boolean }) {
+      progress: { lexical: number; vector: number }; associate?: EvidenceDemands; preferenceRetention?: SourcePreferenceRetention;
+      observationSourceId?: string; indexMembers?: number }) {
     const { question_time: proposed, ...rest } = input, recorded = proposed && recordedQuestionTime(QuestionTimePreferenceSchema.parse(proposed));
+    this.originalQuestionTime = proposed;
     this.input = { ...rest, ...(recorded === undefined ? {} : { question_time: recorded }) };
     this.meter = new SourceSemanticResourceLedger(input.budget);
-    if (candidate?.associate === true) this.statements = new StatementKeyRetention(this.meter,
-      phase => this.resourceRefusals.push({ stage: this.stage, phase }));
+    if (candidate?.associate !== undefined) this.statements = new StatementKeyRetention(this.meter,
+      phase => this.resourceRefusals.push({ stage: this.stage, phase }), candidate.associate);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
     this.vector = { completion: "not_run", state: null, reason: "validation_not_run", inspected_windows: 0,
@@ -401,16 +364,12 @@ class AcquisitionQuery {
       } else {
         const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
           this.input.allowance.max_attempts, this.meter.remaining());
-        this.lexicalCandidates = this.collapseStatementCandidates(lexical.candidates);
+        this.lexicalCandidates = collapseStatementCandidates(lexical.candidates, this.meter);
         this.lexical = { completion: lexical.completion, reason: lexical.reason,
           index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
         if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
         this.absorb(lexical.resources);
-        for (const candidate of this.lexicalCandidates) {
-          this.observe("lexical_candidate", () => ({ kind: "lexical_candidate", target: structuredClone(candidate.source.target),
-            lane: candidate.lexical.lane, rank: candidate.lexical.rank, lane_rank: candidate.lexical.lane_rank,
-            bm25: candidate.lexical.bm25 }));
-        }
+        observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact));
       }
       this.stage = "vector";
       if (this.control !== "lexical") this.scanVectors();
@@ -429,6 +388,11 @@ class AcquisitionQuery {
           this.resourceRefusals.push({ stage: "nomination", phase: domain?.reason ?? "question_time_reader_unavailable" });
         }
         if (!active && preference?.intervals.length) this.nominatePrefix(false, cursor);
+        if (!active) this.observe("source_task_inventory", () => sourceTaskInventory({
+          state: preference?.intervals.length && (domain === undefined || domain.status === "unavailable") ? "unavailable" : "inactive",
+          reason: preference === undefined ? this.originalQuestionTime === undefined ? "question_time_not_proposed" : "question_time_no_recorded_domain"
+            : domain?.status === "unavailable" ? domain.reason : domain === undefined ? "question_time_reader_unavailable" : "question_time_domain_empty",
+          restrictedComplete: true, original: [...this.nominations.entries()], nominations: this.nominations, result: this.result() }));
         if (active) {
           this.limited ||= nativePending;
           const partial = preferQuestionTime({ repository: this.repository, workspace: this.input.workspace_id,
@@ -436,14 +400,51 @@ class AcquisitionQuery {
             maxRoots: this.input.allowance.max_roots, maxAttempts: this.input.allowance.max_attempts, meter: this.meter,
             absorb: resources => this.absorb(resources), refusals: this.resourceRefusals,
             ordered: keys => { this.questionTimeOrder = keys; },
+            observeInventory: (original, restrictedComplete, reason) => this.observe("source_task_inventory", () => sourceTaskInventory({
+              state: reason === undefined ? "active" : "unavailable", reason, restrictedComplete,
+              sourceId: this.candidate?.observationSourceId, original, nominations: this.nominations, result: this.result() })),
+            ...(this.input.source_template === undefined && this.input.source_task_observation !== undefined &&
+              this.candidate?.preferenceRetention !== undefined && this.originalQuestionTime !== undefined ? {
+              beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
+                this.prepaidBaseBytes = preferTaskObservations({ proposal: this.input.source_task_observation!,
+                  question: this.originalQuestionTime!, query: this.input.navigation_text, original,
+                  nominations: this.nominations, occurrences: this.candidate!.retained, max_roots: this.input.allowance.max_roots,
+                  repository: this.repository, meter: this.meter, retention: this.candidate!.preferenceRetention!,
+                  association: this.statements?.finalizationProtection(this.input.allowance.max_roots,
+                    original.reduce((sum, [key]) => sum + key.length, 0)
+                      + [...this.nominations.keys()].reduce((sum, key) => sum + key.length, 0))
+                    ?? { work_units: 0, memory_bytes: 0 }, result: () => this.result(),
+                  nativeBytes: bytes => { this.nativeBytes += bytes; }, observe: observation =>
+                    this.observe("source_task_observation", () => ({ kind: "source_task_observation", observation })) });
+              }
+            } : {}),
+            ...(this.input.source_template === undefined || this.candidate?.preferenceRetention === undefined ? {} : {
+              beforeFinalRetention: (original: readonly (readonly [string, RetainedNomination])[]) => {
+                this.prepaidBaseBytes = restoreSourceTemplate({ proposal: this.input.source_template!, original,
+                  nominations: this.nominations, occurrences: this.candidate!.retained, max_roots: this.input.allowance.max_roots,
+                  repository: this.repository, meter: this.meter, retention: this.candidate!.preferenceRetention!,
+                  association: this.statements?.finalizationProtection(this.input.allowance.max_roots,
+                    original.reduce((sum, [key]) => sum + key.length, 0)
+                      + [...this.nominations.keys()].reduce((sum, key) => sum + key.length, 0))
+                    ?? { work_units: 0, memory_bytes: 0 }, result: () => this.result(),
+                  nativeBytes: bytes => { this.nativeBytes += bytes; }, observe: observation =>
+                    this.observe("source_template_restoration", () => ({ kind: "source_template_restoration",
+                      observation, index_binding: this.vectorBinding })) });
+              }
+            }),
             ...(this.candidate === undefined ? {} : { occurrences: this.candidate.retained }),
             nominate: candidates => {
-              this.timeRoute = true; this.lexicalCandidates = this.collapseStatementCandidates(candidates); this.vectorCandidates = [];
+              this.timeRoute = true; this.lexicalCandidates = collapseStatementCandidates(candidates, this.meter); this.vectorCandidates = [];
+              observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact), "question_time");
               const pending = this.nominatePrefix(true); this.limited ||= pending;
             } });
           this.limited ||= partial;
         }
-        this.association = this.statements?.associate([...this.nominations.keys()]);
+        this.association = this.statements?.associate([...this.nominations.keys()], (root, keys, anchors) => {
+          const read = this.repository.readStatementWitnesses?.(this.nominations.get(root)!.source, keys, anchors, this.meter.remaining());
+          if (read !== undefined) this.absorb(read.resources);
+          return read;
+        }, evidenceWindow(this.originalQuestionTime));
       }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -455,10 +456,18 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
+    const result = this.result();
+    this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
+      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
+      statement_association: this.statements?.availability() ?? { status: "not_requested", reason: "association_not_requested" } }));
+    return result;
+  }
+
+  private result(): SourceIndexAcquisitionResult {
     const lexicalDone = this.lexical.completion === "complete" || this.control === "vector" && this.lexical.completion === "not_run";
     const complete = !this.limited && this.counts.native_unknown === 0 && lexicalDone &&
       (this.vector.completion === "complete" || this.vector.completion === "not_run");
-    const result: SourceIndexAcquisitionResult = {
+    return {
       policy: "source-index-interleaved-prefix.v1", navigation_digest: this.navigationDigest,
       completion: complete ? "complete" : this.nominations.size === 0 && this.lexical.completion === "unavailable" &&
         this.vector.completion === "unavailable" ? "unavailable" : "partial",
@@ -470,9 +479,6 @@ class AcquisitionQuery {
         "native_deadline_and_interruption_require_daemon_integration", "caller_owned_read_snapshot_required",
         "lexical_corpus_coverage_untracked", ...(this.timeRoute ? ["question_time_bounded_preference"] : [])]
     };
-    this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
-      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion }));
-    return result;
   }
 
   private observe(kind: SourceIndexAcquisitionFact["kind"], capture: () => SourceIndexAcquisitionFact): void {
@@ -619,7 +625,7 @@ class AcquisitionQuery {
         invalid_windows: this.vector.invalid_windows + 1 }; return;
     }
     if (!Number.isFinite(cosine)) return;
-    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding);
+    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding, candidate.source);
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
     const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);
@@ -632,17 +638,6 @@ class AcquisitionQuery {
     this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
       + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
-  }
-
-  /** Like a vector window, a statement key reaches its raw root once per lane: only its best-ranked
-   * key competes, so repeated statements of one root neither spend attempts nor retain occurrences. */
-  private collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[]): readonly SourceIndexLexicalCandidate[] {
-    if (!candidates.some(row => row.source.auxiliary !== undefined)) return candidates;
-    this.meter.charge(candidates.length, 0, "statement candidate collapse");
-    const seen = new Set<string>();
-    // The set grows only when this root and lane are first seen.
-    return candidates.filter(row => row.source.auxiliary === undefined ||
-      seen.size < seen.add(`${row.lexical.lane}\0${sourceIndexNativeRootKey(row.source)}`).size);
   }
 
   private nominatePrefix(stopAtRootLimit = false,
@@ -753,13 +748,20 @@ class AcquisitionQuery {
     }
     if (this.nominations.size >= this.input.allowance.max_roots) {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
-      this.observeNomination(channel, source, "nomination_limit"); return;
+      this.observeNomination(channel, source, "nomination_limit");
+      this.retainIndexMember(key, source); return;
     }
     this.meter.charge(1, 192, "source nomination reference retention");
     this.retainOccurrence(source, lexical, vector);
     this.nominations.set(key, { source, lexical: lexical === null ? [] : [lexical], vector });
     this.counts.admitted++;
     this.observeNomination(channel, source, "admitted");
+  }
+
+  /** Bounded by the requested count and kept off the ledger the nominated prefix and association share. */
+  private retainIndexMember(key: string, source: SourceIndexTarget): void {
+    if (this.indexMembers.length >= (this.candidate?.indexMembers ?? 0) || this.indexMemberKeys.has(key)) return;
+    this.indexMemberKeys.add(key); this.indexMembers.push(source);
   }
 
   private retainOccurrence(source: SourceIndexTarget, lexical: SourceIndexLexicalRank | null,

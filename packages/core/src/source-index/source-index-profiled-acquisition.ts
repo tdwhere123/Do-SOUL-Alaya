@@ -8,7 +8,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { createNativeRouteNomination, type NativeRouteLane, type NativeRouteAdmission } from "../recall/runtime/native-route-opportunity.js";
-import { SourceIndexAcquisition, type SourceIndexAcquisitionObserver, type SourceIndexAcquisitionFact } from "./source-index-acquisition.js";
+import { SourceIndexAcquisition } from "./source-index-acquisition.js";
+import type { SourceIndexAcquisitionObserver, SourceIndexAcquisitionFact } from "./acquisition-observation.js";
 
 type Route = Readonly<{ navigation: string; vector: SourceIndexQueryVector }>;
 type Capture = ReturnType<SourceIndexAcquisition["captureNative"]>;

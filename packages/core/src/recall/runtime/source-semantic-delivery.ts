@@ -140,9 +140,14 @@ function closedProof(
   return true;
 }
 
-/** Only the execution owner calls this with its actual projected proof and origins. */
+/** Actual engine-projected proofs only. A selected binding restricts roots, never proof origins or closure. */
 export function sourceSemanticProofDependencies(result: Pick<SourceSemanticReasoningResult,
-  "binding_results" | "derivations" | "evidence_leaves" | "derived_nodes">, meter: SourceSemanticResourceLedger): readonly string[] {
+  "binding_results" | "derivations" | "evidence_leaves" | "derived_nodes">, meter: SourceSemanticResourceLedger,
+  bindingId?: string): readonly string[] {
+  if (bindingId !== undefined) {
+    const indexed = (result.evidence_leaves?.length ?? 0) + (result.derived_nodes?.length ?? 0) + (result.derivations?.length ?? 0);
+    meter.charge(indexed, indexed * 64, "selected proof dependency indexes");
+  }
   const leaves = new Map(result.evidence_leaves?.map(row => [row.observation_id, row.leaf]));
   const derived = new Map(result.derived_nodes?.map(row => [row.node_id, row]));
   const dependencies = new Set<string>();
@@ -157,7 +162,14 @@ export function sourceSemanticProofDependencies(result: Pick<SourceSemanticReaso
     dependencies.add(id);
   };
   const rows = new Map(result.derivations?.map(row => [row.derivation_id, row]));
-  const roots = (result.binding_results ?? []).flatMap(row => row.explanation_ids);
+  const bindings = result.binding_results ?? [];
+  const selected = bindingId === undefined ? bindings : bindings.filter(row => {
+    meter.charge(1, 8, "proof binding selection"); return row.binding_id === bindingId;
+  });
+  if (bindingId !== undefined && selected.length !== 1) {
+    throw new CoreError("OBLIGATION_VIOLATION", "selected binding is not unique in the executed proof");
+  }
+  const roots = selected.flatMap(row => row.explanation_ids);
   const closed = closedProof(roots, rows, meter, row => {
     for (const observation of row.observation_ids) {
       const leaf = leaves.get(observation);
