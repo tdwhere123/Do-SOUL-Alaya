@@ -487,6 +487,7 @@ it("uses verified predicate readings as an access-only paraphrase bridge and lea
   });
 });
 
+// Two native worker libraries (ID and insertion order) crossed Vitest's 5s default under Darwin CI load.
 it("preserves lexical role foils and query order under source ID and insertion order changes through the public handler", async () => {
   for (const reversed of [false, true]) {
     const sources = [{ id: reversed ? "z9" : "a1", text: "Alice helps Bob.", reading: "help" },
@@ -509,7 +510,7 @@ it("preserves lexical role foils and query order under source ID and insertion o
       expect(result.coverage.conditional_computation).toBe("unexercised");
     });
   }
-});
+}, 15_000);
 
 it("treats missing and wrong hashes as hints while independently verifying shared-content roots and capsule identity", async () => {
   await withAccessLibrary([
