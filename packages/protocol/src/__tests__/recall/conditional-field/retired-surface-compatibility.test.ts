@@ -38,4 +38,17 @@ describe("retired Recall surface sibling compatibility", () => {
       }
     }).success).toBe(false);
   });
+
+  it("admits a first-page member_index line without treating it as ranking evidence", () => {
+    const line = { label: "R06", root_id: "root", date: "2026-09-08", line: "Alice helps Bob.",
+      producer: "source-statements-v1" as const, statement_ids: ["stmt-1"], in_pool: true };
+    expect(SoulMemorySearchResponseSchema.parse({ ...response, member_index: [line] }).member_index).toEqual([line]);
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...response, member_index: [{ ...line, producer: "first-message", date: null, statement_ids: [], in_pool: false }]
+    }).member_index?.[0]?.producer).toBe("first-message");
+    expect(SoulMemorySearchResponseSchema.safeParse({ ...response, member_index: [{ ...line, label: "6" }] }).success)
+      .toBe(false);
+    expect(SoulMemorySearchResponseSchema.safeParse({ ...response, member_index: [{ ...line, rank: 1 }] }).success)
+      .toBe(false);
+  });
 });
