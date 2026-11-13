@@ -12,6 +12,8 @@ let installed;
 /** Neutral and CLI --import share this owner so a child can enroll its own descendants. */
 export function installProviderFreeActor(preload) {
   const isolation = new ProviderFreeIsolation();
+  // Same-process boundary re-entry must join this journal; wrap already injects it into children.
+  process.env = isolation.environment(process.env);
   isolation.ready();
   installProviderFreeDescendants(isolation, preload);
   process.on("exit", () => {
