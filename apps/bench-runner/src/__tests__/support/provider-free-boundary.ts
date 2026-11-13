@@ -14,6 +14,7 @@ import dns from "node:dns";
 const require = createRequire(import.meta.url);
 const { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } = require("./provider-free-isolation.ts") as typeof import("./provider-free-isolation.js");
 const { installProviderFreeDescendants, providerFreeDescendantPreload } = require("./provider-free-descendants.ts") as typeof import("./provider-free-descendants.js");
+const { isKernelWriteLeaseIpcAddress } = require("../../runs/extraction/fill/manifest/kernel-write-lease.ts") as typeof import("../../runs/extraction/fill/manifest/kernel-write-lease.js");
 
 type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
 const installationKey = Symbol.for("alaya.provider-free-boundary-installations");
@@ -144,12 +145,19 @@ function installProviderFreeTransport(deny: (kind: string) => never): () => void
       // net.createConnection passes Node's normalized [options, callback] array.
       const normalized = Array.isArray(args[0]) ? args[0] : undefined;
       const value = normalized ? normalized[0] : args[0];
-      if (typeof value === "string") return deny("non-loopback socket");
+      if (typeof value === "string") {
+        if (isKernelWriteLeaseIpcAddress(value)) return Reflect.apply(target, receiver, args);
+        if (!/^\d+$/u.test(value)) return deny("non-loopback socket");
+      }
       let options: Record<string, unknown>;
-      if (typeof value === "number") options = { port: value, host: typeof args[1] === "string" ? args[1] : undefined };
-      else if (value && typeof value === "object") options = { ...value };
+      if (typeof value === "number" || typeof value === "string" && /^\d+$/u.test(value)) {
+        options = { port: Number(value), host: typeof args[1] === "string" ? args[1] : undefined };
+      } else if (value && typeof value === "object") options = { ...value };
       else return deny("unknown socket destination");
-      if (typeof options.path === "string") return deny("non-loopback socket");
+      if (typeof options.path === "string" && options.path.length > 0) {
+        if (!isKernelWriteLeaseIpcAddress(options.path)) return deny("non-loopback socket");
+        return Reflect.apply(target, receiver, args);
+      }
       const host = options.host ?? options.hostname ?? "localhost";
       if (host !== "127.0.0.1" && host !== "::1" && host !== "localhost") return deny("non-loopback socket");
       // Do not trust a machine's localhost DNS/hosts mapping or a custom lookup callback.
@@ -157,7 +165,7 @@ function installProviderFreeTransport(deny: (kind: string) => never): () => void
       delete options.hostname; delete options.lookup;
       if (normalized) {
         const copy = Object.assign([...normalized], normalized); copy[0] = options; args[0] = copy;
-      } else if (typeof value === "number") {
+      } else if (typeof value === "number" || typeof value === "string") {
         args = [options, ...args.slice(1).filter((arg: unknown) => typeof arg === "function")];
       } else args[0] = options;
       return Reflect.apply(target, receiver, args);

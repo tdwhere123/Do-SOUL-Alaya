@@ -12,6 +12,7 @@ import dns from "node:dns";
 import type { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { installProviderFreeBoundary } from "./provider-free-boundary.js";
+import { isKernelWriteLeaseIpcAddress } from "../../runs/extraction/fill/manifest/kernel-write-lease.js";
 
 // An outer provider-free run may already guard descendants with its own preload;
 // that guard appends its import after ours and is not part of this unit's argv.
@@ -125,13 +126,21 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
     await expect(request("/redirect")).rejects.toThrow("HTTP redirect");
     expect(okRequests).toBe(2);
     expect(() => net.connect(443, "192.0.2.1")).toThrow("non-loopback socket");
+    expect(() => net.connect("443", "192.0.2.1")).toThrow("non-loopback socket");
     expect(() => net.connect("/tmp/nonexistent-provider-fixture.sock")).toThrow("non-loopback socket");
+    const digest = "a".repeat(64);
+    const lease = process.platform === "linux" ? `\0alaya-extraction-cache-write-${digest}`
+      : process.platform === "win32" ? `\\\\.\\pipe\\alaya-w-${digest.slice(0, 16)}`
+      : `/tmp/alaya-w-${digest.slice(0, 16)}.sock`;
+    expect(isKernelWriteLeaseIpcAddress(lease)).toBe(true);
+    expect(() => { const socket = net.connect(lease); socket.on("error", () => undefined); socket.destroy(); }).not.toThrow();
+    expect(() => { const socket = net.connect({ path: lease }); socket.on("error", () => undefined); socket.destroy(); }).not.toThrow();
     expect(() => dgram.createSocket("udp4")).toThrow("UDP transport");
     expect(() => dns.resolve4("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
     expect(() => dns.lookup("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
     expect(() => dns.promises.lookup("provider-fixture.invalid")).toThrow("DNS lookup");
-    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "UDP transport",
-      "DNS lookup", "DNS lookup", "DNS lookup"]);
+    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "non-loopback socket",
+      "UDP transport", "DNS lookup", "DNS lookup", "DNS lookup"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     isolation.restore();

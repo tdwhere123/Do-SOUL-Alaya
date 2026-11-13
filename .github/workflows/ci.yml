@@ -43,6 +43,8 @@ jobs:
         with:
           # Tests inspect Git config and reject includes; no later step needs Git auth.
           persist-credentials: false
+          # Named historical producer commits must be retained for cat-file admission.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
         with:

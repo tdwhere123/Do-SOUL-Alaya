@@ -22,7 +22,11 @@ export function assertHistoricalRecallProducer(version: string, revision: string
     throw new AlayaError("UNAVAILABLE", "unsupported historical recall preparation producer");
   }
   // The named immutable source object must actually be retained locally; no fetch/reconstruction.
-  execFileSync("git", ["-c", "core.fsmonitor=false", "cat-file", "-e", `${head}^{commit}`], { cwd: checkout, stdio: "pipe" });
+  try {
+    execFileSync("git", ["-c", "core.fsmonitor=false", "cat-file", "-e", `${head}^{commit}`], { cwd: checkout, stdio: "pipe" });
+  } catch (cause) {
+    throw new AlayaError("UNAVAILABLE", "historical producer commit is not retained in this checkout", { cause });
+  }
 }
 
 function captureFiles(paths: readonly string[]) {
