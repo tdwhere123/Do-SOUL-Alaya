@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 
 const scripts = new URL("../../../scripts/", import.meta.url);
 
+// Scorer children crossed 30s under Windows CI load after a long shard.
 it("qualifies successful CLI scoring and invalidates prior success before malformed input reads", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-score-inputs-"));
   try {
@@ -40,7 +41,7 @@ it("qualifies successful CLI scoring and invalidates prior success before malfor
         .toMatchObject({ status: "not_qualifiable", reason: "scoring_incomplete" });
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
-}, 30_000);
+}, 90_000);
 const dataset = new Map([
   ["a", { question_id: "a", haystack_sessions: [[{ has_answer: true, content: "gold" }]] }],
   ["b", { question_id: "b", haystack_sessions: [[{ has_answer: true, content: "gold" }]] }],
@@ -75,6 +76,7 @@ it("requires the fixed question by arm census, without treating unknowns as miss
   expect(() => recallHarnessCensus(rows, dataset, { ...manifest, question_ids: ["a", "a"] })).toThrow(/unique/u);
 });
 
+// Two Node scorer children crossed 30s under Windows CI load after a long shard.
 it("writes failure states and refuses qualification when an expected paired row fails", async () => {
   const root = mkdtempSync(join(tmpdir(), "recall-score-census-"));
   const scorer = fileURLToPath(new URL("recall-harness-score.mjs", scripts));
@@ -107,4 +109,4 @@ it("writes failure states and refuses qualification when an expected paired row 
     expect(JSON.parse(readFileSync(join(root, "census.json"), "utf8")))
       .toMatchObject({ status: "not_qualifiable", reason: "scoring_incomplete" });
   } finally { rmSync(root, { recursive: true, force: true }); }
-}, 30_000);
+}, 90_000);
