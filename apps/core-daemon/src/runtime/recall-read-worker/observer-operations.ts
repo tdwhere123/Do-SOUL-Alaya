@@ -1,4 +1,4 @@
-import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, SourceSemanticResourceLedger,
   SourceSemanticResourceExhausted, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
@@ -18,28 +18,24 @@ import {
   reserveSnapshotPinWork,
   snapshotIdFromPin,
   toSourceObserverRow,
-  toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
   type ConditionalFieldRecallRequest,
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
   SqliteSourceIndexRepository,
-  SqliteEvidenceCapsuleRepo,
-  SqliteFieldSourceRecordRepo,
   SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
   SqliteRelationRecallReader,
-  SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { withWorkerActualCost } from "../recall/worker-actual-cost.js";
 import { storedMeasurementReaders } from "./stored-measurement-readers.js";
+import { sourceRootReaders } from "./source-root-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
-import { MEMBER_INDEX_OVERFLOW, memberIndexInputsOf, rememberMemberIndexInputs, renderMemberIndex,
-  type MemberIndexInputs } from "./member-index.js";
+import { MEMBER_INDEX_OVERFLOW, renderMemberIndex, type MemberIndexInputs } from "./member-index.js";
 import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
 import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
@@ -66,19 +62,10 @@ export function runConditionalFieldWorkerRecall(
   const reserved = reserveSnapshotPinWork(payload.budget);
   const observer = adapters.observer;
   observer?.queryVector(payload.prepared_query?.vector);
-  const base: ObserverReaders = reserved.permitted && payload.cancelled !== true
-    ? adapters.readers ?? (payload.prepared_query === undefined && observer === undefined ? readersFor(runtime)
-      : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
-        "allowance", payload.prepared_query?.evidence)) : {};
-  let memberInputs: MemberIndexInputs | undefined;
-  const readers: ObserverReaders = base.nominateSources === undefined ? base : {
-    ...base, nominateSources: input => {
-      const nomination = base.nominateSources!(input);
-      if (nomination !== null && typeof nomination === "object") memberInputs ??= memberIndexInputsOf(nomination);
-      observer?.nomination(nomination);
-      return nomination;
-    }
-  };
+  const firstPage = payload.continuation == null && payload.payload_continuation === undefined;
+  const assembled = reserved.permitted && payload.cancelled !== true
+    ? workerReaders(runtime, payload, adapters.readers, observer, firstPage) : undefined;
+  const readers: ObserverReaders = assembled?.readers ?? {};
   let governance = payload.governance;
   const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
     ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
@@ -158,10 +145,11 @@ export function runConditionalFieldWorkerRecall(
     entry, metadata: source_metadata[indexEntryCacheKey(entry)] ?? null })) }));
   const issuedDeliveryId = executed.delivery_id ?? issuedDeliveryIdOf(executed.index);
   const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
-  const firstPage = payload.continuation == null && payload.payload_continuation === undefined;
-  const member_index = !firstPage || memberInputs === undefined ? undefined
-    : renderMemberIndex(runtime.database, workspaceId, memberInputs, new Set(index.entries.flatMap(entry =>
-      entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])), index.entries.length);
+  const memberInputs = firstPage ? assembled?.memberInputs() : undefined;
+  const member_index = memberInputs === undefined ? undefined
+    : renderMemberIndex(new SqliteSourceIndexRepository(runtime.database, fieldContractSha256), memberInputs,
+      new Set(index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])),
+      index.entries.length);
   return {
     execution_receipt: executed.execution_receipt,
     index,
@@ -171,6 +159,24 @@ export function runConditionalFieldWorkerRecall(
     ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId }),
     ...(member_index === undefined || member_index.length === 0 ? {} : { member_index })
   };
+}
+
+/** A first page builds its own readers so its nomination can hand the member-index inputs to this call only. */
+function workerReaders(runtime: RecallReadWorkerRuntime, payload: ConditionalFieldRecallWorkerPayload,
+  injected: ObserverReaders | undefined, observer: SourceSemanticObserver | undefined, firstPage: boolean) {
+  let memberInputs: MemberIndexInputs | undefined;
+  const base: ObserverReaders = injected ?? (payload.prepared_query === undefined && observer === undefined && !firstPage
+    ? readersFor(runtime)
+    : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
+      "allowance", payload.prepared_query?.evidence, firstPage ? inputs => { memberInputs ??= inputs; } : undefined));
+  const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
+    ...base, nominateSources: input => {
+      const nomination = base.nominateSources!(input);
+      observer.nomination(nomination);
+      return nomination;
+    }
+  };
+  return { readers, memberInputs: () => memberInputs };
 }
 
 type NominationCapture = Omit<ReturnType<SourceIndexAcquisition["nominateWithWitness"]>, "witness"> & {
@@ -189,7 +195,8 @@ type PreparedEvidence = Parameters<typeof bindEvidenceDemands>[1];
  */
 export function nominateNativeSources(database: StorageDatabase, input: NominationInput,
   queryVector: SourceIndexQueryVector, observer?: SourceSemanticObserver,
-  funding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence): NativeSourceNomination {
+  funding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence,
+  onMemberIndex?: (inputs: MemberIndexInputs) => void): NativeSourceNomination {
   const repository = new SqliteSourceIndexRepository(database, fieldContractSha256, { captureReadTargets: true });
   const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
   const admit: Parameters<SourceIndexAcquisition["nominateWithWitness"]>[1] = (scope, source) => {
@@ -296,9 +303,9 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       resource_refusals: association !== undefined && retainedAssociation === undefined
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
   const binding = original.result.vector.state !== null && "binding" in original.result.vector.state ? original.result.vector.state.binding : null;
-  rememberMemberIndexInputs(nomination, { pool: result.nominations.map(row => row.source),
-    overflow: original.index_members ?? [], conditions: demands.status === "ready" ? demands.vectors : [],
-    generation: binding?.generation_id ?? null });
+  onMemberIndex?.({ pool: result.nominations.map(row => row.source), overflow: original.index_members ?? [],
+    conditions: demands.status === "ready" ? demands.vectors : [],
+    vectors: binding === null ? null : { generation_id: binding.generation_id, dimensions: binding.dimensions } });
   return nomination;
 }
 
@@ -368,14 +375,11 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = [],
   queryVector: SourceIndexQueryVector = { status: "unavailable", reason: "embedding_preparation_unwired" },
-  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence): ObserverReaders {
+  observer?: SourceSemanticObserver, acquisitionFunding: AcquisitionFunding = "allowance", evidence?: PreparedEvidence,
+  onMemberIndex?: (inputs: MemberIndexInputs) => void): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
-  const sourceRoots = new SqliteSourceRootRecallReader(
-    new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
-    new SqliteEvidenceCapsuleRepo(database)
-  );
   const kindsSql = database.connection.prepare(
     `SELECT relation_kind AS kind FROM relation_assertions
      WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
@@ -383,7 +387,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
     sourceDependencies: input => readSourceDependencyDelivery(new SqliteSourceIndexRepository(database, fieldContractSha256), input),
-    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding, evidence),
+    nominateSources: input => nominateNativeSources(database, input, queryVector, observer, acquisitionFunding, evidence, onMemberIndex),
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,
@@ -405,64 +409,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         resourceLimited: page.resourceLimited
       };
     },
-    sourceRootMetadataByteLimit: 8192,
-    sourceRootChunkByteLimit: 4096,
-    sourceRoots: (input) => {
-      const page = sourceRoots.page({
-        workspaceId: input.workspaceId,
-        query: input.query,
-        limit: input.limit,
-        nativeLimit: input.nativeLimit,
-        workLimit: input.workLimit,
-        afterCursor: input.afterCursor,
-        byteLimit: input.byteLimit,
-        nativeByteLimit: input.nativeByteLimit
-      });
-      return {
-        rows: page.rows.map(toSourceRootObserverRow),
-        nativeVisits: page.nativeVisits,
-        nativeBytes: page.nativeBytes,
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        metadataBytes: page.metadataBytes,
-        nativeWork: page.nativeWork,
-        truncated: page.truncated,
-        committedThrough: page.committedThrough,
-        unavailable: page.unavailable
-      };
-    },
-    sourceRoot: (input) => {
-      if (input.revision === undefined || input.digest === undefined) {
-        return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
-      }
-      const page = sourceRoots.hydrate(
-        input.workspaceId,
-        sourceRecallTarget({
-          workspace_id: input.workspaceId,
-          root_kind: input.rootKind,
-          root_id: input.rootId,
-          source_version: input.revision,
-          content_digest: input.digest,
-          evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
-        }),
-        input.byteLimit ?? 65536,
-        input.offset ?? 0,
-        // 12288 is the retained chunk+metadata reservation; logical clip is separate.
-        input.nativeByteLimit ?? Math.max(input.byteLimit ?? 65536, 12_288),
-        input.workLimit,
-        input.purpose === "payload",
-        input.firstDeliveryUnit === true
-      );
-      return {
-        row: page.row === null ? null : toSourceRootObserverRow(page.row),
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        metadataBytes: page.metadataBytes,
-        nativeWork: page.nativeWork,
-        unavailable: page.unavailable,
-        resourceLimited: page.resourceLimited
-      };
-    },
+    ...sourceRootReaders(database),
     relation: (input) => relation.read(
       input.workspaceId,
       input.subject,

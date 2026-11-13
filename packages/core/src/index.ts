@@ -7,7 +7,7 @@ export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.
 export { acquireProfiledSourceIndex } from "./source-index/source-index-profiled-acquisition.js";
 export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
 export type { TaskInterpretationReader } from "./source-index/task-observation-binding.js";
-export { bindEvidenceDemands, restrictStatementAssociation, type StatementAssociation } from "./source-index/statement-association.js";
+export { bindEvidenceDemands, restrictStatementAssociation, statementKeyCosine, type StatementAssociation } from "./source-index/statement-association.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
 export * from "./governance/bankruptcy/budget-bankruptcy-service.js";

@@ -550,6 +550,17 @@ reading the first pages and then continuing their cut sources (≈ 9 KB more for
 five) is what reaches the recall floor, while reordering or deferring cut members loses
 the 2 KB guard.
 
+The first page also carries an optional `member_index` (Protocol 41.1.0): one line per
+further member after the ranked results, up to 32 roots in total — pool roots not on the
+page, then up to 16 roots that acquisition refused only by its nomination limit. A line
+joins the member's existing source statements by best cosine of their stored key vectors
+to the caller's evidence conditions (first message when it has none), clipped at 218 B.
+Member reads reuse the source template reader's currentness, erase and statement-binding
+checks; an erased, changed or unreadable member is omitted, and a read-budget refusal ends
+the list without touching the ranked page. It lets the consumer see and choose beyond the ranked five; it is never ranking evidence
+and does not change the pool, accounting or ranked stream. Pool members read through
+continuation; listed statements open with `soul.open_pointer`.
+
 See [Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts).
 `RecallNavigationWitness` records original/hint view, native operator,
 ordinal, optional access rank and byte location; it is discovery provenance,

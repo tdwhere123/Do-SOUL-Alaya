@@ -122,7 +122,7 @@ export function bindEvidenceDemands(conditions: readonly EvidenceCondition[] | u
 }
 
 /** Same arithmetic as the declared offline rule: one left-to-right Float64 pass over Float32 values. */
-function cosine(key: Float32Array, demand: Float32Array): number {
+export function statementKeyCosine(key: Float32Array, demand: Float32Array): number {
   let dot = 0, keyNorm = 0, demandNorm = 0;
   for (let i = 0; i < key.length; i++) {
     const a = key[i]!, b = demand[i]!;
@@ -252,7 +252,7 @@ export class StatementKeyRetention {
           if (fact.role !== condition.speaker || condition.anchors.length > 0
             && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") return;
           if (time === "unknown") { open[index] = true; return; }
-          const value = cosine(key.embedding, vector);
+          const value = statementKeyCosine(key.embedding, vector);
           if (value > (best ?? -Infinity)) { best = value; span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span]; }
         });
         const asked = span !== null && condition.speaker === "assistant" ? prompt((span as readonly [number, number])[0]) : null;

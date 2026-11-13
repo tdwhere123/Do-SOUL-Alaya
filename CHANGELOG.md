@@ -8,14 +8,32 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 41.0.0, engine gateway 3.0.0
+## Unreleased — protocol 41.1.0, engine gateway 3.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
-`@do-soul/alaya-engine-gateway` is `3.0.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
+
+Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
+(`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the
+delivered ranked page it lists one line per further member, up to 32 roots including
+the ranked ones: pool roots not on the page, then up to 16 roots refused only by the
+nomination limit. A line joins the member's existing source statements (best cosine of
+their stored key vectors to the caller's evidence conditions), or its first message when
+it has none, clipped at 218 bytes. Member reads go through the source template reader's
+currentness, erase and statement-binding checks; a member that is erased, changed or
+unreadable is omitted, never listed empty, and a read-budget refusal ends the list. Listing
+draws no acquisition resources. Lines are
+interpretation, not ranking evidence: the nominated pool, accounting, ranked stream and
+`ordinary-native-field.v15` semantics are unchanged, and no model call is added. Engine gateway 3.1.0 names the field in the
+`soul.recall` description (additive description change). Protocol 41.0.0 captures keep their archive identity.
+
+Recall execution retention evicts only least-recently-used other executions of the same
+workspace when a new record does not fit, and refuses rather than evict another workspace.
+A continuation of an evicted execution reads as invalidated, as after expiry.
 
 Protocol 41.0.0 identifies ordinary results as `ordinary-native-field.v15` (library
 field protocol 15), a delivery semantic **major** under invariant §25. Delivery units

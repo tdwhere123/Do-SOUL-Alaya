@@ -7,8 +7,8 @@ export type RecallRetentionRemoval = Readonly<{ handles: readonly string[];
   reason: "expired" | "discarded" | "invalidated" | "evicted" }>;
 
 /** Process-local execution leases. A record that does not fit evicts whole
- * least-recently-used other executions; it is refused only when evicting every
- * other execution would still not make room. Shared immutable nodes are
+ * least-recently-used other executions of its workspace; it is refused only when
+ * evicting all of them would still not make room. Shared immutable nodes are
  * conservatively charged per retained root. */
 export class RecallExecutionRetention {
   private readonly records = new Map<string, Retained>();
@@ -128,29 +128,24 @@ export class RecallExecutionRetention {
     return { entries: this.records.size, executions: this.deadlines.size, retained_bytes: this.bytes };
   }
   private touch(execution: string): void { this.touched.set(execution, ++this.clock); }
-  /** Least-recently-used other executions whose removal makes `bytes` fit, or undefined if none can. */
+  /** Least-recently-used other executions of the same workspace whose removal makes `bytes` fit, or undefined
+   * if none can. Another workspace's leases are never evicted to make room. */
   private victimsFor(key: string, row: Retained, bytes: number): readonly string[] | undefined {
     let total = this.bytes - (this.records.get(key)?.bytes ?? 0) + bytes;
     let workspace = bytes;
-    const owned = new Map<string, { total: number; workspace: number }>();
+    const owned = new Map<string, number>();
     for (const [id, retained] of this.records) {
-      if (id === key) continue;
-      if (retained.workspace === row.workspace) workspace += retained.bytes;
-      if (retained.execution === row.execution) continue;
-      const sum = owned.get(retained.execution) ?? { total: 0, workspace: 0 };
-      sum.total += retained.bytes;
-      if (retained.workspace === row.workspace) sum.workspace += retained.bytes;
-      owned.set(retained.execution, sum);
+      if (id === key || retained.workspace !== row.workspace) continue;
+      workspace += retained.bytes;
+      if (retained.execution !== row.execution) owned.set(retained.execution, (owned.get(retained.execution) ?? 0) + retained.bytes);
     }
     const victims: string[] = [];
     const order = [...owned.keys()].sort((a, b) => (this.touched.get(a) ?? 0) - (this.touched.get(b) ?? 0));
     for (const execution of order) {
       if (total <= this.capacity && workspace <= this.workspaceCapacity) break;
-      const sum = owned.get(execution)!;
-      if (total <= this.capacity && sum.workspace === 0) continue;
       victims.push(execution);
-      total -= sum.total;
-      workspace -= sum.workspace;
+      total -= owned.get(execution)!;
+      workspace -= owned.get(execution)!;
     }
     return total <= this.capacity && workspace <= this.workspaceCapacity ? victims : undefined;
   }

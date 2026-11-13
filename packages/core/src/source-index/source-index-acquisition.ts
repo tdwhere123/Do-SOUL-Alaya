@@ -325,7 +325,6 @@ class AcquisitionQuery {
   /** Admitted roots refused only by the root limit, in attempt order; listed, never nominated. */
   public readonly indexMembers: SourceIndexTarget[] = [];
   private readonly indexMemberKeys = new Set<string>();
-  private indexMembersClosed = false;
   private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
@@ -759,15 +758,9 @@ class AcquisitionQuery {
     this.observeNomination(channel, source, "admitted");
   }
 
+  /** Bounded by the requested count and kept off the ledger the nominated prefix and association share. */
   private retainIndexMember(key: string, source: SourceIndexTarget): void {
-    if (this.indexMembersClosed || this.indexMembers.length >= (this.candidate?.indexMembers ?? 0)
-      || this.indexMemberKeys.has(key)) return;
-    try { this.meter.charge(1, 192, "source index member reference retention"); }
-    catch (error) {
-      // An unfunded listing ends the list; it never changes the nominated prefix or its completion.
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      this.indexMembersClosed = true; return;
-    }
+    if (this.indexMembers.length >= (this.candidate?.indexMembers ?? 0) || this.indexMemberKeys.has(key)) return;
     this.indexMemberKeys.add(key); this.indexMembers.push(source);
   }
 

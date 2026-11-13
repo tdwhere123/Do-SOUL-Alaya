@@ -36,10 +36,10 @@ export function putSourceStatementArtifact(database: StorageDatabase, input: Sou
     VALUES(?,?,?,?,?,?)`).run(bound.source_target.workspace_id, input.artifact_id, bound.source_target.root_id, source.source_id, json, expected.key_text);
 }
 
-/** Missing is a non-statement capsule; malformed/over-budget is not absence. */
+/** Missing is a non-statement capsule; neither malformed (partial) nor over-budget (resource_limited) is absence. */
 export function readStatementIndexTarget(database: StorageDatabase, workspace: string, artifactId: string, budget: SourceIndexBudget) {
   const resources = { work: 0, native_bytes: 0 };
-  if (budget.work < 1 || budget.native_bytes < TARGET_BYTES + 1) return { status: "partial" as const, resources };
+  if (budget.work < 1 || budget.native_bytes < TARGET_BYTES + 1) return { status: "resource_limited" as const, resources };
   const row = database.connection.prepare(`SELECT substr(CAST(target_json AS BLOB),1,?) AS target_json FROM source_statement_artifacts
     WHERE workspace_id=? AND artifact_id=?`).get(TARGET_BYTES + 1, workspace, artifactId) as { target_json: Buffer } | undefined;
   resources.work++;

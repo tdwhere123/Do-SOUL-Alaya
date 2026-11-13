@@ -15,6 +15,7 @@ import { QueryReadMeter, targetDecodeReservation } from "./query-read-meter.js";
 import { admitSourceIndexQueryCandidate } from "./source-index-query-reader.js";
 import { readStatementIndexChunk, readStatementIndexTarget } from "./statement-artifact.js";
 import { tokenizeFtsQuery } from "../shared/fts-lane-routing.js";
+import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js";
 
 // Artifact ids have at most 256 Unicode scalar characters. Payload sizes are read before payloads.
 const ARTIFACT_ID_BYTES = 1024;
@@ -25,33 +26,44 @@ type ReadContext = Readonly<{
   meter: QueryReadMeter; sha256: FieldContractSha256;
 }>;
 class TemplateReadUnknown extends Error {}
+/** A refusal by a read budget, distinct from an unknown source state. */
+class TemplateReadLimited extends TemplateReadUnknown {}
 
 /** Caller owns the admitted root and snapshot. An unfinished enumeration never returns a useful prefix. */
 export function readTemplateStatements(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
   source: SourceIndexTarget, budget: SourceSemanticResourceBudget, sha256: FieldContractSha256): SourceIndexTemplateRead {
   const meter = new QueryReadMeter(budget), context: ReadContext = { database, records, source, meter, sha256 };
   try {
-    const admission = admitSourceIndexQueryCandidate(database, records, source, null, meter.ledger.remaining());
-    meter.absorbQuery(admission.resources);
-    if (admission.status !== "ready") throw new TemplateReadUnknown(`source_template_${admission.status}:${admission.reason}`);
-    meter.ledger.charge(1, 64, "source template enumeration");
-    const statements: { source: SourceIndexTarget; bound: BoundSourceStatement }[] = [];
-    if (source.target.root_kind !== "source_record") return { status: "complete", statements, resources: meter.resources() };
-    let after = "", inventory: HostOccurrenceInventory | undefined;
-    while (true) {
-      const header = readArtifactHeader(context, after);
-      if (header === null) return { status: "complete", statements, resources: meter.resources() };
-      inventory ??= readInventory(context);
-      const statement = readArtifact(context, header);
-      verifyOwnMessage(context, statement.bound, inventory);
-      meter.ledger.retain(statement, "source template statement retention");
-      meter.ledger.charge(1, 8, "source template result reference");
-      statements.push(statement); after = header.id;
-    }
+    return { status: "complete", statements: enumerateTemplateStatements(context).statements, resources: meter.resources() };
   } catch (error) {
     return { status: "unknown", reason: error instanceof TemplateReadUnknown ? error.message
       : error instanceof SourceSemanticResourceExhausted ? `source_template_read_budget:${error.phase}`
         : "source_template_read_failed_unknown_additional_cost", resources: meter.resources() };
+  }
+}
+
+/** Throws on any unfinished enumeration. The host inventory is returned when statement binding loaded it. */
+function enumerateTemplateStatements(context: ReadContext) {
+  const { database, records, source, meter } = context;
+  const admission = admitSourceIndexQueryCandidate(database, records, source, null, meter.ledger.remaining());
+  meter.absorbQuery(admission.resources);
+  if (admission.status !== "ready") {
+    const reason = `source_template_${admission.status}:${admission.reason}`;
+    throw admission.status === "resource_limited" ? new TemplateReadLimited(reason) : new TemplateReadUnknown(reason);
+  }
+  meter.ledger.charge(1, 64, "source template enumeration");
+  const statements: { source: SourceIndexTarget; bound: BoundSourceStatement }[] = [];
+  let after = "", inventory: HostOccurrenceInventory | undefined;
+  if (source.target.root_kind !== "source_record") return { statements, inventory };
+  while (true) {
+    const header = readArtifactHeader(context, after);
+    if (header === null) return { statements, inventory };
+    inventory ??= readInventory(context);
+    const statement = readArtifact(context, header);
+    verifyOwnMessage(context, statement.bound, inventory);
+    meter.ledger.retain(statement, "source template statement retention");
+    meter.ledger.charge(1, 8, "source template result reference");
+    statements.push(statement); after = header.id;
   }
 }
 
@@ -119,6 +131,49 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
   }
 }
 
+/** Listing material for one admitted member: its owned statements (stored leading key-window vector of the bound
+ * generation when valid, else null), the recorded event time, and its first host message. Admission, erase and
+ * statement binding and host inventory are the template reader's; a failed read is unknown and a budget refusal is
+ * resource_limited, never an empty listing. */
+export function readMemberListing(database: StorageDatabase, records: SqliteFieldSourceRecordRepo, source: SourceIndexTarget,
+  vectors: Readonly<{ generation_id: string; dimensions: number }> | null, budget: SourceSemanticResourceBudget,
+  sha256: FieldContractSha256) {
+  const meter = new QueryReadMeter(budget), context: ReadContext = { database, records, source, meter, sha256 };
+  try {
+    const template = enumerateTemplateStatements(context);
+    const statements = template.statements.map(row => ({ source: row.source, text: row.bound.statement.text,
+      role: row.bound.message.role, message_id: row.bound.message.message_id,
+      embedding: vectors === null ? null : readStatementVector(context, row.source, vectors) }));
+    const inventory = template.inventory ?? (source.target.root_kind === "source_record" ? readInventory(context) : undefined);
+    const first = inventory?.occurrences.find(row => hostOccurrenceIsMessage(row));
+    if (first === undefined) return { status: "ready" as const, statements, event_time: null, first_message: null,
+      resources: meter.resources() };
+    const part = readMessagePart(context, first.utf8_span[0], first.utf8_span[1]);
+    return { status: "ready" as const, statements, event_time: part.eventTime, first_message: part.text.trim(),
+      resources: meter.resources() };
+  } catch (error) {
+    if (error instanceof TemplateReadLimited || error instanceof SourceSemanticResourceExhausted) {
+      return { status: "resource_limited" as const, reason: error instanceof TemplateReadLimited ? error.message
+        : `member_listing_read_budget:${error.phase}`, resources: meter.resources() };
+    }
+    return { status: "unknown" as const, reason: error instanceof TemplateReadUnknown ? error.message
+      : "member_listing_read_failed_unknown_additional_cost", resources: meter.resources() };
+  }
+}
+
+/** A statement key is scored by its leading window; later windows of a long key are not read. */
+function readStatementVector({ database, source, meter }: ReadContext, key: SourceIndexTarget,
+  vectors: Readonly<{ generation_id: string; dimensions: number }>): Float32Array | null {
+  meter.ledger.reserve(1, 4 * vectors.dimensions + 64, "member statement key vector");
+  const row = cachedReadStatement(database, `SELECT v.embedding_blob AS blob FROM source_index_windows w
+    JOIN source_index_vectors v ON v.workspace_id = w.workspace_id AND v.generation_id = w.generation_id
+      AND v.window_id = w.window_id
+    WHERE w.workspace_id = ? AND w.generation_id = ? AND w.root_key = ? ORDER BY w.ordinal LIMIT 1`)
+    .get(source.target.workspace_id, vectors.generation_id, key.root_key) as { blob: Uint8Array } | undefined;
+  meter.read(1, row?.blob.byteLength ?? 0);
+  return row === undefined ? null : decodeValidEmbeddingBlob(row.blob, vectors.dimensions);
+}
+
 function readArtifactHeader({ database, source, meter }: ReadContext, after: string): ArtifactHeader | null {
   meter.ledger.reserve(1, HEADER_BYTES, "source template artifact header");
   meter.read(1, 0);
@@ -146,6 +201,7 @@ function readArtifactHeader({ database, source, meter }: ReadContext, after: str
 
 function readInventory({ records, source, meter }: ReadContext): HostOccurrenceInventory {
   const read = readInventoryResult({ records, source, meter });
+  if (read.status === "resource_limited") throw new TemplateReadLimited("source_template_host_resource_limited");
   if (read.status !== "captured" || read.inventory === undefined) throw new TemplateReadUnknown(`source_template_host_${read.status}`);
   return read.inventory;
 }
@@ -165,6 +221,7 @@ function readArtifact(context: ReadContext, header: ArtifactHeader) {
   meter.ledger.charge(decode.work_units, decode.memory_bytes, "source template target decoding");
   const target = readStatementIndexTarget(database, source.target.workspace_id, header.id, meter.remaining());
   meter.absorb(target.resources);
+  if (target.status === "resource_limited") throw new TemplateReadLimited("source_template_artifact_resource_limited");
   if (target.status !== "ready") throw new TemplateReadUnknown(`source_template_artifact_${target.status}`);
   const bytes = header.gistBytes + header.keyBytes;
   // JSON/schema copies, canonical identity material, key construction and hashing are paid before allocation.
@@ -215,7 +272,7 @@ function readMessagePart({ records, source, meter }: ReadContext, offset: number
     { workLimit: meter.ledger.work, nativeByteLimit: meter.ledger.bytes });
   if (read === null) { meter.read(1, 0); throw new TemplateReadUnknown("source_template_source_missing"); }
   meter.absorb(sourceReadCost(read));
-  if (read.resourceLimited) throw new TemplateReadUnknown("source_template_source_read_budget");
+  if (read.resourceLimited) throw new TemplateReadLimited("source_template_source_read_budget");
   if (read.invalidOffset || read.record?.source_body == null || read.prefixBytes === 0 || offset + read.prefixBytes > end) {
     throw new TemplateReadUnknown("source_template_source_incomplete");
   }

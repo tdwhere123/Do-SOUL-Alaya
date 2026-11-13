@@ -33,6 +33,43 @@ describe("Recall execution lease retention", () => {
     store.invalidate("a"); store.invalidate("c"); store.invalidate("d");
   });
 
+  it("evicts only the same workspace's least-recently-used execution when global capacity is exceeded", () => {
+    const store = new RecallExecutionRetention(5_000, 5_000, 60_000);
+    const removed = vi.fn(); store.subscribe(removed);
+    const row = (execution: string, workspace: string) =>
+      ({ execution, workspace, bytes: 1_000, handles: [`h-${execution}`], value: { execution } });
+    store.set("field:two-a", row("two-a", "two"));
+    store.set("field:two-b", row("two-b", "two"));
+    store.set("field:one-a", row("one-a", "one"));
+    store.set("field:one-b", row("one-b", "one"));
+    expect(removed).toHaveBeenCalledTimes(1);
+    expect(removed).toHaveBeenCalledWith({ handles: ["h-one-a"], reason: "evicted" });
+    expect(store.executionFor("h-two-a")).toBe("two-a");
+    expect(store.executionFor("h-two-b")).toBe("two-b");
+    expect(store.executionFor("h-one-b")).toBe("one-b");
+    expect(store.executionFor("h-one-a")).toBeUndefined();
+    store.invalidate("two-a"); store.invalidate("two-b"); store.invalidate("one-b");
+  });
+
+  it("refuses when global capacity is exceeded and the same workspace has no other execution to evict", () => {
+    const store = new RecallExecutionRetention(3_000, 3_000, 60_000);
+    const removed = vi.fn(); store.subscribe(removed);
+    const row = (execution: string, workspace: string) =>
+      ({ execution, workspace, bytes: 1_000, handles: [`h-${execution}`], value: { execution } });
+    store.set("field:two-a", row("two-a", "two"));
+    store.set("field:two-b", row("two-b", "two"));
+    expect(() => store.set("field:one-a", row("one-a", "one")))
+      .toThrowError(expect.objectContaining({
+        code: "CONFLICT",
+        details: expect.objectContaining({ resource: "execution_retention" })
+      }));
+    expect(removed).not.toHaveBeenCalled();
+    expect(store.executionFor("h-two-a")).toBe("two-a");
+    expect(store.executionFor("h-two-b")).toBe("two-b");
+    expect(store.executionFor("h-one-a")).toBeUndefined();
+    store.invalidate("two-a"); store.invalidate("two-b");
+  });
+
   it("never evicts the incoming execution and refuses without evicting when nothing can make room", () => {
     const store = new RecallExecutionRetention(5_000, 3_000, 60_000);
     const removed = vi.fn(); store.subscribe(removed);

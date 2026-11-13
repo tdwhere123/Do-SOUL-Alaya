@@ -74,7 +74,8 @@ export function enumerateSourceIndexTargets(database: StorageDatabase, records: 
         { workLimit: remaining().work, nativeByteLimit: remaining().native_bytes });
       if (read === null) { resources.work++; recordsDone = true; continue; }
       const cost = sourceReadCost(read); resources.work += cost.work; resources.native_bytes += cost.native_bytes;
-      if (read.record === null || read.resourceLimited || read.record.source_body === null && read.bodyBytes > 0) {
+      if (read.resourceLimited) { reason = "enumeration_budget"; break; }
+      if (read.record === null || read.record.source_body === null && read.bodyBytes > 0) {
         reason = "native_source_unknown"; break;
       }
       source = sourceTargetFromRead(read); nextRecord = read.record.source_id;
@@ -85,6 +86,7 @@ export function enumerateSourceIndexTargets(database: StorageDatabase, records: 
       if (typeof read.created_at !== "string" || typeof read.object_id !== "string") { reason = "native_source_unknown"; break; }
       const artifact = readStatementIndexTarget(database, input.workspaceId, read.object_id, remaining());
       resources.work += artifact.resources.work; resources.native_bytes += artifact.resources.native_bytes;
+      if (artifact.status === "resource_limited") { reason = "enumeration_budget"; break; }
       if (artifact.status === "partial") { reason = "native_source_unknown"; break; }
       source = artifact.status === "ready" ? artifact.source : artifact.status === "stale" || read.linked === 1 ? null : capsuleTargetFromRead(read);
       if (read.linked !== 1 && source === null) { reason = "native_source_unknown"; break; }

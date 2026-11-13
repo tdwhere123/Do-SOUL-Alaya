@@ -29,13 +29,14 @@ function fixture(rows: readonly ReturnType<typeof templateStatement>[]) {
     .nominateWithWitness(input, () => "admitted", view, undefined, undefined, undefined, undefined, members);
 }
 
-it("lists roots refused only by the root limit, in attempt order, without changing the nominated prefix", () => {
+it("lists roots refused only by the root limit, in attempt order, without changing the nominated prefix or its resources", () => {
   const rows = Array.from({ length: 24 }, (_, i) => templateStatement(`root-${i}`));
   const run = fixture(rows);
   const base = run(0), listed = run(16);
   expect(base).not.toHaveProperty("index_members");
   expect(listed.result.nominations).toEqual(base.result.nominations);
   expect(listed.result.accounting).toEqual(base.result.accounting);
+  expect(listed.result.resources).toEqual(base.result.resources);
   expect(listed.result.completion).toBe(base.result.completion);
   expect(listed.index_members).toEqual(rows.slice(16).map(row => row.source));
 });

@@ -5,6 +5,9 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoundSourceStatement, HostOccurrence } from "@do-soul/alaya-protocol";
 import { StorageDatabase } from "../../../sqlite/db.js";
+import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
+import { guardSourceIndexTarget } from "../../../repos/source-index/native-source.js";
+import { readStatementIndexTarget } from "../../../repos/source-index/statement-artifact.js";
 import { eraseSource, publishSource } from "./source-index-fixture.js";
 import { QUERY_BUDGET, WORKSPACE, expectQueryResources, fixture, targetFor, type Fixture } from "./source-index-query-fixture.js";
 import { contextOf, publishMessages, publishStatement } from "./source-template-fixture.js";
@@ -210,5 +213,90 @@ describe("current source-template statement reads", () => {
       expect(environment.index.readTemplateStatements(input.source, QUERY_BUDGET)).toMatchObject({ status: "complete", statements: [expected] });
     })();
     expect(environment.index.readTemplateStatements(input.source, QUERY_BUDGET)).toMatchObject({ status: "complete", statements: [] });
+  });
+});
+
+describe("member listing reads", () => {
+  it("lists current own statements, the first host message and its event time", () => {
+    const environment = setup(), input = publishMessages(environment, [{ role: "user", text: "  I ordered a café cocktail. " },
+      { role: "assistant", text: "You chose the terrace." }], "source-statements", WORKSPACE, "2026-08-16T09:00:00.000Z");
+    const statement = publishStatement(environment, input, "artifact-listed", 1);
+    const listing = environment.index.readMemberListing(input.source, null, QUERY_BUDGET);
+    expect(listing).toMatchObject({ status: "ready", first_message: "I ordered a café cocktail.",
+      event_time: "2026-08-16T09:00:00.000Z", statements: [{ source: statement.source, text: "You chose the terrace.",
+        role: "assistant", message_id: "message-1", embedding: null }] });
+    expectQueryResources(listing.resources);
+  });
+
+  it.each(["replaced", "erased"])("refuses a %s member instead of listing it empty", state => {
+    const environment = setup(), input = publishMessages(environment);
+    publishStatement(environment, input, "artifact-current");
+    if (state === "erased") eraseSource(environment, input.record.record_id);
+    else publishSource(environment, "A newer source.", input.record.source_id,
+      { source_version: "v2", recorded_at: "2026-08-17T00:00:00.000Z" });
+    const listing = environment.index.readMemberListing(input.source, null, QUERY_BUDGET);
+    expect(listing.status).toBe("unknown");
+    expect("statements" in listing).toBe(false);
+    expectQueryResources(listing.resources);
+  });
+
+  it("refuses a member without a host inventory as unknown, as statement binding would", () => {
+    const environment = setup(), record = publishSource(environment, "No host structure.");
+    expect(environment.index.readMemberListing(targetFor(record), null, QUERY_BUDGET)).toMatchObject({ status: "unknown" });
+  });
+
+  it("reports a budget refusal as resource limited, not as an unknown member", () => {
+    const environment = setup(), input = publishMessages(environment);
+    publishStatement(environment, input, "artifact-unfunded");
+    const listing = environment.index.readMemberListing(input.source, null, { work_units: 0, memory_bytes: 0 });
+    expect(listing.status).toBe("resource_limited");
+    expect("statements" in listing).toBe(false);
+  });
+
+  it("reports a clipped native message read as resource limited", () => {
+    const environment = setup(), input = publishMessages(environment);
+    const bounded = SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
+    vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded").mockImplementation(function (this: SqliteFieldSourceRecordRepo, ...args) {
+      const read = bounded.apply(this, args);
+      return read === null ? null : { ...read, resourceLimited: true };
+    });
+    expect(environment.index.readMemberListing(input.source, null, QUERY_BUDGET))
+      .toMatchObject({ status: "resource_limited", reason: "source_template_source_read_budget" });
+  });
+});
+
+describe("member listing budget refusals", () => {
+  it("reports every underfunded work or byte budget as resource limited, never as an unknown member", () => {
+    const environment = setup(), input = publishMessages(environment);
+    publishStatement(environment, input, "artifact-swept");
+    const listing = (budget: { work_units: number; memory_bytes: number }) =>
+      environment.index.readMemberListing(input.source, null, budget);
+    for (const [axis, step] of [["work_units", 1], ["memory_bytes", 64]] as const) {
+      const at = (value: number) => listing({ ...QUERY_BUDGET, [axis]: value });
+      let funded = 0;
+      while (funded <= QUERY_BUDGET[axis] && at(funded).status !== "ready") funded += step;
+      expect(funded).toBeGreaterThan(0);
+      expect(funded).toBeLessThanOrEqual(QUERY_BUDGET[axis]);
+      for (let value = 0; value < funded; value += step) expect(at(value).status, `${axis} ${value}`).toBe("resource_limited");
+    }
+  });
+});
+
+describe("statement artifact target reads", () => {
+  it("separates a budget refusal from a malformed stored target", () => {
+    const environment = setup(), input = publishMessages(environment);
+    const statement = publishStatement(environment, input, "artifact-target");
+    const id = statement.source.auxiliary!.artifact_id;
+    const read = (budget: { work: number; native_bytes: number }) => readStatementIndexTarget(environment.database, WORKSPACE, id, budget);
+    expect(read({ work: 1, native_bytes: 100 }).status).toBe("resource_limited");
+    expect(read({ work: 1, native_bytes: 1 << 20 }).status).toBe("resource_limited");
+    expect(read({ work: 1 << 10, native_bytes: 1 << 20 })).toMatchObject({ status: "ready", source: statement.source });
+    expect(guardSourceIndexTarget(environment.database, environment.records, statement.source).status).toBe("ready");
+    // Simulate persisted corruption beneath the publication owner, which never rewrites a key.
+    environment.database.connection.exec("DROP TRIGGER source_statement_key_immutable");
+    environment.database.connection.prepare("UPDATE source_statement_artifacts SET target_json='{' WHERE artifact_id=?").run(id);
+    expect(read({ work: 1 << 10, native_bytes: 1 << 20 }).status).toBe("partial");
+    expect(guardSourceIndexTarget(environment.database, environment.records, statement.source))
+      .toMatchObject({ status: "partial", reason: "native_source_unavailable" });
   });
 });
