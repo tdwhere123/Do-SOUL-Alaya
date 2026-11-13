@@ -1,20 +1,11 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { createRequire, syncBuiltinESMExports } from "node:module";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import net from "node:net";
-import http from "node:http";
-import http2 from "node:http2";
-import dgram from "node:dgram";
-import dns from "node:dns";
-
-// Native CLI preloads execute this TypeScript source directly; type-only imports
-// retain normal compiler resolution while require uses Node's source loader.
-const require = createRequire(import.meta.url);
-const { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } = require("./provider-free-isolation.ts") as typeof import("./provider-free-isolation.js");
-const { installProviderFreeDescendants, providerFreeDescendantPreload } = require("./provider-free-descendants.ts") as typeof import("./provider-free-descendants.js");
-const { isKernelWriteLeaseIpcAddress } = require("../../runs/extraction/fill/manifest/kernel-write-lease.ts") as typeof import("../../runs/extraction/fill/manifest/kernel-write-lease.js");
+import { installProviderFreeTransport } from "./provider-free-transport.mjs";
+import { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } from "./provider-free-isolation.mjs";
+import { installProviderFreeDescendants, providerFreeDescendantPreload } from "./provider-free-descendants.mjs";
 
 type FixtureDirectory = Readonly<{ dev: number; ino: number }>;
 const installationKey = Symbol.for("alaya.provider-free-boundary-installations");
@@ -127,76 +118,6 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };
-}
-
-/** Guard native Node transports too: fetch alone does not cover http, sockets or DNS. */
-function installProviderFreeTransport(deny: (kind: string) => never): () => void {
-  const restores: (() => void)[] = [];
-  const replace = (owner: object, key: string, value: unknown) => {
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-    if (typeof Reflect.get(owner, key) !== "function") return;
-    Object.defineProperty(owner, key, descriptor && "value" in descriptor ? { ...descriptor, value }
-      : { configurable: true, enumerable: descriptor?.enumerable ?? false, writable: true, value });
-    restores.push(() => { if (descriptor) Object.defineProperty(owner, key, descriptor); else Reflect.deleteProperty(owner, key); });
-  };
-  const connect = net.Socket.prototype.connect;
-  replace(net.Socket.prototype, "connect", new Proxy(connect, {
-    apply(target, receiver, args) {
-      // net.createConnection passes Node's normalized [options, callback] array.
-      const normalized = Array.isArray(args[0]) ? args[0] : undefined;
-      const value = normalized ? normalized[0] : args[0];
-      if (typeof value === "string") {
-        if (isKernelWriteLeaseIpcAddress(value)) return Reflect.apply(target, receiver, args);
-        if (!/^\d+$/u.test(value)) return deny("non-loopback socket");
-      }
-      let options: Record<string, unknown>;
-      if (typeof value === "number" || typeof value === "string" && /^\d+$/u.test(value)) {
-        options = { port: Number(value), host: typeof args[1] === "string" ? args[1] : undefined };
-      } else if (value && typeof value === "object") options = { ...value };
-      else return deny("unknown socket destination");
-      if (typeof options.path === "string" && options.path.length > 0) {
-        if (!isKernelWriteLeaseIpcAddress(options.path)) return deny("non-loopback socket");
-        return Reflect.apply(target, receiver, args);
-      }
-      const host = options.host ?? options.hostname ?? "localhost";
-      if (host !== "127.0.0.1" && host !== "::1" && host !== "localhost") return deny("non-loopback socket");
-      // Do not trust a machine's localhost DNS/hosts mapping or a custom lookup callback.
-      options.host = host === "localhost" ? "127.0.0.1" : host;
-      delete options.hostname; delete options.lookup;
-      if (normalized) {
-        const copy = Object.assign([...normalized], normalized); copy[0] = options; args[0] = copy;
-      } else if (typeof value === "number" || typeof value === "string") {
-        args = [options, ...args.slice(1).filter((arg: unknown) => typeof arg === "function")];
-      } else args[0] = options;
-      return Reflect.apply(target, receiver, args);
-    }
-  }));
-  const emit = http.ClientRequest.prototype.emit;
-  replace(http.ClientRequest.prototype, "emit", function (this: http.ClientRequest, event: string | symbol, ...args: unknown[]) {
-    if (event === "response") {
-      const response = args[0] as http.IncomingMessage;
-      if ((response.statusCode ?? 0) >= 300 && (response.statusCode ?? 0) < 400 && response.headers.location) {
-        try { deny("HTTP redirect"); }
-        catch (error) { this.destroy(error as Error); response.destroy(); return false; }
-      }
-    }
-    return Reflect.apply(emit, this, [event, ...args]);
-  });
-  replace(dgram, "createSocket", () => deny("UDP transport"));
-  replace(http2, "connect", () => deny("HTTP/2 transport"));
-  for (const owner of [dns, dns.promises, dns.Resolver.prototype, dns.promises.Resolver.prototype]) {
-    for (const key of Object.getOwnPropertyNames(owner)) {
-      if (/^(?:lookup|resolve|reverse)/u.test(key) && typeof Reflect.get(owner, key) === "function") {
-        const lookup = Reflect.get(owner, key);
-        replace(owner, key, new Proxy(lookup, { apply(target, receiver, args) {
-          // Node also calls lookup for literal listen addresses; these require no DNS query.
-          if (key === "lookup" && (args[0] === "127.0.0.1" || args[0] === "::1")) return Reflect.apply(target, receiver, args);
-          return deny("DNS lookup");
-        } }));
-      }
-    }
-  }
-  return () => { for (const restore of restores.reverse()) restore(); };
 }
 
 function containedFixtureFile(path: string, root: string): boolean {

@@ -1,8 +1,6 @@
 /** Neutral registration before a descendant imports application code. */
-import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
+import { installProviderFreeChildGuard } from "./provider-free-child-guard.mjs";
+import { installProviderFreeActor } from "./provider-free-descendants.mjs";
 
-const isolation = installProviderFreeBoundary();
-process.on("exit", () => {
-  try { isolation.assertSafe(); }
-  catch { if (process.exitCode !== isolation.signalFailureExitCode) process.exitCode = 1; }
-});
+installProviderFreeChildGuard();
+installProviderFreeActor(import.meta.url);

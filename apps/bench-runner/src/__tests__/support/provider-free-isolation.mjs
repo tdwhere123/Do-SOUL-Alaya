@@ -7,16 +7,13 @@ import { threadId } from "node:worker_threads";
 const SIGNAL_ENV = "ALAYA_PROVIDER_FREE_ISOLATION";
 export const ISOLATION_SIGNAL_FAILURE_EXIT = 86;
 const contract = "provider-free-isolation.v1";
-type Binding = { root: string; member: string; identity: string };
-type Entry = { parent: string | null; kind: string };
 
 export class ProviderFreeIsolationError extends Error {
-  readonly code = "PROVIDER_FREE_ISOLATION_FAILED";
-  readonly evidence: string;
-  readonly reasons: readonly string[];
-  constructor(evidence: string, reasons: readonly string[]) {
+  constructor(evidence, reasons) {
     super(`Provider-free isolation failed; evidence: ${evidence}; ${reasons.join(", ")}`);
-    this.evidence = evidence; this.reasons = [...reasons];
+    this.code = "PROVIDER_FREE_ISOLATION_FAILED";
+    this.evidence = evidence;
+    this.reasons = [...reasons];
   }
 }
 
@@ -24,13 +21,10 @@ export class ProviderFreeIsolationError extends Error {
  * Each actor has private append-only files; registration precedes launch and readiness
  * precedes application import. Evidence outlives product quarantine/reaping and restore. */
 export class ProviderFreeIsolation {
-  readonly binding: Binding;
-  private readonly faults: string[] = [];
-  private readonly descendant: boolean;
-  private reportedFault = false;
-
   constructor() {
     const inherited = process.env[SIGNAL_ENV];
+    this.faults = [];
+    this.reportedFault = false;
     if (inherited === undefined) {
       const root = fs.mkdtempSync(join(tmpdir(), "alaya-provider-free-isolation-"));
       this.binding = { root, identity: randomUUID(), member: randomUUID() };
@@ -39,7 +33,7 @@ export class ProviderFreeIsolation {
       fs.writeFileSync(join(root, "members.jsonl"), "", { flag: "wx", mode: 0o600 });
       this.register(this.binding.member, { parent: null, kind: "root" });
     } else {
-      this.binding = JSON.parse(inherited) as Binding;
+      this.binding = JSON.parse(inherited);
       const { root, member, identity } = this.binding;
       if (typeof root !== "string" || resolve(root) !== root || !root.startsWith(join(tmpdir(), "alaya-provider-free-isolation-"))
         || !/^[a-f0-9-]{36}$/u.test(member) || !/^[a-f0-9-]{36}$/u.test(identity)) throw new Error("Invalid isolation binding");
@@ -54,14 +48,14 @@ export class ProviderFreeIsolation {
     }
   }
 
-  ready(): void {
+  ready() {
     const ready = this.path(this.binding.member, "ready.json");
     if (!fs.existsSync(ready)) this.record(this.binding.member, "ready.json", { pid: process.pid, thread: threadId });
     if (this.faults.length) throw new ProviderFreeIsolationError(this.binding.root, this.faults);
   }
 
-  environment(env: NodeJS.ProcessEnv | undefined, member = this.binding.member): NodeJS.ProcessEnv {
-    const selected: NodeJS.ProcessEnv = { ...(env ?? process.env), [SIGNAL_ENV]: JSON.stringify({ ...this.binding, member }) };
+  environment(env, member = this.binding.member) {
+    const selected = { ...(env ?? process.env), [SIGNAL_ENV]: JSON.stringify({ ...this.binding, member }) };
     // Replaced child environments still have to resolve this journal under os.tmpdir().
     const temp = tmpdir();
     selected.TMPDIR ??= temp;
@@ -70,35 +64,35 @@ export class ProviderFreeIsolation {
     return selected;
   }
 
-  reserve(kind: string): string {
+  reserve(kind) {
     const member = randomUUID();
     this.register(member, { parent: this.binding.member, kind });
     return member;
   }
 
-  violation(kind: string): void {
+  violation(kind) {
     this.faults.push(`violation:${kind}`);
     this.record(this.binding.member, `violation-${randomUUID()}.json`, { kind });
   }
 
-  cancelled(member: string): void {
+  cancelled(member) {
     const path = this.path(member, "cancellation.json");
     if (!fs.existsSync(path)) this.record(member, "cancellation.json", { requested: true });
   }
 
-  exited(member: string, code: number | null, signal: string | null = null): void {
+  exited(member, code, signal = null) {
     // This listener belongs to the guard and is independent of product epochs/quarantine.
     if (code === ISOLATION_SIGNAL_FAILURE_EXIT) this.faults.push("descendant_signal_failure");
     if (signal !== null && !fs.existsSync(this.path(member, "cancellation.json"))) this.faults.push("unexpected_descendant_signal");
     this.record(member, "exit.json", { code, signal });
   }
 
-  spawnFailed(member: string): void {
+  spawnFailed(member) {
     this.faults.push("descendant_start_unknown");
     this.record(member, "start-failed.json", { status: "unknown" });
   }
 
-  assertSafe(requireSettled = false): void {
+  assertSafe(requireSettled = false) {
     const reasons = [...this.faults];
     try {
       const marker = this.read(join(this.binding.root, "identity.json"));
@@ -106,7 +100,7 @@ export class ProviderFreeIsolation {
       const registry = join(this.binding.root, "members.jsonl"), registryStat = fs.lstatSync(registry);
       if (!registryStat.isFile() || registryStat.isSymbolicLink() || registryStat.nlink !== 1) throw new Error("Invalid isolation registry");
       const registrations = fs.readFileSync(registry, "utf8").trim().split("\n").map(line => JSON.parse(line));
-      const members = registrations.map(row => row.member as string);
+      const members = registrations.map(row => row.member);
       if (new Set(members).size !== members.length || !members.includes(this.binding.member)) throw new Error("Invalid isolation registry");
       if (members.some(member => !/^[a-f0-9-]{36}$/u.test(member))) throw new Error("Unknown isolation member");
       const entries = new Map(members.map(member => [member, this.read(this.path(member, "entry.json"))]));
@@ -122,7 +116,7 @@ export class ProviderFreeIsolation {
         const names = fs.readdirSync(join(this.binding.root, member));
         if (!names.includes("ready.json") && names.includes("exit.json")) reasons.push(`unconfirmed_descendant:${member}`);
         if (requireSettled && member !== this.binding.member && !names.includes("exit.json")) {
-          const seen = new Set<string>();
+          const seen = new Set();
           let parent = entries.get(member)?.parent;
           while (typeof parent === "string") {
             if (seen.has(parent) || !entries.has(parent)) throw new Error("Invalid isolation ancestry");
@@ -157,9 +151,9 @@ export class ProviderFreeIsolation {
     }
   }
 
-  private inLineage(member: string, parentOf: (id: string) => unknown): boolean {
+  inLineage(member, parentOf) {
     if (member === this.binding.member) return true;
-    const seen = new Set<string>();
+    const seen = new Set();
     for (let parent = parentOf(member); typeof parent === "string"; parent = parentOf(parent)) {
       if (parent === this.binding.member) return true;
       if (seen.has(parent)) return false;
@@ -168,8 +162,8 @@ export class ProviderFreeIsolation {
     return false;
   }
 
-  private path(member: string, file: string): string { return join(this.binding.root, member, file); }
-  private register(member: string, entry: Entry): void {
+  path(member, file) { return join(this.binding.root, member, file); }
+  register(member, entry) {
     try {
       fs.mkdirSync(join(this.binding.root, member), { mode: 0o700 });
       this.write(this.path(member, "entry.json"), entry);
@@ -182,19 +176,19 @@ export class ProviderFreeIsolation {
       } finally { fs.closeSync(fd); }
     } catch { this.signalFailure(); throw new ProviderFreeIsolationError(this.binding.root, this.faults); }
   }
-  private read(path: string): Record<string, unknown> {
+  read(path) {
     const stat = fs.lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16_384) throw new Error("Invalid isolation record");
-    const value: unknown = JSON.parse(fs.readFileSync(path, "utf8"));
+    const value = JSON.parse(fs.readFileSync(path, "utf8"));
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid isolation record");
-    return value as Record<string, unknown>;
+    return value;
   }
-  private write(path: string, value: unknown): void { fs.writeFileSync(path, JSON.stringify(value), { flag: "wx", mode: 0o600 }); }
-  private record(member: string, file: string, value: unknown): void {
+  write(path, value) { fs.writeFileSync(path, JSON.stringify(value), { flag: "wx", mode: 0o600 }); }
+  record(member, file, value) {
     try { this.write(this.path(member, file), value); }
     catch { this.signalFailure(); }
   }
-  private signalFailure(): void {
+  signalFailure() {
     this.faults.push("isolation_signal_write_failed");
     // Reserved guard status, never an ordinary item failure. No filesystem read
     // is needed to propagate a failure of the journal itself.
