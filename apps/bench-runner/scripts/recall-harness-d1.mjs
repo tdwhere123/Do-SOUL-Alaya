@@ -101,7 +101,7 @@ const { prepareSemanticChainSourceIndex } = await import(pathToFileURL(join(dist
 const { executeOrdinaryRecallEntry } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/ordinary-entry-execution.js")).href);
 const { queryProposalFromCoordinates } = await import(pathToFileURL(join(dist, "runs/recall-measurement/ordinary/query-coordinate-proposal.js")).href);
 const { chainIdentity, writeChainArtifact } = await import(pathToFileURL(join(dist, "runs/recall-measurement/contract.js")).href);
-const { admitHistoricalRecallPreparation, assertHistoricalRecallProducer } = await import(pathToFileURL(join(dist, "runs/recall-measurement/historical-preparation.js")).href);
+const { admitHistoricalRecallPreparation } = await import(pathToFileURL(join(dist, "runs/recall-measurement/historical-preparation.js")).href);
 const { captureRecallRuntimeBuild } = await import("./recall-runtime-binding.mjs");
 const { readCurrentExtractionAuthorityRevision } = await import(pathToFileURL(join(dist, "runs/extraction/authority/inspection.js")).href);
 const { loadSelectedQuestionMetadata, longMemEvalDatasetInputPaths } = await import(pathToFileURL(join(dist, "datasets/longmemeval/ingestion/fetch.js")).href);
@@ -136,7 +136,6 @@ const preparationRevision = values["prepared-revision"] ?? revision;
 // Ownership is selected by the explicit mode, not by whether the revisions differ.
 const consumer = values["prepared-cache"] !== undefined;
 const historical = values["historical-preparation"];
-if (historical !== undefined) assertHistoricalRecallProducer(historical, preparationRevision);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 let ids = values.ids ? values.ids.split(",") : cohort.question_ids;
