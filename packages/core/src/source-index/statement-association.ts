@@ -69,7 +69,7 @@ export type StatementAssociation = Readonly<{
 }>;
 
 /** `statement: null`: no witness; the root's first unit. */
-export type EvidenceOpening = Readonly<{ statement: number | null; span: readonly [number, number] }>;
+type EvidenceOpening = Readonly<{ statement: number | null; span: readonly [number, number] }>;
 
 /** Internal diagnostics, never part of the retained association graph or its resource quote. */
 export type StatementAssociationAvailability = Readonly<{
@@ -289,7 +289,7 @@ export function restrictStatementAssociation(association: StatementAssociation,
 }
 
 /** Another instance of a placed condition, delivered as its witness message after the first five. */
-export type EvidenceWitnessVariant = Readonly<{ root: string; statement: number; root_position: number;
+type EvidenceWitnessVariant = Readonly<{ root: string; statement: number; root_position: number;
   support_span: Readonly<{ start_byte: number; end_byte: number }> }>;
 
 export type EvidenceCoverageInjection = Readonly<{ statement: number; root_position: number }

@@ -18,7 +18,7 @@ export function acquisitionQueryBindingCost(): SourceSemanticResourceBudget {
 export function acquisitionQueryVectorNormCost(dimensions: number): SourceSemanticResourceBudget {
   return { work_units: 3 * dimensions, memory_bytes: 4 * dimensions };
 }
-export function acquisitionQueryVectorCaptureCost(vector: SourceIndexQueryVector): SourceSemanticResourceBudget {
+function acquisitionQueryVectorCaptureCost(vector: SourceIndexQueryVector): SourceSemanticResourceBudget {
   if (vector.status !== "available") return { work_units: 0, memory_bytes: 0 };
   const binding = acquisitionQueryBindingCost();
   const norm = acquisitionQueryVectorNormCost(vector.profile.dimensions);
