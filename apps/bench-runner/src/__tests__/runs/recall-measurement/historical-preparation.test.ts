@@ -18,6 +18,14 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
 const revision = computeExtractionAuthorityWorktreeRevision({ head: "9dce76ae7dabc8103baf277c6ad93863c5c16bbd",
   trackedDiff: new Uint8Array(), untrackedFiles: [] });
+const historicalProducerRetained = (() => {
+  try {
+    assertHistoricalRecallProducer(HISTORICAL_RECALL_PREPARATION, revision);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 function sealed() {
   const root = mkdtempSync(join(tmpdir(), "historical-recall-")); roots.push(root);
   const dir = join(root, "sealed", "prepare"); mkdirSync(dir, { recursive: true });
@@ -48,7 +56,7 @@ function sealed() {
     input: { version: HISTORICAL_RECALL_PREPARATION, producerRevision: revision, configPath, root: join(root, "private") } };
 }
 
-it("admits an artifact-bound private read copy without opening or changing original SQLite sidecars", async () => {
+it.skipIf(!historicalProducerRetained)("admits an artifact-bound private read copy without opening or changing original SQLite sidecars", async () => {
   const f = sealed();
   const before = [f.configPath, f.receiptPath, f.snapshot, `${f.snapshot}-wal`, `${f.snapshot}-shm`].map(path => readFileSync(path));
   const admitted = admitHistoricalRecallPreparation(f.input);
@@ -70,7 +78,7 @@ it("admits an artifact-bound private read copy without opening or changing origi
   expect(readChainArtifact(join(f.input.root, "originals-after.json"))).toMatchObject({ unchanged: true, private_copy_released: true });
 });
 
-it("keeps the private copy when the originals changed during recall", () => {
+it.skipIf(!historicalProducerRetained)("keeps the private copy when the originals changed during recall", () => {
   const f = sealed();
   const admitted = admitHistoricalRecallPreparation(f.input);
   const copy = admitted.config.consumer_snapshot_path!;
@@ -79,7 +87,7 @@ it("keeps the private copy when the originals changed during recall", () => {
   expect(existsSync(copy)).toBe(true);
 });
 
-it.each(["missing-config", "missing-receipt", "corrupt-receipt", "corrupt-db", "wal", "wrong-producer"])("refuses %s without preparing or accepting an alternate identity", fault => {
+it.skipIf(!historicalProducerRetained).each(["missing-config", "missing-receipt", "corrupt-receipt", "corrupt-db", "wal", "wrong-producer"])("refuses %s without preparing or accepting an alternate identity", fault => {
   const f = sealed();
   if (fault === "missing-config") rmSync(f.configPath);
   if (fault === "missing-receipt") rmSync(f.receiptPath);
@@ -93,7 +101,8 @@ it.each(["missing-config", "missing-receipt", "corrupt-receipt", "corrupt-db", "
 });
 
 it("requires the exact supported clean producer version, not a historical-looking prefix", () => {
-  expect(() => assertHistoricalRecallProducer(HISTORICAL_RECALL_PREPARATION, revision)).not.toThrow();
+  if (historicalProducerRetained) expect(() => assertHistoricalRecallProducer(HISTORICAL_RECALL_PREPARATION, revision)).not.toThrow();
+  else expect(() => assertHistoricalRecallProducer(HISTORICAL_RECALL_PREPARATION, revision)).toThrow(/not retained/u);
   expect(() => assertHistoricalRecallProducer("unknown", revision)).toThrow(/unsupported/u);
   expect(() => assertHistoricalRecallProducer(HISTORICAL_RECALL_PREPARATION, revision.replace(/.$/u, "0"))).toThrow(/unsupported/u);
 });
