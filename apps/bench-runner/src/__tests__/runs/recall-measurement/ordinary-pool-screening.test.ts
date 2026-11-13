@@ -258,7 +258,8 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
     "--dataset", join(fixture.root, "data/longmemeval_s.json"), "--cache", join(fixture.root, "cache")]);
   expect(readFileSync(join(oldRoot, "reservation"), "utf8")).toBe("preserve");
   expect(JSON.parse(readFileSync(join(unresolved, "rows.jsonl"), "utf8")).error).toContain("prior first exposure may be unresolved");
-}, 120000);
+// Three native recall entries plus three harness children crossed 120s under Ubuntu coverage load.
+}, 240_000);
 
 it("ranks message units across the workspace and uses stable keys before root deduplication", async () => {
   const policy = await import(pathToFileURL(fileURLToPath(new URL("../../../../scripts/recall-simulator-policies.mjs", import.meta.url))).href);
