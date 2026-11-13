@@ -3,7 +3,7 @@ import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Worker } from "node:worker_threads";
-export { isKernelWriteLeaseIpcAddress } from "./kernel-write-lease-ipc.mjs";
+export { isKernelWriteLeaseIpcAddress } from "./kernel-write-lease-ipc.js";
 
 const STARTING = 0;
 const ACTIVE = 1;
