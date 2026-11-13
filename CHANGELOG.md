@@ -16,6 +16,7 @@ A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
+Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
 
 Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
 (`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the
