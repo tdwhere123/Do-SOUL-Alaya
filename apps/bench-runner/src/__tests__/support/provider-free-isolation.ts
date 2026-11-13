@@ -61,7 +61,7 @@ export class ProviderFreeIsolation {
   }
 
   environment(env: NodeJS.ProcessEnv | undefined, member = this.binding.member): NodeJS.ProcessEnv {
-    const selected = { ...(env ?? process.env), [SIGNAL_ENV]: JSON.stringify({ ...this.binding, member }) };
+    const selected: NodeJS.ProcessEnv = { ...(env ?? process.env), [SIGNAL_ENV]: JSON.stringify({ ...this.binding, member }) };
     // Replaced child environments still have to resolve this journal under os.tmpdir().
     const temp = tmpdir();
     selected.TMPDIR ??= temp;
