@@ -275,10 +275,10 @@ it.each(["healthy", "denial", "unconfirmed"])(
     const bootstrap = new URL("provider-free-cli-bootstrap.mjs", support).href;
     const temporary = mkdtempSync(join(tmpdir(), "provider-owner-config-"));
     const config = join(temporary, "vitest.config.mjs"), evidence = join(temporary, "probe.json");
-    // Keep Vitest's pool teardown independent from the fixture's own child-process
-    // proof: the fixture explicitly launches a fork, spawn, and Worker in each arm.
-    writeFileSync(config, `export default ${JSON.stringify({ root, test: {
-      include: [fixture.replaceAll("\\", "/")], pool: "threads", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
+    // This fixture takes its root from the checkout, not a mapped drive.
+    // Vite's Windows realpath optimizer otherwise runs a "net use" shell probe.
+    writeFileSync(config, `export default ${JSON.stringify({ root, resolve: { preserveSymlinks: true }, test: {
+      include: [fixture.replaceAll("\\", "/")], pool: "forks", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
     } })};`);
     try {
       const result = await new Promise<{ code: string | number; stdout: string; stderr: string }>(resolve => {
