@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import { writeJsonAtomic } from "./checkpoint.js";
-import type { DiagnosticLoopPhase } from "./phases.js";
+import { DIAGNOSTIC_LOOP_PHASES, type DiagnosticLoopPhase } from "./phases.js";
 
 export type SmokeGateStatus = "passed" | "failed" | "absent";
 
@@ -13,6 +14,14 @@ export interface DiagnosticLoopSmokeGate {
   readonly failed_phase?: DiagnosticLoopPhase;
 }
 
+const SmokeGateSchema = z.object({
+  schema_version: z.literal(1),
+  kind: z.literal("diagnostic_loop_smoke_gate"),
+  status: z.enum(["passed", "failed"]),
+  identity_digest: z.string().regex(/^[a-f0-9]{64}$/u),
+  failed_phase: z.enum(DIAGNOSTIC_LOOP_PHASES).optional()
+}).strict();
+
 export function smokeGatePath(workRoot: string): string {
   return join(workRoot, "smoke-gate.json");
 }
@@ -20,14 +29,14 @@ export function smokeGatePath(workRoot: string): string {
 export function readSmokeGate(workRoot: string, identityDigest: string): SmokeGateStatus {
   const path = smokeGatePath(workRoot);
   if (!existsSync(path)) return "absent";
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<DiagnosticLoopSmokeGate>;
-  if (parsed.kind !== "diagnostic_loop_smoke_gate") {
+  const parsed = SmokeGateSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+  if (!parsed.success) {
     throw new Error(`invalid smoke gate: ${path}`);
   }
-  if (parsed.identity_digest !== identityDigest) {
+  if (parsed.data.identity_digest !== identityDigest) {
     throw new Error(`smoke gate identity_digest does not match this run: ${path}`);
   }
-  return parsed.status === "failed" ? "failed" : "passed";
+  return parsed.data.status;
 }
 
 export function writeSmokeGate(input: {
@@ -43,5 +52,5 @@ export function writeSmokeGate(input: {
     identity_digest: input.identityDigest,
     ...(input.failedPhase === undefined ? {} : { failed_phase: input.failedPhase })
   };
-  writeJsonAtomic(smokeGatePath(input.workRoot), record);
+  writeJsonAtomic(smokeGatePath(input.workRoot), SmokeGateSchema.parse(record));
 }

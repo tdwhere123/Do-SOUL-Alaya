@@ -373,6 +373,22 @@ describe("diagnostic-loop run", () => {
 });
 
 describe("diagnostic-loop smoke gate", () => {
+  it.each([{ schema_version: 2, status: "passed" }, { schema_version: 1, status: "unknown" }])(
+    "rejects an invalid persisted gate before any expensive adapter: %j", async fields => {
+      const workRoot = await tempRoot();
+      const { resolveDiagnosticLoopIdentity, resolvedDiagnosticLoopIdentityDigest } = await import(
+        "../../../runs/diagnostic-loop/authority/identity.js");
+      const request = loopRequest();
+      const identity = await resolveDiagnosticLoopIdentity(request);
+      await writeFile(join(workRoot, "smoke-gate.json"), JSON.stringify({
+        kind: "diagnostic_loop_smoke_gate", identity_digest: resolvedDiagnosticLoopIdentityDigest(identity), ...fields
+      }));
+      const tracked = trackingAdapters();
+      await expect(runDiagnosticLoop({ workRoot, request, mode: "run", adapters: tracked.adapters, argv: [] }))
+        .rejects.toThrow(/invalid smoke gate/u);
+      expect(tracked.calls).toEqual(["preflight", "authority_cache"]);
+    });
+
   it("records a failed smoke and blocks later expensive phases", async () => {
     const workRoot = await tempRoot();
     const failing = trackingAdapters();
