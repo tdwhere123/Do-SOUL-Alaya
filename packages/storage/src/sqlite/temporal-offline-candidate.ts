@@ -17,12 +17,12 @@ import {
 import { StorageError } from "../shared/errors.js";
 import { acquireTemporalMaintenanceLease, type TemporalMaintenanceLease } from "./temporal-maintenance-lease.js";
 import { publishNewTemporalFile, syncTemporalDirectory, TemporalFilePublicationError } from "./temporal-file-publication.js";
+import {
+  readSqliteDatabaseFileWitnessSet,
+  type SqliteDatabaseFileWitness
+} from "./sqlite-database-file-witness.js";
 
-export interface TemporalCandidateFileDigest {
-  readonly role: "database" | "journal" | "wal";
-  readonly bytes: number;
-  readonly sha256: string;
-}
+export type TemporalCandidateFileDigest = SqliteDatabaseFileWitness;
 
 export interface TemporalCandidatePreparation {
   readonly selected: false;
@@ -305,13 +305,7 @@ function sameVersions(actual: readonly number[], expected: readonly number[]): b
 }
 
 function readFileSet(filename: string): readonly TemporalCandidateFileDigest[] {
-  const roles: readonly TemporalCandidateFileDigest["role"][] = ["database", "journal", "wal"];
-  return Object.freeze(roles.flatMap((role) => {
-    const partFilename = databaseFileSetPath(filename, role);
-    if (!fs.existsSync(partFilename)) return [];
-    const bytes = fs.readFileSync(partFilename);
-    return [Object.freeze({ role, bytes: bytes.byteLength, sha256: fileBytesSha256(bytes) })];
-  }));
+  return readSqliteDatabaseFileWitnessSet(filename);
 }
 
 function assertUnchangedSource(
@@ -326,11 +320,6 @@ function assertUnchangedSource(
 
 function databaseFileSetPaths(filename: string): readonly string[] {
   return [filename, `${filename}-journal`, `${filename}-wal`, `${filename}-shm`];
-}
-
-function databaseFileSetPath(filename: string, role: TemporalCandidateFileDigest["role"]): string {
-  if (role === "database") return filename;
-  return `${filename}-${role}`;
 }
 
 function stagingFilename(candidateFilename: string, phase: "copy" | "sealed"): string {

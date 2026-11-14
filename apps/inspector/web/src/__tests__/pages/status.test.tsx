@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import StatusPage from "../../pages/status";
 import { ToastProvider } from "../../components/toast";
-import { setInspectorToken } from "../../api";
+
 
 function renderStatus() {
   return render(
@@ -26,7 +26,6 @@ describe("StatusPage", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    setInspectorToken("t");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
   });

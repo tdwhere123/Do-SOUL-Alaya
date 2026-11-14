@@ -51,11 +51,19 @@ describe("snapshot extraction authority", () => {
     expect(() => assertSnapshotExtractionAuthorityBinding(reopened, { ...compact, source_packing: "reference-eight" }))
       .toThrow(/source_packing/u);
     const { source_packing: _packing, ...withoutPacking } = compact;
-    const { source_packing: _authorityPacking, ...missingAuthorityPacking } = reopened;
-    expect(() => parseSnapshotExtractionAuthorityBytes(Buffer.from(JSON.stringify(missingAuthorityPacking)), "missing packing"))
-      .toThrow();
     expect(() => assertSnapshotExtractionAuthorityBinding(reopened, { ...withoutPacking, schema_version: 3 }))
       .toThrow(/source_manifest_schema_version/u);
+  });
+
+  it("rejects authority bytes that omit source_packing at parse time", () => {
+    const manifest = { ...extractionManifest(2, "missing-packing"), schema_version: 4 as const,
+      source_packing: "singleton" as const };
+    const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);
+    const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA, compact);
+    const reopened = parseSnapshotExtractionAuthorityBytes(renderSnapshotExtractionAuthority(authority), "missing packing");
+    const { source_packing: _authorityPacking, ...missingPacking } = reopened;
+    expect(() => parseSnapshotExtractionAuthorityBytes(Buffer.from(JSON.stringify(missingPacking)), "missing packing"))
+      .toThrow();
   });
 
   it("keeps provider identity out of the full authority artifact", () => {

@@ -24,11 +24,10 @@ const workspaceIdListeners = new Set<() => void>();
 const INSPECTOR_SESSION_READY_STORAGE_KEY = "alaya-inspector-session-ready";
 const INSPECTOR_WORKSPACE_STORAGE_KEY = "alaya-inspector-workspace-id";
 
-export const setInspectorToken = (token: string) => {
-  if (token.trim().length === 0) {
-    inspectorSessionReady = false;
-    sessionStorage.removeItem(INSPECTOR_SESSION_READY_STORAGE_KEY);
-  }
+/** Clears the Inspector cookie-session ready flag. Cookie session only; nonempty tokens are not stored. */
+export const clearInspectorSession = (): void => {
+  inspectorSessionReady = false;
+  sessionStorage.removeItem(INSPECTOR_SESSION_READY_STORAGE_KEY);
 };
 
 export const markInspectorSessionReady = (): void => {

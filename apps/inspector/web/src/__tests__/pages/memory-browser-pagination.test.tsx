@@ -10,12 +10,11 @@ import {
   urlOf,
   type FetchInput
 } from "./memory-browser.test-support";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 describe("MemoryBrowserPage promote-to-strictly_governed", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import EmbeddingSupplementForm from "../../components/embedding-supplement-form";
 import { ToastProvider } from "../../components/toast";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 function renderForm() {
   return render(
@@ -16,7 +16,6 @@ describe("EmbeddingSupplementForm", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

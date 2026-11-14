@@ -1,8 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { forwardRef, useEffect, useImperativeHandle, type ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, vi } from "vitest";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { vi } from "vitest";
 import { ToastProvider } from "../../components/toast";
 import GraphPage from "../../pages/graph";
 

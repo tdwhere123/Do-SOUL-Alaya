@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 import { MemorySearchResultSchema, encodeSourceDisclosure } from "@do-soul/alaya-protocol";
 import {
   STABILITY_DASH,
@@ -26,7 +26,6 @@ describe("GraphPage (react-force-graph driven)", () => {
 
   beforeEach(() => {
     forceGraphMockState.reset();
-    setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     stubWebgl(true);
     fetchMock = vi.fn().mockResolvedValue(

@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../../app/app";
 import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
-import { getWorkspaceId, markInspectorSessionReady, setInspectorToken, setWorkspaceId } from "../../api";
+import { getWorkspaceId, markInspectorSessionReady, clearInspectorSession, setWorkspaceId } from "../../api";
 
 const VALID_STATUS = {
   checked_at: "2026-05-14T12:00:00.000Z",
@@ -121,7 +121,7 @@ function launchRedeemBodies(fetchMock: ReturnType<typeof vi.fn>): Array<{ code: 
 describe("AppContent", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    setInspectorToken("");
+    clearInspectorSession();
     setWorkspaceId(null);
     stubInspectorFetch();
   });

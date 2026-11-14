@@ -12,126 +12,21 @@ import {
   DYNAMICS_CONSTANTS,
   HealthEventKind,
   GardenEventType,
-  formatFileSecretRef,
-  type EventLogEntry
+  formatFileSecretRef
 } from "@do-soul/alaya-protocol";
-
-import { EventPublisher } from "@do-soul/alaya-core";
 
 import {
   initDatabase,
   SqliteConfigRepo,
-  SqliteEventLogRepo,
-  type ConfigRepo
+  SqliteEventLogRepo
 } from "@do-soul/alaya-storage";
 
 import { registerConfigRoutes } from "../../routes/workspace/config.js";
 
-import { createConfigService } from "../../services/config/config-service.js";
-
 import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file/env-file-service.js";
 
-import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../../cli/support/config-files.js";
-
-async function createServiceHarness(options: {
-  readonly platform?: NodeJS.Platform;
-  readonly tempIds?: readonly string[];
-  readonly repo?: ConfigRepo;
-  readonly env?: NodeJS.ProcessEnv;
-} = {}): Promise<{
-  readonly service: ReturnType<typeof createConfigService>;
-  readonly paths: AlayaConfigPaths;
-  readonly publishedEvents: EventLogEntry[];
-  readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
-}> {
-  const repo = options.repo ?? createMemoryConfigRepo();
-  const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-"));
-  const paths = resolveAlayaConfigPaths(configDir);
-  const publishedEvents: EventLogEntry[] = [];
-  const appendManyWithMutation = vi.fn(
-    async <T>(
-      events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-      mutate: (entries: readonly EventLogEntry[]) => T
-    ): Promise<T> => {
-      const persisted = events.map(
-        (event, idx) =>
-          ({
-            ...event,
-            event_id: `event-${publishedEvents.length + idx + 1}`,
-            created_at: "2026-05-01T00:00:00.000Z",
-            revision: publishedEvents.length + idx + 1
-          }) as EventLogEntry
-      );
-      // Snapshot length before the mutate so a thrown mutate cleanly rolls
-      // back the appended rows (mirrors EventPublisher.appendManyWithMutation
-      // transactional semantics in tests that don't wire a real publisher).
-      const before = publishedEvents.length;
-      publishedEvents.push(...persisted);
-      try {
-        return mutate(persisted);
-      } catch (error) {
-        publishedEvents.length = before;
-        throw error;
-      }
-    }
-  );
-  let tempIndex = 0;
-  return {
-    service: createConfigService({
-      configRepo: repo,
-      eventPublisher: {
-        appendManyWithMutation
-      } as Parameters<typeof createConfigService>[0]["eventPublisher"],
-      configPathsProvider: () => paths,
-      clock: () => "2026-05-01T00:00:00.000Z",
-      platform: options.platform,
-      generateAuditId: () => `audit-${publishedEvents.length + 1}`,
-      generateTempId: () => options.tempIds?.[tempIndex++] ?? `tmp-${tempIndex++}`,
-      envProvider: () => options.env ?? process.env
-    }),
-    paths,
-    publishedEvents,
-    appendManyWithMutation
-  };
-}
-
-function createMemoryConfigRepo(): ConfigRepo {
-  const values = new Map<string, unknown>();
-  const getParsed = <T,>(key: string, parser: { parse(value: unknown): T }): T | null => {
-    const value = values.get(key);
-    return value === undefined ? null : parser.parse(value);
-  };
-  const setParsed = <T,>(key: string, value: T, parser: { parse(value: unknown): T }): T => {
-    const parsed = parser.parse(value);
-    values.set(key, parsed);
-    return parsed;
-  };
-  const patchParsed = <T extends Record<string, unknown>>(
-    key: string,
-    partial: Partial<T>,
-    defaults: T,
-    parser: { parse(value: unknown): T }
-  ): T => {
-    const current = getParsed(key, parser) ?? parser.parse(defaults);
-    const next = parser.parse({ ...current, ...partial });
-    setParsed(key, next, parser);
-    return next;
-  };
-  return {
-    getParsed,
-    setParsed,
-    patchParsed
-  };
-}
-
-const RecordConfigParser = Object.freeze({
-  parse(value: unknown): Record<string, unknown> {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new Error("Config must be an object");
-    }
-    return value as Record<string, unknown>;
-  }
-});
+import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
+import { createServiceHarness } from "./routes-config-port.harness.js";
 
 function createDeferred<T>(): {
   readonly promise: Promise<T>;

@@ -7,7 +7,7 @@ import ConfigPage from "../../pages/config";
 import { ConfigSection, type SectionMeta } from "../../pages/config-section";
 import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 function renderConfig() {
   return render(
@@ -44,7 +44,6 @@ describe("ConfigPage", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
       if (init?.method === "PATCH") {

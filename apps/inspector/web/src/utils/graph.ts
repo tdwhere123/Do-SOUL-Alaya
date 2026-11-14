@@ -5,10 +5,18 @@ export interface GraphNodeShape {
   readonly influence_count?: number;
 }
 
+// Node hue basis on the path plane. The path plane carries no origin_kind, so
+// nodes are coloured by their anchor-derived node.kind (memory vs scope) rather
+// than the retired origin classification. Keyed by GraphNode.kind.
+// see also: apps/inspector/web/src/pages/graph-page/ anchorKindToNodeKind / NodeKindLegend
+export const NODE_KIND_BASE_COLOR: Record<string, string> = {
+  memory: "#92A8B3", // calm blue-grey — object / object_facet anchors
+  scope: "#C9ADA7" // warm clay — obligation / risk_concern / time_concern anchors
+};
+
 export const NODE_COLOR: Record<string, string> = {
   signal: "#96AD90",
-  memory: "#92A8B3",
-  scope: "#C9ADA7",
+  ...NODE_KIND_BASE_COLOR,
   projection: "#D4AF37"
 };
 
@@ -44,15 +52,6 @@ export const EDGE_TYPE_BASE_COLOR: Record<string, [number, number, number]> = {
   references: [125, 159, 187], // light blue
   belongs_to: [126, 168, 132], // sage green
   derived_from: [192, 128, 64] // soft orange
-};
-
-// Node hue basis on the path plane. The path plane carries no origin_kind, so
-// nodes are coloured by their anchor-derived node.kind (memory vs scope) rather
-// than the retired origin classification. Keyed by GraphNode.kind.
-// see also: apps/inspector/web/src/pages/graph-page/ anchorKindToNodeKind / NodeKindLegend
-export const NODE_KIND_BASE_COLOR: Record<string, string> = {
-  memory: "#92A8B3", // calm blue-grey — object / object_facet anchors
-  scope: "#C9ADA7" // warm clay — obligation / risk_concern / time_concern anchors
 };
 
 // see also: packages/protocol/src/relations/path-relation.ts:StabilityClassSchema

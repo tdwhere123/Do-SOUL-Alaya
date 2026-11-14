@@ -11,7 +11,7 @@ import {
   urlOf,
   type FetchInput
 } from "./memory-browser.test-support";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
 import MemoryBrowserPage from "../../pages/memory-browser";
@@ -24,7 +24,6 @@ describe("MemoryBrowserPage", () => {
   });
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

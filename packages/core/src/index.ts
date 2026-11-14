@@ -221,7 +221,6 @@ export * from "./runtime/runs/workspace-service.js";
 export * from "./governance/security/zero-day-security-layer.js";
 
 export {
-  verifyPublishedSourceInterpretation, packetEvidenceId,
   createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation
 } from "./memory/evidence-create/source-interpretation-packet-publication.js";
 export { semanticInterpretationEvidenceId } from "./memory/evidence-create/source-semantic-capsule.js";

@@ -1164,8 +1164,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1029,
-      "expected_sha256": "a996d243f0c70f266f2ab1c5fcb5eb5ac8f384c5f1ad7f7dd11b0be519acc959"
+      "expected_count": 1026,
+      "expected_sha256": "c5c5417602e882d5c19933cb969960100f4066cf1c13c358182f002e97fa0ceb"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1284,7 +1284,7 @@
     },
     {
       "path": "packages/core/src/embedding-recall/local-onnx.ts",
-      "reason": "Optional local ONNX extra is not a package.json dependency; a literal specifier would fail typecheck on the default install."
+      "reason": "Local ONNX loads the pinned @huggingface/transformers Core dependency lazily via a non-literal specifier so API-only consumers do not initialize ONNX; package presence is not model readiness."
     }
   ]
 }

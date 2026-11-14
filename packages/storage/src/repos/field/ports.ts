@@ -4,7 +4,6 @@ import type {
   EffectDecision,
   FactorFamily,
   ProjectionEraseSubjectKind,
-  ProjectionGenerationPort,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
 import type { HostStructureDescriptor, SourceRepresentation, UtteranceAttribution } from "@do-soul/alaya-protocol";
@@ -242,7 +241,6 @@ export interface FieldProjectionGenerationRepo {
     workspaceId: string,
     generationIds: readonly string[]
   ): readonly FieldProjectionGenerationRow[];
-  asGenerationPort(): ProjectionGenerationPort;
 }
 
 export interface FieldEraseBarrierRepo {

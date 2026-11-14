@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import RecallPage from "../../pages/recall";
 import { ToastProvider } from "../../components/toast";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 function renderRecall() {
   return render(
@@ -71,7 +71,6 @@ describe("RecallPage", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
     fetchMock = vi.fn();
     fetchMock.mockImplementation(async (input: FetchInput) => {

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import HealthInboxPage from "../../pages/health-inbox";
 import { ToastProvider } from "../../components/toast";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 import { HealthIssueCauseKindSchema } from "@do-soul/alaya-protocol";
 import { CAUSE_OPTIONS } from "../../pages/health-inbox-types";
 import { en } from "../../i18n/dict-en";
@@ -85,7 +85,6 @@ describe("HealthInboxPage", () => {
   });
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

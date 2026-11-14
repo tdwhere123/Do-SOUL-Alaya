@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import OverviewPage from "../../pages/overview";
 import { ToastProvider } from "../../components/toast";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 function renderOverview() {
   return render(
@@ -37,7 +37,6 @@ describe("OverviewPage", () => {
   let fetchMock: Mock<typeof fetch>;
 
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
     fetchMock = vi.fn<typeof fetch>();
     fetchMock.mockImplementation(async (input: FetchInput) => {

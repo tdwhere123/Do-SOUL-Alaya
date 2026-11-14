@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import BenchTrendPage from "../../pages/bench-trend";
 import { LocaleProvider } from "../../i18n/locale";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 
 function renderBenchTrend() {
   return render(
@@ -21,7 +21,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe("BenchTrendPage", () => {
   beforeEach(() => {
-    setInspectorToken("t");
     setWorkspaceId("ws1");
   });
 

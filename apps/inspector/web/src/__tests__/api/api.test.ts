@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   apiFetch,
-  setInspectorToken,
+  clearInspectorSession,
   setUnauthorizedHandler,
   setWorkspaceId,
   subscribeWorkspaceId,
@@ -14,7 +14,6 @@ describe("apiFetch", () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     setUnauthorizedHandler(null);
   });
@@ -168,7 +167,7 @@ describe("apiFetch", () => {
   });
 
   it("does not treat a leftover sessionStorage process token as a session", async () => {
-    setInspectorToken("");
+    clearInspectorSession();
     sessionStorage.setItem("alaya-inspector-token", "stored-token");
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await apiFetch("/status");

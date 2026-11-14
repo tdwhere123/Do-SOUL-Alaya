@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import ProposalsPage from "../../pages/proposals";
-import { setInspectorToken, setWorkspaceId } from "../../api";
+import { setWorkspaceId } from "../../api";
 import { ToastProvider } from "../../components/toast";
 
 interface PendingProposalFixture {
@@ -20,7 +20,6 @@ describe("ProposalsPage", () => {
   let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    setInspectorToken("test-token");
     setWorkspaceId("ws-1");
     fetchMock = vi.fn().mockResolvedValue(pendingResponse([pendingProposal()]));
     vi.stubGlobal("fetch", fetchMock);

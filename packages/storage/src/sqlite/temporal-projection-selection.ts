@@ -19,6 +19,10 @@ import {
 } from "./temporal-projection-selection-state.js";
 import { StorageError } from "../shared/errors.js";
 import { markTemporalDatabaseEstablished } from "./temporal-file-publication.js";
+import {
+  readSqliteDatabaseFileWitnessSet,
+  type SqliteDatabaseFileWitness
+} from "./sqlite-database-file-witness.js";
 
 const LEGACY_PATH_RELATION_WRITE_BLOCK_MESSAGE =
   "Legacy path relation writes are disabled after temporal projection selection.";
@@ -26,11 +30,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const LEGACY_PATH_RELATION_READ_BLOCK_MESSAGE =
   "Legacy path relation reads are disabled after temporal projection selection.";
 
-interface ReceiptFileDigest {
-  readonly role: "database" | "journal" | "wal";
-  readonly bytes: number;
-  readonly sha256: string;
-}
+type ReceiptFileDigest = SqliteDatabaseFileWitness;
 
 interface PreparedTemporalCandidateReceipt {
   readonly sourceFilename: string;
@@ -355,13 +355,7 @@ function parseReceiptFileSet(value: unknown): readonly ReceiptFileDigest[] {
 }
 
 function readFileSet(filename: string): readonly ReceiptFileDigest[] {
-  const parts: readonly ReceiptFileDigest["role"][] = ["database", "journal", "wal"];
-  return Object.freeze(parts.flatMap((role) => {
-    const partFilename = role === "database" ? filename : `${filename}-${role}`;
-    if (!fs.existsSync(partFilename)) return [];
-    const bytes = fs.readFileSync(partFilename);
-    return [Object.freeze({ role, bytes: bytes.byteLength, sha256: sha256(bytes) })];
-  }));
+  return readSqliteDatabaseFileWitnessSet(filename);
 }
 
 function digestFileSet(fileSet: readonly ReceiptFileDigest[]): string {

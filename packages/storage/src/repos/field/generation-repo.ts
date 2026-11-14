@@ -1,7 +1,6 @@
 import {
   compareUtcInstants,
   type FieldContractSha256,
-  type ProjectionGenerationPort,
   type ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
@@ -352,18 +351,6 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
     );
     if (row !== null) verifyPersistedGeneration(row, this.sha256);
     return row;
-  }
-
-  public asGenerationPort(): ProjectionGenerationPort {
-    return {
-      snapshot: (input) => generationFromRow(this.insert(generationToRow(input))),
-      verify: (input) => generationFromRow(
-        this.persistStatus(input.workspace_id, input.generation_id, "verified")
-      ),
-      activatePointer: (input) => this.activatePointer(input),
-      pin: (input) => this.pin(input),
-      release: (input) => this.releasePin(input)
-    };
   }
 
   public readByGenerationIds(
