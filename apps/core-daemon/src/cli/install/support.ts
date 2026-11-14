@@ -1,6 +1,6 @@
 import { access, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
-import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
+import { AlayaError, type RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import type { AlayaCliContext } from "../bridge.js";
 import type { AlayaConfigPaths } from "../support/config-files.js";
 import { writePrivateTextAtomic } from "../../services/support/private-file-service.js";
@@ -81,7 +81,7 @@ export async function rollbackPartialState(partialState: readonly PartialStateEn
         const current = await readOptional(entry.path);
         if (current === (entry.beforeContent ?? null)) continue;
         if (current !== entry.afterContent) {
-          throw new Error("Config changed after publication; refusing to overwrite it during rollback");
+          throw new AlayaError("CONFLICT", "Config changed after publication; refusing to overwrite it during rollback");
         }
       }
       if (entry.beforeContent === undefined) {

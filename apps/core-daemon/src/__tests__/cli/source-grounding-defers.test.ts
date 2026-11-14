@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  AlayaError,
   SignalState,
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
@@ -12,6 +13,7 @@ import {
   type AlayaCliDaemonRuntime
 } from "../../cli/bridge.js";
 import { createSourceGroundingDefersCommand } from "../../cli/source-grounding-defers/command.js";
+import { projectSourceGroundingDeferRecoveryPage } from "../../cli/source-grounding-defers/projection.js";
 
 const CLAIM_TOKEN_FINGERPRINT = `sha256:${"a".repeat(64)}`;
 const RAW_CLAIM_TOKEN = "claim-capability-secret";
@@ -70,6 +72,19 @@ function createHarness() {
 }
 
 describe("source-grounding-defers CLI", () => {
+  it.each(["list-recoverable", "recover"] as const)("keeps %s fail-closed when recovery is unavailable", async (action) => {
+    const { bridge, stdout, stderr } = createHarness();
+    const result = await bridge.dispatch(["source-grounding-defers", action, "--workspace", "workspace-1",
+      ...(action === "recover" ? ["--signal", "signal-1"] : [])]);
+    expect(result.exitCode).toBe(70);
+    expect(stdout.readText()).toBe("");
+    expect(stderr.readText()).toMatch(/^CLI failure \[category=subcommand error_id=/u);
+  });
+
+  it("rejects malformed recovery entries with the shared error family", () => {
+    expect(() => projectSourceGroundingDeferRecoveryPage({ entries: {}, next_after_signal_id: null })).toThrow(AlayaError);
+  });
+
   it("lists workspace-scoped obligations with explicit cap semantics", async () => {
     const { bridge, service, stdout } = createHarness();
     await bridge.dispatch([

@@ -1,5 +1,6 @@
 import type { SignalService } from "@do-soul/alaya-core";
 import {
+  AlayaError,
   IsoDatetimeStringSchema,
   isSourceGroundingDeferReason,
   sourceGroundingDeferReasons,
@@ -27,7 +28,7 @@ export function projectSourceGroundingDeferEntry(value: unknown): SourceGroundin
 
 export function projectSourceGroundingDeferRecoveryPage(value: unknown): ReturnType<SignalService["listSourceGroundingRecoveryCandidates"]> {
   const page = requireRecord(value, "recovery page");
-  if (!Array.isArray(page.entries)) throw new Error("Invalid source-grounding recovery entries.");
+  if (!Array.isArray(page.entries)) throw new AlayaError("INTERNAL", "Invalid source-grounding recovery entries.");
   return { next_after_signal_id: page.next_after_signal_id === null ? null : readDisplayText(page.next_after_signal_id, "next_after_signal_id"),
     entries: page.entries.map(value => {
       const entry = requireRecord(value, "recovery entry");

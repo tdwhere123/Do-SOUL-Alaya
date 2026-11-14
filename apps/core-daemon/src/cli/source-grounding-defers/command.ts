@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SignalService } from "@do-soul/alaya-core";
 import {
+  AlayaError,
   BoundedJsonObjectSchema,
   IsoDatetimeStringSchema,
   type CandidateMemorySignal
@@ -114,7 +115,7 @@ function executeList(
 
 function executeRecoveryList(ctx: AlayaCliContext, args: SourceGroundingDefersArgs,
   service: SourceGroundingDeferService): AlayaCliResult {
-  if (service.listSourceGroundingRecoveryCandidates === undefined) throw new Error("Source-grounding recovery is unavailable.");
+  if (service.listSourceGroundingRecoveryCandidates === undefined) throw new AlayaError("INTERNAL", "Source-grounding recovery is unavailable.");
   const page = projectSourceGroundingDeferRecoveryPage(service.listSourceGroundingRecoveryCandidates(args.workspaceId, args.afterSignalId, args.limit));
   if (ctx.jsonRequested !== true) {
     for (const entry of page.entries) ctx.stdout.write(`${entry.signal_id}\treason=${entry.defer_reason}\tstate=recoverable_unqueued\n`);
@@ -130,7 +131,7 @@ async function executeRedrive(
 ): Promise<AlayaCliResult> {
   const signalId = args.signalId!;
   const rawPayload = await readRawPayloadFile(ctx.cwd, args.rawPayloadFile);
-  if (args.action === "recover" && service.recoverSourceGroundingDefer === undefined) throw new Error("Source-grounding recovery is unavailable.");
+  if (args.action === "recover" && service.recoverSourceGroundingDefer === undefined) throw new AlayaError("INTERNAL", "Source-grounding recovery is unavailable.");
   const result = args.action === "recover"
     ? await service.recoverSourceGroundingDefer!(args.workspaceId, signalId)
     : await service.redriveSourceGroundingDefer(args.workspaceId, signalId,

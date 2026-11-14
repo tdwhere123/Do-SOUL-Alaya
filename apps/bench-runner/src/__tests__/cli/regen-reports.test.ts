@@ -34,6 +34,11 @@ it("regenerates canonical legacy, policy and fast archives without changing KPI 
     const ignored = join(root, "public", "not-a-history-entry"); mkdirSync(ignored);
     writeFileSync(join(ignored, "kpi.json"), "invalid");
     writeFileSync(join(ignored, "report.md"), "untouched");
+    const rejected = spawnSync(process.execPath, [resolve(import.meta.dirname,
+      "../../../scripts/regen-reports.mjs"), root, "unexpected"], { encoding: "utf8" });
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("usage: regen-reports.mjs [history-root]");
+    for (const [slug] of entries) expect(readFileSync(join(root, "public", slug, "report.md"), "utf8")).toBe("stale report");
     const result = spawnSync(process.execPath, [resolve(import.meta.dirname,
       "../../../scripts/regen-reports.mjs"), root], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);

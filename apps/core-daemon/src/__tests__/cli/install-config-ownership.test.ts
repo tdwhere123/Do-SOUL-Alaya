@@ -1,5 +1,6 @@
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,8 +21,11 @@ vi.mock("node:fs/promises", async importOriginal => {
 const directories: string[] = [];
 afterAll(async () => { await Promise.all(directories.map(dir => rm(dir, { recursive: true, force: true }))); });
 async function fixture() {
-  const dir = await mkdtemp(path.join(tmpdir(), "alaya config owner-"));
-  directories.push(dir);
+  const parent = await mkdtemp(path.join(tmpdir(), "alaya config owner-"));
+  directories.push(parent);
+  // Keep spaced paths while using the shared guard\'s contained config-fixture owner.
+  const dir = path.join(parent, `alaya-bench-config-${randomUUID()}`);
+  await mkdir(dir);
   let tick = 0;
   const command = createInstallCommand({
     configDirResolver: () => dir,

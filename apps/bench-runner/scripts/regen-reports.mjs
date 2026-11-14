@@ -9,6 +9,7 @@
 // content is NOT mutated.
 
 import { readFile, writeFile } from "node:fs/promises";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -25,7 +26,7 @@ import { isRecallEvalArchive, sameRecallEvalBaselineIdentity } from
 import { renderRecallEvalReport } from "../dist/runs/kpi/recall-eval-report.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-if (process.argv.length > 3) throw new Error("usage: regen-reports.mjs [history-root]");
+if (process.argv.length > 3) throw new AlayaError("VALIDATION", "usage: regen-reports.mjs [history-root]");
 const HISTORY_ROOT = process.argv[2] === undefined
   ? resolveDefaultBenchHistoryRoot(resolve(__dirname, "../../..")) : resolve(process.argv[2]);
 
