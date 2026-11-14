@@ -7,7 +7,7 @@ import { formatFileSecretRef } from "@do-soul/alaya-protocol";
 import { afterAll, describe, expect, it } from "vitest";
 
 const repo = fileURLToPath(new URL("../../../../../", import.meta.url));
-const tripwire = fileURLToPath(new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url));
+const tripwire = new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url).href;
 const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 function fixture() {
@@ -93,7 +93,7 @@ describe("built install to authenticated startup config consumption", () => {
       api_key_source: "file", key_file_path: path.join(f.config, "secrets", "openai") };
     for (const supplied of [answers, {}]) {
       const installed = spawnSync(process.execPath, ["bin/alaya.mjs", "install", "--non-interactive", JSON.stringify(supplied)], {
-        cwd: repo, env: { ...f.env, NODE_OPTIONS: "--import=" + tripwire, ALAYA_TEST_TRANSPORT_WITNESS: witness },
+        cwd: repo, env: { ...f.env, NODE_OPTIONS: `--import=${tripwire}`, ALAYA_TEST_TRANSPORT_WITNESS: witness },
         encoding: "utf8", timeout: 25000
       });
       expect(installed.error).toBeUndefined();
@@ -104,8 +104,11 @@ describe("built install to authenticated startup config consumption", () => {
     expect(existsSync(path.join(repo, "must-not-select-file-db"))).toBe(false);
     runtimeProbe(f.env, "file");
     runtimeProbe({ ...f.env, PORT: "32766", ALAYA_REQUEST_TOKEN: "process-token" }, "override");
-    writeFileSync(f.file, readFileSync(f.file, "utf8") + "ALAYA_DAEMON_SOCKET=" + path.join(f.config, "daemon.sock") + "\n");
-    runtimeProbe(f.env, "socket");
+    // Socket-file ownership uses POSIX Unix sockets, not Windows named pipes.
+    if (process.platform !== "win32") {
+      writeFileSync(f.file, readFileSync(f.file, "utf8") + "ALAYA_DAEMON_SOCKET=" + path.join(f.config, "daemon.sock") + "\n");
+      runtimeProbe(f.env, "socket");
+    }
   }, 90000);
 
   it("validates file values before startup and retains ordinary HTTP no-token fail-closed", () => {

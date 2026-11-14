@@ -86,6 +86,7 @@ export async function recallThroughHandler(
   request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "dimension" | "domain_tags" | "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
     readonly continuation?: InformationIndex["continuation"];
     readonly now?: string;
+    readonly budget?: Parameters<RecallService["recall"]>[0]["budget"];
   }
 ) {
   const { dependencies } = createDependencies();
@@ -96,6 +97,11 @@ export async function recallThroughHandler(
     now: () => new Date(Date.parse(clock) + ticks++ * 1_000).toISOString(),
     observerReaders: readersFor(slice)
   });
+  const budget = request.budget;
+  if (budget !== undefined) {
+    const recall = service.recall.bind(service);
+    service.recall = parameters => recall({ ...parameters, budget });
+  }
   const handler = createRecallHandler({
     deps: {
       recallService: service,

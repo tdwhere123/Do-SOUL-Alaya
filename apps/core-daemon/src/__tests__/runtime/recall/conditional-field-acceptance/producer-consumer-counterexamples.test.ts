@@ -140,9 +140,10 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   it("paged 32-cap observation concatenates without skip or duplicate", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 40, 701);
+    const memoryBytes = 1_010_000;
     const full = runRecall(slice, {
       query_text: "needle",
-      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000, memory_bytes: 1_010_000 })
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000, memory_bytes: memoryBytes })
     });
     expect(full.entries).toHaveLength(40);
     expect(full.completeness.logical_index).toBe("complete");
@@ -152,6 +153,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
       const page = await recallThroughHandler(slice, {
         query: "needle",
         max_results: 8,
+        budget: defaultBudget({ page_budget: 8, memory_bytes: memoryBytes }),
         continuation
       });
       pages.push(page.index.entries.map(entryId));

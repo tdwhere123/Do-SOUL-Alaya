@@ -178,9 +178,10 @@ describe("conditional-field producer-consumer counterexamples", () => {
       lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
         inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
     };
+    const memoryBytes = 1_010_000;
     const full = runRecall(slice, {
       query_text: "needle",
-      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: 1_010_000 }),
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: memoryBytes }),
       readers: capped
     });
     const pages = [];
@@ -188,7 +189,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     for (let step = 0; step < 8; step += 1) {
       const page = runRecall(slice, {
         query_text: "needle",
-        budget: defaultBudget({ page_budget: 8 }),
+        budget: defaultBudget({ page_budget: 8, memory_bytes: memoryBytes }),
         readers: capped,
         continuation
       });

@@ -174,7 +174,7 @@ function buildObservationCompletenessLookup(
 }
 
 // Not an admission or fusion order.
-export function sortLexicalEvidenceEmbeddingCandidates(
+function sortLexicalEvidenceEmbeddingCandidates(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
   queryText: string
 ): ScoreEvidenceCandidatesParams["candidates"] {

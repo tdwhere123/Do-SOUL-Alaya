@@ -13,7 +13,7 @@ import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/leas
 
 const repo = fileURLToPath(new URL("../../../../../", import.meta.url));
 const installer = path.join(repo, "scripts/install.sh");
-const preload = fileURLToPath(new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url));
+const preload = new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url).href;
 const directories: string[] = [];
 let release: ReturnType<typeof packageBuiltRelease>;
 afterAll(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -145,7 +145,7 @@ describe.skipIf(process.platform === "win32")("installer production bin launch c
     expect(schemaWitness(f.target)).toEqual({ identity: 246813579, schema: [] });
     const installed = f.run();
     expect(installed.status, `${installed.stdout}\n${installed.stderr}`).toBe(0);
-    expect(installed.stdout).toContain(`backing up ${f.target} -> `);
+    expect(installed.stdout).toContain(`backing up ${realpathSync(f.target)} -> `);
     expect(schemaWitness(f.backup())).toEqual({ identity: 246813579, schema: [] });
     expect(schemaWitness(f.target)).toEqual({ identity: 246813579, schema: [{ name: "schema_version" }] });
     const current = new BetterSqlite3(f.target, { readonly: true });

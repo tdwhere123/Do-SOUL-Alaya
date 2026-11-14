@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 export const SQLITE_DATABASE_FILE_WITNESS_ROLES = Object.freeze(["database", "journal", "wal"] as const);
 
-export type SqliteDatabaseFileWitnessRole = (typeof SQLITE_DATABASE_FILE_WITNESS_ROLES)[number];
+type SqliteDatabaseFileWitnessRole = (typeof SQLITE_DATABASE_FILE_WITNESS_ROLES)[number];
 
 export interface SqliteDatabaseFileWitness {
   readonly role: SqliteDatabaseFileWitnessRole;

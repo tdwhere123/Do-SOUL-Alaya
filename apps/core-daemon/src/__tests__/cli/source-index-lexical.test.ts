@@ -30,7 +30,7 @@ it.each([false, true])("selects v2 through the CLI and persists the bounded lexi
   __setCjkSegmentationLoaderForTests(async () => ({ cut: token => [token] }));
   const bind = vi.fn(async () => ({ status: "unsupported" as const, reason: "provider_disabled" }));
   const producer = createSourceIndexProducer({ database: environment.database, bindSourceEmbedding: bind,
-    warn: vi.fn(), ...(partial ? { limits: { work: 8 } } : {}) });
+    warn: vi.fn(), ...(partial ? { limits: { maxRootsPerPass: 0 } } : {}) });
   const controls = createDaemonLifecycleControls({ app: { fetch: async () => new Response("ok") },
     lifecycleState: createCoreDaemonLifecycleState(), warnLogger: { warn: vi.fn() }, sourceIndexProducer: producer,
     gardenBacklogTelemetryService: { start: vi.fn(), stop: vi.fn(async () => undefined) },

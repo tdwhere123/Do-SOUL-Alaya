@@ -7,6 +7,9 @@ import dgram from "node:dgram";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isNativeConfigFixtureFile } from "./provider-free-fixture-files.mjs";
 
 /** Install in vi.hoisted before application imports. Shared with native feedback
  * and recovery tests; unlike the loopback fixture guard, no transport is permitted. */
@@ -38,9 +41,11 @@ export function installStrictProviderFreeBoundary() {
       apply(target, receiver, args) {
         // Safe temporary config fixtures are owned by the existing native fixture helper.
         const filename = String(args[0]);
-        const fixture = /[/\\]alaya-bench-config-[a-f0-9-]+[/\\]\.env(?:\.[a-f0-9-]+\.tmp)?$/u.test(filename);
-        if (!fixture && /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(filename)) {
-          forbidden.push("credential file"); throw new Error("Credential file access forbidden");
+        if (/(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(filename)) {
+          const path = resolve(args[0] instanceof URL ? fileURLToPath(args[0]) : filename);
+          if (!isNativeConfigFixtureFile(path)) {
+            forbidden.push("credential file"); throw new Error("Credential file access forbidden");
+          }
         }
         return Reflect.apply(target, receiver, args);
       }

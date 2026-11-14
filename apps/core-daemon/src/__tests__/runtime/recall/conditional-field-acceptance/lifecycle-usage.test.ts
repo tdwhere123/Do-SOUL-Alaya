@@ -191,8 +191,10 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     try {
       await worker.ready();
       let now = "2026-09-07T23:59:59.000Z";
-      const direct = await collectBoundaryPages(handlerFor(slice.database, serviceFor(slice.database, () => now)));
-      const service = serviceFor(slice.database, () => now, worker);
+      // Budget the retained partition identities in both arms; this tests paging, not default-budget refusal.
+      const memoryBytes = 1_010_000;
+      const direct = await collectBoundaryPages(handlerFor(slice.database, serviceFor(slice.database, () => now, undefined, memoryBytes)));
+      const service = serviceFor(slice.database, () => now, worker, memoryBytes);
       const handler = handlerFor(slice.database, service);
       const entries = await collectBoundaryPages(handler);
       expect(entries).toEqual(direct);

@@ -70,7 +70,7 @@ export type SourceGroundingDeferEventInput = Omit<
 >;
 
 /** Observed quiescent deferrals outside the bounded queue; not claimable queue entries. */
-export interface SourceGroundingDeferRecoveryEntry {
+interface SourceGroundingDeferRecoveryEntry {
   readonly signal_id: string;
   readonly workspace_id: string;
   readonly run_id: string;
@@ -78,7 +78,7 @@ export interface SourceGroundingDeferRecoveryEntry {
   readonly triage_revision: number;
 }
 
-export interface SourceGroundingDeferRecoveryPage {
+interface SourceGroundingDeferRecoveryPage {
   readonly entries: readonly SourceGroundingDeferRecoveryEntry[];
   /** Advances over inspected candidates, including those whose proof was refused. Null means exhausted. */
   readonly next_after_signal_id: string | null;

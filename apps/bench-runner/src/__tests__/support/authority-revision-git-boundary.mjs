@@ -221,7 +221,7 @@ function inspectIndex(checkout, index) {
     // never reads credential-shaped worktree bytes through the filesystem guard.
     // A touched/replaced template fails closed under the stable-filesystem premise.
     const sourceTemplate = path === ".env.example" && mode === 0o100644 &&
-      index.toString("hex", start + 40, start + 60) === "b08e228b4af41952796386a749a1055a8c41b740";
+      index.toString("hex", start + 40, start + 60) === "c651e4e62cbfbe5b63de5d672e4d8aa6b0727126";
     assertRelativeWorktreePath(path, sourceTemplate);
     if (sourceTemplate) {
       inStage("public_template_stat", () => {

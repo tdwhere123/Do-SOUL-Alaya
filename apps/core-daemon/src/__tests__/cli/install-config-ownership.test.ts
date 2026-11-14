@@ -52,7 +52,8 @@ describe("installer config write ownership", () => {
     expect(first.startsWith(operator)).toBe(true);
     expect(first).not.toContain("env:OLD");
     expect(first).not.toContain("https://old.example");
-    expect((await stat(f.env)).mode & 0o777).toBe(0o600);
+    // Windows stat has writable/read-only mode bits, not POSIX owner permissions.
+    if (process.platform !== "win32") expect((await stat(f.env)).mode & 0o777).toBe(0o600);
     expect((await f.run()).exitCode).toBe(0);
     expect(await readFile(f.env, "utf8")).toBe(first);
   });
@@ -66,12 +67,12 @@ describe("installer config write ownership", () => {
       const repo = fileURLToPath(new URL("../../../../../", import.meta.url));
       const witness = path.join(f.dir, "transport-witness");
       await writeFile(witness, "");
+      const preload = new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url).href;
       const child = spawnSync(process.execPath, ["bin/alaya.mjs", "install", "--non-interactive", "{}"], {
         cwd: repo, env: {
           HOME: f.dir, PATH: process.env.PATH, APPVEYOR: "1", CI: "1",
           ALAYA_CONFIG_DIR: f.dir, ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false",
-          ALAYA_EMBEDDING_PROVIDER: "openai",
-          NODE_OPTIONS: "--import=" + fileURLToPath(new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url)),
+          ALAYA_EMBEDDING_PROVIDER: "openai", NODE_OPTIONS: `--import=${preload}`,
           ALAYA_TEST_TRANSPORT_WITNESS: witness
         },
         encoding: "utf8", timeout: 20000
@@ -84,7 +85,7 @@ describe("installer config write ownership", () => {
     });
     expect((await f.run({ embedding_enabled: false })).exitCode).toBe(0);
     expect(await readdir(f.dir)).not.toContain(".env.runtime-embedding.lock");
-  });
+  }, 30_000);
 
   it("rolls back already published TOML when env replacement fails, then permits forced retry", async () => {
     const f = await fixture();

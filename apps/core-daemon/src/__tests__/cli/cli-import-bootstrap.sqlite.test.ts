@@ -1,6 +1,6 @@
 import BetterSqlite3 from "better-sqlite3";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,12 +9,12 @@ import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/leas
 import { quoteTomlString } from "../support/test-paths.js";
 
 const bin = fileURLToPath(new URL("../../../../../bin/alaya.mjs", import.meta.url));
-const preload = fileURLToPath(new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url));
+const preload = new URL("../support/cli-bootstrap-tripwire.mjs", import.meta.url).href;
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 function fixture() {
-  const root = mkdtempSync(path.join(tmpdir(), "alaya-bin-import-"));
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "alaya-bin-import-")));
   directories.push(root);
   const config = path.join(root, "config");
   const home = path.join(root, "home");

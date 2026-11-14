@@ -139,7 +139,8 @@ it("distinguishes bounded-out from valid-empty and scrubs capsule and canonical 
   try {
     const lifecycle = new SourceIndexLifecycle(index, fieldSha256);
     expect(await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", { ...limits, work: 0 }))
-      .toMatchObject({ status: "partial", generation: { enumeration_complete: false } });
+      .toMatchObject({ status: "unavailable", reason: "enumeration_allocation_exhausted",
+        generation: { enumeration_complete: false } });
     const empty = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v1", limits);
     expect(empty).toMatchObject({ status: "ready", generation: { status: "valid_empty", target_count: 0 } });
     expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget)).toMatchObject({ completion: "complete", candidates: [] });
@@ -184,7 +185,7 @@ it("resumes a long segmented root within each pass allowance across database reo
     expect(long.length).toBeGreaterThan(small.work);
     let lifecycle = new SourceIndexLifecycle(index, fieldSha256);
     const belowUnit = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", { ...limits, work: 100 });
-    expect(belowUnit).toMatchObject({ status: "partial", analysis_units: 0 });
+    expect(belowUnit).toMatchObject({ status: "unavailable", reason: "enumeration_allocation_exhausted", analysis_units: 0 });
     expect(belowUnit.resources.work).toBeLessThanOrEqual(100);
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_progress").get()).toEqual({ n: 0 });
     let pass = await lifecycle.prepareLexical(WORKSPACE, "segmented-unicode61.v2", small);
