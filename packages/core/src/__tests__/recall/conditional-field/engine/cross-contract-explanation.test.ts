@@ -2,90 +2,99 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ASSOCIATION_DOMAIN_ID,
+  MemoryDimension,
   productSubjectId,
   type QueryInterpretation,
-  type QueryProgram,
-  type RelationValidity
+  type QueryProgram
 } from "@do-soul/alaya-protocol";
-import {
-  SqliteFieldSourceRecordRepo,
-  type StorageDatabase
-} from "@do-soul/alaya-storage";
+import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { capContractId } from "../../../../recall/conditional-field/cap-contract.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { toSourceObserverRow, type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
-import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
-import { hashedRecord, openFieldDatabase } from "../../../../../../storage/src/__tests__/repos/field/field-contract-fixture.js";
+import { MEM, WS, openSourceSlice } from "../vertical/source-slice.js";
 
 const AS_OF = "2026-09-10T00:00:00.000Z";
-const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
-const CONTENT = "retained source";
-const CONTENT_HASH = `sha256:${createHash("sha256").update(CONTENT).digest("hex")}`;
+const OPEN = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
+
 const SOFT = capContractId({
   domain_id: ASSOCIATION_DOMAIN_ID,
   normalization: "l2.dot.v1",
   transfer_id: "policy.cosine.linear.milligrade.v1",
   transfer_version: "1"
 });
-const tracked = new Set<StorageDatabase>();
+const databases = new Set<StorageDatabase>();
 
 afterEach(() => {
-  for (const database of tracked) database.close();
-  tracked.clear();
+  for (const database of databases) database.close();
+  databases.clear();
 });
 
 describe("contract-scoped explanations from admitted observation", () => {
-  it("keeps B's own soft proof and drops a hard A→R→B splice", () => {
-    const { field, grounded, index } = observeAndProject({ objects: ["A", "B"], relation: ["A", "B"] });
+  it("keeps B's own soft proof and drops a hard A→R→B splice", async () => {
+    const { field, grounded, index } = await observeAndProject({
+      stored: [MEM.r, MEM.l], nominate: [MEM.r, MEM.l], relation: [MEM.r, MEM.l]
+    });
     expect(field.transitions.some((row) => row.applicable
-      && productSubjectId(row.from) === "A" && productSubjectId(row.to) === "B"
+      && productSubjectId(row.from) === MEM.r && productSubjectId(row.to) === MEM.l
       && row.cap_contract_id !== SOFT)).toBe(true);
-    expect(field.seeds.some((seed) => productSubjectId(seed.state) === "B" && seed.cap_contract_id === SOFT)).toBe(true);
-    const delivered = index.entries.find((entry) => entry.object_id === "B");
+    expect(field.seeds.some((seed) => productSubjectId(seed.state) === MEM.l && seed.cap_contract_id === SOFT)).toBe(true);
+    const delivered = index.entries.find((entry) => entry.object_id === MEM.l);
     expect(delivered?.association_milligrades).toBeGreaterThan(0);
     const rootId = delivered?.explanation_ids[0];
     expect(rootId).toEqual(expect.any(String));
     expect(proofKinds(grounded, rootId!)).toEqual(["leaf"]);
-    expect(proofMentions(grounded, rootId!, "A")).toBe(false);
+    expect(proofMentions(grounded, rootId!, MEM.r)).toBe(false);
   });
 
-  it("preserves a same-contract serial path to B", () => {
-    const { grounded, index } = observeAndProject({
-      objects: ["A", "B"], relation: ["A", "B"], measure: false
+  it("preserves a same-contract serial path to B", async () => {
+    const { grounded, index } = await observeAndProject({
+      stored: [MEM.r, MEM.l], nominate: [MEM.r, MEM.l], relation: [MEM.r, MEM.l], measure: false
     });
-    const delivered = index.entries.find((entry) => entry.object_id === "B");
+    const delivered = index.entries.find((entry) => entry.object_id === MEM.l);
     expect(delivered?.association_milligrades).toBeGreaterThan(0);
     const rootId = delivered?.explanation_ids[0];
     expect(rootId).toEqual(expect.any(String));
-    expect(proofMentions(grounded, rootId!, "A")).toBe(true);
+    expect(proofMentions(grounded, rootId!, MEM.r)).toBe(true);
   });
 
-  it("leaves a hard-only destination unreachable", () => {
-    const { field, index } = observeAndProject({ objects: ["A"], relation: ["A", "C"] });
+  it("leaves a hard-only destination unreachable after an applicable hard transfer", async () => {
+    const { field, index } = await observeAndProject({
+      stored: [MEM.r, MEM.c], nominate: [MEM.r], relation: [MEM.r, MEM.c]
+    });
+    const transferred = field.transitions.find((row) => row.applicable
+      && productSubjectId(row.from) === MEM.r && productSubjectId(row.to) === MEM.c);
+    expect(transferred).toBeDefined();
+    expect(transferred?.cap_contract_id).not.toBe(SOFT);
+    expect(field.seeds.some((seed) => productSubjectId(seed.state) === MEM.r && seed.cap_contract_id === SOFT)).toBe(true);
     const value = field.binding.kind === "bound"
-      ? field.binding.snapshot.values.find((row) => productSubjectId(row.state) === "C")
+      ? field.binding.snapshot.values.find((row) => productSubjectId(row.state) === MEM.c)
       : undefined;
     expect(value === undefined || value.activation?.kind === "unreachable"
       || (value.milligrades ?? 0) === 0).toBe(true);
-    expect(index.entries.some((entry) => entry.object_id === "C")).toBe(false);
+    expect(index.entries.some((entry) => entry.object_id === MEM.c)).toBe(false);
   });
 
-  it("denies an ineligible source by permission and by currentness", () => {
-    const denied = observeAndProject({
-      objects: ["A", "B"], relation: ["A", "B"], authorizedScopes: []
+  it("denies an ineligible source by permission and by persisted currentness", async () => {
+    const denied = await observeAndProject({
+      stored: [MEM.r, MEM.l], nominate: [MEM.r, MEM.l], relation: [MEM.r, MEM.l],
+      measure: false, authorizedScopes: ["global_core"]
     });
-    expect(denied.index.entries.some((entry) => entry.object_id === "B")).toBe(false);
-    const stale = observeAndProject({
-      objects: ["A", "B"], relation: ["A", "B"], staleObject: "B"
+    expect(denied.index.entries.some((entry) => entry.object_id === MEM.l)).toBe(false);
+    const stale = await observeAndProject({
+      stored: [MEM.r, MEM.l], nominate: [MEM.r, MEM.l], relation: [MEM.r, MEM.l],
+      measure: false, tombstone: MEM.l
     });
-    expect(stale.index.entries.some((entry) => entry.object_id === "B")).toBe(false);
+    expect(stale.index.entries.some((entry) => entry.object_id === MEM.l)).toBe(false);
   });
 
-  it("resumes grounding with the same B explanation", () => {
-    const { field, grounded } = observeAndProject({ objects: ["A", "B"], relation: ["A", "B"] });
+  it("resumes grounding with the same B explanation", async () => {
+    const { field, grounded } = await observeAndProject({
+      stored: [MEM.r, MEM.l], nominate: [MEM.r, MEM.l], relation: [MEM.r, MEM.l]
+    });
     const input = {
       seeds: field.seeds, transitions: field.transitions, derivations: field.derivations,
       transition_derivations: field.transition_derivations
@@ -102,8 +111,8 @@ describe("contract-scoped explanations from admitted observation", () => {
   });
 });
 
-function observeAndProject(input: ObserveCase) {
-  const field = observeCase(input);
+async function observeAndProject(input: ObserveCase) {
+  const field = await observeCase(input);
   return { field, ...projectField(field) };
 }
 
@@ -128,57 +137,82 @@ function projectField(field: ReturnType<typeof observeField>) {
 }
 
 type ObserveCase = Readonly<{
-  readonly objects: readonly string[];
+  readonly stored: readonly string[];
+  readonly nominate: readonly string[];
   readonly relation: readonly [string, string];
   readonly measure?: boolean;
   readonly authorizedScopes?: readonly string[] | null;
-  readonly staleObject?: string;
-  readonly workUnits?: number;
-  readonly resume?: ReturnType<typeof observeField>;
+  readonly tombstone?: string;
 }>;
 
-function observeCase(input: ObserveCase) {
-  const database = openFieldDatabase();
-  tracked.add(database);
-  const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
-  for (const objectId of input.objects) {
-    records.insert(hashedRecord("workspace-1", CONTENT, objectId));
+async function observeCase(input: ObserveCase) {
+  const slice = await openSourceSlice((database) => databases.add(database));
+  for (const objectId of input.stored) {
+    const nominated = input.nominate.includes(objectId);
+    await slice.writeMemory(objectId, nominated ? `related ${objectId}` : `other ${objectId}`, MemoryDimension.FACT);
+  }
+  await slice.admitRelation({
+    evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000201",
+    assertionId: `assert-${input.relation[0].slice(-4)}-${input.relation[1].slice(-4)}`,
+    sourceId: input.relation[0],
+    targetId: input.relation[1],
+    resultObjectId: input.relation[1],
+    relationKind: "observed_log",
+    validity: OPEN,
+    gist: "observed log"
+  });
+  if (input.tombstone !== undefined) {
+    slice.database.connection.prepare(
+      "UPDATE memory_entries SET retention_state='tombstoned' WHERE object_id=?"
+    ).run(input.tombstone);
   }
   const measure = input.measure !== false;
   return observeField(interpretation(measure), {
-    workspace_id: "workspace-1",
+    workspace_id: WS,
     query_text: "related",
     as_of: AS_OF,
     authorized_scopes: input.authorizedScopes === undefined ? null : input.authorizedScopes,
-    budget: defaultBudget({ work_units: input.workUnits ?? 10_000, memory_bytes: 1_000_000 }),
-    ...(input.resume === undefined ? {} : { resume_field: input.resume }),
-    readers: {
-      lexical: () => ({
-        ids: measure ? [] : [...input.objects],
-        nativeVisits: measure ? 0 : input.objects.length,
-        nativeBytes: 1,
-        rowsRead: measure ? 0 : input.objects.length,
-        bytesRead: 1,
-        truncated: false
-      }),
-      source: ({ objectId }) => sourcePage(records, objectId, input.staleObject),
-      ...(measure ? {
-        embeddingIds: () => ({
-          objectIds: [...input.objects],
-          rowVisits: input.objects.length,
-          metadataUtf8Bytes: 16,
-          truncated: false,
-          committedThrough: input.objects.at(-1) ?? null
-        }),
-        measureStoredPair: ({ objectId }: { objectId: string }) => ({
-          object: vector(objectId), query: vector("query"),
-          objectStatus: "ready" as const, queryStatus: "ready" as const, rowVisits: 2, bytesRead: 16
-        })
-      } : {}),
-      relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) =>
-        relationPage(input.relation, subject, predicate, afterAssertionId, limit, nativeLimit)
-    }
+    budget: defaultBudget({ work_units: 10_000, memory_bytes: 1_000_000 }),
+    readers: readersFor(slice, input.nominate, measure)
   });
+}
+
+function readersFor(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  nominate: readonly string[],
+  measure: boolean
+): ObserverReaders {
+  return {
+    lexical: (input) => slice.memoryReader.lexical(
+      input.workspaceId, input.query, input.limit, input.nativeLimit, input.afterObjectId
+    ),
+    source: (input) => {
+      const page = slice.memoryReader.source(input.workspaceId, input.objectId, input.byteLimit);
+      return {
+        row: page.row === null ? null : toSourceObserverRow(page.row),
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        unavailable: page.unavailable
+      };
+    },
+    relation: (input) => slice.relationReader.read(
+      input.workspaceId, input.subject, input.predicate, input.limit, input.nativeLimit, input.afterAssertionId
+    ),
+    ...(measure ? {
+      embeddingIds: () => ({
+        objectIds: [...nominate],
+        rowVisits: nominate.length,
+        metadataUtf8Bytes: 16,
+        truncated: false,
+        committedThrough: nominate.at(-1) ?? null
+      }),
+      measureStoredPair: ({ objectId }: { objectId: string }) => ({
+        object: vector(objectId), query: vector("query"),
+        objectStatus: "ready" as const, queryStatus: "ready" as const, rowVisits: 2, bytesRead: 16
+      })
+    } : {}),
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
+  };
 }
 
 function interpretation(measure: boolean): QueryInterpretation {
@@ -190,7 +224,7 @@ function interpretation(measure: boolean): QueryInterpretation {
     body: {
       schema_version: 1,
       kind: "relation",
-      relation_kind: "related",
+      relation_kind: "observed_log",
       source_variable: "s",
       target_variable: "t",
       guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", time_scope: "none" },
@@ -235,67 +269,15 @@ function interpretation(measure: boolean): QueryInterpretation {
   };
 }
 
-function sourcePage(records: SqliteFieldSourceRecordRepo, objectId: string, staleObject: string | undefined) {
-  const stored = records.findCurrent("workspace-1", objectId);
-  if (stored?.source_body == null) {
-    return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true as const };
-  }
-  const stale = objectId === staleObject;
-  return {
-    row: {
-      object_id: objectId,
-      sourceRevision: stored.source_version,
-      content: stored.source_body,
-      lifecycle_state: stale ? "retired" : "active",
-      scope_class: "project" as const,
-      ...(stale ? { valid_from: "2020-01-01T00:00:00.000Z", valid_to: "2020-01-02T00:00:00.000Z" } : {})
-    },
-    rowsRead: 1,
-    bytesRead: stored.source_body.length,
-    unavailable: false
-  };
-}
-
-function relationPage(
-  relation: readonly [string, string],
-  subject: string | null,
-  predicate: string,
-  afterAssertionId: string | null,
-  limit: number,
-  nativeLimit: number
-) {
-  const assertionId = `assert-${relation[0]}-${relation[1]}`;
-  const rows = subject === relation[0] && predicate === "related" && assertionId > (afterAssertionId ?? "")
-    ? [{
-      sourceObjectId: relation[0],
-      targetObjectId: relation[1],
-      predicate: "related",
-      assertionId,
-      resultObjectId: relation[1],
-      validity: VALIDITY,
-      evidenceRefs: [`evidence-${assertionId}`]
-    }]
-    : [];
-  const observations = rows.slice(0, Math.min(limit, nativeLimit));
-  return {
-    observations,
-    nativeVisits: observations.length,
-    nativeBytes: 1,
-    rowsRead: observations.length,
-    bytesRead: 1,
-    truncated: false,
-    committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId
-  };
-}
-
 function vector(objectId: string) {
+  const content = `related ${objectId}`;
   return {
     object_id: objectId,
     model_id: "stored-fixture",
     provider_kind: "openai" as const,
     schema_version: 1,
     dimensions: 2,
-    content_hash: CONTENT_HASH,
+    content_hash: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
     embedding: new Float32Array([1, 0])
   };
 }
@@ -315,4 +297,3 @@ function proofMentions(
   return [...traceDerivationForest({ forest, roots: [rootId] }).traversal.nodes.values()]
     .some((row) => row.observation_ids.includes(observationId));
 }
-
