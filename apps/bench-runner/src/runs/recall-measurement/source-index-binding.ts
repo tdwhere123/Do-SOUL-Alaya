@@ -449,9 +449,12 @@ function setupMetersExhausted(leftover: SourceIndexProducerPassRemaining): boole
   return (leftover.work === 0 || leftover.nativeBytes === 0 || leftover.modelInputs === 0 || leftover.inputBytes === 0);
 }
 
+const LEXICAL_OR_CENSUS_PARTIAL_REASONS = ["enumeration_budget", "enumeration_page", "incomplete", "read_budget", "deadline_exceeded"];
 function canContinueSourceIndexPass(status: string, reason: string): boolean {
+  if (reason === "enumeration_allocation_exhausted") return false;
   if (status === "resource_exhausted") return true;
-  return status === "partial" && (reason === "pending_targets" || reason === "capture_incomplete");
+  return status === "partial" && (reason === "pending_targets" || reason === "capture_incomplete" ||
+    LEXICAL_OR_CENSUS_PARTIAL_REASONS.includes(reason));
 }
 
 function debitSetupLeftover(leftover: SourceIndexProducerPassRemaining, spent: {
@@ -516,7 +519,12 @@ async function runBoundedSourceIndexPasses(daemon: BenchDaemonHandle, allowance:
         pass.resources.native_bytes > (remaining.nativeBytes ?? Infinity) ||
         pass.resources.model_inputs > (remaining.modelInputs ?? Infinity) || pass.resources.input_bytes > (remaining.inputBytes ?? Infinity));
       if (leftover !== undefined) leftover = debitSetupLeftover(leftover, pass.resources);
-      const after = observe(index + 1, "after"), progress = compareSourceIndexProgress(before, after);
+      const after = observe(index + 1, "after"), witnessed = compareSourceIndexProgress(before, after);
+      // The aggregate may describe lexical/census work in another workspace. An unchanged
+      // requested-workspace vector witness cannot certify that the whole pass stalled.
+      const progress: SourceIndexProgressComparison = witnessed.status === "no_progress" && pass.status === "partial" &&
+        LEXICAL_OR_CENSUS_PARTIAL_REASONS.includes(pass.reason)
+        ? { status: "unknown", reason: "aggregate_preparation_outside_witness" } : witnessed;
       const effective = { ...pass.limits };
       for (const key of SETUP_METER_KEYS) if (remaining?.[key] !== undefined) effective[key] = Math.min(effective[key], remaining[key]!);
       const entry: SourceIndexSetupPass = { pass: index + 1, receipt: pass,

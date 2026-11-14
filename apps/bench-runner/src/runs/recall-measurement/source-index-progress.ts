@@ -2,6 +2,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { canonicalJson, sourceIndexGenerationId, sourceIndexConfigurationId, sourceIndexProfileId,
   type SourceIndexGeneration, type SourceIndexSelection, type SourceIndexPendingResult,
+  sourceIndexLexicalGenerationId, type SourceIndexLexicalState, type SourceIndexLexicalGeneration,
   type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
@@ -12,7 +13,8 @@ const PENDING_BUDGET = Object.freeze({ work: 1, native_bytes: 8 });
 type DiagnosticCost = { metadata_transactions: number; target_rows: number; pending_reads: number;
   work: number; native_bytes: number; sql_internal_work: "unknown" };
 type Metadata = { workspace_id: string; source_epoch: number; selection: SourceIndexSelection | null;
-  generation_id: string | null; generation: SourceIndexGeneration | null; targets: readonly SourceIndexTarget[] };
+  generation_id: string | null; generation: SourceIndexGeneration | null; targets: readonly SourceIndexTarget[];
+  lexical: { state: NonNullable<SourceIndexLexicalState>; generation: SourceIndexLexicalGeneration | null } | null };
 export type SourceIndexProgressSnapshot = {
   status: "observed" | "unknown"; reason: string | null; metadata: Metadata | null;
   pending: { root_key: string; result: SourceIndexPendingResult }[];
@@ -45,8 +47,12 @@ export function captureSourceIndexProgress(filename: string, workspace: string, 
       const generation = id === null ? null : repository.generation(workspace, id);
       const targets = generation === null ? [] : repository.listTargets(workspace, generation.generation_id, null, ROOT_LIMIT);
       result.cost.target_rows += targets.length;
+      // Fixed administrative lookups in the same epoch snapshot; no lexical text or staged bodies.
+      const state = repository.lexical.lexicalState(workspace);
+      const lexical = state === null ? null : { state, generation: repository.lexical.lexicalGeneration(workspace,
+        sourceIndexLexicalGenerationId(state.selection, fact.source_epoch, fieldContractSha256)) };
       return { workspace_id: fact.workspace_id, source_epoch: fact.source_epoch, selection: fact.selection,
-        generation_id: id, generation, targets };
+        generation_id: id, generation, targets, lexical };
     })();
     const before = metadata();
     result.metadata = before;
@@ -96,6 +102,53 @@ export function sourceIndexProgressBindingMatches(snapshot: SourceIndexProgressS
     canonicalJson(metadata.selection!.configuration.profile) === canonicalJson(binding.profile);
 }
 
+type CensusProgress = Pick<SourceIndexGeneration, "target_count" | "completed_count" | "enumeration_complete" |
+  "after_source_id" | "after_capsule_cursor" | "records_complete">;
+function compareCensusProgress(a: CensusProgress, b: CensusProgress): "progress" | "regressed" | "unchanged" {
+  if (b.target_count < a.target_count || b.completed_count < a.completed_count ||
+      a.enumeration_complete && !b.enumeration_complete || a.records_complete && !b.records_complete ||
+      a.after_source_id !== null && (b.after_source_id === null || b.after_source_id < a.after_source_id) ||
+      a.after_capsule_cursor !== null && b.after_capsule_cursor === null) return "regressed";
+  if (b.target_count > a.target_count || b.completed_count > a.completed_count ||
+      !a.enumeration_complete && b.enumeration_complete || !a.records_complete && b.records_complete ||
+      b.after_source_id !== null && b.after_source_id !== a.after_source_id ||
+      b.after_capsule_cursor !== null && b.after_capsule_cursor !== a.after_capsule_cursor) return "progress";
+  return "unchanged";
+}
+
+function compareLexicalProgress(left: Metadata, right: Metadata): SourceIndexProgressComparison | null {
+  const a = left.lexical, b = right.lexical;
+  if (a === null && b === null) return null;
+  if (b === null || a !== null && canonicalJson(a.state.selection) !== canonicalJson(b.state.selection)) {
+    return { status: "unknown", reason: "lexical_binding_changed" };
+  }
+  for (const [metadata, lexical] of [[left, a], [right, b]] as const) {
+    const g = lexical?.generation;
+    if (g != null && (g.source_epoch !== metadata.source_epoch || canonicalJson(g.selection) !== canonicalJson(lexical!.state.selection) ||
+        g.generation_id !== sourceIndexLexicalGenerationId(lexical!.state.selection, metadata.source_epoch, fieldContractSha256) ||
+        g.status === "failed" || g.status === "retired")) return { status: "unknown", reason: "lexical_generation_unavailable" };
+  }
+  const g = b.generation;
+  if (g === null) return { status: "unknown", reason: "lexical_generation_unavailable" };
+  if (a?.generation == null) return { status: "progress", reason: "lexical_preparation_started" };
+  const census = compareCensusProgress(a.generation, g);
+  if (census !== "unchanged") return { status: census === "regressed" ? "unknown" : "progress",
+    reason: census === "regressed" ? "lexical_capture_regressed" : "lexical_capture_or_completion_advanced" };
+  if (b.state.active_generation_id === g.generation_id && a.state.active_generation_id !== g.generation_id) {
+    return { status: "progress", reason: "lexical_generation_published" };
+  }
+  return null;
+}
+
+function lexicalPreparationComplete(value: Metadata): boolean {
+  const lexical = value.lexical;
+  if (lexical === null) return true;
+  const generation = lexical.generation;
+  return generation !== null && (generation.status === "ready" || generation.status === "valid_empty") &&
+    lexical.state.active_generation_id === generation.generation_id && generation.enumeration_complete &&
+    generation.completed_count === generation.target_count;
+}
+
 /** Counts/cursors establish capture progress even when the bounded captured-root set is partial.
  * A stall needs a complete comparable enumerated set and already-prepared native manifests.
  * Charges, accepted-vector counters and transient producer scheduling are deliberately absent.
@@ -114,17 +167,11 @@ export function compareSourceIndexProgress(before: SourceIndexProgressSnapshot,
       left.generation_id !== right.generation_id || canonicalJson(left.selection) !== canonicalJson(right.selection)) {
     return unknown("incomparable_binding");
   }
-  const a = left.generation!, b = right.generation!;
-  if (b.target_count < a.target_count || b.completed_count < a.completed_count ||
-      a.enumeration_complete && !b.enumeration_complete ||
-      a.after_source_id !== null && (b.after_source_id === null || b.after_source_id < a.after_source_id)) {
-    return unknown("regressed_capture");
-  }
-  if (b.target_count > a.target_count || b.completed_count > a.completed_count ||
-      !a.enumeration_complete && b.enumeration_complete ||
-      b.after_source_id !== null && (a.after_source_id === null || b.after_source_id > a.after_source_id)) {
-    return progress("persisted_capture_or_completion_advanced");
-  }
+  const census = compareCensusProgress(left.generation!, right.generation!);
+  if (census === "regressed") return unknown("regressed_capture");
+  if (census === "progress") return progress("persisted_capture_or_completion_advanced");
+  const lexical = compareLexicalProgress(left, right);
+  if (lexical !== null) return lexical;
   let prepared = true;
   for (const old of before.pending) {
     const next = after.pending.find(row => row.root_key === old.root_key);
@@ -142,6 +189,9 @@ export function compareSourceIndexProgress(before: SourceIndexProgressSnapshot,
     value.targets.length === value.generation!.target_count && value.targets.length <= ROOT_LIMIT;
   if (!complete(left) || !complete(right) || before.pending.length !== left.targets.length ||
       after.pending.length !== right.targets.length) return unknown("captured_set_incomplete");
+  // An unfinished lexical root can commit bounded analyzer units without changing these
+  // generation counters. This vector witness cannot certify a combined-producer stall.
+  if (!lexicalPreparationComplete(left) || !lexicalPreparationComplete(right)) return unknown("lexical_preparation_incomplete");
   if (canonicalJson(left) !== canonicalJson(right) || canonicalJson(before.pending) !== canonicalJson(after.pending)) {
     return unknown("native_witness_changed");
   }

@@ -14,8 +14,8 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initDatabase, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo, SqliteFieldEraseBarrierRepo } from "@do-soul/alaya-storage";
-import { fieldContractSha256, LocalOnnxEmbeddingClient, type SourceEmbeddingResult } from "@do-soul/alaya-core";
-import { hashSourceRecordId, sourceIndexProfileId, SoulInterpretationResponseSchema, sourceSemanticAccessPhases } from "@do-soul/alaya-protocol";
+import { fieldContractSha256, LocalOnnxEmbeddingClient, SourceIndexLifecycle, type SourceEmbeddingResult } from "@do-soul/alaya-core";
+import { hashSourceRecordId, sourceIndexProfileId, SoulInterpretationResponseSchema, sourceSemanticAccessPhases, type SourceIndexLexicalRepresentation } from "@do-soul/alaya-protocol";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -27,8 +27,8 @@ import { createSourceIndexProducer, type SourceIndexProducerPassRemaining } from
 import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProgressBindingMatches } from "../../../runs/recall-measurement/source-index-progress.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal } from "../../../harness/daemon-task.js";
-import { configuration, fixture, publishSource, WORKSPACE, BUDGET, captureDocuments, vectorFor } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
-import { hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
+import { configuration, fixture, publishSource, WORKSPACE, BUDGET, buildReady, captureDocuments, vectorFor } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { hashedOriginalRecord, seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 const roots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -637,6 +637,8 @@ it("lets valid unknown diagnostics spend finite allowance but stops a complete p
   expect(unknown.report).toMatchObject({ setup_passes: 2, setup_stop_reason: "setup_pass_exhausted" });
   expect(unknown.report.setup_history[1]!.progress.status).toBe("unknown"); // manifest unprepared
   const database = initDatabase({ filename: config.snapshot_path });
+  // Isolate the complete prepared witness from the producer's unrelated workspace rotation.
+  database.connection.prepare("DELETE FROM workspaces WHERE workspace_id=?").run("workspace-2");
   const environment = { database, index: new SqliteSourceIndexRepository(database, fieldContractSha256),
     records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) };
   const generation = environment.index.begin(environment.index.select(WORKSPACE,
@@ -790,6 +792,82 @@ it.each(["cancel", "cleanup_failure", "later_pass_throw"] as const)("retains com
     if (fault === "later_pass_throw") expect(readChainArtifact(join(output, "setup-failure-prefix.json"))).toMatchObject({
       resources: { model_inputs: 2 }, history: [{ receipt: { resources: { model_inputs: 2 } } }] });
   } finally { clearBenchDaemonTestSignal(controller.signal); }
+});
+
+function readyVectorInput(sources: number, lexical: SourceIndexLexicalRepresentation, body?: string) {
+  const { root, config, execution } = setupSources(sources), database = initDatabase({ filename: config.snapshot_path });
+  database.connection.prepare("DELETE FROM workspaces WHERE workspace_id=?").run("workspace-2");
+  const environment = { database, index: new SqliteSourceIndexRepository(database, fieldContractSha256),
+    records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) };
+  if (body !== undefined) publishSource(environment, body, "long-root");
+  const ready = buildReady(environment, configuration({ provider_kind: "local_onnx", model_id: execution.model_id,
+    window_bytes: 504, max_input_tokens: 512 }, "source-index-local.v1"));
+  environment.index.lexical.selectLexical(WORKSPACE, lexical);
+  database.close(); config.snapshot_sha256 = hashRegularFileNoFollow(config.snapshot_path);
+  return { root, config, execution: { ...execution, lexical }, ready };
+}
+
+it.each([
+  ["enumeration_page", { capturePage: 1, maxCapturePages: 1 }, 1],
+  ["enumeration_budget", { work: 650 }, 2]
+] as const)("continues public cached-local setup through lexical-only %s progress with ready vectors", async (reason, producerPassLimits, sources) => {
+  const { root, config, execution, ready } = readyVectorInput(sources, "raw-unicode61.v1");
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, execution,
+    join(root, "lexical-census"), undefined, { maxPasses: 5, producerPassLimits });
+  expect(result.report.setup_history[0]!.receipt).toMatchObject({ status: "partial", reason });
+  expect(result.config).not.toBeNull();
+  expect(result.report).toMatchObject({ setup_passes: 3, setup_stop_reason: "settled", setup_resources: { model_inputs: 0 },
+    lexical_preparation: { stop_reason: "ready" } });
+  expect(result.config!.source_index!.index.generation_id).toBe(ready.generation.generation_id);
+  expect(result.report.setup_history.slice(0, 2).map(entry => entry.progress.status)).toEqual(["progress", "progress"]);
+});
+
+it("does not mistake another workspace's advancing census partial for a stall of public cached-local setup", async () => {
+  const { root, config, execution } = readyVectorInput(1, "raw-unicode61.v1");
+  const database = initDatabase({ filename: config.snapshot_path }); seedWorkspaces(database, ["workspace-2"]);
+  const environment = { database, index: new SqliteSourceIndexRepository(database, fieldContractSha256),
+    records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) };
+  publishSource(environment, "other workspace", "other", { workspace_id: "workspace-2" });
+  buildReady(environment, configuration({ provider_kind: "local_onnx", model_id: execution.model_id,
+    window_bytes: 504, max_input_tokens: 512 }, "source-index-local.v1"), "workspace-2");
+  environment.index.lexical.selectLexical("workspace-2", "raw-unicode61.v1");
+  expect(await new SourceIndexLifecycle(environment.index, fieldContractSha256).prepareLexical(WORKSPACE, "raw-unicode61.v1",
+    { ...BUDGET, capture_page: 32, max_capture_pages: 8, max_roots: 16, max_body_bytes: 65536 })).toMatchObject({ status: "ready" });
+  database.close(); config.snapshot_sha256 = hashRegularFileNoFollow(config.snapshot_path); bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "other-census"), undefined,
+    { maxPasses: 5, producerPassLimits: { capturePage: 1, maxCapturePages: 1 } });
+  expect(result.config).not.toBeNull();
+  expect(result.report).toMatchObject({ setup_passes: 3, setup_stop_reason: "settled", setup_resources: { model_inputs: 0 } });
+  expect(result.report.setup_history.slice(0, 2).map(entry => entry.progress))
+    .toEqual(Array.from({ length: 2 }, () => ({ status: "unknown", reason: "aggregate_preparation_outside_witness" })));
+});
+
+it("keeps bounded lexical analyzer work unknown rather than declaring a vector-only stall during public setup", async () => {
+  const { root, config, execution, ready } = readyVectorInput(1, "segmented-unicode61.v2", "stone ".repeat(80));
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "lexical-units"), undefined,
+    { maxPasses: 12, producerPassLimits: { work: 1500 } });
+  expect(result.config).not.toBeNull();
+  expect(result.config!.source_index!.index.generation_id).toBe(ready.generation.generation_id);
+  const partials = result.report.setup_history.filter(entry => entry.receipt.status === "partial");
+  expect(partials.length).toBeGreaterThan(1);
+  expect(partials.every(entry => entry.receipt.reason === "read_budget")).toBe(true);
+  expect(partials.slice(1).some(entry => entry.progress.status === "unknown" && entry.progress.reason === "lexical_preparation_incomplete")).toBe(true);
+  expect(result.report).toMatchObject({ setup_stop_reason: "settled", setup_resources: { model_inputs: 0 } });
+});
+
+it("stops public setup on the first nonadvancing census allocation refusal and retains the receipt", async () => {
+  const { root, config, execution } = readyVectorInput(1, "raw-unicode61.v1"); bindProducer(false);
+  const output = join(root, "lexical-refused");
+  const result = await prepareSemanticChainSourceIndex(config, execution, output, undefined,
+    { maxPasses: 4, producerPassLimits: { work: 200 } });
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({ setup_passes: 1, setup_stop_reason: "native_terminal",
+    setup: { status: "resource_exhausted", reason: "enumeration_allocation_exhausted" } });
+  expect(readChainArtifact(join(output, "passes/pass-1.json"))).toEqual(result.report.setup_history[0]);
+  expect(existsSync(join(output, "passes/pass-2.json"))).toBe(false);
+  expect(existsSync(join(output, "chain-config.json"))).toBe(false);
 });
 
 it("recognizes capture-only advancement without model submissions and does not call a bounded root prefix a stall", async () => {
