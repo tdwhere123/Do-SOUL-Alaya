@@ -58,5 +58,3 @@ export async function runWorkerActiveConstraints(input: Readonly<{
     total_count: result.total_count
   });
 }
-
-

@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installProviderFreeTransport } from "./provider-free-transport.mjs";
+import { containedFixtureFile, isNativeConfigFixtureFile } from "./provider-free-fixture-files.mjs";
 import { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } from "./provider-free-isolation.mjs";
 import { installProviderFreeDescendants, providerFreeDescendantPreload } from "./provider-free-descendants.mjs";
 
@@ -89,9 +90,7 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
           const filename = String(args[0]);
           if (/(?:^|[/\\])(?:[^/\\]+\.env|\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(filename)) {
             const path = resolve(args[0] instanceof URL ? fileURLToPath(args[0]) : filename);
-            // Atomic .env.<uuid>.tmp siblings belong to the same native config lease.
-            const native = /^(.*[/\\]alaya-bench-config-[a-f0-9-]+)[/\\]\.env(?:\.[a-f0-9-]+\.tmp)?$/u.exec(path)?.[1];
-            const nativeFixture = native !== undefined && containedFixtureFile(path, native);
+            const nativeFixture = isNativeConfigFixtureFile(path);
             const ownedFixture = options.ownedTemporaryFixtures && [...fixtures].some(([root, identity]) => {
               try {
                 const stat = fs.lstatSync(root);
@@ -118,28 +117,4 @@ export function installProviderFreeBoundary(options: Readonly<{ ownedTemporaryFi
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };
-}
-
-function containedFixtureFile(path: string, root: string): boolean {
-  try {
-    if (fs.realpathSync(root) !== root) return false;
-    const stat = fs.lstatSync(path, { throwIfNoEntry: false });
-    // A fixture can read its own ordinary files, not a hard link to another owner.
-    if (stat?.isFile() && stat.nlink > 1) return false;
-    let ancestor = path;
-    const suffix: string[] = [];
-    for (;;) {
-      try { ancestor = fs.realpathSync(ancestor); break; }
-      catch (error) {
-        if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") return false;
-        // A dangling symlink is not an owned missing file.
-        if (fs.lstatSync(ancestor, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
-        const parent = dirname(ancestor);
-        if (parent === ancestor) return false;
-        suffix.unshift(relative(parent, ancestor)); ancestor = parent;
-      }
-    }
-    const target = resolve(ancestor, ...suffix), within = relative(root, target);
-    return within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within);
-  } catch { return false; }
 }

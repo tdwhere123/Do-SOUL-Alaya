@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, readFileSync, writeFileSync, symlinkSync, linkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, openSync, closeSync, unlinkSync, realpathSync, readFileSync, writeFileSync, symlinkSync, linkSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +82,47 @@ it("refuses credential links escaping a fresh fixture and an existing machine-ho
     expect(() => readFileSync(join(outside, ".aws", "credentials"), "utf8")).toThrow("credential file");
     expect(isolation.violations).toEqual(["credential file", "credential file", "credential file"]);
   } finally { isolation.restore(); }
+});
+
+it("permits native fixture config locks without admitting lock backups or escaped credential links", () => {
+  const root = temporary(), config = join(root, `alaya-bench-config-${randomUUID()}`);
+  mkdirSync(config);
+  const lock = join(config, ".env.runtime-embedding.lock"), outside = join(root, "auth.json");
+  writeFileSync(outside, "synthetic operator data");
+  const isolation = installProviderFreeBoundary();
+  try {
+    closeSync(openSync(lock, "wx", 0o600));
+    expect(readFileSync(lock, "utf8")).toBe("");
+    expect(() => readFileSync(`${lock}.backup`, "utf8")).toThrow("credential file");
+    unlinkSync(lock); symlinkSync(outside, lock);
+    expect(() => readFileSync(lock, "utf8")).toThrow("credential file");
+    unlinkSync(lock); linkSync(outside, lock);
+    expect(() => readFileSync(lock, "utf8")).toThrow("credential file");
+    expect(isolation.violations).toEqual(["credential file", "credential file", "credential file"]);
+  } finally { isolation.restore(); }
+});
+
+it("applies fixture lock containment to native child synchronous and promise file reads", () => {
+  const root = temporary(), config = join(root, `alaya-bench-config-${randomUUID()}`);
+  mkdirSync(config);
+  const lock = join(config, ".env.runtime-embedding.lock"), outside = join(root, "auth.json");
+  writeFileSync(outside, "synthetic operator data");
+  const guard = new URL("../../../../../scripts/test-support/provider-free/provider-free-child-guard.mjs", import.meta.url).href;
+  const script = `import { openSync, closeSync, readFileSync, unlinkSync, symlinkSync, linkSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { installProviderFreeChildGuard } from ${JSON.stringify(guard)};
+installProviderFreeChildGuard();
+const lock = ${JSON.stringify(lock)}, outside = ${JSON.stringify(outside)}, denied = [];
+closeSync(openSync(lock, "wx", 0o600));
+const content = await readFile(lock, "utf8");
+unlinkSync(lock); symlinkSync(outside, lock);
+try { readFileSync(lock, "utf8"); } catch (error) { denied.push(error.message); }
+try { await readFile(lock, "utf8"); } catch (error) { denied.push(error.message); }
+unlinkSync(lock); linkSync(outside, lock);
+try { await readFile(lock, "utf8"); } catch (error) { denied.push(error.message); }
+console.log(JSON.stringify({ content, denied }));`;
+  const output = childProcess.execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+  expect(JSON.parse(output)).toEqual({ content: "", denied: Array(3).fill("Provider-free test refused credential file") });
 });
 
 it("still blocks non-loopback transport and strips ambient credentials before application use", async () => {
