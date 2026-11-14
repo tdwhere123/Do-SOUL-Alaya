@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +36,22 @@ afterEach(async () => {
 });
 
 describe("snapshot writer preflight proof atomicity", () => {
+  it("rejects malformed sidecar before publication and releases the lock for corrected preflight", async () => {
+    const fixture = createFixture();
+    const input = writerInput(fixture);
+    writeFileSync(fixture.snapshotOut, "retained original target");
+    await expect(writeRecallEvalSnapshot({ ...input, snapshotQuestions: [{
+      questionId: "invalid", questionDate: "2026-01-01T00:00:00.000Z", unvalidated: true
+    }] })).rejects.toThrow(/sidecar.*malformed/iu);
+    expect(readFileSync(fixture.snapshotOut, "utf8")).toBe("retained original target");
+    expect(snapshotArtifactPaths(fixture.snapshotOut).slice(1).filter(existsSync)).toEqual([]);
+    // This empty source has no eligible relation. Corrected retry must reach
+    // that independent gate (not a leaked publish lease), still without writes.
+    await expect(writeRecallEvalSnapshot(input)).rejects.toThrow(/at least one eligible answers_with/iu);
+    expect(readFileSync(fixture.snapshotOut, "utf8")).toBe("retained original target");
+    expect(snapshotArtifactPaths(fixture.snapshotOut).slice(1).filter(existsSync)).toEqual([]);
+  });
+
   it("writes nothing when the complete manifest changes after proof creation", async () => {
     const fixture = createFixture();
     const input = writerInput(fixture);

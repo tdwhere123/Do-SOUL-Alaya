@@ -9,6 +9,7 @@ import {
   checkpointAndCopyBenchDb,
   snapshotQuestionIdDigest,
   snapshotExtractionAuthorityPath,
+  snapshotSidecarPath,
   writeSnapshotManifest,
   writeSnapshotSidecar,
   type LongMemEvalSnapshotQuestion,
@@ -16,6 +17,7 @@ import {
   type ProfiledSnapshotExtractionProvenance
 } from "./materialize.js";
 import { readSchemaMigrationVersion } from "./snapshot-seed-identity.js";
+import { parseSnapshotSidecar } from "./sidecar-validation.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import {
   assertCurrentPostFillCacheAuthorityProofManifest,
@@ -120,7 +122,9 @@ function prepareSnapshotArtifactWrite(
     manifestSha256: captured.compact.manifest_sha256
   });
   const extraction = captured.compact;
-  const sidecar = buildSidecar(input);
+  // Validate the exact persisted projection before authority publication or DB copy.
+  const sidecar = parseSnapshotSidecar(buildSidecar(input), snapshotSidecarPath(input.snapshotOut),
+    RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);
   const datasetSha = resolveSnapshotDatasetSha(input, extraction, questionDigest);
   const prepared = {

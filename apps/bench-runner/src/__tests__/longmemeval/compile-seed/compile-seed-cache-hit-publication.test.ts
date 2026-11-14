@@ -25,7 +25,8 @@ import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import { buildRoundExtractionLedger } from "../../../datasets/longmemeval/runner/question/seed-round-extraction-ledger.js";
 import { assertStatementRound, type VerifiedStatementSession } from "../../../runs/snapshot/seed-ledger/statement-session-proof.js";
 import type { CompleteExtraction } from "../../../runs/snapshot/seed-ledger/seed-ledger-shared.js";
-import type { LongMemEvalSnapshotSeedRound } from "../../../runs/snapshot/materialize.js";
+import { writeSnapshotSidecar, readSnapshotSidecar, RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+  type LongMemEvalSnapshotSeedRound } from "../../../runs/snapshot/materialize.js";
 import { readSourceObservationProof } from "../../../runs/snapshot/seed-ledger/source-observation-proof.js";
 import { inspectCachedExtraction, readCachedEntry, writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
@@ -113,9 +114,16 @@ describe("whole-session cache fill and round-bound publication", () => {
       .toEqual([[3, 1, true], [1, 1, false]]);
     expect(ledgers[0]!.statementSession!.receipt.messages[1]).toMatchObject({ message: { text: "" },
       status: "partial", statements: [], rejections: [{ reason: "empty_source", statement_index: 0 }] });
+    const snapshotPath = join(dataDirRoot, "recorded.db");
+    writeSnapshotSidecar(snapshotPath, { schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+      variant: "longmemeval_s", questions: [{ questionId: "q1", question: "Recorded question?",
+        questionDate: CLOCK, answerSessionIds: [], sidecar: [], seedRounds: ledgers,
+        workspaceId: WORKSPACE, runId: RUN }] });
+    const persisted = readSnapshotSidecar(snapshotPath).questions[0]!.seedRounds!;
+    expect(persisted).toEqual(ledgers);
     const seen = new Map<string, VerifiedStatementSession>();
     const extraction = { extraction_model: MODEL, request_profile: REQUEST_PROFILE } as CompleteExtraction;
-    ledgers.forEach((round, index) => assertStatementRound({ round, sessionMessages: messages,
+    persisted.forEach((round, index) => assertStatementRound({ round, sessionMessages: messages,
       roundMessages: rounds[index]!.messageIndices.map(position => messages[position]!), extraction, seen }));
     const forged = structuredClone(ledgers[0]!);
     (forged.statementSession!.responses![0] as { rawJson: string }).rawJson = '{"messages":[]}';

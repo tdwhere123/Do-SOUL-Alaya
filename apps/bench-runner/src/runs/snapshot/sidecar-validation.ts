@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { SOURCE_STATEMENTS_CONTRACT, SourceStatementMessageSchema,
+  SourceStatementRequestSchema, SourceStatementSchema } from "@do-soul/alaya-protocol";
 import { normalizeCompileSeedSourceTime } from "../../datasets/longmemeval/ingestion/source-time.js";
 import type { LongMemEvalSnapshotSidecarFile } from "./materialize.js";
 
@@ -57,6 +59,38 @@ const SemanticSupplementShardSchema = z.object({
   rawSignalCount: CountSchema,
   draftCount: CountSchema
 }).strict();
+// The sidecar owns the persisted envelope; source message/request/statement syntax
+// stays with Protocol and semantic proof remains with assertStatementRound.
+const StatementStatusSchema = z.enum(["complete", "partial", "failed"]);
+const StatementUsageSchema = z.object({ input_tokens: CountSchema, output_tokens: CountSchema }).strict();
+const StatementRejectionSchema = z.object({
+  message_id: z.string().nullable(),
+  statement_index: CountSchema.nullable(),
+  reason: z.enum(["invalid_statement", "unknown_message", "duplicate_message", "missing_message",
+    "invalid_message", "malformed_response", "transport_failure", "message_capacity", "request_budget",
+    "cancelled", "not_dispatched", "empty_source"])
+}).strict();
+const StatementSessionSchema = z.object({
+  receipt: z.object({
+    contract: z.literal(SOURCE_STATEMENTS_CONTRACT),
+    session_id: NonEmptyStringSchema,
+    status: StatementStatusSchema,
+    messages: z.array(z.object({
+      message: SourceStatementMessageSchema,
+      status: StatementStatusSchema,
+      // Unlike the model-facing parser, persisted proof must not strip fields.
+      statements: z.array(SourceStatementSchema.unwrap().strict()),
+      rejections: z.array(StatementRejectionSchema)
+    }).strict()),
+    rejections: z.array(StatementRejectionSchema),
+    chunks: z.array(z.object({ chunk_index: CountSchema, status: StatementStatusSchema,
+      usage: StatementUsageSchema.nullable() }).strict())
+  }).strict(),
+  responses: z.array(z.object({ request: SourceStatementRequestSchema,
+    rawJson: z.string(), usage: StatementUsageSchema.optional() }).strict()).optional(),
+  firstUse: z.boolean(),
+  unassignedRawStatements: CountSchema
+}).strict();
 const SeedRoundSchema = z.object({
   sessionIndex: CountSchema,
   roundIndex: CountSchema,
@@ -70,6 +104,7 @@ const SeedRoundSchema = z.object({
   draftCount: CountSchema.nullable(),
   extractionShards: z.array(ExtractionShardSchema).nonempty().optional(),
   semanticSupplementShards: z.array(SemanticSupplementShardSchema).nonempty().optional(),
+  statementSession: StatementSessionSchema.optional(),
   factsProduced: CountSchema,
   parseDropped: CountSchema,
   compileOverflowDropped: CountSchema,
