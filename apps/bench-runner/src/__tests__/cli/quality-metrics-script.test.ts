@@ -74,6 +74,46 @@ it("accepts an explicitly measured zero controlled replay", () => {
     non_monotonic_rate: 0, high_lexical_demoted_rate: 0 });
 });
 
+it.each([
+  { name: "measured zero", optional: { budget_drop: { max_entries: 0 } }, count: 0 },
+  { name: "measured positive", optional: { budget_drop: { max_entries: 2 } }, count: 2 },
+  { name: "absent budget", optional: {}, count: undefined },
+  { name: "absent max_entries", optional: { budget_drop: {} }, count: undefined }
+])("controlled replay availability preserves independent measurements: $name", ({ optional, count }) => {
+  const result = runQualityScript({ scenarios: [], metrics: { diagnostics_count: 4, delivery_count: 7,
+    non_monotonic: { count: 1 }, high_lexical_demoted: { count: 2 }, ...optional } });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics).toMatchObject({ non_monotonic_rate: 0.25, high_lexical_demoted_rate: 0.5 });
+  expect(metrics.metadata.controlled_replay).toMatchObject({ delivery_count: 7, diagnostics_count: 4,
+    non_monotonic_count: 1, non_monotonic_denominator: 4,
+    high_lexical_demoted_count: 2, high_lexical_demoted_denominator: 4 });
+  for (const key of ["cohort_first_admitted", "cohort_winning_admission", "path_expansion_share", "per_plane_recall_coverage", "active_constraints_count"]) {
+    expect(metrics).not.toHaveProperty(key);
+    expect(metrics.metadata.unavailable_metrics[key]).toEqual(expect.any(String));
+    expect(metrics.warnings).toContainEqual(expect.stringContaining(`${key} unavailable`));
+  }
+  if (count === undefined) {
+    expect(metrics).not.toHaveProperty("budget_drop_distribution");
+    expect(metrics.metadata.controlled_replay).not.toHaveProperty("budget_drop_denominator");
+    expect(metrics.metadata.unavailable_metrics.budget_drop_distribution).toEqual(expect.any(String));
+  } else {
+    expect(metrics.budget_drop_distribution).toEqual({ max_entries: { count, share: count / 4, denominator: 4 } });
+    expect(metrics.metadata.controlled_replay.budget_drop_denominator).toBe(4);
+    expect(metrics.metadata.unavailable_metrics).not.toHaveProperty("budget_drop_distribution");
+  }
+});
+
+it.each([{ max_entries: "0" }, { max_entries: -1 }, { max_entries: 0.5 },
+  { max_entries: null }, { max_entries: Number.MAX_SAFE_INTEGER + 1 }, null, []
+])("controlled replay availability rejects malformed optional budget counts: %j", budget_drop => {
+  const result = runQualityScript({ scenarios: [], metrics: { diagnostics_count: 4, delivery_count: 7,
+    non_monotonic: { count: 1 }, high_lexical_demoted: { count: 2 }, budget_drop } });
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("budget_drop");
+});
+
 it.each([{}, { arbitrary: true }, { questions: "corrupt" }, { questions: [null] },
   { questions: [{ delivered_results: "corrupt" }] }, { scenarios: [], metrics: {} },
   { kpi: { quality_metrics: { schema_version: "future" } } },

@@ -481,24 +481,33 @@ function applyControlledReplay(archive, output) {
   const nonMonotonicCount = requiredReplayCount(metrics.non_monotonic?.count, "non_monotonic.count");
   const highLexicalDemotedCount =
     requiredReplayCount(metrics.high_lexical_demoted?.count, "high_lexical_demoted.count");
-  const budgetDropMaxEntries = readNumber(metrics.budget_drop?.max_entries);
+  if (hasOwnField(metrics, "budget_drop") && !isRecord(metrics.budget_drop)) {
+    throw new Error("controlled replay requires a budget_drop object when supplied");
+  }
+  const budgetDropMaxEntries = hasOwnField(metrics.budget_drop, "max_entries")
+    ? requiredReplayCount(metrics.budget_drop.max_entries, "budget_drop.max_entries") : undefined;
   const activeConstraints = countActiveConstraints(archive);
+  const unavailable = {};
+  for (const key of ["cohort_first_admitted", "cohort_winning_admission", "path_expansion_share", "per_plane_recall_coverage"]) {
+    delete output[key];
+    unavailable[key] = "controlled replay has no cohort plane diagnostics";
+  }
 
   output.non_monotonic_rate = share(nonMonotonicCount, diagnosticsCount);
   output.high_lexical_demoted_rate = share(
     highLexicalDemotedCount,
     diagnosticsCount
   );
-  output.budget_drop_distribution =
-    budgetDropMaxEntries === null
-      ? {}
-      : {
-          max_entries: {
-            count: budgetDropMaxEntries,
-            share: share(budgetDropMaxEntries, diagnosticsCount),
-            denominator: diagnosticsCount
-          }
-        };
+  if (budgetDropMaxEntries === undefined) {
+    delete output.budget_drop_distribution;
+    unavailable.budget_drop_distribution = "controlled replay budget_drop.max_entries absent";
+  } else {
+    output.budget_drop_distribution = { max_entries: {
+      count: budgetDropMaxEntries,
+      share: share(budgetDropMaxEntries, diagnosticsCount),
+      denominator: diagnosticsCount
+    } };
+  }
   if (activeConstraints.available) output.active_constraints_count = activeConstraints.count;
   else delete output.active_constraints_count;
 
@@ -510,26 +519,18 @@ function applyControlledReplay(archive, output) {
     non_monotonic_denominator: diagnosticsCount,
     high_lexical_demoted_count: highLexicalDemotedCount,
     high_lexical_demoted_denominator: diagnosticsCount,
-    budget_drop_denominator: diagnosticsCount
+    ...(budgetDropMaxEntries === undefined ? {} : { budget_drop_denominator: diagnosticsCount })
   };
   output.metadata.active_constraints_sources = activeConstraints.sources;
 
   if (diagnosticsCount === 0) {
     output.warnings.push(
-      "controlled replay metrics.diagnostics_count missing or zero; rate metrics set to 0"
+      "controlled replay metrics.diagnostics_count is measured zero; rate metrics set to 0"
     );
   }
-  if (budgetDropMaxEntries === null) {
-    output.warnings.push(
-      "controlled replay metrics.budget_drop.max_entries missing; budget_drop_distribution set to empty"
-    );
-  }
-  output.warnings.push(
-    "controlled replay archive has no cohort plane diagnostics; cohort_* metrics set to empty"
-  );
-  if (!activeConstraints.available) {
-    output.warnings.push("active_constraints_count unavailable: total absent or incomplete");
-  }
+  if (!activeConstraints.available) unavailable.active_constraints_count = "total absent or incomplete";
+  output.metadata.unavailable_metrics = unavailable;
+  output.warnings.push(...Object.entries(unavailable).map(([key, reason]) => `${key} unavailable: ${reason}`));
 }
 
 function requiredReplayCount(value, field) {
