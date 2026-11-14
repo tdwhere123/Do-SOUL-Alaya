@@ -346,6 +346,28 @@ export class SqliteSignalRepo implements SignalRepo {
     }
   }
 
+  /** Candidate enumeration, not retry authorization. The transition owner validates audit proof. */
+  public listUnqueuedDeferredIds(workspaceId: string, afterSignalId: string | null, limit: number): readonly string[] {
+    const size = parsePageLimit(limit, "unqueued signal page limit", 1001);
+    return this.db.connection.prepare(`SELECT signal_id FROM signals s
+      WHERE workspace_id=? AND signal_state='deferred' AND signal_id>?
+        AND NOT EXISTS (SELECT 1 FROM source_grounding_defer_queue q
+          WHERE q.workspace_id=s.workspace_id AND q.signal_id=s.signal_id)
+      ORDER BY signal_id LIMIT ?`).all(workspaceId, afterSignalId ?? "", size)
+      .map(row => readNonEmptyStringField(readRecord(row, "unqueued signal"), "signal_id"));
+  }
+
+  /** Snapshot-bound compare witness; absence alone does not authorize a retry. */
+  public matchesUnqueuedDeferredRevision(workspaceId: string, signalId: string, revision: number): boolean {
+    return this.db.connection.prepare(`SELECT 1 FROM signals s
+      WHERE workspace_id=? AND signal_id=? AND signal_state='deferred' AND materialization_lineage_proven=1
+        AND NOT EXISTS (SELECT 1 FROM source_grounding_defer_queue q
+          WHERE q.workspace_id=s.workspace_id AND q.signal_id=s.signal_id)
+        AND ?=(SELECT MAX(revision) FROM event_log e
+          WHERE e.entity_type='candidate_memory_signal' AND e.entity_id=s.signal_id)
+    `).get(workspaceId, signalId, revision) !== undefined;
+  }
+
   public getStorageConnectionIdentity(): StorageDatabase {
     return this.db;
   }

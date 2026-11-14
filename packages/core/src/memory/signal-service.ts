@@ -29,6 +29,7 @@ import {
 } from "./signal-service-materialization.js";
 import {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  type SourceGroundingDeferTransitionPort,
   type SourceGroundingDeferStats
 } from "./source-grounding-defer-queue.js";
 import type {
@@ -226,6 +227,22 @@ export class SignalService {
     return this.dependencies.sourceGroundingDeferQueue?.list(workspaceId, limit) ?? [];
   }
 
+  /** Recovery discovery is not the bounded ready queue and never claims or replays effects. */
+  public listSourceGroundingRecoveryCandidates(workspaceId: string, afterSignalId: string | null = null, limit = 100):
+    ReturnType<NonNullable<SourceGroundingDeferTransitionPort["listRecoveryCandidates"]>> {
+    const list = this.dependencies.sourceGroundingDeferTransitions?.listRecoveryCandidates;
+    if (list === undefined) throw new CoreError("CONFLICT", "Source-grounding recovery is unavailable.");
+    return list(workspaceId, afterSignalId, limit);
+  }
+
+  /** Explicit audited re-admission and claim share one transaction before existing redrive effects. */
+  public recoverSourceGroundingDefer(workspaceId: string, signalId: string): Promise<SignalServiceReceiveResult> {
+    if (this.dependencies.sourceGroundingDeferTransitions?.listRecoveryCandidates === undefined) {
+      return Promise.reject(new CoreError("CONFLICT", "Source-grounding recovery is unavailable."));
+    }
+    return this.track(() => this.redriveSourceGroundingOwned(workspaceId, signalId, undefined, true));
+  }
+
   /**
    * Explicit re-drive: re-runs the materializer (including source grounding).
    * Never auto-materializes without passing the same fail-closed rules.
@@ -239,7 +256,7 @@ export class SignalService {
   }
 
   private async redriveSourceGroundingOwned(workspaceId: string, signalId: string,
-    patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }): Promise<SignalServiceReceiveResult> {
+    patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }, recoverUnqueued?: true): Promise<SignalServiceReceiveResult> {
     const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
     if (UnavailableSourceStatementSignalSchema.safeParse(persistedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals cannot be redriven.");
@@ -252,6 +269,7 @@ export class SignalService {
       warn: this.warn,
       workspaceId,
       signalId,
+      ...(recoverUnqueued ? { recoverUnqueued } : {}),
       ...(patch?.raw_payload === undefined ? {} : { rawPayload: patch.raw_payload })
     });
     if (context === null) {

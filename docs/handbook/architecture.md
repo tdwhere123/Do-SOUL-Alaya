@@ -342,8 +342,25 @@ and grounding redrives without a completion witness, become
 release a live grounding claim; an explicit reconciliation requires a later
 outcome audit. The durable lineage
 is established only by the atomic pre-effect transition; migration never invents
-it for existing rows. New proven deferrals remain retryable. Historical
-success-shaped audits do not prove quiescence or the current attempt. Unknown
+it for existing rows. New proven deferrals remain retryable. The bounded
+source-grounding FIFO queue may evict only unclaimed entries, not active or
+unfinished claims. An unqueued deferral is not a claimable queue entry. Operators
+can discover proven quiescent deferrals with
+`alaya source-grounding-defers list-recoverable --workspace <id>`; a non-null
+`next_after_signal_id` requires another page using `--after-signal`, even when
+that page has no eligible entries. `--limit` bounds inspected candidates (maximum
+1000), not just successful matches. `alaya source-grounding-defers recover
+--workspace <id> --signal <id>` explicitly re-admits and claims a retained
+obligation before using the existing fail-closed redrive materializer. It does
+not patch the retained payload or automatically replay on listing/startup.
+Recovery requires proven atomic lineage, a matching adjacent successful-deferred
+outcome (with no recorded created objects) and source-grounding triage pair as the
+latest entity audit, current
+DEFERRED state and no queue row. The transition rechecks these facts inside the
+same transaction as the recovery audit, FIFO admission and exclusive claim;
+capacity refusal or a concurrent claim rolls the transaction back. Historical,
+malformed, erased, later-audited or unfinished attempts cannot use this route.
+Historical success-shaped audits do not prove quiescence or the current attempt. Unknown
 effects cannot be automatically replayed. This inspection-required disposition
 closes the safety boundary; it does not automatically recover missing memories.
 Signal-reference replay waits for a
@@ -351,6 +368,13 @@ known MATERIALIZED disposition while independent memory enrichment continues;
 its unfinished obligation remains durable and does not starve later work.
 Shutdown refuses new Garden passes, drains accepted writers and retains the lease
 until background drains and storage close are confirmed, including across retries.
+
+MCP completion checks its current completion claim before each candidate signal
+admission, including generic and source-statement candidates. A receive already
+dispatched can still settle after reclaim; losing the claim fences later siblings,
+not earlier effects. Deterministic envelope-bound IDs preserve completed signals
+and their audits on successor retry; final completion and claim release remain
+owner-checked.
 
 When a candidate fails materialization, completion audit and response expose
 `failed_candidate_signals_count`; `unknown_candidate_signals_count` separately

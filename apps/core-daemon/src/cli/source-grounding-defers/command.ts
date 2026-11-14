@@ -15,6 +15,7 @@ import {
 } from "../bridge.js";
 import {
   projectSourceGroundingDeferEntry,
+  projectSourceGroundingDeferRecoveryPage,
   projectSourceGroundingDeferStats
 } from "./projection.js";
 
@@ -28,14 +29,14 @@ type SourceGroundingDeferService = Pick<
   | "listSourceGroundingDefers"
   | "redriveSourceGroundingDefer"
   | "reconcileStaleSourceGroundingRedrive"
->;
+> & Partial<Pick<SignalService, "listSourceGroundingRecoveryCandidates" | "recoverSourceGroundingDefer">>;
 
 export interface SourceGroundingDefersCommandDependencies {
   readonly signalService: SourceGroundingDeferService;
 }
 
 interface SourceGroundingDefersArgs {
-  readonly action: "list" | "redrive" | "reconcile";
+  readonly action: "list" | "redrive" | "reconcile" | "list-recoverable" | "recover";
   readonly workspaceId: string;
   readonly signalId: string | null;
   readonly limit: number;
@@ -43,6 +44,7 @@ interface SourceGroundingDefersArgs {
   readonly expectedClaimExpiresAt: string | null;
   readonly reason: string | null;
   readonly rawPayloadFile: string | null;
+  readonly afterSignalId: string | null;
 }
 
 interface ParsedOptions {
@@ -54,6 +56,7 @@ interface ParsedOptions {
   expectedClaimExpiresAt: string | null;
   reason: string | null;
   rawPayloadFile: string | null;
+  afterSignalId: string | null;
 }
 
 type ParseResult<T> =
@@ -65,7 +68,7 @@ export function createSourceGroundingDefersCommand(
 ): AlayaSubcommandSpec<SourceGroundingDefersArgs> {
   return {
     name: "source-grounding-defers",
-    description: "List, re-drive, or reconcile source-grounding defer obligations.",
+    description: "List, re-drive, reconcile, or recover unqueued source-grounding defer obligations.",
     argsSchema: sourceGroundingDefersArgsSchema(),
     requiresDaemonReady: true,
     handler: async (ctx, args) => await executeSourceGroundingDefers(ctx, args, deps)
@@ -77,8 +80,9 @@ async function executeSourceGroundingDefers(
   args: SourceGroundingDefersArgs,
   deps: SourceGroundingDefersCommandDependencies
 ): Promise<AlayaCliResult> {
+  if (args.action === "list-recoverable") return executeRecoveryList(ctx, args, deps.signalService);
   if (args.action === "list") return executeList(ctx, args, deps.signalService);
-  if (args.action === "redrive") return await executeRedrive(ctx, args, deps.signalService);
+  if (args.action === "redrive" || args.action === "recover") return await executeRedrive(ctx, args, deps.signalService);
   return await executeReconcile(ctx, args, deps.signalService);
 }
 
@@ -108,6 +112,17 @@ function executeList(
   };
 }
 
+function executeRecoveryList(ctx: AlayaCliContext, args: SourceGroundingDefersArgs,
+  service: SourceGroundingDeferService): AlayaCliResult {
+  if (service.listSourceGroundingRecoveryCandidates === undefined) throw new Error("Source-grounding recovery is unavailable.");
+  const page = projectSourceGroundingDeferRecoveryPage(service.listSourceGroundingRecoveryCandidates(args.workspaceId, args.afterSignalId, args.limit));
+  if (ctx.jsonRequested !== true) {
+    for (const entry of page.entries) ctx.stdout.write(`${entry.signal_id}\treason=${entry.defer_reason}\tstate=recoverable_unqueued\n`);
+    ctx.stdout.write(`next_after_signal=${page.next_after_signal_id ?? "none"}\n`);
+  }
+  return { exitCode: ALAYA_SYSEXITS.OK, json: { action: "list-recoverable", workspace_id: args.workspaceId, ...page } };
+}
+
 async function executeRedrive(
   ctx: AlayaCliContext,
   args: SourceGroundingDefersArgs,
@@ -115,13 +130,13 @@ async function executeRedrive(
 ): Promise<AlayaCliResult> {
   const signalId = args.signalId!;
   const rawPayload = await readRawPayloadFile(ctx.cwd, args.rawPayloadFile);
-  const result = await service.redriveSourceGroundingDefer(
-    args.workspaceId,
-    signalId,
-    rawPayload === null ? undefined : { raw_payload: rawPayload }
-  );
+  if (args.action === "recover" && service.recoverSourceGroundingDefer === undefined) throw new Error("Source-grounding recovery is unavailable.");
+  const result = args.action === "recover"
+    ? await service.recoverSourceGroundingDefer!(args.workspaceId, signalId)
+    : await service.redriveSourceGroundingDefer(args.workspaceId, signalId,
+      rawPayload === null ? undefined : { raw_payload: rawPayload });
   const report = {
-    action: "redrive",
+    action: args.action,
     workspace_id: args.workspaceId,
     signal_id: signalId,
     signal_state: result.signal.signal_state,
@@ -130,7 +145,7 @@ async function executeRedrive(
   } as const;
   if (ctx.jsonRequested !== true) {
     ctx.stdout.write(
-      `redrive ${signalId}: state=${report.signal_state} triage=${report.triage_result} target=${report.materialization_target ?? "none"}\n`
+      `${args.action} ${signalId}: state=${report.signal_state} triage=${report.triage_result} target=${report.materialization_target ?? "none"}\n`
     );
   }
   return { exitCode: ALAYA_SYSEXITS.OK, json: report };
@@ -176,7 +191,7 @@ function sourceGroundingDefersArgsSchema(): AlayaCliArgsSchema<SourceGroundingDe
 
 function parseArgs(input: readonly string[]): ParseResult<SourceGroundingDefersArgs> {
   const action = input[0];
-  if (action !== "list" && action !== "redrive" && action !== "reconcile") {
+  if (action !== "list" && action !== "redrive" && action !== "reconcile" && action !== "list-recoverable" && action !== "recover") {
     return { ok: false, message: commandUsage() };
   }
   const parsed = parseOptions(input.slice(1));
@@ -196,7 +211,8 @@ function parseOptions(input: readonly string[]): ParseResult<ParsedOptions> {
     expectedClaimFingerprint: null,
     expectedClaimExpiresAt: null,
     reason: null,
-    rawPayloadFile: null
+    rawPayloadFile: null,
+    afterSignalId: null
   };
   for (let index = 0; index < input.length; index += 2) {
     const flag = input[index]!;
@@ -213,6 +229,7 @@ function parseOptions(input: readonly string[]): ParseResult<ParsedOptions> {
 function assignOption(options: ParsedOptions, flag: string, value: string): ParseResult<true> {
   if (flag === "--workspace") options.workspaceId = value;
   else if (flag === "--signal") options.signalId = value;
+  else if (flag === "--after-signal") options.afterSignalId = value;
   else if (flag === "--expected-claim-fingerprint") options.expectedClaimFingerprint = value;
   else if (flag === "--expected-claim-expires-at") options.expectedClaimExpiresAt = value;
   else if (flag === "--reason") options.reason = value;
@@ -258,22 +275,25 @@ function validateAction(
   action: SourceGroundingDefersArgs["action"],
   options: ParsedOptions
 ): ParseResult<SourceGroundingDefersArgs> {
-  if (action === "list" && hasMutationOptions(options)) {
-    return { ok: false, message: "list accepts only --workspace and --limit." };
+  const listing = action === "list" || action === "list-recoverable";
+  if (action !== "list-recoverable" && options.afterSignalId !== null) return { ok: false, message: "--after-signal requires list-recoverable." };
+  if (action === "list-recoverable" && options.limit > 1000) return { ok: false, message: "list-recoverable --limit must not exceed 1000." };
+  if (listing && hasMutationOptions(options)) {
+    return { ok: false, message: `${action} accepts only --workspace, --limit${action === "list-recoverable" ? ", and --after-signal" : ""}.` };
   }
-  if (action !== "list" && options.signalId === null) {
+  if (!listing && options.signalId === null) {
     return { ok: false, message: `--signal is required for ${action}.` };
   }
-  if (action !== "list" && options.limitProvided) {
+  if (!listing && options.limitProvided) {
     return { ok: false, message: `${action} does not accept --limit.` };
   }
-  if (action === "redrive" && hasReconciliationOptions(options)) {
-    return { ok: false, message: "redrive does not accept reconciliation options." };
+  if ((action === "redrive" || action === "recover") && hasReconciliationOptions(options)) {
+    return { ok: false, message: `${action} does not accept reconciliation options.` };
   }
   const reconcileError = validateReconciliationOptions(action, options);
   if (reconcileError !== null) return { ok: false, message: reconcileError };
-  if (action === "reconcile" && options.rawPayloadFile !== null) {
-    return { ok: false, message: "reconcile does not accept --raw-payload-file." };
+  if ((action === "reconcile" || action === "recover") && options.rawPayloadFile !== null) {
+    return { ok: false, message: `${action} does not accept --raw-payload-file.` };
   }
   return {
     ok: true,
@@ -285,7 +305,8 @@ function validateAction(
       expectedClaimFingerprint: options.expectedClaimFingerprint,
       expectedClaimExpiresAt: options.expectedClaimExpiresAt,
       reason: options.reason,
-      rawPayloadFile: options.rawPayloadFile
+      rawPayloadFile: options.rawPayloadFile,
+      afterSignalId: options.afterSignalId
     }
   };
 }
@@ -328,5 +349,5 @@ function cliArgsError(message: string) {
 }
 
 function commandUsage(): string {
-  return "Usage: source-grounding-defers list|redrive|reconcile --workspace <id> [options]";
+  return "Usage: source-grounding-defers list|redrive|reconcile|list-recoverable|recover --workspace <id> [options]";
 }

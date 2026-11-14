@@ -120,6 +120,13 @@ export class SqliteEventLogRepo implements EventLogRepo {
   public async queryByEntityTypeBefore(
     entityType: string, entityId: string, eventType: string, beforeRevision: number | null, limit: number
   ): Promise<readonly EventLogEntry[]> {
+    return this.queryByEntityTypeBeforeInCurrentTransaction(entityType, entityId, eventType, beforeRevision, limit);
+  }
+
+  /** Same bounded/read-qualified authority for transition-owned synchronous transactions. */
+  public queryByEntityTypeBeforeInCurrentTransaction(
+    entityType: string, entityId: string, eventType: string, beforeRevision: number | null, limit: number
+  ): readonly EventLogEntry[] {
     const parsedPage = parseEventLogPage({ limit, offset: 0 });
     if (beforeRevision !== null && (!Number.isSafeInteger(beforeRevision) || beforeRevision < 0)) {
       throw new StorageError("VALIDATION_FAILED", "Invalid event-log revision cursor.");

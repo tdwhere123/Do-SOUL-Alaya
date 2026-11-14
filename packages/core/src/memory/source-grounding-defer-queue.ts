@@ -69,7 +69,24 @@ export type SourceGroundingDeferEventInput = Omit<
   "event_id" | "created_at" | "revision"
 >;
 
+/** Observed quiescent deferrals outside the bounded queue; not claimable queue entries. */
+export interface SourceGroundingDeferRecoveryEntry {
+  readonly signal_id: string;
+  readonly workspace_id: string;
+  readonly run_id: string;
+  readonly defer_reason: SourceGroundingDeferReason;
+  readonly triage_revision: number;
+}
+
+export interface SourceGroundingDeferRecoveryPage {
+  readonly entries: readonly SourceGroundingDeferRecoveryEntry[];
+  /** Advances over inspected candidates, including those whose proof was refused. Null means exhausted. */
+  readonly next_after_signal_id: string | null;
+}
+
 export interface SourceGroundingDeferTransitionPort {
+  /** Bounded discovery only; the transition rechecks proof before explicit recovery. */
+  listRecoveryCandidates?(workspaceId: string, afterSignalId: string | null, limit: number): SourceGroundingDeferRecoveryPage;
   recordDefer(input: {
     readonly signal: CandidateMemorySignal;
     readonly defer_reason: SourceGroundingDeferReason;
@@ -80,6 +97,8 @@ export interface SourceGroundingDeferTransitionPort {
     readonly claim_token?: string;
   }): SourceGroundingDeferRecordTransition;
   claimRedrive(input: {
+    /** Explicit operator recovery of an unqueued, proven quiescent deferral. */
+    readonly recover_unqueued?: true;
     readonly workspace_id: string;
     readonly signal_id: string;
     readonly raw_payload?: CandidateMemorySignal["raw_payload"];

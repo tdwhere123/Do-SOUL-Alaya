@@ -13,6 +13,8 @@ import type {
   StorageDatabase
 } from "@do-soul/alaya-storage";
 
+import { listGroundingRecoveryCandidates, readmitGroundingDeferral } from "./recovery.js";
+
 type TransitionRepos = Readonly<{
   eventLogRepo: SqliteEventLogRepo;
   signalRepo: SqliteSignalRepo;
@@ -30,6 +32,7 @@ export function createSourceGroundingDeferTransitions(
 ): SourceGroundingDeferTransitionPort {
   assertSharedStorageConnection(repos);
   return {
+    listRecoveryCandidates: (workspaceId, afterSignalId, limit) => listGroundingRecoveryCandidates(repos, workspaceId, afterSignalId, limit),
     recordDefer: (input) => repos.eventLogRepo.transactional(() => {
       assertClaimOwner(repos, input.signal.workspace_id, input.signal.signal_id, input.claim_token);
       const events = [
@@ -76,9 +79,12 @@ function claimRedrive(
 ) {
   try {
     return repos.eventLogRepo.transactional(() => {
-      const audit_event = input.audit_event === undefined
-        ? null
-        : appendEventLogSynchronously(repos.eventLogRepo, input.audit_event);
+      if (input.recover_unqueued && (input.raw_payload !== undefined || input.audit_event !== undefined)) {
+        throw new CoreError("VALIDATION", "Recover the retained deferral before proposing a redrive payload patch.");
+      }
+      const audit_event = input.recover_unqueued
+        ? readmitGroundingDeferral(repos, input.workspace_id, input.signal_id)
+        : input.audit_event === undefined ? null : appendEventLogSynchronously(repos.eventLogRepo, input.audit_event);
       const queued = repos.queueRepo.claim(
         input.workspace_id,
         input.signal_id,

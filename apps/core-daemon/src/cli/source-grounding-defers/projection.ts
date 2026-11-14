@@ -1,3 +1,4 @@
+import type { SignalService } from "@do-soul/alaya-core";
 import {
   IsoDatetimeStringSchema,
   isSourceGroundingDeferReason,
@@ -22,6 +23,18 @@ export function projectSourceGroundingDeferEntry(value: unknown): SourceGroundin
     claim_expires_at: readNullableIsoDatetime(entry.claim_expires_at, "claim_expires_at"),
     admission_state: readEnum(entry.admission_state, ["ready", "capacity_blocked"], "admission_state")
   };
+}
+
+export function projectSourceGroundingDeferRecoveryPage(value: unknown): ReturnType<SignalService["listSourceGroundingRecoveryCandidates"]> {
+  const page = requireRecord(value, "recovery page");
+  if (!Array.isArray(page.entries)) throw new Error("Invalid source-grounding recovery entries.");
+  return { next_after_signal_id: page.next_after_signal_id === null ? null : readDisplayText(page.next_after_signal_id, "next_after_signal_id"),
+    entries: page.entries.map(value => {
+      const entry = requireRecord(value, "recovery entry");
+      return { signal_id: readDisplayText(entry.signal_id, "signal_id"),
+        workspace_id: readDisplayText(entry.workspace_id, "workspace_id"), run_id: readDisplayText(entry.run_id, "run_id"),
+        defer_reason: readDeferReason(entry.defer_reason), triage_revision: readCount(entry.triage_revision, "triage_revision") };
+    }) };
 }
 
 export function projectSourceGroundingDeferStats(value: unknown): SourceGroundingDeferStats {

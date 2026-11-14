@@ -40,6 +40,7 @@ export async function claimSourceGroundingRedrive(input: {
   readonly workspaceId: string;
   readonly signalId: string;
   readonly rawPayload?: CandidateMemorySignal["raw_payload"];
+  readonly recoverUnqueued?: true;
 }): Promise<SourceGroundingDeferClaim> {
   const existing = await input.dependencies.signalRepo.getById(input.signalId);
   const transitions = input.dependencies.sourceGroundingDeferTransitions;
@@ -51,6 +52,7 @@ export async function claimSourceGroundingRedrive(input: {
   }
   const claimToken = randomUUID();
   const claim = transitions.claimRedrive({
+    ...(input.recoverUnqueued ? { recover_unqueued: true as const } : {}),
     workspace_id: input.workspaceId,
     signal_id: input.signalId,
     claim_token: claimToken,
