@@ -61,7 +61,7 @@ test("install.sh describes the required ONNX runtime and explicit model provisio
   assert.ok(source.includes(`@huggingface/transformers@${corePackage.dependencies["@huggingface/transformers"]}`));
   assert.match(source, /node \$\{ALAYA_HOME\}\/scripts\/fetch-local-embedding-model\.mjs/);
   assert.doesNotMatch(source, /optional; default install skips|@huggingface\/transformers@4\.2\.0/);
-  assert.ok(source.indexOf('node ./scripts/vacuum-into.mjs') < source.indexOf('node ./bin/alaya.mjs --help'));
+  assert.ok(source.indexOf('node ./scripts/vacuum-into.mjs') < source.indexOf('node "$STAGING_DIR/bin/alaya.mjs" --help'));
 });
 
 test("release quality jobs build dist before typechecking and dev watches the maintained built entry", () => {

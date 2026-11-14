@@ -69,7 +69,11 @@ default file is `<config-dir>/alaya.db`, where config directory selection is
 TOML `storage.db_path` and then `DATA_DIR` override the database location.
 Relative values resolve against the launch working directory, so installer
 and daemon must use the same working directory to select the same file.
-Use an absolute configured path for upgrades independent of launch directory.
+The installer captures its launch directory and resolved config directory, then
+runs the staged CLI bootstrap from that same context as the live locator and
+snapshot, not from the build directory. Relative paths are supported throughout
+that upgrade. Use an absolute configured path when subsequent daemon launches
+must be independent of their working directory.
 Snapshots land separately in `<config-dir>/backups/`. See
 [Rollback an upgrade](#rollback-an-upgrade) to restore the paired version and
 pre-migration database without discarding the current installation. The installer

@@ -113,6 +113,7 @@ fi
 set -euo pipefail
 
 REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
+LAUNCH_DIR="$(pwd -P)"
 ALAYA_HOME="${ALAYA_HOME:-${HOME}/.local/share/do-soul-alaya}"
 ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
 
@@ -302,8 +303,11 @@ if [ -f "$LIVE_DB" ]; then
   ok "database backup: ${DB_BACKUP_PATH}"
 fi
 
-# The CLI's normal bootstrap may migrate storage; retain the pre-upgrade DB first.
-if ! node ./bin/alaya.mjs --help >/dev/null 2>&1; then
+# The real CLI bootstrap may migrate storage; retain the pre-upgrade DB first.
+# Build in staging, but bootstrap from the captured launch context used by the
+# locator. Relative TOML/DATA_DIR must never select a different staged database;
+# the resolved config directory also pins relative config/XDG inputs.
+if ! ( cd "$LAUNCH_DIR" && ALAYA_CONFIG_DIR="$LIVE_CONFIG_DIR" node "$STAGING_DIR/bin/alaya.mjs" --help ) >/dev/null 2>&1; then
   err "post-build sanity check failed: \`node ./bin/alaya.mjs --help\` did not exit 0"
 fi
 ok "post-build sanity check passed"
