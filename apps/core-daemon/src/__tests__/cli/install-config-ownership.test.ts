@@ -11,6 +11,7 @@ import type { AlayaCliContext } from "../../cli/bridge.js";
 import { withRuntimeEmbeddingFileLock } from "../../services/env-file/env-file-io.js";
 import { rollbackPartialState } from "../../cli/install/support.js";
 import { formatFileSecretRef } from "@do-soul/alaya-protocol";
+import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { resolveSecretRef } from "../../secrets/index.js";
 import { parseEnv } from "../../services/env-file/env-file-format.js";
 
@@ -19,13 +20,19 @@ vi.mock("node:fs/promises", async importOriginal => {
   return { ...actual, rename: vi.fn(actual.rename) };
 });
 
-const directories: string[] = [];
-afterAll(async () => { await Promise.all(directories.map(dir => rm(dir, { recursive: true, force: true }))); });
+const fixtures: { parent: string; database: string }[] = [];
+afterAll(async () => {
+  for (const { parent, database } of fixtures.splice(0)) {
+    // Install deliberately leaves the shared schema handle open for a live daemon.
+    closeCachedDatabase(database);
+    await rm(parent, { recursive: true, force: true });
+  }
+});
 async function fixture() {
   const parent = await mkdtemp(path.join(tmpdir(), "alaya config owner-"));
-  directories.push(parent);
   // Keep spaced paths while using the shared guard\'s contained config-fixture owner.
   const dir = path.join(parent, `alaya-bench-config-${randomUUID()}`);
+  fixtures.push({ parent, database: path.join(dir, "alaya.db") });
   await mkdir(dir);
   let tick = 0;
   const command = createInstallCommand({

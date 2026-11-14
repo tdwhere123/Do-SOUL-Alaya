@@ -275,8 +275,10 @@ it.each(["healthy", "denial", "unconfirmed"])(
     const bootstrap = new URL("provider-free-cli-bootstrap.mjs", support).href;
     const temporary = mkdtempSync(join(tmpdir(), "provider-owner-config-"));
     const config = join(temporary, "vitest.config.mjs"), evidence = join(temporary, "probe.json");
+    // Keep Vitest's pool teardown independent from the fixture's own child-process
+    // proof: the fixture explicitly launches a fork, spawn, and Worker in each arm.
     writeFileSync(config, `export default ${JSON.stringify({ root, test: {
-      include: [fixture.replaceAll("\\", "/")], pool: "forks", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
+      include: [fixture.replaceAll("\\", "/")], pool: "threads", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
     } })};`);
     try {
       const result = await new Promise<{ code: string | number; stdout: string; stderr: string }>(resolve => {
@@ -287,7 +289,6 @@ it.each(["healthy", "denial", "unconfirmed"])(
       });
       const output = `${result.stdout}\n${result.stderr}`;
       expect(output).toContain("1 passed");
-      expect(result.code, output).toBe(mode === "healthy" ? 0 : 1);
       const probe = JSON.parse(readFileSync(evidence, "utf8"));
       expect(probe.mode).toBe(mode);
       // Retain guard-owned journals, including negative-arm sticky records, for inspection.
@@ -298,6 +299,7 @@ it.each(["healthy", "denial", "unconfirmed"])(
       const reasons: string[] = roots.flatMap(({ member }) => readdirSync(join(probe.root, member))
         .filter(name => name.startsWith("signal-failure-"))
         .flatMap(name => JSON.parse(readFileSync(join(probe.root, member, name), "utf8")).reasons));
+      expect(result.code, `${output}\nRoot isolation reasons: ${JSON.stringify(reasons)}`).toBe(mode === "healthy" ? 0 : 1);
       if (mode === "healthy") expect(reasons).toEqual([]);
       else expect(reasons.some(reason => reason.startsWith(mode === "denial" ? "violation:credential file" : "unconfirmed_descendant:"))).toBe(true);
     } finally { rmSync(temporary, { recursive: true, force: true }); }
