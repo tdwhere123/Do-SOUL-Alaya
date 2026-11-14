@@ -267,6 +267,8 @@ function cohortQualityMetrics(hits: ScorableHits): NonNullable<KpiPayload["kpi"]
   return {
     schema_version: "bench-quality-metrics.unavailable.v1",
     unavailable_reason: "not_recomputed_from_shard_archives",
+    evaluator_identity_unscorable_count: hits.unscorableAnswerableCount,
+    evaluator_identity_unscorable_denominator: nonAbstention,
     unscorable_reason_distribution: {
       ...(hits.abstentionCount === 0
         ? {}

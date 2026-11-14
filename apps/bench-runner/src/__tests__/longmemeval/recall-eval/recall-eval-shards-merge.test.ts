@@ -2,7 +2,7 @@ import { readFile, rm, mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { KpiPayload, MeasuredQualityMetrics, PerScenarioRow } from "@do-soul/alaya-eval";
+import { KpiPayloadSchema, type KpiPayload, type MeasuredQualityMetrics, type PerScenarioRow } from "@do-soul/alaya-eval";
 import type { LongMemEvalSnapshotManifest } from "../../../runs/snapshot/materialize.js";
 import type { LongMemEvalWorkerShardPlan } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-worker.js";
 import { mergeRecallEvalShardArchives } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge.js";
@@ -76,6 +76,35 @@ describe("mergeRecallEvalShardArchives — shard measurement truth", () => {
     ) as { shards: readonly { kpi_sha256: string; shard_index: number }[] };
     expect(sources.shards).toHaveLength(3);
     expect(sources.shards.every((shard) => /^[a-f0-9]{64}$/u.test(shard.kpi_sha256))).toBe(true);
+  });
+
+  it.each([
+    { abstentions: [], unscorable: [], answerable: 3, hits: [0] },
+    { abstentions: [0, 1, 2], unscorable: [], answerable: 0, hits: [] },
+    { abstentions: [], unscorable: [0, 1, 2], answerable: 0, hits: [] },
+    { abstentions: [0], unscorable: [1], answerable: 1, hits: [2] }
+  ])("persists schema-valid cohort accounting after merge: %j", async cohort => {
+    const historyRoot = join(tmpRoot, "cohort-history"), shardRoot = join(tmpRoot, "cohort-shard");
+    const kpi = createTestShardKpi({ offset: 0, limit: 3,
+      abstentionIndices: cohort.abstentions, unscorableIndices: cohort.unscorable, hitIndices: cohort.hits });
+    await writeShardRoot(shardRoot, kpi, { questions: createTestDiagnostics(kpi) });
+    const result = await mergeRecallEvalShardArchives({
+      plans: [{ shardIndex: 0, offset: 0, limit: 3, historyRoot: shardRoot }], historyRoot,
+      snapshotManifest: { question_count: 3 } as LongMemEvalSnapshotManifest, concurrency: 1
+    });
+    const persisted = KpiPayloadSchema.parse(JSON.parse(await readFile(result.kpiPath, "utf8")));
+    expect(persisted.answerable_evaluated_count).toBe(cohort.answerable);
+    expect(persisted.kpi.r_at_5).toBe(cohort.answerable === 0 ? 0 : cohort.hits.length / cohort.answerable);
+    expect(persisted.kpi.quality_metrics).toMatchObject({
+      schema_version: "bench-quality-metrics.unavailable.v1",
+      unavailable_reason: "not_recomputed_from_shard_archives",
+      evaluator_identity_unscorable_count: cohort.unscorable.length,
+      evaluator_identity_unscorable_denominator: 3 - cohort.abstentions.length,
+      measurement_cohort_counts: { evaluated: 3, abstention: cohort.abstentions.length,
+        scorable_answerable: cohort.answerable, unscorable_answerable: cohort.unscorable.length }
+    });
+    expect(persisted.kpi.quality_metrics).not.toHaveProperty("non_monotonic_rate");
+    expect(await readFile(result.reportPath, "utf8")).toContain("iagnostic");
   });
 
   it("reconstructs exact hits from row booleans where rounded shard rates would differ", async () => {
@@ -457,6 +486,7 @@ function createTestShardKpi(opts: {
   offset: number;
   limit: number;
   abstentionIndices: readonly number[];
+  unscorableIndices?: readonly number[];
   hitIndices: readonly number[];
 }): KpiPayload & { readonly kpi: KpiPayload["kpi"] & { readonly quality_metrics: MeasuredQualityMetrics } } {
   const rows: PerScenarioRow[] = Array.from({ length: opts.limit }, (_, index) => {
@@ -467,7 +497,7 @@ function createTestShardKpi(opts: {
       version: 1,
       hit_at_5: isHit,
       latency_ms: 10 + index,
-      scorable: !isAbstention,
+      scorable: !isAbstention && !(opts.unscorableIndices ?? []).includes(index),
       measurement_cohort: isAbstention ? "dataset_declared_abstention" : "answerable",
       tier: "warm"
     };
@@ -482,7 +512,11 @@ function createTestShardKpi(opts: {
     answerable_evaluated_count: answerableCount,
     kpi: {
       ...base.kpi,
-      quality_metrics: makeQualityMetrics(),
+      quality_metrics: { ...makeQualityMetrics(),
+        evaluator_identity_unscorable_count: opts.unscorableIndices?.length ?? 0,
+        abstention: { schema_version: "bench-abstention.v2", total: opts.abstentionIndices.length,
+          scored: 0, unscorable: opts.abstentionIndices.length, method: "fused_margin_diagnostic_only",
+          calibration_status: "uncalibrated", gate_eligible: false } },
       per_scenario: rows,
       r_at_1: rate,
       r_at_5: rate,
