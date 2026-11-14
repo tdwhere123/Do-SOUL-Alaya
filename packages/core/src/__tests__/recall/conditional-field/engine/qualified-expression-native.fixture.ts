@@ -7,7 +7,7 @@ import { compileConditionalFieldQuery } from "../../../../recall/conditional-fie
 import { parseBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import type { FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
-import { leafDerivation, seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { leafDerivation, seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../../../../recall/conditional-field/observers/observe-ports.js";
 import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
@@ -169,7 +169,7 @@ function syntheticLeaves(state: FieldEngineState): ReadonlyMap<string, Derivatio
   };
   visit(state.interpretation.program);
   const add = (product: ProductStateKey): void => {
-    const id = seedDerivationIdentity(fieldPartitionNodeId(productStateNodeId(product), undefined));
+    const id = seedActivationDerivationId({ state: product });
     leaves.set(id, leafDerivation({ derivation_id: id, leaf_id: id, observation_id: productEndpointId(product),
       source_revision: product.target.kind === "memory_entry" ? product.target.source_revision : product.target.source_version }));
     const epsilon = `${productEndpointId(product)}:${productEndpointId(product)}:epsilon`;

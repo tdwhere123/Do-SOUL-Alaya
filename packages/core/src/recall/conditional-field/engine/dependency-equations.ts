@@ -12,7 +12,7 @@ import { ruleIdentity, transitionKey } from "./path-composition.js";
 import { localLeafIds, traceDerivationForest } from "./derivation-provenance.js";
 import {
   ruleDerivationIdentity,
-  seedDerivationIdentity, derivationRootAt, type DerivationRootLookup
+  seedActivationDerivationId, derivationRootAt, type DerivationRootLookup
 } from "./path-derivation.js";
 
 export type SharedRule = Readonly<{
@@ -117,10 +117,11 @@ export function productsTouchedByLeaf(input: {
   };
   for (const seed of input.seeds) {
     const key = productStateNodeId(seed.state);
+    const seedLeaf = seedActivationDerivationId(seed);
     if (
       key === input.withdrawnLeafId
-      || seedDerivationIdentity(key) === input.withdrawnLeafId
-      || leafHits(seedDerivationIdentity(key))
+      || seedLeaf === input.withdrawnLeafId
+      || leafHits(seedLeaf)
     ) {
       touched.add(key);
     }
@@ -133,8 +134,6 @@ export function productsTouchedByLeaf(input: {
       transition.relation_kind === input.withdrawnLeafId
       || from === input.withdrawnLeafId
       || to === input.withdrawnLeafId
-      || seedDerivationIdentity(from) === input.withdrawnLeafId
-      || seedDerivationIdentity(to) === input.withdrawnLeafId
       || leafHits(root)
     ) {
       touched.add(from);
@@ -206,7 +205,7 @@ export function affectedSubjectsOf(
 
 export function seedTouchesLeaf(seed: SeedActivation, withdrawnLeafId: string): boolean {
   const key = productStateNodeId(seed.state);
-  return key === withdrawnLeafId || seedDerivationIdentity(key) === withdrawnLeafId;
+  return key === withdrawnLeafId || seedActivationDerivationId(seed) === withdrawnLeafId;
 }
 
 export function capOrPermissionRevisions(

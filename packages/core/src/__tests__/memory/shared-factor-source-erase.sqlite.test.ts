@@ -66,7 +66,8 @@ describe("shared factor source erase", () => {
     expect(repos.factors.findDescriptor("workspace-1", sharedId)?.canonical_payload)
       .toBe(shared[0]!.canonical_payload);
 
-    persistFormedSource(database, repos, second);
+    const continued = formSource("src-2", "00000000-0000-4000-8000-000000000002");
+    persistFormedSource(database, repos, continued);
     expect(repos.factors.findDescriptor("workspace-1", sharedId)?.canonical_payload)
       .toBe(shared[0]!.canonical_payload);
     expect(repos.factors.insertIncidence(incidenceRow(secondIncidence))).toEqual(

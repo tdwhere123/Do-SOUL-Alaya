@@ -3,7 +3,7 @@ import { solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import { type Derivation, type ObserverPage, type QueryInterpretation, type QueryProgram, type Transition } from "@do-soul/alaya-protocol";
 import { applyObserverPage, createConditionalField, withdrawDerivationLeaves } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
-import { derivationForest, evaluateDerivation, leafDerivation, seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { derivationForest, evaluateDerivation, leafDerivation, seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
@@ -69,7 +69,7 @@ describe("dependency boundary regressions", () => {
     expect(root).toBeDefined();
     expect(evaluateDerivation(derivationForest(grounded.derivations), root!, leafGrades(grounded.derivations))).toBe(500);
     const forest = derivationForest(grounded.derivations);
-    expect(localLeafIds(traceDerivationForest({ forest, roots: [root!] }).traversal)).toContain(seedDerivationIdentity(fieldPartitionNodeId(productStateNodeId(productKey("a")), undefined)));
+    expect(localLeafIds(traceDerivationForest({ forest, roots: [root!] }).traversal)).toContain(seedActivationDerivationId({ state: productKey("a") }));
   });
 
   it("does not materialize a witness for an unseeded hard cycle", () => {
@@ -140,7 +140,7 @@ describe("dependency boundary regressions", () => {
       claims: new Map([["b", "supported"]]),
       support: [{ schema_version: 1, proposition_id: "b", claim: "supported",
         witnesses: [{ schema_version: 1, witness_id: "a-supports-b", premises: [productStateNodeId(a)], cost: 1, complete: true }] }] });
-    const after = withdrawDerivationLeaves(before, seedDerivationIdentity(productStateNodeId(a)));
+    const after = withdrawDerivationLeaves(before, seedActivationDerivationId({ state: a }));
     expect(after.support).toEqual([]);
     expect(after.claims.get("b") ?? "unknown").toBe("unknown");
   });

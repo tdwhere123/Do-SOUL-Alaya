@@ -10,7 +10,7 @@ import {
 } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { encodeBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
-import { seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
@@ -84,7 +84,7 @@ function fixture(scenario: Scenario) {
     instance_id: `${from}-to-${to}`, strength_milligrades: 1000, validity: VALIDITY, applicable: true
   }));
   const fixedLeaves = new Set([
-    ...seeds.map((seed) => seedDerivationIdentity(fieldPartitionNodeId(productStateNodeId(seed.state), seed.cap_contract_id))),
+    ...seeds.map((seed) => seedActivationDerivationId(seed)),
     ...transitions.map((transition) => transition.instance_id!)
   ]);
   return { scenario, interpretation, seeds, transitions, outputs, fixedLeaves };

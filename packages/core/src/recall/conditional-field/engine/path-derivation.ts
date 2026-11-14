@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  canonicalProductIdentity,
   formatConditionalFieldDigest,
   type Derivation,
-  type DerivationKind
+  type DerivationKind,
+  type SeedActivation
 } from "@do-soul/alaya-protocol";
+import { fieldPartitionNodeId } from "../cap-contract.js";
 import { projectLegalDerivationStep } from "../reference/bind-max-min.js";
 import { traceDerivationForest } from "./derivation-provenance.js";
 
@@ -164,6 +167,16 @@ export function derivationIdentity(
 
 export function seedDerivationIdentity(productNodeId: string): string {
   return clipId(`seed:${productNodeId}`);
+}
+
+/** Graph node id of a seed; the same contract+product partition as numeric preparation. */
+export function seedActivationNodeId(seed: Pick<SeedActivation, "state" | "cap_contract_id">): string {
+  return fieldPartitionNodeId(canonicalProductIdentity(seed.state), seed.cap_contract_id);
+}
+
+/** Emitted seed-leaf identity. Withdrawal consumers must match this, not a second formula. */
+export function seedActivationDerivationId(seed: Pick<SeedActivation, "state" | "cap_contract_id">): string {
+  return seedDerivationIdentity(seedActivationNodeId(seed));
 }
 
 export function ruleDerivationIdentity(transitionKeyValue: string): string {

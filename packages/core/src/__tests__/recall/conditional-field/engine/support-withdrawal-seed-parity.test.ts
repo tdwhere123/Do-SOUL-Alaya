@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { evaluateBooleanHypergraph, type BooleanHyperedge } from "@do-soul/alaya-graph-algorithms";
-import type { ProductStateKey, SeedActivation, Transition } from "@do-soul/alaya-protocol";
+import { ASSOCIATION_DOMAIN_ID, type ProductStateKey, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField, withdrawDerivationLeaves, type FieldEngineState }
   from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
-import { seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
-import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
+import { seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { capContractId, fieldPartitionNodeId, HARD_IDENTITY_CAP_CONTRACT } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, productKey } from "../reference/deployment.fixture.js";
 import { query, relation } from "./relation-grounding.fixture.js";
@@ -16,7 +16,9 @@ type Edge = Readonly<{ id: string; from: string; to: string; grade: number }>;
 type Seed = Readonly<{ object: string; grade: number }>;
 type Graph = Readonly<{ seeds: readonly Seed[]; edges: readonly Edge[] }>;
 const key = (object: string): ProductStateKey => productKey(object);
-const seedLeaf = (object: string) => seedDerivationIdentity(productStateNodeId(key(object)));
+const seedLeaf = (object: string, contract?: string) => seedActivationDerivationId({
+  state: key(object), ...(contract === undefined ? {} : { cap_contract_id: contract })
+});
 
 function build(graph: Graph): FieldEngineState {
   const seeds: SeedActivation[] = graph.seeds.map((seed) => ({ schema_version: 1, state: key(seed.object), milligrades: seed.grade }));
@@ -52,6 +54,11 @@ const without = (graph: Graph, leaf: string): Graph => ({ seeds: graph.seeds.fil
   edges: graph.edges.filter((e) => e.id !== leaf) });
 
 function expectRebuildParity(graph: Graph, state: FieldEngineState, leaf: string): Graph {
+  const grounded = groundedOutputDerivations({ ...state, allowance: 100_000 });
+  expect(grounded.complete).toBe(true);
+  if (state.seeds.some((seed) => seedActivationDerivationId(seed) === leaf)) {
+    expect(grounded.derivations.some((row) => row.kind === "leaf" && row.derivation_id === leaf)).toBe(true);
+  }
   const after = without(graph, leaf), withdrawn = withdrawDerivationLeaves(state, leaf), fresh = build(after);
   expect(actual(withdrawn)).toEqual(reference(after));
   expect(actual(fresh)).toEqual(reference(after));
@@ -128,5 +135,37 @@ describe("decreasing an alternative below a cap", () => {
     expect(actual(withdrawDerivationLeaves(full, "high")).get("end")).toBe(700);
     expect(actual(withdrawDerivationLeaves(full, "low")).get("end")).toBe(800);
     expectRebuildParity(graph, full, "low");
+  });
+});
+
+describe("contract-scoped seed withdrawal", () => {
+  it("withdraws the emitted seed leaf and keeps an independent contract seed", () => {
+    const soft = capContractId({
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      normalization: "l2.dot.v1",
+      transfer_id: "policy.cosine.linear.milligrade.v1",
+      transfer_version: "1"
+    });
+    const hard = capContractId(HARD_IDENTITY_CAP_CONTRACT);
+    const seeds: SeedActivation[] = [
+      { schema_version: 1, state: key("a"), milligrades: 800, cap_contract_id: soft },
+      { schema_version: 1, state: key("b"), milligrades: 1000, cap_contract_id: hard }
+    ];
+    const state = createConditionalField({
+      interpretation: query(relation("p")), budget: defaultBudget({ finalization_reserve: 0 }), seeds, transitions: []
+    });
+    const grounded = groundedOutputDerivations({ ...state, allowance: 100_000 });
+    expect(grounded.complete).toBe(true);
+    const softLeaf = [...grounded.derivations].find((row) =>
+      row.kind === "leaf" && row.derivation_id === seedActivationDerivationId(seeds[0]!));
+    expect(softLeaf?.derivation_id).toBe(seedActivationDerivationId(seeds[0]!));
+    const withdrawn = withdrawDerivationLeaves(state, softLeaf!.derivation_id);
+    expect([...withdrawn.seeds]).toEqual([seeds[1]]);
+    const fresh = createConditionalField({
+      interpretation: query(relation("p")), budget: defaultBudget({ finalization_reserve: 0 }),
+      seeds: [seeds[1]!], transitions: []
+    });
+    expect(actual(withdrawn)).toEqual(actual(fresh));
+    expect(proofLeaves(withdrawn)).toEqual(proofLeaves(fresh));
   });
 });

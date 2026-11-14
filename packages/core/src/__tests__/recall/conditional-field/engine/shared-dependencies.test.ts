@@ -23,7 +23,7 @@ import { groundedOutputDerivations } from "../../../../recall/conditional-field/
 import {
   joinDerivation,
   leafDerivation,
-  seedDerivationIdentity,
+  seedActivationDerivationId,
   withdrawDerivation
 } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { composedFacetPathId, samePathAccepts } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
@@ -124,7 +124,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     expect(gradeOf(state, a)).toBe(1000);
     expect(gradeOf(state, b)).toBe(900);
     expect(state.support).toHaveLength(1);
-    const after = withdrawDerivationLeaves(state, seedDerivationIdentity(productStateNodeId(a)));
+    const after = withdrawDerivationLeaves(state, seedActivationDerivationId({ state: a }));
     expect(after.seeds).toHaveLength(0);
     expect(activationOf(after, a)).toEqual({ kind: "unreachable" });
     expect(activationOf(after, b)).toEqual({ kind: "unreachable" });
@@ -304,7 +304,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
       result_version: "v1",
       budget: defaultBudget({ page_budget: 50 }),
       derivations: [root],
-      output_derivations: { [fieldPartitionNodeId(key, value.cap_contract_id)]: [root.derivation_id] },
+      output_derivations: { [fieldPartitionNodeId(key, undefined)]: [root.derivation_id] },
       support: [supportRecord("r", [witnessOf("too-big", ["r"], 400)])]
     });
     expect(index.entries).toHaveLength(1);

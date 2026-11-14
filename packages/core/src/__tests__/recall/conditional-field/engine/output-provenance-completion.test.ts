@@ -3,7 +3,7 @@ import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
-import { ruleDerivationIdentity, seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { ruleDerivationIdentity, seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
@@ -22,7 +22,7 @@ const sToC = edge("s", "c", "detour-start", 500);
 const cToB = edge("c", "b", "detour-end", 900);
 const partitionKey = (activation: Pick<SeedActivation, "state" | "cap_contract_id">) =>
   fieldPartitionNodeId(productStateNodeId(activation.state), activation.cap_contract_id);
-const seedLeaf = (activation: SeedActivation) => seedDerivationIdentity(partitionKey(activation));
+const seedLeaf = (activation: SeedActivation) => seedActivationDerivationId(activation);
 const seedId = seedLeaf(seed);
 const ruleId = (row: Transition) => ruleDerivationIdentity(transitionKey(row));
 
