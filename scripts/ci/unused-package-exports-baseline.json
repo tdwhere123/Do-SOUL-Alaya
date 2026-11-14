@@ -237,8 +237,6 @@
     "type:packages/core/src/conversation/semantic-enrichment-worker.ts:SemanticTransportCompletionTokenCapability",
     "type:packages/core/src/conversation/semantic-enrichment-worker.ts:SemanticTransportSpendCapability",
     "type:packages/core/src/dynamics/dynamics-scoring.ts:ManifestationState",
-    "type:packages/core/src/embedding-recall/evidence/prefix-eligibility.ts:EvidencePrefixEligibilityStatus",
-    "type:packages/core/src/embedding-recall/evidence/prefix-eligibility.ts:EvidencePrefixLiveObservationCompleteness",
     "type:packages/core/src/governance/claims/claim-service-types.ts:ClaimHelperInputs",
     "type:packages/core/src/governance/effects/causal-plasticity.ts:PlasticityChannel",
     "type:packages/core/src/governance/effects/causal-plasticity.ts:UsageAdaptationDisposition",
