@@ -404,6 +404,7 @@ function prepareEraseStatements(database: StorageDatabase) {
   };
 }
 
+/** Source/span erase always drops that source's incidences. A shared factor is a descendant only when no incidence remains outside the erase closure. */
 function descendantSql(kind: ProjectionEraseSubjectKind): string | null {
   if (kind === "source_record") return `
     WITH RECURSIVE records_to_erase(record_id) AS (
@@ -436,13 +437,29 @@ function descendantSql(kind: ProjectionEraseSubjectKind): string | null {
         ON span.workspace_id = incidence.workspace_id AND span.span_id = incidence.span_id
       JOIN records_to_erase AS record ON record.record_id = span.record_id
       WHERE span.workspace_id = @workspaceId
+        AND NOT EXISTS (
+          SELECT 1
+          FROM factor_incidences AS remaining
+          JOIN source_spans AS remaining_span
+            ON remaining_span.workspace_id = remaining.workspace_id
+           AND remaining_span.span_id = remaining.span_id
+          WHERE remaining.workspace_id = @workspaceId
+            AND remaining.factor_id = incidence.factor_id
+            AND remaining_span.record_id NOT IN (SELECT record_id FROM records_to_erase)
+        )
     ORDER BY subject_kind, subject_id
   `;
   if (kind === "source_span") return `
     SELECT 'incidence' AS subject_kind, incidence_id AS subject_id FROM factor_incidences
       WHERE workspace_id = @workspaceId AND span_id = @subjectId
-    UNION SELECT 'factor', factor_id FROM factor_incidences
-      WHERE workspace_id = @workspaceId AND span_id = @subjectId
+    UNION SELECT 'factor', associated.factor_id FROM factor_incidences AS associated
+      WHERE associated.workspace_id = @workspaceId AND associated.span_id = @subjectId
+        AND NOT EXISTS (
+          SELECT 1 FROM factor_incidences AS remaining
+          WHERE remaining.workspace_id = @workspaceId
+            AND remaining.factor_id = associated.factor_id
+            AND remaining.span_id <> @subjectId
+        )
     ORDER BY subject_kind, subject_id
   `;
   if (kind === "factor") return `
