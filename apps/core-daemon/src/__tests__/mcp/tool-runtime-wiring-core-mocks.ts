@@ -341,9 +341,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     ProjectMappingService: makeClass(),
     ProposalService: makeClass(),
     RecallService: makeClass(),
-    RuleBasedEntityExtractor: makeClass({
-      extract: vi.fn(async () => [])
-    }),
     RuleBasedQueryFactFrameExtractor: makeClass({
       extract: vi.fn(async () => [])
     }),
