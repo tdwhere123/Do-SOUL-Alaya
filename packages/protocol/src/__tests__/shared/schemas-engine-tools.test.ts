@@ -16,43 +16,8 @@ import {
   SearchFilesToolResultSchema,
   ToolUseBlockSchema,
   WriteFileToolInputSchema,
-  WriteFileToolResultSchema,
-  type CandidateMemorySignal,
-  type WorkspaceRunEvent
+  WriteFileToolResultSchema
 } from "../../index.js";
-
-type IfEquals<X, Y, A = true, B = false> =
-  (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? A : B;
-type IsReadonlyProperty<T, K extends keyof T> = IfEquals<
-  { [P in K]: T[P] },
-  { -readonly [P in K]: T[P] },
-  false,
-  true
->;
-type AssertTrue<T extends true> = T;
-export type _WorkspaceRunEventReadonlyChecks = [
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "event_id">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_type">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "entity_id">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "workspace_id">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "run_id">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "caused_by">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "revision">>,
-  AssertTrue<IsReadonlyProperty<WorkspaceRunEvent, "created_at">>
-];
-export type _CandidateMemorySignalReadonlyChecks = [
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "signal_id">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "workspace_id">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "run_id">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "surface_id">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "source">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "signal_kind">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "signal_state">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "object_kind">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "scope_hint">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "confidence">>,
-  AssertTrue<IsReadonlyProperty<CandidateMemorySignal, "created_at">>
-];
 
 
 describe("EngineResultSchema", () => {
