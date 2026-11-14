@@ -6,6 +6,8 @@ import { access, appendFile, mkdtemp, readFile, rm, stat, truncate } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { mergeRecallEvalShardArchives } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge.js";
+import { writeShardRoot } from "../../cli/merge/cli-merge-validations-fixture.js";
 import { assembleRecallEvalKpi } from
   "../../../runs/kpi/recall-eval-payload.js";
 import type { RecallEvalQuestionResult } from
@@ -36,6 +38,34 @@ const disabledRuntime = {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })));
+});
+
+describe("recall evaluator cohort persistence", () => {
+  it("carries production scorable, abstention and identity-unscorable rows through shard merge and schema readback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "producer-cohort-merge-")); roots.push(root);
+    const collected = (["scorable", "abstention", "identity_unscorable"] as const).map((status, index) => {
+      const id = `cohort-${index}`, hit = status === "scorable";
+      const diagnostics = promotionMeasurementDiagnostic(id, status, hit);
+      return { ...question(id), diagnostics, hitAt1: hit, hitAt5: hit, hitAt10: hit,
+        deliveredObjectIds: diagnostics.delivered_results.flatMap(row => row.object_id === undefined ? [] : [row.object_id]) };
+    });
+    const payload = assembleRecallEvalKpi(kpiInput(collected));
+    const source = KpiPayloadSchema.parse(JSON.parse(JSON.stringify(payload)));
+    expect(source.kpi.quality_metrics?.evaluator_identity_unscorable_denominator).toBe(3);
+    const shardRoot = join(root, "shard");
+    await writeShardRoot(shardRoot, source, { questions: collected.map(row => row.diagnostics) });
+    const result = await mergeRecallEvalShardArchives({
+      plans: [{ shardIndex: 0, offset: 0, limit: 3, historyRoot: shardRoot }],
+      historyRoot: join(root, "merged"), snapshotManifest: kpiInput(collected).manifest, concurrency: 1
+    });
+    const persisted = KpiPayloadSchema.parse(JSON.parse(await readFile(result.kpiPath, "utf8")));
+    expect(persisted).toMatchObject({ evaluated_count: 3, answerable_evaluated_count: 1,
+      kpi: { r_at_5: 1, quality_metrics: { schema_version: "bench-quality-metrics.unavailable.v1",
+        evaluator_identity_unscorable_count: 1, evaluator_identity_unscorable_denominator: 3,
+        measurement_cohort_counts: { evaluated: 3, non_abstention: 2, abstention: 1,
+          scorable_answerable: 1, unscorable_answerable: 1, hit_at_5: 1, miss_at_5: 0 } } } });
+    expect(persisted.measurement_attribution?.gate_eligible).toBe(false);
+  });
 });
 
 describe("provider state KPI persistence", () => {
