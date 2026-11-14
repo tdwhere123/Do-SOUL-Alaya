@@ -44,9 +44,11 @@ export async function runSourceIndexLexicalPreparation(input: {
       }
       if (receipt.status === "ready") return finish("ready");
       const continuable = receipt.status === "partial" && receipt.generation !== null &&
-        (receipt.reason === "incomplete" || receipt.reason === "read_budget" || receipt.reason === "deadline_exceeded");
+        (receipt.reason === "incomplete" || receipt.reason === "read_budget" || receipt.reason === "deadline_exceeded" ||
+          receipt.reason === "enumeration_budget" || receipt.reason === "enumeration_page");
       if (!continuable) return finish(`lexical_${receipt.status}:${receipt.reason ?? "none"}`);
-      const g = receipt.generation!, progress = `${g.completed_count}/${g.target_count}/${g.enumeration_complete}`;
+      const g = receipt.generation!, progress = JSON.stringify([g.generation_id, g.completed_count, g.target_count,
+        g.enumeration_complete, g.after_source_id, g.after_capsule_cursor, g.records_complete]);
       if (progress === last) return finish("lexical_no_progress");
       last = progress;
     }

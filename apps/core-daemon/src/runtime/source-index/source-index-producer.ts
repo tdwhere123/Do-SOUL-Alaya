@@ -290,8 +290,8 @@ export class SourceIndexProducer {
         pass.binding = binding.status === "ready"
           ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
         tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
-        if (binding.status === "unsupported" && pass.outcome.status === "settled") {
-          pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+        if (binding.status === "unsupported") {
+          pass.outcome = combinePassOutcome(pass.outcome, { status: binding.status, reason: boundedProducerFailureReason(binding.reason) });
         }
       }
       if (tracked.status === "unsupported") {
@@ -301,8 +301,7 @@ export class SourceIndexProducer {
         this.targetCursors.delete(workspace);
       } else {
         const outcome = await this.reconcileWorkspace(workspace, tracked, pass);
-        // Keep normal workspace rotation, but never let a later success erase a terminal refusal.
-        if (outcome !== null && pass.outcome.status === "settled") pass.outcome = outcome;
+        if (outcome !== null) pass.outcome = combinePassOutcome(pass.outcome, outcome);
         if (vectorFirst && !pass.signal.aborted && this.hasBudget(pass)) await this.reconcileLexical(workspace, pass);
         if (!this.hasBudget(pass)) return;
       }
@@ -345,8 +344,10 @@ export class SourceIndexProducer {
     pass.visitedRoots += result.visited_roots;
     pass.capturePages += result.capture_pages;
     for (const key of ["pages", "projections", "targets", "generations"] as const) pass.reclamation[key] += result.reclamation[key];
-    if (result.status === "unavailable" && result.reason === "enumeration_allocation_exhausted") {
-      pass.outcome = { status: "resource_exhausted", reason: result.reason };
+    if (result.status === "partial") {
+      pass.outcome = combinePassOutcome(pass.outcome, { status: "partial", reason: result.reason ?? "lexical_incomplete" });
+    } else if (result.status === "unavailable" && result.reason === "enumeration_allocation_exhausted") {
+      pass.outcome = combinePassOutcome(pass.outcome, { status: "resource_exhausted", reason: result.reason });
     }
     if (result.status === "unavailable" && result.reason !== "segmenter_unavailable" && !pass.signal.aborted) {
       this.input.warn("source index lexical preparation unavailable", { workspace_id: workspaceId, reason: boundedProducerFailureReason(result.reason ?? "") });
@@ -529,6 +530,16 @@ function restrictPassLimits(
     next[key] = Math.min(constructed[key], value);
   }
   return next;
+}
+
+/** One bounded pass summary, not generation state: hard stops survive later outcomes;
+ * otherwise the first refusal dominates partial/settled. Binding readiness is retained separately. */
+function combinePassOutcome(current: PassOutcome, next: PassOutcome): PassOutcome {
+  if (next.status === "settled") return current;
+  if (current.status === "settled") return next;
+  if (current.status === "failed" || current.status === "cancelled" || current.status === "deadline" || current.status === "stopped") return current;
+  if (next.status === "failed" || next.status === "cancelled" || next.status === "deadline" || next.status === "stopped") return next;
+  return current.status === "partial" ? next : current;
 }
 
 function boundedProducerFailureReason(reason: string): string {

@@ -759,7 +759,13 @@ ends the pass partial with `enumeration_budget`. Neither retries the same
 unadvanced cursor inside that pass, skips the root, nor publishes incomplete coverage.
 The generation remains partial at its retained cursor; retry the same generation
 with more work/native bytes. This refusal is allocation-local, not a permanent
-source or generation failure.
+source or generation failure. Automatic pass receipts also retain advancing lexical
+partial state when vectors are already ready. Hard failures and cancellation/deadline
+outcomes retain their own status; otherwise the first refusal dominates partial/settled
+outcomes across workspaces. Binding readiness remains
+separately disclosed. Bounded bench preparation continues ordinary enumeration pages
+and remaining-budget partials, comparing durable census cursors/family state as well as
+coverage counts; an allocation refusal ends that invocation without retrying.
 
 Operators can replace an existing lexical selection through the idle runtime:
 
