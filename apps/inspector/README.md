@@ -27,7 +27,13 @@ an httpOnly session cookie. Inspector HTTP auth is cookie-only.
 session secret. Managed inspect supplies `ALAYA_DAEMON_URL`;
 `createInspectorApp` falls back to `http://127.0.0.1:5173` when constructing
 an app without that option. The inspector itself defaults to port `5174`
-(see CLI launcher for collision logic).
+(see CLI launcher for collision logic). Manual SPA
+(`pnpm --dir apps/inspector/web dev`) listens on `127.0.0.1:5175` (`strictPort`)
+and proxies `/api` to Inspector 5174; the daemon on 5173 remains required.
+Port 3000 is not a product default. Auto-session cookies mint for `127.0.0.1` /
+`::1` / `localhost` (including IPv4-mapped loopback) on the 127.0.0.1-only
+listener; missing conninfo is still that listener; an explicit non-loopback
+client is refused.
 
 ## Configuration
 

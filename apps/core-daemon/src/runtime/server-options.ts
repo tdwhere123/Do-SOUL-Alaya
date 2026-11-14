@@ -43,6 +43,18 @@ export function isLoopbackHost(host: string): boolean {
   return /^127(?:\.\d{1,3}){3}$/.test(normalized);
 }
 
+/**
+ * Whether unknown-peer rate-limit fail-closed should default on.
+ * Uses the listen-policy loopback classifier, including IPv4-mapped loopback.
+ * A unix socket does not flip this: non-loopback `DAEMON_HOST` still fail-closes
+ * missing peer/socket identity. Absent/empty host is the default loopback.
+ */
+export function isRemoteDaemonBind(envLike: DaemonHostEnvLike): boolean {
+  const configuredHost = readOptionalEnvValue(envLike.DAEMON_HOST);
+  const host = configuredHost ?? DEFAULT_DAEMON_HOST;
+  return !isLoopbackHost(host);
+}
+
 export function isWildcardHost(host: string): boolean {
   const normalized = stripBrackets(host);
   return (

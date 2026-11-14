@@ -21,6 +21,16 @@ It must not depend on core, soul, or daemon packages.
 - `src/repos/` contains repository implementations.
 - `src/migrations/` contains SQLite migration files copied during build.
 
+## Offline temporal candidate
+
+`prepareTemporalCandidate` is the supported offline preparation library API.
+It copies a live legacy database, initializes a candidate schema, reconciles
+quarantine, and publishes a new candidate file plus an unselected receipt
+(`kind: temporal_offline_candidate`, `status: prepared`, `selected: false`).
+It does not change the source path and does not select the candidate.
+`alaya temporal-cutover` is the operator entry for selection, rollback, and
+recovery from those filesystem artifacts. There is no second preparation CLI.
+
 ## Commands
 
 ```bash

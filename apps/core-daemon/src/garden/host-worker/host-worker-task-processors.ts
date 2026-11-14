@@ -13,7 +13,10 @@ import type { SignalOutcomeCounts } from "../post-turn-extract/signal-receiver.j
 
 export const IN_PROCESS_CLAIMANT = "in-process";
 
-/** Audit-first dispatch of an in-process claimed garden task. */
+/**
+ * Appends `soul.garden.task_dispatched` after an in-process claim already committed.
+ * This is not the scheduler's claim+dispatch EventLog-first transaction.
+ */
 export async function publishInProcessTaskDispatch(
   row: GardenTaskRow,
   runId: string,

@@ -70,8 +70,9 @@ holes; unsupported producer, guard or program cannot silently become a
 successful empty query. A proposed guard has no caller-owned verdict: Core
 rechecks source, equality, authorization, binding and time against captured
 current authority. Requested source observation time, semantic `as_of`,
-storage time and lease lifetime remain separate. Unknown source time is never
-inferred from `created_at`.
+storage time and lease lifetime remain separate. Memory `created_at` is existence
+time, not assertion validity and not an authorization coordinate. Unknown source
+time is never inferred from `created_at`.
 
 Association is `assoc.bottleneck.milligrade.v1`: compatible serial/AND paths
 use minimum, OR alternatives maximum. Separate rule instances, witnesses and

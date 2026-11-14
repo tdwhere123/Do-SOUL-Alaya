@@ -10,6 +10,7 @@ const request = () => ({ taskSurface: createTaskSurface(), workspaceId: "workspa
 
 describe("RecallService explicit query time", () => {
   it("filters real source timestamps with explicit inclusive bounds and keeps the interpretation clock", async () => {
+    // created_at is a listing filter, not assertion/source validity or authorization.
     const f = await fixture();
     const ids = ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001", "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
       "aaaaaaaa-aaaa-4aaa-8aaa-000000000003"];

@@ -1,8 +1,9 @@
 /**
  * Writable process SQLite open surface. `initDatabase` is the handle that
  * caches, migrates, and refuses an unverified temporal schema in runtime
- * mode. Offline cutover uses `prepareTemporalCandidate`; do not open
- * better-sqlite3 beside this owner.
+ * mode. Offline cutover prepares candidates with public `prepareTemporalCandidate`;
+ * do not open better-sqlite3 beside this owner. The CLI owns selection, rollback,
+ * and recovery from the candidate and receipt artifacts, not preparation.
  */
 export {
   initDatabase,

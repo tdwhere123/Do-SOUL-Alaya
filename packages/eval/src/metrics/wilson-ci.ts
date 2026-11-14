@@ -72,7 +72,8 @@ export function ciAwareBand(
 }
 
 // Sample-size label used in report.md and release notes to communicate
-// statistical confidence at a glance.
+// statistical confidence at a glance. It is a static report facet, not
+// gate_eligible, history-entry authority, or a release bypass.
 //
 // invariant: the cascade is size-driven; `worst_shard_bound` latency
 // always pins the label to `shard_merged` regardless of evaluatedCount

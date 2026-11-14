@@ -68,6 +68,8 @@ async function writeDiagnosticMerge(args: {
   readonly hits: ScorableHits;
 }): Promise<RecallEvalResult> {
   const slug = `${args.first.payload.run_at.replaceAll(":", "-")}-${args.first.payload.alaya_commit}-c${args.input.concurrency}-merged`;
+  // History-layout diagnostic artifact: same public/slug files as a history entry,
+  // but gate_eligible stays false and latest pointers are not updated.
   const entryRoot = join(args.input.historyRoot, "public", slug);
   await mkdir(entryRoot, { recursive: true });
   const kpiPath = join(entryRoot, "kpi.json");

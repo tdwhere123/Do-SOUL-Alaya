@@ -224,6 +224,9 @@ export function resolvePeerRateLimitKey(
     return `unix:${peercred}`;
   }
   const socket = readSocketRemoteAddress(context);
+  // Unix SO_PEERCRED is the identity when present. Missing peer and TCP
+  // address refuse only when fail-closed is on; that default follows listen
+  // policy, not a second loopback classifier.
   if (socket === undefined && failClosedOnUnknownSocket) {
     return UNKNOWN_SOCKET_KEY;
   }

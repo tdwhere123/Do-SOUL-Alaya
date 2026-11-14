@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { applyRemoteBindTokenRotation } from "../../../runtime/request-token-binding.js";
 import {
+  isLoopbackHost,
+  isRemoteDaemonBind,
   isRemoteDaemonOptInEnabled,
   resolveDaemonHostFromEnv,
   resolveDaemonListenPolicy,
@@ -145,5 +147,27 @@ describe("core daemon server listen options", () => {
     );
 
     expect(messages).toEqual([]);
+  });
+
+  it("treats IPv4-mapped loopback as loopback listen, not a remote fail-closed bind", () => {
+    expect(isLoopbackHost("::ffff:127.0.0.1")).toBe(true);
+    expect(isRemoteDaemonBind({ DAEMON_HOST: "::ffff:127.0.0.1" })).toBe(false);
+    expect(resolveDaemonListenPolicy({
+      DAEMON_HOST: "::ffff:127.0.0.1"
+    })).toEqual({ kind: "loopback", host: "::ffff:127.0.0.1" });
+  });
+
+  it("keeps unknown-peer fail-closed on a unix bind whose DAEMON_HOST is non-loopback", () => {
+    expect(isRemoteDaemonBind({
+      DAEMON_HOST: "0.0.0.0",
+      ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock",
+      ALAYA_ALLOW_REMOTE_DAEMON: "1",
+      ALAYA_ALLOW_WILDCARD_BIND: "1"
+    })).toBe(true);
+  });
+
+  it("does not treat a unix socket with default loopback TCP as a remote bind", () => {
+    expect(isRemoteDaemonBind({ ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock" })).toBe(false);
+    expect(isRemoteDaemonBind({})).toBe(false);
   });
 });

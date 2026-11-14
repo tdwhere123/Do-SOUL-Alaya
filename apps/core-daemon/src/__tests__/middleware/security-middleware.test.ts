@@ -9,7 +9,8 @@ import { createApiSecurityHeadersMiddleware } from "../../middleware/security-he
 import {
   isProtectedRequest,
   registerRateLimitMiddleware,
-  registerSecurityHeadersMiddleware
+  registerSecurityHeadersMiddleware,
+  resolveRateLimitSettings
 } from "../../middleware/register-security-middleware.js";
 
 vi.mock("@hono/node-server/conninfo", () => ({
@@ -180,6 +181,20 @@ describe("security middleware", () => {
 
     keyCounter = 0;
     expect((await app.request("/api/example")).status).toBe(429);
+  });
+
+  it("does not default unknown-socket fail-closed for IPv4-mapped loopback DAEMON_HOST", () => {
+    const previous = process.env.DAEMON_HOST;
+    process.env.DAEMON_HOST = "::ffff:127.0.0.1";
+    try {
+      expect(resolveRateLimitSettings(undefined).failClosedOnUnknownSocket).toBe(false);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.DAEMON_HOST;
+      } else {
+        process.env.DAEMON_HOST = previous;
+      }
+    }
   });
 
   it("fails closed on unknown sockets when remote bind is enabled", async () => {

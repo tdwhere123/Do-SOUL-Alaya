@@ -37,7 +37,12 @@ reference it but must not silently replace it.
 ## Temporal Relation Contract
 
 Evidence provides source observation/event time, never `created_at` as a
-surrogate. Active assertions require one typed interval: bounded `[from,to)`,
+surrogate. Memory `created_at` is storage existence time: it is not assertion
+validity, not source observation time, and not an authorization coordinate.
+Ordinary recall `time_field=created_at` is a listing filter. Query `as_of` /
+`referenceTime` is the interpretation clock. Inspector search windows parse
+local-timezone UI text; Recall and SQLite event-time windows compare UTC
+instants. Active assertions require one typed interval: bounded `[from,to)`,
 open `[from,+infinity)` or explicitly permitted timeless. Unknown validity
 stays in proposal, deferred or quarantine state. A nomination is a candidate;
 deterministic normalization and governance decide admission.
@@ -62,6 +67,13 @@ fails closed. Neither migration nor rollback manufactures time, rewrites
 assertion history or activates quarantine. This is a protocol/EventLog major
 under invariant §25, not an online mixed-schema reader.
 
+Offline preparation is the public `@do-soul/alaya-storage` library API
+`prepareTemporalCandidate`: it copies a live legacy schema, initializes a
+candidate, reconciles quarantine, and publishes the candidate file plus an
+unselected receipt (`kind: temporal_offline_candidate`, `selected: false`).
+It never changes the source path or selects the candidate. `alaya temporal-cutover`
+consumes those filesystem artifacts and owns selection, rollback, and recovery.
+There is no second preparation CLI.
 The offline CLI dispatches before normal database bootstrap and holds maintenance
 leases on physical resource paths. A journal-owned durable selection is the
 recovery commit point: recovery verifies that exact selected tuple and completes
@@ -129,8 +141,16 @@ replay does not infer a new grant from credentials or a model name.
   probe; help also omits that probe. Tools/MCP retain normal recall-capable bootstrap. These are internal
   lifecycle fixes under invariants §21–§25, not new tools or schema changes.
 - **Memory Inspector:** local memory-management and runtime-parameter UI,
-  not a chat or agent-turn frontend. It uses daemon HTTP with its own session.
-  Durable writes still pass through governance.
+  not a chat or agent-turn frontend. Managed `alaya inspect` listens on
+  `127.0.0.1:5174` and uses daemon `127.0.0.1:5173` (or `ALAYA_DAEMON_URL`).
+  Manual Vite SPA (`pnpm --dir apps/inspector/web dev`) listens on
+  `127.0.0.1:5175` with `strictPort` and proxies `/api` to Inspector 5174; the
+  daemon on 5173 remains required for that API. Port 3000 is not a product
+  default. Auto-session cookies mint for `127.0.0.1` / `::1` / `localhost`,
+  including IPv4-mapped `::ffff:127.0.0.1`, or when conninfo is missing on that
+  127.0.0.1-only listener. An explicit non-loopback client, including
+  `127.0.0.2`, is refused. This is not daemon request-token trust and not the
+  daemon 127/8 listen classifier. Durable writes still pass through governance.
 - **Host slash boot trigger:** a host-native launcher for
   `alaya inspect --open` if supported by that host/version, not an MCP tool
   or agent flow.
@@ -140,7 +160,11 @@ are operator-owned: changing `ALAYA_REQUEST_TOKEN` and restarting rotates the
 credential; when absent, normal HTTP startup fails closed and managed temporary
 startup passes a process-local token to its Inspector child. Remote non-loopback
 bind is break-glass, not secured by a desktop header or a single token for
-multi-host deployment. Provider configuration and secrets use the install
+multi-host deployment. Unknown-peer rate-limit refusal defaults on when
+`DAEMON_HOST` is a non-loopback TCP name, using the same loopback classifier
+as listen policy, including IPv4-mapped loopback. Unix `SO_PEERCRED` remains
+the peer identity when present. A unix socket plus default loopback
+`DAEMON_HOST` does not by itself enable that refusal. Provider configuration and secrets use the install
 route, not Inspector direct durable-memory writes. Startup validates a captured
 effective environment: process values override config-directory `.env` values
 per key, including explicit empty process values. Auth, listen/socket policy and
@@ -173,7 +197,13 @@ postcommit notification failure: keep the durable result, invalidate affected
 caches and report propagation diagnostics. Field formation,
 projection-generation and causal-usage receipts instead persist first and
 append EventLog as a separate audit step; a missing append does not erase an
-already committed receipt.
+already committed receipt. In-process Garden scheduler claim and
+`soul.garden.task_dispatched` share that EventLog-first transaction.
+Host-worker MCP claim is task-row CAS without that event: claim transfers
+ownership, it is not proof that work was dispatched. Statement-session
+in-process work commits the claim first, then publishes the dispatch audit;
+interruption leaves CAS/TTL reclaim to pending without fabricating
+`soul.garden.task_dispatched`. Those paths are not one state machine.
 
 An authorized source erase may redact proven source-derived claim
 canonicalization and slot-creation payload fields in the same transaction as

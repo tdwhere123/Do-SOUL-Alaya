@@ -40,6 +40,18 @@ deliverable. Neither creates a second ontology.
 
 **RecallQuery** — Scoped, budgeted request to RecallService.
 
+**Time coordinates** — Distinct clocks: source observation/event time,
+assertion validity, memory `created_at` (storage existence), query `as_of`
+(interpretation clock), and lease lifetime. Authorization uses principal and
+scope, not `created_at`. Inspector search windows parse local-timezone UI text;
+Recall and SQLite event-time windows compare UTC instants.
+
+**Preference** — Question-time preference softly reorders native nomination and
+cannot override hard `since`/`until` or authorization. Garden
+`preference_profile` is claim content. Manifestation preference is per-turn
+visibility. These are not one priority table. EventLog replay is deterministic
+and does not re-apply a later preference.
+
 ## Garden / Maintenance
 
 **Garden** — Fire-and-forget background maintenance relative to the consuming
@@ -90,7 +102,10 @@ fallback sharing one runtime contract. Daemon HTTP is not an MCP server.
 explicit confirmation.
 
 **Memory Inspector** — Local memory-management UI, not an agent chat frontend
-or alternate durable write path.
+or alternate durable write path. Managed inspect is daemon 5173 plus Inspector
+5174; manual Vite SPA is loopback 5175 proxying `/api` to 5174. Port 3000 is
+not a product default. Auto-session trusts `127.0.0.1` / `::1` / `localhost`
+on that 127.0.0.1-only listener, not daemon request-token auth.
 
 ## Recall
 

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenEventType, GardenTaskKind, hostSessionContainerKey } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
-import { createHostWorkerTaskExpirer } from "../../garden/host-worker/host-worker-task-maintenance.js";
+import { createGardenClaimReclaimer, createHostWorkerTaskExpirer } from "../../garden/host-worker/host-worker-task-maintenance.js";
+import { IN_PROCESS_CLAIMANT } from "../../garden/host-worker/host-worker-task-processors.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../../garden/statement-session/statement-session-closure.js";
 import { createGardenTaskHandlers } from "../../mcp-memory/garden-task/garden-task-handlers.js";
 import { CONTAINER, CONTAINER_KEY, WORKSPACE, createStatementSessionEnvironment, hostMessages } from "./statement-session-fixture.js";
@@ -101,6 +102,30 @@ describe("statement session closure robustness", { timeout: 30_000 }, () => {
     await capture(env, 1);
     env.advance(STATEMENT_SESSION_IDLE_MS);
     expect(idle().map(container => container.container_key)).toEqual([CONTAINER_KEY]);
+  });
+
+  it("reclaims an in-process statement-session claim that never published dispatch", async () => {
+    const env = await environment();
+    await capture(env, 0);
+    env.advance(STATEMENT_SESSION_IDLE_MS);
+    await env.processSession(env.provider(() => []), HOST_WORKER);
+    const [chunk] = env.sessionTasks();
+    expect(chunk).toMatchObject({ status: "pending" });
+    const claimedAt = env.now();
+    expect(await env.gardenTaskRepo.claimAtomic(chunk!.id, IN_PROCESS_CLAIMANT, claimedAt, WORKSPACE)).toBe("claimed");
+    const eventCount = (type: string) => (env.database.connection.prepare(
+      `SELECT COUNT(*) AS n FROM event_log WHERE event_type = ? AND entity_id = ?`).get(type, chunk!.id) as { n: number }).n;
+    expect(eventCount(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED)).toBe(0);
+
+    env.advance(11 * 60 * 1000);
+    await createGardenClaimReclaimer({ now: env.now, gardenTaskRepo: env.gardenTaskRepo })();
+    expect(env.sessionTasks()).toEqual([expect.objectContaining({ id: chunk!.id, status: "pending" })]);
+    expect(eventCount(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED)).toBe(0);
+    expect(eventCount(GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED)).toBe(1);
+
+    await env.processSession(env.provider(() => []));
+    expect(env.sessionTasks()).toEqual([expect.objectContaining({ id: chunk!.id, status: "completed" })]);
+    expect(eventCount(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED)).toBe(1);
   });
 
   it("fails an unclaimed chunk past the host-worker TTL instead of deleting it, without re-enqueueing it", async () => {

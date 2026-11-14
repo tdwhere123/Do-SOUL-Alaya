@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
+import { isRemoteDaemonBind } from "../runtime/server-options.js";
 import {
   createFixedWindowRateLimitMiddleware,
   resolveProtectedRateLimitKey
@@ -28,7 +29,7 @@ export function resolveRateLimitSettings(
   return {
     maxRequests: config?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS,
     windowMs: config?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
-    failClosedOnUnknownSocket: config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind(),
+    failClosedOnUnknownSocket: config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind(processEnvLookup()),
     ...(config?.nowMs === undefined ? {} : { nowMs: config.nowMs })
   };
 }
@@ -52,14 +53,6 @@ export function registerRateLimitMiddleware(
         resolveProtectedRateLimitKey(context, settings.failClosedOnUnknownSocket)
     })
   );
-}
-
-function isRemoteDaemonBind(env: NodeJS.ProcessEnv = processEnvLookup()): boolean {
-  const host = (env.DAEMON_HOST ?? "127.0.0.1").trim();
-  if (host.length === 0 || host === "localhost" || host === "::1" || host === "[::1]") {
-    return false;
-  }
-  return !/^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 export function isProtectedRequest(method: string, path: string): boolean {

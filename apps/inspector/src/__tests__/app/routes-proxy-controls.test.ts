@@ -182,6 +182,40 @@ describe("inspector routes", () => {
     }
   });
 
+  it("mints a session cookie for an IPv4-mapped loopback client", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-mapped-loopback-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
+    try {
+      const app = createInspectorApp({
+        launchCode: "mapped-code",
+        staticRoot,
+        resolveClientAddress: () => "::ffff:127.0.0.1"
+      });
+      const html = await app.request("/");
+      expect(html.status).toBe(200);
+      expect(html.headers.get("set-cookie")).toMatch(/alaya_inspector_session=/);
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mint a session cookie for 127.0.0.2, which is not Inspector client trust", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-loopback-range-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");
+    try {
+      const app = createInspectorApp({
+        launchCode: "range-code",
+        staticRoot,
+        resolveClientAddress: () => "127.0.0.2"
+      });
+      const html = await app.request("/");
+      expect(html.status).toBe(200);
+      expect(html.headers.get("set-cookie")).toBeNull();
+    } finally {
+      await rm(staticRoot, { recursive: true, force: true });
+    }
+  });
+
   it("does not mint a session cookie for an explicit non-loopback client", async () => {
     const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-remote-"));
     await writeFile(path.join(staticRoot, "index.html"), "<html>ok</html>", "utf8");

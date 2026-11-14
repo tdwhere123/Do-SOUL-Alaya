@@ -76,11 +76,14 @@ export function isLoopbackInspectorClient(
   context: Context,
   resolveClientAddress?: (context: Context) => string | undefined
 ): boolean {
-  const address = resolveClientAddress?.(context) ?? readSocketRemoteAddress(context);
-  if (address === undefined) {
+  const raw = resolveClientAddress?.(context) ?? readSocketRemoteAddress(context);
+  if (raw === undefined) {
     // Inspector HTTP only listens on 127.0.0.1; missing conninfo is still that listener.
     return true;
   }
+  const address = raw.startsWith("::ffff:") ? raw.slice("::ffff:".length) : raw;
+  // Inspector client trust is 127.0.0.1 / ::1 / localhost, including IPv4-mapped
+  // ::ffff:127.0.0.1. It is not the daemon 127/8 listen classifier.
   return address === "127.0.0.1" || address === "::1" || address === "localhost";
 }
 

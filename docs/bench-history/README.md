@@ -66,8 +66,13 @@ has `correct: null` and an explicit validity reason; any invalid judgment leaves
 the cohort's `qa_accuracy` unavailable without retrying or reducing `qa_total`.
 Diagnostic shard merges may reconstruct cohort counts while leaving quality
 facets `bench-quality-metrics.unavailable.v1`; unavailable facets cannot satisfy
-numeric gates. Historical merge reporting denominators do not establish current
-answerable-cohort or release authority.
+numeric gates. The merge writes history-shaped `public/<slug>` files as
+diagnostic evidence (`gate_eligible=false`, no latest-pointer update), not a
+promotable history entry. The static `shard_merged` sample-size label is a
+report facet, not that classification. Historical merge reporting denominators
+do not establish current answerable-cohort or release authority. Mixed-treatment
+stage pairing is the same diagnostic surface; it is not a production release
+bypass.
 
 Use the same explicit `--data-dir` for dataset warmup and scoring. Use
 `--history-root` to choose a different output root. Dataset warmup downloads

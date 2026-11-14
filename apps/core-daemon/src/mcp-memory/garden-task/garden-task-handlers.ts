@@ -177,6 +177,8 @@ function createClaimGardenTaskHandler(params: Readonly<{
     if (beforeClaim !== null) {
       GardenClaimTaskResponseSchema.parse({ status: "claimed", ...toGardenClaimTaskPayload(beforeClaim, repo.statementSessions) });
     }
+    // Host-worker MCP claim is task-row CAS only. It does not append
+    // soul.garden.task_dispatched; that pairing belongs to in-process scheduler dispatch.
     const claimResult = await repo.claimAtomic(
       request.task_id,
       context.agentTarget,
