@@ -17,7 +17,9 @@ ports from the daemon. It should not create daemon runtime dependencies.
 
 - `src/index.ts` exports the soul package surface.
 - `src/garden/` owns Garden extraction and materialization helpers.
-- `src/tools/` owns MCP tool handler wiring.
+- `src/kernel/` owns SOUL kernel helpers.
+- MCP `soul.*` / `garden.*` tool handler wiring lives in `apps/core-daemon`
+  (`src/mcp-memory/tool/`), not in this package.
 
 ## Commands
 

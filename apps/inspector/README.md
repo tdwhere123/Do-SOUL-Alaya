@@ -18,13 +18,16 @@ This package ships two concerns under one published artifact:
 
 The CLI launcher (`alaya inspect`) lives in
 `apps/core-daemon/src/cli/inspect.ts` and spawns this package's
-`dist/runtime/server.js` as a managed child process. The printed URL
-contains a one-time `launch` query code — not the inspector bearer token.
-The SPA redeems that code via loopback `POST /api/launch-session`, stores
-the token in `sessionStorage`, and sends it on subsequent requests as
-`X-Alaya-Inspector-Token`. The daemon URL is hard-coded to
-`http://127.0.0.1:5173` in `src/runtime/app.ts`; the inspector itself
-defaults to port `5174` (see CLI launcher for collision logic).
+`dist/runtime/server.js` as a managed child process. Inherited fd 3 carries
+the launch proof so it is not in argv or the child environment. The printed
+URL contains a one-time `launch` query code — not a bearer token. The SPA
+redeems that code via loopback `POST /api/launch-session`; the server sets
+an httpOnly session cookie. Inspector HTTP auth is cookie-only.
+`sessionStorage` tracks a session-ready flag and workspace id, not the
+session secret. Managed inspect supplies `ALAYA_DAEMON_URL`;
+`createInspectorApp` falls back to `http://127.0.0.1:5173` when constructing
+an app without that option. The inspector itself defaults to port `5174`
+(see CLI launcher for collision logic).
 
 ## Configuration
 

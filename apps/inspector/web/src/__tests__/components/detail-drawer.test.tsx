@@ -1,3 +1,4 @@
+import { SoulOpenPointerRequestSchema } from "@do-soul/alaya-protocol";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
@@ -144,8 +145,9 @@ describe("DetailDrawer", () => {
       expect(onCreateProposal).toHaveBeenCalledWith("retire", "mem-1", undefined);
     });
 
-    // The open-in-CLI command targets the bare object id via pointer_id, not
-    // the serialized anchor.
+    // The open-in-CLI command targets the bare object id via object_id, not
+    // the serialized anchor. Expected payload is a literal, then checked with
+    // the live strict MCP schema (invariant §25).
     await userEvent.click(screen.getByRole("button", { name: /open in cli/i }));
     await waitFor(() => {
       expect(onCopyCli).toHaveBeenCalled();
@@ -154,8 +156,21 @@ describe("DetailDrawer", () => {
       typeof text === "string" && text.includes("open_pointer")
     );
     expect(cliCall).toBeDefined();
-    expect(cliCall?.[0]).toContain('"pointer_id":"mem-1"');
+    const expectedOpenPointer = { object_id: "mem-1" } as const;
+    const expectedCliCommand =
+      `alaya tools call --json soul.open_pointer '{"object_id":"mem-1"}'`;
+    expect(cliCall?.[0]).toBe(expectedCliCommand);
     expect(cliCall?.[0]).not.toContain(serializedAnchor);
+    expect(cliCall?.[0]).not.toContain("pointer_id");
+    expect(SoulOpenPointerRequestSchema.parse(expectedOpenPointer)).toEqual({
+      object_id: "mem-1"
+    });
+    expect(() => SoulOpenPointerRequestSchema.parse({ pointer_id: "mem-1" })).toThrow();
+    const copiedJson = String(cliCall?.[0]).match(/\{[^}]*\}/u);
+    expect(copiedJson).not.toBeNull();
+    expect(SoulOpenPointerRequestSchema.parse(JSON.parse(copiedJson![0]))).toEqual({
+      object_id: "mem-1"
+    });
   });
 
   // canAct is gated on node.kind === "memory". A scope/concern anchor (no

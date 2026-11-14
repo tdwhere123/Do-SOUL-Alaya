@@ -56,7 +56,7 @@ export function useDetailDrawerState(props: UseDetailDrawerStateOptions): Detail
     () => ({
       busyAction,
       canAct: node?.kind === "memory",
-      cliCommand: node ? `alaya tools call --json soul.open_pointer '{"pointer_id":"${targetId}"}'` : "",
+      cliCommand: node ? `alaya tools call --json soul.open_pointer '{"object_id":"${targetId}"}'` : "",
       hasEvidence: Boolean(node?.evidence_refs && node.evidence_refs.length > 0),
       hasRemembered: Boolean(node?.summary || node?.rationale),
       hasTrust: node?.confidence !== undefined,

@@ -59,10 +59,9 @@ export class McpBridge {
     runtimeContext?: Readonly<ConversationRuntimeContext>
   ): Promise<McpToolResultBlock> {
     try {
-      if (toolUse.name.startsWith("soul.")) {
-        if (!Object.hasOwn(allowedSoulToolNames, toolUse.name)) {
-          return createErrorResult(toolUse.id, "unsupported tool");
-        }
+      // Catalog names, including published garden.*, are executable. Prefix-only
+      // soul.* routing left garden tools as an unknown namespace (invariant §25 patch).
+      if (Object.hasOwn(allowedSoulToolNames, toolUse.name)) {
         return await withTimeout(
           (signal) => this.dependencies.soulHandler(toolUse, runtimeContext, signal),
           this.timeoutMs
@@ -76,7 +75,7 @@ export class McpBridge {
         );
       }
 
-      if (toolUse.name.startsWith("tools.")) {
+      if (toolUse.name.startsWith("soul.") || toolUse.name.startsWith("tools.")) {
         return createErrorResult(toolUse.id, "unsupported tool");
       }
 

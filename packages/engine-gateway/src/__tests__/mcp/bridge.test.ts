@@ -196,9 +196,31 @@ describe("McpBridge", () => {
     });
   });
 
+  it("still denies unpublished garden names as an unknown namespace", async () => {
+    const soulHandler = vi.fn();
+    const bridge = new McpBridge({ soulHandler });
+
+    const result = await bridge.executeToolUse({
+      ...toolUse,
+      id: "toolu_garden_fake",
+      name: "garden.not_a_published_tool"
+    });
+
+    expect(soulHandler).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu_garden_fake",
+      content: JSON.stringify({
+        error: "Unknown MCP namespace for tool garden.not_a_published_tool"
+      }),
+      is_error: true
+    });
+  });
+
   it("returns an error result for unknown namespaces", async () => {
+    const soulHandler = vi.fn();
     const bridge = new McpBridge({
-      soulHandler: vi.fn()
+      soulHandler
     });
 
     const result = await bridge.executeToolUse({
@@ -207,9 +229,11 @@ describe("McpBridge", () => {
       name: "memory.store"
     });
 
-    expect(result).toMatchObject({
+    expect(soulHandler).not.toHaveBeenCalled();
+    expect(result).toEqual({
       type: "tool_result",
       tool_use_id: "toolu_3",
+      content: JSON.stringify({ error: "Unknown MCP namespace for tool memory.store" }),
       is_error: true
     });
   });
@@ -340,6 +364,45 @@ describe("McpBridge", () => {
       "garden.claim_task",
       "garden.complete_task"
     ]);
+  });
+
+  it("routes every published catalog tool, including garden.*, to the soul handler", async () => {
+    const catalogNames = soulToolDefs.map((toolDef) => toolDef.name);
+    expect(catalogNames).toEqual(expect.arrayContaining([
+      "garden.list_pending_tasks",
+      "garden.claim_task",
+      "garden.complete_task"
+    ]));
+
+    for (const name of catalogNames) {
+      const soulHandler = vi.fn().mockResolvedValue({
+        type: "tool_result",
+        tool_use_id: `toolu_${name}`,
+        content: JSON.stringify({ ok: true, tool: name })
+      });
+      const toolsHandler = vi.fn();
+      const bridge = new McpBridge({ soulHandler, toolsHandler });
+      const catalogToolUse = {
+        type: "tool_use",
+        id: `toolu_${name}`,
+        name,
+        input: {}
+      } satisfies ToolUseBlock;
+
+      const result = await bridge.executeToolUse(catalogToolUse, runtimeContext);
+
+      expect(soulHandler).toHaveBeenCalledWith(
+        catalogToolUse,
+        runtimeContext,
+        expect.any(AbortSignal)
+      );
+      expect(toolsHandler).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        type: "tool_result",
+        tool_use_id: `toolu_${name}`,
+        content: JSON.stringify({ ok: true, tool: name })
+      });
+    }
   });
 
   it("allows first-party recall tools through the soul namespace gate", async () => {

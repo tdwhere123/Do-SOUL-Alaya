@@ -10,9 +10,12 @@ schema export helpers. It must not depend on other workspace packages.
 
 ## Key Entry Points
 
+Current package version is `41.1.0` (see `package.json` and `CHANGELOG.md`).
+Historical protocol-version notes below stay historically bounded.
+
 - `src/index.ts` exports the public protocol surface.
 - `src/events/` contains EventLog payload schemas.
-- `src/soul/mcp-types.ts` contains MCP tool input/output schemas.
+- `src/surfaces/mcp-types.ts` contains MCP tool input/output schemas.
 - `src/engine/` contains conversation engine protocol types.
 
 ## Privacy redaction in EventLog

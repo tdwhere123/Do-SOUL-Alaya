@@ -18,6 +18,11 @@ versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
 
+Inspector `soul.open_pointer` copy uses strict `object_id`. MCP bridge executes
+published `garden.*` catalog tools through the soul handler. Both are adapter
+fixes with no tool-name or schema change (invariant §25 patch). Unknown MCP
+namespaces stay denied.
+
 Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
 (`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the
 delivered ranked page it lists one line per further member, up to 32 roots including

@@ -14,10 +14,9 @@ is the behavioral guardrail.
 - Recall is two problems: (1) relevance ranking, (2) answer-set coverage.
   Coverage/path/session signals in point-wise ranking often destroy ranking;
   put set-coverage in delivery, not as a ranking replace.
-- Prefer additive RRF (or flat additive) as the ranking base; use axes as
-  bounded refinement on top (compose, do not replace). Saturating noisy-OR /
-  multiplicative collapses that bury embedding rescue have already failed
-  catastrophically in bench — do not revive without new independent proof.
+- Live ranking belongs to `docs/handbook/recall.md`. Do not revive retired
+  fusion recipes (including RRF) or saturating noisy-OR / multiplicative
+  collapses without new independent proof.
 - Structural/topology "reserve" injection and correlated lexical double-count
   can look like gains while injecting noise — measure both any@5 and
   full-gold / single-fact, not one KPI.

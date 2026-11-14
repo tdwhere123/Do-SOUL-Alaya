@@ -78,7 +78,6 @@ better-sqlite3 over mock soup.
   worker on transient diagnostics — review products when the lane finishes.
 - Honor model allow-lists. Parent keeps final judgment; worker summaries are
   not closeout proof.
-- Review/fix-loop: Nice-to-have findings must also be fixed before closeout
-  (rerun reviewer only if that fix expands scope/behavior/risk). Fix
-  pre-existing nits in remediation passes — do not defer as out-of-scope.
-  Blocking/Important still need a fresh reviewer pass.
+- Review/fix-loop: honor the authorized scope. Nice-to-have or pre-existing
+  nits are not an automatic closeout obligation. Blocking/Important still
+  need a fresh reviewer pass when the task requires one.
