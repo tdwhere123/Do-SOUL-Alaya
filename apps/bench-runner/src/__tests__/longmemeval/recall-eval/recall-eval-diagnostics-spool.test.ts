@@ -1,4 +1,6 @@
 import { gunzipSync } from "node:zlib";
+import { writeFile } from "node:fs/promises";
+import { KpiPayloadSchema, renderReport, diffKpis } from "@do-soul/alaya-eval";
 import { access, appendFile, mkdtemp, readFile, rm, stat, truncate } from
   "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,6 +36,33 @@ const disabledRuntime = {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })));
+});
+
+describe("provider state KPI persistence", () => {
+  it.each([
+    { states: ["unknown", "unknown"], unknown: 1, returned: 0 },
+    { states: ["unknown", "provider_returned"], unknown: 0.5, returned: 0.5 },
+    { states: ["provider_not_requested", "provider_not_requested"], unknown: 0, returned: 0 }
+  ] as const)("keeps unknown in the whole evaluated denominator: %j", async fixture => {
+    const rows = fixture.states.map((state, index) => {
+      const row = question(`state-${index}`);
+      return { ...row, diagnostics: { ...row.diagnostics, provider_state: state } };
+    });
+    const payload = assembleRecallEvalKpi(kpiInput(rows));
+    const root = await mkdtemp(join(tmpdir(), "provider-kpi-")); roots.push(root);
+    await writeFile(join(root, "kpi.json"), JSON.stringify(payload));
+    const persisted = KpiPayloadSchema.parse(JSON.parse(await readFile(join(root, "kpi.json"), "utf8")));
+    expect(persisted.evaluated_count).toBe(2);
+    expect(persisted.kpi.provider_unknown_rate).toBe(fixture.unknown);
+    expect(persisted.kpi.provider_returned_rate).toBe(fixture.returned);
+    expect(renderReport(persisted, null, diffKpis(persisted, null)))
+      .toContain(`unknown=${(fixture.unknown * 100).toFixed(2)}%`);
+    const historical = structuredClone(payload);
+    delete historical.kpi.provider_unknown_rate;
+    const legacy = KpiPayloadSchema.parse(JSON.parse(JSON.stringify(historical)));
+    expect(legacy.kpi).not.toHaveProperty("provider_unknown_rate");
+    expect(renderReport(legacy, null, diffKpis(legacy, null))).toContain("unknown=n/a");
+  });
 });
 
 describe("RecallEvalDiagnosticsSpool", () => {

@@ -171,6 +171,8 @@ function assertProviderBinding(
        kpi.provider_failed_rate !== expected.provider_failed_rate) ||
       (kpi.provider_not_requested_rate !== undefined &&
        kpi.provider_not_requested_rate !== expected.provider_not_requested_rate) ||
+      (kpi.provider_unknown_rate !== undefined &&
+       kpi.provider_unknown_rate !== expected.unknown_rate) ||
       (kpi.query_embedding_unusable_rate !== undefined &&
        kpi.query_embedding_unusable_rate !== expected.query_embedding_unusable_rate)) {
     throw new Error("full diagnostics provider rates differ from verified KPI");

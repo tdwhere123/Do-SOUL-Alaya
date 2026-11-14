@@ -234,6 +234,7 @@ function buildProviderKpi(summaries: ReturnType<typeof buildLocomoKpiSummaries>)
     provider_pending_rate: summaries.providerStateSummary.provider_pending_rate,
     provider_failed_rate: summaries.providerStateSummary.provider_failed_rate,
     provider_not_requested_rate: summaries.providerStateSummary.provider_not_requested_rate,
+    provider_unknown_rate: summaries.providerStateSummary.unknown_rate,
     query_embedding_unusable_rate: summaries.providerStateSummary.query_embedding_unusable_rate
   };
 }

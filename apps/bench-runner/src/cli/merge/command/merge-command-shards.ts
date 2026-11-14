@@ -167,6 +167,7 @@ const PROVIDER_RATE_FIELDS = [
   "provider_pending_rate",
   "provider_failed_rate",
   "provider_not_requested_rate",
+  "provider_unknown_rate",
   "query_embedding_unusable_rate"
 ] as const satisfies readonly (keyof KpiPayload["kpi"])[];
 type ProviderRateField = (typeof PROVIDER_RATE_FIELDS)[number];
@@ -213,6 +214,7 @@ function createMergeShardAggregate(
       provider_pending_rate: 0,
       provider_failed_rate: 0,
       provider_not_requested_rate: 0,
+      provider_unknown_rate: 0,
       query_embedding_unusable_rate: 0
     },
     tierHot: 0,

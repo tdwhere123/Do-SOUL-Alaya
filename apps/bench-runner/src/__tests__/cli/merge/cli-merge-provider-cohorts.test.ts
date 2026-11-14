@@ -46,13 +46,14 @@ describe("merged provider-returned scorable cohort", () => {
     delete payload.kpi.provider_failed_rate;
     delete payload.kpi.provider_not_requested_rate;
     delete payload.kpi.query_embedding_unusable_rate;
+    delete payload.kpi.provider_unknown_rate;
     const merged = merge([measured, { ...unmeasured, payload }]);
     // The nonreporting shard stays in the denominator; its rates do not become zero.
     expect(merged).toMatchObject({ evaluated_count: 2, answerable_evaluated_count: 2 });
     expect(merged.kpi.r_at_5).toBe(1);
     for (const field of ["provider_returned_rate", "provider_pending_rate",
       "provider_failed_rate", "provider_not_requested_rate",
-      "query_embedding_unusable_rate"] as const) {
+      "query_embedding_unusable_rate", "provider_unknown_rate"] as const) {
       expect(merged.kpi[field]).toBeUndefined();
     }
   });
@@ -72,6 +73,19 @@ describe("merged provider-returned scorable cohort", () => {
       expect(merged.kpi.provider_returned_rate).toBe(1);
     }
   );
+
+  it("weights explicit unknown rates across unequal shards and never fills historical absence", () => {
+    const first = providerShard("unknown", [true], 3);
+    first.payload.kpi.provider_unknown_rate = 1;
+    first.payload.kpi.provider_returned_rate = 0;
+    const second = providerShard("known", [false], 0);
+    const merged = merge([first, second]);
+    expect(merged.evaluated_count).toBe(5);
+    expect(merged.kpi.provider_unknown_rate).toBe(0.8);
+    expect(merged.kpi.provider_returned_rate).toBe(0.2);
+    delete second.payload.kpi.provider_unknown_rate;
+    expect(merge([first, second]).kpi.provider_unknown_rate).toBeUndefined();
+  });
 
   it("archives the merged subset and passes the full diagnostics validator", async () => {
     const shards = [providerShard("a", [true], 3), providerShard("b", [false], 0)];
@@ -104,6 +118,10 @@ describe("merged provider-returned scorable cohort", () => {
     const contents = await readFile(path.resolve(archiveRoot, full.path));
     expect(payload.kpi.r_at_5_with_embedding_returned).toBe(0.5);
     expect(payload.kpi.provider_returned_rate).toBe(1);
+    expect(payload.kpi.provider_unknown_rate).toBe(0);
+    await expect(validateLongMemEvalReleaseDiagnostics({ contents, payload: {
+      ...payload, kpi: { ...payload.kpi, provider_unknown_rate: 0.5 }
+    } })).rejects.toThrow(/provider rates/u);
     await expect(validateLongMemEvalReleaseDiagnostics({ contents, payload })).resolves.toBeUndefined();
     await expect(validateLongMemEvalReleaseDiagnostics({ contents, payload: {
       ...payload, kpi: { ...payload.kpi, r_at_5_with_embedding_returned: 0.8 }
@@ -137,7 +155,7 @@ function providerShard(prefix: string, answerableHits: readonly boolean[], abste
       r_at_5_overall: hits / evaluated,
       ...(scorable === 0 ? {} : { r_at_5_with_embedding_returned: rate }),
       provider_returned_rate: 1, provider_pending_rate: 0, provider_failed_rate: 0,
-      provider_not_requested_rate: 0, query_embedding_unusable_rate: 0,
+      provider_not_requested_rate: 0, query_embedding_unusable_rate: 0, provider_unknown_rate: 0,
       quality_metrics: { ...makeQualityMetrics({ denominator: scorable, candidateAbsent: scorable - hits }),
         abstention: { schema_version: "bench-abstention.v2", total: abstentions, scored: 0,
           unscorable: abstentions, method: "fused_margin_diagnostic_only", calibration_status: "uncalibrated",
