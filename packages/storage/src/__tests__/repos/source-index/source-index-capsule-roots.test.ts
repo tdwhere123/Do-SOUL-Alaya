@@ -69,7 +69,7 @@ describe("native retained capsule SourceIndex roots", () => {
     await capsule(env, "inactive needle", "archived"); const root = await capsule(env);
     const generation = env.index.begin(env.index.select(WORKSPACE, configuration()));
     const refused = env.index.capturePage(WORKSPACE, generation.generation_id, 1, { work: 0, native_bytes: 0 });
-    expect(refused).toMatchObject({ added: 0, generation: { enumeration_complete: false, reason: "enumeration_budget" } });
+    expect(refused).toMatchObject({ added: 0, generation: { enumeration_complete: false, reason: "enumeration_allocation_exhausted" } });
     const visited = [];
     for (let i = 0; i < 8; i++) {
       const page = env.index.capturePage(WORKSPACE, generation.generation_id, 1, BUDGET); visited.push(page);

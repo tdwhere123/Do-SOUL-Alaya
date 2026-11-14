@@ -208,7 +208,7 @@ describe("persisted Source index build and restart states", () => {
     const generation = environment.index.begin(selection);
     const limited = environment.index.capturePage(WORKSPACE, generation.generation_id, 8, budget);
     expect(limited).toMatchObject({ added: 0, resources: { work: 0, native_bytes: 0 }, generation: {
-      status: "partial", reason: "enumeration_budget", enumeration_complete: false,
+      status: "partial", reason: "enumeration_allocation_exhausted", enumeration_complete: false,
       after_source_id: null, target_count: 0, completed_count: 0
     } });
     environment = reopen(environment);

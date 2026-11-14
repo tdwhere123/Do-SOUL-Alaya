@@ -156,7 +156,11 @@ export class SourceIndexLifecycle {
         debit(captured.resources); generation = captured.generation;
         checkpoint();
         await yieldToEventLoop(); checkpoint();
-        if (captured.resources.work === 0) break;
+        if (generation.reason === "enumeration_allocation_exhausted") {
+          // A reduced allocation after earlier pages advanced is ordinary pass exhaustion.
+          return page === 0 ? result("unavailable", generation.reason) : result("partial", "enumeration_budget");
+        }
+        if (generation.reason !== "enumeration_page" || captured.resources.work === 0) break;
       }
       // Unchanged roots copy the active generation's projections; only new or changed roots are analyzed.
       for (let batch = 0; batch < limits.max_capture_pages * LEXICAL_REUSE_BATCHES_PER_PAGE && visitedRoots < limits.max_roots; batch++) {
@@ -208,6 +212,7 @@ export class SourceIndexLifecycle {
       generation = store.lexicalGeneration(workspaceId, generation.generation_id);
       checkpoint();
       if (generation === null) return result("unbound", "missing_generation");
+      if (!generation.enumeration_complete) return result("partial", generation.reason ?? "capture_incomplete");
       const publish = store.activateLexical(workspaceId, generation.generation_id);
       generation = store.lexicalGeneration(workspaceId, generation.generation_id);
       if (publish.status === "accepted") return result("ready", null);

@@ -290,7 +290,9 @@ export class SourceIndexProducer {
         pass.binding = binding.status === "ready"
           ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
         tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
-        if (binding.status === "unsupported") pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+        if (binding.status === "unsupported" && pass.outcome.status === "settled") {
+          pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+        }
       }
       if (tracked.status === "unsupported") {
         if (vectorFirst) await this.reconcileLexical(workspace, pass);
@@ -343,6 +345,9 @@ export class SourceIndexProducer {
     pass.visitedRoots += result.visited_roots;
     pass.capturePages += result.capture_pages;
     for (const key of ["pages", "projections", "targets", "generations"] as const) pass.reclamation[key] += result.reclamation[key];
+    if (result.status === "unavailable" && result.reason === "enumeration_allocation_exhausted") {
+      pass.outcome = { status: "resource_exhausted", reason: result.reason };
+    }
     if (result.status === "unavailable" && result.reason !== "segmenter_unavailable" && !pass.signal.aborted) {
       this.input.warn("source index lexical preparation unavailable", { workspace_id: workspaceId, reason: boundedProducerFailureReason(result.reason ?? "") });
     }
@@ -365,8 +370,14 @@ export class SourceIndexProducer {
       this.targetCursors.delete(workspaceId);
       return { status: "settled", reason: "pass_complete" };
     }
+    const captureStart = pass.capturePages;
     const captured = this.captureUntilComplete(workspaceId, generation, pass);
     if (pass.signal.aborted) return null;
+    if (captured.reason === "enumeration_allocation_exhausted" && pass.capturePages > captureStart) {
+      if (pass.capturePages > captureStart + 1) return { status: "partial", reason: "enumeration_budget" };
+      this.input.warn("source index capture allocation exhausted", { workspace_id: workspaceId, reason: captured.reason });
+      return { status: "resource_exhausted", reason: captured.reason };
+    }
     const outcome = await this.backfillTargets(selection, captured.generation_id, binding, pass);
     if (outcome !== null) return outcome;
     return pass.signal.aborted ? null : this.publishIfReady(workspaceId, captured.generation_id);
@@ -382,7 +393,7 @@ export class SourceIndexProducer {
       pass.spent.work += result.resources.work;
       pass.spent.native_bytes += result.resources.native_bytes;
       generation = result.generation;
-      if (result.resources.work === 0 && result.resources.native_bytes === 0) break;
+      if (generation.reason !== "enumeration_page" || result.resources.work === 0) break;
     }
     return generation;
   }
@@ -440,7 +451,7 @@ export class SourceIndexProducer {
     if (generation.status === "failed") return { status: "failed", reason: generation.reason ?? "generation_failed" };
     if (generation.status === "retired") return { status: "superseded", reason: "generation_retired" };
     if (!generation.enumeration_complete || generation.completed_count !== generation.target_count) {
-      return { status: "partial", reason: !generation.enumeration_complete ? "capture_incomplete" : "pending_targets" };
+      return { status: "partial", reason: !generation.enumeration_complete ? generation.reason ?? "capture_incomplete" : "pending_targets" };
     }
     const published = this.lifecycle.publish(workspaceId, generationId);
     if (published.status === "accepted") return { status: "settled", reason: "pass_complete" };

@@ -749,6 +749,17 @@ The explicit `SourceIndexLifecycle.prepareLexical` entry and the idle daemon's
 records and standalone capsules with no embedding binding or dispatch. They share
 the bounded native census, source guards and dependency closure with vector
 preparation, but have independent selection, generation, pending roots and activation.
+A census budget refusal after durable cursor/family progress remains partial
+(`enumeration_budget`). Without such progress, `enumeration_allocation_exhausted`
+means the supplied census allocation cannot service the next guarded root, even
+when its probes consumed work. With no earlier census-page progress in the pass,
+lexical preparation returns unavailable; the daemon pass reports resource exhaustion
+and an operator warning. A reduced allocation after earlier page progress instead
+ends the pass partial with `enumeration_budget`. Neither retries the same
+unadvanced cursor inside that pass, skips the root, nor publishes incomplete coverage.
+The generation remains partial at its retained cursor; retry the same generation
+with more work/native bytes. This refusal is allocation-local, not a permanent
+source or generation failure.
 
 Operators can replace an existing lexical selection through the idle runtime:
 

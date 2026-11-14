@@ -62,6 +62,22 @@ export function publishStatement(environment: Pick<Fixture, "database">, input: 
   return { bound, source: sourceIndexStatementTarget(artifact, input.record.source_id) };
 }
 
+/** Legal maximum context closure followed by an independently readable small capsule. */
+export async function publishFullContextStatement(environment: Pick<Fixture, "database" | "records">) {
+  const contexts = Array.from({ length: 128 }, (_, index) =>
+    publishMessages(environment, [{ role: "user", text: `Context ${index}.` }], `context-${String(index).padStart(3, "0")}`).record);
+  const source = publishMessages(environment, [{ role: "user", text: "The dependent statement." }], "target");
+  const first = publishStatement(environment, source, "b", 0, {}, contexts.map(contextOf));
+  const later = await new SqliteEvidenceCapsuleRepo(environment.database).create({
+    object_id: "ffffffff-ffff-4fff-8fff-ffffffffffff", object_kind: "evidence_capsule", schema_version: 1,
+    lifecycle_state: "active", created_at: CLOCK, updated_at: CLOCK, created_by: "storage-test",
+    evidence_kind: "conversation_excerpt", semantic_anchor: { topic: "later", keywords: [], summary: "later" },
+    event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "Later small capsule.",
+    excerpt: "Later small capsule.", source_hash: null, run_id: "run-statements", workspace_id: WORKSPACE, surface_id: null
+  });
+  return { first, later };
+}
+
 export function contextOf(record: FieldSourceRecordRow): SourceStatementContextSource {
   return { workspace_id: record.workspace_id, root_id: record.record_id, source_id: record.source_id,
     source_version: record.source_version, content_digest: record.content_digest };

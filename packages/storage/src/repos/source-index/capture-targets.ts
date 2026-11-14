@@ -105,6 +105,12 @@ export function enumerateSourceIndexTargets(database: StorageDatabase, records: 
     }
     cursor = nextRecord; capsulesCursor = nextCapsule;
   }
+  // Only committed cursor/family movement is progress. Dependency probes can consume
+  // positive work indefinitely without making this allocation serviceable.
+  if (reason === "enumeration_budget" && cursor === input.after_source_id &&
+      capsulesCursor === input.after_capsule_cursor && recordsDone === input.records_complete) {
+    reason = "enumeration_allocation_exhausted";
+  }
   if (!complete && reason === null) reason = "enumeration_page";
   return { after_source_id: cursor, after_capsule_cursor: capsulesCursor, records_complete: recordsDone,
     enumeration_complete: complete, added, reason };
