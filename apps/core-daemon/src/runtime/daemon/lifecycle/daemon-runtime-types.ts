@@ -45,6 +45,8 @@ export interface DaemonStartupStepRecord {
 }
 
 export interface AlayaDaemonRuntime {
+  /** Validated startup subset only; never a storage/config locator overlay. */
+  readonly startupConfig?: import("../support/daemon-env.js").ValidatedDaemonEnv;
   readonly app: ReturnType<typeof createCoreDaemonApp>;
   readonly requestProtection: RequestProtectionConfig;
   readonly runtimeNotifier: AlayaRuntimeNotifier;

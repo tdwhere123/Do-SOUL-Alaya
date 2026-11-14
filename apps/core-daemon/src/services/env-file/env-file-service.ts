@@ -4,13 +4,13 @@ import { processEnvLookup } from "../../runtime/config/daemon-config-environment
 import {
   assertPublicHttpProviderUrl,
   formatFileSecretRef,
-  isContainedFileSecretPath,
   parseEnvBoolean,
   parseSecretRefKeychainTarget,
   type RuntimeEmbeddingConfig,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import { assertPasteSecretSupported } from "../support/paste-secret-platform.js";
+import { resolveContainedFileSecretPath } from "../../secrets/file-secret-path.js";
 import type { AlayaConfigPaths } from "../../cli/support/config-files.js";
 import {
   parseRuntimeEmbeddingConfigPatchWithSecretControls,
@@ -414,25 +414,6 @@ function assertPatchedProviderUrl(providerUrl: string | null, invalidPatch: () =
   } catch {
     throw invalidPatch();
   }
-}
-
-function resolveContainedFileSecretPath(filePath: string, secretsDir: string): string | null {
-  if (!path.isAbsolute(filePath) || filePath.includes("\0")) {
-    return null;
-  }
-  const resolvedFile = path.resolve(filePath);
-  const resolvedRoot = path.resolve(secretsDir);
-  if (!isContainedFileSecretPath(resolvedFile, resolvedRoot)) {
-    return null;
-  }
-  const relative = path.relative(resolvedRoot, resolvedFile);
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return null;
-  }
-  if (relative.split(path.sep).includes("..")) {
-    return null;
-  }
-  return resolvedFile;
 }
 
 function invalidRuntimeEmbeddingPatch(): CoreError {

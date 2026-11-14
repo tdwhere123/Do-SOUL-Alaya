@@ -137,6 +137,7 @@ type CreateCoreDaemonAppInput = Readonly<{
 
 export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType<typeof createApp> {
   const services = {
+    env: input.env,
     requestProtection: {
       ...input.requestProtection,
       allowDesktopOriginlessRequests: !input.remoteDaemonOptInEnabled

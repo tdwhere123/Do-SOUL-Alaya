@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { resolveContainedFileSecretPath } from "./file-secret-path.js";
 import { processEnvLookup } from "../runtime/config/daemon-config-environment.js";
 import {
-  isContainedFileSecretPath,
   parseSecretRefKeychainTarget,
   SECRET_REF_ENV_PREFIX,
   SECRET_REF_FILE_PREFIX,
@@ -117,9 +117,7 @@ function resolveFileRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret
   }
 
   const secretsDir = reader.secretsDir ?? resolveConfiguredSecretsDir();
-  const resolvedFile = path.resolve(filePath);
-  const resolvedSecretsDir = path.resolve(secretsDir);
-  if (!isContainedFileSecretPath(resolvedFile, resolvedSecretsDir)) {
+  if (resolveContainedFileSecretPath(filePath, secretsDir) === null) {
     return {
       kind: "malformed",
       ref,

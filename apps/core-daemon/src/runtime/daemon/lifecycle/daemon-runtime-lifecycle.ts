@@ -52,6 +52,7 @@ type GardenBacklogTelemetryLifecycle = Readonly<{
 }>;
 
 type CreateDaemonLifecycleControlsInput = Readonly<{
+  env?: NodeJS.ProcessEnv;
   app: Readonly<{ fetch: DaemonAppFetch }>;
   lifecycleState: CoreDaemonLifecycleState;
   warnLogger: LifecycleWarnLogger;
@@ -306,9 +307,10 @@ function createHttpServerStarter(
     ensureServerNotRunning(state);
     logEphemeralTokenStartup(input, options);
 
-    const policy = resolveDaemonListenPolicy(processEnvLookup());
+    const env = input.env ?? processEnvLookup();
+    const policy = resolveDaemonListenPolicy(env);
     const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
-    const port = options.port ?? parsePort(processEnvLookup().PORT, 3000);
+    const port = options.port ?? parsePort(env.PORT, 3000);
     const serverFactory = input.serverFactory ?? serve;
     const tcpServer = serverFactory({
       fetch: input.app.fetch,
@@ -335,7 +337,7 @@ function createHttpServerStarter(
     }
     startBackgroundServices();
     installSignalShutdownHandlersOnce(state, input, shutdown);
-    warnIfRemoteDaemonListening(processEnvLookup(), hostname, (message) => {
+    warnIfRemoteDaemonListening(env, hostname, (message) => {
       input.warnLogger.warn(message, {});
     });
     const address = (tcpServer as Partial<Server>).address?.();
@@ -379,8 +381,8 @@ function logEphemeralTokenStartup(
   }
 
   input.warnLogger.warn("starting managed daemon with ephemeral request token", {
-    host: options.hostname ?? resolveDaemonHostFromEnv(processEnvLookup()),
-    port: options.port ?? parsePort(processEnvLookup().PORT, 3000)
+    host: options.hostname ?? resolveDaemonHostFromEnv(input.env ?? processEnvLookup()),
+    port: options.port ?? parsePort((input.env ?? processEnvLookup()).PORT, 3000)
   });
 }
 

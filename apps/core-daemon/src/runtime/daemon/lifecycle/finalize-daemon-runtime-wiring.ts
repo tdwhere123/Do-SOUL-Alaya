@@ -4,7 +4,7 @@ import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
-import { processEnvLookup } from "../../config/daemon-config-environment.js";
+import { createReviewerIdentityBindingFromEnv } from "../../../mcp-memory/tool/daemon-handler.js";
 import {
   createAuditedSourceAdmission,
   createAuditedSourceReplacement,
@@ -25,6 +25,7 @@ export async function finalizeDaemonRuntimeFromWiring(
     gardenTaskRepo: input.gardenTaskRepo, warn: input.warnLogger.warn,
     now: receiptTime === undefined ? () => new Date().toISOString() : () => receiptTime });
   return await finalizeAlayaDaemonRuntime({
+    startupConfig: input.startupConfig,
     requestProtection: input.requestProtection,
     runtimeNotifier: input.runtimeNotifier,
     startupSteps: input.startupSteps,
@@ -60,6 +61,7 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
   hostSessionCapture: HostSessionCapture | undefined) {
   return {
     ...(input.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: input.sourceSemanticInterpretationClock }),
+    reviewerIdentityBinding: createReviewerIdentityBindingFromEnv(input.effectiveEnv),
     zeroDayToolAccess: input.zeroDaySecurityLayer,
     recallService: input.recallService,
     memoryService: input.memoryService,
@@ -164,7 +166,7 @@ function createDaemonAppEnvironmentInput(input: FinalizeDaemonRuntimeWiringInput
     principalCodingEngineAvailable: input.principalCodingAvailability.available,
     repoRoot: input.repoRoot,
     filesDirectory: input.filesDirectory,
-    env: processEnvLookup(),
+    env: input.effectiveEnv,
     listServerHardConstraints: input.listServerHardConstraints,
     warn: input.warnLogger.warn,
     probeDatabase: () => {
@@ -228,6 +230,7 @@ function createDaemonAppServiceInput(input: FinalizeDaemonRuntimeWiringInput) {
 
 function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
   return {
+    env: input.effectiveEnv,
     warnLogger: input.warnLogger,
     gardenBacklogTelemetryService: input.gardenBacklogTelemetryService,
     gardenRuntime: input.gardenRuntime,

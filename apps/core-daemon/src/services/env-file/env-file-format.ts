@@ -21,6 +21,24 @@ export function renderEnv(entries: ReadonlyMap<string, string>): string {
   return `${Array.from(entries.entries()).map(([key, value]) => `${renderEnvKey(key)}=${renderEnvValue(value)}`).join("\n")}\n`;
 }
 
+/** Replace only keys owned by a writer; operator lines and comments remain byte-for-byte. */
+export function mergeOwnedEnvEntries(
+  content: string | null,
+  ownedKeys: readonly string[],
+  updates: ReadonlyMap<string, string>
+): string {
+  const owned = new Set(ownedKeys);
+  for (const key of updates.keys()) {
+    if (!owned.has(key)) throw new CoreError("VALIDATION", `Unowned .env key: ${key}`);
+  }
+  const retained = (content ?? "").split(/(?<=\n)/u).filter((line) => {
+    const assignment = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(line);
+    return assignment === null || !owned.has(assignment[1]!);
+  }).join("");
+  const separator = retained.length > 0 && !retained.endsWith("\n") ? "\n" : "";
+  return `${retained}${separator}${renderEnv(updates)}`;
+}
+
 function parseEnvValue(rawValue: string): string {
   if (rawValue.startsWith("\"")) {
     if (!rawValue.endsWith("\"") || rawValue.length === 1) {
@@ -42,7 +60,7 @@ function renderEnvValue(value: string): string {
   if (/[\r\n]/u.test(value)) {
     throw new CoreError("VALIDATION", ".env values must be single-line");
   }
-  if (value.includes("#")) {
+  if (/[\s"#\\]/u.test(value)) {
     return `"${value.replace(/["\\]/gu, "\\$&")}"`;
   }
   return value;

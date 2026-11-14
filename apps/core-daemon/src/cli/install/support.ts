@@ -4,6 +4,7 @@ import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import type { AlayaCliContext } from "../bridge.js";
 import type { AlayaConfigPaths } from "../support/config-files.js";
 import { writePrivateTextAtomic } from "../../services/support/private-file-service.js";
+import { parseEnv } from "../../services/env-file/env-file-format.js";
 import type {
   KeychainAvailabilityResult,
   KeychainReadResult,
@@ -47,6 +48,7 @@ export interface PartialStateEntry {
   readonly path: string;
   // beforeContent === undefined means the file did not exist before; rollback unlinks.
   readonly beforeContent: string | undefined;
+  readonly afterContent?: string;
 }
 
 export type GardenConfigAuditSnapshot = Pick<RuntimeGardenComputeConfig, "provider_kind" | "enabled" | "secret_ref">;
@@ -75,6 +77,13 @@ export async function rollbackPartialState(partialState: readonly PartialStateEn
   for (let i = partialState.length - 1; i >= 0; i -= 1) {
     const entry = partialState[i]!;
     try {
+      if (entry.afterContent !== undefined) {
+        const current = await readOptional(entry.path);
+        if (current === (entry.beforeContent ?? null)) continue;
+        if (current !== entry.afterContent) {
+          throw new Error("Config changed after publication; refusing to overwrite it during rollback");
+        }
+      }
       if (entry.beforeContent === undefined) {
         await unlink(entry.path).catch((err) => {
           if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -180,14 +189,8 @@ export function readTomlBoolean(content: string, sectionName: string, key: strin
 }
 
 export function readEnvValue(content: string, key: string): string | null {
-  for (const rawLine of content.split(/\r?\n/u)) {
-    const [rawKey, ...valueParts] = rawLine.split("=");
-    if (rawKey === key) {
-      const value = valueParts.join("=").trim();
-      return value.length > 0 ? value : null;
-    }
-  }
-  return null;
+  const value = parseEnv(content).get(key)?.trim();
+  return value === undefined || value.length === 0 ? null : value;
 }
 
 export function normalizeFile(value: string | null): string {

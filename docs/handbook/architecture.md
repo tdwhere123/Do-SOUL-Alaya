@@ -141,7 +141,19 @@ credential; when absent, normal HTTP startup fails closed and managed temporary
 startup passes a process-local token to its Inspector child. Remote non-loopback
 bind is break-glass, not secured by a desktop header or a single token for
 multi-host deployment. Provider configuration and secrets use the install
-route, not Inspector direct durable-memory writes. Review identity is
+route, not Inspector direct durable-memory writes. Startup validates a captured
+effective environment: process values override config-directory `.env` values
+per key, including explicit empty process values. Auth, listen/socket policy and
+reviewer binding consume that same snapshot without mutating process environment.
+Database selection remains separately owned by configured-paths (TOML, process
+`DATA_DIR`, default); file `.env` cannot redirect maintenance or runtime storage.
+Installer updates only its embedding/provider keys and explicit Garden mode,
+preserving unrelated operator lines. Install, keychain and runtime config writers
+share the exclusive config-file lock through publication and rollback. Conflicting
+installs reject without writing; an interrupted lock is not stolen automatically.
+Reconcile an interrupted install's audit/files before removing its orphaned lock
+and retrying with `--force`. File-secret admission reuses the runtime containment
+rule; installation never copies an external secret implicitly. Review identity is
 server-bound only with configured reviewer token and identity; otherwise it
 is an attestation (invariant §21b).
 

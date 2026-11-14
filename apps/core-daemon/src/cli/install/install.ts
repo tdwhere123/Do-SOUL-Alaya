@@ -1,6 +1,9 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
+import { CoreError, DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
+import { resolveContainedFileSecretPath } from "../../secrets/file-secret-path.js";
+import { mergeOwnedEnvEntries } from "../../services/env-file/env-file-format.js";
+import { withRuntimeEmbeddingFileLock } from "../../services/env-file/env-file-io.js";
 import {
   RuntimeGardenProviderKindSchema,
   formatFileSecretRef,
@@ -43,6 +46,7 @@ import {
   type PartialStateEntry
 } from "./support.js";
 import { installArgsSchema } from "./args.js";
+import { INSTALL_ENV_KEYS, renderAlayaToml, buildInstallEnvEntries, type ResolvedInstallConfig } from "./render-install-config.js";
 
 export type { InstallAnswers, InstallCommandDependencies } from "./support.js";
 
@@ -104,19 +108,6 @@ interface ExistingInstallConfig {
   readonly garden_provider_kind: string | null;
 }
 
-interface ResolvedInstallConfig {
-  readonly db_path: string;
-  readonly embedding_enabled: boolean;
-  readonly embedding_provider: EmbeddingProviderKind;
-  readonly provider_base_url: string | null;
-  readonly model_id: string;
-  readonly default_workspace: string;
-  readonly worktree_enabled: boolean;
-  readonly secret_ref: string | null;
-  readonly garden_provider_kind: RuntimeGardenComputeConfig["provider_kind"] | null;
-  readonly pasted_secret: Readonly<{ readonly path: string; readonly value: string }> | null;
-}
-
 async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<ExistingInstallConfig> {
   const toml = await readOptional(paths.tomlPath);
   const env = await readOptional(paths.envPath);
@@ -163,7 +154,7 @@ function resolveInstallAnswers(
       : null;
   const secretRef = usesOpenAi
     ? embeddingEnabled
-      ? resolveInstallSecretRef(answers, existing, pastedSecret)
+      ? resolveInstallSecretRef(answers, existing, pastedSecret, paths.secretsDir)
       : existing.secret_ref
     : null;
   const defaultModelId = usesOpenAi ? "text-embedding-3-small" : DEFAULT_LOCAL_ONNX_MODEL_ID;
@@ -207,63 +198,23 @@ function resolveGardenProviderKind(
 function resolveInstallSecretRef(
   answers: InstallAnswers,
   existing: ExistingInstallConfig,
-  pastedSecret: ResolvedInstallConfig["pasted_secret"]
+  pastedSecret: ResolvedInstallConfig["pasted_secret"],
+  secretsDir: string
 ): string | null {
   if (pastedSecret !== null) {
     return formatFileSecretRef(pastedSecret.path);
   }
   if (answers.api_key_source === "file") {
-    return formatFileSecretRef(path.resolve(requireNonEmpty(answers.key_file_path, "key_file_path")));
+    const containedPath = resolveContainedFileSecretPath(requireNonEmpty(answers.key_file_path, "key_file_path"), secretsDir);
+    if (containedPath === null) {
+      throw new CoreError("VALIDATION", "key_file_path must resolve inside the configured secrets directory.");
+    }
+    return formatFileSecretRef(containedPath);
   }
   if (answers.api_key_source === "env" || existing.secret_ref === null) {
     return `env:${requireNonEmpty(answers.env_var_name ?? "OPENAI_API_KEY", "env_var_name")}`;
   }
   return existing.secret_ref;
-}
-
-function renderAlayaToml(config: ResolvedInstallConfig): string {
-  const lines = [
-    "[storage]",
-    `db_path = ${quoteTomlString(config.db_path)}`,
-    "",
-    "[runtime]",
-    `default_workspace = ${quoteTomlString(config.default_workspace)}`,
-    `worktree_enabled = ${config.worktree_enabled ? "true" : "false"}`,
-    "",
-    "[embedding]",
-    `enabled = ${config.embedding_enabled ? "true" : "false"}`,
-    `model_id = ${quoteTomlString(config.model_id)}`
-  ];
-  if (config.provider_base_url !== null) {
-    lines.push(`provider_base_url = ${quoteTomlString(config.provider_base_url)}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function renderEnvFile(config: ResolvedInstallConfig): string {
-  const lines = [
-    `ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=${config.embedding_enabled ? "true" : "false"}`,
-    `ALAYA_EMBEDDING_PROVIDER=${config.embedding_provider}`
-  ];
-  if (config.embedding_provider === "local_onnx") {
-    lines.push(`ALAYA_LOCAL_EMBEDDING_MODEL=${config.model_id}`);
-  } else {
-    if (config.secret_ref !== null) {
-      lines.push(`ALAYA_OPENAI_SECRET_REF=${config.secret_ref}`);
-    }
-    lines.push(`OPENAI_EMBEDDING_MODEL=${config.model_id}`);
-    if (config.provider_base_url !== null) {
-      lines.push(`OPENAI_EMBEDDING_PROVIDER_URL=${config.provider_base_url}`);
-    }
-  }
-  if (config.garden_provider_kind !== null) {
-    lines.push(`${GARDEN_PROVIDER_KIND_ENV}=${config.garden_provider_kind}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function quoteTomlString(value: string): string {
-  return JSON.stringify(value);
 }
 
 function normalizeNullableString(
@@ -308,6 +259,25 @@ async function runNonInteractiveInstall(
   deps: InstallCommandDependencies
 ): Promise<AlayaCliResult> {
   const session = createInstallSession(ctx, deps);
+  try {
+    await ensurePrivateDirectory(session.paths.configDir);
+    // Same OS-level lock as runtime/Inspector and keychain writers. Never steal
+    // an orphaned lock: an interrupted publication needs operator reconciliation.
+    return await withRuntimeEmbeddingFileLock(session.paths.envPath, { timeoutMs: 0 }, async () =>
+      await runInstallUnderLock(ctx, args, deps, session)
+    );
+  } catch (error) {
+    ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+  }
+}
+
+async function runInstallUnderLock(
+  ctx: AlayaCliContext,
+  args: InstallArgs,
+  deps: InstallCommandDependencies,
+  session: ReturnType<typeof createInstallSession>
+): Promise<AlayaCliResult> {
   const partialState: PartialStateEntry[] = [];
   let auditInitialized = false;
 
@@ -377,6 +347,10 @@ async function applyInstallConfig(
 ): Promise<void> {
   const existing = await readExistingInstallConfig(paths);
   const resolved = resolveInstallAnswers(answers, existing, paths);
+  if (resolved.secret_ref?.startsWith("file:")
+    && resolveContainedFileSecretPath(resolved.secret_ref.slice("file:".length), paths.secretsDir) === null) {
+    throw new CoreError("VALIDATION", "File secret ref must resolve inside the configured secrets directory.");
+  }
   await persistPastedSecret(paths, resolved.pasted_secret, partialState, platform);
   await persistInstallTextFiles(paths, resolved, partialState);
   await ensureSchemaReady(resolved.db_path);
@@ -394,8 +368,9 @@ async function persistPastedSecret(
   assertPasteSecretSupported(platform);
   await ensurePrivateDirectory(paths.secretsDir);
   const secretBefore = await readOptional(pastedSecret.path);
-  await writePrivateTextAtomic(pastedSecret.path, `${pastedSecret.value.trimEnd()}\n`, 0o600);
-  partialState.push({ path: pastedSecret.path, beforeContent: secretBefore ?? undefined });
+  const afterContent = `${pastedSecret.value.trimEnd()}\n`;
+  partialState.push({ path: pastedSecret.path, beforeContent: secretBefore ?? undefined, afterContent });
+  await writePrivateTextAtomic(pastedSecret.path, afterContent, 0o600);
 }
 
 async function persistInstallTextFiles(
@@ -404,7 +379,11 @@ async function persistInstallTextFiles(
   partialState: PartialStateEntry[]
 ): Promise<void> {
   const nextToml = renderAlayaToml(resolved);
-  const nextEnv = renderEnvFile(resolved);
+  const nextEnv = mergeOwnedEnvEntries(
+    await readOptional(paths.envPath),
+    INSTALL_ENV_KEYS,
+    buildInstallEnvEntries(resolved)
+  );
   await persistInstallFile(paths.tomlPath, nextToml, partialState);
   await persistInstallFile(paths.envPath, nextEnv, partialState);
 }
@@ -416,10 +395,11 @@ async function persistInstallFile(
 ): Promise<void> {
   const before = await readOptional(filePath);
   if (normalizeFile(before) === normalizeFile(nextContent)) {
+    await chmod(filePath, 0o600);
     return;
   }
+  partialState.push({ path: filePath, beforeContent: before ?? undefined, afterContent: nextContent });
   await writePrivateTextAtomic(filePath, nextContent, 0o600);
-  partialState.push({ path: filePath, beforeContent: before ?? undefined });
 }
 
 async function finalizeInstallSuccess(

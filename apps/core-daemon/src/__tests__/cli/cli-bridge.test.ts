@@ -301,6 +301,7 @@ describe("cli bridge", () => {
     const shutdown = vi.fn(async () => {});
     const runtime = {
       startupSteps: [{ step: "http-app" }],
+      startupConfig: { ALAYA_REVIEWER_TOKEN: "file-review", ALAYA_REVIEWER_IDENTITY: "user:operator" },
       shutdown
     };
     const createAlayaDaemonRuntime = vi.fn(async () => runtime);
@@ -332,6 +333,9 @@ describe("cli bridge", () => {
     expect(exitCode).toBe(73);
     expect(dispatch).toHaveBeenCalledWith(["doctor", "--json"]);
     expect(createAlayaCliBridge).toHaveBeenCalledTimes(1);
+    expect(createAlayaCliBridge).toHaveBeenCalledWith(runtime, expect.objectContaining({
+      env: { ALAYA_REVIEWER_TOKEN: "file-review", ALAYA_REVIEWER_IDENTITY: "user:operator" }
+    }));
     expect(registerAlayaCliCommands).toHaveBeenCalledTimes(1);
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(stderr.readText()).toBe("");

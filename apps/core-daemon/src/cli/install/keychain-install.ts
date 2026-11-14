@@ -17,6 +17,7 @@ import {
   type KeychainWriteResult
 } from "../../secrets/keychain/index.js";
 import { readSecretLine } from "./masked-stdin.js";
+import { withRuntimeEmbeddingFileLock } from "../../services/env-file/env-file-io.js";
 import {
   GARDEN_KEYCHAIN_SECRET_REF_ENV,
   KEYCHAIN_INSTALL_ACCOUNT,
@@ -65,7 +66,16 @@ export async function executeKeychainInstall(
     return reportEmptyKeychainSecret(ctx.stderr);
   }
 
-  return await persistKeychainInstall(ctx, deps, session, secret);
+  try {
+    return await withRuntimeEmbeddingFileLock(session.paths.envPath, { timeoutMs: 0 }, async () => {
+      const blocking = await prepareKeychainInstall(session, args.force);
+      if (blocking !== null) return blocking;
+      return await persistKeychainInstall(ctx, deps, session, secret);
+    });
+  } catch (error) {
+    ctx.stderr.write(`${sanitizeInstallError(error)}\n`);
+    return { exitCode: ALAYA_SYSEXITS.TEMPFAIL };
+  }
 }
 
 interface KeychainInstallSession {
@@ -228,8 +238,8 @@ async function persistKeychainInstallFiles(
   const envBefore = await readOptional(session.paths.envPath);
   const nextEnv = patchEnvWithGardenKeychainRef(envBefore, session.keychainRef);
   if (normalizeFile(envBefore) !== normalizeFile(nextEnv)) {
+    session.partialState.push({ path: session.paths.envPath, beforeContent: envBefore ?? undefined, afterContent: nextEnv });
     await writePrivateTextAtomic(session.paths.envPath, nextEnv, 0o600);
-    session.partialState.push({ path: session.paths.envPath, beforeContent: envBefore ?? undefined });
   }
   const dbPath = await resolveExistingDbPath(session.paths);
   return await patchPersistedGardenSecretRefIfPresent(dbPath, session.keychainRef, session.startedAt);

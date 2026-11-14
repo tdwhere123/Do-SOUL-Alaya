@@ -141,7 +141,9 @@ export async function runAlayaCli(
         ? { embeddingStartupProbe: "omit" } : undefined);
     const bridge = loaded.createAlayaCliBridge(runtime, {
       cwd,
-      env,
+      // Auth/listen/reviewer handoff follows startup, not a second file read.
+      // The validated subset excludes storage and config locators.
+      env: { ...env, ...runtime.startupConfig },
       stdin,
       stdout,
       stderr,

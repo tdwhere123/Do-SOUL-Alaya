@@ -136,7 +136,10 @@ export async function createAlayaDaemonRuntime(
 
 async function createRuntimeBootstrapContext() {
   const startupSteps: DaemonStartupStepRecord[] = [];
-  const validatedEnv = validateDaemonEnv(process.env);
+  const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
+  const configEnvResult = await loadConfigEnv(configPaths.envPath);
+  const effectiveEnv = Object.freeze(mergeDaemonEnvLookup(process.env, configEnvResult));
+  const validatedEnv = validateDaemonEnv(effectiveEnv);
   const warnLogger = createWarnLogger();
   startCjkSegmentationWarmup(warnLogger);
   installUnhandledRejectionHandler(warnLogger);
@@ -144,12 +147,8 @@ async function createRuntimeBootstrapContext() {
   const requestProtection = createRequestProtection(validatedEnv, (message, meta) => {
     warnLogger.warn(message, meta ?? {});
   });
-  const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
-  const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
-  const configEnvResult = await loadConfigEnv(configPaths.envPath, (message, meta) => {
-    warnLogger.warn(message, meta ?? {});
-  });
-  warnUnregisteredPrefixedDaemonEnvKeys(mergeDaemonEnvLookup(process.env, configEnvResult));
+  const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(effectiveEnv);
+  warnUnregisteredPrefixedDaemonEnvKeys(effectiveEnv);
   // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
   warnLogger.info("effective recall runtime", {
@@ -162,6 +161,7 @@ async function createRuntimeBootstrapContext() {
   return {
     startupSteps,
     validatedEnv,
+    effectiveEnv,
     warnLogger,
     runtimeNotifier,
     requestProtection,
@@ -349,6 +349,8 @@ function buildFinalizeSurfaceRuntimeInput(
 ) {
   return {
     requestProtection: bootstrap.requestProtection,
+    effectiveEnv: bootstrap.effectiveEnv,
+    startupConfig: bootstrap.validatedEnv,
     runtimeNotifier: bootstrap.runtimeNotifier,
     startupSteps: bootstrap.startupSteps,
     eventLogRepo: repositories.eventLogRepo,

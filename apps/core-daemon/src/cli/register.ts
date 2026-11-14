@@ -256,13 +256,14 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     getGardenCredentialProvenance: async () =>
       await runtime.services.configService.getGardenCredentialProvenance(),
     getRuntimeWiring: () => {
-      const daemonSocket = processEnvLookup().ALAYA_DAEMON_SOCKET?.trim();
-      const tokenWorkspaces = processEnvLookup().ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+      const env = runtime.startupConfig ?? processEnvLookup();
+      const daemonSocket = env.ALAYA_DAEMON_SOCKET?.trim();
+      const tokenWorkspaces = env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
       return {
         request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral",
         daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
         wildcard_bind_opt_in: parseEnvBoolean(
-          processEnvLookup().ALAYA_ALLOW_WILDCARD_BIND,
+          env.ALAYA_ALLOW_WILDCARD_BIND,
           "ALAYA_ALLOW_WILDCARD_BIND"
         ),
         request_token_workspaces:

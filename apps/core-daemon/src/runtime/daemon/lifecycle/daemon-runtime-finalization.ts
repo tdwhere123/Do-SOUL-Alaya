@@ -33,6 +33,7 @@ type DaemonRuntimeServiceExports = Omit<
 > & GardenCompileSnapshotExports;
 
 export async function finalizeAlayaDaemonRuntime(input: {
+  readonly startupConfig?: import("../support/daemon-env.js").ValidatedDaemonEnv;
   readonly requestProtection: RequestProtectionConfig;
   readonly runtimeNotifier: AlayaRuntimeNotifier;
   readonly startupSteps: DaemonStartupStepRecord[];
@@ -180,6 +181,7 @@ function createGardenStatusService(serviceExports: GardenCompileSnapshotExports)
 
 function createFinalizedDaemonRuntime(
   input: {
+    readonly startupConfig?: import("../support/daemon-env.js").ValidatedDaemonEnv;
     readonly requestProtection: RequestProtectionConfig;
     readonly runtimeNotifier: AlayaRuntimeNotifier;
     readonly startupSteps: DaemonStartupStepRecord[];
@@ -190,6 +192,7 @@ function createFinalizedDaemonRuntime(
 ): AlayaDaemonRuntime {
   return Object.freeze({
     app,
+    startupConfig: input.startupConfig,
     requestProtection: input.requestProtection,
     runtimeNotifier: input.runtimeNotifier,
     startupSteps: input.startupSteps,

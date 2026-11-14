@@ -104,6 +104,7 @@ export type { RequestTokenGrant, WorkspaceTokenBinding };
 export { REQUEST_TOKEN_GRANT_CONTEXT_KEY };
 
 export interface CoreDaemonServices {
+  readonly env?: NodeJS.ProcessEnv;
   readonly logger?: ErrorLoggerPort;
   readonly requestProtection?: RequestProtectionConfig;
   readonly routes?: CoreDaemonRouteServices;
@@ -171,7 +172,7 @@ export function createApp(
   const protectionConfig =
     services.requestProtection === undefined
       ? undefined
-      : applyRemoteBindTokenRotation(services.requestProtection, processEnvLookup());
+      : applyRemoteBindTokenRotation(services.requestProtection, services.env ?? processEnvLookup());
   const requestProtection = resolveRequestProtectionSettings(protectionConfig);
   const bodyLimits = createRequestBodyLimits();
 
