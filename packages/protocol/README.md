@@ -132,9 +132,8 @@ No source or index rewrite is required. Rollback uses the retained previous bina
 with fresh handles, not a relabeled current page.
 
 Protocol 21.0.0 is the ordinary ranking/delivery **major** under
-[handbook invariant §25](../../docs/handbook/invariants.md); that historical
-release shipped as package `34.0.0`. The current package version is `41.1.0`
-(see Key Entry Points). `src/__tests__/contracts/semver-surface.sidecar.json`
+[handbook invariant §25](../../docs/handbook/invariants.md). The current package
+version is `41.1.0` (see Key Entry Points). `src/__tests__/contracts/semver-surface.sidecar.json`
 pins the current surface hash. The public request and `QueryView` default to `native_query`.
 Historical `canonical`/`associative` values remain in `EnumerationPolicySchema`
 for recorded readers and requests, but live execution refuses them rather than
