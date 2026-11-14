@@ -109,19 +109,22 @@ export function normalizePlane(value) {
 export function countActiveConstraints(root) {
   const arraySources = [];
   const countSources = [];
+  let incomplete = false;
 
   walk(root, "$");
 
-  if (arraySources.length > 0) {
-    return {
-      count: arraySources.reduce((sum, source) => sum + source.count, 0),
-      sources: arraySources
-    };
-  }
-
+  // Preserve the historical array-over-count precedence and summation. Presence
+  // on one question does not prove a complete archive population. An explicit
+  // nullable count or incomplete receipt cannot be replaced by an observed list.
+  const sources = arraySources.length > 0 ? arraySources : countSources;
+  const populationCovered = !Array.isArray(root?.questions) ||
+    sources.some(source => !source.path.startsWith("$.questions[")) ||
+    root.questions.every((_question, index) => sources.some(source =>
+      source.path.startsWith(`$.questions[${index}].`)));
   return {
-    count: countSources.reduce((sum, source) => sum + source.count, 0),
-    sources: countSources
+    count: sources.reduce((sum, source) => sum + source.count, 0),
+    sources,
+    available: sources.length > 0 && !incomplete && populationCovered
   };
 
   function walk(value, path) {
@@ -133,13 +136,21 @@ export function countActiveConstraints(root) {
 
     for (const [key, child] of Object.entries(value)) {
       const childPath = `${path}.${key}`;
-      if (key === "active_constraints" && Array.isArray(child)) {
+      if (key === "active_constraints") {
+        if (!Array.isArray(child) || !child.every(isRecord)) {
+          throw new Error(`invalid active_constraints at ${childPath}`);
+        }
         arraySources.push({ path: childPath, count: child.length });
       } else if (key === "active_constraints_count") {
-        const count = readNumber(child);
-        if (count !== null) {
-          countSources.push({ path: childPath, count });
+        if (child === null) incomplete = true;
+        else if (!Number.isSafeInteger(child) || child < 0) {
+          throw new Error(`invalid active_constraints_count at ${childPath}`);
+        } else countSources.push({ path: childPath, count: child });
+      } else if (key === "active_constraints_completeness") {
+        if (child !== "complete" && child !== "incomplete") {
+          throw new Error(`invalid active_constraints_completeness at ${childPath}`);
         }
+        incomplete ||= child === "incomplete";
       }
       walk(child, childPath);
     }

@@ -138,10 +138,20 @@ unversioned historical sidecar). Each diagnostic question needs an explicit
 (`gold_object_ids`, `gold_memory_ids`, `gold_evidence_ids`). Nonempty delivery and
 gold rows carry `object_id`; identity lists contain nonempty strings. Explicit
 empty lists are observed empty measurements; omitted lists are not. Historical
-identity-only gold remains readable, but missing gold-diagnostic facets are
-omitted and explained in `metadata.unavailable_metrics`, not filled with zeros.
-Missing delivery scores likewise leave order rate unavailable over the unchanged
-question population. Unknown versions and malformed supplied measurements fail.
+identity-only gold remains readable, but each facet requires its own consumed
+fields across the declared population: budget drop reasons; lexical and final
+ranks; source planes and (for nonempty planes) final ranks; and each delivery's
+first/winning admission plane, using its gold fallback only when absent on the
+delivery. Explicit nullable ranks/drop reasons/planes retain their producer
+meaning; they are not missing fields. Missing gold identities suppress gold-hit
+accounting without discarding independently measured delivery attribution.
+Unavailable facets and their counters are omitted and explained in
+`metadata.unavailable_metrics`, not filled with zeros or measured on a smaller
+subset. Missing delivery scores leave order rate unavailable over the unchanged
+question population. Active constraint totals require an archive declaration or
+complete per-question observations; null counts and incomplete receipts remain
+unavailable. Existing array-over-count precedence and counting stay unchanged.
+Unknown versions and malformed supplied measurements fail.
 
 - `sample_size` identifies the dataset population; `evaluated_count` records the
   evaluated selection. Keep answerable, abstention, and invalid cohorts distinct.

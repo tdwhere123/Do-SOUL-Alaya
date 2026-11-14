@@ -171,13 +171,7 @@ function applyLongMemEvalDiagnostics(archive, output) {
     goldStats,
     activeConstraints
   });
-  pushDiagnosticsWarnings(output, {
-    questions,
-    questionStats,
-    goldStats,
-    activeConstraints
-  });
-  preserveMissingDiagnosticsMeasurements(output, availability, questionStats);
+  preserveMissingDiagnosticsMeasurements(output, availability, questionStats, goldStats, activeConstraints);
 }
 
 // This offline projection also reads historical partial sidecars, not just the
@@ -198,6 +192,7 @@ function validateDiagnosticsMeasurement(archive) {
         throw new Error(`invalid diagnostics question ${key}`);
       }
     }
+    for (const row of [...question.delivered_results, ...(question.gold ?? [])]) validateDiagnosticFacetFields(row);
     const identityKeys = ["gold_object_ids", "gold_memory_ids", "gold_evidence_ids"]
       .filter(key => hasOwnField(question, key));
     for (const key of identityKeys) {
@@ -214,32 +209,75 @@ function validateDiagnosticsMeasurement(archive) {
   return { goldComplete, identityComplete };
 }
 
-function preserveMissingDiagnosticsMeasurements(output, availability, stats) {
+// Validate supplied coordinates even when another field makes their facet
+// unavailable. Preserve the producer's nullable rank/drop/plane semantics;
+// unlike these fields, relevance_score is a number, not a nullable coordinate.
+function validateDiagnosticFacetFields(row) {
+  const valid = (key, predicate) => {
+    if (hasOwnField(row, key) && !predicate(row[key])) {
+      throw new Error(`invalid diagnostics facet ${key}`);
+    }
+  };
+  const finite = value => typeof value === "number" && Number.isFinite(value);
+  valid("relevance_score", finite);
+  for (const key of ["lexical_rank", "final_rank"]) valid(key, value => value === null || finite(value));
+  valid("budget_drop_reason", value => value === null || typeof value === "string" && value.trim().length > 0);
+  for (const key of ["plane_first_admitted", "plane_winning_admission"]) {
+    valid(key, value => value === null || typeof value === "string");
+  }
+  valid("source_planes", value => Array.isArray(value) && value.every(plane => typeof plane === "string"));
+}
+
+function preserveMissingDiagnosticsMeasurements(output, availability, stats, goldStats, constraints) {
   const unavailable = {};
   const omit = (keys, reason) => {
     for (const key of keys) { delete output[key]; unavailable[key] = reason; }
   };
   const metadata = output.metadata.longmemeval;
-  if (!availability.goldComplete) {
-    omit(["budget_drop_distribution", "high_lexical_demoted_rate", "per_plane_recall_coverage"],
-      "gold diagnostics absent on some questions");
-    for (const key of ["gold_count", "budget_drop_denominator", "budget_drop_field_count",
-      "high_lexical_demoted_count", "high_lexical_demoted_denominator"]) delete metadata[key];
+  const goldReason = availability.goldComplete
+    ? "required gold facet fields absent on some rows" : "gold diagnostics absent on some questions";
+  if (!availability.goldComplete) delete metadata.gold_count;
+  if (!availability.goldComplete || !goldStats.budgetComplete) {
+    omit(["budget_drop_distribution"], goldReason);
+    delete metadata.budget_drop_denominator;
+    delete metadata.budget_drop_field_count;
   }
-  if (!availability.identityComplete) {
-    omit(["cohort_first_admitted", "cohort_winning_admission", "path_expansion_share"],
-      "gold identity measurement absent on some questions");
-    delete metadata.gold_hit_count;
+  if (!availability.goldComplete || !goldStats.lexicalComplete) {
+    omit(["high_lexical_demoted_rate"], goldReason);
+    delete metadata.high_lexical_demoted_count;
+    delete metadata.high_lexical_demoted_denominator;
   }
+  if (!availability.goldComplete || !goldStats.coverageComplete) omit(["per_plane_recall_coverage"], goldReason);
+  for (const [facet, observed, counter] of [
+    ["cohort_first_admitted", stats.planeFirstFields, "plane_first_admitted_field_count"],
+    ["cohort_winning_admission", stats.planeWinningFields, "plane_winning_admission_field_count"]
+  ]) {
+    if (observed !== stats.deliveredCount) {
+      omit([facet], "admission plane absent on some delivered rows and their gold fallback");
+      delete metadata[counter];
+    } else if (!availability.identityComplete) {
+      // Delivery attribution is independently measured; only its gold-hit
+      // component requires the identity list. Do not discard valid delivery.
+      for (const row of Object.values(output[facet])) {
+        delete row.gold_hit_count;
+        delete row.gold_hit_share;
+        delete row.gold_hit_denominator;
+      }
+      unavailable[`${facet}.gold_hit_share`] = "gold identity measurement absent on some questions";
+    }
+  }
+  if (!availability.identityComplete) delete metadata.gold_hit_count;
+  if (stats.planeFirstFields !== stats.deliveredCount) {
+    omit(["path_expansion_share"], "first admission plane absent on some delivered rows and their gold fallback");
+  }
+  if (!constraints.available) omit(["active_constraints_count"], "active constraint total absent or incomplete");
   if (stats.nonMonotonicMissingScores > 0) {
     omit(["non_monotonic_rate"], "delivery scores absent on some questions");
     delete metadata.non_monotonic_count;
   }
   if (Object.keys(unavailable).length > 0) {
     output.metadata.unavailable_metrics = unavailable;
-    // Do not leave a warning claiming that an omitted facet was measured zero.
-    output.warnings = output.warnings.filter(warning =>
-      !Object.keys(unavailable).some(key => warning.includes(key)));
+    output.warnings.push(...Object.entries(unavailable).map(([key, reason]) => `${key} unavailable: ${reason}`));
   }
 }
 
@@ -338,10 +376,16 @@ function accumulateGoldStats(allGold) {
   const planeHitAt5Counts = new Map();
 
   let budgetDropFieldCount = 0;
+  let budgetComplete = true, lexicalComplete = true, coverageComplete = true;
   let highLexicalDemotedCount = 0;
   let highLexicalDenominator = 0;
 
   for (const gold of allGold) {
+    budgetComplete &&= hasOwnField(gold, "budget_drop_reason");
+    lexicalComplete &&= hasOwnField(gold, "lexical_rank") && hasOwnField(gold, "final_rank");
+    // An explicitly empty plane set contributes no plane regardless of rank.
+    coverageComplete &&= hasOwnField(gold, "source_planes") &&
+      (gold.source_planes.length === 0 || hasOwnField(gold, "final_rank"));
     if (hasOwnField(gold, "budget_drop_reason")) {
       budgetDropFieldCount += 1;
     }
@@ -372,6 +416,9 @@ function accumulateGoldStats(allGold) {
   }
 
   return {
+    budgetComplete,
+    lexicalComplete,
+    coverageComplete,
     budgetDropCounts,
     planeGoldCounts,
     planeHitAt5Counts,
@@ -427,50 +474,6 @@ function assignDiagnosticsOutput(output, ctx) {
   output.metadata.active_constraints_sources = activeConstraints.sources;
 }
 
-function pushDiagnosticsWarnings(output, ctx) {
-  const { questions, questionStats, goldStats, activeConstraints } = ctx;
-  const allGold = questionStats.allGold;
-
-  if (questions.length === 0) {
-    output.warnings.push("questions[] is measured empty; non_monotonic_rate set to 0");
-  }
-  if (questionStats.deliveredCount > 0 && questionStats.nonMonotonicEvaluable === 0) {
-    output.warnings.push(
-      "delivered_results[].relevance_score missing or incomplete; non_monotonic_rate set to 0"
-    );
-  }
-  if (allGold.length > 0 && goldStats.budgetDropFieldCount === 0) {
-    output.warnings.push(
-      "gold[].budget_drop_reason missing; budget_drop_distribution set to empty"
-    );
-  }
-  if (goldStats.highLexicalDenominator === 0) {
-    output.warnings.push(
-      "no gold rows with numeric lexical_rank and final_rank; high_lexical_demoted_rate set to 0"
-    );
-  }
-  if (questionStats.planeFirstFields === 0) {
-    output.warnings.push(
-      "plane_first_admitted missing from delivered_results[]/gold[]; cohort_first_admitted set to empty"
-    );
-  }
-  if (questionStats.planeWinningFields === 0) {
-    output.warnings.push(
-      "plane_winning_admission missing from delivered_results[]/gold[]; cohort_winning_admission set to empty"
-    );
-  }
-  if (activeConstraints.sources.length === 0) {
-    output.warnings.push(
-      "active_constraints[] or active_constraints_count not present; active_constraints_count set to 0"
-    );
-  }
-  if (Object.keys(output.per_plane_recall_coverage).length === 0) {
-    output.warnings.push(
-      "gold[].source_planes missing or empty; per_plane_recall_coverage set to empty"
-    );
-  }
-}
-
 function applyControlledReplay(archive, output) {
   const metrics = isRecord(archive?.metrics) ? archive.metrics : {};
   const diagnosticsCount = requiredReplayCount(metrics.diagnostics_count, "diagnostics_count");
@@ -496,7 +499,8 @@ function applyControlledReplay(archive, output) {
             denominator: diagnosticsCount
           }
         };
-  output.active_constraints_count = activeConstraints.count;
+  if (activeConstraints.available) output.active_constraints_count = activeConstraints.count;
+  else delete output.active_constraints_count;
 
   output.metadata.controlled_replay = {
     scenarios_count: asArray(archive?.scenarios).length,
@@ -523,10 +527,8 @@ function applyControlledReplay(archive, output) {
   output.warnings.push(
     "controlled replay archive has no cohort plane diagnostics; cohort_* metrics set to empty"
   );
-  if (activeConstraints.sources.length === 0) {
-    output.warnings.push(
-      "active_constraints[] or active_constraints_count not present; active_constraints_count set to 0"
-    );
+  if (!activeConstraints.available) {
+    output.warnings.push("active_constraints_count unavailable: total absent or incomplete");
   }
 }
 
@@ -560,6 +562,6 @@ function applyKpiPayload(archive, output) {
     previous_run: isRecord(diff) ? readString(diff.previous_run) : null
   };
   const activeConstraints = countActiveConstraints(archive);
-  if (activeConstraints.sources.length > 0) output.active_constraints_count = activeConstraints.count;
+  if (activeConstraints.available) output.active_constraints_count = activeConstraints.count;
   output.metadata.active_constraints_sources = activeConstraints.sources;
 }

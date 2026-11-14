@@ -123,13 +123,16 @@ it("preserves legacy partial identity measurements without silently filling abse
 });
 
 it("keeps historical gold diagnostics readable without inventing identity-hit accounting", () => {
-  const result = runQualityScript({ questions: [{ delivered_results: [], gold: [{ object_id: "gold",
-    final_rank: null, source_planes: [] }] }] });
+  const result = runQualityScript({ questions: [{ delivered_results: [], gold: [{ object_id: "gold" }] }] });
   expect(result.status, result.stderr).toBe(0);
   const metrics = JSON.parse(result.stdout);
   expect(metrics.metadata.longmemeval.gold_count).toBe(1);
+  expect(metrics).toMatchObject({ non_monotonic_rate: 0 });
+  for (const field of ["high_lexical_demoted_rate", "budget_drop_distribution", "per_plane_recall_coverage", "active_constraints_count"]) {
+    expect(metrics).not.toHaveProperty(field);
+  }
   expect(metrics.metadata.longmemeval).not.toHaveProperty("gold_hit_count");
-  expect(metrics).not.toHaveProperty("cohort_first_admitted");
+  expect(metrics.cohort_first_admitted).toEqual({});
 });
 
 it("does not shrink the population or fill an absent sibling measurement", () => {
@@ -142,6 +145,118 @@ it("does not shrink the population or fill an absent sibling measurement", () =>
   expect(metrics.metadata.longmemeval.non_monotonic_denominator).toBe(2);
   expect(metrics).not.toHaveProperty("non_monotonic_rate");
   expect(metrics).not.toHaveProperty("budget_drop_distribution");
+});
+
+function measuredQuestion() {
+  return {
+    gold_object_ids: ["g", "h"], active_constraints: [], active_constraints_completeness: "complete",
+    delivered_results: [
+      { object_id: "g", relevance_score: 0.2, plane_winning_admission: null },
+      { object_id: "x", relevance_score: 0.8, plane_first_admitted: "workspace_local", plane_winning_admission: "workspace_local" }
+    ],
+    gold: [
+      { object_id: "g", budget_drop_reason: null, source_planes: ["lexical"], final_rank: 2, lexical_rank: 0.9,
+        plane_first_admitted: "path_expansion", plane_winning_admission: "path_expansion" },
+      { object_id: "h", budget_drop_reason: "max_entries", source_planes: ["lexical"], final_rank: 6, lexical_rank: 0.9 }
+    ]
+  };
+}
+
+it.each([
+  { name: "full measured inputs", remove: [], absent: [], counters: [] },
+  { name: "identity-only gold", remove: ["budget_drop_reason", "source_planes", "final_rank", "lexical_rank"],
+    absent: ["budget_drop_distribution", "per_plane_recall_coverage", "high_lexical_demoted_rate"],
+    counters: ["budget_drop_denominator", "budget_drop_field_count", "high_lexical_demoted_count", "high_lexical_demoted_denominator"] },
+  { name: "mixed budget declarations", remove: ["budget_drop_reason"], absent: ["budget_drop_distribution"],
+    counters: ["budget_drop_denominator", "budget_drop_field_count"] },
+  { name: "mixed plane declarations", remove: ["source_planes"], absent: ["per_plane_recall_coverage"], counters: [] },
+  { name: "mixed final ranks", remove: ["final_rank"], absent: ["per_plane_recall_coverage", "high_lexical_demoted_rate"],
+    counters: ["high_lexical_demoted_count", "high_lexical_demoted_denominator"] },
+  { name: "mixed lexical ranks", remove: ["lexical_rank"], absent: ["high_lexical_demoted_rate"],
+    counters: ["high_lexical_demoted_count", "high_lexical_demoted_denominator"] }
+])("projects each gold facet only from its declared population: $name", fixture => {
+  const questions = [measuredQuestion(), measuredQuestion()];
+  for (const key of fixture.remove) Reflect.deleteProperty(questions[1]!.gold[1]!, key);
+  const result = runQualityScript({ questions });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  for (const field of fixture.absent) expect(metrics).not.toHaveProperty(field);
+  for (const field of fixture.counters) expect(metrics.metadata.longmemeval).not.toHaveProperty(field);
+  const expected = { budget_drop_distribution: { max_entries: { count: 2, share: 0.5, denominator: 4 } },
+    high_lexical_demoted_rate: 0.5,
+    per_plane_recall_coverage: { lexical: { gold_count: 4, hit_at_5_count: 2, hit_at_5_rate: 0.5 } } };
+  for (const [field, value] of Object.entries(expected)) if (!fixture.absent.includes(field)) expect(metrics[field]).toEqual(value);
+  expect(metrics).toMatchObject({ non_monotonic_rate: 1, active_constraints_count: 0, path_expansion_share: 0.5 });
+  expect(metrics.metadata.longmemeval).toMatchObject({ questions_count: 2, non_monotonic_denominator: 2,
+    non_monotonic_count: 2, gold_hit_count: 2, gold_count: 4 });
+  expect(metrics.cohort_first_admitted.path_expansion).toMatchObject({ delivered_count: 2, delivered_denominator: 4 });
+  // Explicit delivered null wins over the gold fallback's path_expansion.
+  expect(metrics.cohort_winning_admission.null.gold_hit_count).toBe(2);
+});
+
+it("treats declared null ranks/drop reason and empty planes as measured, not missing", () => {
+  const result = runQualityScript({ questions: [{ delivered_results: [], gold_object_ids: ["g"],
+    gold: [{ object_id: "g", budget_drop_reason: null, source_planes: [], final_rank: null, lexical_rank: null }],
+    active_constraints_count: 0 }] });
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ non_monotonic_rate: 0, high_lexical_demoted_rate: 0,
+    budget_drop_distribution: {}, per_plane_recall_coverage: {}, active_constraints_count: 0,
+    metadata: { longmemeval: { high_lexical_demoted_denominator: 0, high_lexical_demoted_count: 0,
+      budget_drop_field_count: 1, budget_drop_denominator: 1 } } });
+  const emptyPlanes = runQualityScript({ questions: [{ delivered_results: [], gold: [{ object_id: "g", source_planes: [] }] }] });
+  expect(JSON.parse(emptyPlanes.stdout).per_plane_recall_coverage).toEqual({});
+});
+
+it.each(["plane_first_admitted", "plane_winning_admission", "gold_object_ids", "active_constraints",
+  "active_constraints_count", "active_constraints_completeness"])("keeps independent facets when %s is unavailable", field => {
+  const questions = [measuredQuestion(), measuredQuestion()];
+  const partial = questions[1]!;
+  if (field === "active_constraints_count") Object.assign(partial, { active_constraints_count: null });
+  else if (field === "active_constraints_completeness") partial.active_constraints_completeness = "incomplete";
+  else if (field.startsWith("plane_")) {
+    Reflect.deleteProperty(partial.delivered_results[0]!, field);
+    Reflect.deleteProperty(partial.gold[0]!, field);
+  } else Reflect.deleteProperty(partial, field);
+  const result = runQualityScript({ questions });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics).toMatchObject({ non_monotonic_rate: 1, high_lexical_demoted_rate: 0.5 });
+  if (field.startsWith("active_")) expect(metrics).not.toHaveProperty("active_constraints_count");
+  if (field === "plane_first_admitted") {
+    expect(metrics).not.toHaveProperty("cohort_first_admitted");
+    expect(metrics).not.toHaveProperty("path_expansion_share");
+    expect(metrics.metadata.longmemeval).not.toHaveProperty("plane_first_admitted_field_count");
+    expect(metrics.cohort_winning_admission.null.gold_hit_count).toBe(2);
+  }
+  if (field === "plane_winning_admission") {
+    expect(metrics).not.toHaveProperty("cohort_winning_admission");
+    expect(metrics.metadata.longmemeval).not.toHaveProperty("plane_winning_admission_field_count");
+    expect(metrics.path_expansion_share).toBe(0.5);
+  }
+  if (field === "gold_object_ids") {
+    expect(metrics.metadata.longmemeval).not.toHaveProperty("gold_hit_count");
+    expect(metrics.cohort_first_admitted.path_expansion).toEqual({ delivered_count: 2, delivered_share: 0.5, delivered_denominator: 4 });
+    expect(metrics.path_expansion_share).toBe(0.5);
+  }
+});
+
+it.each([
+  ["gold", "budget_drop_reason", 3], ["gold", "budget_drop_reason", ""],
+  ["gold", "lexical_rank", "0.9"], ["gold", "final_rank", "6"],
+  ["gold", "source_planes", null], ["gold", "source_planes", [3]],
+  ["gold", "plane_first_admitted", {}], ["delivery", "plane_winning_admission", []],
+  ["delivery", "relevance_score", null], ["delivery", "relevance_score", "0.9"],
+  ["question", "active_constraints", [null]], ["question", "active_constraints", null],
+  ["question", "active_constraints_count", -1], ["question", "active_constraints_count", "0"],
+  ["question", "active_constraints_completeness", "unknown"]
+])("rejects malformed supplied %s.%s instead of coercing it to absence", (scope, field, value) => {
+  const question = measuredQuestion();
+  const target = scope === "gold" ? question.gold[0]! : scope === "delivery" ? question.delivered_results[0]! : question;
+  Reflect.set(target, String(field), value);
+  const result = runQualityScript({ questions: [question] });
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain(String(field));
 });
 
 function runQualityScript(value: unknown) {
