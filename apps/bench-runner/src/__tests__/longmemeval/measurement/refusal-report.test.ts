@@ -1,8 +1,8 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary({
-    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+    descendantPreload: new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href
   });
 });
 import { rmSync } from "node:fs";
@@ -85,7 +85,7 @@ it("keeps refused and absent rows in the real mixed report without consulting th
  * the output of the real dataset loader; no private caller body is copied or substituted. */
 it("emits the compiled CLI refusal report with actual null exposure and a no-label-read sentinel", async () => {
   const f = await prepareRefusalReportFixture(["field-present", "field-null", "supported", "missing", "tampered"]); roots.push(f.root);
-  const boundary = new URL("../../support/provider-free-boundary.ts", import.meta.url).href;
+  const boundary = new URL("../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
   const base = new URL("../../../../dist/", import.meta.url);
   const compiled = (path: string) => new URL(path, base).href;
   const fetchUrl = compiled("datasets/longmemeval/ingestion/fetch.js");

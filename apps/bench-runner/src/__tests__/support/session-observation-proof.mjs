@@ -13,7 +13,7 @@ const json = path => JSON.parse(readFileSync(path, 'utf8'));
 const write = (path, value) => writeFileSync(path, JSON.stringify(value), { flag: 'wx' });
 const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/conditional-navigation-launch.js');
 const preparation = join(tree, 'apps/bench-runner/dist/runs/snapshot/source-records/prepare.js');
-const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
+const preload = new URL('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 if (process.argv[2] === 'prepare') {
   const guard = await import('./source-import-boundary.mjs');
   const { prepareSourceRecordsSnapshot } = await import(pathToFileURL(preparation).href);
@@ -21,8 +21,8 @@ if (process.argv[2] === 'prepare') {
   assert.equal(guard.receipt().operations.some(row => row.blocked), false);
   process.stdout.write(JSON.stringify(manifest));
 } else {
-  const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
-  const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
+  const { installProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/provider-free-boundary.ts');
+  const { installStrictProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts');
   const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
   const root = mkdtempSync(join(tmpdir(), 'session-observation-'));
   const invocations = [], captured = [];

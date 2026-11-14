@@ -1,6 +1,6 @@
 import { afterAll, expect, it, vi } from "vitest";
 const boundary = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 import { readdirSync, rmSync } from "node:fs";

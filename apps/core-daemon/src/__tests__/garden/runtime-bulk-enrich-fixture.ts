@@ -361,7 +361,7 @@ export function createGardenDataPorts(
     },
     tieringPort: {
       findHotDemotionCandidates: vi.fn(async () => []),
-      demoteToWarm: vi.fn(() => [])
+      demoteToCold: vi.fn(() => [])
     },
     dormantDemotionPort: {
       findLowActivityActiveMemories: vi.fn(async () => []),

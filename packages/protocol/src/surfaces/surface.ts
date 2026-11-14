@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
+
+// surface://segment(/segment)* — each segment is non-empty [\w.-]; rejects
+// empty paths, bare/duplicated slashes, colons, and control chars.
+export const SURFACE_URI_PATTERN = /^surface:\/\/[\w.-]+(?:\/[\w.-]+)*$/;
 import { PersistentObjectEnvelopeSchema } from "../memory/envelope.js";
 import { ObjectKind } from "../memory/object-kind.js";
 

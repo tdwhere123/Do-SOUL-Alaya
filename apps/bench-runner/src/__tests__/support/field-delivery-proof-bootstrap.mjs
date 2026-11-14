@@ -1,6 +1,6 @@
 // Authored numerical inputs only. No model, embedding runtime or transport is invoked.
 // Native SQLite scoring, nomination, source admission and byte locations are untouched.
-await import('./strict-provider-free-cli-bootstrap.mjs');
+await import('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs');
 import { writeFileSync } from 'node:fs';
 import fs from 'node:fs';
 // win32.basename recognizes both Windows and POSIX separators in authored paths.

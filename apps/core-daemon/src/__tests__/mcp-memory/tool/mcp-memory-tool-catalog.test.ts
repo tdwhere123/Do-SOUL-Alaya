@@ -8,14 +8,6 @@ import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 
 describe("mcp memory tool catalog", () => {
-  it("exposes exactly the first-party soul tool names", () => {
-    const tools = listAlayaMemoryTools();
-
-    expect(tools.map((tool) => tool.name)).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
-    expect(new Set(tools.map((tool) => tool.name)).size).toBe(tools.length);
-    expect(tools.map((tool) => tool.name).some((name) => name.startsWith("memory."))).toBe(false);
-  });
-
   it("pins read-only annotations to read-only tools only", () => {
     const byName = new Map(listAlayaMemoryTools().map((tool) => [tool.name, tool] as const));
 
@@ -71,8 +63,10 @@ describe("mcp memory tool catalog", () => {
   it("generates descriptions from soulToolDefs and only appends a daemon loop suffix", () => {
     const daemonCatalog = listAlayaMemoryTools();
 
+    expect(daemonCatalog.map((tool) => tool.name)).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
     expect(daemonCatalog.map((tool) => tool.name)).toEqual(soulToolDefs.map((tool) => tool.name));
     expect(new Set(daemonCatalog.map((tool) => tool.name)).size).toBe(daemonCatalog.length);
+    expect(daemonCatalog.map((tool) => tool.name).some((name) => name.startsWith("memory."))).toBe(false);
     for (const tool of daemonCatalog) {
       const spec = soulToolDefs.find((candidate) => candidate.name === tool.name);
       expect(spec).toBeDefined();

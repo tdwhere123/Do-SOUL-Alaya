@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   const previous = process.env.NODE_OPTIONS;
-  const bootstrap = new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const bootstrap = new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   process.env.NODE_OPTIONS = `${previous ?? ""} --import=${bootstrap}`.trim();
   return { ...installProviderFreeBoundary(), previous };
 });

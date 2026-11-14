@@ -17,7 +17,10 @@ import {
   type PathRelation
 } from "../relations/path-relation.js";
 import { z } from "zod";
-import type { SoulActiveConstraint } from "../surfaces/mcp-memory-search-types.js";
+import {
+  SoulActiveConstraintSchema,
+  type SoulActiveConstraint
+} from "../surfaces/mcp-memory-search-types.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 
 export type AuthorizedScopesAdmission =
@@ -99,6 +102,23 @@ export type ActiveConstraintClaim = Readonly<Pick<ClaimForm, "claim_status" | "s
 export interface ActiveConstraintQueryResult {
   readonly constraints: readonly Readonly<ActiveConstraintRecord>[];
   readonly total_count: number;
+}
+
+export function projectSoulActiveConstraint(
+  record: Readonly<ActiveConstraintRecord>
+): SoulActiveConstraint {
+  return SoulActiveConstraintSchema.parse({
+    object_id: record.memory.object_id,
+    object_kind: record.memory.object_kind,
+    content: record.memory.content,
+    dimension: record.memory.dimension,
+    scope_class: record.memory.scope_class,
+    governance_state: {
+      claim_status: record.claim_status,
+      governance_class: record.governance_class,
+      source_channels: record.source_channels
+    }
+  });
 }
 
 export function normalizeActiveConstraintsCap(cap: number | null | undefined): number {

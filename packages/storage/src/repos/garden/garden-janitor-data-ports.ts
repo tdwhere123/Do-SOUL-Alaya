@@ -44,7 +44,7 @@ export function createTieringPort(
       ) as readonly { readonly memory_entry_id: string; readonly last_access_at: string | null; readonly activation_score: number }[];
       return rows;
     },
-    demoteToWarm: (workspaceId, memoryEntryIds) => {
+    demoteToCold: (workspaceId, memoryEntryIds) => {
       const uniqueIds = Array.from(new Set(memoryEntryIds.filter((entryId) => entryId.length > 0)));
       if (uniqueIds.length === 0) {
         return [];

@@ -94,7 +94,7 @@ describe("Janitor", () => {
       cleanupPort,
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(() => [])
+        demoteToCold: vi.fn(() => [])
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       eventLogRepo: {
@@ -143,7 +143,7 @@ describe("Janitor", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(() => [])
+        demoteToCold: vi.fn(() => [])
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       eventLogRepo,
@@ -170,7 +170,7 @@ describe("Janitor", () => {
       maxLastHitAgeMs: JANITOR_CONSTANTS.HOT_DEMOTION_THRESHOLD_MS,
       minActivationScore: JANITOR_CONSTANTS.HOT_DEMOTION_MIN_ACTIVATION
     });
-    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
+    expect(tieringPort.demoteToCold).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
     expect(result).toMatchObject({
       success: true,
       objects_affected: ["memory-1", "memory-2"],
@@ -195,7 +195,7 @@ describe("Janitor", () => {
 
     expect(scanRetentionDecay).toHaveBeenCalledWith("workspace-1");
     expect(result.audit_entries[0]).toContain("retention_decay_scan: updated 3 hot memories");
-    expect(tieringPort.demoteToWarm).not.toHaveBeenCalled();
+    expect(tieringPort.demoteToCold).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
@@ -213,7 +213,7 @@ describe("Janitor", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(() => [])
+        demoteToCold: vi.fn(() => [])
       },
       scheduler,
       eventLogRepo: createPassthroughEventLogPort(),
@@ -268,7 +268,7 @@ describe("Janitor", () => {
         { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 },
         { memory_entry_id: "memory-2", last_access_at: null, activation_score: 0.2 }
       ]),
-      demoteToWarm: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => {
+      demoteToCold: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => {
         order.push("demote");
         return memoryEntryIds;
       })
@@ -302,7 +302,7 @@ describe("Janitor", () => {
       expect(payload.reason).toBe("hot_index_demotion");
     }
     expect(order).toEqual(["append", "demote"]);
-    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
+    expect(tieringPort.demoteToCold).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
   });
 
   it("fails the hot index demotion batch when a selected id is not applied", async () => {
@@ -325,7 +325,7 @@ describe("Janitor", () => {
         { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 },
         { memory_entry_id: "memory-retired", last_access_at: null, activation_score: 0.1 }
       ]),
-      demoteToWarm: vi.fn(() => ["memory-1"])
+      demoteToCold: vi.fn(() => ["memory-1"])
     };
     const janitor = new Janitor({
       cleanupPort: {
@@ -343,7 +343,7 @@ describe("Janitor", () => {
 
     const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
 
-    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-retired"]);
+    expect(tieringPort.demoteToCold).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-retired"]);
     expect(result.success).toBe(false);
     expect(result.objects_affected).toEqual([]);
     expect(result.error_message).toBe(
@@ -363,7 +363,7 @@ describe("Janitor", () => {
 
     const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
 
-    expect(tieringPort.demoteToWarm).not.toHaveBeenCalled();
+    expect(tieringPort.demoteToCold).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual([]);
     expect(result.success).toBe(true);
     expect(result.audit_entries).toEqual([
@@ -386,7 +386,7 @@ describe("Janitor", () => {
 
     const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
 
-    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith(
+    expect(tieringPort.demoteToCold).toHaveBeenCalledWith(
       "workspace-1",
       hotCandidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id)
     );
@@ -405,7 +405,7 @@ describe("Janitor", () => {
 
     expect(result.success).toBe(false);
     expect(result.error_message).toContain("eventLogRepo");
-    expect(tieringPort.demoteToWarm).not.toHaveBeenCalled();
+    expect(tieringPort.demoteToCold).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
@@ -527,7 +527,7 @@ function createJanitor(options: {
   };
   const tieringPort = {
     findHotDemotionCandidates: vi.fn(async () => options.hotCandidates ?? []),
-    demoteToWarm: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => memoryEntryIds)
+    demoteToCold: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => memoryEntryIds)
   };
   const scheduler = {
     reportCompletion: options.reportCompletion ?? vi.fn(async () => undefined)

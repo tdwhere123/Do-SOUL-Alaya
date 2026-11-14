@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   installProviderFreeBoundary();
 });
 import {

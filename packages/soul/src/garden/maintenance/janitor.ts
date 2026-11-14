@@ -62,7 +62,7 @@ export interface JanitorMemoryTieringPort {
   // Mechanical hot->cold apply. Returns the ids that actually left hot;
   // omitted ids were not hot+active (retired, already cold, missing, or
   // concurrently changed). Janitor rolls back a batch if any selected id is missing.
-  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): readonly string[];
+  demoteToCold(workspaceId: string, memoryEntryIds: readonly string[]): readonly string[];
 }
 
 type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
@@ -265,7 +265,7 @@ export class Janitor {
     await this.publishEventLogsMutation(
       this.buildHotIndexDemotionEvents(task, requestedIds, this.now()),
       () => {
-        const appliedIds = this.tieringPort.demoteToWarm(task.workspace_id, requestedIds);
+        const appliedIds = this.tieringPort.demoteToCold(task.workspace_id, requestedIds);
         const appliedSet = new Set(appliedIds);
         if (
           appliedIds.length !== requestedIds.length ||

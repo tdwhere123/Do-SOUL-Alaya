@@ -1,4 +1,4 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, readLocalJsonPointer } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 
@@ -136,10 +136,7 @@ function schemaChildren(node: Schema): unknown[] {
 function resolveReference(root: Schema, reference: string): unknown {
   if (reference === "#") return root;
   if (!reference.startsWith("#/")) throw new AlayaError("VALIDATION", "Gemini generation schema requires local JSON-pointer references");
-  let value: unknown = root;
-  for (const part of reference.slice(2).split("/")) {
-    value = record(value)?.[part.replace(/~1/gu, "/").replace(/~0/gu, "~")];
-    if (value === undefined) throw new AlayaError("VALIDATION", "Gemini generation schema has an unresolved reference");
-  }
+  const value = readLocalJsonPointer(root, reference);
+  if (value === undefined) throw new AlayaError("VALIDATION", "Gemini generation schema has an unresolved reference");
   return value;
 }

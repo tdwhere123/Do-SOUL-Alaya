@@ -2,8 +2,8 @@ import { afterAll, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const guards = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  const { installStrictProviderFreeBoundary } = await import("../../support/strict-provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
   return [installProviderFreeBoundary(), installStrictProviderFreeBoundary()] as const;
 });
 afterAll(() => { expect(guards[0].violations).toEqual([]); expect(guards[1].forbidden).toEqual([]);

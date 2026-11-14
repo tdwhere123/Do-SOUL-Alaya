@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.js");
-  const { installStrictProviderFreeBoundary } = await import("../../../../../../apps/bench-runner/src/__tests__/support/strict-provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
   return { safe: installProviderFreeBoundary(), strict: installStrictProviderFreeBoundary() };
 });
 afterAll(() => {

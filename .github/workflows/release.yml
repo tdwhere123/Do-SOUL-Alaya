@@ -179,6 +179,7 @@ jobs:
         run: |
           node --test scripts/ci/check-content-contracts.test.mjs
           node --test scripts/ci/check-benchmark-storage.test.mjs
+          node --test scripts/replay-enrichment-admission.test.mjs
           node scripts/ci/check-content-contracts.mjs
 
   bench-runner-help:

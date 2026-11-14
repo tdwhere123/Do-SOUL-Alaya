@@ -1,5 +1,5 @@
 // Instrument the shipped Worker, not a substitute runtime or retention owner.
-import { installProviderFreeBoundary } from "../../../../../bench-runner/src/__tests__/support/provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 const boundary = installProviderFreeBoundary();
 import { parentPort, workerData } from "node:worker_threads";
 import { appendFileSync } from "node:fs";

@@ -3,8 +3,8 @@ import childProcess from 'node:child_process';
 import workerThreads from 'node:worker_threads';
 import { appendFileSync } from 'node:fs';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
-import { installProviderFreeBoundary } from './provider-free-boundary.ts';
-import { installStrictProviderFreeBoundary } from './strict-provider-free-boundary.ts';
+import { installProviderFreeBoundary } from '../../../../../scripts/test-support/provider-free/provider-free-boundary.ts';
+import { installStrictProviderFreeBoundary } from '../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts';
 const safe = installProviderFreeBoundary();
 // Real credentials are removed before imports. Daemon may inspect absent credential names
 // and install its synthetic local fixture authentication; no real credential is accessible.

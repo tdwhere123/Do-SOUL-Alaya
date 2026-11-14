@@ -11,7 +11,7 @@ import workers from "node:worker_threads";
 import { createRequire, registerHooks, syncBuiltinESMExports } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isAbsolute, join } from "node:path";
-import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 import { createReadOnlyGitExecutionPolicy } from "./read-only-git-boundary.mjs";
 import { authorityGitRefusalDiagnostic, createAuthorityRevisionGitPolicy } from "./authority-revision-git-boundary.mjs";
 

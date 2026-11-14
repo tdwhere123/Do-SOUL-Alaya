@@ -3,7 +3,7 @@ import http from "node:http";
 import http2 from "node:http2";
 import dgram from "node:dgram";
 import dns from "node:dns";
-import { isKernelWriteLeaseIpcAddress } from "../../runs/extraction/fill/manifest/kernel-write-lease-ipc.ts";
+import { isKernelWriteLeaseIpcAddress } from "../../../apps/bench-runner/src/runs/extraction/fill/manifest/kernel-write-lease-ipc.ts";
 
 /** Guard native Node transports: fetch alone does not cover http, sockets or DNS. */
 export function installProviderFreeTransport(deny) {

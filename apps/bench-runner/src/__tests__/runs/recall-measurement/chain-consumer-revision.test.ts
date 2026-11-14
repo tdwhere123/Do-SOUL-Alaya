@@ -2,7 +2,7 @@ import { afterAll, afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { installProviderFreeBoundary } from "../../support/provider-free-boundary.js";
+import { installProviderFreeBoundary } from "../../../../../../scripts/test-support/provider-free/provider-free-boundary.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";

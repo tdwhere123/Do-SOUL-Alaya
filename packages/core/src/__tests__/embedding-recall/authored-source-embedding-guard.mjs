@@ -6,7 +6,7 @@ import tls from "node:tls";
 import dns from "node:dns";
 import dgram from "node:dgram";
 import { syncBuiltinESMExports } from "node:module";
-import { installProviderFreeBoundary } from "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 
 // Shared by the test host and its authored IPC child; installed before application imports.
 const boundary = installProviderFreeBoundary({ descendantPreload: import.meta.url });

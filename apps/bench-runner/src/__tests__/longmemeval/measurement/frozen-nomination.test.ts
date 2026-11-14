@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 const guards = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
-  const { installStrictProviderFreeBoundary } = await import("../../support/strict-provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
   return [installProviderFreeBoundary(), installStrictProviderFreeBoundary()] as const;
 });
 import { SourceIndexAcquisition } from "@do-soul/alaya-core";

@@ -4,6 +4,7 @@ import {
   SourceSemanticQueryCarrierBodySchema, SourceSemanticQueryMeaningBodySchema,
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
   SOURCE_SEMANTIC_QUERY_REFERENT_KINDS,
+  readLocalJsonPointer,
   type SourceSemanticQueryPresentation
 } from "@do-soul/alaya-protocol";
 import { producerResponseJsonSchema } from "./source-semantic-response-schema.js";
@@ -24,11 +25,7 @@ function derefJsonSchema(root: Record<string, unknown>, node: Record<string, unk
   if (typeof node.$ref !== "string") return node;
   const pointer = node.$ref;
   if (!pointer.startsWith("#/")) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
-  let current: unknown = root;
-  for (const part of pointer.slice(2).split("/")) {
-    current = isJsonSchemaObject(current) ? current[part.replace(/~1/gu, "/").replace(/~0/gu, "~")] : undefined;
-    if (!isJsonSchemaObject(current)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
-  }
+  const current = readLocalJsonPointer(root, pointer);
   if (!isJsonSchemaObject(current)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
   return derefJsonSchema(root, current);
 }

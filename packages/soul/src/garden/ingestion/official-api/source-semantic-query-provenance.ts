@@ -3,6 +3,7 @@ import { producerResponseJsonSchema } from "./source-semantic-response-schema.js
 import {
   sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
   AlayaError, SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticCorrespondenceAssessmentSchema,
+  readLocalJsonPointer,
   countSourceSemanticCorrespondenceJsonBytes,
   type SourceSemanticCorrespondenceDemand,
   type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticQuery,
@@ -266,12 +267,8 @@ function deref(root: Record<string, unknown>, node: Record<string, unknown>): Re
   if (typeof node.$ref !== "string") return node;
   const pointer = node.$ref;
   if (!pointer.startsWith("#/")) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
-  let current: Record<string, unknown> = root;
-  for (const part of pointer.slice(2).split("/")) {
-    const next = current[part.replace(/~1/gu, "/").replace(/~0/gu, "~")];
-    if (!isObject(next)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
-    current = next;
-  }
+  const current = readLocalJsonPointer(root, pointer);
+  if (!isObject(current)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
   return deref(root, current);
 }
 

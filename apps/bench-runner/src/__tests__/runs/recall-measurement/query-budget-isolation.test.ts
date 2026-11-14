@@ -1,7 +1,7 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  await import(/* @vite-ignore */ new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href);
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  await import(/* @vite-ignore */ new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href);
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   const installed = installProviderFreeBoundary();
   process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:E0_TEST_GARDEN_KEY";
   process.env.E0_TEST_GARDEN_KEY = "test-key";

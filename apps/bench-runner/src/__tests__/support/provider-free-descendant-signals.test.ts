@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import workers from "node:worker_threads";
 import net from "node:net";
 import { expect, it } from "vitest";
-import { installProviderFreeBoundary } from "./provider-free-boundary.js";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.js";
 const nativeSpawnSync = childProcess.spawnSync.bind(childProcess);
 
 it("keeps a caught parent refusal sticky even if the public violation list is cleared", () => {
@@ -43,7 +43,7 @@ it.each(["spawn", "spawnSync", "execFile", "execFileSync", "promisifiedExecFile"
 );
 
 it("registers a CLI eval before application import even when inherited loader options are removed", () => {
-  const preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const preload = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   const isolation = installProviderFreeBoundary({ descendantPreload: preload });
   try {
     const env: NodeJS.ProcessEnv = { ...process.env, PROVIDER_FIXTURE_API_KEY: "synthetic" };
@@ -72,7 +72,7 @@ it("registers a CLI eval before application import even when inherited loader op
 });
 
 it("does not rewrite a later CLI child's successful exit from a sibling's recorded violation", () => {
-  const preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const preload = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   const isolation = installProviderFreeBoundary({ descendantPreload: preload });
   try {
     childProcess.spawnSync(process.execPath, ["-e",
@@ -92,8 +92,8 @@ it.each([
 ])("preserves inherited options with %s installation and %s imports", (order, syntax) => {
   const original = { environment: process.env, fetch: globalThis.fetch, read: readFileSync,
     connect: net.Socket.prototype.connect, spawn: childProcess.spawnSync, worker: workers.Worker };
-  const customPreload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
-  const neutralPreload = new URL("./provider-free-descendant-bootstrap.mjs", import.meta.url).href;
+  const customPreload = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const neutralPreload = new URL("../../../../../scripts/test-support/provider-free/provider-free-descendant-bootstrap.mjs", import.meta.url).href;
   const customOptions = { descendantPreload: customPreload };
   const first = installProviderFreeBoundary(order === "neutral-first" ? {} : customOptions);
   const second = installProviderFreeBoundary(order === "neutral-first" ? customOptions : {});
@@ -162,7 +162,7 @@ it("returns, registers and terminates a real Worker subclass installed after the
 it("rejects an inherited parent identity without descendant registration before application entry", () => {
   const isolation = installProviderFreeBoundary();
   try {
-    const guard = new URL("./provider-free-boundary.ts", import.meta.url).href;
+    const guard = new URL("../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
     const env = { ...process.env }; delete env.NODE_OPTIONS;
     const result = nativeSpawnSync(process.execPath, ["--input-type=module", "--eval", `
       const { installProviderFreeBoundary } = await import(${JSON.stringify(guard)});
@@ -177,7 +177,7 @@ it("rejects an inherited parent identity without descendant registration before 
 });
 
 it("refuses shell dispatch before any unregistered Node descendant can start", async () => {
-  const isolation = installProviderFreeBoundary({ descendantPreload: new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href });
+  const isolation = installProviderFreeBoundary({ descendantPreload: new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href });
   try {
     expect(() => childProcess.execSync("node -e 'process.exit(0)'" )).toThrow("direct execution");
     await expect(promisify(childProcess.exec)("node -e 'process.exit(0)'" )).rejects.toThrow("direct execution");
@@ -188,7 +188,7 @@ it("refuses shell dispatch before any unregistered Node descendant can start", a
 });
 
 it("fails closed when a Node descendant exits without confirming its guard", async () => {
-  const isolation = installProviderFreeBoundary({ descendantPreload: new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href });
+  const isolation = installProviderFreeBoundary({ descendantPreload: new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href });
   try {
     await promisify(childProcess.execFile)(process.execPath, ["--invalid-isolation-fixture-flag"], { env: {} }).catch(() => undefined);
     expect(isolation.violations).toEqual([]);
@@ -199,8 +199,8 @@ it("fails closed when a Node descendant exits without confirming its guard", asy
 it("retains concurrent child and Worker refusals, including a grandchild, independently of reap callbacks", async () => {
   const root = mkdtempSync(join(tmpdir(), "provider-signal-concurrent-"));
   const program = join(root, "actors.mjs"), child = join(root, "nested.mjs");
-  const guard = new URL("./provider-free-boundary.ts", import.meta.url).href;
-  const bootstrap = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const guard = new URL("../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
+  const bootstrap = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   const violation = `try{require('node:fs').readFileSync('/nonexistent-isolation-fixture/auth.json')}catch{}`;
   writeFileSync(child, `import {Worker} from 'node:worker_threads';
     const actor=new Worker(${JSON.stringify(violation)},{eval:true,execArgv:[],env:{}});
@@ -228,7 +228,7 @@ it("retains concurrent child and Worker refusals, including a grandchild, indepe
 it("guards the actual Source ONNX fork host despite cleared loader flags and preserves a refusal after normal child close", async () => {
   const root = mkdtempSync(join(tmpdir(), "provider-source-child-signal-"));
   const preload = join(root, "preload.mjs"), program = join(root, "source-host.mjs");
-  const guard = new URL("./provider-free-boundary.ts", import.meta.url).href;
+  const guard = new URL("../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
   const host = new URL("../../../../../packages/core/dist/embedding-recall/local-onnx-process/ipc-client.js", import.meta.url).href;
   writeFileSync(preload, `
     const {installProviderFreeBoundary}=await import(${JSON.stringify(guard)});

@@ -1,6 +1,7 @@
 import {
   EvidenceHealthState,
   StorageTier,
+  normalizeCanonicalEntities,
   type CandidateMemorySignal,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
@@ -323,8 +324,6 @@ export function buildMemoryInput(
   };
 }
 
-const MAX_CANONICAL_ENTITIES = 3;
-
 // Threads the signal's canonical_entities (answer-selective recall key) onto the
 // materialized memory_entry. Prefers the first-class signal field; falls back to
 // the raw_payload echo so the bench seed path (which round-trips raw_payload, not
@@ -341,23 +340,6 @@ function buildCanonicalEntitiesProjection(
 function readRawCanonicalEntities(rawPayload: CandidateMemorySignal["raw_payload"]): readonly string[] {
   const value = rawPayload.canonical_entities;
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-}
-
-function normalizeCanonicalEntities(values: readonly string[]): readonly string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
-  for (const value of values) {
-    const normalized = value.trim().toLowerCase();
-    if (normalized.length === 0 || seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    output.push(normalized);
-    if (output.length >= MAX_CANONICAL_ENTITIES) {
-      break;
-    }
-  }
-  return output;
 }
 
 // invariant: the enrich_pending no-drop intent carried into a memory-creating

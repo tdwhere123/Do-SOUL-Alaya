@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
@@ -37,7 +37,7 @@ const minute = (value: number) => new Date(Date.parse(CLOCK) + value * 60_000).t
  * The provider-free guard runs before storage/Core imports and worker native startup.
  */
 function instrumentedWorker(install: string): URL {
-  const guard = new URL("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.ts", import.meta.url);
+  const guard = new URL("../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url);
   const storage = new URL("../../../../../../packages/storage/dist/index.js", import.meta.url);
   const core = new URL("../../../../../../packages/core/dist/index.js", import.meta.url);
   return new URL(`data:text/javascript,${encodeURIComponent(`

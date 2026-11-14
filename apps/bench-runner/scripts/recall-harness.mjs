@@ -23,13 +23,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { AlayaError, captureSourceIndexLexicalPreparationAllocation } from "@do-soul/alaya-protocol";
-import { installProviderFreeBoundary } from "../src/__tests__/support/provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 import { loadRecallVectorCache } from "./recall-vector-cache.mjs";
 import { recallExecutionIdentity, recallPreparationKey, assertRecallCachedPreparation } from "./recall-harness-selection.mjs";
 
 // Install before runtime imports: only local inference and loopback transport are authorized.
 const providerFree = installProviderFreeBoundary({
-  descendantPreload: new URL("../src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+  descendantPreload: new URL("../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href
 });
 process.on("exit", () => {
   if (providerFree.violations.length > 0) {

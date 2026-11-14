@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 vi.mock("../../../harness/daemon.js", async importOriginal => ({

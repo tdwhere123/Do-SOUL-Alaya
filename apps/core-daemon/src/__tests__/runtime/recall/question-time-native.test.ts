@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { installProviderFreeBoundary } from "../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js";
+import { installProviderFreeBoundary } from "../../../../../../scripts/test-support/provider-free/provider-free-boundary.js";
 import type { QueryInterpretationProposal } from "@do-soul/alaya-protocol";
 
 const boundary = installProviderFreeBoundary();

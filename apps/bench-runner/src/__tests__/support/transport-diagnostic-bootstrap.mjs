@@ -1,5 +1,5 @@
 /** Provider-free compiled CLI fixture: guard before importing any application module. */
-import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 import { fetchLoopbackProvider } from "./loopback-provider-fetch.ts";
 import dns from "node:dns";
 import dnsPromises from "node:dns/promises";

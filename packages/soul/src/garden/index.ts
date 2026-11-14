@@ -203,7 +203,14 @@ export {
   type DegradationAssessParams,
   type DegradationStepKind
 } from "./triage/degradation-pipeline.js";
-export { InMemoryHandoffGapHandler, type GapOrHandoffRecord, type HandoffGapCreatedObject, type HandoffGapHandler } from "./maintenance/handoff-gap-handler.js";
+export {
+  InMemoryHandoffGapHandler,
+  looksLikeGapSignal,
+  buildHandoffGapSignalSummary,
+  type GapOrHandoffRecord,
+  type HandoffGapCreatedObject,
+  type HandoffGapHandler
+} from "./maintenance/handoff-gap-handler.js";
 export {
   JANITOR_CONSTANTS,
   Janitor,

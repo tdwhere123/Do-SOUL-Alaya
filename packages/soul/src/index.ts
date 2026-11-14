@@ -74,6 +74,8 @@ export {
   LIBRARIAN_CONSTANTS,
   Librarian,
   InMemoryHandoffGapHandler,
+  looksLikeGapSignal,
+  buildHandoffGapSignalSummary,
   UnavailableGardenProvider,
   MaterializationRouter,
   buildEvidenceInput,

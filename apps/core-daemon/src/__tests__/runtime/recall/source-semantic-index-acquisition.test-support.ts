@@ -23,7 +23,7 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { assertBuiltWorker, builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 
-export const PROVIDER_FREE_WORKER_IMPORT = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+export const PROVIDER_FREE_WORKER_IMPORT = `--import=${new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
 {
   const current = process.env.NODE_OPTIONS ?? "";
   if (!current.includes(PROVIDER_FREE_WORKER_IMPORT)) {

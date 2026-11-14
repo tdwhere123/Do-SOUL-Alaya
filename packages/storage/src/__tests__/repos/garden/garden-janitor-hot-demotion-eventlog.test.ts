@@ -55,8 +55,8 @@ describe("janitor hot index demotion EventLog transaction", () => {
           .run("memory-stale");
         return found;
       },
-      demoteToWarm: (workspaceId, memoryEntryIds) =>
-        ports.tieringPort.demoteToWarm(workspaceId, memoryEntryIds)
+      demoteToCold: (workspaceId, memoryEntryIds) =>
+        ports.tieringPort.demoteToCold(workspaceId, memoryEntryIds)
     });
 
     const result = await janitor.run(createHotDemotionTask());

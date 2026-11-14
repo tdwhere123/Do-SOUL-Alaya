@@ -9,7 +9,7 @@ import { readRetainedEvidence, RetainedConsumerLedger, RETAINED_CONSUMER_BUDGET,
 
 const isolation = await vi.hoisted(async () => {
   if (process.env["ALAYA_RETAINED_EVIDENCE_CONSUMER"] !== "1") return undefined;
-  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 afterAll(() => { isolation?.restore(); if (isolation !== undefined) expect(isolation.violations).toEqual([]); });

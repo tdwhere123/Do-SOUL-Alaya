@@ -6,7 +6,7 @@ import { inspect } from "node:util";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import(
-    "../../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js"
+    "../../../../../../../scripts/test-support/provider-free/provider-free-boundary.js"
   );
   return installProviderFreeBoundary();
 });

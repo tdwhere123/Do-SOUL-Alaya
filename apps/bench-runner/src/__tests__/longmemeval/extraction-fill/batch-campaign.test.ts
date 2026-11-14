@@ -118,7 +118,7 @@ function launch(manifest: string, extraArgs: readonly string[] = []) {
       ...process.env,
       // This CLI fixture explicitly needs its synthetic Garden identity after
       // ambient credentials were removed by the no-sentinel unit entry.
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href}`
     } });
   children.add(child);
   let output = "";

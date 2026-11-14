@@ -35,7 +35,7 @@ export function reasonRequest(interpretationId: string, groups: number): Extract
 }
 
 export async function withPublished(body: Parameters<typeof withAccessLibrary>[1]) {
-  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+  const guard = `--import=${new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
   process.execArgv.push(guard);
   try { await withAccessLibrary(sources, body); }
   finally {

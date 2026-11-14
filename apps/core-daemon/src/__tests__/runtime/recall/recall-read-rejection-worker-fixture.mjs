@@ -1,5 +1,5 @@
 // Install credential and transport guards before importing application modules.
-import { installProviderFreeBoundary } from "../../../../../bench-runner/src/__tests__/support/provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 const isolation = installProviderFreeBoundary();
 globalThis.fetch = () => { throw new Error("provider transport forbidden in worker rejection fixture"); };
 const { parentPort, workerData } = await import("node:worker_threads");

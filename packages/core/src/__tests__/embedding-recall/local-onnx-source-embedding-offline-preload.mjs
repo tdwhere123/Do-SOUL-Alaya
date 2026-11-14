@@ -11,7 +11,7 @@ import path from "node:path";
 import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
-import { installProviderFreeBoundary } from "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.ts";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.ts";
 import { createReadOnlyGitExecutionPolicy } from "../../../../../apps/bench-runner/src/__tests__/support/read-only-git-boundary.mjs";
 
 const preloadSpecifier = import.meta.url;

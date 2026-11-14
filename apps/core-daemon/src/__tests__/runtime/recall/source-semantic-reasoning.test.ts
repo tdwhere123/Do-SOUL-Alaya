@@ -18,7 +18,7 @@ import {
 } from "../../../../../bench-runner/src/harness/daemon/daemon-config-directory.js";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
@@ -240,7 +240,7 @@ async function withPublished(body: (input: {
     eraser.apply(barrier); eraser.apply(barrier);
   }
   database.close(); closeCachedDatabase(filename);
-  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+  const guard = `--import=${new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
   process.execArgv.push(guard);
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: options.workerCount ?? 1,
     prepareSourceQuery: options.prepareSourceQuery })!;
@@ -979,7 +979,7 @@ it("delivers qualified answers through the actual CLI executable with no provide
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
     const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
     // Node loads --import as an ESM URL; a Windows drive path is parsed as a scheme.
-    const guard = new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+    const guard = new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
     const configDir = planBenchDaemonConfigDirectory();
     const lease = createBenchDaemonConfigDirectoryLease(configDir);
     await lease.prepare();

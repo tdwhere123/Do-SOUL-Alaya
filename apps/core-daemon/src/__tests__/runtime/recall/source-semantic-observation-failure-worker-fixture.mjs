@@ -1,4 +1,4 @@
-import "../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs";
+import "../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs";
 import { SourceSemanticObserver } from "../../../../dist/runtime/recall-read-worker/source-semantic-observation.js";
 
 // Inject a metadata-construction failure at an actual native decision boundary.

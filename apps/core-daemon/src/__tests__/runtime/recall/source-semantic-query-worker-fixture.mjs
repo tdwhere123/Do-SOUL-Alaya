@@ -1,4 +1,4 @@
-import "../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs";
+import "../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs";
 import { appendFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { sourceSemanticExecution, sourceSemanticAcquisitionNotRun } from "../../../../../../packages/protocol/dist/garden/source-semantic-access.js";

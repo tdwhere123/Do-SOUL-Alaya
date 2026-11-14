@@ -7,8 +7,8 @@ import { mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSy
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
-const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
+const { installProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/provider-free-boundary.ts');
+const { installStrictProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts');
 const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
 const tree = fileURLToPath(new URL('../../../../../', import.meta.url));
 const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/conditional-navigation-launch.js');

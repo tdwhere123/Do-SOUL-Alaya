@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createBenchDaemonLaunchConfig, BENCH_DAEMON_MANAGED_ENV_KEYS } from "../../../harness/daemon/daemon-environment.js";
 import { createBenchDaemonConfigDirectoryLease } from "../../../harness/daemon/daemon-config-directory.js";
-import { installProviderFreeBoundary } from "../../support/provider-free-boundary.js";
+import { installProviderFreeBoundary } from "../../../../../../scripts/test-support/provider-free/provider-free-boundary.js";
 import { samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 const roots: string[] = [];

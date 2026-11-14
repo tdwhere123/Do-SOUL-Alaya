@@ -145,7 +145,7 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
     });
     expect(found.map((entry) => entry.memory_entry_id)).toEqual(["memory-demote"]);
 
-    expect(ports.tieringPort.demoteToWarm("workspace-1", ["memory-demote"])).toEqual(["memory-demote"]);
+    expect(ports.tieringPort.demoteToCold("workspace-1", ["memory-demote"])).toEqual(["memory-demote"]);
     const row = database.connection
       .prepare("SELECT storage_tier FROM memory_entries WHERE object_id = ? LIMIT 1")
       .get("memory-demote") as { readonly storage_tier: string } | undefined;
@@ -185,7 +185,7 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
     });
 
     expect(
-      ports.tieringPort.demoteToWarm("workspace-1", [
+      ports.tieringPort.demoteToCold("workspace-1", [
         "memory-hot",
         "memory-already-cold",
         "memory-retired"

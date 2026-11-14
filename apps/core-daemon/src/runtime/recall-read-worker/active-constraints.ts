@@ -1,4 +1,4 @@
-import { SoulActiveConstraintSchema, type BoundedActiveConstraintsRequest } from "@do-soul/alaya-protocol";
+import { projectSoulActiveConstraint, type BoundedActiveConstraintsRequest } from "@do-soul/alaya-protocol";
 import { snapshotIdFromPin } from "@do-soul/alaya-core";
 import { findActiveConstraints, readBoundedActiveConstraints, SqliteGovernancePathReader,
   SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
@@ -54,22 +54,9 @@ export async function runWorkerActiveConstraints(input: Readonly<{
     cap: payload.cap
   });
   return Object.freeze({
-    constraints: Object.freeze(result.constraints.map(toActiveConstraint)),
+    constraints: Object.freeze(result.constraints.map(projectSoulActiveConstraint)),
     total_count: result.total_count
   });
 }
 
-function toActiveConstraint(record: Awaited<ReturnType<typeof findActiveConstraints>>["constraints"][number]) {
-  return SoulActiveConstraintSchema.parse({
-    object_id: record.memory.object_id,
-    object_kind: record.memory.object_kind,
-    content: record.memory.content,
-    dimension: record.memory.dimension,
-    scope_class: record.memory.scope_class,
-    governance_state: {
-      claim_status: record.claim_status,
-      governance_class: record.governance_class,
-      source_channels: record.source_channels
-    }
-  });
-}
+

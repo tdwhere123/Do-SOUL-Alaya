@@ -68,7 +68,7 @@ export async function withFeedbackSource(ticket: string, body: (input: {
   ids: ReadonlyMap<string, readonly string[]>;
 }) => Promise<void>, options?: { original_query: string; query: SourceSemanticQuery; provider_guard?: URL;
   additional_sources?: readonly AccessFixtureSource[]; approval_ticket?: string; interpretation_census?: "complete" }) {
-  const guard = `--import=${(options?.provider_guard ?? new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url)).href}`;
+  const guard = `--import=${(options?.provider_guard ?? new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url)).href}`;
   process.execArgv.push(guard);
   try {
     await withAccessLibrary([

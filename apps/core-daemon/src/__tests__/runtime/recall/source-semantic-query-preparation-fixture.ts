@@ -112,7 +112,7 @@ export async function queryClient(options: { capture?: boolean; publishInterpret
     embedInputs: options.embed ?? h.binding.embedInputs } : await options.bind(h.binding));
   const prepare = vi.fn<PrepareSourceQuery>(input => SourceIndexAcquisition.prepareQuery({ ...input,
     selection: h.selection, bind: async () => await bind() }));
-  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+  const guard = `--import=${new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
   process.execArgv.push(guard);
   const client = createRecallReadWorkerClient({ databaseFilename: options.capture ? `${h.filename}.capture` : h.filename,
     workerUrl: new URL("./source-semantic-query-worker-fixture.mjs", import.meta.url),

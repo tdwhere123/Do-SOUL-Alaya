@@ -10,7 +10,7 @@ import { afterEach, expect, it } from "vitest";
 const bench = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const repository = resolve(bench, "../..");
 const guard = new URL("../support/source-import-boundary.mjs", import.meta.url);
-const strict = new URL("../support/strict-provider-free-cli-bootstrap.mjs", import.meta.url).href;
+const strict = new URL("../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs", import.meta.url).href;
 const { createReadOnlyGitExecutionPolicy } = await import(/* @vite-ignore */
   new URL("../support/read-only-git-boundary.mjs", import.meta.url).href);
 const gitExecutable: string = createReadOnlyGitExecutionPolicy().prepare("git").executable;

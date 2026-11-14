@@ -65,6 +65,24 @@ export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;
 // canonical_entities is a recall key consumed by entity grouping designed for a tight set (≤3),
 // not a free-form tag list — the field contract, not just a materializer-private cap.
 export const CANONICAL_ENTITIES_MAX = 3;
+
+/** Lowercase, trim, dedupe, cap. Materializers and parsers reuse this; the MCP schema does not transform. */
+export function normalizeCanonicalEntities(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0 || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+    if (output.length >= CANONICAL_ENTITIES_MAX) {
+      break;
+    }
+  }
+  return output;
+}
 export const BOUNDED_JSON_OBJECT_MAX_CHARS = 16384;
 export const PREFERENCE_FACT_MAX_CHARS = 1_200;
 

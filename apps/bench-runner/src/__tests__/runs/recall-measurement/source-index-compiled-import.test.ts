@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { expect, it } from "vitest";
 
-const boundary = new URL("../../support/provider-free-boundary.ts", import.meta.url).href;
+const boundary = new URL("../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
 const binding = new URL("../../../../dist/runs/recall-measurement/source-index-binding.js", import.meta.url).href;
 const contract = new URL("../../../../dist/runs/recall-measurement/contract.js", import.meta.url).href;
 

@@ -7,15 +7,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
-const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
+const { installProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/provider-free-boundary.ts');
+const { installStrictProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts');
 const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
 const tree = fileURLToPath(new URL('../../../../../', import.meta.url));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
 const write = (path, value) => writeFileSync(path, JSON.stringify(value), { flag: 'wx' });
 const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/conditional-navigation-launch.js');
-const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
+const preload = new URL('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 const root = mkdtempSync(join(tmpdir(), 'temporal-navigation-'));
 const invocations = [], captures = [], readFaults = [];
 const bytes = path => readdirSync(path, { withFileTypes: true }).reduce((sum, entry) => sum +

@@ -7,43 +7,13 @@ import {
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import {
+  buildHandoffGapSignalSummary,
+  looksLikeGapSignal,
   type HandoffGapCreatedObject,
   type HandoffGapHandler,
   type GapOrHandoffRecord
 } from "@do-soul/alaya-soul";
 import { SqliteHandoffGapRepo } from "@do-soul/alaya-storage";
-
-// ---------------------------------------------------------------------------
-// Gap detection helpers — replicated from InMemoryHandoffGapHandler
-// ---------------------------------------------------------------------------
-
-const GAP_OBJECT_KINDS = new Set(["gap", "gap_record", "context_gap"]);
-
-function normalizeObjectKind(objectKind: string): string {
-  return objectKind.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-}
-
-function looksLikeGapSignal(signal: CandidateMemorySignal): boolean {
-  if (signal.interpretation_contract !== undefined) return false;
-  if (signal.raw_payload.gap_detected === true) {
-    return true;
-  }
-  return GAP_OBJECT_KINDS.has(normalizeObjectKind(signal.object_kind));
-}
-
-function buildSignalSummary(signal: CandidateMemorySignal): string {
-  const excerpt = signal.raw_payload.excerpt;
-  if (typeof excerpt === "string" && excerpt.trim().length > 0) {
-    return excerpt.trim();
-  }
-
-  const matchedText = signal.raw_payload.matched_text;
-  if (typeof matchedText === "string" && matchedText.trim().length > 0) {
-    return matchedText.trim();
-  }
-
-  return `Signal ${signal.signal_id} (${signal.signal_kind})`;
-}
 
 // ---------------------------------------------------------------------------
 // SqliteHandoffGapAdapter
@@ -76,7 +46,7 @@ export class SqliteHandoffGapAdapter implements HandoffGapHandler {
           gap_kind: "context_gap",
           detected_in_run_id: signal.run_id,
           surface_id: signal.surface_id,
-          description: buildSignalSummary(signal),
+          description: buildHandoffGapSignalSummary(signal),
           ttl_ms: this.ttlMs,
           recurrence_runs: null,
           recurrence_surfaces: null,

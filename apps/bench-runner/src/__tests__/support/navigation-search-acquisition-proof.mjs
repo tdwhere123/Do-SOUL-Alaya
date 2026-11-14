@@ -1,6 +1,6 @@
 // Authored boundary proof. Guard installation precedes every application import, including child CLIs.
-import { installProviderFreeBoundary } from './provider-free-boundary.ts';
-import { installStrictProviderFreeBoundary } from './strict-provider-free-boundary.ts';
+import { installProviderFreeBoundary } from '../../../../../scripts/test-support/provider-free/provider-free-boundary.ts';
+import { installStrictProviderFreeBoundary } from '../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -14,7 +14,7 @@ const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBo
 const root = mkdtempSync(join(tmpdir(), 'navigation-search-acquisition-'));
 const tree = fileURLToPath(new URL('../../../../../', import.meta.url));
 const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/conditional-navigation-launch.js');
-const localPreload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
+const localPreload = new URL('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 const transportPreload = new URL('./transport-diagnostic-bootstrap.mjs', import.meta.url).href;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));

@@ -1,6 +1,6 @@
 // Install transport/credential guards and a model-construction tripwire before
 // importing application modules. This never replaces a changed navigation owner.
-await import('./strict-provider-free-cli-bootstrap.mjs');
+await import('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs');
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import fs from 'node:fs';
 import childProcess from 'node:child_process';

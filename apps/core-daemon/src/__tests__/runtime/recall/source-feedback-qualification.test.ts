@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
-  const { installStrictProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/strict-provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
   const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
   return { safe, strict };
 });
@@ -26,7 +26,7 @@ import { CHILD, CONTEXT, query, withFeedbackSource } from "./source-feedback.tes
 import { assessmentForTestPairs } from "../../../../../bench-runner/src/__tests__/support/semantic-correspondence-assessment.js";
 
 const ORIGINAL = "Which ticket does M7 use, and what clearance applies?";
-const STRICT_BOOTSTRAP = new URL("../../../../../bench-runner/src/__tests__/support/strict-provider-free-cli-bootstrap.mjs", import.meta.url);
+const STRICT_BOOTSTRAP = new URL("../../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs", import.meta.url);
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function temporaryDirectory() {

@@ -8,12 +8,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-const { installProviderFreeBoundary } = await import('./provider-free-boundary.ts');
-const { installStrictProviderFreeBoundary } = await import('./strict-provider-free-boundary.ts');
+const { installProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/provider-free-boundary.ts');
+const { installStrictProviderFreeBoundary } = await import('../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.ts');
 const safe = installProviderFreeBoundary(), strict = installStrictProviderFreeBoundary();
 const tree = fileURLToPath(new URL('../../../../../', import.meta.url));
 const cli = join(tree, 'apps/bench-runner/dist/runs/source-access-diagnostic/conditional-navigation-launch.js');
-const preload = new URL('./strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
+const preload = new URL('../../../../../scripts/test-support/provider-free/strict-provider-free-cli-bootstrap.mjs', import.meta.url).href;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 // Freeze code evidence before preparation, selection, and authored evaluator labels.
 const owners = ['conditional-navigation', 'conditional-navigation-run', 'conditional-navigation-evaluate', 'structural-navigation', 'navigation-read-budget'];

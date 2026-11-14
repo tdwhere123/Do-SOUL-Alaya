@@ -1,8 +1,8 @@
 import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary({
-    descendantPreload: new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href
+    descendantPreload: new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href
   });
 });
 import { spawnSync } from "node:child_process";
@@ -218,7 +218,7 @@ it.each(["present", "absent"] as const)("carries the family refusal into acquisi
 
 /** The same fixtures through the compiled consumer modules, not only the tsconfig view. */
 function compiledConsumerChain(f: Awaited<ReturnType<typeof fixture>>, evaluatorRoot: string) {
-  const boundary = new URL("../../support/provider-free-boundary.ts", import.meta.url).href;
+  const boundary = new URL("../../../../../../scripts/test-support/provider-free/provider-free-boundary.ts", import.meta.url).href;
   const compiled = (name: string) => new URL(`../../../../dist/runs/recall-measurement/${name}`, import.meta.url).href;
   const protocol = new URL("../../../../../../packages/protocol/dist/index.js", import.meta.url).href;
   const budget = { schema_version: 1, work_units: 100, memory_bytes: 100_000, page_budget: 1,

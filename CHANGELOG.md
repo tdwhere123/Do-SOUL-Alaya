@@ -23,6 +23,10 @@ published `garden.*` catalog tools through the soul handler. Both are adapter
 fixes with no tool-name or schema change (invariant §25 patch). Unknown MCP
 namespaces stay denied.
 
+Protocol adds shared pure helpers `normalizeCanonicalEntities`,
+`readLocalJsonPointer`, `SURFACE_URI_PATTERN`, and `projectSoulActiveConstraint`
+(additive TypeScript, no MCP schema change; invariant §25 patch).
+
 Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
 (`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the
 delivered ranked page it lists one line per further member, up to 32 roots including

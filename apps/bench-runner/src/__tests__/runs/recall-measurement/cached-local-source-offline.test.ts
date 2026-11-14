@@ -14,7 +14,7 @@ const offline = await vi.hoisted(async () => {
     return { cache, isolation: null as Isolation | null, receiptDir: null as string | null };
   }
   // Reuse both owners: pre-import CLI credential/loopback protection and explicit native-child isolation.
-  const bootstrap = new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const bootstrap = new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   await import(/* @vite-ignore */ bootstrap);
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

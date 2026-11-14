@@ -1,5 +1,5 @@
 import {
-  SoulActiveConstraintSchema,
+  projectSoulActiveConstraint,
   isPathActiveForRecall,
   normalizeActiveConstraintAdmission,
   listActiveConstraintCandidateMemoryIds,
@@ -103,15 +103,7 @@ function readSnapshot(
   const selected = selectActiveConstraintRecords({
     workspaceId: request.workspaceId, memories, claims, paths: activePaths, cap: request.cap
   });
-  const constraints = selected.constraints.map((record) => SoulActiveConstraintSchema.parse({
-    object_id: record.memory.object_id, object_kind: record.memory.object_kind,
-    content: record.memory.content, dimension: record.memory.dimension,
-    scope_class: record.memory.scope_class,
-    governance_state: {
-      claim_status: record.claim_status, governance_class: record.governance_class,
-      source_channels: record.source_channels
-    }
-  }));
+  const constraints = selected.constraints.map(projectSoulActiveConstraint);
   return finish(request, allowance, constraints, page.rows, selected.total_count);
 }
 

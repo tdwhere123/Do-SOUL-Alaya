@@ -245,6 +245,7 @@ export {
 export {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
+  CANONICAL_ENTITIES_MAX,
   BoundedIdSchema,
   BoundedJsonObjectSchema,
   compareUtcInstants,
@@ -253,8 +254,10 @@ export {
   NonEmptyStringSchema,
   NonNegativeIntSchema,
   PREFERENCE_FACT_MAX_CHARS,
-  PositiveIntSchema
+  PositiveIntSchema,
+  normalizeCanonicalEntities
 } from "./shared/schema-primitives.js";
+export { readLocalJsonPointer, unescapeJsonPointerToken } from "./shared/json-pointer.js";
 export {
   bindStandardConfigPatchResponse,
   bindStandardResponse,

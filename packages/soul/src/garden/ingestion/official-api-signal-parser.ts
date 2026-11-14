@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AssociativeFactFrameSchema,
   OpenSemanticFactorGraphProposalSchema,
+  normalizeCanonicalEntities,
   type AssociativeFactFrame,
   type CandidateMemorySignal,
   type IdentityObservation,
@@ -70,29 +71,11 @@ const StringArraySchema = z
     }
     return Object.freeze(output);
   });
-const MAX_CANONICAL_ENTITIES = 3;
-// canonical_entities is the answer-selective key: normalize to lowercase, dedupe, cap 3.
 const CanonicalEntitiesArraySchema = z
   .preprocess((value) => (Array.isArray(value) ? value : []), z.array(OptionalTrimmedStringSchema))
-  .transform((values) => {
-    const seen = new Set<string>();
-    const output: string[] = [];
-    for (const value of values) {
-      if (value === null) {
-        continue;
-      }
-      const normalized = value.toLowerCase();
-      if (seen.has(normalized)) {
-        continue;
-      }
-      seen.add(normalized);
-      output.push(normalized);
-      if (output.length >= MAX_CANONICAL_ENTITIES) {
-        break;
-      }
-    }
-    return Object.freeze(output);
-  });
+  .transform((values) => Object.freeze(
+    normalizeCanonicalEntities(values.filter((value): value is string => value !== null))
+  ));
 const OptionalProjectionSchemaVersionSchema = z.preprocess(
   (value) => (value === 1 ? value : undefined),
   z.literal(1).optional()

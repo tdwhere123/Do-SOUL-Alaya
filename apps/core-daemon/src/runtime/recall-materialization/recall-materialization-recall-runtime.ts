@@ -1,6 +1,6 @@
 import {
   RecallContextEventType,
-  SoulActiveConstraintSchema
+  projectSoulActiveConstraint
 } from "@do-soul/alaya-protocol";
 import {
   RecallService,
@@ -143,27 +143,13 @@ export function createRecallActiveConstraintsPort(
         cap: activeConstraintsInput.cap
       });
       return Object.freeze({
-        constraints: Object.freeze(result.constraints.map(toActiveConstraintRecord)),
+        constraints: Object.freeze(result.constraints.map(projectSoulActiveConstraint)),
         total_count: result.total_count
       });
     }
   };
 }
 
-function toActiveConstraintRecord(record: Awaited<ReturnType<typeof findActiveConstraints>>["constraints"][number]) {
-  return SoulActiveConstraintSchema.parse({
-    object_id: record.memory.object_id,
-    object_kind: record.memory.object_kind,
-    content: record.memory.content,
-    dimension: record.memory.dimension,
-    scope_class: record.memory.scope_class,
-    governance_state: {
-      claim_status: record.claim_status,
-      governance_class: record.governance_class,
-      source_channels: record.source_channels
-    }
-  });
-}
 export function createRecallServiceRuntime(input: {
   readonly input: CreateRecallMaterializationWiringInput;
   readonly embeddingRuntime: ReturnType<typeof createDaemonEmbeddingRuntime>;

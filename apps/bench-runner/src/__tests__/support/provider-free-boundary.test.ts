@@ -11,7 +11,7 @@ import dgram from "node:dgram";
 import dns from "node:dns";
 import type { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
-import { installProviderFreeBoundary } from "./provider-free-boundary.js";
+import { installProviderFreeBoundary } from "../../../../../scripts/test-support/provider-free/provider-free-boundary.js";
 import { isKernelWriteLeaseIpcAddress } from "../../runs/extraction/fill/manifest/kernel-write-lease.js";
 
 // An outer provider-free run may already guard descendants with its own preload;
@@ -148,7 +148,7 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
 });
 
 it.each(["supplied", "default", "already-present"] as const)("preserves repeated fork flags and provider refusal with %s execArgv", async mode => {
-  const path = descendantFixture(), preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const path = descendantFixture(), preload = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   const flag = `--import=${preload}`, supplied = ["--conditions", "node", "--conditions", "development",
     ...(mode === "already-present" ? [flag] : [])];
   const expected = ["--conditions", "node", "--conditions", "development", flag];
@@ -174,7 +174,7 @@ it.each(["supplied", "default", "already-present"] as const)("preserves repeated
 });
 
 it("preserves repeated Worker flags and an already-present guard while retaining provider refusal", async () => {
-  const path = descendantFixture(), preload = new URL("./provider-free-cli-bootstrap.mjs", import.meta.url).href;
+  const path = descendantFixture(), preload = new URL("../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
   const supplied = ["--conditions", "node", "--conditions", "development", `--import=${preload}`];
   const expected = [...supplied], isolation = installProviderFreeBoundary({ descendantPreload: preload });
   let worker: workerThreads.Worker | undefined;
