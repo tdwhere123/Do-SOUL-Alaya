@@ -123,7 +123,7 @@ export async function runAlayaCli(
     const loaded = await loadModules();
     softwareExit = loaded.softwareExit;
     const command = argv.find((token) => !token.startsWith("-"));
-    if (command === "temporal-cutover") {
+    if (command === "temporal-cutover" || command === "import") {
       const bridge = loaded.createAlayaCliBridge({ startupSteps: [] }, { cwd, env, stdin, stdout, stderr, isTTY });
       if (loaded.registerAlayaOfflineCliCommands === undefined) {
         stderr.write("Offline maintenance CLI registration is unavailable; rebuild Alaya.\n");
@@ -133,8 +133,12 @@ export async function runAlayaCli(
       const result = await bridge.dispatch([...argv]);
       return toExitCode(result.exitCode, softwareExit);
     }
-    runtime = await loaded.createAlayaDaemonRuntime(command === "source-index-lexical"
-      ? { embeddingStartupProbe: "omit" } : undefined);
+    // Health reporting observes readiness; help only describes the catalog.
+    // Neither needs a provider probe. Recall-capable tools/MCP retain theirs.
+    const helpRequested = command === "help" || argv.some(token => token === "--help" || token === "-h");
+    runtime = await loaded.createAlayaDaemonRuntime(
+      helpRequested || command === "source-index-lexical" || command === "doctor" || command === "status"
+        ? { embeddingStartupProbe: "omit" } : undefined);
     const bridge = loaded.createAlayaCliBridge(runtime, {
       cwd,
       env,

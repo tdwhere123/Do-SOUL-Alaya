@@ -64,6 +64,37 @@ test("install.sh describes the required ONNX runtime and explicit model provisio
   assert.ok(source.indexOf('node ./scripts/vacuum-into.mjs') < source.indexOf('node ./bin/alaya.mjs --help'));
 });
 
+test("release quality jobs build dist before typechecking and dev watches the maintained built entry", () => {
+  const workflow = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  for (const job of ["quality", "windows-quality"]) {
+    const body = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z-]+:\n/u)[0];
+    assert.ok(body);
+    assert.ok(body.includes("run: pnpm build"));
+    assert.ok(body.includes("run: pnpm run --if-present typecheck"));
+    assert.ok(body.indexOf("run: pnpm build") < body.indexOf("run: pnpm run --if-present typecheck"));
+  }
+  const daemonPackage = JSON.parse(readFileSync(path.join(repoRoot, "apps/core-daemon/package.json"), "utf8"));
+  assert.equal(daemonPackage.scripts.dev, "node --watch dist/index.js");
+  assert.ok(existsSync(path.join(repoRoot, "apps/core-daemon/src/index.ts")));
+});
+
+test("installer refuses an existing rollback directory before touching current state", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-install-retained-"));
+  try {
+    const current = writeSentinel(path.join(work, "install"));
+    const retained = writeSentinel(path.join(work, "install.bak"));
+    const result = spawnSync("bash", [installScript], { cwd: work, encoding: "utf8", env: {
+      PATH: process.env.PATH, HOME: path.join(work, "operator-home"),
+      ALAYA_HOME: "install", ALAYA_BIN_DIR: "bin", ALAYA_VERSION: "v0.3.11"
+    } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retained install already exists/);
+    assert.equal(readFileSync(current, "utf8"), "keep-me");
+    assert.equal(readFileSync(retained, "utf8"), "keep-me");
+    assert.equal(readdirSync(work).some(name => name.includes(".staging-")), false);
+  } finally { rmSync(work, { recursive: true, force: true }); }
+});
+
 test("install.sh rejects a tarball whose package.json version does not match the tag", () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-install-version-"));
   try {
@@ -76,6 +107,7 @@ test("install.sh rejects a tarball whose package.json version does not match the
     const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
     const sums = path.join(work, "SHA256SUMS");
     writeFileSync(sums, `${digest}  do-soul-alaya-0.3.11.tar.gz\n`);
+    const current = writeSentinel(path.join(work, "nested failure/install home"));
 
     const result = spawnSync("bash", [installScript], {
       cwd: work,
@@ -85,20 +117,24 @@ test("install.sh rejects a tarball whose package.json version does not match the
         ALAYA_VERSION: "v0.3.11",
         ALAYA_LOCAL_TARBALL: tarball,
         ALAYA_LOCAL_SHA256SUMS: sums,
-        ALAYA_HOME: path.join(work, "home"),
-        ALAYA_BIN_DIR: path.join(work, "bin")
+        HOME: path.join(work, "operator-home"),
+        ALAYA_HOME: "nested failure/install home",
+        ALAYA_BIN_DIR: "nested failure/bin directory"
       }
     });
     assert.notEqual(result.status, 0);
     const output = `${result.stdout}\n${result.stderr}`;
     assert.match(output, /package\.json version/);
     assert.match(output, /does not match tag/);
+    assert.deepEqual(readdirSync(path.join(work, "nested failure")), ["install home"]);
+    assert.equal(readFileSync(current, "utf8"), "keep-me");
+    assert.equal(existsSync(path.join(work, "nested failure/bin directory/alaya")), false);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 });
 
-test("installer snapshots live storage before invoking the staged CLI bootstrap", () => {
+for (const layout of ["absolute", "relative", "nested spaces"]) test(`installer uses ${layout} paths through upgrade and paired rollback`, () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-install-backup-order-"));
   try {
     const prefixName = "do-soul-alaya-0.3.11";
@@ -106,6 +142,13 @@ test("installer snapshots live storage before invoking the staged CLI bootstrap"
     const fakeBin = path.join(work, "commands");
     const configDir = path.join(work, "config");
     const liveDb = path.join(configDir, "alaya.db");
+    const installHome = layout === "nested spaces" ? "missing parent/install space" : "install";
+    const binDir = layout === "nested spaces" ? "launchers/bin space" : "bin";
+    const installTarget = path.join(work, installHome);
+    const binTarget = path.join(work, binDir);
+    mkdirSync(path.join(installTarget, "bin"), { recursive: true });
+    writeFileSync(path.join(installTarget, "package.json"), JSON.stringify({ version: "0.3.10" }));
+    writeFileSync(path.join(installTarget, "bin/alaya.mjs"), '#!/usr/bin/env node\nprocess.stdout.write("0.3.10\\n");\n', { mode: 0o755 });
     mkdirSync(path.join(prefix, "scripts"), { recursive: true });
     mkdirSync(path.join(prefix, "bin"));
     mkdirSync(fakeBin); mkdirSync(configDir);
@@ -117,7 +160,7 @@ test("installer snapshots live storage before invoking the staged CLI bootstrap"
     writeFileSync(path.join(prefix, "scripts/vacuum-into.mjs"),
       'import fs from "node:fs"; import path from "node:path"; fs.mkdirSync(path.dirname(process.argv[3]), {recursive:true}); fs.copyFileSync(process.argv[2], process.argv[3]);\n');
     writeFileSync(path.join(prefix, "bin/alaya.mjs"),
-      'import fs from "node:fs"; fs.writeFileSync(process.env.FIXTURE_LIVE_DB, "upgraded-by-bootstrap");\n');
+      '#!/usr/bin/env node\nimport fs from "node:fs"; fs.writeFileSync(process.env.FIXTURE_LIVE_DB, "upgraded-by-bootstrap");\n');
     const tarball = path.join(work, `${prefixName}.tar.gz`);
     const tar = spawnSync("tar", ["-czf", tarball, prefixName], { cwd: work, encoding: "utf8" });
     assert.equal(tar.status, 0, tar.stderr);
@@ -126,7 +169,8 @@ test("installer snapshots live storage before invoking the staged CLI bootstrap"
     const result = spawnSync("bash", [installScript], { cwd: work, encoding: "utf8", env: {
       ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, HOME: path.join(work, "operator-home"),
       ALAYA_VERSION: "v0.3.11", ALAYA_LOCAL_TARBALL: tarball, ALAYA_LOCAL_SHA256SUMS: sums,
-      ALAYA_HOME: path.join(work, "install"), ALAYA_BIN_DIR: path.join(work, "bin"),
+      ALAYA_HOME: layout === "absolute" ? installTarget : installHome,
+      ALAYA_BIN_DIR: layout === "absolute" ? binTarget : binDir,
       ALAYA_CONFIG_DIR: configDir, FIXTURE_LIVE_DB: liveDb
     } });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -134,6 +178,32 @@ test("installer snapshots live storage before invoking the staged CLI bootstrap"
     assert.equal(backups.length, 1);
     assert.equal(readFileSync(path.join(configDir, "backups", backups[0]), "utf8"), "pre-upgrade-storage");
     assert.equal(readFileSync(liveDb, "utf8"), "upgraded-by-bootstrap");
+    assert.equal(JSON.parse(readFileSync(path.join(installTarget, "package.json"))).version, "0.3.11");
+    assert.equal(JSON.parse(readFileSync(path.join(`${installTarget}.bak`, "package.json"))).version, "0.3.10");
+    assert.equal(existsSync(path.join(binTarget, "alaya")), true);
+    assert.equal(readdirSync(path.dirname(installTarget)).some(name => name.includes(".staging-")), false);
+    const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
+    const recipe = readme.match(/```bash\n(# Never move \.bak[\s\S]*?)\n```/u)?.[1];
+    assert.ok(recipe, "README rollback recipe must be executable");
+    // Preserve an existing WAL witness too, rather than attaching it to the old DB.
+    writeFileSync(`${liveDb}-wal`, "current WAL");
+    const rollback = spawnSync("bash", ["-euc", recipe], { cwd: work, encoding: "utf8", env: {
+      PATH: process.env.PATH, ALAYA_HOME: installTarget, LIVE_DB: liveDb,
+      DB_BACKUP: path.join(configDir, "backups", backups[0])
+    } });
+    assert.equal(rollback.status, 0, rollback.stderr);
+    assert.equal(rollback.stdout.trim(), "0.3.10");
+    assert.equal(readFileSync(liveDb, "utf8"), "pre-upgrade-storage");
+    assert.equal(existsSync(`${liveDb}-wal`), false);
+    const archive = readdirSync(path.dirname(installTarget)).find(name => name.includes(".rollback-"));
+    assert.ok(archive);
+    const archivePath = path.join(path.dirname(installTarget), archive);
+    assert.equal(readFileSync(path.join(archivePath, "current.db"), "utf8"), "upgraded-by-bootstrap");
+    assert.equal(readFileSync(path.join(archivePath, "current.db-wal"), "utf8"), "current WAL");
+    assert.equal(JSON.parse(readFileSync(path.join(archivePath, "install/package.json"))).version, "0.3.11");
+    const launched = spawnSync(path.join(binTarget, "alaya"), ["--version"], { encoding: "utf8" });
+    assert.equal(launched.status, 0, launched.stderr);
+    assert.equal(launched.stdout.trim(), "0.3.10");
   } finally { rmSync(work, { recursive: true, force: true }); }
 });
 

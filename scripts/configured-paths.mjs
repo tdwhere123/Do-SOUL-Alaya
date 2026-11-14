@@ -26,7 +26,12 @@ export function resolveAlayaConfigDir(environment, platform = process.platform, 
 }
 
 export function resolveConfiguredDatabasePath(tomlPath, environment, fallbackPath, launchCwd = process.cwd()) {
-  const fromToml = readStorageDbPathFromToml(tomlPath);
+  return resolveConfiguredDatabasePathFromToml(readOptionalToml(tomlPath), environment, fallbackPath, launchCwd);
+}
+
+// null is a captured absent file, not permission to re-read mutable config.
+export function resolveConfiguredDatabasePathFromToml(tomlContent, environment, fallbackPath, launchCwd = process.cwd()) {
+  const fromToml = tomlContent === null ? null : parseStorageDbPathFromToml(tomlContent);
   if (fromToml !== null) {
     return path.resolve(launchCwd, fromToml);
   }
@@ -39,9 +44,9 @@ export function resolveConfiguredDatabasePath(tomlPath, environment, fallbackPat
   return path.resolve(launchCwd, fallbackPath);
 }
 
-function readStorageDbPathFromToml(tomlPath) {
+function readOptionalToml(tomlPath) {
   try {
-    return parseStorageDbPathFromToml(readFileSync(tomlPath, "utf8"));
+    return readFileSync(tomlPath, "utf8");
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) {
       return null;

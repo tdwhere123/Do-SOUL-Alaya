@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAlayaOperationsService } from "../../cli/operations/operations-service.js";
 import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
 import { acquireTemporalRuntimeLease } from "../../runtime/temporal-cutover/lease.js";
+import * as temporalLease from "../../runtime/temporal-cutover/lease.js";
+import { resolveConfiguredDatabasePath, resolveConfiguredDatabasePathFromToml } from "../../runtime/daemon/support/storage-config.js";
 import * as storagePointerFile from "../../runtime/config/storage-pointer-file.js";
 import { quoteTomlString } from "../support/test-paths.js";
 
@@ -44,6 +46,38 @@ async function payload(filename: string): Promise<Buffer> {
 }
 
 describe("SQLite operations snapshots", () => {
+  it("resolves captured TOML without re-reading a changed storage pointer", async () => {
+    const f = await fixture();
+    const captured = await readFile(f.paths.tomlPath, "utf8");
+    await writeFile(f.paths.tomlPath, '[storage]\ndb_path = "changed.db"\n');
+    expect(resolveConfiguredDatabasePathFromToml(captured, { DATA_DIR: "ignored" }, "unused", f.paths.configDir))
+      .toBe(f.filename);
+    expect(await resolveConfiguredDatabasePath(f.paths, { env: {}, fallbackPath: "unused", launchCwd: f.paths.configDir }))
+      .toBe(path.join(f.paths.configDir, "changed.db"));
+    expect(resolveConfiguredDatabasePathFromToml(null, { DATA_DIR: "relative-data" }, "unused", f.paths.configDir))
+      .toBe(path.join(f.paths.configDir, "relative-data/alaya.db"));
+  });
+
+  it("rejects a pointer changed before lease acquisition without restoring either database", async () => {
+    const f = await fixture();
+    const source = walDatabase(f.filename, "incoming");
+    const artifact = await f.service.backup();
+    source.prepare("UPDATE example SET value = 'keep'").run();
+    const changedDb = path.join(f.paths.configDir, "other.db");
+    const originalLease = temporalLease.withTemporalCutoverLease;
+    vi.spyOn(temporalLease, "withTemporalCutoverLease").mockImplementation(async (input, operation) => {
+      await writeFile(f.paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(changedDb)}\n`);
+      return await originalLease(input, operation);
+    });
+    try {
+      await expect(f.service.importBundle({ bundlePath: artifact.artifact_path })).rejects.toThrow("configuration changed");
+      expect(values(source)).toEqual([{ value: "keep" }]);
+      await expect(stat(changedDb)).rejects.toMatchObject({ code: "ENOENT" });
+      // The rejected operation must release its real runtime lease too.
+      const lease = await acquireTemporalRuntimeLease(f.filename);
+      await lease.release();
+    } finally { source.close(); }
+  });
   it.each(["backup", "exportBundle"] as const)("%s includes committed WAL while the source remains open", async (operation) => {
     const f = await fixture();
     const source = walDatabase(f.filename, "committed in WAL");

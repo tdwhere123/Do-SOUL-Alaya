@@ -70,11 +70,12 @@ TOML `storage.db_path` and then `DATA_DIR` override the database location.
 Relative values resolve against the launch working directory, so installer
 and daemon must use the same working directory to select the same file.
 Use an absolute configured path for upgrades independent of launch directory.
-Snapshots land separately in `<config-dir>/backups/`. Restore by
-stopping the daemon and copying that backup over the live database,
-then `mv "$ALAYA_HOME.bak" "$ALAYA_HOME"` if you also need the previous
-binary. `scripts/uninstall.sh` keeps `.bak` unless `--remove-bak` is
-passed. Install and uninstall share one path-admission guard. Before
+Snapshots land separately in `<config-dir>/backups/`. See
+[Rollback an upgrade](#rollback-an-upgrade) to restore the paired version and
+pre-migration database without discarding the current installation. The installer
+refuses to overwrite an existing `.bak`; archive that retained version explicitly
+before another upgrade. `scripts/uninstall.sh` keeps `.bak` unless
+`--remove-bak` is passed. Install and uninstall share one path-admission guard. Before
 detaching or deleting anything, uninstall rejects an `ALAYA_HOME`,
 `${ALAYA_HOME}.bak` (when `--remove-bak` is used), or `ALAYA_CONFIG_DIR`
 (when `--purge` is used) that is `$HOME`, an ancestor of `$HOME`, a system
@@ -85,6 +86,55 @@ unlinks a contained `ALAYA_HOME` symlink instead of following it.
 macOS, and Windows on x64 or arm64. Its install path has no automatic
 source-build fallback, so other operating-system or architecture combinations
 are not supported by the default Alaya install.
+
+## Developing the daemon
+
+Run `pnpm install --frozen-lockfile && pnpm build` from the source checkout first.
+`pnpm --filter @do-soul/alaya dev` watches the **built** `dist/index.js` daemon
+entry; it does not compile TypeScript. Re-run `pnpm build` after source changes
+(the watcher restarts when the built entry changes). Normal HTTP startup still
+requires the configured request token; this command does not bypass startup
+validation or provision embedding models.
+
+## Rollback an upgrade
+
+Stop **all** Alaya daemon/MCP/CLI processes first. Select the `.bak` installation
+and the database snapshot printed by the **same upgrade**; a current migrated DB
+is not a substitute for its pre-migration snapshot. Record the retained version:
+`node -p 'require(process.argv[1]).version' "$ALAYA_HOME.bak/package.json"`.
+Use absolute paths below, with `LIVE_DB` resolved using the same launch directory,
+TOML and `DATA_DIR` as the daemon, and `DB_BACKUP` set to that snapshot.
+
+For a database outside both installation directories (the default layout), run
+these steps one at a time, stopping on any error:
+
+```bash
+# Never move .bak onto an existing directory: mv would nest it, not replace it.
+test -d "$ALAYA_HOME.bak" && test -f "$DB_BACKUP"
+ROLLBACK_STATE="$(mktemp -d "${ALAYA_HOME}.rollback-XXXXXX")"
+# Retain the current database and its WAL tuple; do not leave old WAL beside
+# the restored main file. Keep this archive until rollback is verified.
+for suffix in '' -wal -shm -journal; do
+  if [ -e "${LIVE_DB}${suffix}" ]; then
+    mv "${LIVE_DB}${suffix}" "$ROLLBACK_STATE/current.db${suffix}"
+  fi
+done
+cp -p "$DB_BACKUP" "$LIVE_DB"
+mv "$ALAYA_HOME" "$ROLLBACK_STATE/install"
+mv "$ALAYA_HOME.bak" "$ALAYA_HOME"
+node -p 'require(process.argv[1]).version' "$ALAYA_HOME/package.json"
+```
+
+Confirm the final version matches the recorded retained version before restarting
+with the restored DB. The launcher still points at the same `ALAYA_HOME`. Preserve
+`ROLLBACK_STATE` and the original snapshot; no recursive deletion is needed. If a
+step fails, keep the daemon stopped and recover from these retained paths rather
+than repeating moves blindly. If the database or backup lives inside either
+installation directory, first archive it outside both trees and explicitly map
+its restored location before moving the directories; do not use the above layout
+recipe unchanged. A temporal-cutover database additionally requires the verified
+schema/EventLog/projection tuple described in the
+[architecture handbook](docs/handbook/architecture.md#temporal-migration-cutover-and-rollback).
 
 ## Local ONNX embeddings
 

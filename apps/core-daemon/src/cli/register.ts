@@ -69,6 +69,7 @@ export function registerAlayaCliCommands(
 /** Maintenance must remain reachable while normal startup rejects the active storage. */
 export function registerAlayaOfflineCliCommands(bridge: AlayaCliBridge): void {
   bridge.registerSubcommand(createTemporalCutoverCommandSpec({ shutdown: async () => undefined }));
+  registerOperationCommands(bridge);
 }
 
 interface AttachArgs {

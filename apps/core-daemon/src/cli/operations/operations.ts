@@ -98,7 +98,9 @@ function resolveService(
     return deps.serviceFactory(ctx);
   }
   return createAlayaOperationsService({
-    configPaths: resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: ctx.env }))
+    configPaths: resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: ctx.env })),
+    env: ctx.env,
+    launchCwd: ctx.cwd
   });
 }
 

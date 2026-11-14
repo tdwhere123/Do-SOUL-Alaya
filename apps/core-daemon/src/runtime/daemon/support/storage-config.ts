@@ -3,7 +3,7 @@ import {
 } from "../../../../../../scripts/configured-paths.mjs";
 import type { AlayaConfigPaths } from "../../../cli/support/config-files.js";
 
-export { parseStorageDbPathFromToml } from "../../../../../../scripts/configured-paths.mjs";
+export { parseStorageDbPathFromToml, resolveConfiguredDatabasePathFromToml } from "../../../../../../scripts/configured-paths.mjs";
 
 export interface ResolveConfiguredDatabasePathOptions {
   readonly env?: NodeJS.ProcessEnv;

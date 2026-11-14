@@ -116,7 +116,18 @@ replay does not infer a new grant from credentials or a model name.
 - **MCP:** stdio agent attach. Daemon HTTP serves its API and Inspector;
   outbound loopback MCP client activity is not an Alaya HTTP MCP server.
 - **CLI:** `bin/alaya.mjs` command surface, including `alaya tools call`
-  fallback, shares the memory-tool contract with MCP.
+  fallback, shares the memory-tool contract with MCP. `import` dispatches before
+  normal runtime bootstrap and owns exclusive config/database maintenance leases.
+  Payload imports restore only the current target resolved from captured TOML,
+  then process `DATA_DIR`, then the config-directory default (relative paths use
+  the captured launch directory); bundled database paths cannot redirect payloads.
+  Config-only imports may select the bundled TOML pointer but require both current
+  and selected databases to be inactive. Configuration changes before lease
+  acquisition reject the import. Restore failures retain partial-state audit;
+  they do not claim that an already restored database was rolled back.
+  `doctor` and `status` observe readiness without an eager embedding provider
+  probe; help also omits that probe. Tools/MCP retain normal recall-capable bootstrap. These are internal
+  lifecycle fixes under invariants §21–§25, not new tools or schema changes.
 - **Memory Inspector:** local memory-management and runtime-parameter UI,
   not a chat or agent-turn frontend. It uses daemon HTTP with its own session.
   Durable writes still pass through governance.

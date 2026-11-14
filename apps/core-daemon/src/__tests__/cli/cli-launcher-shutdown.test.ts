@@ -46,7 +46,7 @@ it.each(["installed", "private"] as const)("%s launcher exits unsuccessfully whe
   expect(result.stderr).not.toContain("fixture-private-cleanup-error");
 }, 30_000);
 
-it.each(["installed", "private"] as const)("%s launcher omits embedding startup effects only for lexical maintenance", launcher => {
+it.each(["installed", "private"] as const)("%s launcher omits embedding startup probes for maintenance and health reporting", launcher => {
   const daemonSource = `export async function createAlayaDaemonRuntime(options){
     process.stdout.write('startup='+JSON.stringify(options ?? null)+'\\n');
     return {shutdown:async()=>{}};}`;
@@ -55,7 +55,14 @@ it.each(["installed", "private"] as const)("%s launcher omits embedding startup 
   expect(lexical.status).toBe(0);
   expect(lexical.stdout).toBe('startup={"embeddingStartupProbe":"omit"}\ncommand completed\n');
   expect(lexical.stderr).toBe("");
-  const ordinary = runLauncher(launcher, "doctor", daemonSource);
+  for (const command of ["doctor", "status", "--help"]) {
+    const health = runLauncher(launcher, command, daemonSource);
+    expect(health.error).toBeUndefined();
+    expect(health.status).toBe(0);
+    expect(health.stdout).toBe('startup={"embeddingStartupProbe":"omit"}\ncommand completed\n');
+    expect(health.stderr).toBe("");
+  }
+  const ordinary = runLauncher(launcher, "tools", daemonSource);
   expect(ordinary.error).toBeUndefined();
   expect(ordinary.status).toBe(0);
   expect(ordinary.stdout).toBe("startup=null\ncommand completed\n");

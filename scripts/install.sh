@@ -46,11 +46,38 @@
 # BASH_SOURCE empty and must still run the installer body below.
 err()  { printf '\033[31mx\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Resolve even missing nested directories, without creating them. Walking each
+# existing directory physically also handles symlinked parents on macOS, where
+# readlink -f is unavailable.
+normalize_directory_path() {
+  local raw="$1" part result="/"
+  local -a parts
+  [ -n "$raw" ] || err "Directory path cannot be empty."
+  [[ "$raw" != *$'\n'* ]] || err "Directory path cannot contain a newline."
+  [[ "$raw" = /* ]] || raw="$PWD/$raw"
+  IFS='/' read -r -a parts <<< "$raw"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ''|.) continue ;;
+      ..) result="${result%/*}"; result="${result:-/}" ;;
+      *)
+        result="${result%/}/$part"
+        if [ -d "$result" ]; then
+          result="$(cd -P "$result" && pwd)" || return 1
+        elif [ -L "$result" ]; then
+          err "Cannot resolve directory symlink: $result"
+        fi
+        ;;
+    esac
+  done
+  printf '%s' "$result"
+}
+
 # Reject targets that, if mv'd to .bak or rm'd, would clobber unrelated state.
 reject_unsafe_path() {
   local label="$1" raw="$2"
   local abs
-  abs="$(readlink -f "$raw" 2>/dev/null || echo "$raw")"
+  abs="$(normalize_directory_path "$raw")" || return 1
   case "$abs" in
     "" | /) err "${label} resolves to '${abs}' (root). Refusing." ;;
     /root|/root/*|/usr|/usr/*|/etc|/etc/*|/var|/var/*|/bin|/bin/*|/sbin|/sbin/*)
@@ -69,8 +96,8 @@ reject_unsafe_path() {
 reject_recursive_delete_target() {
   local label="$1" raw="$2"
   local abs abs_home
-  abs="$(reject_unsafe_path "$label" "$raw")"
-  abs_home="$(readlink -f "$HOME" 2>/dev/null || echo "$HOME")"
+  abs="$(reject_unsafe_path "$label" "$raw")" || return 1
+  abs_home="$(normalize_directory_path "$HOME")" || return 1
   [ "$abs" = "$abs_home" ] \
     && err "${label} cannot be \$HOME (would clobber user state)."
   case "$abs_home" in
@@ -88,9 +115,6 @@ set -euo pipefail
 REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
 ALAYA_HOME="${ALAYA_HOME:-${HOME}/.local/share/do-soul-alaya}"
 ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
-TMP_DIR="$(mktemp -d -t alaya-install-XXXXXX)"
-STAGING_DIR="${ALAYA_HOME}.staging-$$"
-trap 'rm -rf "$TMP_DIR" "$STAGING_DIR"' EXIT
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '   %s\n' "$*"; }
@@ -102,9 +126,15 @@ bold "Do-SOUL Alaya installer"
 # --- path safety ----------------------------------------------------------
 # This guard runs against ALAYA_HOME (where the install body lives) AND
 # against ALAYA_BIN_DIR (where the alaya symlink lives).
-abs_alaya_home="$(reject_recursive_delete_target 'ALAYA_HOME' "$ALAYA_HOME")"
-abs_bin_dir="$(reject_unsafe_path 'ALAYA_BIN_DIR' "$ALAYA_BIN_DIR")"
-case "$abs_bin_dir" in
+ALAYA_HOME="$(reject_recursive_delete_target 'ALAYA_HOME' "$ALAYA_HOME")"
+ALAYA_BIN_DIR="$(reject_unsafe_path 'ALAYA_BIN_DIR' "$ALAYA_BIN_DIR")"
+if [ -e "${ALAYA_HOME}.bak" ] || [ -L "${ALAYA_HOME}.bak" ]; then
+  err "retained install already exists: ${ALAYA_HOME}.bak; archive it before retrying"
+fi
+TMP_DIR="$(mktemp -d -t alaya-install-XXXXXX)"
+STAGING_DIR="${ALAYA_HOME}.staging-$$"
+trap 'rm -rf "$TMP_DIR" "$STAGING_DIR"' EXIT
+case "$ALAYA_BIN_DIR" in
   /etc|/etc/*) err "ALAYA_BIN_DIR cannot be under /etc. Refusing." ;;
 esac
 
@@ -278,10 +308,9 @@ if ! node ./bin/alaya.mjs --help >/dev/null 2>&1; then
 fi
 ok "post-build sanity check passed"
 
-# Atomic swap.
+# Atomic swap. The retained version's absence was checked before staging.
 if [ -d "$ALAYA_HOME" ]; then
   warn "existing install at ${ALAYA_HOME} -> ${ALAYA_HOME}.bak"
-  rm -rf "${ALAYA_HOME}.bak"
   mv "$ALAYA_HOME" "${ALAYA_HOME}.bak"
 fi
 mv "$STAGING_DIR" "$ALAYA_HOME"
@@ -317,10 +346,11 @@ info "  node ${ALAYA_HOME}/scripts/fetch-local-embedding-model.mjs"
 if [ -n "$DB_BACKUP_PATH" ]; then
   info ""
   info "Database backup (VACUUM INTO): ${DB_BACKUP_PATH}"
-  info "Schema only migrates forward. Restore before rolling the binary back:"
-  info "  1. stop the daemon"
-  info "  2. cp '${DB_BACKUP_PATH}' '${LIVE_DB}'"
-  info "Binary rollback: mv '${ALAYA_HOME}.bak' '${ALAYA_HOME}'"
+  info "Schema only migrates forward. Pair this pre-migration DB with the retained binary."
+  info "Rollback: follow README.md 'Rollback an upgrade' (stop all Alaya processes,"
+  info "preserve the current install and database including WAL, restore the DB snapshot,"
+  info "then move .bak into the VACANT install path and verify package.json.version)."
+  info "Do not move .bak onto an existing directory or delete the current installation."
 fi
 info ""
 info "Next steps:"

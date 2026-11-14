@@ -11,7 +11,7 @@ import {
   type OperationAuditRecord,
   type OperationsBundle
 } from "./operations-types.js";
-import { parseStorageDbPathFromToml, resolveConfiguredDatabasePath } from "../../runtime/daemon/support/storage-config.js";
+import { parseStorageDbPathFromToml, resolveConfiguredDatabasePathFromToml } from "../../runtime/daemon/support/storage-config.js";
 import {
   replaceStorageDbPathInToml,
   writeTextAtomic
@@ -20,12 +20,15 @@ import { withTemporalCutoverLease } from "../../runtime/temporal-cutover/lease.j
 import { readDatabaseSnapshot, restoreDatabaseSnapshot } from "./operations-database.js";
 import { readBundle } from "./operations-bundle-reader.js";
 import { readErrorMessage } from "@do-soul/alaya-protocol";
+import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 export type { AlayaOperationsService, ImportPreview, OperationAuditRecord, OperationName, OperationsBundle } from "./operations-types.js";
 export { AlayaOperationError } from "./operations-types.js";
 
 export interface AlayaOperationsServiceDependencies {
   readonly configPaths: AlayaConfigPaths;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly launchCwd?: string;
   readonly clock?: () => string;
 }
 
@@ -41,7 +44,7 @@ export function createAlayaOperationsService(
       await writeBundleArtifact(deps.configPaths, "export", now, input.outputPath),
     previewImport: async ({ bundlePath }) => await previewBundleImport(bundlePath),
     importBundle: async ({ bundlePath }) =>
-      await importOperationsBundle(deps.configPaths, now, bundlePath)
+      await importOperationsBundle(deps, now, bundlePath)
   };
 }
 
@@ -90,17 +93,39 @@ async function previewBundleImport(bundlePath: string): Promise<ImportPreview> {
 }
 
 async function importOperationsBundle(
-  configPaths: AlayaConfigPaths,
+  deps: AlayaOperationsServiceDependencies,
   now: () => string,
   bundlePath: string
 ): Promise<Readonly<{ audit_path: string; restored_paths: readonly string[] }>> {
+  const { configPaths } = deps;
+  const env = { ...(deps.env ?? processEnvLookup()) };
+  const launchCwd = deps.launchCwd ?? process.cwd();
+  const fallbackPath = path.join(configPaths.configDir, "alaya.db");
   const bundle = await readBundle(bundlePath);
   const audit = await startImportAudit(configPaths, now, bundlePath);
   const restoredPaths: string[] = [];
   try {
-    await restoreImportedBundle(configPaths, bundle, restoredPaths);
-    await finishImportAudit(audit, now, restoredPaths, null);
-    return { audit_path: audit.auditPath, restored_paths: restoredPaths };
+    // Resolve once, before any restore writes. Compare the configuration witness
+    // under the lease rather than resolving a potentially different target again.
+    const configWitness = await readOptionalUtf8(configPaths.tomlPath);
+    const restoreDbPath = resolveConfiguredDatabasePathFromToml(configWitness, env, fallbackPath, launchCwd);
+    // Config-only import preserves its pointer-switch semantics, so both the
+    // current and newly selected databases must be inactive during publication.
+    const selectedDbPath = bundle.storage.db_base64 === null && bundle.config.alaya_toml !== null
+      ? resolveConfiguredDatabasePathFromToml(bundle.config.alaya_toml, env, fallbackPath, launchCwd)
+      : restoreDbPath;
+    return await withTemporalCutoverLease({
+      configFilename: configPaths.tomlPath,
+      candidateFilename: restoreDbPath,
+      runtimeFilenames: [restoreDbPath, selectedDbPath]
+    }, async () => {
+      if (await readOptionalUtf8(configPaths.tomlPath) !== configWitness) {
+        throw new AlayaOperationError("CANTCREAT", "Active database configuration changed before import acquired its lease; retry import.");
+      }
+      await restoreImportedBundle(configPaths, bundle, restoreDbPath, restoredPaths);
+      await finishImportAudit(audit, now, restoredPaths, null);
+      return { audit_path: audit.auditPath, restored_paths: restoredPaths };
+    });
   } catch (error) {
     await finishImportAudit(audit, now, restoredPaths, error);
     throw error;
@@ -131,41 +156,16 @@ async function startImportAudit(
 async function restoreImportedBundle(
   configPaths: AlayaConfigPaths,
   bundle: OperationsBundle,
+  restoreDbPath: string,
   restoredPaths: string[]
 ): Promise<void> {
-  const restoreDbPath = await resolveImportDbPath(configPaths, bundle);
-  if (bundle.storage.db_base64 === null || restoreDbPath === null) {
-    await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
+  if (bundle.storage.db_base64 === null) {
+    await restoreImportedConfigFiles(configPaths, bundle, null, restoredPaths);
     return;
   }
-  const dbBytes = Buffer.from(bundle.storage.db_base64, "base64");
-  // Restore is offline maintenance: exclude daemon startup and pointer cutovers
-  // before changing either the active database or its configuration.
-  await withTemporalCutoverLease({
-    configFilename: configPaths.tomlPath,
-    candidateFilename: restoreDbPath,
-    runtimeFilenames: [restoreDbPath]
-  }, async () => {
-    if (await resolveImportDbPath(configPaths, bundle) !== restoreDbPath) {
-      throw new AlayaOperationError("CANTCREAT", "Active database changed before import acquired its lease; retry import.");
-    }
-    await restoreDatabaseSnapshot(restoreDbPath, dbBytes);
-    restoredPaths.push(restoreDbPath);
-    await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
-  });
-}
-
-async function resolveImportDbPath(
-  configPaths: AlayaConfigPaths,
-  bundle: OperationsBundle
-): Promise<string | null> {
-  if (bundle.storage.db_base64 === null) {
-    return null;
-  }
-  return await resolveConfiguredDatabasePath(configPaths, {
-    env: {},
-    fallbackPath: path.join(configPaths.configDir, "alaya.db")
-  });
+  await restoreDatabaseSnapshot(restoreDbPath, Buffer.from(bundle.storage.db_base64, "base64"));
+  restoredPaths.push(restoreDbPath);
+  await restoreImportedConfigFiles(configPaths, bundle, restoreDbPath, restoredPaths);
 }
 
 async function restoreImportedConfigFiles(
