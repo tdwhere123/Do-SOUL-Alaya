@@ -142,7 +142,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     await plantNeedles(slice, 40, 701);
     const full = runRecall(slice, {
       query_text: "needle",
-      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000 })
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000, memory_bytes: 1_010_000 })
     });
     expect(full.entries).toHaveLength(40);
     expect(full.completeness.logical_index).toBe("complete");

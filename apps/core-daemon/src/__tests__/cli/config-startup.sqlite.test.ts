@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { formatFileSecretRef } from "@do-soul/alaya-protocol";
 import { afterAll, describe, expect, it } from "vitest";
 
 const repo = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -30,7 +31,7 @@ function runtimeProbe(env: NodeJS.ProcessEnv, mode: string) {
     import path from "node:path";
     const loopbackFetch = globalThis.fetch;
     globalThis.fetch = () => { throw new Error("provider fetch forbidden"); };
-    const { createAlayaDaemonRuntime, resolveSecretRef } = await import(${JSON.stringify(path.join(repo, "apps/core-daemon/dist/index.js"))});
+    const { createAlayaDaemonRuntime, resolveSecretRef } = await import(${JSON.stringify(pathToFileURL(path.join(repo, "apps/core-daemon/dist/index.js")).href)});
     const mode = process.argv[2];
     if (mode === "invalid") {
       await assert.rejects(createAlayaDaemonRuntime({ embeddingStartupProbe: "omit" }), /Invalid daemon env PORT/);
@@ -57,7 +58,7 @@ function runtimeProbe(env: NodeJS.ProcessEnv, mode: string) {
           });
           assert.equal(authenticated.status, 200);
           const config = await runtime.services.configService.getRuntimeEmbeddingConfig();
-          assert.equal(config.secret_ref, "file:" + path.join(process.env.ALAYA_CONFIG_DIR, "secrets", "openai"));
+          assert.equal(config.secret_ref, ${JSON.stringify(formatFileSecretRef(path.join(env.ALAYA_CONFIG_DIR!, "secrets", "openai")))});
           assert.deepEqual(resolveSecretRef(config.secret_ref), {
             ref: config.secret_ref, origin: "file", value: "synthetic-local-key"
           });

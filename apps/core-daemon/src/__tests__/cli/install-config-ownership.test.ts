@@ -10,6 +10,7 @@ import { createInstallCommand } from "../../cli/install/install.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
 import { withRuntimeEmbeddingFileLock } from "../../services/env-file/env-file-io.js";
 import { rollbackPartialState } from "../../cli/install/support.js";
+import { formatFileSecretRef } from "@do-soul/alaya-protocol";
 import { resolveSecretRef } from "../../secrets/index.js";
 import { parseEnv } from "../../services/env-file/env-file-format.js";
 
@@ -125,10 +126,11 @@ describe("installer config write ownership", () => {
     await mkdir(path.dirname(contained));
     await writeFile(contained, "synthetic-local-key\n");
     expect((await f.run({ embedding_enabled: true, api_key_source: "file", key_file_path: contained }, true)).exitCode).toBe(0);
-    expect(parseEnv(await readFile(f.env, "utf8")).get("ALAYA_OPENAI_SECRET_REF")).toBe("file:" + contained);
-    expect(resolveSecretRef("file:" + contained, {
+    const secretRef = formatFileSecretRef(contained);
+    expect(parseEnv(await readFile(f.env, "utf8")).get("ALAYA_OPENAI_SECRET_REF")).toBe(secretRef);
+    expect(resolveSecretRef(secretRef, {
       secretsDir: path.dirname(contained), readFile: () => "synthetic-local-key\n",
       readEnv: () => undefined, readKeychain: () => { throw new Error("not called"); }
-    })).toEqual({ ref: "file:" + contained, value: "synthetic-local-key", origin: "file" });
+    })).toEqual({ ref: secretRef, value: "synthetic-local-key", origin: "file" });
   });
 });

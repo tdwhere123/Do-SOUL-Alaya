@@ -276,7 +276,7 @@ it.each(["healthy", "denial", "unconfirmed"])(
     const temporary = mkdtempSync(join(tmpdir(), "provider-owner-config-"));
     const config = join(temporary, "vitest.config.mjs"), evidence = join(temporary, "probe.json");
     writeFileSync(config, `export default ${JSON.stringify({ root, test: {
-      include: [fixture], pool: "forks", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
+      include: [fixture.replaceAll("\\", "/")], pool: "forks", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
     } })};`);
     try {
       const result = await new Promise<{ code: string | number; stdout: string; stderr: string }>(resolve => {

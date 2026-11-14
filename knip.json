@@ -38,7 +38,10 @@
       "entry": [
         "{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
         "src/{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
-        "scripts/configured-paths.d.mts"
+        "scripts/configured-paths.d.mts",
+        "scripts/test-support/provider-free/*.d.mts",
+        "scripts/test-support/provider-free/*.fixture.ts",
+        "scripts/test-support/provider-free/*.fixture.cjs"
       ]
     },
     "packages/protocol": {

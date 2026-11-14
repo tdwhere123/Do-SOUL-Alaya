@@ -180,7 +180,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     };
     const full = runRecall(slice, {
       query_text: "needle",
-      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000 }),
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: 1_010_000 }),
       readers: capped
     });
     const pages = [];
