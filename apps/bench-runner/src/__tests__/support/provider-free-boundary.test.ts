@@ -126,6 +126,7 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
     await expect(request("/redirect")).rejects.toThrow("HTTP redirect");
     expect(okRequests).toBe(2);
     expect(() => net.connect(443, "192.0.2.1")).toThrow("non-loopback socket");
+    expect(() => net.connect(443, "1.1.1.1")).toThrow("non-loopback socket");
     expect(() => net.connect("/tmp/nonexistent-provider-fixture.sock")).toThrow("non-loopback socket");
     const digest = "a".repeat(64);
     const lease = process.platform === "linux" ? `\0alaya-extraction-cache-write-${digest}`
@@ -138,7 +139,7 @@ it("permits native loopback HTTP but refuses redirects, non-loopback sockets, UD
     expect(() => dns.resolve4("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
     expect(() => dns.lookup("provider-fixture.invalid", () => undefined)).toThrow("DNS lookup");
     expect(() => dns.promises.lookup("provider-fixture.invalid")).toThrow("DNS lookup");
-    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "UDP transport",
+    expect(isolation.violations).toEqual(["HTTP redirect", "non-loopback socket", "non-loopback socket", "non-loopback socket", "UDP transport",
       "DNS lookup", "DNS lookup", "DNS lookup"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

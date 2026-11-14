@@ -1,12 +1,8 @@
-import { existsSync } from "node:fs";
-
 import { mkdtemp, rm } from "node:fs/promises";
 
 import { tmpdir } from "node:os";
 
 import { join } from "node:path";
-
-import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,25 +16,17 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type MemoryEntry,
-  type SoulMemorySearchResponse,
-  type TrustSummary
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
 
 import {
   initDatabase,
-  createGardenBackgroundDataPorts,
-  getCurrentSchemaSummary,
   SqliteMemoryEntryRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 
-import { createAlayaCliBridge } from "../../cli/bridge.js";
-
-import { registerAlayaCliCommands } from "../../cli/register.js";
-
-import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { createAlayaDaemonRuntime } from "../../index.js";
 
 const tempDirs: string[] = [];
 
@@ -55,85 +43,6 @@ interface AuditLinkRow {
 
 interface EventIdRow {
   readonly event_id: string;
-}
-
-async function callRuntimeMemoryTool<TOutput = unknown>(
-  runtime: AlayaDaemonRuntime,
-  toolName: string,
-  args: unknown
-): Promise<TOutput> {
-  const result = await runtime.services.mcpMemoryToolHandler.call({
-    toolName,
-    arguments: args,
-    context: {
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      agentTarget: "codex",
-      sessionId: "trust-state-persistence-test-session",
-      surfaceId: "attached-agent-proof"
-    }
-  });
-
-  expect(result).toMatchObject({ ok: true, tool_name: toolName });
-  if (!result.ok) {
-    throw new Error(result.error.message);
-  }
-
-  return result.output as TOutput;
-}
-
-async function readCodexStatus(runtime: AlayaDaemonRuntime): Promise<TrustSummary> {
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const bridge = createAlayaCliBridge(runtime, {
-    stdin: new PassThrough(),
-    stdout,
-    stderr,
-    isTTY: false
-  });
-  registerAlayaCliCommands(bridge, runtime);
-
-  const result = await bridge.dispatch(["status", "--agent", "codex", "--json"]);
-  expect(result.exitCode).toBe(0);
-
-  const report = result.json as {
-    readonly trust: readonly TrustSummary[];
-  };
-  const summary = report.trust.find((candidate) => candidate.agent_target === "codex");
-  expect(summary).toBeDefined();
-  return summary!;
-}
-
-async function seedRecallFixture(dataDir: string, memory: MemoryEntry = createMemoryEntry()): Promise<void> {
-  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-  try {
-    const workspaceRepo = new SqliteWorkspaceRepo(database);
-    const runRepo = new SqliteRunRepo(database);
-    const memoryRepo = new SqliteMemoryEntryRepo(database);
-
-    await workspaceRepo.create({
-      workspace_id: "workspace-1",
-      name: "workspace one",
-      root_path: "/tmp/alaya-workspace-1",
-      workspace_kind: WorkspaceKind.LOCAL_REPO,
-      default_engine_binding: null,
-      workspace_state: WorkspaceState.ACTIVE
-    });
-    await runRepo.create({
-      run_id: "run-1",
-      workspace_id: "workspace-1",
-      title: "attached-agent proof run",
-      goal: null,
-      run_mode: RunMode.CHAT,
-      engine_binding_id: null,
-      engine_class: null,
-      run_state: RunState.IDLE,
-      current_surface_id: null
-    });
-    await memoryRepo.create(memory);
-  } finally {
-    database.close();
-  }
 }
 
 async function seedCrossWorkspaceFixture(dataDir: string): Promise<void> {
@@ -174,15 +83,6 @@ async function seedCrossWorkspaceFixture(dataDir: string): Promise<void> {
       last_used_at: "2026-04-01T00:00:00.000Z",
       last_hit_at: "2026-04-01T00:00:00.000Z"
     }));
-  } finally {
-    database.close();
-  }
-}
-
-function readSchemaSummary(dataDir: string): ReturnType<typeof getCurrentSchemaSummary> {
-  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-  try {
-    return getCurrentSchemaSummary(database);
   } finally {
     database.close();
   }

@@ -134,21 +134,6 @@ const RecordConfigParser = Object.freeze({
   }
 });
 
-function createDeferred<T>(): {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T | PromiseLike<T>) => void;
-  readonly reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, resolve, reject };
-}
-
 describe("routes-config port batch", () => {
 
   it("persists provider_kind=host_worker and mirrors it into ALAYA_GARDEN_PROVIDER_KIND", async () => {

@@ -1,20 +1,5 @@
 import { StorageError } from "../../../../shared/errors.js";
-import {
-  enforceEventLogAllHardCap,
-  parseEventLogEntryRow,
-  type EventLogAllScopeKind,
-  type EventLogRow
-} from "../mappers/event-log-rows.js";
-import type { EventLogEntry } from "@do-soul/alaya-protocol";
-
-export function queryBoundedAll(
-  loadRows: () => EventLogRow[],
-  scopeKind: EventLogAllScopeKind,
-  scopeId: string
-): readonly EventLogEntry[] {
-  const rows = loadRows();
-  return enforceEventLogAllHardCap(rows, scopeKind, scopeId).map((row) => parseEventLogEntryRow(row));
-}
+import type { EventLogAllScopeKind } from "../mappers/event-log-rows.js";
 
 export function wrapBoundedQueryError(
   scopeKind: EventLogAllScopeKind,

@@ -257,19 +257,6 @@ function earliestCopyFsyncOwner(
   throw new Error("copy/fsync owner required after dominance proof");
 }
 
-function optimizationDeclineReason(
-  copyFsyncDominant: boolean,
-  cloneReuseProved: boolean
-): string {
-  if (!copyFsyncDominant && cloneReuseProved !== true) {
-    return "copy/fsync is not the measured dominant phase and safe clone reuse is not proved";
-  }
-  if (!copyFsyncDominant) {
-    return "copy/fsync is not the measured dominant phase on the provider-free fixture";
-  }
-  return "safe clone reuse is not independently proved; retain one private copy per question";
-}
-
 function requireQuantity(
   quantity: ObservedFiniteNumber,
   path: string

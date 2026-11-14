@@ -381,8 +381,5 @@ export const en: Record<keyof typeof zh, string> = {
 
   // session
   "session:expired.title": "Session expired",
-  "session:expired.body": "The Inspector security token is no longer valid. Close this tab and re-run alaya inspect.",
-
-  // toast
-  "toast.dismiss": "Dismiss"
+  "session:expired.body": "The Inspector security token is no longer valid. Close this tab and re-run alaya inspect."
 };

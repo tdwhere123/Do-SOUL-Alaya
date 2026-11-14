@@ -70,11 +70,6 @@ const LEGEND_EDGE_ITEMS: ReadonlyArray<{
   }
 ];
 
-interface PathGraphEnvelopeLike {
-  readonly success: boolean;
-  readonly data: SoulPathGraphContract;
-}
-
 interface ViewModeToggleProps {
   readonly mode: "2d" | "3d";
   readonly webglSupported: boolean;
@@ -255,27 +250,6 @@ export function probeWebgl(): boolean {
   } catch {
     return false;
   }
-}
-
-export function unwrapPathGraph(
-  value: SoulPathGraphContract | PathGraphEnvelopeLike
-): SoulPathGraphContract {
-  if (isPathGraphEnvelope(value)) {
-    return value.data;
-  }
-  return value;
-}
-
-function isPathGraphEnvelope(
-  value: SoulPathGraphContract | PathGraphEnvelopeLike
-): value is PathGraphEnvelopeLike {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "data" in value &&
-    typeof value.data === "object" &&
-    value.data !== null
-  );
 }
 
 // Path-graph anchors are typed by their PathAnchorRef.kind. The renderer's

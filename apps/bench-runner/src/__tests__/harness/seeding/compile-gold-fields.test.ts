@@ -50,7 +50,9 @@ describe("compile gold field omission", () => {
       signalInput()
     );
 
-    expect(hasGoldPrefixedKey(payload)).toBe(false);
+    expect(payload).not.toHaveProperty("gold_osf_ids");
+    expect(payload).not.toHaveProperty("gold-answer");
+    expect(payload).not.toHaveProperty("goldAnswer");
     expect(payload.semantic_factor_graph).toMatchObject({ source_kind: "evidence" });
   });
 
@@ -70,8 +72,9 @@ describe("compile gold field omission", () => {
     const compiled = attachCompileSourceGrounding(nested, signalInput());
     const projected = projectCompileRawPayload(nested);
 
-    expect(hasGoldPrefixedKey(compiled)).toBe(false);
-    expect(hasGoldPrefixedKey(projected)).toBe(false);
+    const nestedGoldKeys = ["gold_hint", "gold-hint", "goldHint", "gold_id", "goldId"] as const;
+    assertAbsentKeys(compiled, nestedGoldKeys);
+    assertAbsentKeys(projected, nestedGoldKeys);
     expect(compiled.items).toEqual([{ keep: true }]);
     expect(compiled.golden).toEqual({ keep: true });
     expect(compiled.semantic_factor_graph).toMatchObject({ source_kind: "evidence" });
@@ -89,7 +92,10 @@ describe("compile gold field omission", () => {
       signalInput()
     );
 
-    expect(hasGoldPrefixedKey(payload)).toBe(false);
+    expect(payload).not.toHaveProperty("gold_semantic_factor_graph");
+    expect(payload).not.toHaveProperty("gold-osf-ids");
+    expect(payload).not.toHaveProperty("goldOsfIds");
+    expect(payload).not.toHaveProperty("gold_answer");
     expect(payload).not.toHaveProperty("semantic_factor_graph");
     expect(payload.semantic_factor_graph_projection).toEqual({
       status: "unavailable",
@@ -100,11 +106,19 @@ describe("compile gold field omission", () => {
 
 const ASSERTION = "I prefer dark mode.";
 
-function hasGoldPrefixedKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(hasGoldPrefixedKey);
-  if (typeof value !== "object" || value === null) return false;
-  return Object.entries(value).some(([key, child]) =>
-    isGoldAuthorityFieldKey(key) || hasGoldPrefixedKey(child));
+function assertAbsentKeys(value: unknown, keys: readonly string[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertAbsentKeys(item, keys);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    expect(record).not.toHaveProperty(key);
+  }
+  for (const child of Object.values(record)) {
+    assertAbsentKeys(child, keys);
+  }
 }
 
 function signalInput(): BenchSignalSeedInput {

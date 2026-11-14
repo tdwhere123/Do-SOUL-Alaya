@@ -79,13 +79,12 @@ describe("repository structure guard", () => {
     await writeSource(root, "packages/base/src/too-large.ts", sourceWithLines(800));
     const policyPath = await writePolicy(root, policy());
 
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+    const failure = await expectGuardFailure(root, policyPath);
+    expect(failure).toMatchObject({
       code: 1,
       stderr: expect.stringContaining("source-file-size-hard-limit")
     });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("next=Split at a domain")
-    });
+    expect(failure.stderr).toContain("next=Split at a domain");
   });
 
   it("rejects a planted workspace dependency inversion", async () => {
@@ -163,35 +162,22 @@ describe("repository structure guard", () => {
       }]
     }));
 
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+    const failure = await expectGuardFailure(root, policyPath);
+    expect(failure).toMatchObject({
       code: 1,
       stderr: expect.stringMatching(
         /forbidden-generic-ownership-directory[\s\S]+production-artifact-reference[\s\S]+retired-import-path/u
       )
     });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("forbidden-rollout-ownership-directory")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=apps/inspector/src/runtime/scratch-evidence.ts")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringMatching(
-        /retired-import-path[\s\S]+retired-source-path-restored[\s\S]+stale-generic-ownership-exception/u
-      )
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=packages/base/src/__tests__/retired-path.test.ts")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=packages/base/src/helpers")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=packages/base/src/misc")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=packages/base/src/common")
-    });
+    expect(failure.stderr).toContain("forbidden-rollout-ownership-directory");
+    expect(failure.stderr).toContain("path=apps/inspector/src/runtime/scratch-evidence.ts");
+    expect(failure.stderr).toMatch(
+      /retired-import-path[\s\S]+retired-source-path-restored[\s\S]+stale-generic-ownership-exception/u
+    );
+    expect(failure.stderr).toContain("path=packages/base/src/__tests__/retired-path.test.ts");
+    expect(failure.stderr).toContain("path=packages/base/src/helpers");
+    expect(failure.stderr).toContain("path=packages/base/src/misc");
+    expect(failure.stderr).toContain("path=packages/base/src/common");
   });
 
   it("does not treat ordinary band and wave words as rollout ownership", async () => {
@@ -224,7 +210,8 @@ describe("repository structure guard", () => {
       retired_import_paths: ["apps/inspector/web/src/utils/parse-search-query"]
     }));
 
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+    const failure = await expectGuardFailure(root, policyPath);
+    expect(failure).toMatchObject({
       code: 1,
       stderr: expect.stringMatching(
         /retired-import-path[\s\S]+retired-source-path-restored/u
@@ -305,19 +292,14 @@ describe("repository structure guard", () => {
       }]
     }));
 
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+    const failure = await expectGuardFailure(root, policyPath);
+    expect(failure).toMatchObject({
       code: 1,
       stderr: expect.stringMatching(/barrel-cycle[\s\S]+new-private-barrel-chain/u)
     });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringMatching(/private-barrel-snapshot-drift[\s\S]+stale-private-barrel-edge-exception/u)
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("duplicate-export-authority")
-    });
-    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
-      stderr: expect.stringContaining("stale-duplicate-export-authority-exception")
-    });
+    expect(failure.stderr).toMatch(/private-barrel-snapshot-drift[\s\S]+stale-private-barrel-edge-exception/u);
+    expect(failure.stderr).toContain("duplicate-export-authority");
+    expect(failure.stderr).toContain("stale-duplicate-export-authority-exception");
   });
 
   it("rejects stale artifact exceptions", async () => {
@@ -570,13 +552,12 @@ describe("repository structure guard", () => {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"]
     });
-    await expect(runGuard(root, await writePolicy(root, policy()))).rejects.toMatchObject({
+    const failure = await expectGuardFailure(root, await writePolicy(root, policy()));
+    expect(failure).toMatchObject({
       code: 1,
       stderr: expect.stringContaining("unscoped-workspace-source")
     });
-    await expect(runGuard(root, await writePolicy(root, policy()))).rejects.toMatchObject({
-      stderr: expect.stringContaining("path=.hidden/src/secret.ts")
-    });
+    expect(failure.stderr).toContain("path=.hidden/src/secret.ts");
   });
 
   it("rejects non-literal import specifiers and stale exceptions, ignoring comments", async () => {
@@ -689,6 +670,18 @@ async function runGuard(root: string, policyPath: string) {
     [scriptPath, "--root", root, "--policy", policyPath],
     { env: cliScriptEnv() }
   );
+}
+
+async function expectGuardFailure(
+  root: string,
+  policyPath: string
+): Promise<Error & { code: number; stderr: string }> {
+  try {
+    await runGuard(root, policyPath);
+  } catch (error) {
+    return error as Error & { code: number; stderr: string };
+  }
+  throw new Error("expected repository structure guard to fail");
 }
 
 function policy(overrides: Record<string, unknown> = {}) {

@@ -50,7 +50,7 @@ import type {
   RemainingWork
 } from "./field-engine.js";
 
-export const KIND_PRIORITY: Readonly<Record<PhysicalCoverageRegionKind, number>> = {
+const KIND_PRIORITY: Readonly<Record<PhysicalCoverageRegionKind, number>> = {
   seed: 0,
   adjacency: 1,
   discovery: 1,

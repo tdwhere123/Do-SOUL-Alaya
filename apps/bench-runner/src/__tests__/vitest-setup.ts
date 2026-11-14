@@ -28,8 +28,14 @@ beforeEach((context) => {
 });
 
 vi.mock("node:dns/promises", () => ({
-  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
-    const answer = { address: "93.184.216.34", family: 4 };
+  lookup: vi.fn(async (host: string, options?: { all?: boolean }) => {
+    if (host !== "127.0.0.1" && host !== "::1" && host !== "localhost") {
+      throw new Error("Provider-free test refused non-loopback DNS");
+    }
+    const answer = {
+      address: host === "::1" ? "::1" : "127.0.0.1",
+      family: host === "::1" ? 6 : 4
+    };
     return options?.all === true ? [answer] : answer;
   })
 }));

@@ -134,21 +134,6 @@ const RecordConfigParser = Object.freeze({
   }
 });
 
-function createDeferred<T>(): {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T | PromiseLike<T>) => void;
-  readonly reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, resolve, reject };
-}
-
 describe("routes-config port batch", () => {
 
   it("forwards runtime embedding patch fields without dropping embedding_enabled", async () => {

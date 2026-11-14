@@ -390,8 +390,5 @@ export const zh = {
 
   // ── session ────────────────────────────────────────────────────────
   "session:expired.title": "会话已过期",
-  "session:expired.body": "Inspector 安全 token 已失效。请关闭标签页并重新运行 alaya inspect。",
-
-  // ── toast (default texts) ──────────────────────────────────────────
-  "toast.dismiss": "关闭"
+  "session:expired.body": "Inspector 安全 token 已失效。请关闭标签页并重新运行 alaya inspect。"
 } as const;

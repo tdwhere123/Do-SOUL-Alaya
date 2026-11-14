@@ -404,16 +404,15 @@ describe("SqliteHandoffGapRepo — immutability", () => {
 
     const found = repo.findHandoffById(record.runtime_id);
     expect(found).not.toBeNull();
-
-    // Attempt to mutate (TypeScript will prevent it, but we verify at runtime)
-    try {
-      (found as Record<string, unknown>)["handoff_kind"] = "MUTATED";
-    } catch {
-      // frozen object throws in strict mode — that is correct
-    }
+    expect(Object.isFrozen(found)).toBe(true);
+    expect(() => {
+      (found as { handoff_kind: string }).handoff_kind = "MUTATED";
+    }).toThrow();
+    expect(found?.handoff_kind).toBe("session_end");
 
     const refetched = repo.findHandoffById(record.runtime_id);
     expect(refetched?.handoff_kind).toBe("session_end");
+    expect(refetched).not.toBe(found);
   });
 
   it("mutating a returned GapRecord does not affect subsequent findById", () => {
@@ -423,14 +422,14 @@ describe("SqliteHandoffGapRepo — immutability", () => {
 
     const found = repo.findGapById(record.runtime_id);
     expect(found).not.toBeNull();
-
-    try {
-      (found as Record<string, unknown>)["gap_kind"] = "MUTATED";
-    } catch {
-      // frozen object throws in strict mode — that is correct
-    }
+    expect(Object.isFrozen(found)).toBe(true);
+    expect(() => {
+      (found as { gap_kind: string }).gap_kind = "MUTATED";
+    }).toThrow();
+    expect(found?.gap_kind).toBe("context_lost");
 
     const refetched = repo.findGapById(record.runtime_id);
     expect(refetched?.gap_kind).toBe("context_lost");
+    expect(refetched).not.toBe(found);
   });
 });

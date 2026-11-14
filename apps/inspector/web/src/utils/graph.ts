@@ -12,14 +12,6 @@ export const NODE_COLOR: Record<string, string> = {
   projection: "#D4AF37"
 };
 
-export const ORIGIN_KIND_COLOR: Record<string, string> = {
-  user_memory: "#4A90A4", // calm teal — explicitly created or curated by the user
-  engineering_chunk: "#8E9396", // muted slate — auto-imported from .codex / engineering source
-  reviewed_engineering_chunk: "#9C6FAB", // soft violet — engineering origin AFTER reviewer accept
-  proposal_pending: "#D4AF37", // amber — awaiting governance review
-  system: "#6F4E5B" // wine — bootstrap / install / runtime-derived
-};
-
 // Edge palette keyed by path-plane relation_kind (link.kind on the path plane
 // is the raw PathRelation.constitution.relation_kind, a free string). Hues are
 // grouped by semantic family so the topology reads at a glance:

@@ -407,7 +407,7 @@ function startObservedField(
     observation_source_revision: input.expected_source_revision };
 }
 
-export function cancelledField(state: FieldEngineState): FieldEngineState {
+function cancelledField(state: FieldEngineState): FieldEngineState {
   return applyObserverPage(state, {
     page: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

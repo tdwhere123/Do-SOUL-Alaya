@@ -255,6 +255,7 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
       noGold,
       noGoldMaterializationDrop,
       noGoldCandidateAbsent,
+      answerSetCoverageDrop,
       abstention,
       hitWithStaleTaxonomy
     ];
@@ -265,7 +266,7 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
       fine_assessment_drop: 0,
       budget_drop: 1,
       delivery_order_drop: 1,
-      answer_set_coverage_drop: 0,
+      answer_set_coverage_drop: 1,
       evaluation_or_gold_issue: 0
     });
     const metrics = buildLongMemEvalQualityMetrics(questions);
@@ -276,13 +277,13 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
     });
     const cohorts = metrics.measurement_cohort_counts!;
     expect(cohorts).toEqual({
-      evaluated: 9,
-      non_abstention: 8,
+      evaluated: 10,
+      non_abstention: 9,
       abstention: 1,
-      scorable_answerable: 7,
+      scorable_answerable: 8,
       unscorable_answerable: 1,
       hit_at_5: 1,
-      miss_at_5: 6
+      miss_at_5: 7
     });
     expect(cohorts.evaluated).toBe(cohorts.non_abstention + cohorts.abstention);
     expect(cohorts.non_abstention).toBe(

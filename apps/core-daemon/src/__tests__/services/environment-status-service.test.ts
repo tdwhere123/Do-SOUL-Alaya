@@ -59,41 +59,51 @@ describe("environment status service", () => {
       kind: "success",
       stdout: "worktree /tmp/one\nworktree /tmp/two\n"
     };
+    const previousSecret = process.env.ALAYA_ENV_STATUS_TEST_SECRET;
+    process.env.ALAYA_ENV_STATUS_TEST_SECRET = "sentinel-not-for-child";
 
-    const service = createEnvironmentStatusService({
-      toolNames: ["git", "node"],
-      getDatabasePath: () => "/tmp/alaya.db",
-      getFilesDirectory: () => "/tmp/alaya-files"
-    });
+    try {
+      const service = createEnvironmentStatusService({
+        toolNames: ["git", "node"],
+        getDatabasePath: () => "/tmp/alaya.db",
+        getFilesDirectory: () => "/tmp/alaya-files"
+      });
 
-    await expect(service.getStatus()).resolves.toEqual({
-      tools: {
-        git: true,
-        node: true
-      },
-      active_worktrees: 2,
-      active_worktrees_known: true,
-      db_path: "/tmp/alaya.db",
-      files_dir: "/tmp/alaya-files"
-    });
+      await expect(service.getStatus()).resolves.toEqual({
+        tools: {
+          git: true,
+          node: true
+        },
+        active_worktrees: 2,
+        active_worktrees_known: true,
+        db_path: "/tmp/alaya.db",
+        files_dir: "/tmp/alaya-files"
+      });
 
-    const gitWorktreeCall = childProcessMock.execFileMock.mock.calls.find(([command]) => command === "git");
-    expect(gitWorktreeCall?.[2]).toMatchObject({
-      encoding: "utf8",
-      timeout: 5_000,
-      windowsHide: true
-    });
-    expect(gitWorktreeCall?.[2]).toMatchObject({
-      env: expect.not.objectContaining({
-        ALAYA_ENV_STATUS_TEST_SECRET: expect.any(String)
-      })
-    });
-    expect(childProcessMock.execFileMock).not.toHaveBeenCalledWith(
-      "bash",
-      expect.arrayContaining(["-lc"]),
-      expect.anything(),
-      expect.anything()
-    );
+      const gitWorktreeCall = childProcessMock.execFileMock.mock.calls.find(([command]) => command === "git");
+      expect(gitWorktreeCall?.[2]).toMatchObject({
+        encoding: "utf8",
+        timeout: 5_000,
+        windowsHide: true
+      });
+      expect(gitWorktreeCall?.[2]).toMatchObject({
+        env: expect.not.objectContaining({
+          ALAYA_ENV_STATUS_TEST_SECRET: "sentinel-not-for-child"
+        })
+      });
+      expect(childProcessMock.execFileMock).not.toHaveBeenCalledWith(
+        "bash",
+        expect.arrayContaining(["-lc"]),
+        expect.anything(),
+        expect.anything()
+      );
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.ALAYA_ENV_STATUS_TEST_SECRET;
+      } else {
+        process.env.ALAYA_ENV_STATUS_TEST_SECRET = previousSecret;
+      }
+    }
   });
 
   it("falls back to false and zero and warns ALAYA_WORKTREE_COUNT_UNAVAILABLE when git fails", async () => {
@@ -175,22 +185,17 @@ describe("environment status service", () => {
   });
 
   it("does not use a shell for default tool probes", async () => {
-    process.env.ALAYA_ENV_STATUS_TEST_SECRET = "secret";
-    try {
-      const service = createEnvironmentStatusService({
-        toolNames: ["definitely-not-a-real-alaya-tool;echo-owned"],
-        getDatabasePath: () => "/tmp/alaya.db",
-        getFilesDirectory: () => "/tmp/alaya-files"
-      });
+    const service = createEnvironmentStatusService({
+      toolNames: ["definitely-not-a-real-alaya-tool;echo-owned"],
+      getDatabasePath: () => "/tmp/alaya.db",
+      getFilesDirectory: () => "/tmp/alaya-files"
+    });
 
-      await expect(service.getStatus()).resolves.toMatchObject({
-        tools: {
-          "definitely-not-a-real-alaya-tool;echo-owned": false
-        }
-      });
-    } finally {
-      delete process.env.ALAYA_ENV_STATUS_TEST_SECRET;
-    }
+    await expect(service.getStatus()).resolves.toMatchObject({
+      tools: {
+        "definitely-not-a-real-alaya-tool;echo-owned": false
+      }
+    });
 
     expect(childProcessMock.execFileMock).not.toHaveBeenCalledWith(
       "bash",

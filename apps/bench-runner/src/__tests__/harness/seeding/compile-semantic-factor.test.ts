@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
-import { isGoldAuthorityFieldKey } from "../../../harness/seeding/compile-gold-fields.js";
 import { attachCompileSourceGrounding } from "../../../harness/seeding/source-grounding.js";
 
 describe("compile source-bound semantic factor fields", () => {
@@ -83,10 +82,11 @@ describe("compile source-bound semantic factor fields", () => {
     );
     expect(rejected.source_grounding).toMatchObject({ status: "rejected" });
     expect(rejected).not.toHaveProperty("semantic_factor_graph");
+    expect(rejected).not.toHaveProperty("gold_semantic_factor_graph");
+    expect(rejected).not.toHaveProperty("gold_osf_ids");
     expect(rejected.semantic_factor_graph_projection).toMatchObject({
       status: "rejected"
     });
-    expect(hasGoldPrefixedKey(rejected)).toBe(false);
   });
 
   it("does not rebuild an OSF graph from gold-shaped compile fields", () => {
@@ -104,20 +104,15 @@ describe("compile source-bound semantic factor fields", () => {
 
     expect(payload.source_grounding).toMatchObject({ status: "grounded" });
     expect(payload).not.toHaveProperty("semantic_factor_graph");
+    expect(payload).not.toHaveProperty("gold_semantic_factor_graph");
+    expect(payload).not.toHaveProperty("gold_osf_ids");
+    expect(payload).not.toHaveProperty("gold_answer");
     expect(payload.semantic_factor_graph_projection).toEqual({
       status: "unavailable",
       reason: "semantic_factor_graph_missing"
     });
-    expect(hasGoldPrefixedKey(payload)).toBe(false);
   });
 });
-
-function hasGoldPrefixedKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(hasGoldPrefixedKey);
-  if (typeof value !== "object" || value === null) return false;
-  return Object.entries(value).some(([key, child]) =>
-    isGoldAuthorityFieldKey(key) || hasGoldPrefixedKey(child));
-}
 
 function signalInput(turnContent: string, matchedText: string): BenchSignalSeedInput {
   return {
