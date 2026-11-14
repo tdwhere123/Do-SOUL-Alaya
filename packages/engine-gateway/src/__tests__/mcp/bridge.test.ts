@@ -290,6 +290,31 @@ describe("McpBridge", () => {
     });
   });
 
+  it("rejects unpublished soul.* even when the conversation predicate accepts the name", async () => {
+    const soulHandler = vi.fn();
+    const toolsHandler = vi.fn();
+    const bridge = new McpBridge({
+      soulHandler,
+      toolsHandler,
+      hasConversationToolName: (toolName) => toolName === "soul.fake"
+    });
+
+    const result = await bridge.executeToolUse({
+      ...toolUse,
+      id: "toolu_soul_fake",
+      name: "soul.fake"
+    });
+
+    expect(soulHandler).not.toHaveBeenCalled();
+    expect(toolsHandler).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu_soul_fake",
+      content: JSON.stringify({ error: "unsupported tool" }),
+      is_error: true
+    });
+  });
+
   it("passes through structured validation errors so the model can retry", async () => {
     const bridge = new McpBridge({
       soulHandler: vi.fn(async () => {

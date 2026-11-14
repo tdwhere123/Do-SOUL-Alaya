@@ -68,6 +68,11 @@ export class McpBridge {
         );
       }
 
+      // Reserved soul.* stays closed even if a conversation predicate matches.
+      if (toolUse.name.startsWith("soul.")) {
+        return createErrorResult(toolUse.id, "unsupported tool");
+      }
+
       if (this.hasConversationToolName(toolUse.name)) {
         return await withTimeout(
           (signal) => this.toolsHandler(toolUse, runtimeContext, signal),
@@ -75,7 +80,7 @@ export class McpBridge {
         );
       }
 
-      if (toolUse.name.startsWith("soul.") || toolUse.name.startsWith("tools.")) {
+      if (toolUse.name.startsWith("tools.")) {
         return createErrorResult(toolUse.id, "unsupported tool");
       }
 
