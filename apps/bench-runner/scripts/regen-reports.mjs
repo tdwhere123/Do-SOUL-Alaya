@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// must run after: pnpm --filter @do-soul/alaya-eval build
+// must run after: pnpm build
+// Usage: node apps/bench-runner/scripts/regen-reports.mjs [history-root]
 // @anchor regen-reports — one-shot rewrite of report.md for every history
 // entry under the local history root's {self,public}/. The bench harness
 // already produced honest kpi.json artifacts; this script only re-renders
@@ -7,24 +8,35 @@
 // renderReport change) can land without re-running the daemon. kpi.json
 // content is NOT mutated.
 
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   KpiPayloadSchema,
+  listEntries,
   diffKpis,
   renderReport,
   resolveDefaultBenchHistoryRoot
 } from "@do-soul/alaya-eval";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const HISTORY_ROOT = resolveDefaultBenchHistoryRoot(resolve(__dirname, "../../.."));
+import { matchesHistoryQuery } from "../../../packages/eval/dist/history/history.js";
+import { isRecallEvalArchive, sameRecallEvalBaselineIdentity } from
+  "../dist/runs/lifecycle/recall-eval/recall-eval-archive-impl.js";
+import { renderRecallEvalReport } from "../dist/runs/kpi/recall-eval-report.js";
 
-async function listEntryDirs(benchDir) {
-  const names = await readdir(benchDir).catch(() => []);
-  return names
-    .filter((name) => /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]+$/.test(name))
-    .sort(); // lex sort = chronological
+const __dirname = dirname(fileURLToPath(import.meta.url));
+if (process.argv.length > 3) throw new Error("usage: regen-reports.mjs [history-root]");
+const HISTORY_ROOT = process.argv[2] === undefined
+  ? resolveDefaultBenchHistoryRoot(resolve(__dirname, "../../..")) : resolve(process.argv[2]);
+
+function sameReportCohort(previous, current) {
+  if (isRecallEvalArchive(current)) {
+    return isRecallEvalArchive(previous) && sameRecallEvalBaselineIdentity(previous, current);
+  }
+  return !isRecallEvalArchive(previous) && matchesHistoryQuery(previous, {
+    split: current.split, policyShape: current.policy_shape ?? "stress",
+    simulateReport: current.simulate_report ?? "none", embeddingProvider: current.embedding_provider
+  });
 }
 
 async function readKpi(kpiPath) {
@@ -35,23 +47,25 @@ async function readKpi(kpiPath) {
 
 async function regenForBench(benchName) {
   const benchDir = join(HISTORY_ROOT, benchName);
-  const dirs = await listEntryDirs(benchDir);
+  const dirs = await listEntries({ historyRoot: HISTORY_ROOT }, benchName);
   if (dirs.length === 0) {
     console.warn(`[regen-reports] no entries under ${benchDir}`);
     return;
   }
 
-  let previousPayload = null;
+  const prior = [];
   for (const slug of dirs) {
     const entryDir = join(benchDir, slug);
     const kpiPath = join(entryDir, "kpi.json");
     const reportPath = join(entryDir, "report.md");
     const current = await readKpi(kpiPath);
+    const previousPayload = prior.findLast(payload => sameReportCohort(payload, current)) ?? null;
     const diff = diffKpis(current, previousPayload);
-    const report = renderReport(current, previousPayload, diff);
+    const render = isRecallEvalArchive(current) ? renderRecallEvalReport : renderReport;
+    const report = render(current, previousPayload, diff);
     await writeFile(reportPath, report + "\n", "utf8");
     console.log(`[regen-reports] rewrote ${reportPath}`);
-    previousPayload = current;
+    prior.push(current);
   }
 }
 

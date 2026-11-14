@@ -270,7 +270,8 @@ export interface HistoryEntryQuery {
   readonly embeddingProvider?: string;
 }
 
-function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
+/** Shared cohort predicate for history readers and offline report regeneration. */
+export function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
   return (
     (query.split === undefined || entry.split === query.split) &&
     (query.policyShape === undefined ||

@@ -118,7 +118,8 @@ export async function selectRecallEvalBaseline(
   return matches.reduce<typeof matches[number] | null>(latestArchive, null)?.payload ?? null;
 }
 
-function sameRecallEvalBaselineIdentity(left: KpiPayload, right: KpiPayload): boolean {
+// Also used by offline report regeneration; keep fast/full and treatment identity intact.
+export function sameRecallEvalBaselineIdentity(left: KpiPayload, right: KpiPayload): boolean {
   const leftAttribution = left.recall_eval_attribution;
   const rightAttribution = right.recall_eval_attribution;
   const leftDigest = evaluatedQuestionDigest(left);
