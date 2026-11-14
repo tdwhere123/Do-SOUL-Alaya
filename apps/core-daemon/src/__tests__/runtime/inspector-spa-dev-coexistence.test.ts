@@ -1,9 +1,9 @@
 import { createRequire } from "node:module";
-import { createServer as createNetServer } from "node:net";
+import { createServer as createNetServer, Server as NetServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { serve, type ServerType } from "@hono/node-server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../runtime/app.js";
 import { startInspectorServer } from "../../../../inspector/src/runtime/server.js";
 
@@ -21,10 +21,27 @@ const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 describe("inspector SPA dev coexistence", () => {
   const closers: Array<() => Promise<void>> = [];
 
+  beforeEach(() => {
+    // Vite probes wildcard availability before binding its configured listener.
+    // Refuse those advisory probes locally; real loopback binds and DNS denial remain intact.
+    const listen = NetServer.prototype.listen;
+    vi.spyOn(NetServer.prototype, "listen").mockImplementation(new Proxy(listen, {
+      apply(target, receiver, args) {
+        const host = typeof args[0] === "object" && args[0] !== null ? args[0].host : args[1];
+        if (host !== "127.0.0.1" && host !== "::1") throw new Error("Test permits only loopback listeners");
+        return Reflect.apply(target, receiver, args);
+      }
+    }));
+  });
+
   afterEach(async () => {
     process.exitCode = undefined;
     const pending = closers.splice(0).reverse().map((close) => close());
-    await Promise.all(pending);
+    try {
+      await Promise.all(pending);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it("forwards cookie session /api through Vite 5175 onto production daemon security on 5173", async () => {
