@@ -27,6 +27,12 @@ it.each([
     const metrics = JSON.parse(quality.stdout);
     expect(metrics.cohort_first_admitted.workspace_local).toMatchObject({ gold_hit_count: 1, gold_hit_denominator: 1 });
     expect(metrics.cohort_winning_admission.workspace_local).toMatchObject({ gold_hit_count: 1, gold_hit_denominator: 1 });
+    expect(metrics).not.toHaveProperty("budget_drop_distribution");
+    expect(metrics).not.toHaveProperty("high_lexical_demoted_rate");
+    expect(metrics).not.toHaveProperty("per_plane_recall_coverage");
+    expect(metrics.metadata.unavailable_metrics).toMatchObject({
+      budget_drop_distribution: "gold diagnostics absent on some questions"
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -77,6 +83,65 @@ it.each([{}, { arbitrary: true }, { questions: "corrupt" }, { questions: [null] 
   const result = runQualityScript(value);
   expect(result.status).toBe(1);
   expect(result.stdout).toBe("");
+});
+
+it.each([
+  { questions: [{}] },
+  { questions: [{ gold: [] }] },
+  { questions: [{ gold_memory_ids: [] }] },
+  { questions: [{ delivered_results: [] }] },
+  { questions: [{ delivered_results: [], gold: null }] },
+  { questions: [{ delivered_results: [], gold: [{}] }] },
+  { questions: [{ delivered_results: [{}], gold: [] }] },
+  { questions: [{ delivered_results: [], gold_memory_ids: "missing" }] },
+  { schema_version: 99, questions: [{ delivered_results: [], gold: [] }] }
+])("refuses evidence-free, missing required or malformed per-question measurements: %j", archive => {
+  const result = runQualityScript(archive);
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toMatch(/diagnostics/u);
+});
+
+it.each([
+  { questions: [] },
+  { schema_version: 1, questions: [{ delivered_results: [], gold: [] }] },
+  { questions: [{ delivered_results: [], gold: [], gold_memory_ids: [] }] }
+])("accepts explicitly measured empty populations: %j", archive => {
+  const result = runQualityScript(archive);
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ non_monotonic_rate: 0,
+    budget_drop_distribution: {}, per_plane_recall_coverage: {} });
+});
+
+it("preserves legacy partial identity measurements without silently filling absent facets", () => {
+  const result = runQualityScript({ questions: [{ delivered_results: [], gold_memory_ids: [] }] });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics.non_monotonic_rate).toBe(0);
+  expect(metrics).not.toHaveProperty("budget_drop_distribution");
+  expect(metrics.metadata.longmemeval).not.toHaveProperty("gold_count");
+});
+
+it("keeps historical gold diagnostics readable without inventing identity-hit accounting", () => {
+  const result = runQualityScript({ questions: [{ delivered_results: [], gold: [{ object_id: "gold",
+    final_rank: null, source_planes: [] }] }] });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics.metadata.longmemeval.gold_count).toBe(1);
+  expect(metrics.metadata.longmemeval).not.toHaveProperty("gold_hit_count");
+  expect(metrics).not.toHaveProperty("cohort_first_admitted");
+});
+
+it("does not shrink the population or fill an absent sibling measurement", () => {
+  const result = runQualityScript({ questions: [
+    { delivered_results: [], gold: [] },
+    { delivered_results: [{ object_id: "a" }, { object_id: "b" }], gold_memory_ids: ["a"] }
+  ] });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics.metadata.longmemeval.non_monotonic_denominator).toBe(2);
+  expect(metrics).not.toHaveProperty("non_monotonic_rate");
+  expect(metrics).not.toHaveProperty("budget_drop_distribution");
 });
 
 function runQualityScript(value: unknown) {

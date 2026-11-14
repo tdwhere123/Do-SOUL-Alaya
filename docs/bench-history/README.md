@@ -131,6 +131,18 @@ not natural questions, inference, provider traffic or scores.
 
 ## Metrics and comparisons
 
+The offline `scripts/compute-bench-quality-metrics.mjs` projection accepts KPI
+quality contracts or diagnostics with `questions[]` (schema version 1, or an
+unversioned historical sidecar). Each diagnostic question needs an explicit
+`delivered_results[]` and either `gold[]` or a gold identity list
+(`gold_object_ids`, `gold_memory_ids`, `gold_evidence_ids`). Nonempty delivery and
+gold rows carry `object_id`; identity lists contain nonempty strings. Explicit
+empty lists are observed empty measurements; omitted lists are not. Historical
+identity-only gold remains readable, but missing gold-diagnostic facets are
+omitted and explained in `metadata.unavailable_metrics`, not filled with zeros.
+Missing delivery scores likewise leave order rate unavailable over the unchanged
+question population. Unknown versions and malformed supplied measurements fail.
+
 - `sample_size` identifies the dataset population; `evaluated_count` records the
   evaluated selection. Keep answerable, abstention, and invalid cohorts distinct.
 - LongMemEval `r_at_1`, `r_at_5`, and `r_at_10` are hit proportions over the

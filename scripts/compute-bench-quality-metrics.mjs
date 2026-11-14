@@ -160,14 +160,7 @@ function detectArchiveKind(archive) {
 
 function applyLongMemEvalDiagnostics(archive, output) {
   const questions = archive.questions;
-  for (const question of questions) {
-    for (const key of ["delivered_results", "gold"]) {
-      if (hasOwnField(question, key) &&
-          (!Array.isArray(question[key]) || !question[key].every(isRecord))) {
-        throw new Error(`invalid diagnostics question ${key}`);
-      }
-    }
-  }
+  const availability = validateDiagnosticsMeasurement(archive);
   const questionStats = accumulateQuestionStats(questions);
   const goldStats = accumulateGoldStats(questionStats.allGold);
   const activeConstraints = countActiveConstraints(archive);
@@ -184,6 +177,70 @@ function applyLongMemEvalDiagnostics(archive, output) {
     goldStats,
     activeConstraints
   });
+  preserveMissingDiagnosticsMeasurements(output, availability, questionStats);
+}
+
+// This offline projection also reads historical partial sidecars, not just the
+// current full schema. Its minimum input is an observed delivery list plus gold
+// diagnostics or a declared gold identity list. Missing lists are never [].
+function validateDiagnosticsMeasurement(archive) {
+  if (hasOwnField(archive, "schema_version") && archive.schema_version !== 1) {
+    throw new Error("unsupported diagnostics schema_version");
+  }
+  let goldComplete = true, identityComplete = true;
+  for (const question of archive.questions) {
+    if (!Array.isArray(question.delivered_results)) {
+      throw new Error("diagnostics question requires measured delivered_results[]");
+    }
+    for (const key of ["delivered_results", "gold"]) {
+      if (hasOwnField(question, key) && (!Array.isArray(question[key]) ||
+          !question[key].every(row => isRecord(row) && typeof row.object_id === "string" && row.object_id.length > 0))) {
+        throw new Error(`invalid diagnostics question ${key}`);
+      }
+    }
+    const identityKeys = ["gold_object_ids", "gold_memory_ids", "gold_evidence_ids"]
+      .filter(key => hasOwnField(question, key));
+    for (const key of identityKeys) {
+      if (!Array.isArray(question[key]) || !question[key].every(id => typeof id === "string" && id.length > 0)) {
+        throw new Error(`invalid diagnostics question ${key}`);
+      }
+    }
+    if (!hasOwnField(question, "gold") && identityKeys.length === 0) {
+      throw new Error("diagnostics question requires measured gold[] or gold identity list");
+    }
+    goldComplete &&= hasOwnField(question, "gold");
+    identityComplete &&= identityKeys.length > 0 || question.gold?.length === 0;
+  }
+  return { goldComplete, identityComplete };
+}
+
+function preserveMissingDiagnosticsMeasurements(output, availability, stats) {
+  const unavailable = {};
+  const omit = (keys, reason) => {
+    for (const key of keys) { delete output[key]; unavailable[key] = reason; }
+  };
+  const metadata = output.metadata.longmemeval;
+  if (!availability.goldComplete) {
+    omit(["budget_drop_distribution", "high_lexical_demoted_rate", "per_plane_recall_coverage"],
+      "gold diagnostics absent on some questions");
+    for (const key of ["gold_count", "budget_drop_denominator", "budget_drop_field_count",
+      "high_lexical_demoted_count", "high_lexical_demoted_denominator"]) delete metadata[key];
+  }
+  if (!availability.identityComplete) {
+    omit(["cohort_first_admitted", "cohort_winning_admission", "path_expansion_share"],
+      "gold identity measurement absent on some questions");
+    delete metadata.gold_hit_count;
+  }
+  if (stats.nonMonotonicMissingScores > 0) {
+    omit(["non_monotonic_rate"], "delivery scores absent on some questions");
+    delete metadata.non_monotonic_count;
+  }
+  if (Object.keys(unavailable).length > 0) {
+    output.metadata.unavailable_metrics = unavailable;
+    // Do not leave a warning claiming that an omitted facet was measured zero.
+    output.warnings = output.warnings.filter(warning =>
+      !Object.keys(unavailable).some(key => warning.includes(key)));
+  }
 }
 
 function accumulateQuestionStats(questions) {
@@ -200,7 +257,7 @@ function accumulateQuestionStats(questions) {
   let planeWinningFields = 0;
 
   for (const question of questions) {
-    const deliveredResults = asArray(question?.delivered_results);
+    const deliveredResults = question.delivered_results;
     const gold = asArray(question?.gold);
     deliveredCount += deliveredResults.length;
 
@@ -375,7 +432,7 @@ function pushDiagnosticsWarnings(output, ctx) {
   const allGold = questionStats.allGold;
 
   if (questions.length === 0) {
-    output.warnings.push("questions[] missing or empty; non_monotonic_rate set to 0");
+    output.warnings.push("questions[] is measured empty; non_monotonic_rate set to 0");
   }
   if (questionStats.deliveredCount > 0 && questionStats.nonMonotonicEvaluable === 0) {
     output.warnings.push(
