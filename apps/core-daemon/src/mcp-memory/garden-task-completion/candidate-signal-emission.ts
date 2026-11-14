@@ -28,6 +28,9 @@ export async function emitTaskCandidateSignals(
   }
   const emittedSignalIds: string[] = [];
   for (const signal of candidateSignals) {
+    // A receive already in flight may settle after reclaim; only the current
+    // completion owner may admit the next sibling effect.
+    refreshCompletionClaim(params, row, completionClaimedBy);
     const received = await params.deps.signalService.receiveSignal(signal);
     emittedSignalIds.push(received.signal.signal_id);
     outcomes.observe(received);
