@@ -99,7 +99,7 @@ describe("mergeRecallEvalShardArchives — shard measurement truth", () => {
       schema_version: "bench-quality-metrics.unavailable.v1",
       unavailable_reason: "not_recomputed_from_shard_archives",
       evaluator_identity_unscorable_count: cohort.unscorable.length,
-      evaluator_identity_unscorable_denominator: 3 - cohort.abstentions.length,
+      evaluator_identity_unscorable_denominator: 3,
       measurement_cohort_counts: { evaluated: 3, abstention: cohort.abstentions.length,
         scorable_answerable: cohort.answerable, unscorable_answerable: cohort.unscorable.length }
     });
