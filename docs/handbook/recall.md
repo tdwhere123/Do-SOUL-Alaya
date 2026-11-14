@@ -215,14 +215,18 @@ The process-local [execution retention owner](../../packages/core/src/recall/run
 accounts fields, worker preparations and issued pages together, with conservative
 object-graph bytes (including full typed-array backing buffers). Independent
 retained roots pay separately for shared nodes. The default ceiling is 128 MiB
-per process/Worker and 64 MiB per workspace within it; capacity exhaustion is an
-explicit `execution_retention` resource refusal and never evicts a valid lease.
+per process/Worker and 64 MiB per workspace within it. Admission may evict whole
+least-recently-used other executions in the same workspace, including unexpired
+leases; another workspace's executions are never eviction victims. If removing
+all eligible victims still cannot fit the record, admission returns an explicit
+`execution_retention` resource refusal without evicting them.
 These are retention estimates, not heap/RSS guarantees or request-work charges.
 Executions expire at the earlier of their admitted lifetime and five minutes;
 an active timer drops references even when no token is used again. Acknowledgment
-releases preparation/source-reader closures; its conservative reservation and
-retry receipt remain until expiry. Terminal replay may retain the field needed
-for source eligibility checks during that lease. Expiry, discard and invalidation
+releases preparation/source-reader closures and lowers the preparation charge to
+the retained retry receipt. Retained field and issued-page charges remain until
+eviction, invalidation, discard or expiry. Terminal replay may retain the field needed
+for source eligibility checks during that lease. Eviction, expiry, discard and invalidation
 notify the parent to revoke the affected Worker affinity handles; Worker exit
 revokes all its routes. Source-currentness and authorization checks remain separate
 from TTL. Older process-local handles cannot resume after upgrade or Worker restart.
