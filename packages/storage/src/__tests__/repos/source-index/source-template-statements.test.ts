@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BoundSourceStatement, HostOccurrence } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, type BoundSourceStatement, type HostOccurrence } from "@do-soul/alaya-protocol";
 import { StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
 import { guardSourceIndexTarget } from "../../../repos/source-index/native-source.js";
 import { readStatementIndexTarget } from "../../../repos/source-index/statement-artifact.js";
 import { eraseSource, publishSource } from "./source-index-fixture.js";
+import { RETAINED_SOURCE_CHUNK_BYTES } from "../../../repos/field/retained-source-chunks.js";
 import { QUERY_BUDGET, WORKSPACE, expectQueryResources, fixture, targetFor, type Fixture } from "./source-index-query-fixture.js";
 import { contextOf, publishMessages, publishStatement } from "./source-template-fixture.js";
 
@@ -226,6 +227,56 @@ describe("member listing reads", () => {
       event_time: "2026-08-16T09:00:00.000Z", statements: [{ source: statement.source, text: "You chose the terrace.",
         role: "assistant", message_id: "message-1", embedding: null }] });
     expectQueryResources(listing.resources);
+  });
+
+  it("charges byte-proportional message comparison while reusing snapshot reads", () => {
+    const environment = setup();
+    const input = publishMessages(environment, [
+      { role: "user", text: `I ordered a café cocktail. ${"detail ".repeat(800)}` },
+      { role: "assistant", text: "You chose the terrace." }
+    ]);
+    const span = input.inventory.occurrences[0]!.utf8_span;
+    const spanBytes = span[1] - span[0];
+    expect(spanBytes).toBeGreaterThan(RETAINED_SOURCE_CHUNK_BYTES);
+    const statements = [0, 1, 2, 3].map(index => publishStatement(environment, input, `shared-${index}`, 0,
+      { statement: { text: `shared fact ${index}`, relation: "reported event" } }));
+    const comparisonLowerBound = statements.length * spanBytes;
+    const uncachedReadLowerBound = statements.length * Math.ceil(spanBytes / RETAINED_SOURCE_CHUNK_BYTES) + 1;
+    const memberBudget = { work_units: 8_000_000, memory_bytes: 64 * 1024 * 1024 };
+    const originalCharge = SourceSemanticResourceLedger.prototype.charge;
+    const charges: { work: number; memory: number; phase: string }[] = [];
+    vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+      charges.push({ work, memory: bytes, phase: String(phase) });
+      return originalCharge.call(this, work, bytes, phase);
+    });
+    const bounded = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+    const listing = environment.index.readMemberListing(input.source, null, memberBudget);
+    expect(listing.status).toBe("ready");
+    if (listing.status !== "ready") throw new Error("member listing must be ready");
+    expect(new Set(listing.statements.map(row => row.source.auxiliary?.artifact_id)))
+      .toEqual(new Set(statements.map(row => row.source.auxiliary?.artifact_id)));
+    expect(listing.statements).toHaveLength(statements.length);
+    expect(listing.first_message?.startsWith("I ordered a café cocktail.")).toBe(true);
+    const messageCharges = charges.filter(row => row.phase.includes("raw message") && !row.phase.includes("reuse"));
+    expect(messageCharges.reduce((sum, row) => sum + row.work, 0)).toBeGreaterThanOrEqual(comparisonLowerBound);
+    expect(messageCharges.filter(row => row.phase.endsWith("comparison") && !row.phase.includes("decode"))
+      .every(row => row.memory === 0 && row.work > 1)).toBe(true);
+    const reads = bounded.mock.calls.length;
+    expect(reads).toBeGreaterThan(0);
+    expect(reads).toBeLessThan(uncachedReadLowerBound);
+    expect(environment.index.readMemberListing(input.source, null, { work_units: comparisonLowerBound,
+      memory_bytes: memberBudget.memory_bytes }).status).toBe("resource_limited");
+    expect(environment.index.readMemberListing(input.source, null, { work_units: listing.resources.work - 1,
+      memory_bytes: memberBudget.memory_bytes }).status).toBe("resource_limited");
+    bounded.mockClear();
+    const admitted = environment.index.readMemberListing(input.source, null, {
+      work_units: listing.resources.work, memory_bytes: memberBudget.memory_bytes });
+    expect(admitted.status).toBe("ready");
+    if (admitted.status !== "ready") throw new Error("funded member listing must be ready");
+    expect(admitted.first_message).toBe(listing.first_message);
+    expect(admitted.statements.map(row => [row.source.auxiliary?.artifact_id, row.text, row.role, row.message_id]))
+      .toEqual(listing.statements.map(row => [row.source.auxiliary?.artifact_id, row.text, row.role, row.message_id]));
+    expect(bounded.mock.calls.length).toBe(reads);
   });
 
   it.each(["replaced", "erased"])("refuses a %s member instead of listing it empty", state => {

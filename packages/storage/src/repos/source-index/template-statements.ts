@@ -21,10 +21,16 @@ import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js
 const ARTIFACT_ID_BYTES = 1024;
 const HEADER_BYTES = ARTIFACT_ID_BYTES + 40;
 type ArtifactHeader = Readonly<{ id: string; targetBytes: number; keyBytes: number; gistBytes: number }>;
+type CachedMessagePart = Readonly<{ text: string; bytes: number; eventTime: string | null }>;
 type ReadContext = Readonly<{
   database: StorageDatabase; records: SqliteFieldSourceRecordRepo; source: SourceIndexTarget;
   meter: QueryReadMeter; sha256: FieldContractSha256;
+  messages: Map<string, CachedMessagePart>;
 }>;
+function listingContext(database: StorageDatabase, records: SqliteFieldSourceRecordRepo, source: SourceIndexTarget,
+  meter: QueryReadMeter, sha256: FieldContractSha256): ReadContext {
+  return { database, records, source, meter, sha256, messages: new Map() };
+}
 class TemplateReadUnknown extends Error {}
 /** A refusal by a read budget, distinct from an unknown source state. */
 class TemplateReadLimited extends TemplateReadUnknown {}
@@ -32,7 +38,7 @@ class TemplateReadLimited extends TemplateReadUnknown {}
 /** Caller owns the admitted root and snapshot. An unfinished enumeration never returns a useful prefix. */
 export function readTemplateStatements(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
   source: SourceIndexTarget, budget: SourceSemanticResourceBudget, sha256: FieldContractSha256): SourceIndexTemplateRead {
-  const meter = new QueryReadMeter(budget), context: ReadContext = { database, records, source, meter, sha256 };
+  const meter = new QueryReadMeter(budget), context = listingContext(database, records, source, meter, sha256);
   try {
     return { status: "complete", statements: enumerateTemplateStatements(context).statements, resources: meter.resources() };
   } catch (error) {
@@ -81,7 +87,7 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
       || key.source_id !== root.source_id || canonicalJson(key.target) !== canonicalJson(root.target))) {
       throw new TemplateReadUnknown("statement_witness_key_root_mismatch");
     }
-    const context: ReadContext = { database, records, source: root, meter, sha256 };
+    const context = listingContext(database, records, root, meter, sha256);
     const inventoryRead = readInventoryResult(context);
     if (inventoryRead.status !== "captured" || inventoryRead.inventory === undefined) {
       if (keys.length > 0) throw new TemplateReadUnknown(`source_template_host_${inventoryRead.status}`);
@@ -138,7 +144,7 @@ export function readStatementWitnesses(database: StorageDatabase, records: Sqlit
 export function readMemberListing(database: StorageDatabase, records: SqliteFieldSourceRecordRepo, source: SourceIndexTarget,
   vectors: Readonly<{ generation_id: string; dimensions: number }> | null, budget: SourceSemanticResourceBudget,
   sha256: FieldContractSha256) {
-  const meter = new QueryReadMeter(budget), context: ReadContext = { database, records, source, meter, sha256 };
+  const meter = new QueryReadMeter(budget), context = listingContext(database, records, source, meter, sha256);
   try {
     const template = enumerateTemplateStatements(context);
     const statements = template.statements.map(row => ({ source: row.source, text: row.bound.statement.text,
@@ -264,8 +270,15 @@ function verifyOwnMessage(context: ReadContext, bound: BoundSourceStatement, inv
   if (textOffset !== bound.message.text.length) throw new TemplateReadUnknown("source_template_message_changed");
 }
 
-function readMessagePart({ records, source, meter }: ReadContext, offset: number, end: number) {
+function readMessagePart(context: ReadContext, offset: number, end: number) {
+  const { records, source, meter, messages } = context, key = `${offset}:${end}`;
   const size = Math.min(RETAINED_SOURCE_CHUNK_BYTES, end - offset);
+  const cached = messages.get(key);
+  if (cached !== undefined) {
+    // verifyOwnMessage still compares these bytes; skip only the saved native read/decode/memory.
+    meter.ledger.charge(size, 0, "source template raw message comparison");
+    return cached;
+  }
   meter.ledger.reserve(size + 5, 2 * size + RETAINED_SOURCE_READ_RESERVATION, "source template raw message");
   meter.ledger.charge(size, 2 * size, "source template raw message decode and comparison");
   const read = records.findByIdBounded(source.target.workspace_id, source.target.root_id, size, offset,
@@ -276,5 +289,7 @@ function readMessagePart({ records, source, meter }: ReadContext, offset: number
   if (read.invalidOffset || read.record?.source_body == null || read.prefixBytes === 0 || offset + read.prefixBytes > end) {
     throw new TemplateReadUnknown("source_template_source_incomplete");
   }
-  return { text: read.record.source_body, bytes: read.prefixBytes, eventTime: read.record.event_time };
+  const part = { text: read.record.source_body, bytes: read.prefixBytes, eventTime: read.record.event_time };
+  messages.set(key, part);
+  return part;
 }
