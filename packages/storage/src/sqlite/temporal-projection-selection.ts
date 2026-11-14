@@ -20,7 +20,7 @@ import {
 import { StorageError } from "../shared/errors.js";
 import { markTemporalDatabaseEstablished } from "./temporal-file-publication.js";
 import {
-  readSqliteDatabaseFileWitnessSet,
+  readSqliteDatabaseFileWitnessSet, SQLITE_DATABASE_FILE_WITNESS_ROLES,
   type SqliteDatabaseFileWitness
 } from "./sqlite-database-file-witness.js";
 
@@ -337,8 +337,8 @@ function parseReceiptFileSet(value: unknown): readonly ReceiptFileDigest[] {
   const seenRoles = new Set<string>();
   const parsed = value.map((entry) => {
     const record = requireRecord(entry, "receipt source file");
-    const role = record.role;
-    if (role !== "database" && role !== "journal" && role !== "wal" || seenRoles.has(role)) {
+    const role = SQLITE_DATABASE_FILE_WITNESS_ROLES.find(candidate => candidate === record.role);
+    if (role === undefined || seenRoles.has(role)) {
       throw new StorageError("CONFLICT", "Temporal candidate receipt has an invalid source file role.");
     }
     seenRoles.add(role);
@@ -347,7 +347,8 @@ function parseReceiptFileSet(value: unknown): readonly ReceiptFileDigest[] {
       bytes: parseNonNegativeInteger(record.bytes, "receipt source file bytes"),
       sha256: parseSha256(record.sha256, "receipt source file sha256")
     });
-  }).sort((left, right) => left.role.localeCompare(right.role));
+  }).sort((left, right) => SQLITE_DATABASE_FILE_WITNESS_ROLES.indexOf(left.role)
+    - SQLITE_DATABASE_FILE_WITNESS_ROLES.indexOf(right.role));
   if (!seenRoles.has("database")) {
     throw new StorageError("CONFLICT", "Temporal candidate receipt is missing its source database witness.");
   }

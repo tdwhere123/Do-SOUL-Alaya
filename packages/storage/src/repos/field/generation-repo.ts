@@ -6,7 +6,6 @@ import {
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { parseOptionalRow } from "../shared/parse-row.js";
-import { generationFromRow, generationToRow } from "./mappers/field-receipts.js";
 import { verifyPersistedGeneration } from "./identity.js";
 import {
   fieldProjectionGenerationParser,

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 
-export const SQLITE_DATABASE_FILE_WITNESS_ROLES = ["database", "journal", "wal"] as const;
+export const SQLITE_DATABASE_FILE_WITNESS_ROLES = Object.freeze(["database", "journal", "wal"] as const);
 
 export type SqliteDatabaseFileWitnessRole = (typeof SQLITE_DATABASE_FILE_WITNESS_ROLES)[number];
 
@@ -11,7 +11,7 @@ export interface SqliteDatabaseFileWitness {
   readonly sha256: string;
 }
 
-export function sqliteDatabaseFileWitnessPath(
+function sqliteDatabaseFileWitnessPath(
   filename: string,
   role: SqliteDatabaseFileWitnessRole
 ): string {
