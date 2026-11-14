@@ -68,6 +68,53 @@ describe("recall evaluator cohort persistence", () => {
   });
 });
 
+describe("worker-shard provider state persistence", () => {
+  const states = ["provider_returned", "provider_pending", "provider_failed", "provider_not_requested",
+    "query_embedding_unusable", "unknown"] as const;
+  const fields = ["provider_returned_rate", "provider_pending_rate", "provider_failed_rate",
+    "provider_not_requested_rate", "query_embedding_unusable_rate", "provider_unknown_rate"] as const;
+  it.each([
+    { name: "all unknown", indexes: [5, 5, 5], counts: [0, 0, 0, 0, 0, 3], historical: false },
+    { name: "all measured states", indexes: [0, 1, 2, 3, 4, 5, 5], counts: [1, 1, 1, 1, 1, 2], historical: false },
+    { name: "disabled", indexes: [3, 3, 3], counts: [0, 0, 0, 3, 0, 0], historical: false },
+    { name: "historical missing sibling", indexes: [5, 0, 0], counts: [2, 0, 0, 0, 0, 1], historical: true }
+  ])("conserves declared provider populations from producer through persisted worker-shard merge: $name", async fixture => {
+    const root = await mkdtemp(join(tmpdir(), "provider-shard-merge-")); roots.push(root);
+    const rows = fixture.indexes.map((state, index) => {
+      const row = question(`provider-${index}`);
+      return { ...row, diagnostics: { ...row.diagnostics, provider_state: states[state]! } };
+    });
+    const groups = [rows.slice(0, 1), rows.slice(1)], plans = [];
+    for (const [shardIndex, group] of groups.entries()) {
+      const input = { ...kpiInput(group), sampleSize: rows.length };
+      const produced = assembleRecallEvalKpi(input);
+      if (fixture.historical && shardIndex === 1) for (const field of fields) delete produced.kpi[field];
+      const shardRoot = join(root, `shard-${shardIndex}`);
+      await writeShardRoot(shardRoot, produced, { questions: group.map(row => row.diagnostics) });
+      plans.push({ shardIndex, offset: shardIndex === 0 ? 0 : 1, limit: group.length, historyRoot: shardRoot });
+    }
+    const result = await mergeRecallEvalShardArchives({ plans, historyRoot: join(root, "merged"),
+      snapshotManifest: kpiInput(rows).manifest, concurrency: 2 });
+    const persisted = KpiPayloadSchema.parse(JSON.parse(await readFile(result.kpiPath, "utf8")));
+    expect(persisted.evaluated_count).toBe(rows.length);
+    for (const [index, field] of fields.entries()) {
+      if (fixture.historical) expect(persisted.kpi).not.toHaveProperty(field);
+      else expect(persisted.kpi[field]).toBe(fixture.counts[index]! / rows.length);
+    }
+    if (!fixture.historical) expect(fields.reduce((sum, field) => sum + persisted.kpi[field]!, 0)).toBeCloseTo(1);
+    const report = await readFile(result.reportPath, "utf8");
+    expect(report).toContain("Strictly non-promotable diagnostic evidence: gate_eligible=false.");
+    if (fixture.historical) expect(report).not.toContain("Embedding provider states:");
+    else for (const [index, label] of ["returned", "pending", "failed", "not_requested", "unusable", "unknown"].entries()) {
+      expect(report).toContain(`${label}=${(fixture.counts[index]! / rows.length * 100).toFixed(2)}%`);
+    }
+    expect(persisted.kpi.quality_metrics).toMatchObject({ schema_version: "bench-quality-metrics.unavailable.v1",
+      unavailable_reason: "not_recomputed_from_shard_archives" });
+    expect(persisted.kpi.quality_metrics).not.toHaveProperty("non_monotonic_rate");
+    expect(persisted.measurement_attribution?.gate_eligible).toBe(false);
+  });
+});
+
 describe("provider state KPI persistence", () => {
   it.each([
     { states: ["unknown", "unknown"], unknown: 1, returned: 0 },

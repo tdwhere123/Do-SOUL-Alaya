@@ -11,7 +11,6 @@ import { buildMergedFullGoldCoverage, hasExactQuestionDiagnosticsSet } from "../
 import { rAt5WithProviderReturned } from "../../../diagnostics/diagnostics-question.js";
 import {
   mergeSeedExtractionPath,
-  ratio,
   stableJson
 } from "../../merge-shared.js";
 import {
@@ -33,6 +32,7 @@ import { buildMergedRates, type MergedRates } from "../merged/merged-rates.js";
 import { computeScorableHits } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge-payload.js";
 import { overallRecallAt5 } from "../../../runs/measurement/answerable-recall.js";
 import { isAbstentionQuestionId } from "../../../diagnostics/abstention.js";
+import { mergeProviderStateRates } from "../../../runs/measurement/provider-state-merge.js";
 
 export interface MergedLongMemEvalBuild {
   readonly payload: KpiPayload;
@@ -162,22 +162,10 @@ function assertNoDuplicateQuestions(payloads: readonly KpiPayload[]): void {
   }
 }
 
-const PROVIDER_RATE_FIELDS = [
-  "provider_returned_rate",
-  "provider_pending_rate",
-  "provider_failed_rate",
-  "provider_not_requested_rate",
-  "provider_unknown_rate",
-  "query_embedding_unusable_rate"
-] as const satisfies readonly (keyof KpiPayload["kpi"])[];
-type ProviderRateField = (typeof PROVIDER_RATE_FIELDS)[number];
-type ProviderRateTotals = Record<ProviderRateField, number>;
-
 interface MergeShardAggregate {
   readonly perScenario: PerScenarioRow[];
   readonly shardTokenEconomies: TokenEconomy[];
-  providerRateFields: readonly ProviderRateField[];
-  providerRateTotals: ProviderRateTotals;
+  readonly providerRates: ReturnType<typeof mergeProviderStateRates>;
   tierHot: number;
   tierWarm: number;
   tierCold: number;
@@ -204,19 +192,7 @@ function createMergeShardAggregate(
   return {
     perScenario: [],
     shardTokenEconomies: [],
-    // These KPI fields are optional in the persisted contract. A field is
-    // reportable only when every shard declares it; an absent field is
-    // unavailable, not a measured zero. The evaluated denominator stays whole.
-    providerRateFields: PROVIDER_RATE_FIELDS.filter((field) =>
-      payloads.every((payload) => payload.kpi[field] !== undefined)),
-    providerRateTotals: {
-      provider_returned_rate: 0,
-      provider_pending_rate: 0,
-      provider_failed_rate: 0,
-      provider_not_requested_rate: 0,
-      provider_unknown_rate: 0,
-      query_embedding_unusable_rate: 0
-    },
+    providerRates: mergeProviderStateRates(payloads),
     tierHot: 0,
     tierWarm: 0,
     tierCold: 0,
@@ -245,7 +221,6 @@ function aggregateMergeShards(
   const aggregate = createMergeShardAggregate(payloads);
   for (const shard of payloads) {
     addShardTotals(aggregate, shard);
-    addShardProviderTotals(aggregate, shard);
     aggregate.evaluatedTotal += shard.evaluated_count;
     aggregate.latencyP50Max = Math.max(aggregate.latencyP50Max, shard.kpi.latency_ms_p50);
     aggregate.latencyP95Max = Math.max(aggregate.latencyP95Max, shard.kpi.latency_ms_p95);
@@ -319,17 +294,6 @@ function indexCliHitDiagnostics(
     byId.set(diagnostic.question_id, diagnostic as unknown as Record<string, unknown>);
   }
   return byId;
-}
-
-function addShardProviderTotals(
-  aggregate: MergeShardAggregate,
-  shard: KpiPayload
-): void {
-  for (const field of aggregate.providerRateFields) {
-    // createMergeShardAggregate selects only fields present on every shard.
-    const rate = shard.kpi[field]!;
-    aggregate.providerRateTotals[field] += Math.round(rate * shard.evaluated_count);
-  }
 }
 
 function buildMergedPayload(
@@ -449,16 +413,6 @@ function providerKpiFields(
           r_at_5_with_embedding_returned: aggregate.returnedSubsetRAt5
         }
       : {}),
-    ...availableProviderRates(aggregate)
+    ...aggregate.providerRates
   };
-}
-
-function availableProviderRates(
-  aggregate: MergeShardAggregate
-): Partial<Record<ProviderRateField, number>> {
-  const rates: Partial<Record<ProviderRateField, number>> = {};
-  for (const field of aggregate.providerRateFields) {
-    rates[field] = ratio(aggregate.providerRateTotals[field], aggregate.evaluatedTotal);
-  }
-  return rates;
 }

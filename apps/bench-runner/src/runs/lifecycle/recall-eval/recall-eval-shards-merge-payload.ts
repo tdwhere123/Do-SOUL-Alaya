@@ -1,5 +1,6 @@
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 import { overallRecallAt5 } from "../../measurement/answerable-recall.js";
+import { mergeProviderStateRates } from "../../measurement/provider-state-merge.js";
 import { mergeSeedExtractionPath } from "../../../cli/merge-shared.js";
 import { buildMergedRates } from "../../../cli/merge/merged/merged-rates.js";
 import { computeQuestionIdDigest } from "../../selection/question-manifest.js";
@@ -86,6 +87,7 @@ export function mergeShardPayloads(
       degradation_reasons: sumDegrade(shardPayloads),
       seed_truncation: sumTruncation(shardPayloads),
       ...seedExtractionFields(shardPayloads),
+      ...mergeProviderStateRates(shardPayloads),
       quality_metrics: cohortQualityMetrics(hits),
       per_scenario: [...perScenario]
     } as KpiPayload["kpi"]

@@ -123,18 +123,8 @@ function pushTierAndEmbeddingKpis(lines: string[], current: KpiPayload): void {
   lines.push(
     `- Degradation reasons: none=${current.kpi.degradation_reasons.none} warm_cascade=${current.kpi.degradation_reasons.warm_cascade_engaged} cold_cascade=${current.kpi.degradation_reasons.cold_cascade_engaged} explainability_partial=${current.kpi.degradation_reasons.recall_explainability_partial}`
   );
-  if (
-    current.kpi.provider_returned_rate !== undefined ||
-    current.kpi.provider_pending_rate !== undefined ||
-    current.kpi.provider_failed_rate !== undefined ||
-    current.kpi.provider_not_requested_rate !== undefined ||
-    current.kpi.provider_unknown_rate !== undefined ||
-    current.kpi.query_embedding_unusable_rate !== undefined
-  ) {
-    lines.push(
-      `- Embedding provider states: returned=${formatMaybeRatio(current.kpi.provider_returned_rate)} pending=${formatMaybeRatio(current.kpi.provider_pending_rate)} failed=${formatMaybeRatio(current.kpi.provider_failed_rate)} not_requested=${formatMaybeRatio(current.kpi.provider_not_requested_rate)} unusable=${formatMaybeRatio(current.kpi.query_embedding_unusable_rate)} unknown=${formatMaybeRatio(current.kpi.provider_unknown_rate)}`
-    );
-  }
+  const providerStates = renderProviderStateSummary(current.kpi);
+  if (providerStates !== null) lines.push(providerStates);
   if (current.kpi.embedding_vector_cache_ready_rate !== undefined) {
     lines.push(
       `- Embedding vector cache ready: ${formatMaybeRatio(current.kpi.embedding_vector_cache_ready_rate)}`
@@ -145,6 +135,14 @@ function pushTierAndEmbeddingKpis(lines: string[], current: KpiPayload): void {
       `- Query embedding cache ready: ${formatMaybeRatio(current.kpi.query_embedding_cache_ready_rate)}`
     );
   }
+}
+
+/** Shared with the non-promotable worker-shard diagnostic report. */
+export function renderProviderStateSummary(kpi: KpiPayload["kpi"]): string | null {
+  if (kpi.provider_returned_rate === undefined && kpi.provider_pending_rate === undefined &&
+      kpi.provider_failed_rate === undefined && kpi.provider_not_requested_rate === undefined &&
+      kpi.provider_unknown_rate === undefined && kpi.query_embedding_unusable_rate === undefined) return null;
+  return `- Embedding provider states: returned=${formatMaybeRatio(kpi.provider_returned_rate)} pending=${formatMaybeRatio(kpi.provider_pending_rate)} failed=${formatMaybeRatio(kpi.provider_failed_rate)} not_requested=${formatMaybeRatio(kpi.provider_not_requested_rate)} unusable=${formatMaybeRatio(kpi.query_embedding_unusable_rate)} unknown=${formatMaybeRatio(kpi.provider_unknown_rate)}`;
 }
 
 function pushSeedAndQualityKpis(lines: string[], current: KpiPayload): void {

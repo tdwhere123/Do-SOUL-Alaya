@@ -1,6 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
+// Offline report adapter binds the formatter owner, not a new public eval export.
+import { renderProviderStateSummary } from
+  "../../../../../../packages/eval/dist/reports/report-absolute-kpis.js";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
 import type { RecallEvalResult } from "./recall-eval-contract.js";
 import type { LongMemEvalWorkerShardPlan } from "./recall-eval-shards-worker.js";
@@ -71,7 +74,7 @@ async function writeDiagnosticMerge(args: {
   const reportPath = join(entryRoot, "report.md");
   const findingsPath = join(entryRoot, "findings.md");
   await writeFile(kpiPath, `${JSON.stringify(args.payload, null, 2)}\n`, "utf8");
-  await writeFile(reportPath, mergedReport(args.input.concurrency, args.hits), "utf8");
+  await writeFile(reportPath, mergedReport(args.input.concurrency, args.hits, args.payload), "utf8");
   await writeFile(findingsPath, "", "utf8");
   await writeFile(
     join(entryRoot, "recall-eval-shard-sources.json"),
@@ -276,12 +279,14 @@ function deliveredObjectRows(
   });
 }
 
-function mergedReport(concurrency: number, hits: ScorableHits): string {
+function mergedReport(concurrency: number, hits: ScorableHits, payload: KpiPayload): string {
+  const providerStates = renderProviderStateSummary(payload.kpi);
   return [
     "# Merged recall-eval shards",
     "",
     `Diagnostic merge of ${concurrency} process shards (${hits.evaluatedCount} questions, ${hits.answerableCount} answerable).`,
     "Strictly non-promotable diagnostic evidence: gate_eligible=false.",
+    ...(providerStates === null ? [] : ["", providerStates]),
     ""
   ].join("\n");
 }
