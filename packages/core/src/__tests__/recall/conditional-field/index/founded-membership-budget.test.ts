@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DerivationSchema, InformationIndexSchema, type FieldSnapshot, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { continueAcceptingIndex, projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { ExplanationDelivery } from "../../../../recall/conditional-field/index/explanation-delivery.js";
 import type { SeedProofIndex } from "../../../../recall/conditional-field/index/seed-proof-index.js";
@@ -45,8 +46,8 @@ describe("founded membership under an exhausted explanation allowance", () => {
     let progress: ExplanationDelivery | undefined, page: InformationIndex | undefined, calls = 0, work = 0;
     const base = { snapshot, view: defaultView(), budget: defaultBudget({ work_units: 3, finalization_reserve: 3,
       min_envelope: 0, page_budget: 1, memory_bytes: 1_000_000 }), grounding_complete: true,
-      ...(mode === "retained" ? { derivation_forest: forest, output_derivation_roots: new Map([[productStateNodeId(state), ["root"]]]) }
-        : { derivations: [leaf, middle, root], output_derivations: { [productStateNodeId(state)]: ["root"] } }),
+      ...(mode === "retained" ? { derivation_forest: forest, output_derivation_roots: new Map([[fieldPartitionNodeId(productStateNodeId(state), undefined), ["root"]]]) }
+        : { derivations: [leaf, middle, root], output_derivations: { [fieldPartitionNodeId(productStateNodeId(state), undefined)]: ["root"] } }),
       remaining_reserve: 3, remaining_memory_bytes: 1_000_000, expires_at: "2099-01-01T00:00:00.000Z",
       observer: { outcome: { schema_version: 1 as const, status: "exhausted" as const }, open_regions: [] },
       on_explanation_progress: (next: ExplanationDelivery | undefined, _bytes: number, spent: number) => {
@@ -92,7 +93,7 @@ describe("founded membership under an exhausted explanation allowance", () => {
       const input = { snapshot: selected, view: defaultView(), budget: defaultBudget({ work_units: allowance,
         finalization_reserve: allowance, min_envelope: 0, page_budget: 1 }), remaining_reserve: allowance,
       grounding_complete: true, derivation_forest: forest, explanation_progress: retained,
-      output_derivation_roots: new Map([[productStateNodeId(state), ["root"]]]),
+      output_derivation_roots: new Map([[fieldPartitionNodeId(productStateNodeId(state), undefined), ["root"]]]),
       claims: new Map([[productStateNodeId(state), "supported" as const]]),
       observer: { outcome: { schema_version: 1 as const, status: "exhausted" as const }, open_regions: [] },
       expires_at: "2099-01-01T00:00:00.000Z",
@@ -179,7 +180,7 @@ describe("founded membership under an exhausted explanation allowance", () => {
       const index = projectAcceptingIndex({ snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1",
         view: defaultView(), budget: defaultBudget({ work_units: 2, finalization_reserve: 2, min_envelope: 0, page_budget: 1 }),
         derivations: structuredClone(derivations), explanation_source_revision: "forest:1",
-        output_derivations: { [productStateNodeId(state)]: ["root"] }, grounding_complete: false,
+        output_derivations: { [fieldPartitionNodeId(productStateNodeId(state), undefined)]: ["root"] }, grounding_complete: false,
         seed_proof_index: owner, on_seed_proof_index: (next, _bytes, work) => { owner = next; spent += work; },
         prior_continuation: continuation, expires_at: "2099-01-01T00:00:00.000Z" });
       expect(spent).toBeLessThanOrEqual(2);
@@ -201,7 +202,7 @@ describe("founded membership under an exhausted explanation allowance", () => {
     let progress: ExplanationDelivery | undefined;
     const base = { snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1", view: defaultView(),
       grounding_complete: true, derivation_forest: new Map([["root", root]]),
-      output_derivation_roots: new Map([[productStateNodeId(state), ["root"]]]),
+      output_derivation_roots: new Map([[fieldPartitionNodeId(productStateNodeId(state), undefined), ["root"]]]),
       support: [{ schema_version: 1 as const, proposition_id: "member", claim: "unknown" as const,
         witnesses: [{ schema_version: 1 as const, witness_id: "costly", premises: [], cost: 2, complete: true }] }],
       expires_at: "2099-01-01T00:00:00.000Z",
@@ -229,7 +230,7 @@ describe("founded membership under an exhausted explanation allowance", () => {
     let cursor: ExplanationDelivery | undefined, released = 0;
     const base = { snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1", view: defaultView(),
       budget: defaultBudget({ page_budget: 1 }), grounding_complete: true,
-      output_derivation_roots: new Map([[productStateNodeId(state), ["root"]]]),
+      output_derivation_roots: new Map([[fieldPartitionNodeId(productStateNodeId(state), undefined), ["root"]]]),
       expires_at: "2099-01-01T00:00:00.000Z", on_explanation_progress: (next: ExplanationDelivery | undefined, bytes: number) => {
         cursor = next; if (bytes < 0) released -= bytes;
       } };
@@ -292,7 +293,7 @@ describe("founded membership under an exhausted explanation allowance", () => {
     const index = projectAcceptingIndex({ snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1",
       view: defaultView(), budget: defaultBudget({ work_units: 10_000, finalization_reserve: 10_000,
         page_budget: 1, memory_bytes: 2_000_000, min_envelope: 0 }), remaining_reserve: 10_000, grounding_complete: true,
-      derivation_forest: forest, output_derivation_roots: new Map([[productStateNodeId(state), ["root"]]]),
+      derivation_forest: forest, output_derivation_roots: new Map([[fieldPartitionNodeId(productStateNodeId(state), undefined), ["root"]]]),
       expires_at: "2099-01-01T00:00:00.000Z", observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
       on_explanation_progress: (next, _bytes, _work, allocated) => { cursor = next; admitted += allocated ?? 0; } });
     expect(index.entries).toEqual([]);

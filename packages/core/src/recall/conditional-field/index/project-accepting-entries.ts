@@ -30,7 +30,8 @@ import {
 } from "../../runtime/index-continuation.js";
 import {
   explanationIdsForEntry,
-  mixedPayloadGeneration
+  mixedPayloadGeneration,
+  outputDerivationRootKey
 } from "./explanation.js";
 import type { AcceptingProjectionInput } from "./project-accepting-index.js";
 import {
@@ -247,22 +248,22 @@ function scanAcceptingValues(scan: {
 }
 
 function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {
-  const key = productStateNodeId(value.state);
+  const key = outputDerivationRootKey(value);
+  const seedMatches = (seed: { state: FieldValue["state"]; milligrades: number; cap_contract_id?: string }) =>
+    outputDerivationRootKey(seed) === key && seed.milligrades >= (value.milligrades ?? 0);
   if (input.derivation_forest !== undefined) {
     const roots = input.output_derivation_roots?.get(key) ?? [];
     return roots.some(id => {
       const root = input.derivation_forest!.get(id);
       return root?.kind === "leaf" && root.observation_ids.includes(productSubjectId(value.state))
         && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0);
-    }) && input.snapshot.seeds.some(seed => productStateNodeId(seed.state) === key
-      && seed.milligrades >= (value.milligrades ?? 0));
+    }) && input.snapshot.seeds.some(seedMatches);
   }
   const roots = new Set(input.output_derivations?.[key] ?? []);
   return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
       && root.observation_ids.includes(productSubjectId(value.state))
       && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0)) === true
-    && input.snapshot.seeds.some((seed) => productStateNodeId(seed.state) === key
-      && seed.milligrades >= (value.milligrades ?? 0));
+    && input.snapshot.seeds.some(seedMatches);
 }
 
 function productUnchanged(

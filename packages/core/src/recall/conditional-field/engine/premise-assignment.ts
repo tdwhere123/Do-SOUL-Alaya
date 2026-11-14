@@ -7,7 +7,7 @@ import {
   type ProductStateKey,
   type Transition
 } from "@do-soul/alaya-protocol";
-import { hardIdentityCapContractId } from "../cap-contract.js";
+import { fieldPartitionNodeId, hardIdentityCapContractId } from "../cap-contract.js";
 import type { QueryRelation } from "../query/compile-query.js";
 import type { HyperedgePremise } from "../reference/accepting-projection.js";
 import type { BoundSourceFacts, BindingContextStore } from "./binding-environment.js";
@@ -154,9 +154,10 @@ export function* groundPremiseAssignments(
   for (const [key, node] of visited) {
     yield { kind: "work", retained_bytes: 256 };
     if (node.program_state !== ACCEPTING_PROGRAM_STATE) continue;
-    const rootId = grounded.progress.root_map.get(key)?.[0];
+    const partition = fieldPartitionNodeId(key, undefined);
+    const rootId = grounded.progress.root_map.get(partition)?.[0];
     const root = rootId === undefined ? undefined : grounded.progress.forest.get(rootId);
-    const grade = grounded.progress.grades.get(key);
+    const grade = grounded.progress.grades.get(partition);
     if (root === undefined || grade === undefined) continue;
     assignments.push({ ...terminalAssignment(from, productEndpointId(node), grade, queryPremiseValidity(from, asOf), "path", node.binding_context),
       derivation: root, derivations: forest });

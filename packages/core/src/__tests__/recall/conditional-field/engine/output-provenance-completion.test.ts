@@ -7,6 +7,7 @@ import { ruleDerivationIdentity, seedDerivationIdentity } from "../../../../reca
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
@@ -19,7 +20,10 @@ const edge = (from: string, to: string, relation_kind: string, strength_milligra
 const sToB = edge("s", "b", "direct", 900);
 const sToC = edge("s", "c", "detour-start", 500);
 const cToB = edge("c", "b", "detour-end", 900);
-const seedId = seedDerivationIdentity(productStateNodeId(seed.state));
+const partitionKey = (activation: Pick<SeedActivation, "state" | "cap_contract_id">) =>
+  fieldPartitionNodeId(productStateNodeId(activation.state), activation.cap_contract_id);
+const seedLeaf = (activation: SeedActivation) => seedDerivationIdentity(partitionKey(activation));
+const seedId = seedLeaf(seed);
 const ruleId = (row: Transition) => ruleDerivationIdentity(transitionKey(row));
 
 function paths(root: string, rows: readonly Derivation[]): readonly string[] {
@@ -225,11 +229,11 @@ describe("output proof completion after numeric settlement", () => {
     const grounded = groundedOutputDerivations({ seeds: [seed, extraSeed], transitions, derivations: [],
       transition_derivations: {}, allowance: 1000 });
     expect(grounded.complete).toBe(true);
-    const root = grounded.roots[productStateNodeId(state("b"))]?.[0];
+    const root = grounded.roots[partitionKey({ state: state("b") })]?.[0];
     if (root === undefined) throw new Error("missing cyclic exit proof");
     expect(paths(root, grounded.derivations)).toEqual([
       [seedId, ruleId(enter), ruleId(xy), ruleId(exit)].join(" -> "),
-      [seedDerivationIdentity(productStateNodeId(extraSeed.state)), ruleId(other), ruleId(exit)].join(" -> ")
+      [seedLeaf(extraSeed), ruleId(other), ruleId(exit)].join(" -> ")
     ].sort());
   });
 
@@ -248,7 +252,7 @@ describe("output proof completion after numeric settlement", () => {
     const expectedPaths = [
       [seedId, ruleId(direct)].join(" -> "),
       [seedId, ruleId(via), ruleId(exit)].join(" -> "),
-      [seedDerivationIdentity(productStateNodeId(weakSeed.state)), ruleId(exit)].join(" -> ")
+      [seedLeaf(weakSeed), ruleId(exit)].join(" -> ")
     ].sort();
     expect(paths(entry.explanation_ids[0]!, index.explanations ?? [])).toEqual(expectedPaths);
     const input = { seeds, transitions, derivations: [], transition_derivations: {} };
@@ -276,17 +280,17 @@ describe("output proof completion after numeric settlement", () => {
       transition_derivations: {}, allowance: 1000 });
     expect(result.complete).toBe(true);
     expect(result.progress.proof_needed).toBe(true);
-    const root = result.roots[productStateNodeId(second.state)]?.[0];
+    const root = result.roots[partitionKey(second)]?.[0];
     if (root === undefined) throw new Error("missing second-seed proof");
     expect(paths(root, result.derivations)).toEqual([
-      seedDerivationIdentity(productStateNodeId(second.state)),
-      [seedDerivationIdentity(productStateNodeId(first.state)), ruleId(xy)].join(" -> ")
+      seedLeaf(second),
+      [seedLeaf(first), ruleId(xy)].join(" -> ")
     ].sort());
     const self = edge("s", "s", "self", 1000);
     const own = groundedOutputDerivations({ seeds: [seed], transitions: [self, sToB],
       derivations: [], transition_derivations: {}, allowance: 1000 });
     expect(own.complete).toBe(true);
-    const ownRoot = own.roots[productStateNodeId(seed.state)]?.[0];
+    const ownRoot = own.roots[partitionKey(seed)]?.[0];
     if (ownRoot === undefined) throw new Error("missing seeded self proof");
     expect(paths(ownRoot, own.derivations)).toEqual([seedId]);
     const { entry, index } = project([self, sToB], own);

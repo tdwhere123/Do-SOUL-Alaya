@@ -6,6 +6,7 @@ import { createConditionalField, withdrawDerivationLeaves, type FieldEngineState
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, productKey } from "../reference/deployment.fixture.js";
 import { query, relation } from "./relation-grounding.fixture.js";
@@ -46,7 +47,7 @@ function proofLeaves(state: FieldEngineState): Map<string, string[]> {
     [...localLeafIds(traceDerivationForest({ forest, roots }).traversal)].sort()]));
 }
 const rootIds = (state: FieldEngineState, object: string) =>
-  [...(groundedOutputDerivations({ ...state, allowance: 100_000 }).roots[productStateNodeId(key(object))] ?? [])].sort();
+  [...(groundedOutputDerivations({ ...state, allowance: 100_000 }).roots[fieldPartitionNodeId(productStateNodeId(key(object)), undefined)] ?? [])].sort();
 const without = (graph: Graph, leaf: string): Graph => ({ seeds: graph.seeds.filter((s) => seedLeaf(s.object) !== leaf),
   edges: graph.edges.filter((e) => e.id !== leaf) });
 
@@ -114,7 +115,7 @@ describe("decreasing an alternative below a cap", () => {
     const withdrawn = withdrawDerivationLeaves(full, "high");
     // Hand-derived: min(400, 700) = 400, so the value is unchanged but the 1000 alternative no longer supports it.
     expect(actual(withdrawn).get("end")).toBe(400);
-    expect(proofLeaves(withdrawn).get(productStateNodeId(key("end")))).not.toContain("high");
+    expect(proofLeaves(withdrawn).get(fieldPartitionNodeId(productStateNodeId(key("end")), undefined))).not.toContain("high");
     expect(rootIds(withdrawn, "end")).not.toEqual(before);
     expect(rootIds(withdrawn, "end")).toEqual(rootIds(build(without(graph, "high")), "end"));
   });

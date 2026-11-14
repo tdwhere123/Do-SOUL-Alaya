@@ -1,6 +1,7 @@
 import { MaxMinWorkQueue, PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { productEndpointId, type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../../shared/errors.js";
+import { fieldPartitionNodeId } from "../cap-contract.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { incomingRules, type SharedRule } from "./dependency-equations.js";
 import { joinDerivation, leafDerivation, seedDerivationIdentity } from "./path-derivation.js";
@@ -190,7 +191,7 @@ class GroundingMachine {
 
   private indexSeed(): boolean {
     const seed = this.input.seeds.at(this.seedOffset)!;
-    const key = productStateNodeId(seed.state);
+    const key = fieldPartitionNodeId(productStateNodeId(seed.state), seed.cap_contract_id);
     if ((this.grades.get(key) ?? -1) < seed.milligrades) {
       const root = leafDerivation({ derivation_id: seedDerivationIdentity(key), observation_id: productEndpointId(seed.state),
         leaf_id: seedDerivationIdentity(key), source_revision: seed.state.target.kind === "memory_entry" ? seed.state.target.source_revision : seed.state.target.source_version,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import type { ExplanationDelivery } from "../../../../recall/conditional-field/index/explanation-delivery.js";
@@ -52,7 +53,7 @@ describe("index representation continuity", () => {
     expect(supported.product_updates?.some((row) => row.update_kind === "claim")).toBe(true);
     const explainedInput = { ...continued, snapshot: snapshotOf([fieldValue("same", 900)]),
       claims: new Map([[key, "supported" as const]]), derivations: [leaf("same")],
-      output_derivations: { [key]: [leaf("same").derivation_id] }, resource_work: undefined };
+      output_derivations: { [fieldPartitionNodeId(key, undefined)]: [leaf("same").derivation_id] }, resource_work: undefined };
     const explained = projectAcceptingIndex(explainedInput);
     expect(explained.entries).toEqual([]);
     expect(explained.product_updates?.some((row) => row.update_kind === "payload")).toBe(true);
@@ -498,7 +499,7 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     ...overrides,
     roles,
     ...(overrides.output_derivations !== undefined || roots.length > 0 ? {
-      output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
+      output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [fieldPartitionNodeId(productStateNodeId(value.state), value.cap_contract_id), roots.map((root) => root.derivation_id)]))
     } : {})
   };
 }

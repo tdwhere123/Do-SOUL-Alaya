@@ -39,7 +39,7 @@ import {
   sortIndexEntries
 } from "../../../../recall/runtime/index-continuation.js";
 import { facetObligation, identityAssociationCap, productIndexKey } from "../reference/deployment.fixture.js";
-import { capContractId } from "../../../../recall/conditional-field/cap-contract.js";
+import { capContractId, fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 const OTHER_SNAPSHOT_ID = `sha256:${"e".repeat(64)}`;
@@ -689,7 +689,7 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     roles,
     ...(claims === undefined ? {} : { claims }),
     ...(propositions === undefined ? {} : { claim_propositions: propositions }),
-    output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
+    output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [fieldPartitionNodeId(productStateNodeId(value.state), value.cap_contract_id), roots.map((root) => root.derivation_id)]))
   };
 }
 

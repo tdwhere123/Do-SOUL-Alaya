@@ -1,7 +1,7 @@
 import { extendMaxMinGraph, solveMaxMinField, MaxMinWorkQueue, PersistentStringMap,
   type MaxMinPreparedGraph } from "@do-soul/alaya-graph-algorithms";
 import { canonicalProductIdentity, type ProductStateKey, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
-import { hardIdentityCapContractId } from "../cap-contract.js";
+import { fieldPartitionNodeId, hardIdentityCapContractId, normalizeFieldPartitionContract } from "../cap-contract.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 
 export type FieldGraphAdditions = Readonly<{ seeds: RetainedRows<SeedActivation>; transitions: RetainedRows<Transition> }>;
@@ -170,8 +170,8 @@ function registerNode(state: PreparedFieldGraph, key: ProductStateKey, contract:
   readonly state: PreparedFieldGraph; readonly id: string; readonly node: PartitionNode;
 } {
   const product = canonicalProductIdentity(key);
-  const normalized = contract === undefined || contract.length === 0 ? HARD : contract;
-  const id = JSON.stringify([normalized, product]);
+  const normalized = normalizeFieldPartitionContract(contract);
+  const id = fieldPartitionNodeId(product, contract);
   const prior = state.nodes.get(id);
   const node = { product, contract: normalized, explicit: prior?.explicit === true || contract !== undefined };
   return { id, node, state: { ...state, graph: extendMaxMinGraph(state.graph, [id], []),

@@ -7,6 +7,7 @@ import { derivationForest, evaluateDerivation, leafDerivation, seedDerivationIde
 import { adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -64,11 +65,11 @@ describe("dependency boundary regressions", () => {
     const seeds = [{ schema_version: 1 as const, state: productKey("a"), milligrades: 500 }];
     const transitions = [edge("a", "b", "ab"), edge("b", "c", "bc"), edge("c", "a", "ca")];
     const grounded = groundedOutputDerivations({ seeds, transitions, derivations: [], transition_derivations: {}, allowance: 1000 });
-    const root = grounded.roots[productStateNodeId(productKey("c"))]?.[0];
+    const root = grounded.roots[fieldPartitionNodeId(productStateNodeId(productKey("c")), undefined)]?.[0];
     expect(root).toBeDefined();
     expect(evaluateDerivation(derivationForest(grounded.derivations), root!, leafGrades(grounded.derivations))).toBe(500);
     const forest = derivationForest(grounded.derivations);
-    expect(localLeafIds(traceDerivationForest({ forest, roots: [root!] }).traversal)).toContain(seedDerivationIdentity(productStateNodeId(productKey("a"))));
+    expect(localLeafIds(traceDerivationForest({ forest, roots: [root!] }).traversal)).toContain(seedDerivationIdentity(fieldPartitionNodeId(productStateNodeId(productKey("a")), undefined)));
   });
 
   it("does not materialize a witness for an unseeded hard cycle", () => {

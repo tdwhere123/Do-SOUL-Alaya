@@ -40,6 +40,15 @@ export function isHardIdentityContractId(id: string | undefined): boolean {
   return id === hardIdentityCapContractId();
 }
 
+export function normalizeFieldPartitionContract(contract: string | undefined): string {
+  return contract === undefined || contract.length === 0 ? hardIdentityCapContractId() : contract;
+}
+
+/** Numeric and grounding share this contract+product node id; product identity stays untagged. */
+export function fieldPartitionNodeId(productIdentity: string, contract: string | undefined): string {
+  return JSON.stringify([normalizeFieldPartitionContract(contract), productIdentity]);
+}
+
 export function identitySeedGrade(state: ProductStateKey): SeedActivation {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

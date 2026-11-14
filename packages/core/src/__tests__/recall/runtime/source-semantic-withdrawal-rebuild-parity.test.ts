@@ -12,6 +12,7 @@ import { withdrawDerivationLeaves, type FieldEngineState } from "../../../recall
 import { parseBindingContext } from "../../../recall/conditional-field/engine/binding-environment.js";
 import { groundedOutputDerivations } from "../../../recall/conditional-field/engine/output-derivations.js";
 import { localLeafIds, traceDerivationForest } from "../../../recall/conditional-field/engine/derivation-provenance.js";
+import { fieldPartitionNodeId } from "../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../recall/conditional-field/reference/bind-max-min.js";
 
 const TEXT = "who uses which tools?";
@@ -56,7 +57,7 @@ function answersOf(state: FieldEngineState, population: Population): Map<string,
     const env = parseBindingContext(row.state.binding_context, state.binding_contexts);
     if (!env.has("@accepted:0")) continue;
     const tool = env.get("tools")!.split("/").at(-1)!;
-    const traced = traceDerivationForest({ forest, roots: grounded.roots[productStateNodeId(row.state)] ?? [] });
+    const traced = traceDerivationForest({ forest, roots: grounded.roots[fieldPartitionNodeId(productStateNodeId(row.state), row.cap_contract_id)] ?? [] });
     expect(traced.complete).toBe(true);
     const leaves = found.get(tool) ?? new Set<string>();
     for (const leaf of localLeafIds(traced.traversal)) {

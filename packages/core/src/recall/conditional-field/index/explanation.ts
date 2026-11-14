@@ -11,6 +11,7 @@ import {
   type Witness
 } from "@do-soul/alaya-protocol";
 import { joinHyperedgeOr } from "../reference/accepting-projection.js";
+import { fieldPartitionNodeId } from "../cap-contract.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { traceDerivationForest } from "../engine/derivation-provenance.js";
 
@@ -124,11 +125,16 @@ export function witnessAttributionHandle(input: Readonly<{
   });
 }
 
+export function outputDerivationRootKey(value: Pick<FieldValue, "state" | "cap_contract_id">): string {
+  return fieldPartitionNodeId(productStateNodeId(value.state), value.cap_contract_id);
+}
+
 function derivationExplanationIds(input: ExplanationSelectionInput): readonly string[] {
+  const key = outputDerivationRootKey(input.value);
   if (input.derivation_forest !== undefined) {
-    return input.output_derivation_roots?.get(productStateNodeId(input.value.state)) ?? [];
+    return input.output_derivation_roots?.get(key) ?? [];
   }
-  return input.output_derivations?.[productStateNodeId(input.value.state)] ?? [];
+  return input.output_derivations?.[key] ?? [];
 }
 
 function witnessExplanationIds(input: ExplanationSelectionInput): readonly string[] {

@@ -5,6 +5,7 @@ import {
   type SupportRecord,
   type Transition
 } from "@do-soul/alaya-protocol";
+import { fieldPartitionNodeId, normalizeFieldPartitionContract } from "../cap-contract.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
@@ -20,6 +21,7 @@ export type SharedRule = Readonly<{
   readonly to: string;
   readonly cap: number;
   readonly derivation_id: string;
+  readonly cap_contract_id: string;
 }>;
 
 export function incomingRules(
@@ -30,13 +32,15 @@ export function incomingRules(
   for (const transition of transitions) {
     if (!transition.applicable) continue;
     const key = transitionKey(transition);
-    const to = productStateNodeId(transition.to);
+    const contract = normalizeFieldPartitionContract(transition.cap_contract_id);
+    const to = fieldPartitionNodeId(productStateNodeId(transition.to), contract);
     const rule: SharedRule = {
       rule_id: key,
-      from: productStateNodeId(transition.from),
+      from: fieldPartitionNodeId(productStateNodeId(transition.from), contract),
       to,
       cap: transition.strength_milligrades,
-      derivation_id: derivationRootAt(transitionRoots, key) ?? ruleDerivationIdentity(key)
+      derivation_id: derivationRootAt(transitionRoots, key) ?? ruleDerivationIdentity(key),
+      cap_contract_id: contract
     };
     const list = incoming.get(to);
     if (list === undefined) incoming.set(to, [rule]);

@@ -13,6 +13,7 @@ import { compileProgramAutomaton } from "../../../../recall/conditional-field/en
 import { seedDerivationIdentity } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
@@ -83,7 +84,7 @@ function fixture(scenario: Scenario) {
     instance_id: `${from}-to-${to}`, strength_milligrades: 1000, validity: VALIDITY, applicable: true
   }));
   const fixedLeaves = new Set([
-    ...seeds.map((seed) => seedDerivationIdentity(productStateNodeId(seed.state))),
+    ...seeds.map((seed) => seedDerivationIdentity(fieldPartitionNodeId(productStateNodeId(seed.state), seed.cap_contract_id))),
     ...transitions.map((transition) => transition.instance_id!)
   ]);
   return { scenario, interpretation, seeds, transitions, outputs, fixedLeaves };
@@ -166,7 +167,7 @@ function actualValues(state: FieldEngineState): Map<string, number> {
 type Grounded = ReturnType<typeof groundedOutputDerivations>;
 function proofForest(grounded: Grounded, product: ProductStateKey) {
   expect(grounded.complete).toBe(true);
-  const roots = grounded.roots[productStateNodeId(product)] ?? [];
+  const roots = grounded.roots[fieldPartitionNodeId(productStateNodeId(product), undefined)] ?? [];
   const traced = traceDerivationForest({ forest: new Map(grounded.derivations.map((node) => [node.derivation_id, node])), roots });
   expect(traced.complete).toBe(true);
   return { roots, nodes: [...traced.traversal.nodes.values()], leaves: localLeafIds(traced.traversal) };

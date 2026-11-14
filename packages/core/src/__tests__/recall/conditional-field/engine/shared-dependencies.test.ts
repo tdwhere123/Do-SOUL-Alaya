@@ -30,6 +30,7 @@ import { composedFacetPathId, samePathAccepts } from "../../../../recall/conditi
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { recoverExplanationForest } from "../../../../recall/conditional-field/index/explanation.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import {
@@ -58,7 +59,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     expect(grounded.work).toBeLessThan(pathCount);
     expect(grounded.derivations.length).toBeLessThan(pathCount);
     const sink = diamond.sinks[0]!;
-    const sinkKey = productStateNodeId(sink);
+    const sinkKey = fieldPartitionNodeId(productStateNodeId(sink), undefined);
     expect(gradeOf(state, sink)).toBe(900);
     const rootIds = grounded.roots[sinkKey] ?? [];
     expect(rootIds).toHaveLength(1);
@@ -303,7 +304,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
       result_version: "v1",
       budget: defaultBudget({ page_budget: 50 }),
       derivations: [root],
-      output_derivations: { [key]: [root.derivation_id] },
+      output_derivations: { [fieldPartitionNodeId(key, value.cap_contract_id)]: [root.derivation_id] },
       support: [supportRecord("r", [witnessOf("too-big", ["r"], 400)])]
     });
     expect(index.entries).toHaveLength(1);
