@@ -114,7 +114,7 @@ export type ConditionalFieldRecallPortResult = Readonly<{
 export type ConditionalFieldRecallPort = Readonly<{
   withPreparedExecution?<T>(input: Omit<ConditionalFieldRecallRequest, "readers">,
     execute: (captured: Omit<ConditionalFieldRecallRequest, "readers">) => Promise<T>, signal?: AbortSignal): Promise<T>;
-  acknowledge?(preparationId: string, index: InformationIndex, previews: ReadonlyMap<string, string>): Promise<ConditionalFieldExecutionReceipt | void>;
+  acknowledge?(preparationId: string, index: InformationIndex, previews: ReadonlyMap<string, string>, signal?: AbortSignal): Promise<ConditionalFieldExecutionReceipt | void>;
   discard?(preparationId: string): Promise<void>;
   recall(
     input: Omit<ConditionalFieldRecallRequest, "readers">
@@ -180,7 +180,8 @@ async function executeCapturedRecall(context: RecallExecutionContext, params: Re
           const preparationId = response.preparation_id;
           if (port.acknowledge === undefined || port.discard === undefined) throw new Error("Recall delivery acknowledgment port missing");
           acknowledge = async (issued, captured) => {
-            const settled = await port.acknowledge!(preparationId, issued, captured);
+            params.abortSignal?.throwIfAborted();
+            const settled = await port.acknowledge!(preparationId, issued, captured, params.abortSignal);
             if (settled !== undefined && executionReceipt !== undefined) Object.assign(executionReceipt, settled);
           };
           discard = async () => { await port.discard!(preparationId); };
@@ -201,7 +202,10 @@ async function executeCapturedRecall(context: RecallExecutionContext, params: Re
       return recalled;
     }, params.continuation?.continuation_id);
     const encoded = encodeRecallResult(index, previews, governance, sourceMetadata);
-    acknowledge ??= async (issued, captured) => { issueDeferred?.({ index: issued, previews: captured, metadata: sourceMetadata }); };
+    acknowledge ??= async (issued, captured) => {
+      params.abortSignal?.throwIfAborted();
+      issueDeferred?.({ index: issued, previews: captured, metadata: sourceMetadata });
+    };
     if (!params.defer_delivery) await acknowledge(encoded.index, previews);
     const issuedDeliveryId = preparedId ?? issuedDeliveryIdOf(index);
     return {

@@ -196,8 +196,12 @@ process-local reader and issued page. It cannot rescan or reselect a frozen
 population; a mutation, expired lease or lost worker invalidates it. Prepared
 pages advance only after delivery acknowledgment checks the current snapshot.
 An acknowledged page and delivery identity can be replayed without double
-debit; uncertain acknowledgment cannot be invented as rollback. Payload
-continuation is bound to an already delivered source in that query epoch and
+debit; uncertain acknowledgment cannot be invented as rollback. Ordinary
+acknowledgment retains caller cancellation after preparation returns: a cancelled
+queued ACK cannot dispatch. Once dispatched, cancellation may leave the outcome
+unknown and quarantines occupancy until actual Worker exit, not Promise rejection.
+Discard uses independent bounded cleanup admission, not an aborted caller scope.
+Payload continuation is bound to an already delivered source in that query epoch and
 retains its offset and cap. Permission is explicit: an unrestricted local
 principal is `authorized_scopes: null` (key present), `[]` admits none, and a
 missing ordinary worker authorization key fails closed. Do not substitute a

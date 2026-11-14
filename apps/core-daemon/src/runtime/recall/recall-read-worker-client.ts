@@ -231,18 +231,17 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }
       return execute({ ...captured, prepared_query: prepared });
     }, signal),
-    acknowledge: async (preparationId, index, previews) => {
-      return await this.lifecycle.request("conditionalField.acknowledge", {
-        preparation_id: preparationId,
-        issued_entry_ids: index.entries.map(indexEntryCacheKey),
-        previews: Object.fromEntries(previews)
-      }, undefined, this.deliveryOwner(preparationId));
+    acknowledge: async (preparationId, index, previews, signal) => {
+      return await this.lifecycle.withinDeadline("conditionalField.acknowledge", async () =>
+        await this.lifecycle.request("conditionalField.acknowledge", {
+          preparation_id: preparationId,
+          issued_entry_ids: index.entries.map(indexEntryCacheKey),
+          previews: Object.fromEntries(previews)
+        }, undefined, this.deliveryOwner(preparationId)), signal);
     },
-    discard: async (preparationId) => {
+    discard: async preparationId => {
       const owner = this.deliveryOwners.get(preparationId);
-      if (owner !== undefined && this.lifecycle.isAvailable(owner)) {
-        await this.lifecycle.request("conditionalField.discard", { preparation_id: preparationId }, undefined, owner);
-      }
+      if (owner !== undefined) await this.lifecycle.discardDelivery(preparationId, owner);
       this.deliveryOwners.delete(preparationId);
     },
     recall: async (input) => {

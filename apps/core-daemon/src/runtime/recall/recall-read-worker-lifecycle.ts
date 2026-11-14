@@ -205,6 +205,18 @@ export class RecallReadWorkerLifecycle {
     }, preferred, isPathAffinityOperation(operation) || operation.startsWith("conditionalField.") || operation === "ready" ? 0 : undefined));
   }
 
+  public async discardDelivery(preparationId: string, owner: Worker): Promise<void> {
+    // Cleanup needs its own bounded admission after caller cancellation or scope
+    // retirement. Reuse only a still-owned lease; stale descendants queue normally.
+    await this.deadlines.exit(async () => {
+      if (!this.isAvailable(owner)) return;
+      const lease = this.leases.getStore();
+      const discard = async () => await this.request("conditionalField.discard", { preparation_id: preparationId }, undefined, owner);
+      if (lease !== undefined && lease.resource.lease === lease.token) await discard();
+      else await this.leases.exit(discard);
+    });
+  }
+
   public close(): Promise<void> {
     this.closePromise ??= this.closeOnce();
     return this.closePromise;
