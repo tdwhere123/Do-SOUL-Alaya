@@ -1,13 +1,8 @@
-import { StorageTier } from "@do-soul/alaya-protocol";
+import type { StorageTier } from "@do-soul/alaya-protocol";
 import {
   resolveEmbeddingRecallTiersFromConfig
 } from "../runtime/config/core-config.js";
 import { getCoreConfig } from "../runtime/config/install-core-config.js";
-
-const DEFAULT_EMBEDDING_RECALL_TIERS: readonly StorageTier[] = [
-  StorageTier.HOT,
-  StorageTier.WARM
-];
 
 // Storage tiers the embedding recall path covers: backfill writes vectors for
 // them and the coarse-injection scan reads them. Default HOT+WARM so a vocab-
@@ -18,5 +13,3 @@ const DEFAULT_EMBEDDING_RECALL_TIERS: readonly StorageTier[] = [
 export function resolveEmbeddingRecallTiers(): readonly StorageTier[] {
   return resolveEmbeddingRecallTiersFromConfig(getCoreConfig().embedding);
 }
-
-export { DEFAULT_EMBEDDING_RECALL_TIERS };

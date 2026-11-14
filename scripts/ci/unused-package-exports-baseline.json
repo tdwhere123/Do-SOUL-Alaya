@@ -8,7 +8,6 @@
     "export:packages/core/src/dynamics/dynamics-service-ports.ts:SCORE_CHANGE_EPSILON",
     "export:packages/core/src/embedding-recall/evidence/document-preview.ts:NON_MEMORY_RECALL_PREVIEW_CHARS",
     "export:packages/core/src/embedding-recall/local-onnx-process/ipc-client.ts:resolveLocalOnnxEmbeddingChildScript",
-    "export:packages/core/src/embedding-recall/tier-config.ts:DEFAULT_EMBEDDING_RECALL_TIERS",
     "export:packages/core/src/governance/claims/claim-service-helpers.ts:assertNoAdditionalEventInputs",
     "export:packages/core/src/governance/effects/causal-plasticity.ts:USAGE_STRENGTH_CAP",
     "export:packages/core/src/governance/effects/causal-plasticity.ts:projectUsageMass",
