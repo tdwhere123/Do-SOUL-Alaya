@@ -131,7 +131,7 @@ function assertPrefixTree(
   for (const child of children) {
     const key = child.name.replace(/\.json$/u, "");
     if (!child.isFile() || child.isSymbolicLink() || !expectedKeys.has(key) ||
-        relative(targetRoot, join(path, child.name)) !== `${prefix}/${key}.json`) {
+        relative(targetRoot, join(path, child.name)) !== join(prefix, `${key}.json`)) {
       throw new Error("target shard tree contains an unknown or unsafe entry");
     }
   }
