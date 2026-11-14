@@ -1,8 +1,8 @@
 import childProcess, { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import workers from "node:worker_threads";
 import net from "node:net";
@@ -266,3 +266,40 @@ it("guards the actual Source ONNX fork host despite cleared loader flags and pre
       refusal: "Provider-free test refused credential file", argv: [`--import=${pathToFileURL(preload).href}`] });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+it.each(["healthy", "denial", "unconfirmed"])(
+  "shares one native descendant owner across Vitest cache re-entry: %s", async mode => {
+    const root = fileURLToPath(new URL("../../../../../", import.meta.url));
+    const support = new URL("../../../../../scripts/test-support/provider-free/", import.meta.url);
+    const fixture = fileURLToPath(new URL("native-owner-cache.fixture.ts", support));
+    const bootstrap = new URL("provider-free-cli-bootstrap.mjs", support).href;
+    const temporary = mkdtempSync(join(tmpdir(), "provider-owner-config-"));
+    const config = join(temporary, "vitest.config.mjs"), evidence = join(temporary, "probe.json");
+    writeFileSync(config, `export default ${JSON.stringify({ root, test: {
+      include: [fixture], pool: "forks", maxWorkers: 1, fileParallelism: false, testTimeout: 15_000
+    } })};`);
+    try {
+      const result = await new Promise<{ code: string | number; stdout: string; stderr: string }>(resolve => {
+        execFile(process.execPath,
+          ["--import", bootstrap, join(root, "node_modules/vitest/vitest.mjs"), "run", "--config", config],
+          { cwd: root, env: { ...process.env, PROVIDER_FREE_OWNER_PROBE: mode, PROVIDER_FREE_OWNER_EVIDENCE: evidence }, timeout: 25_000 },
+          (error, stdout, stderr) => resolve({ code: error === null ? 0 : error.code ?? "unknown", stdout, stderr }));
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(output).toContain("1 passed");
+      expect(result.code, output).toBe(mode === "healthy" ? 0 : 1);
+      const probe = JSON.parse(readFileSync(evidence, "utf8"));
+      expect(probe.mode).toBe(mode);
+      // Retain guard-owned journals, including negative-arm sticky records, for inspection.
+      console.log(`OWNER_EVIDENCE:${JSON.stringify(probe)}`);
+      const members: { member: string }[] = readFileSync(join(probe.root, "members.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+      const roots = members.filter(({ member }) => JSON.parse(readFileSync(join(probe.root, member, "entry.json"), "utf8")).parent === null);
+      expect(roots).toHaveLength(1);
+      const reasons: string[] = roots.flatMap(({ member }) => readdirSync(join(probe.root, member))
+        .filter(name => name.startsWith("signal-failure-"))
+        .flatMap(name => JSON.parse(readFileSync(join(probe.root, member, name), "utf8")).reasons));
+      if (mode === "healthy") expect(reasons).toEqual([]);
+      else expect(reasons.some(reason => reason.startsWith(mode === "denial" ? "violation:credential file" : "unconfirmed_descendant:"))).toBe(true);
+    } finally { rmSync(temporary, { recursive: true, force: true }); }
+  }, 30_000
+);

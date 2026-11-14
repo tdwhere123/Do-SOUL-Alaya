@@ -7,7 +7,10 @@ import { promisify } from "node:util";
 import { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } from "./provider-free-isolation.mjs";
 
 export const providerFreeDescendantPreload = new URL("./provider-free-descendant-bootstrap.mjs", import.meta.url).href;
-let installed;
+const ownerKey = Symbol.for("alaya.provider-free-descendant-owner");
+// Native --import and Vitest can evaluate this module in separate caches while
+// mutating the same builtins. Share both the wrappers and their preload leases.
+const owner = process[ownerKey] ??= { installed: undefined };
 
 /** Neutral and CLI --import share this owner so a child can enroll its own descendants. */
 export function installProviderFreeActor(preload) {
@@ -26,10 +29,10 @@ export function installProviderFreeActor(preload) {
 /** Propagation and lifetime evidence belong to the isolation guard, not product reap callbacks. */
 export function installProviderFreeDescendants(signal, preload) {
   const binding = JSON.stringify(signal.binding);
-  if (installed !== undefined) {
-    if (installed.binding !== binding) throw new Error("Conflicting descendant isolation owner");
-    installed.preloads.set(preload, (installed.preloads.get(preload) ?? 0) + 1);
-    installed.ownedPreloads.add(preload);
+  if (owner.installed !== undefined) {
+    if (owner.installed.binding !== binding) throw new Error("Conflicting descendant isolation owner");
+    owner.installed.preloads.set(preload, (owner.installed.preloads.get(preload) ?? 0) + 1);
+    owner.installed.ownedPreloads.add(preload);
     return () => release(preload);
   }
   const restores = [], preloads = new Map([[preload, 1]]), ownedPreloads = new Set([preload]);
@@ -106,7 +109,7 @@ export function installProviderFreeDescendants(signal, preload) {
   restores.push(...installProcessLaunches(signal, processArgv, env, monitor));
   // ESM named imports bind the builtin snapshot; CJS namespace mutation is not enough.
   syncBuiltinESMExports();
-  installed = { binding, preloads, ownedPreloads, restore: () => {
+  owner.installed = { binding, preloads, ownedPreloads, restore: () => {
     for (const restore of restores.reverse()) restore();
     syncBuiltinESMExports();
   } };
@@ -183,11 +186,11 @@ function installProcessLaunches(signal, argv, env, monitor) {
 }
 
 function release(preload) {
-  if (installed === undefined) return;
-  const references = installed.preloads.get(preload) ?? 0;
-  if (references > 1) installed.preloads.set(preload, references - 1);
-  else installed.preloads.delete(preload);
-  if (installed.preloads.size === 0) { installed.restore(); installed = undefined; }
+  if (owner.installed === undefined) return;
+  const references = owner.installed.preloads.get(preload) ?? 0;
+  if (references > 1) owner.installed.preloads.set(preload, references - 1);
+  else owner.installed.preloads.delete(preload);
+  if (owner.installed.preloads.size === 0) { owner.installed.restore(); owner.installed = undefined; }
 }
 
 /** Remove only this journal's injected imports; preserve other options and quoted values verbatim. */
