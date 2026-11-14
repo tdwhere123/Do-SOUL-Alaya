@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("snapshot extraction authority", () => {
-  it("binds singleton packing and the manifest version through summary and persisted authority", () => {
+  it("binds singleton packing and the manifest version through summary and serialized authority", () => {
     const manifest = { ...extractionManifest(2, "singleton"), schema_version: 4 as const,
       source_packing: "singleton" as const };
     const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);
