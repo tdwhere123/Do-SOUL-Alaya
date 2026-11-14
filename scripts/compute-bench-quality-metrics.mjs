@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { readGoldObjectIds } from "../apps/bench-runner/dist/diagnostics/gold-object-identities.js";
+import { QualityMetricsSchema } from "../packages/eval/dist/contracts/kpi-quality-schema.js";
 import {
   asArray,
   asStringArray,
@@ -47,7 +48,7 @@ try {
     throw new Error("no readable archive JSON source found");
   } else {
     const archive = JSON.parse(readFileSync(source.selectedPath, "utf8"));
-    result.source.archive_kind = detectArchiveKind(archive, source.selectedPath);
+    result.source.archive_kind = detectArchiveKind(archive);
     result.metadata.archive_file = basename(source.selectedPath);
     result.metadata.bench_name = readString(archive?.bench_name);
     result.metadata.run_at = readString(archive?.run_at);
@@ -60,10 +61,7 @@ try {
     } else if (result.source.archive_kind === "kpi-payload") {
       applyKpiPayload(archive, result);
     } else {
-      result.warnings.push(
-        `unrecognized archive shape in ${source.selectedPath}; emitting neutral metrics`
-      );
-      applyGenericArchiveMetrics(archive, result);
+      throw new Error(`unrecognized archive shape in ${source.selectedPath}`);
     }
   }
 } catch (error) {
@@ -143,22 +141,13 @@ function resolveArchiveSource(inputPath, warnings) {
   return null;
 }
 
-function detectArchiveKind(archive, selectedPath) {
-  if (Array.isArray(archive?.questions)) return "longmemeval-diagnostics";
+function detectArchiveKind(archive) {
+  if (Array.isArray(archive?.questions) && archive.questions.every(isRecord)) return "longmemeval-diagnostics";
   if (
     Array.isArray(archive?.scenarios) &&
     archive?.metrics !== null &&
     typeof archive?.metrics === "object"
   ) {
-    return "controlled-replay";
-  }
-  if (basename(selectedPath) === "longmemeval-diagnostics.json") {
-    return "longmemeval-diagnostics";
-  }
-  if (basename(selectedPath) === "locomo-diagnostics.json") {
-    return "longmemeval-diagnostics";
-  }
-  if (basename(selectedPath) === "controlled-replay.json") {
     return "controlled-replay";
   }
   // A KpiPayload archive (kpi.json) carries the bench-runner's own
@@ -170,7 +159,15 @@ function detectArchiveKind(archive, selectedPath) {
 }
 
 function applyLongMemEvalDiagnostics(archive, output) {
-  const questions = asArray(archive?.questions);
+  const questions = archive.questions;
+  for (const question of questions) {
+    for (const key of ["delivered_results", "gold"]) {
+      if (hasOwnField(question, key) &&
+          (!Array.isArray(question[key]) || !question[key].every(isRecord))) {
+        throw new Error(`invalid diagnostics question ${key}`);
+      }
+    }
+  }
   const questionStats = accumulateQuestionStats(questions);
   const goldStats = accumulateGoldStats(questionStats.allGold);
   const activeConstraints = countActiveConstraints(archive);
@@ -419,11 +416,11 @@ function pushDiagnosticsWarnings(output, ctx) {
 
 function applyControlledReplay(archive, output) {
   const metrics = isRecord(archive?.metrics) ? archive.metrics : {};
-  const diagnosticsCount = readNumber(metrics.diagnostics_count) ?? 0;
-  const deliveryCount = readNumber(metrics.delivery_count) ?? 0;
-  const nonMonotonicCount = readNumber(metrics.non_monotonic?.count) ?? 0;
+  const diagnosticsCount = requiredReplayCount(metrics.diagnostics_count, "diagnostics_count");
+  const deliveryCount = requiredReplayCount(metrics.delivery_count, "delivery_count");
+  const nonMonotonicCount = requiredReplayCount(metrics.non_monotonic?.count, "non_monotonic.count");
   const highLexicalDemotedCount =
-    readNumber(metrics.high_lexical_demoted?.count) ?? 0;
+    requiredReplayCount(metrics.high_lexical_demoted?.count, "high_lexical_demoted.count");
   const budgetDropMaxEntries = readNumber(metrics.budget_drop?.max_entries);
   const activeConstraints = countActiveConstraints(archive);
 
@@ -476,22 +473,26 @@ function applyControlledReplay(archive, output) {
   }
 }
 
+function requiredReplayCount(value, field) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`controlled replay requires a measured nonnegative ${field}`);
+  }
+  return value;
+}
+
 // Read the bench-runner's own quality_metrics out of a kpi.json. This keeps
 // the four bench surfaces comparable: a kpi.json from any of them yields the
 // same per-plane-coverage shape this script also derives from a sidecar.
 function applyKpiPayload(archive, output) {
-  const quality = archive?.kpi?.quality_metrics ?? {};
-  output.non_monotonic_rate = readNumber(quality.non_monotonic_rate) ?? 0;
-  output.high_lexical_demoted_rate =
-    readNumber(quality.high_lexical_demoted_rate) ?? 0;
-  output.budget_drop_distribution = isRecord(quality.budget_drop_distribution)
-    ? quality.budget_drop_distribution
-    : {};
-  output.per_plane_recall_coverage = isRecord(
-    quality.per_plane_recall_coverage
-  )
-    ? quality.per_plane_recall_coverage
-    : {};
+  const quality = QualityMetricsSchema.parse(archive.kpi.quality_metrics);
+  // KPI input already owns its measurement status and denominators. Discard
+  // diagnostic defaults and copy only validated fields actually present in it;
+  // parser defaults are not evidence that a historical field was measured.
+  for (const key of ["non_monotonic_rate", "budget_drop_distribution", "high_lexical_demoted_rate",
+    "cohort_first_admitted", "cohort_winning_admission", "path_expansion_share",
+    "active_constraints_count", "per_plane_recall_coverage"]) delete output[key];
+  Object.assign(output, Object.fromEntries(Object.entries(quality)
+    .filter(([key]) => hasOwnField(archive.kpi.quality_metrics, key))));
   const diff = archive?.diff_vs_previous;
   output.metadata.kpi_payload = {
     bench_name: readString(archive?.bench_name),
@@ -502,22 +503,6 @@ function applyKpiPayload(archive, output) {
     previous_run: isRecord(diff) ? readString(diff.previous_run) : null
   };
   const activeConstraints = countActiveConstraints(archive);
-  output.active_constraints_count = activeConstraints.count;
+  if (activeConstraints.sources.length > 0) output.active_constraints_count = activeConstraints.count;
   output.metadata.active_constraints_sources = activeConstraints.sources;
-  if (Object.keys(output.per_plane_recall_coverage).length === 0) {
-    output.warnings.push(
-      "kpi.quality_metrics.per_plane_recall_coverage missing or empty; set to empty"
-    );
-  }
-}
-
-function applyGenericArchiveMetrics(archive, output) {
-  const activeConstraints = countActiveConstraints(archive);
-  output.active_constraints_count = activeConstraints.count;
-  output.metadata.active_constraints_sources = activeConstraints.sources;
-  if (activeConstraints.sources.length === 0) {
-    output.warnings.push(
-      "active_constraints[] or active_constraints_count not present; active_constraints_count set to 0"
-    );
-  }
 }
