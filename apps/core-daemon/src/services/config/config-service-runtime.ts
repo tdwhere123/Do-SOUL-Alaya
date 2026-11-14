@@ -16,16 +16,15 @@ import {
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_GARDEN_MODEL } from "@do-soul/alaya-soul";
 import type { ConfigRepo } from "@do-soul/alaya-storage";
-import { ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV, selectGardenCredentialProvenance } from "../../garden/support/credential.js";
+import { selectGardenSecretRef, selectGardenCredentialProvenance } from "../../garden/support/credential.js";
 import type { GardenCredentialProvenance } from "../../garden/support/credential.js";
 import type { AlayaConfigPaths } from "../../cli/support/config-files.js";
 import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS, processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { normalizeLegacyConfigVersion, withConfigVersion } from "./config-version.js";
 import { loadConfigEnv, readConfigEnvValue, readNonEmptyEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import {
   ALAYA_GARDEN_PROVIDER_KIND_ENV,
-  ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
-  ALAYA_OPENAI_SECRET_REF_ENV,
   applyRuntimeGardenComputeConfigFiles,
   applyRuntimeEmbeddingConfigFiles,
   normalizeRuntimeEmbeddingConfigPatch,
@@ -375,11 +374,7 @@ async function defaultRuntimeGardenComputeConfig(
   warn: (message: string) => void
 ): Promise<RuntimeGardenComputeConfig> {
   const configEnv = await loadConfigEnv(paths.envPath);
-  const gardenSecretRef =
-    readRawSecretRef(configEnv, ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV) ??
-    readRawSecretRef(configEnv, ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV);
-  const embeddingFallbackSecretRef = readRawSecretRef(configEnv, ALAYA_OPENAI_SECRET_REF_ENV);
-  const secretRef = gardenSecretRef ?? embeddingFallbackSecretRef;
+  const secretRef = selectGardenSecretRef((key) => readConfigEnvValue(configEnv, key))?.ref ?? null;
   const modelId =
     readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ??
     OFFICIAL_API_GARDEN_MODEL;
@@ -402,10 +397,6 @@ async function defaultRuntimeGardenComputeConfig(
   );
 }
 
-function readRawSecretRef(configEnv: ReadonlyMap<string, string>, key: string): string | null {
-  return readNonEmptyEnv(readConfigEnvValue(configEnv, key));
-}
-
 function parseIsoTimestamp(
   value: string,
   validationMessage = "Invalid runtime embedding config patch"
@@ -416,30 +407,6 @@ function parseIsoTimestamp(
   return value;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function readConfigVersion(defaults: VersionedRuntimeConfig): number {
   return defaults.config_version ?? CURRENT_CONFIG_VERSION;
-}
-
-function normalizeLegacyConfigVersion(value: unknown, configVersion: number): unknown {
-  if (!isRecord(value) || value.config_version !== undefined) {
-    return value;
-  }
-  return {
-    ...value,
-    config_version: configVersion
-  };
-}
-
-function withConfigVersion<T extends VersionedRuntimeConfig>(
-  patch: Partial<T>,
-  configVersion: number
-): Partial<T> {
-  return {
-    ...patch,
-    config_version: configVersion
-  };
 }

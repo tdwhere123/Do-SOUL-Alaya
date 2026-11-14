@@ -1,5 +1,8 @@
 import { parseEnvBoolean, type EmbeddingStatus, type ToolchainStatus } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { assessStartupReadiness } from "../../runtime/daemon/support/startup-readiness.js";
+import { GARDEN_SCHEDULER_INTERVAL_MS } from "../../garden/runtime/runtime-background-services.js";
+export { GARDEN_SCHEDULER_INTERVAL_MS } from "../../garden/runtime/runtime-background-services.js";
 import type {
   EmbeddingQueryWarmupSummary,
   WorkspaceBootstrapReconcileResult
@@ -259,15 +262,6 @@ export interface DoctorReport {
 
 const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
 
-const STARTUP_STEPS = [
-  "database",
-  "repositories",
-  "core-services",
-  "garden-runtime",
-  "mcp-tooling",
-  "http-app"
-] as const;
-
 export function createDoctorCommand(
   deps: DoctorCommandDependencies
 ): AlayaSubcommandSpec<DoctorArgs> {
@@ -379,13 +373,7 @@ function readDoctorStartup(
   ctx: AlayaCliContext
 ): DoctorReport["startup"] {
   const startupSteps = deps.startupStepsProvider?.(ctx) ?? ctx.daemon.startupSteps;
-  const completedSteps = startupSteps.map((step) => step.step);
-  const missingSteps = STARTUP_STEPS.filter((step) => !completedSteps.includes(step));
-  return {
-    ready: missingSteps.length === 0,
-    completed_steps: completedSteps,
-    missing_steps: missingSteps
-  };
+  return assessStartupReadiness(startupSteps);
 }
 
 async function readDoctorServices(
@@ -425,7 +413,6 @@ async function readDoctorServices(
   };
 }
 
-export const GARDEN_SCHEDULER_INTERVAL_MS = 60_000;
 export const GARDEN_STALE_PASS_INTERVALS = 2;
 
 export function assessMcpCatalogTransport(

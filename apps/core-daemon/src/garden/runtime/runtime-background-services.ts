@@ -175,6 +175,8 @@ async function enqueueWorkspaceScopedLibrarianTasks(input: Readonly<{
   }
 }
 
+export const GARDEN_SCHEDULER_INTERVAL_MS = 60_000;
+
 function createGardenSchedulerBackgroundService(input: Readonly<{
   readonly gardenTaskRepoAvailable: boolean;
   readonly hostWorkerTaskRuntime: {
@@ -198,7 +200,7 @@ function createGardenSchedulerBackgroundService(input: Readonly<{
 }>): BackgroundServiceConfig {
   return {
     name: "GardenScheduler",
-    intervalMs: 60_000,
+    intervalMs: GARDEN_SCHEDULER_INTERVAL_MS,
     task: async () => {
       await runGardenSchedulerMaintenance(input);
       await drainBulkEnrichTasks(input);

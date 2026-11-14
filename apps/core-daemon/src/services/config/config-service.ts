@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { CoreError } from "@do-soul/alaya-core";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { normalizeLegacyConfigVersion, withConfigVersion } from "./config-version.js";
 import {
   diagnosticWarn,
   DEFAULT_ENVIRONMENT_CONFIG,
@@ -457,25 +458,6 @@ function readConfigVersion(defaults: VersionedConfigObject): number {
   return defaults.config_version ?? CURRENT_CONFIG_VERSION;
 }
 
-function normalizeLegacyConfigVersion(value: unknown, configVersion: number): unknown {
-  if (!isRecord(value) || value.config_version !== undefined) {
-    return value;
-  }
-  return {
-    ...value,
-    config_version: configVersion
-  };
-}
-
-function withConfigVersion<T extends VersionedConfigObject>(
-  patch: Partial<T>,
-  configVersion: number
-): Partial<T> {
-  return {
-    ...patch,
-    config_version: configVersion
-  };
-}
 
 function parseIsoTimestamp(
   value: string,

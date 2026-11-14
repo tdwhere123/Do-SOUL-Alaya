@@ -3,6 +3,7 @@ import type { DaemonStartupStepRecord } from "../index.js";
 import type { RecallUtilizationService, RecallUtilizationStats } from "../services/status/recall-utilization-service.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "./bridge.js";
 import { projectSourceGroundingDeferStats } from "./source-grounding-defers/projection.js";
+import { assessStartupReadiness } from "../runtime/daemon/support/startup-readiness.js";
 
 const DEFAULT_RECALL_STATS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -41,15 +42,6 @@ interface StatusReport {
   }>;
   readonly recall_stats?: RecallUtilizationStats;
 }
-
-const STARTUP_STEPS = [
-  "database",
-  "repositories",
-  "core-services",
-  "garden-runtime",
-  "mcp-tooling",
-  "http-app"
-] as const;
 
 export function createStatusCommand(
   deps: StatusCommandDependencies
@@ -195,15 +187,8 @@ function summarizeDaemonStatus(
   deps: StatusCommandDependencies
 ): Readonly<{ summary: StatusReport["daemon"] }> {
   const startupSteps = deps.startupStepsProvider?.(ctx) ?? ctx.daemon.startupSteps;
-  const completedSteps = startupSteps.map((step) => step.step);
-  const missingSteps = STARTUP_STEPS.filter((step) => !completedSteps.includes(step));
-  return {
-    summary: {
-      up: missingSteps.length === 0,
-      completed_steps: completedSteps,
-      missing_steps: missingSteps
-    }
-  };
+  const { ready, completed_steps, missing_steps } = assessStartupReadiness(startupSteps);
+  return { summary: { up: ready, completed_steps, missing_steps } };
 }
 
 async function maybeLoadRecallStats(

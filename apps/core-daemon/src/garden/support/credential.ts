@@ -12,23 +12,29 @@ export const ALAYA_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_
 export const ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV = "ALAYA_GARDEN_OPENAI_SECRET_REF";
 export const ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV = "ALAYA_OPENAI_SECRET_REF";
 
+/** Per-key source precedence belongs to the caller; credential priority does not. */
+export function selectGardenSecretRef(read: (key: string) => string | null | undefined): Readonly<{
+  ref: string;
+  embeddingFallback: boolean;
+}> | null {
+  for (const key of [
+    ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
+    ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV,
+    ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV
+  ]) {
+    const ref = read(key)?.trim();
+    if (ref) return { ref, embeddingFallback: key === ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV };
+  }
+  return null;
+}
+
 export function selectGardenCredentialProvenance(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly configEnv: ReadonlyMap<string, string>;
 }): GardenCredentialProvenance {
-  const dedicatedRef = readFirstConfigValue(input.env, input.configEnv, [
-    ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
-    ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV
-  ]);
-
-  if (dedicatedRef !== null) {
-    return { kind: secretRefScheme(dedicatedRef) ?? "file" };
-  }
-
-  const embeddingFallbackRef = readConfigValue(input.env, input.configEnv, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV);
-  return embeddingFallbackRef === null
-    ? { kind: "none" }
-    : { kind: "embedding-fallback" };
+  const selected = selectGardenSecretRef((key) => readConfigValue(input.env, input.configEnv, key));
+  if (selected === null) return { kind: "none" };
+  return { kind: selected.embeddingFallback ? "embedding-fallback" : secretRefScheme(selected.ref) ?? "file" };
 }
 
 export function resolveGardenOpenAiCredential(input: {
@@ -39,58 +45,15 @@ export function resolveGardenOpenAiCredential(input: {
   readonly provenance: GardenCredentialProvenance;
 }> {
   const env = input.env ?? processEnvLookup();
-  const dedicatedRef = readFirstConfigValue(env, input.configEnv, [
-    ALAYA_GARDEN_OPENAI_SECRET_REF_ENV,
-    ALAYA_LEGACY_GARDEN_OPENAI_SECRET_REF_ENV
-  ]);
-
-  if (dedicatedRef !== null) {
-    const resolved = resolveSecretRefOrNull(dedicatedRef, ALAYA_GARDEN_OPENAI_SECRET_REF_ENV, env);
-    if (resolved === null) {
-      return {
-        apiKey: null,
-        provenance: { kind: "none" }
-      };
-    }
-    return {
-      apiKey: resolved.value,
-      provenance: { kind: resolved.origin }
-    };
-  }
-
-  const embeddingFallbackRef = readConfigValue(env, input.configEnv, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV);
-  if (embeddingFallbackRef === null) {
-    return {
-      apiKey: null,
-      provenance: { kind: "none" }
-    };
-  }
-
-  const resolved = resolveSecretRefOrNull(embeddingFallbackRef, ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV, env);
-  if (resolved === null) {
-    return {
-      apiKey: null,
-      provenance: { kind: "embedding-fallback" }
-    };
-  }
+  const selected = selectGardenSecretRef((key) => readConfigValue(env, input.configEnv, key));
+  if (selected === null) return { apiKey: null, provenance: { kind: "none" } };
+  const label = selected.embeddingFallback
+    ? ALAYA_EMBEDDING_OPENAI_SECRET_REF_ENV : ALAYA_GARDEN_OPENAI_SECRET_REF_ENV;
+  const resolved = resolveSecretRefOrNull(selected.ref, label, env);
   return {
-    apiKey: resolved.value,
-    provenance: { kind: "embedding-fallback" }
+    apiKey: resolved?.value ?? null,
+    provenance: { kind: selected.embeddingFallback ? "embedding-fallback" : resolved?.origin ?? "none" }
   };
-}
-
-function readFirstConfigValue(
-  env: NodeJS.ProcessEnv,
-  configEnv: ReadonlyMap<string, string>,
-  keys: readonly string[]
-): string | null {
-  for (const key of keys) {
-    const value = readConfigValue(env, configEnv, key);
-    if (value !== null) {
-      return value;
-    }
-  }
-  return null;
 }
 
 function readConfigValue(
