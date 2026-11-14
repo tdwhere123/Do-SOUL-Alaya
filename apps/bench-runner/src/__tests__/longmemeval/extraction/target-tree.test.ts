@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
-import { assertExactTargetTree, assertRecoverableTargetTree } from
+import { assertExactTargetTree, assertRecoverableTargetTree, removeEmptyStage } from
   "../../../runs/extraction/cache-audit/materialization/target-tree.js";
+import { MATERIALIZATION_STAGE_NAME } from
+  "../../../runs/extraction/cache-audit/materialization/contract.js";
+import { linkFileExclusiveDurable, writeBytesExclusiveDurable } from
+  "../../../runs/extraction/fill/manifest/durable-exclusive-publication.js";
 import type { MaterializationShardDescriptor } from
   "../../../runs/extraction/cache-audit/materialization/contract.js";
 
@@ -30,6 +34,38 @@ it("accepts a native shard tree through publication states, recovery and committ
   expect(() => assertRecoverableTargetTree(root, [descriptor], 1024)).toThrow(/differs/u);
 });
 
+it("resumes a partially published native shard tree without accepting an open stage as committed", () => {
+  const root = tree();
+  assertExactTargetTree(root, [descriptor], "fresh");
+  const stage = join(root, MATERIALIZATION_STAGE_NAME);
+  mkdirSync(stage);
+  const staged = join(stage, `${key}.json`), published = join(root, "ab", `${key}.json`);
+  writeBytesExclusiveDurable(staged, Buffer.from(bytes));
+  assertRecoverableTargetTree(root, [descriptor], 1024);
+  linkFileExclusiveDurable(staged, published);
+  assertRecoverableTargetTree(root, [descriptor], 1024);
+  expect(() => assertExactTargetTree(root, [descriptor], "committed")).toThrow(/stage/u);
+  rmSync(staged);
+  removeEmptyStage(root);
+  assertExactTargetTree(root, [descriptor], "committed");
+});
+
+it("accepts genuinely empty fresh and committed trees", () => {
+  const root = mkdtempSync(join(tmpdir(), "target-tree-")); roots.push(root);
+  assertExactTargetTree(root, [], "fresh");
+  assertExactTargetTree(root, [], "committed");
+});
+
+it("rejects a linked shard prefix even when the external tree contains the exact expected bytes", () => {
+  const root = tree(), outside = tree();
+  writeFileSync(join(outside, "ab", `${key}.json`), bytes);
+  assertExactTargetTree(outside, [descriptor], "committed");
+  rmSync(join(root, "ab"), { recursive: true });
+  symlinkSync(join(outside, "ab"), join(root, "ab"), process.platform === "win32" ? "junction" : "dir");
+  expect(() => assertExactTargetTree(root, [descriptor], "committed")).toThrow();
+  expect(() => assertRecoverableTargetTree(root, [descriptor], 1024)).toThrow();
+});
+
 it("rejects prefix/key mismatches, unknown files, symlinks and unexpected empty prefixes", () => {
   const root = tree();
   const wrongKey = "cd" + "1".repeat(62);
@@ -40,8 +76,13 @@ it("rejects prefix/key mismatches, unknown files, symlinks and unexpected empty 
   writeFileSync(join(root, "ab", "unknown.json"), bytes);
   expect(() => assertExactTargetTree(root, [descriptor], "committed")).toThrow(/unknown or unsafe/u);
   rmSync(join(root, "ab", "unknown.json"));
-  symlinkSync(join(root, "outside.json"), join(root, "ab", `${key}.json`));
+  const outside = mkdtempSync(join(tmpdir(), "target-tree-outside-")); roots.push(outside);
+  const outsideFile = join(outside, `${key}.json`);
+  writeFileSync(outsideFile, bytes);
+  // Windows junctions exercise real reparse points without requiring symlink privileges.
+  symlinkSync(process.platform === "win32" ? outside : outsideFile, join(root, "ab", `${key}.json`),
+    process.platform === "win32" ? "junction" : "file");
   expect(() => assertRecoverableTargetTree(root, [descriptor], 1024)).toThrow(/unknown or unsafe/u);
-  rmSync(join(root, "ab", `${key}.json`));
+  rmSync(join(root, "ab", `${key}.json`), { recursive: true });
   expect(() => assertExactTargetTree(root, [], "committed")).toThrow(/unexpected empty shard prefix/u);
 });
