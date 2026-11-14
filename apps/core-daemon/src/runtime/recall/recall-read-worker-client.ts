@@ -211,7 +211,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
-    withPreparedExecution: async (input, execute) => this.lifecycle.withinDeadline("conditionalField.recall", async () => {
+    withPreparedExecution: async (input, execute, signal) => this.lifecycle.withinDeadline("conditionalField.recall", async () => {
       const captured = structuredClone(input);
       if (captured.continuation != null || captured.cancelled || captured.result_kind_view === "memory_only") return execute(captured);
       const reason = this.lifecycle.snapshotHasBegun() ? "snapshot_already_begun"
@@ -230,7 +230,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         deadline.check();
       }
       return execute({ ...captured, prepared_query: prepared });
-    }),
+    }, signal),
     acknowledge: async (preparationId, index, previews) => {
       return await this.lifecycle.request("conditionalField.acknowledge", {
         preparation_id: preparationId,

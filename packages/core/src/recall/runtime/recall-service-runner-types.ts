@@ -75,6 +75,8 @@ export type ConditionalFieldRecallRequest = Readonly<{
 }>;
 
 export interface RecallExecutionParams {
+  /** Live caller capability, excluded from captured domain data and Worker payloads. */
+  readonly abortSignal?: AbortSignal;
   readonly continuation?: Continuation | null;
   readonly defer_delivery?: boolean;
   readonly taskSurface: Readonly<TaskObjectSurface>;

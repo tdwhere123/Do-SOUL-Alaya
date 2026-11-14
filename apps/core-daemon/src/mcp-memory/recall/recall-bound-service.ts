@@ -23,6 +23,7 @@ export async function runProductionBoundRecall(input: Readonly<{
   const timeFilter = buildRecallTimeFilter(input.request);
   return await input.deps.recallService.recall({
     defer_delivery: true,
+    ...(input.context.abortSignal === undefined ? {} : { abortSignal: input.context.abortSignal }),
     taskSurface: input.taskSurface,
     workspaceId: input.context.workspaceId,
     runId: input.context.runId,

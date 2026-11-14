@@ -61,6 +61,7 @@ export interface RecallUsageHandlerDependencies {
   readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
   readonly recallService: {
     recall(params: {
+      readonly abortSignal?: AbortSignal;
       readonly defer_delivery?: boolean;
       readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;
       readonly workspaceId: string;

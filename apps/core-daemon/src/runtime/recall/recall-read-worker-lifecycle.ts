@@ -144,7 +144,8 @@ export class RecallReadWorkerLifecycle {
     finally { deadline.dispose(); }
   }
 
-  public async withinDeadline<T>(operation: string, work: () => Promise<T>): Promise<T> {
+  public async withinDeadline<T>(operation: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal !== undefined) return await this.executionScope({ signal, timeoutMs: this.options.requestTimeoutMs }, work);
     this.assertOpen();
     const inherited = this.deadlines.getStore();
     if (inherited !== undefined) return await inherited.run(work);

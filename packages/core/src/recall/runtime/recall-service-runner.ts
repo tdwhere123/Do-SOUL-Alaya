@@ -113,7 +113,7 @@ export type ConditionalFieldRecallPortResult = Readonly<{
 
 export type ConditionalFieldRecallPort = Readonly<{
   withPreparedExecution?<T>(input: Omit<ConditionalFieldRecallRequest, "readers">,
-    execute: (captured: Omit<ConditionalFieldRecallRequest, "readers">) => Promise<T>): Promise<T>;
+    execute: (captured: Omit<ConditionalFieldRecallRequest, "readers">) => Promise<T>, signal?: AbortSignal): Promise<T>;
   acknowledge?(preparationId: string, index: InformationIndex, previews: ReadonlyMap<string, string>): Promise<ConditionalFieldExecutionReceipt | void>;
   discard?(preparationId: string): Promise<void>;
   recall(
@@ -127,7 +127,9 @@ export async function executeRecall(
 ): Promise<ConditionalFieldRecallResult> {
   // Capture intent and controls before even the clock/default-policy callbacks.
   // Service and cancellation capabilities are references, never frozen caller data.
-  params = captureRecallData(params);
+  const { abortSignal, ...domain } = params;
+  abortSignal?.throwIfAborted();
+  params = { ...captureRecallData(domain), ...(abortSignal === undefined ? {} : { abortSignal }) };
   context = { ...context, dependencies: { ...context.dependencies } };
   if (params.policyOverride?.scoring_weight_overrides !== undefined
     || params.policyOverride?.domain_weight_overrides !== undefined) {
@@ -147,7 +149,7 @@ export async function executeRecall(
   return port?.withPreparedExecution === undefined ? executeCapturedRecall(context, params, sent)
     : port.withPreparedExecution(withoutReaders(sent), captured =>
       executeCapturedRecall(context, params,
-        withRecallEnvironment(captureRecallRequest({ ...captured, readers: sent.readers }))));
+        withRecallEnvironment(captureRecallRequest({ ...captured, readers: sent.readers }))), abortSignal);
 }
 
 async function executeCapturedRecall(context: RecallExecutionContext, params: RecallExecutionParams,
