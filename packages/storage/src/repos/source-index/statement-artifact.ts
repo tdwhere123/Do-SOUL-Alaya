@@ -4,6 +4,7 @@ import {
   SourceIndexTargetSchema, type SourceStatementArtifact, type SourceIndexTarget, type SourceIndexBudget
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import { putStatementDependencies, readStatementDependencies } from "./statement-dependencies.js";
 
@@ -40,7 +41,7 @@ export function putSourceStatementArtifact(database: StorageDatabase, input: Sou
 export function readStatementIndexTarget(database: StorageDatabase, workspace: string, artifactId: string, budget: SourceIndexBudget) {
   const resources = { work: 0, native_bytes: 0 };
   if (budget.work < 1 || budget.native_bytes < TARGET_BYTES + 1) return { status: "resource_limited" as const, resources };
-  const row = database.connection.prepare(`SELECT substr(CAST(target_json AS BLOB),1,?) AS target_json FROM source_statement_artifacts
+  const row = cachedReadStatement(database, `SELECT substr(CAST(target_json AS BLOB),1,?) AS target_json FROM source_statement_artifacts
     WHERE workspace_id=? AND artifact_id=?`).get(TARGET_BYTES + 1, workspace, artifactId) as { target_json: Buffer } | undefined;
   resources.work++;
   if (row === undefined) return { status: "absent" as const, resources };
@@ -61,7 +62,7 @@ export function readStatementIndexTarget(database: StorageDatabase, workspace: s
 
 /** Coordinates here address auxiliary key text only, never the source message. */
 export function readStatementIndexChunk(database: StorageDatabase, source: SourceIndexTarget, maxBytes: number, offset: number) {
-  const row = database.connection.prepare(`SELECT key_text FROM source_statement_artifacts WHERE workspace_id=? AND artifact_id=?
+  const row = cachedReadStatement(database, `SELECT key_text FROM source_statement_artifacts WHERE workspace_id=? AND artifact_id=?
     AND target_json=? AND length(CAST(key_text AS BLOB))=?`).get(source.target.workspace_id, source.auxiliary?.artifact_id,
     canonicalJson(source), source.body_bytes) as { key_text: string } | undefined;
   if (row === undefined) return { row: null, resources: { work: 1, native_bytes: 0 } };

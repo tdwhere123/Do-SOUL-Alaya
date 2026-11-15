@@ -70,13 +70,13 @@ export function requireCurrentStatementMemory(database: StorageDatabase, workspa
 export function readStatementDependencies(database: StorageDatabase, workspace: string, artifactId: string, budget: SourceIndexBudget) {
   const resources = { work: 0, native_bytes: 0 };
   if (budget.work < 1 || budget.native_bytes < 16) return { status: "resource_limited" as const, resources };
-  const { n } = database.connection.prepare(`SELECT COUNT(*) AS n FROM source_statement_dependencies WHERE workspace_id=? AND artifact_id=?`)
+  const { n } = cachedReadStatement(database, `SELECT COUNT(*) AS n FROM source_statement_dependencies WHERE workspace_id=? AND artifact_id=?`)
     .get(workspace, artifactId) as { n: number };
   resources.work = 1; resources.native_bytes = 8;
   const dependencyWork = 4 * n;
   if (n === 0) return { status: "partial" as const, resources };
   if (dependencyWork + 1 > budget.work) return { status: "resource_limited" as const, resources };
-  const stale = database.connection.prepare(`SELECT 1 FROM source_statement_dependencies dependency
+  const stale = cachedReadStatement(database, `SELECT 1 FROM source_statement_dependencies dependency
     WHERE workspace_id=? AND artifact_id=? AND (${UNAVAILABLE_STATEMENT_DEPENDENCY_SQL}) LIMIT 1`).get(workspace, artifactId) !== undefined;
   resources.work += dependencyWork; resources.native_bytes += 8;
   return { status: stale ? "stale" as const : "ready" as const, resources };

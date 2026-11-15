@@ -3,6 +3,7 @@ import {
   type FieldContractSha256, type HostOccurrenceInventory, type SourceScopeClass
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../shared/errors.js";
 import { readSourceProjectionDependencies, SOURCE_DEPENDENCY_METADATA_RESERVATION,
   SOURCE_RECORD_METADATA_BYTE_MAX as METADATA_MAX, SOURCE_RECORD_METADATA_COLUMNS as COLUMNS,
@@ -41,7 +42,7 @@ export function readHostInventory(database: StorageDatabase, input: HostInventor
     const value = (column: string) => (column === "host_structure_json" && !columns.hostStructure ||
       column === "source_representation_json" && !columns.representation) ? "NULL" : column;
     const metadataSize = COLUMNS.map(column => `COALESCE(octet_length(${value(column)}),0)`).join("+");
-    const row = database.connection.prepare(`SELECT ${COLUMNS.map(column =>
+    const row = cachedReadStatement(database, `SELECT ${COLUMNS.map(column =>
       `CASE WHEN (${metadataSize}) <= ${METADATA_MAX} THEN ${value(column)} END AS ${column}`).join(",")},
       (${metadataSize}) AS metadata_bytes, source_body IS NOT NULL AS retained,
       (SELECT CASE WHEN octet_length(record_id) <= 71 THEN record_id END FROM source_records current INDEXED BY idx_source_records_current
@@ -73,7 +74,7 @@ export function readHostInventory(database: StorageDatabase, input: HostInventor
       // Reserve JSON materialization, decoded object, canonical validation and hash before fetching payload.
       if (nativeBytes + size + 8 > input.nativeByteLimit || memory + 3 * size + 8 > input.memoryLimit ||
           work + 2 * size + 2 > input.workLimit) return result("resource_limited");
-      const payload = database.connection.prepare(`SELECT octet_length(canonical_inventory) AS bytes,
+      const payload = cachedReadStatement(database, `SELECT octet_length(canonical_inventory) AS bytes,
         CASE WHEN octet_length(canonical_inventory) = ? THEN canonical_inventory END AS inventory
         FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?`)
         .get(size, input.workspaceId, input.recordId) as { bytes: number; inventory: string | null } | undefined;
