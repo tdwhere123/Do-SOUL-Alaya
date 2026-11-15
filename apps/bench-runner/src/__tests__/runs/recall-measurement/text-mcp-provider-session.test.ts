@@ -3,15 +3,19 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary({ ownedTemporaryFixtures: true });
 });
-const mcpDispatch = vi.hoisted(() => ({ fail: false, calls: 0 }));
+const mcpDispatch = vi.hoisted(() => ({ fail: false, throwCode: null as "CANCELLED" | "CONFLICT" | null, calls: 0 }));
 vi.mock("../../../runs/recall-measurement/text-mcp-consumer/live-mcp.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../../../runs/recall-measurement/text-mcp-consumer/live-mcp.js")>();
+  const { AlayaError } = await import("@do-soul/alaya-protocol");
   return {
     ...actual,
     async dispatchTextMcpRead(
       ...args: Parameters<typeof actual.dispatchTextMcpRead>
     ) {
       mcpDispatch.calls += 1;
+      if (mcpDispatch.throwCode !== null) {
+        throw new AlayaError(mcpDispatch.throwCode, "authored mcp dispatch interruption");
+      }
       if (mcpDispatch.fail) {
         return {
           tool: args[1], arguments: structuredClone(args[2]),
@@ -111,7 +115,9 @@ afterEach(() => {
   onRequest = () => undefined;
   afterExtract = () => undefined;
   mcpDispatch.fail = false;
+  mcpDispatch.throwCode = null;
   mcpDispatch.calls = 0;
+  if (vi.isMockFunction(performance.now)) vi.mocked(performance.now).mockRestore();
 });
 
 function query() {
@@ -129,7 +135,12 @@ function consumerOf(fixture: ReturnType<typeof issue>, extra: { host_issued_init
   return {
     config: base.config, root: fixture.consumerRoot, query: query(),
     host_issued_initial_recall: extra.host_issued_initial_recall ?? fixture.grant.host_issued_initial_recall,
-    ceilings: { ...CEILINGS, wall_ms: fixture.grant.limits.wall_ms }
+    ceilings: {
+      ...CEILINGS,
+      wall_ms: fixture.grant.limits.wall_ms,
+      max_tool_calls: fixture.grant.limits.max_tool_calls,
+      max_model_turns: fixture.grant.limits.max_model_turns
+    }
   };
 }
 
@@ -456,4 +467,102 @@ it("publication failure after a completed turn keeps live invocation and transcr
   expect(interrupted.events.some(event => event.kind === "mcp_call" && event.response_state === "received")).toBe(true);
   expect(interrupted.turns[0]?.status).toBe("admitted");
   expect(interrupted.turns[1]?.status).toBe("pending");
+}, 180000);
+
+it("MCP throw after start retains unknown delivery and does not re-dispatch under a one-call grant", async () => {
+  mcpDispatch.throwCode = "CANCELLED";
+  const modelThrow = issue("mcp-throw-read", { maxModelTurns: 2, maxToolCalls: 1 });
+  answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  const first = await consumeTextMcpProviderSession({
+    grantPin: modelThrow.pin, mode: "execute", consumer: consumerOf(modelThrow)
+  }, dependencies(modelThrow.selected));
+  expect(first.failure).toMatch(/authored mcp dispatch interruption/);
+  expect(first.mcp_dispatches).toBe(1);
+  expect(mcpDispatch.calls).toBe(1);
+  expect(first.events.some(event => event.kind === "mcp_call" && event.response_state === "unknown")).toBe(true);
+  expect(received).toHaveLength(1);
+  mcpDispatch.throwCode = null;
+  mcpDispatch.calls = 0;
+  const replay = await consumeTextMcpProviderSession({
+    grantPin: modelThrow.pin, mode: "execute", consumer: consumerOf(modelThrow)
+  }, dependencies(modelThrow.selected));
+  expect(mcpDispatch.calls).toBe(0);
+  expect(received).toHaveLength(1);
+  expect(replay.mcp_dispatches).toBe(0);
+  expect(replay.attempts_this_invocation).toBe(0);
+
+  received.length = 0;
+  answers.length = 0;
+  mcpDispatch.calls = 0;
+  mcpDispatch.throwCode = "CONFLICT";
+  const hostThrow = issue("mcp-throw-host", { hostIssuedInitialRecall: true, maxModelTurns: 2, maxToolCalls: 1 });
+  answers.push(JSON.stringify({ action: "answer", text: "should-not-run" }));
+  const host = await consumeTextMcpProviderSession({
+    grantPin: hostThrow.pin, mode: "execute", consumer: consumerOf(hostThrow)
+  }, dependencies(hostThrow.selected));
+  expect(host.failure).toMatch(/authored mcp dispatch interruption/);
+  expect(host.mcp_dispatches).toBe(1);
+  expect(host.host_setup).toBe(true);
+  expect(host.events.some(event => event.kind === "host_setup" && event.response_state === "unknown")).toBe(true);
+  expect(received).toHaveLength(0);
+  mcpDispatch.throwCode = null;
+  mcpDispatch.calls = 0;
+  const hostReplay = await consumeTextMcpProviderSession({
+    grantPin: hostThrow.pin, mode: "execute", consumer: consumerOf(hostThrow)
+  }, dependencies(hostThrow.selected));
+  expect(mcpDispatch.calls).toBe(0);
+  expect(received).toHaveLength(0);
+  expect(hostReplay.turns).toEqual([]);
+  expect(hostReplay.mcp_dispatches).toBe(0);
+}, 180000);
+
+it("pre-dispatch transcript persist failure does not count a started MCP call", async () => {
+  const fixture = issue("mcp-persist-fail", { maxModelTurns: 2, maxToolCalls: 1 });
+  answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  let transcriptReplaces = 0;
+  const originalRename = mutableFs.renameSync;
+  mutableFs.renameSync = function(from, to) {
+    if (String(to).endsWith("session-transcript.json")) {
+      transcriptReplaces += 1;
+      if (transcriptReplaces >= 2) {
+        throw Object.assign(new Error("authored transcript persist failure"), { code: "EACCES" });
+      }
+    }
+    return originalRename.call(this, from, to);
+  };
+  syncBuiltinESMExports();
+  let failed: Awaited<ReturnType<typeof consumeTextMcpProviderSession>>;
+  try {
+    failed = await consumeTextMcpProviderSession({
+      grantPin: fixture.pin, mode: "execute", consumer: consumerOf(fixture)
+    }, dependencies(fixture.selected));
+  } finally {
+    mutableFs.renameSync = originalRename;
+    syncBuiltinESMExports();
+  }
+  expect(failed.failure).toMatch(/authored transcript persist failure/);
+  expect(failed.mcp_dispatches).toBe(0);
+  expect(mcpDispatch.calls).toBe(0);
+  expect(failed.events.some(event => event.kind === "mcp_call")).toBe(false);
+}, 180000);
+
+it("wall expiry after known-usage model result does not dispatch MCP or turn two", async () => {
+  const fixture = issue("wall-after-model", { maxModelTurns: 2, maxToolCalls: 1 });
+  answers.push(
+    JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }),
+    JSON.stringify({ action: "answer", text: "should-not-run" })
+  );
+  afterExtract = () => { vi.spyOn(performance, "now").mockReturnValue(1e15); };
+  const result = await consumeTextMcpProviderSession({
+    grantPin: fixture.pin, mode: "execute", consumer: consumerOf(fixture)
+  }, dependencies(fixture.selected));
+  expect(result.failure).toBeNull();
+  expect(result.attempts_this_invocation).toBe(1);
+  expect(result.invocations_this_invocation).toBe(1);
+  expect(result.cost.unknown_usage_attempts).toBe(0);
+  expect(result.turns[0]?.status).toBe("admitted");
+  expect(result.turns[1]).toBeUndefined();
+  expect(mcpDispatch.calls).toBe(0);
+  expect(result.events.some(event => event.kind === "mcp_call")).toBe(false);
+  expect(received).toHaveLength(1);
 }, 180000);

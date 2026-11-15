@@ -30,6 +30,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
   query: { query_key: string; original_query: string };
   hostIssuedInitialRecall?: boolean;
   maxModelTurns?: number;
+  maxToolCalls?: number;
   wallMs?: number;
   closedSessions?: readonly string[];
   closedKeys?: readonly string[];
@@ -73,7 +74,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
       wall_ms: input.wallMs ?? 60_000,
       spend_ceiling_usd: 1,
       max_model_turns: maxModelTurns,
-      max_tool_calls: 4,
+      max_tool_calls: input.maxToolCalls ?? 4,
       max_input_bytes: 1_500_000,
       max_output_bytes: 64_000
     },

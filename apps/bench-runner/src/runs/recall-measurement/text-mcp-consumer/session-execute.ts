@@ -240,13 +240,11 @@ async function ensureHostSetup(grant: TextMcpProviderSessionGrant, consumer: Ses
       ? {} : { interpretation_proposal: consumer.query.interpretation_proposal })
   }));
   throwIfSessionCancelled(abortSignal);
-  const dispatched = await dispatchTextMcpRead(daemon.mcpClient, "soul.recall", args);
-  work.mcpDispatches += 1; work.hostSetup = true;
-  work.events.push({
-    kind: "host_setup", generated_by: "host_controlled_setup", tool: dispatched.tool,
-    arguments: dispatched.arguments, response_state: dispatched.response_state, envelope: dispatched.envelope
+  reserveMcpDelivery(work, persist, {
+    kind: "host_setup", generated_by: "host_controlled_setup", tool: "soul.recall", arguments: args
   });
-  persist();
+  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, "soul.recall", args));
+  if (isUnresolvedTextMcpDelivery(dispatched.response_state)) return;
 }
 
 async function settleSessionTurn(input: Parameters<typeof runProviderSessionExecute>[0], daemon: BenchDaemonHandle,
@@ -281,13 +279,12 @@ async function settleSessionTurn(input: Parameters<typeof runProviderSessionExec
   if (follow === "settled") return "continue";
   if (input.priorMcp + work.mcpDispatches >= input.grant.limits.max_tool_calls) return "stop";
   throwIfSessionCancelled(input.abortSignal);
-  const dispatched = await dispatchTextMcpRead(daemon.mcpClient, action.tool, structuredClone(action.arguments));
-  work.mcpDispatches += 1;
-  work.events.push({
-    kind: "mcp_call", origin: "model_selected", tool: dispatched.tool, arguments: dispatched.arguments,
-    response_state: dispatched.response_state, envelope: dispatched.envelope
+  if (performance.now() >= phaseDeadlineMs) return "stop";
+  const args = structuredClone(action.arguments);
+  reserveMcpDelivery(work, persist, {
+    kind: "mcp_call", origin: "model_selected", tool: action.tool, arguments: args
   });
-  persist();
+  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, action.tool, args));
   return isUnresolvedTextMcpDelivery(dispatched.response_state) ? "stop" : "continue";
 }
 
@@ -314,6 +311,38 @@ function toProviderLine(line: TextMcpProviderSessionLine): ProviderRequestLine {
 function readSessionAction(outcome: unknown) {
   const parsed = z.object({ action: SessionAction }).passthrough().safeParse(outcome);
   return parsed.success ? parsed.data.action : undefined;
+}
+
+function reserveMcpDelivery(work: SessionWork, persist: () => void, event: Record<string, unknown>): void {
+  const reserved = { ...event, response_state: "unknown", envelope: null };
+  work.events.push(reserved);
+  try { persist(); }
+  catch (cause) {
+    work.events.pop();
+    throw cause;
+  }
+  work.mcpDispatches += 1;
+  if (event.kind === "host_setup") work.hostSetup = true;
+}
+
+async function dispatchReservedMcp(work: SessionWork, persist: () => void, run: () => Promise<{
+  tool: string; arguments: Record<string, unknown>; response_state: string; envelope: unknown;
+}>) {
+  const last = work.events[work.events.length - 1];
+  const dispatched = await run();
+  if (last === undefined) return dispatched;
+  const previousState = last.response_state, previousEnvelope = last.envelope;
+  last.tool = dispatched.tool;
+  last.arguments = dispatched.arguments;
+  last.response_state = dispatched.response_state;
+  last.envelope = dispatched.envelope;
+  try { persist(); }
+  catch (cause) {
+    last.response_state = previousState;
+    last.envelope = previousEnvelope;
+    throw cause;
+  }
+  return dispatched;
 }
 
 function mcpFollowupFor(events: readonly Record<string, unknown>[], key: string): "none" | "settled" | "unresolved" {
