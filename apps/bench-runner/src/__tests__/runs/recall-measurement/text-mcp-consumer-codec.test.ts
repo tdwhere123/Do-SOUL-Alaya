@@ -1,0 +1,91 @@
+import { afterAll, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
+
+import { ALAYA_MCP_SERVER_INSTRUCTIONS } from "@do-soul/alaya/mcp-server";
+import { canonicalJson } from "@do-soul/alaya-protocol";
+import {
+  TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
+  TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE, TextMcpConsumerInputSchema
+} from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
+import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes }
+  from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
+import { executeTextMcpConsumer } from "../../../runs/recall-measurement/text-mcp-consumer/execute.js";
+
+const surface = {
+  instructions_status: "present" as const,
+  instructions: ALAYA_MCP_SERVER_INSTRUCTIONS,
+  version: { name: "do-soul-alaya", version: "test" },
+  capabilities: { tools: {} },
+  tools: [{ name: "soul.recall", description: "recall fixture" }]
+};
+
+it("decodes allowed reads, terminal answers, host-policy writes, and invalid text independently", () => {
+  expect(decodeTextMcpAction('{"action":"read","tool":"soul.recall","arguments":{"query":"Q"}}')).toEqual({
+    kind: "read", tool: "soul.recall", arguments: { query: "Q" }
+  });
+  expect(decodeTextMcpAction('{"action":"read","tool":"soul.open_pointer","arguments":{"id":"p"}}')).toEqual({
+    kind: "read", tool: "soul.open_pointer", arguments: { id: "p" }
+  });
+  expect(decodeTextMcpAction('{"action":"answer","text":"done"}')).toEqual({ kind: "answer", text: "done" });
+  expect(decodeTextMcpAction('{"action":"read","tool":"soul.capture_host_session","arguments":{}}')).toEqual({
+    kind: "host_policy_refusal", tool: "soul.capture_host_session",
+    reason: "tool not on the diagnostic read allowlist"
+  });
+  expect(decodeTextMcpAction('{"action":"read","tool":"garden.claim_task","arguments":{}}').kind).toBe("host_policy_refusal");
+  expect(decodeTextMcpAction("not-json")).toEqual({ kind: "invalid_action", reason: "unparseable_text" });
+  expect(decodeTextMcpAction('{"action":"read","tool":"soul.recall","arguments":[]}')).toEqual({
+    kind: "invalid_action", reason: "invalid_read"
+  });
+  expect(TEXT_MCP_ALLOWED_READ_TOOLS).toEqual(["soul.recall", "soul.open_pointer"]);
+});
+
+it("encodes live instructions and the diagnostic restriction without clipping envelopes or gold labels", () => {
+  const envelope = { content: [{ type: "text", text: "LITERAL_ENVELOPE_TEXT" }], isError: false, extra: { nested: 1 } };
+  const encoded = encodeTextMcpRequest({
+    surface, query: "Which project was mentioned?",
+    events: [{
+      kind: "host_setup", generated_by: "host_controlled_setup", tool: "soul.recall",
+      arguments: { query: "Which project was mentioned?" }, response_state: "received", envelope
+    }]
+  });
+  expect(encoded.systemPrompt).toContain("LIVE_INSTRUCTIONS_STATUS: present");
+  expect(encoded.systemPrompt).toContain(ALAYA_MCP_SERVER_INSTRUCTIONS);
+  expect(encoded.systemPrompt).toContain(TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION);
+  expect(encoded.systemPrompt).toContain(TEXT_MCP_ACTION_PROTOCOL);
+  expect(encoded.systemPrompt).not.toMatch(/gold|question_type|EVALUATOR_ONLY/u);
+  expect(encoded.userPrompt).toContain("controlled setup; not model-generated");
+  expect(encoded.userPrompt).toContain(canonicalJson(envelope));
+  expect(encoded.userPrompt).toContain("LITERAL_ENVELOPE_TEXT");
+  expect(encoded.userPrompt).not.toContain("first_page");
+  const body = bindTextMcpGatewayBody(encoded);
+  expect(body.messages).toEqual([
+    { role: "system", content: encoded.systemPrompt },
+    { role: "user", content: encoded.userPrompt }
+  ]);
+  expect(JSON.stringify(body)).not.toContain("Bearer");
+  expect(textMcpUtf8Bytes(encoded)).toBe(
+    Buffer.byteLength(encoded.systemPrompt, "utf8") + Buffer.byteLength(encoded.userPrompt, "utf8")
+  );
+});
+
+it("refuses gold fields on the consumer input and remote model execution without a grant", async () => {
+  expect(TextMcpConsumerInputSchema.safeParse({
+    config: {}, root: "/tmp/text-mcp", query: { query_key: "a".repeat(64), original_query: "Q", gold: "no" },
+    host_issued_initial_recall: false, model_kind: "scripted",
+    ceilings: { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 }
+  }).success).toBe(false);
+  await expect(executeTextMcpConsumer({
+    config: {}, root: "/tmp/text-mcp", query: { query_key: "a".repeat(64), original_query: "Q" },
+    host_issued_initial_recall: false, model_kind: "remote",
+    ceilings: { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 }
+  })).rejects.toMatchObject({ code: "UNAVAILABLE", message: TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE });
+  await expect(executeTextMcpConsumer({
+    config: {}, root: "/tmp/text-mcp", query: { query_key: "a".repeat(64), original_query: "Q" },
+    host_issued_initial_recall: false, model_kind: "scripted",
+    ceilings: { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 }
+  })).rejects.toMatchObject({ code: "VALIDATION" });
+});
