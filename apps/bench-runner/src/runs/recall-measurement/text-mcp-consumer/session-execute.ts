@@ -43,7 +43,8 @@ const SessionAction = z.discriminatedUnion("kind", [
 ]);
 /** invocations_this_invocation: model-work entries started in this consume, including raw replay.
  * attempts_this_invocation: physical reservations created under this consume's write lease.
- * mcp_dispatches: host_setup/mcp_call dispatches started in this consume, not prior transcript history. */
+ * mcp_dispatches: host_setup/mcp_call dispatches started in this consume, not prior transcript history.
+ * host_setup: a recorded host-setup dispatch; response_state, not this flag, establishes delivery. */
 const Result = z.object({
   contract: z.literal(TEXT_MCP_PROVIDER_SESSION_CONTRACT),
   model_kind: z.literal(TEXT_MCP_PROVIDER_BOUND_KIND),
@@ -315,14 +316,16 @@ function readSessionAction(outcome: unknown) {
 
 function reserveMcpDelivery(work: SessionWork, persist: () => void, event: Record<string, unknown>): void {
   const reserved = { ...event, response_state: "unknown", envelope: null };
+  const priorHostSetup = work.hostSetup;
   work.events.push(reserved);
+  if (event.kind === "host_setup") work.hostSetup = true;
   try { persist(); }
   catch (cause) {
     work.events.pop();
+    work.hostSetup = priorHostSetup;
     throw cause;
   }
   work.mcpDispatches += 1;
-  if (event.kind === "host_setup") work.hostSetup = true;
 }
 
 async function dispatchReservedMcp(work: SessionWork, persist: () => void, run: () => Promise<{

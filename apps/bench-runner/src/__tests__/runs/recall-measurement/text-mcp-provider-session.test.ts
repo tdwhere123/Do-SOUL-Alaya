@@ -514,17 +514,18 @@ it("MCP throw after start retains unknown delivery and does not re-dispatch unde
   expect(received).toHaveLength(0);
   expect(hostReplay.turns).toEqual([]);
   expect(hostReplay.mcp_dispatches).toBe(0);
+  expect(hostReplay.host_setup).toBe(true);
 }, 180000);
 
-it("pre-dispatch transcript persist failure does not count a started MCP call", async () => {
-  const fixture = issue("mcp-persist-fail", { maxModelTurns: 2, maxToolCalls: 1 });
+it.each([false, true])("pre-dispatch persist failure records no MCP call or host setup (host_setup=%s)", async hostIssuedInitialRecall => {
+  const fixture = issue(`mcp-persist-fail-${hostIssuedInitialRecall}`, { hostIssuedInitialRecall, maxModelTurns: 2, maxToolCalls: 1 });
   answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
   let transcriptReplaces = 0;
   const originalRename = mutableFs.renameSync;
   mutableFs.renameSync = function(from, to) {
     if (String(to).endsWith("session-transcript.json")) {
       transcriptReplaces += 1;
-      if (transcriptReplaces >= 2) {
+      if (transcriptReplaces >= (hostIssuedInitialRecall ? 1 : 2)) {
         throw Object.assign(new Error("authored transcript persist failure"), { code: "EACCES" });
       }
     }
@@ -543,7 +544,9 @@ it("pre-dispatch transcript persist failure does not count a started MCP call", 
   expect(failed.failure).toMatch(/authored transcript persist failure/);
   expect(failed.mcp_dispatches).toBe(0);
   expect(mcpDispatch.calls).toBe(0);
-  expect(failed.events.some(event => event.kind === "mcp_call")).toBe(false);
+  expect(failed.events.some(event => event.kind === "mcp_call" || event.kind === "host_setup")).toBe(false);
+  expect(failed.host_setup).toBe(false);
+  expect(received).toHaveLength(hostIssuedInitialRecall ? 0 : 1);
 }, 180000);
 
 it("wall expiry after known-usage model result does not dispatch MCP or turn two", async () => {
