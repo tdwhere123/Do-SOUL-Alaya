@@ -1,7 +1,22 @@
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
+});
+const encodeBudget = vi.hoisted(() => ({ expireAt: 0, seen: 0 }));
+vi.mock("../../../runs/recall-measurement/text-mcp-consumer/codec.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../../runs/recall-measurement/text-mcp-consumer/codec.js")>();
+  return {
+    ...actual,
+    encodeTextMcpRequest(input: Parameters<typeof actual.encodeTextMcpRequest>[0]) {
+      const encoded = actual.encodeTextMcpRequest(input);
+      encodeBudget.seen += 1;
+      if (encodeBudget.expireAt > 0 && encodeBudget.seen >= encodeBudget.expireAt) {
+        vi.spyOn(performance, "now").mockReturnValue(1e15);
+      }
+      return encoded;
+    }
+  };
 });
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -41,6 +56,11 @@ afterAll(() => {
   preparation?.mockRestore();
   if (base !== undefined) rmSync(base.root, { recursive: true, force: true });
   isolation.restore(); expect(isolation.violations).toEqual([]);
+});
+afterEach(() => {
+  encodeBudget.expireAt = 0;
+  encodeBudget.seen = 0;
+  if (vi.isMockFunction(performance.now)) vi.mocked(performance.now).mockRestore();
 });
 
 function input(root: string, extra: Record<string, unknown> = {}) {
@@ -363,4 +383,33 @@ it("does not late-abort a completed turn after disposing the wait timer", async 
   const wait = 6_500 - (performance.now() - t0);
   if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
   expect(turnSignal?.aborted).toBe(false);
+}, 120000);
+
+it("does not count request preparation that exhausts the wait budget as a model call", async () => {
+  encodeBudget.expireAt = 1;
+  let calls = 0;
+  const execution = await executeTextMcpConsumer(input("prep-expire"), {
+    complete: () => { calls += 1; throw new Error("complete must not run after preparation exhausted the wait budget"); }
+  });
+  expect(calls).toBe(0);
+  expect(execution.consumer_model_calls).toBe(0);
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling", model_work: "idle" });
+  expect(execution.model_work.status).toBe("idle");
+}, 120000);
+
+it("preserves a prior settled model_work when a later turn is refused before complete", async () => {
+  encodeBudget.expireAt = 2;
+  let calls = 0;
+  const execution = await executeTextMcpConsumer(input("later-prep-expire"), {
+    complete: () => {
+      calls += 1;
+      return {
+        text: JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }), finishReason: "stop"
+      };
+    }
+  });
+  expect(calls).toBe(1);
+  expect(execution.consumer_model_calls).toBe(1);
+  expect(execution.model_work.status).toBe("settled");
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling", model_work: "settled" });
 }, 120000);

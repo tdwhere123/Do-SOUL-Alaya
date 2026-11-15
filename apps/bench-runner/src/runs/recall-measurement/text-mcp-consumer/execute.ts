@@ -115,7 +115,7 @@ async function runTextMcpLoop(input: Readonly<{
   while (terminal === null) {
     refuseBenchWorkAfterCancel();
     if (performance.now() - input.started >= ceilings.wall_ms) {
-      terminal = { outcome: "time_ceiling", model_work: modelWork === "idle" ? "idle" : "settled" }; break;
+      terminal = { outcome: "time_ceiling", model_work: modelWork }; break;
     }
     if (modelCalls >= ceilings.max_model_turns) { terminal = { outcome: "model_turn_ceiling" }; break; }
     const encoded = encodeTextMcpRequest({ surface, query, events });
@@ -124,12 +124,15 @@ async function runTextMcpLoop(input: Readonly<{
     const request = {
       systemPrompt: encoded.systemPrompt, userPrompt: encoded.userPrompt, gatewayBody: structuredClone(gatewayBody)
     };
-    modelCalls += 1;
+    if (performance.now() - input.started >= ceilings.wall_ms) {
+      terminal = { outcome: "time_ceiling", model_work: modelWork }; break;
+    }
     const model = await awaitOwnedTextMcpModel(complete, request, input.started, ceilings.wall_ms);
+    if (model.invoked) modelCalls += 1;
     if (model.status === "cancelled") throw cancelledTextMcpTurn(model.model_work);
     if (model.status === "time_ceiling") {
-      modelWork = model.model_work;
-      terminal = { outcome: "time_ceiling", model_work: model.model_work }; break;
+      if (model.invoked) modelWork = model.model_work;
+      terminal = { outcome: "time_ceiling", model_work: model.invoked ? model.model_work : modelWork }; break;
     }
     if (model.status === "failed") {
       modelWork = "settled";
@@ -192,13 +195,14 @@ function textMcpDispatchBudget(
 async function awaitOwnedTextMcpModel(
   complete: TextMcpComplete, request: TextMcpModelRequest, started: number, wallMs: number
 ): Promise<
-  | { status: "ok"; text: string; finishReason: string | null }
-  | { status: "failed"; reason: string }
-  | { status: "time_ceiling"; model_work: Exclude<TextMcpModelWorkStatus, "settled"> }
-  | { status: "cancelled"; model_work: Exclude<TextMcpModelWorkStatus, "idle"> }
+  | { invoked: true; status: "ok"; text: string; finishReason: string | null }
+  | { invoked: true; status: "failed"; reason: string }
+  | { invoked: false; status: "time_ceiling"; model_work: "idle" }
+  | { invoked: true; status: "time_ceiling"; model_work: Exclude<TextMcpModelWorkStatus, "idle" | "settled"> }
+  | { invoked: true; status: "cancelled"; model_work: Exclude<TextMcpModelWorkStatus, "idle"> }
 > {
   refuseBenchWorkAfterCancel();
-  if (performance.now() - started >= wallMs) return { status: "time_ceiling", model_work: "idle" };
+  if (performance.now() - started >= wallMs) return { invoked: false, status: "time_ceiling", model_work: "idle" };
   const scope = currentBenchScope();
   const turn = new AbortController();
   const wait = startModelWait(started, wallMs, scope);
@@ -215,8 +219,10 @@ async function awaitOwnedTextMcpModel(
   turn.abort();
   const acked = await observeModelAck(work);
   const model_work = acked ? "acked" as const : "unsettled_unknown" as const;
-  if (scope?.cancelled === true || scope?.signal.aborted === true) return { status: "cancelled", model_work };
-  return { status: "time_ceiling", model_work };
+  if (scope?.cancelled === true || scope?.signal.aborted === true) {
+    return { invoked: true, status: "cancelled", model_work };
+  }
+  return { invoked: true, status: "time_ceiling", model_work };
 }
 
 function startModelWait(
@@ -248,15 +254,22 @@ function settleReturnedModel(
   winner: { kind: "returned"; result: TextMcpModelResult } | { kind: "threw"; error: unknown },
   started: number, wallMs: number, scope: ReturnType<typeof currentBenchScope>
 ): Awaited<ReturnType<typeof awaitOwnedTextMcpModel>> {
-  if (performance.now() - started >= wallMs) return { status: "time_ceiling", model_work: "settled_late" };
-  if (scope?.cancelled === true || scope?.signal.aborted === true) return { status: "cancelled", model_work: "settled" };
+  if (performance.now() - started >= wallMs) {
+    return { invoked: true, status: "time_ceiling", model_work: "settled_late" };
+  }
+  if (scope?.cancelled === true || scope?.signal.aborted === true) {
+    return { invoked: true, status: "cancelled", model_work: "settled" };
+  }
   if (winner.kind === "threw") {
     if (winner.error instanceof AlayaError && (winner.error.code === "CANCELLED" || winner.error.code === "CONFLICT")) {
       throw winner.error;
     }
-    return { status: "failed", reason: winner.error instanceof Error ? winner.error.message : String(winner.error) };
+    return {
+      invoked: true, status: "failed",
+      reason: winner.error instanceof Error ? winner.error.message : String(winner.error)
+    };
   }
-  return readReturnedModel(winner.result);
+  return { invoked: true, ...readReturnedModel(winner.result) };
 }
 
 function observeModelAck(work: Promise<unknown>): Promise<boolean> {
