@@ -202,11 +202,15 @@ async function awaitOwnedTextMcpModel(
   | { invoked: true; status: "cancelled"; model_work: Exclude<TextMcpModelWorkStatus, "idle"> }
 > {
   refuseBenchWorkAfterCancel();
-  if (performance.now() - started >= wallMs) return { invoked: false, status: "time_ceiling", model_work: "idle" };
   const scope = currentBenchScope();
   const turn = new AbortController();
+  if (performance.now() - started >= wallMs) return { invoked: false, status: "time_ceiling", model_work: "idle" };
+  // Keep admission and invocation in one turn: deferring the callback lets cancellation
+  // become observable before previously admitted model work actually starts.
+  let work: Promise<TextMcpModelResult>;
+  try { work = Promise.resolve(complete({ ...request, abortSignal: turn.signal })); }
+  catch (error) { work = Promise.reject(error); }
   const wait = startModelWait(started, wallMs, scope);
-  const work = Promise.resolve().then(() => complete({ ...request, abortSignal: turn.signal }));
   work.then(() => undefined, () => undefined);
   const winner = await Promise.race([
     work.then(result => ({ kind: "returned" as const, result }), error => ({ kind: "threw" as const, error })),
@@ -276,7 +280,7 @@ function observeModelAck(work: Promise<unknown>): Promise<boolean> {
   return new Promise(resolve => {
     let settled = false;
     work.then(() => { settled = true; resolve(true); }, () => { settled = true; resolve(true); });
-    // complete() is then-wrapped; a sync abort ack fulfills on a later microtask.
+    // A cooperative port may settle its promise on a following microtask.
     queueMicrotask(() => queueMicrotask(() => { if (!settled) resolve(false); }));
   });
 }

@@ -3,7 +3,7 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-const encodeBudget = vi.hoisted(() => ({ expireAt: 0, seen: 0 }));
+const encodeBudget = vi.hoisted(() => ({ expireAt: 0, seen: 0, cancel: undefined as AbortController | undefined }));
 vi.mock("../../../runs/recall-measurement/text-mcp-consumer/codec.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../../../runs/recall-measurement/text-mcp-consumer/codec.js")>();
   return {
@@ -11,6 +11,8 @@ vi.mock("../../../runs/recall-measurement/text-mcp-consumer/codec.js", async imp
     encodeTextMcpRequest(input: Parameters<typeof actual.encodeTextMcpRequest>[0]) {
       const encoded = actual.encodeTextMcpRequest(input);
       encodeBudget.seen += 1;
+      const cancel = encodeBudget.cancel;
+      if (cancel !== undefined) queueMicrotask(() => cancel.abort());
       if (encodeBudget.expireAt > 0 && encodeBudget.seen >= encodeBudget.expireAt) {
         vi.spyOn(performance, "now").mockReturnValue(1e15);
       }
@@ -60,6 +62,7 @@ afterAll(() => {
 afterEach(() => {
   encodeBudget.expireAt = 0;
   encodeBudget.seen = 0;
+  encodeBudget.cancel = undefined;
   if (vi.isMockFunction(performance.now)) vi.mocked(performance.now).mockRestore();
 });
 
@@ -383,6 +386,21 @@ it("does not late-abort a completed turn after disposing the wait timer", async 
   const wait = 6_500 - (performance.now() - t0);
   if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
   expect(turnSignal?.aborted).toBe(false);
+}, 120000);
+
+it("never begins model work after queued cancellation becomes observable", async () => {
+  const controller = new AbortController();
+  bindBenchDaemonTestSignal(controller.signal);
+  encodeBudget.cancel = controller;
+  const beganAfterCancel: boolean[] = [];
+  const execution = executeTextMcpConsumer(input("cancel-before-invocation"), {
+    complete: () => {
+      beganAfterCancel.push(controller.signal.aborted);
+      return { text: JSON.stringify({ action: "answer", text: "discarded" }), finishReason: "stop" };
+    }
+  });
+  await expect(execution).rejects.toMatchObject({ code: "CANCELLED" });
+  expect(beganAfterCancel).not.toContain(true);
 }, 120000);
 
 it("does not count request preparation that exhausts the wait budget as a model call", async () => {
