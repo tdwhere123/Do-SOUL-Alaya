@@ -1,22 +1,19 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../../harness/daemon-task.js";
-import { callMcpTool, type BenchMcpToolCapture } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../../harness/daemon.js";
-import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import {
   SemanticChainConfigSchema, withSemanticChainDaemon, type SemanticChainConfig
 } from "../contract.js";
-import { semanticChainCacheInputPaths } from "../inputs.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope } from "../ordinary/ordinary-entry-contract.js";
 import {
   TEXT_MCP_CONSUMER_CONTRACT, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS,
   TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE, TEXT_MCP_WALL_MS_MEANING, TextMcpConsumerExecutionSchema,
   TextMcpConsumerInputSchema, type TextMcpCeilings, type TextMcpConsumerExecution, type TextMcpConsumerInput,
-  type TextMcpConsumerTerminal, type TextMcpDispatch, type TextMcpLiveSurface, type TextMcpModelRequest,
-  type TextMcpModelResult, type TextMcpModelWorkStatus, type TextMcpResponseState, type TextMcpScriptedPort
+  type TextMcpConsumerTerminal, type TextMcpLiveSurface, type TextMcpModelRequest,
+  type TextMcpModelResult, type TextMcpModelWorkStatus, type TextMcpScriptedPort
 } from "./contract.js";
 import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes } from "./codec.js";
+import { assertTextMcpOutputRoot, dispatchTextMcpRead, snapshotLiveMcpSurface } from "./live-mcp.js";
 
 type TextMcpComplete = TextMcpScriptedPort["complete"];
 
@@ -302,48 +299,6 @@ function cancelledTextMcpTurn(modelWork: Exclude<TextMcpModelWorkStatus, "idle">
   );
 }
 
-async function snapshotLiveMcpSurface(client: Client): Promise<TextMcpLiveSurface> {
-  const instructions = client.getInstructions();
-  const listed = await client.listTools();
-  return {
-    instructions_status: instructions === undefined ? "absent" : "present",
-    instructions: instructions === undefined ? null : instructions,
-    version: client.getServerVersion() ?? null,
-    capabilities: client.getServerCapabilities() ?? null,
-    tools: structuredClone(listed.tools)
-  };
-}
-
-async function dispatchTextMcpRead(
-  client: Client, name: string, args: Record<string, unknown>
-): Promise<TextMcpDispatch> {
-  const capturedArgs = structuredClone(args);
-  let frame: BenchMcpToolCapture | undefined;
-  try {
-    await callMcpTool(client, name, capturedArgs, captured => { frame = captured; });
-  } catch (error) {
-    if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
-    if (frame === undefined) {
-      return { tool: name, arguments: capturedArgs, response_state: "transport_error", envelope: null };
-    }
-  }
-  if (frame === undefined) {
-    return { tool: name, arguments: capturedArgs, response_state: "unknown", envelope: null };
-  }
-  return {
-    tool: name, arguments: structuredClone(frame.request.arguments),
-    response_state: classifyEnvelope(frame.response), envelope: structuredClone(frame.response)
-  };
-}
-
-function classifyEnvelope(response: unknown): TextMcpResponseState {
-  if (response === null || typeof response !== "object") return "invalid_response";
-  const record = response as Record<string, unknown>;
-  if (record.isError === true) return "public_error";
-  if (!Array.isArray(record.content)) return "invalid_response";
-  return "received";
-}
-
 function modelTurnEvent(
   gatewayBody: Record<string, unknown>,
   model: { text: string; finishReason: string | null },
@@ -395,13 +350,4 @@ function baseExecution(config: SemanticChainConfig, hostSetup: boolean, modelWor
 
 function freezeExecution(value: TextMcpConsumerExecution): TextMcpConsumerExecution {
   return TextMcpConsumerExecutionSchema.parse(JSON.parse(JSON.stringify(value)));
-}
-
-function assertTextMcpOutputRoot(root: string, config: SemanticChainConfig): void {
-  const physicalRoot = canonicalPath(root);
-  for (const input of [config.snapshot_path, ...semanticChainCacheInputPaths({ config })]) {
-    if (canonicalPathsOverlap(physicalRoot, canonicalPath(input))) {
-      throw new AlayaError("VALIDATION", "text MCP consumer output root must be separate from the sealed snapshot and cache inputs");
-    }
-  }
 }

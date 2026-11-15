@@ -1,9 +1,38 @@
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody } from "@do-soul/alaya-engine-gateway";
 import {
-  TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_SCRIPTED_MODEL,
-  isAllowedTextMcpReadTool, type TextMcpDecodedAction, type TextMcpEncodedRequest, type TextMcpLiveSurface
+  TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
+  TEXT_MCP_SCRIPTED_MODEL, isAllowedTextMcpReadTool, type TextMcpDecodedAction, type TextMcpEncodedRequest,
+  type TextMcpLiveSurface
 } from "./contract.js";
+
+/** Named schema for the provider-bound sender. Not the scripted jsonObject fixture. */
+export const TEXT_MCP_ACTION_SCHEMA_NAME = "text_mcp_action" as const;
+export const TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  oneOf: Object.freeze([
+    Object.freeze({
+      type: "object",
+      additionalProperties: false,
+      required: Object.freeze(["action", "tool", "arguments"]),
+      properties: Object.freeze({
+        action: Object.freeze({ const: "read" }),
+        tool: Object.freeze({ enum: Object.freeze([...TEXT_MCP_ALLOWED_READ_TOOLS]) }),
+        arguments: Object.freeze({ type: "object" })
+      })
+    }),
+    Object.freeze({
+      type: "object",
+      additionalProperties: false,
+      required: Object.freeze(["action", "text"]),
+      properties: Object.freeze({
+        action: Object.freeze({ const: "answer" }),
+        text: Object.freeze({ type: "string" })
+      })
+    })
+  ])
+});
 
 export function encodeTextMcpRequest(input: Readonly<{
   surface: TextMcpLiveSurface;
