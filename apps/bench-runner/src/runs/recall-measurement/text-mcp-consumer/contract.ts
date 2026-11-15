@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OrdinaryRecallEntryQuerySchema } from "../ordinary/ordinary-entry-contract.js";
 
 /** Text-mediated MCP consumer. Not a generic agent, native tool-calling adapter, or paid QA entry. */
 export const TEXT_MCP_CONSUMER_CONTRACT = "text-mcp-consumer-v1" as const;
@@ -48,9 +49,8 @@ export const TextMcpCeilingsSchema = z.object({
   max_output_bytes: z.number().int().min(1).max(1_000_000),
   wall_ms: z.number().int().min(1).max(300_000)
 }).strict();
-export const TextMcpConsumerQuerySchema = z.object({
-  query_key: Digest, original_query: z.string().min(1)
-}).strict();
+/** Ordinary query authority, including an optional admitted frozen interpretation proposal. */
+export const TextMcpConsumerQuerySchema = OrdinaryRecallEntryQuerySchema;
 export const TextMcpConsumerInputSchema = z.object({
   config: z.unknown(), root: z.string().min(1), query: TextMcpConsumerQuerySchema,
   host_issued_initial_recall: z.boolean(), model_kind: z.enum(["scripted", "remote"]),
@@ -70,6 +70,8 @@ export const TextMcpConsumerTerminalSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("model_turn_ceiling") }).strict(),
   z.object({ outcome: z.literal("tool_call_ceiling") }).strict(),
   z.object({ outcome: z.literal("time_ceiling") }).strict(),
+  z.object({ outcome: z.literal("model_incomplete"), finishReason: z.string().min(1) }).strict(),
+  z.object({ outcome: z.literal("model_unknown"), finishReason: z.string().nullable() }).strict(),
   z.object({
     outcome: z.literal("unresolved_delivery"),
     response_state: z.enum(["transport_error", "unknown", "invalid_response"])
@@ -125,6 +127,8 @@ export type TextMcpModelRequest = Readonly<{
   systemPrompt: string;
   userPrompt: string;
   gatewayBody: Readonly<Record<string, unknown>>;
+  /** Session-owned abort for this turn; cooperative ports may stop. Uncooperative work is still abandoned. */
+  abortSignal?: AbortSignal;
 }>;
 export type TextMcpModelResult = Readonly<{ text: string; finishReason: string | null }>;
 export type TextMcpScriptedPort = Readonly<{

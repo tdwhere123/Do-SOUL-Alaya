@@ -73,10 +73,15 @@ it("encodes live instructions and the diagnostic restriction without clipping en
 });
 
 it("refuses gold fields on the consumer input and remote model execution without a grant", async () => {
+  const ceilings = { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 };
   expect(TextMcpConsumerInputSchema.safeParse({
     config: {}, root: "/tmp/text-mcp", query: { query_key: "a".repeat(64), original_query: "Q", gold: "no" },
-    host_issued_initial_recall: false, model_kind: "scripted",
-    ceilings: { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 }
+    host_issued_initial_recall: false, model_kind: "scripted", ceilings
+  }).success).toBe(false);
+  expect(TextMcpConsumerInputSchema.safeParse({
+    config: {}, root: "/tmp/text-mcp",
+    query: { query_key: "a".repeat(64), original_query: "Q", interpretation_proposal: { gold: true } },
+    host_issued_initial_recall: false, model_kind: "scripted", ceilings
   }).success).toBe(false);
   await expect(executeTextMcpConsumer({
     config: {}, root: "/tmp/text-mcp", query: { query_key: "a".repeat(64), original_query: "Q" },

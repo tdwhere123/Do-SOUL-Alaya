@@ -91,6 +91,7 @@ function formatEvent(event: Record<string, unknown>, ordinal: number): string {
   if (kind === "model_turn") {
     return [
       `--- model_turn ordinal=${ordinal}`,
+      `finish_reason: ${String(event.finishReason ?? null)}`,
       "decoded_action:", canonicalJson(event.decoded ?? null),
       "model_text:", typeof event.model_text === "string" ? event.model_text : canonicalJson(event.model_text ?? null)
     ].join("\n");

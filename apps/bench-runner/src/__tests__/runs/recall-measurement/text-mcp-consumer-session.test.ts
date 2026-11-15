@@ -11,6 +11,7 @@ import { bindBenchDaemonTestSignal } from "../../../harness/daemon-task.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope }
   from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
+import { queryProposalFromCoordinates } from "../../../runs/recall-measurement/ordinary/query-coordinate-proposal.js";
 import { TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS }
   from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
 import { executeTextMcpConsumer } from "../../../runs/recall-measurement/text-mcp-consumer/execute.js";
@@ -59,6 +60,19 @@ function answerThen(read: Record<string, unknown>) {
       return { text: JSON.stringify({ action: "answer", text: "terminal-answer" }), finishReason: "stop" as const };
     },
     turns: () => turns
+  };
+}
+
+function hangingPort() {
+  let invoked = 0;
+  let release: (value: { text: string; finishReason: string | null }) => void = () => undefined;
+  const pending = new Promise<{ text: string; finishReason: string | null }>(resolve => { release = resolve; });
+  return {
+    complete: () => { invoked += 1; return pending; },
+    invoked: () => invoked,
+    releaseLateAnswer: () => release({
+      text: JSON.stringify({ action: "answer", text: "late-answer" }), finishReason: "stop"
+    })
   };
 }
 
@@ -181,4 +195,101 @@ it("cancels without a second model turn and leaves the original snapshot unchang
   })).rejects.toMatchObject({ code: "CANCELLED" });
   expect(turns).toBe(1);
   expect(hashRegularFileNoFollow(base.config.snapshot_path)).toBe(base.config.snapshot_sha256);
+}, 120000);
+
+it("counts host setup toward max_tool_calls and admits time/tool ceilings before dispatch", async () => {
+  let turns = 0;
+  const tools = await executeTextMcpConsumer(input("setup-tool-ceiling", {
+    host_issued_initial_recall: true, ceilings: { ...CEILINGS, max_tool_calls: 0 }
+  }), { complete: () => { turns += 1; throw new Error("model must not run after tool ceiling"); } });
+  expect(turns).toBe(0);
+  expect(tools.terminal).toEqual({ outcome: "tool_call_ceiling" });
+  expect(tools.mcp_dispatches).toBe(0);
+  expect(tools.host_setup).toBe(false);
+  const timed = await executeTextMcpConsumer(input("setup-time-ceiling", {
+    host_issued_initial_recall: true, ceilings: { ...CEILINGS, wall_ms: 1 }
+  }), { complete: () => { turns += 1; throw new Error("model must not run after time ceiling"); } });
+  expect(turns).toBe(0);
+  expect(timed.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(timed.mcp_dispatches).toBe(0);
+  expect(timed.host_setup).toBe(false);
+}, 120000);
+
+it("binds the complete callable before await so later port mutation is ignored", async () => {
+  const port = {
+    complete: () => ({ text: JSON.stringify({ action: "answer", text: "captured" }), finishReason: "stop" as const })
+  };
+  const pending = executeTextMcpConsumer(input("captured-complete"), port);
+  port.complete = () => ({ text: JSON.stringify({ action: "answer", text: "mutated" }), finishReason: "stop" });
+  expect((await pending).terminal).toEqual({ outcome: "answered", text: "captured" });
+}, 120000);
+
+it("rejects a late answer after pending complete() is cancelled", async () => {
+  const hang = hangingPort();
+  const controller = new AbortController();
+  bindBenchDaemonTestSignal(controller.signal);
+  const pending = executeTextMcpConsumer(input("pending-cancel"), hang);
+  await vi.waitFor(() => { expect(hang.invoked()).toBe(1); }, { timeout: 15_000 });
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ code: "CANCELLED" });
+  hang.releaseLateAnswer();
+  await Promise.resolve();
+  expect(hashRegularFileNoFollow(base.config.snapshot_path)).toBe(base.config.snapshot_sha256);
+}, 120000);
+
+it("rejects a late answer after pending complete() exceeds wall_ms", async () => {
+  const hang = hangingPort();
+  const execution = await executeTextMcpConsumer(input("pending-time", {
+    ceilings: { ...CEILINGS, wall_ms: 10_000 }
+  }), hang);
+  expect(hang.invoked()).toBe(1);
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(JSON.stringify(execution.events)).not.toContain("late-answer");
+  hang.releaseLateAnswer();
+  await Promise.resolve();
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(execution.mcp_dispatches).toBe(0);
+}, 120000);
+
+it("does not dispatch or accept answers from length, null, or unknown finishReason", async () => {
+  const length = await executeTextMcpConsumer(input("finish-length"), {
+    complete: () => ({
+      text: JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }), finishReason: "length"
+    })
+  });
+  expect(length.terminal).toEqual({ outcome: "model_incomplete", finishReason: "length" });
+  expect(length.mcp_dispatches).toBe(0);
+  const missing = await executeTextMcpConsumer(input("finish-null"), {
+    complete: () => ({
+      text: JSON.stringify({ action: "answer", text: "should-not-accept" }), finishReason: null
+    })
+  });
+  expect(missing.terminal).toEqual({ outcome: "model_unknown", finishReason: null });
+  expect(missing.mcp_dispatches).toBe(0);
+  const unknown = await executeTextMcpConsumer(input("finish-unknown"), {
+    complete: () => ({
+      text: JSON.stringify({ action: "answer", text: "should-not-accept" }), finishReason: "content_filter"
+    })
+  });
+  expect(unknown.terminal).toEqual({ outcome: "model_unknown", finishReason: "content_filter" });
+  expect(unknown.mcp_dispatches).toBe(0);
+}, 120000);
+
+it("passes an admitted frozen interpretation proposal unchanged on host setup", async () => {
+  const query = base.queries[0]!;
+  const proposal = queryProposalFromCoordinates(query.original_query, base.config.interpretation_clock, {
+    status: "formed",
+    coordinates: { time: { kind: "window", alternatives: [{ start: "2023-09-12", end: "2023-09-12" }] } }
+  })!;
+  const frozen = structuredClone(proposal);
+  const execution = await executeTextMcpConsumer(input("frozen-proposal", {
+    host_issued_initial_recall: true,
+    query: { query_key: query.query_key, original_query: query.original_query, interpretation_proposal: proposal }
+  }), {
+    complete: () => ({ text: JSON.stringify({ action: "answer", text: "from-setup" }), finishReason: "stop" })
+  });
+  expect(execution.host_setup).toBe(true);
+  expect(canonicalJson((execution.events[0] as { arguments: { interpretation_proposal: unknown } }).arguments
+    .interpretation_proposal)).toBe(canonicalJson(frozen));
+  expect(execution.terminal).toEqual({ outcome: "answered", text: "from-setup" });
 }, 120000);
