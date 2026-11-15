@@ -12,8 +12,9 @@ import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope }
   from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { queryProposalFromCoordinates } from "../../../runs/recall-measurement/ordinary/query-coordinate-proposal.js";
-import { TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS }
-  from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
+import {
+  TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS, TEXT_MCP_WALL_MS_MEANING
+} from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
 import { executeTextMcpConsumer } from "../../../runs/recall-measurement/text-mcp-consumer/execute.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { HIDDEN_GOLD } from "./native-recall.test-support.js";
@@ -63,12 +64,20 @@ function answerThen(read: Record<string, unknown>) {
   };
 }
 
-function hangingPort() {
+function hangingPort(mode: "ignore" | "ack" = "ignore") {
   let invoked = 0;
   let release: (value: { text: string; finishReason: string | null }) => void = () => undefined;
   const pending = new Promise<{ text: string; finishReason: string | null }>(resolve => { release = resolve; });
   return {
-    complete: () => { invoked += 1; return pending; },
+    complete: (request: { abortSignal?: AbortSignal }) => {
+      invoked += 1;
+      if (mode === "ack") {
+        request.abortSignal?.addEventListener("abort", () => {
+          release({ text: JSON.stringify({ action: "answer", text: "acked-late" }), finishReason: "stop" });
+        }, { once: true });
+      }
+      return pending;
+    },
     invoked: () => invoked,
     releaseLateAnswer: () => release({
       text: JSON.stringify({ action: "answer", text: "late-answer" }), finishReason: "stop"
@@ -88,6 +97,7 @@ it("dispatches model-selected soul.recall through live MCP and preserves the lit
     typeof tool === "object" && tool !== null && "name" in tool && tool.name === "soul.recall")).toBe(true);
   expect(execution.diagnostic_restriction).toBe(TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION);
   expect(execution.paid_readiness).toEqual(TEXT_MCP_CONSUMER_PAID_READINESS);
+  expect(execution.model_work).toEqual({ status: "settled", wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING });
   expect(execution.claims).toEqual({
     native_provider_tool_calling: false, cli_host_equivalence: false, answer_quality: "not_verified"
   });
@@ -210,7 +220,8 @@ it("counts host setup toward max_tool_calls and admits time/tool ceilings before
     host_issued_initial_recall: true, ceilings: { ...CEILINGS, wall_ms: 1 }
   }), { complete: () => { turns += 1; throw new Error("model must not run after time ceiling"); } });
   expect(turns).toBe(0);
-  expect(timed.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(timed.terminal).toEqual({ outcome: "time_ceiling", model_work: "idle" });
+  expect(timed.model_work.status).toBe("idle");
   expect(timed.mcp_dispatches).toBe(0);
   expect(timed.host_setup).toBe(false);
 }, 120000);
@@ -231,7 +242,9 @@ it("rejects a late answer after pending complete() is cancelled", async () => {
   const pending = executeTextMcpConsumer(input("pending-cancel"), hang);
   await vi.waitFor(() => { expect(hang.invoked()).toBe(1); }, { timeout: 15_000 });
   controller.abort();
-  await expect(pending).rejects.toMatchObject({ code: "CANCELLED" });
+  await expect(pending).rejects.toMatchObject({
+    code: "CANCELLED", cause: { model_work: "unsettled_unknown", wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING }
+  });
   hang.releaseLateAnswer();
   await Promise.resolve();
   expect(hashRegularFileNoFollow(base.config.snapshot_path)).toBe(base.config.snapshot_sha256);
@@ -243,11 +256,12 @@ it("rejects a late answer after pending complete() exceeds wall_ms", async () =>
     ceilings: { ...CEILINGS, wall_ms: 10_000 }
   }), hang);
   expect(hang.invoked()).toBe(1);
-  expect(execution.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling", model_work: "unsettled_unknown" });
+  expect(execution.model_work.status).toBe("unsettled_unknown");
   expect(JSON.stringify(execution.events)).not.toContain("late-answer");
   hang.releaseLateAnswer();
   await Promise.resolve();
-  expect(execution.terminal).toEqual({ outcome: "time_ceiling" });
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling", model_work: "unsettled_unknown" });
   expect(execution.mcp_dispatches).toBe(0);
 }, 120000);
 
@@ -292,4 +306,61 @@ it("passes an admitted frozen interpretation proposal unchanged on host setup", 
   expect(canonicalJson((execution.events[0] as { arguments: { interpretation_proposal: unknown } }).arguments
     .interpretation_proposal)).toBe(canonicalJson(frozen));
   expect(execution.terminal).toEqual({ outcome: "answered", text: "from-setup" });
+}, 120000);
+
+it("rejects a synchronous CPU-overrun answer after the actual wait budget", async () => {
+  const t0 = performance.now(), wall = 5_000;
+  const execution = await executeTextMcpConsumer(input("cpu-late", {
+    ceilings: { ...CEILINGS, wall_ms: wall }
+  }), {
+    complete: () => {
+      while (performance.now() - t0 < wall + 400) { /* overrun the session wait budget */ }
+      return { text: JSON.stringify({ action: "answer", text: "cpu-late" }), finishReason: "stop" };
+    }
+  });
+  expect(execution.terminal).toEqual({ outcome: "time_ceiling", model_work: "settled_late" });
+  expect(execution.model_work).toEqual({ status: "settled_late", wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING });
+  expect(execution.mcp_dispatches).toBe(0);
+}, 120000);
+
+it("observes a cooperative cancel ack without accepting the late answer", async () => {
+  const ack = hangingPort("ack");
+  const ackCtl = new AbortController();
+  bindBenchDaemonTestSignal(ackCtl.signal);
+  const acked = executeTextMcpConsumer(input("coop-cancel"), ack);
+  await vi.waitFor(() => { expect(ack.invoked()).toBe(1); }, { timeout: 15_000 });
+  ackCtl.abort();
+  const cancelled = await acked.then(() => undefined, error => error) as Error & { code?: string; cause?: unknown };
+  expect(cancelled).toMatchObject({ code: "CANCELLED" });
+  expect(cancelled.message).toContain("model_work=acked");
+  expect(cancelled.cause).toEqual({ model_work: "acked", wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING });
+}, 120000);
+
+it("observes a cooperative deadline ack without accepting the late answer", async () => {
+  const deadline = hangingPort("ack");
+  const timed = await executeTextMcpConsumer(input("coop-deadline", {
+    ceilings: { ...CEILINGS, wall_ms: 10_000 }
+  }), deadline);
+  expect(timed.terminal).toEqual({ outcome: "time_ceiling", model_work: "acked" });
+  expect(timed.model_work.status).toBe("acked");
+  expect(JSON.stringify(timed.events)).not.toContain("acked-late");
+  expect(timed.mcp_dispatches).toBe(0);
+}, 120000);
+
+it("does not late-abort a completed turn after disposing the wait timer", async () => {
+  const t0 = performance.now();
+  let turnSignal: AbortSignal | undefined;
+  const execution = await executeTextMcpConsumer(input("no-late-abort", {
+    ceilings: { ...CEILINGS, wall_ms: 6_000 }
+  }), {
+    complete: request => {
+      turnSignal = request.abortSignal;
+      return { text: JSON.stringify({ action: "answer", text: "ok" }), finishReason: "stop" };
+    }
+  });
+  expect(execution.terminal).toEqual({ outcome: "answered", text: "ok" });
+  expect(turnSignal?.aborted).toBe(false);
+  const wait = 6_500 - (performance.now() - t0);
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+  expect(turnSignal?.aborted).toBe(false);
 }, 120000);

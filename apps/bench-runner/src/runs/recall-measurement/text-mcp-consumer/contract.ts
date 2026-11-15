@@ -21,11 +21,19 @@ export const TEXT_MCP_ACTION_PROTOCOL = [
 ].join(" ");
 
 /** Frozen-answer grants cover static windows. Adaptive MCP turns have no grant in this slice. */
+export const TEXT_MCP_WALL_MS_MEANING = "admission_and_model_wait_budget" as const;
+export const TEXT_MCP_MODEL_WORK_STATUSES = [
+  "idle", "settled", "settled_late", "acked", "unsettled_unknown"
+] as const;
+export type TextMcpModelWorkStatus = (typeof TEXT_MCP_MODEL_WORK_STATUSES)[number];
+
 export const TEXT_MCP_CONSUMER_PAID_READINESS = Object.freeze({
   status: "blocked_without_separate_grant" as const,
   request_binding_owner: "apps/bench-runner/src/runs/provider-request/request-binding.ts",
   attempt_owner: "apps/bench-runner/src/runs/provider-request/execution.ts",
-  static_grant_note: "frozen-answer grants are static evidence windows, not interactive MCP turns"
+  static_grant_note: "frozen-answer grants are static evidence windows, not interactive MCP turns",
+  wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING,
+  in_process_complete: "cannot_preempt" as const
 });
 
 export const TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE = [
@@ -47,6 +55,7 @@ export const TextMcpCeilingsSchema = z.object({
   max_tool_calls: z.number().int().min(0).max(32),
   max_input_bytes: z.number().int().min(1).max(2_000_000),
   max_output_bytes: z.number().int().min(1).max(1_000_000),
+  /** Admission and model-wait budget. Does not preempt in-process complete(), startup, or MCP. */
   wall_ms: z.number().int().min(1).max(300_000)
 }).strict();
 /** Ordinary query authority, including an optional admitted frozen interpretation proposal. */
@@ -69,7 +78,10 @@ export const TextMcpConsumerTerminalSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("output_ceiling") }).strict(),
   z.object({ outcome: z.literal("model_turn_ceiling") }).strict(),
   z.object({ outcome: z.literal("tool_call_ceiling") }).strict(),
-  z.object({ outcome: z.literal("time_ceiling") }).strict(),
+  z.object({
+    outcome: z.literal("time_ceiling"),
+    model_work: z.enum(["idle", "settled", "settled_late", "acked", "unsettled_unknown"])
+  }).strict(),
   z.object({ outcome: z.literal("model_incomplete"), finishReason: z.string().min(1) }).strict(),
   z.object({ outcome: z.literal("model_unknown"), finishReason: z.string().nullable() }).strict(),
   z.object({
@@ -103,13 +115,19 @@ export const TextMcpConsumerExecutionSchema = z.object({
     status: z.literal("blocked_without_separate_grant"),
     request_binding_owner: z.string().min(1),
     attempt_owner: z.string().min(1),
-    static_grant_note: z.string().min(1)
+    static_grant_note: z.string().min(1),
+    wall_ms_meaning: z.literal(TEXT_MCP_WALL_MS_MEANING),
+    in_process_complete: z.literal("cannot_preempt")
   }).strict(),
   diagnostic_restriction: z.literal(TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION),
   live_surface: TextMcpLiveSurfaceSchema.nullable(),
   consumer_model_calls: z.number().int().nonnegative(),
   mcp_dispatches: z.number().int().nonnegative(),
   host_setup: z.boolean(),
+  model_work: z.object({
+    status: z.enum(TEXT_MCP_MODEL_WORK_STATUSES),
+    wall_ms_meaning: z.literal(TEXT_MCP_WALL_MS_MEANING)
+  }).strict(),
   events: z.array(z.record(z.string(), z.unknown())),
   terminal: TextMcpConsumerTerminalSchema,
   original_snapshot_sha256: Digest
@@ -127,7 +145,7 @@ export type TextMcpModelRequest = Readonly<{
   systemPrompt: string;
   userPrompt: string;
   gatewayBody: Readonly<Record<string, unknown>>;
-  /** Session-owned abort for this turn; cooperative ports may stop. Uncooperative work is still abandoned. */
+  /** Turn abort. Cooperative ports may ack; uncooperative work is reported unsettled_unknown. */
   abortSignal?: AbortSignal;
 }>;
 export type TextMcpModelResult = Readonly<{ text: string; finishReason: string | null }>;
