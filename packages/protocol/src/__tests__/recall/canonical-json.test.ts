@@ -87,6 +87,120 @@ describe("canonicalJson", () => {
       .toEqual([...canonicalJsonChunks(value)].map(chunk => Buffer.byteLength(chunk, "utf8")));
   });
 
+  it.each([
+    [undefined, undefined], [Symbol("root"), undefined], [() => undefined, undefined],
+    [null, "null"], [-0, "0"], [NaN, "null"], [Infinity, "null"], [true, "true"], [false, "false"],
+    [1e21, "1e+21"], [[, undefined, () => undefined, Symbol("slot")], "[,,,]"],
+    [{ z: undefined, a: "x", f: () => undefined, s: Symbol("value") },
+      '{"a":"x","f":undefined,"s":undefined,"z":undefined}'],
+    [{ "2": "two", "10": "ten" }, '{"10":"ten","2":"two"}'],
+    [{ "\ue000": 1, "\ud800\udc00": 2 }, '{"𐀀":2,"":1}'],
+    ["\ud800", '"\\ud800"'], ["\udc00", '"\\udc00"'], ["汉🙂\n", '"汉🙂\\n"'],
+    ['\u0000"\\', '"\\u0000\\"\\\\"'], [{ b: [true, false], a: {} }, '{"a":{},"b":[true,false]}'],
+    [Object.assign(Object.create({ inherited: 7 }), { b: 2, a: 1 }), '{"a":1,"b":2}'],
+    [new Date(0), "{}"], [new Number(5), "{}"], [new String("ab"), '{"0":"a","1":"b"}']
+  ])("preserves legacy eager bytes for independent example %#", (value, expected) => {
+    expect(canonicalJson(value)).toBe(expected);
+    if (expected !== undefined) expect([...canonicalJsonChunks(value)].join("")).toBe(expected);
+  });
+
+  it("preserves root function toJSON while omitting function array slots", () => {
+    const callable = Object.assign(() => undefined, { toJSON: () => 7 });
+    expect(canonicalJson(callable)).toBe("7");
+    expect(canonicalJson([callable])).toBe("[]");
+    expect(canonicalJson({ callable })).toBe('{"callable":7}');
+    expect(() => [...canonicalJsonChunks(callable)]).toThrow("canonical preimage has no root string");
+  });
+
+  it("reads sorted keys once and preserves getter mutation and live array length", () => {
+    for (const encode of [canonicalJson, (value: unknown) => [...canonicalJsonChunks(value)].join("")]) {
+      const accesses: string[] = [];
+      const value: Record<string, unknown> = { get z() { accesses.push("z"); return 2; },
+        get a() { accesses.push("a"); delete value.b; value.newKey = 3; return 1; }, b: 4 };
+      expect(encode(value)).toBe('{"a":1,"b":undefined,"z":2}');
+      expect(accesses).toEqual(["a", "z"]);
+      const array = [0, 2, 3];
+      Object.defineProperty(array, 0, { get() { array.length = 1; return 1; } });
+      expect(encode(array)).toBe("[1]");
+      const grown = [0];
+      Object.defineProperty(grown, 0, { get() { grown[1] = 2; return 1; } });
+      expect(encode(grown)).toBe("[1,2]");
+    }
+  });
+
+  it("uses indexed array reads, including inherited slots, rather than a custom iterator", () => {
+    for (const encode of [canonicalJson, (value: unknown) => [...canonicalJsonChunks(value)].join("")]) {
+      const reads: PropertyKey[] = [], array = [1, , 3];
+      Object.setPrototypeOf(array, Object.create(Array.prototype, { 1: { value: 2 } }));
+      array[Symbol.iterator] = () => { throw new Error("iterator must not run"); };
+      const proxy = new Proxy(array, { get(target, key, receiver) {
+        reads.push(key); return Reflect.get(target, key, receiver);
+      } });
+      expect(encode(proxy)).toBe("[1,2,3]");
+      expect(reads).toEqual(["length", "0", "length", "1", "length", "2", "length"]);
+    }
+  });
+
+  it("accepts shared objects but preserves cycle, BigInt and getter failures", () => {
+    const shared = { n: 1 }, failure = new RangeError("getter failed");
+    const cycle: Record<string, unknown> = {}; cycle.self = cycle;
+    for (const encode of [canonicalJson, (value: unknown) => [...canonicalJsonChunks(value)].join("")]) {
+      expect(encode({ a: shared, b: shared })).toBe('{"a":{"n":1},"b":{"n":1}}');
+      expect(() => encode(cycle)).toThrow(new TypeError("circular canonical preimage"));
+      expect(() => encode(1n)).toThrow(new TypeError("Do not know how to serialize a BigInt"));
+      expect(() => encode({ nested: 1n })).toThrow(new TypeError("Do not know how to serialize a BigInt"));
+      expect(() => encode({ get a() { throw failure; } })).toThrow(failure);
+      // A failed traversal must not poison a later invocation's ancestor set.
+      expect(encode(shared)).toBe('{"n":1}');
+    }
+  });
+
+  it("keeps streaming getters lazy through key/colon chunks and early return", () => {
+    const accesses: string[] = [];
+    const value = { get a() { accesses.push("a"); return { get b() { accesses.push("b"); return 1; } }; },
+      get z() { accesses.push("z"); throw new Error("unvisited"); } };
+    const stream = canonicalJsonChunks(value);
+    expect(accesses).toEqual([]);
+    for (const chunk of ["{", '"a"', ":"]) expect(stream.next()).toEqual({ value: chunk, done: false });
+    expect(accesses).toEqual([]);
+    expect(stream.next().value).toBe("{");
+    expect(accesses).toEqual(["a"]);
+    for (const chunk of ['"b"', ":"]) expect(stream.next().value).toBe(chunk);
+    expect(accesses).toEqual(["a"]);
+    expect(stream.next().value).toBe("1");
+    expect(accesses).toEqual(["a", "b"]);
+    stream.return(undefined);
+    expect(accesses).toEqual(["a", "b"]);
+  });
+
+  it("retains independent streaming chunk and execution-charge inventories", () => {
+    const value = { b: [undefined, 1], a: "x" };
+    const expected = ["{", '"a"', ":", '"x"', ",", '"b"', ":", "[", ",", "1", "]", "}"];
+    const rows: unknown[] = [], meter = { charge(work: number, bytes: number, phase?: string) {
+      rows.push([work, bytes, phase]);
+    } };
+    expect([...canonicalJsonChunks(value, meter)]).toEqual(expected);
+    expect(rows).toEqual([
+      [1, 64, "canonical identity traversal"], [2, 96, "canonical identity key ordering"],
+      [1, 0, "canonical identity key comparison"], [1, 30, "canonical identity scalar encoding"],
+      [1, 0, "canonical identity traversal"], [1, 30, "canonical identity scalar encoding"],
+      [1, 30, "canonical identity scalar encoding"], [1, 64, "canonical identity traversal"],
+      [1, 0, "canonical identity traversal"], [1, 26, "canonical identity scalar encoding"]
+    ]);
+    const execution = new SourceSemanticResourceLedger({ work_units: 11, memory_bytes: 340 });
+    expect([...quoteUnpreparedChunks(value, execution)]).toEqual(expected.map(chunk => Buffer.byteLength(chunk)));
+    expect(execution.remaining()).toEqual({ work_units: 0, memory_bytes: 0 });
+    const actual = new SourceSemanticResourceLedger({ work_units: 11, memory_bytes: 340 });
+    expect([...canonicalJsonChunks(value, actual)]).toEqual(expected);
+    expect(actual.remaining()).toEqual({ work_units: 0, memory_bytes: 0 });
+    for (const budget of [{ work_units: 10, memory_bytes: 340 }, { work_units: 11, memory_bytes: 339 }]) {
+      expect(() => [...canonicalJsonChunks(value, new SourceSemanticResourceLedger(budget))]).toThrow();
+      expect(() => [...quoteUnpreparedChunks(value, new SourceSemanticResourceLedger(budget))]).toThrow();
+    }
+    expect(canonicalJson(value)).toBe('{"a":"x","b":[,1]}');
+    expect(sha256(canonicalJson(value))).toBe(sha256('{"a":"x","b":[,1]}'));
+  });
+
   it("is independent of process locale", () => {
     const distModule = fileURLToPath(
       new URL("../../../dist/recall/selection/capture/canonical-json.js", import.meta.url)

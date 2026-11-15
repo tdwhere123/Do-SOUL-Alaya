@@ -6,7 +6,9 @@ const codeUnitLength = (codeUnits: number): number => codeUnits;
 export function canonicalJson(value: unknown): string {
   // Preserve the legacy root omission; streaming/quotation require a real preimage.
   if (value === undefined || typeof value === "function" || typeof value === "symbol") return JSON.stringify(value);
-  return [...canonicalJsonChunks(value)].join("");
+  const chunks: string[] = [];
+  canonicalStructureChunks(value, encodedScalar, token => token, undefined, new Set(), chunks).next();
+  return chunks.join("");
 }
 
 /** Exact UTF-16 length of the canonical preimage, without encoding strings or sorting keys.
@@ -128,37 +130,43 @@ function canonicalChunks<T>(value: unknown, scalar: (value: unknown) => T, token
   meter: Meter | undefined, ancestors: Set<object>, prepared?: CanonicalJsonSubtrees,
   planner?: Meter, execution?: Meter): Generator<T> {
   const plan = value !== null && typeof value === "object" ? prepared?.match(value, meter) : undefined;
-  if (plan === undefined) return canonicalStructureChunks(value, scalar, token, meter, ancestors, prepared, planner, execution);
+  if (plan === undefined) return canonicalStructureChunks(value, scalar, token, meter, ancestors, undefined, prepared, planner, execution);
   if (planner === undefined) return plan.replay(scalar, token, meter!);
   execution!.charge(1, 64, "canonical prepared replay frame");
   return plan.record(scalar, token, planner, execution!, ancestors);
 }
 
-/** Encoding and quotation share all ordering, omissions and chunk boundaries. */
+/** One traversal owns ordering, omissions, access timing and chunk boundaries.
+ * Eager encoding pushes into its private sink without suspending at each chunk;
+ * only lazy execution dispatches prepared subtrees. Each object still owns one frame. */
 function* canonicalStructureChunks<T>(value: unknown, scalar: (value: unknown) => T, token: (value: string) => T,
-  meter: Meter | undefined, ancestors: Set<object>, prepared?: CanonicalJsonSubtrees,
+  meter: Meter | undefined, ancestors: Set<object>, sink?: T[], prepared?: CanonicalJsonSubtrees,
   planner?: Meter, execution?: Meter): Generator<T> {
   // Includes the active generator frame and its ancestor bookkeeping.
   meter?.charge(1, 64, "canonical identity traversal");
-  if (value === null || typeof value !== "object") { yield scalar(value); return; }
+  if (value === null || typeof value !== "object") {
+    const chunk = scalar(value); if (sink) sink.push(chunk); else yield chunk;
+    return;
+  }
   if (ancestors.has(value)) throw new TypeError("circular canonical preimage");
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      yield token("[");
+      const open = token("["); if (sink) sink.push(open); else yield open;
       for (let index = 0; index < value.length; index++) {
-        if (index) yield token(",");
+        if (index) { const comma = token(","); if (sink) sink.push(comma); else yield comma; }
         // Match Array.map(...).join: undefined and holes contribute an empty slot.
         const child = value[index];
         if (child !== undefined && typeof child !== "function" && typeof child !== "symbol") {
           // A scalar needs a visit and its encoding, not another recursive generator.
           if (child === null || typeof child !== "object") {
             meter?.charge(1, 0, "canonical identity traversal");
-            yield scalar(child);
-          } else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
+            const chunk = scalar(child); if (sink) sink.push(chunk); else yield chunk;
+          } else if (sink) canonicalStructureChunks(child, scalar, token, meter, ancestors, sink).next();
+          else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
         }
       }
-      yield token("]");
+      const close = token("]"); if (sink) sink.push(close); else yield close;
     } else {
       const keys = Object.keys(value);
       meter?.charge(keys.length, 64 + keys.length * 16, "canonical identity key ordering");
@@ -166,19 +174,20 @@ function* canonicalStructureChunks<T>(value: unknown, scalar: (value: unknown) =
         meter?.charge(1, 0, "canonical identity key comparison");
         return compareCodeUnits(left, right);
       });
-      yield token("{");
+      const open = token("{"); if (sink) sink.push(open); else yield open;
       for (let index = 0; index < keys.length; index++) {
         const key = keys[index]!;
-        if (index) yield token(",");
-        yield scalar(key);
-        yield token(":");
+        if (index) { const comma = token(","); if (sink) sink.push(comma); else yield comma; }
+        const name = scalar(key); if (sink) sink.push(name); else yield name;
+        const colon = token(":"); if (sink) sink.push(colon); else yield colon;
         const child = (value as Record<string, unknown>)[key];
         if (child === null || typeof child !== "object") {
           meter?.charge(1, 0, "canonical identity traversal");
-          yield scalar(child);
-        } else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
+          const chunk = scalar(child); if (sink) sink.push(chunk); else yield chunk;
+        } else if (sink) canonicalStructureChunks(child, scalar, token, meter, ancestors, sink).next();
+        else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
       }
-      yield token("}");
+      const close = token("}"); if (sink) sink.push(close); else yield close;
     }
   } finally { ancestors.delete(value); }
 }
