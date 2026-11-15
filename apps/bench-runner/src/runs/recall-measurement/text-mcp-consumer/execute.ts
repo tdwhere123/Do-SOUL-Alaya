@@ -8,8 +8,8 @@ import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope } from "../ordinary/
 import {
   TEXT_MCP_CONSUMER_CONTRACT, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS,
   TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE, TEXT_MCP_WALL_MS_MEANING, TextMcpConsumerExecutionSchema,
-  TextMcpConsumerInputSchema, type TextMcpCeilings, type TextMcpConsumerExecution, type TextMcpConsumerInput,
-  type TextMcpConsumerTerminal, type TextMcpLiveSurface, type TextMcpModelRequest,
+  TextMcpConsumerInputSchema, isUnresolvedTextMcpDelivery, type TextMcpCeilings, type TextMcpConsumerExecution,
+  type TextMcpConsumerInput, type TextMcpConsumerTerminal, type TextMcpLiveSurface, type TextMcpModelRequest,
   type TextMcpModelResult, type TextMcpModelWorkStatus, type TextMcpScriptedPort
 } from "./contract.js";
 import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes } from "./codec.js";
@@ -83,8 +83,7 @@ async function runTextMcpConsumer(
         kind: "host_setup", generated_by: "host_controlled_setup", tool: dispatched.tool,
         arguments: dispatched.arguments, response_state: dispatched.response_state, envelope: dispatched.envelope
       });
-      if (dispatched.response_state === "transport_error" || dispatched.response_state === "unknown"
-        || dispatched.response_state === "invalid_response") {
+      if (isUnresolvedTextMcpDelivery(dispatched.response_state)) {
         return freezeExecution(completeExecution(config, surface, true, {
           events, modelCalls: 0, mcpDispatches, modelWork: "idle",
           terminal: { outcome: "unresolved_delivery", response_state: dispatched.response_state }
@@ -166,8 +165,7 @@ async function runTextMcpLoop(input: Readonly<{
       kind: "mcp_call", origin: "model_selected", tool: dispatched.tool, arguments: dispatched.arguments,
       response_state: dispatched.response_state, envelope: dispatched.envelope
     });
-    if (dispatched.response_state === "transport_error" || dispatched.response_state === "unknown"
-      || dispatched.response_state === "invalid_response") {
+    if (isUnresolvedTextMcpDelivery(dispatched.response_state)) {
       terminal = { outcome: "unresolved_delivery", response_state: dispatched.response_state }; break;
     }
   }

@@ -3,6 +3,25 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary({ ownedTemporaryFixtures: true });
 });
+const mcpDispatch = vi.hoisted(() => ({ fail: false, calls: 0 }));
+vi.mock("../../../runs/recall-measurement/text-mcp-consumer/live-mcp.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../../runs/recall-measurement/text-mcp-consumer/live-mcp.js")>();
+  return {
+    ...actual,
+    async dispatchTextMcpRead(
+      ...args: Parameters<typeof actual.dispatchTextMcpRead>
+    ) {
+      mcpDispatch.calls += 1;
+      if (mcpDispatch.fail) {
+        return {
+          tool: args[1], arguments: structuredClone(args[2]),
+          response_state: "transport_error" as const, envelope: null
+        };
+      }
+      return actual.dispatchTextMcpRead(...args);
+    }
+  };
+});
 process.env.NODE_ENV = "test";
 process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL = "true";
 
@@ -40,6 +59,7 @@ const answers: string[] = [];
 let response: "success" | "unknown" | "hang" = "success";
 let ready: () => void | Promise<void> = () => undefined;
 let onRequest: () => void = () => undefined;
+let afterExtract: () => void = () => undefined;
 let endpoint = "";
 
 const server = createServer(async (req, res) => {
@@ -89,6 +109,9 @@ afterEach(() => {
   response = "success";
   ready = () => undefined;
   onRequest = () => undefined;
+  afterExtract = () => undefined;
+  mcpDispatch.fail = false;
+  mcpDispatch.calls = 0;
 });
 
 function query() {
@@ -102,10 +125,11 @@ function issue(name: string, extra: Omit<Parameters<typeof issueTextMcpProviderS
   return issueTextMcpProviderSession({ home, config: base.config, query: query(), ...extra });
 }
 
-function consumerOf(fixture: ReturnType<typeof issue>) {
+function consumerOf(fixture: ReturnType<typeof issue>, extra: { host_issued_initial_recall?: boolean } = {}) {
   return {
     config: base.config, root: fixture.consumerRoot, query: query(),
-    host_issued_initial_recall: false, ceilings: { ...CEILINGS }
+    host_issued_initial_recall: extra.host_issued_initial_recall ?? fixture.grant.host_issued_initial_recall,
+    ceilings: { ...CEILINGS, wall_ms: fixture.grant.limits.wall_ms }
   };
 }
 
@@ -126,6 +150,7 @@ function dependencies(selected: ReturnType<typeof sessionProviderConfig>) {
             }
           }, { maxRetries: 0, retryDelaysMs: [] });
           const result = execution.result;
+          afterExtract();
           return { rawJson: result.text, responseMetadata: { finishReason: result.finishReason },
             usage: result.usage, httpResponse: result.httpResponse };
         } catch (cause) {
@@ -288,6 +313,7 @@ it("root drift during readiness sends nothing and interrupted publication recove
     syncBuiltinESMExports();
   }
   expect(interrupted.attempts_this_invocation).toBe(1);
+  expect(interrupted.invocations_this_invocation).toBe(1);
   expect((interrupted.ledger as { unresolvedAttempts: unknown[] }).unresolvedAttempts).toHaveLength(1);
   expect(interrupted.turns[0]?.status).toBe("pending");
   const prior = received.length;
@@ -298,4 +324,136 @@ it("root drift during readiness sends nothing and interrupted publication recove
   expect(recovered.turns[0]?.status).toBe("admitted");
   expect(recovered.turns[1]).toBeUndefined();
   expect(recovered.cost.reported_input_tokens).toBe(11);
+  expect(recovered.mcp_dispatches).toBe(0);
+}, 180000);
+
+it("unresolved MCP delivery stays terminal on replay and host setup", async () => {
+  mcpDispatch.fail = true;
+  const modelFail = issue("unresolved-mcp-replay");
+  answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  const first = await consumeTextMcpProviderSession({
+    grantPin: modelFail.pin, mode: "execute", consumer: consumerOf(modelFail)
+  }, dependencies(modelFail.selected));
+  expect(first.attempts_this_invocation).toBe(1);
+  expect(first.mcp_dispatches).toBe(1);
+  expect(first.events.some(event => event.kind === "mcp_call" && event.response_state === "transport_error")).toBe(true);
+  expect(first.turns[1]).toBeUndefined();
+  expect(received).toHaveLength(1);
+  const replay = await consumeTextMcpProviderSession({
+    grantPin: modelFail.pin, mode: "execute", consumer: consumerOf(modelFail)
+  }, dependencies(modelFail.selected));
+  expect(received).toHaveLength(1);
+  expect(replay.attempts_this_invocation).toBe(0);
+  expect(replay.turns[1]).toBeUndefined();
+
+  received.length = 0;
+  answers.length = 0;
+  mcpDispatch.calls = 0;
+  const hostFail = issue("unresolved-host-setup", { hostIssuedInitialRecall: true });
+  answers.push(JSON.stringify({ action: "answer", text: "should-not-run" }));
+  const host = await consumeTextMcpProviderSession({
+    grantPin: hostFail.pin, mode: "execute", consumer: consumerOf(hostFail)
+  }, dependencies(hostFail.selected));
+  expect(host.host_setup).toBe(true);
+  expect(host.events.some(event => event.kind === "host_setup" && event.response_state === "transport_error")).toBe(true);
+  expect(received).toHaveLength(0);
+  expect(host.turns).toEqual([]);
+  const hostReplay = await consumeTextMcpProviderSession({
+    grantPin: hostFail.pin, mode: "execute", consumer: consumerOf(hostFail)
+  }, dependencies(hostFail.selected));
+  expect(received).toHaveLength(0);
+  expect(hostReplay.turns).toEqual([]);
+}, 180000);
+
+it("aborted execute does not dispatch host setup or replayed MCP", async () => {
+  const host = issue("abort-host-setup", { hostIssuedInitialRecall: true });
+  const abortedHost = new AbortController();
+  abortedHost.abort();
+  const hostResult = await consumeTextMcpProviderSession({
+    grantPin: host.pin, mode: "execute", consumer: consumerOf(host), abortSignal: abortedHost.signal
+  }, dependencies(host.selected));
+  expect(hostResult.failure).toMatch(/cancelled/i);
+  expect(mcpDispatch.calls).toBe(0);
+  expect(received).toHaveLength(0);
+
+  const partial = issue("abort-replay-mcp");
+  answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  const originalLink = mutableFs.linkSync;
+  mutableFs.linkSync = function(from, to) {
+    if (String(to).endsWith(".turn.json")) {
+      throw Object.assign(new Error("authored publication interruption"), { code: "EACCES" });
+    }
+    return originalLink(from, to);
+  };
+  syncBuiltinESMExports();
+  try {
+    await consumeTextMcpProviderSession({
+      grantPin: partial.pin, mode: "execute", consumer: consumerOf(partial)
+    }, dependencies(partial.selected));
+  } finally {
+    mutableFs.linkSync = originalLink;
+    syncBuiltinESMExports();
+  }
+  await consumeTextMcpProviderSession({
+    grantPin: partial.pin, mode: "recover", consumer: consumerOf(partial)
+  }, dependencies(partial.selected));
+  const before = received.length;
+  mcpDispatch.calls = 0;
+  const aborted = new AbortController();
+  aborted.abort();
+  const replayed = await consumeTextMcpProviderSession({
+    grantPin: partial.pin, mode: "execute", consumer: consumerOf(partial), abortSignal: aborted.signal
+  }, dependencies(partial.selected));
+  expect(replayed.failure).toMatch(/cancelled/i);
+  expect(mcpDispatch.calls).toBe(0);
+  expect(received).toHaveLength(before);
+
+  mcpDispatch.calls = 0;
+  const mid = issue("abort-after-model");
+  answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  const midAbort = new AbortController();
+  afterExtract = () => midAbort.abort();
+  const stopped = await consumeTextMcpProviderSession({
+    grantPin: mid.pin, mode: "execute", consumer: consumerOf(mid), abortSignal: midAbort.signal
+  }, dependencies(mid.selected));
+  expect(stopped.failure).toMatch(/cancelled/i);
+  expect(stopped.attempts_this_invocation).toBe(1);
+  expect(mcpDispatch.calls).toBe(0);
+  expect(stopped.events.some(event => event.kind === "mcp_call")).toBe(false);
+}, 180000);
+
+it("publication failure after a completed turn keeps live invocation and transcript counts", async () => {
+  const fixture = issue("partial-after-success", { maxModelTurns: 2 });
+  answers.push(
+    JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }),
+    JSON.stringify({ action: "answer", text: "terminal-answer" })
+  );
+  let turnPublications = 0;
+  const originalLink = mutableFs.linkSync;
+  mutableFs.linkSync = function(from, to) {
+    if (String(to).endsWith(".turn.json")) {
+      turnPublications += 1;
+      if (turnPublications >= 2) {
+        throw Object.assign(new Error("authored publication interruption"), { code: "EACCES" });
+      }
+    }
+    return originalLink(from, to);
+  };
+  syncBuiltinESMExports();
+  let interrupted: Awaited<ReturnType<typeof consumeTextMcpProviderSession>>;
+  try {
+    interrupted = await consumeTextMcpProviderSession({
+      grantPin: fixture.pin, mode: "execute", consumer: consumerOf(fixture)
+    }, dependencies(fixture.selected));
+  } finally {
+    mutableFs.linkSync = originalLink;
+    syncBuiltinESMExports();
+  }
+  expect(interrupted.failure).toMatch(/authored publication interruption/);
+  expect(interrupted.invocations_this_invocation).toBe(2);
+  expect(interrupted.attempts_this_invocation).toBe(2);
+  expect(interrupted.mcp_dispatches).toBe(1);
+  expect(interrupted.events.some(event => event.kind === "mcp_call" && event.response_state === "received")).toBe(true);
+  expect(interrupted.turns[0]?.status).toBe("admitted");
+  expect(interrupted.turns[1]?.status).toBe("pending");
 }, 180000);

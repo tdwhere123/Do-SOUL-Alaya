@@ -48,6 +48,14 @@ export const TEXT_MCP_RESPONSE_STATES = [
   "received", "public_error", "transport_error", "invalid_response", "unknown"
 ] as const;
 export type TextMcpResponseState = (typeof TEXT_MCP_RESPONSE_STATES)[number];
+export const TEXT_MCP_UNRESOLVED_RESPONSE_STATES = [
+  "transport_error", "unknown", "invalid_response"
+] as const;
+export type TextMcpUnresolvedResponseState = (typeof TEXT_MCP_UNRESOLVED_RESPONSE_STATES)[number];
+
+export function isUnresolvedTextMcpDelivery(state: unknown): state is TextMcpUnresolvedResponseState {
+  return (TEXT_MCP_UNRESOLVED_RESPONSE_STATES as readonly string[]).includes(String(state));
+}
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const TextMcpCeilingsSchema = z.object({

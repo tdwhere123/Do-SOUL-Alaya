@@ -8,9 +8,8 @@ import {
 
 /** Named schema for the provider-bound sender. Not the scripted jsonObject fixture. */
 export const TEXT_MCP_ACTION_SCHEMA_NAME = "text_mcp_action" as const;
+/** Standard JSON Schema union. Outer additionalProperties must not wrap oneOf or every action is forbidden. */
 export const TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA = Object.freeze({
-  type: "object",
-  additionalProperties: false,
   oneOf: Object.freeze([
     Object.freeze({
       type: "object",

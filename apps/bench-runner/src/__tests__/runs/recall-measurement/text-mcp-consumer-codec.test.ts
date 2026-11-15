@@ -11,9 +11,13 @@ import {
   TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
   TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE, TextMcpConsumerInputSchema
 } from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
-import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes }
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes,
+  TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA, TEXT_MCP_ACTION_SCHEMA_NAME }
   from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
 import { executeTextMcpConsumer } from "../../../runs/recall-measurement/text-mcp-consumer/execute.js";
+import { prepareSemanticProviderRequest } from "../../../runs/compile-seed/http/semantic-provider-http.js";
+import { sessionProviderConfig } from "../../support/text-mcp-provider-session-fixture.js";
 
 const surface = {
   instructions_status: "present" as const,
@@ -93,4 +97,28 @@ it("refuses gold fields on the consumer input and remote model execution without
     host_issued_initial_recall: false, model_kind: "scripted",
     ceilings: { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 }
   })).rejects.toMatchObject({ code: "VALIDATION" });
+});
+
+it("accepts intended text actions and rejects invalid shapes on the transmitted response_format schema", () => {
+  const encoded = encodeTextMcpRequest({ surface, query: "Which project was mentioned?", events: [] });
+  const body = JSON.parse(prepareSemanticProviderRequest(sessionProviderConfig(), {
+    systemPrompt: encoded.systemPrompt, userPrompt: encoded.userPrompt, maxOutputTokens: 128,
+    retryMode: "disabled", outputTokenField: "max_tokens", validateRawJson: () => undefined,
+    responseJsonSchema: TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA
+  }, TEXT_MCP_ACTION_SCHEMA_NAME).body) as {
+    response_format?: { type?: string; json_schema?: { name?: string; schema?: object } };
+  };
+  expect(body.response_format?.type).toBe("json_schema");
+  expect(body.response_format?.json_schema?.name).toBe(TEXT_MCP_ACTION_SCHEMA_NAME);
+  const transmitted = body.response_format?.json_schema?.schema;
+  expect(transmitted).toEqual(TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA);
+  // Standard JSON Schema (Ajv), not a live-provider strict-subset or remote compatibility claim.
+  const validate = new Ajv2020({ strict: false }).compile(transmitted!);
+  expect(validate({ action: "read", tool: "soul.recall", arguments: { query: "Q" } })).toBe(true);
+  expect(validate({ action: "read", tool: "soul.open_pointer", arguments: { id: "p" } })).toBe(true);
+  expect(validate({ action: "answer", text: "done" })).toBe(true);
+  expect(validate({ action: "read", tool: "soul.recall", arguments: { query: "Q" }, extra: true })).toBe(false);
+  expect(validate({ action: "answer" })).toBe(false);
+  expect(validate({ action: "write", tool: "soul.recall", arguments: {} })).toBe(false);
+  expect(validate({})).toBe(false);
 });
