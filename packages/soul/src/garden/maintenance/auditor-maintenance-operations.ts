@@ -33,7 +33,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
     const noopMemoryIds: string[] = [];
 
     for (const entry of batch) {
-      const outcome = await this.revokeStaleEvidenceGreen(task, entry.memory_entry_id);
+      const outcome = await this.revokeStaleEvidenceGreen(task, entry);
       if (outcome === "revoked") {
         revokedMemoryIds.push(entry.memory_entry_id);
       } else {
@@ -51,21 +51,22 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
 
   private async revokeStaleEvidenceGreen(
     task: GardenTaskDescriptor,
-    memoryEntryId: string
+    entry: StaleMemoryEntry
   ): Promise<"revoked" | "noop"> {
+    const revokedAt = this.now();
     const payload = SoulGreenRevokedPayloadSchema.parse({
-      target_object_id: memoryEntryId,
+      target_object_id: entry.memory_entry_id,
       workspace_id: task.workspace_id,
       revoke_reason: "verification_fail",
       task_id: task.task_id,
-      occurred_at: this.now()
+      occurred_at: revokedAt
     });
     try {
       await this.appendEventLogAndMutate(
         {
           event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
           entity_type: "memory_entry",
-          entity_id: memoryEntryId,
+          entity_id: entry.memory_entry_id,
           workspace_id: task.workspace_id,
           run_id: task.run_id,
           caused_by: this.role,
@@ -73,14 +74,14 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         },
         () => {
           const result = this.dependencies.greenMaintenancePort.revokeGreen(
-            memoryEntryId,
+            entry.memory_entry_id,
             "verification_fail",
             task.task_id,
             task.workspace_id
           );
           // Throw inside the transaction: a zero-row revoke must also roll back its EventLog row.
           if (result.affected === 0) {
-            throw new GreenRevokeNoopError(memoryEntryId, task.workspace_id);
+            throw new GreenRevokeNoopError(entry.memory_entry_id, task.workspace_id);
           }
         }
       );

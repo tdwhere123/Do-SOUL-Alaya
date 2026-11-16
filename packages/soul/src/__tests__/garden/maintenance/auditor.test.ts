@@ -66,6 +66,41 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  it.each([1, 0])("reads the per-entry clock before payload fields and re-reads mutation identities (affected=%i)", async (affected) => {
+    const reads: string[] = [];
+    const entry: StaleMemoryEntry = {
+      get memory_entry_id() { reads.push("memory"); return "memory-1"; },
+      stale_evidence_refs: ["evidence-1"]
+    };
+    const task: GardenTaskDescriptor = {
+      ...createTask(),
+      get task_id() { reads.push("task"); return "task-1"; },
+      get workspace_id() { reads.push("workspace"); return "workspace-1"; },
+      get run_id() { reads.push("run"); return null; }
+    };
+    const { auditor, greenMaintenancePort } = createAuditor({
+      staleEntries: [entry],
+      now: () => { reads.push("clock"); return "2026-03-27T00:00:00.000Z"; }
+    });
+    greenMaintenancePort.revokeGreen.mockImplementation(() => {
+      reads.push("revoke");
+      return { affected };
+    });
+
+    const result = await auditor.run(task);
+
+    const throughAccounting = [
+      "clock", "workspace", "clock",
+      "memory", "workspace", "task",
+      "memory", "workspace", "run",
+      "memory", "task", "workspace", "revoke",
+      ...(affected === 0 ? ["memory", "workspace"] : []),
+      "memory"
+    ];
+    expect(result.success).toBe(true);
+    expect(reads.slice(0, throughAccounting.length)).toEqual(throughAccounting);
+  });
+
   it("fails evidence staleness when EventLog is not wired", async () => {
     const { auditor, scheduler } = createAuditor({
       staleEntries: [{ memory_entry_id: "memory-1", stale_evidence_refs: ["evidence-1"] }],
@@ -341,6 +376,7 @@ function createAuditor(options: {
   readonly eventLogRepo?: AuditorDependencies["eventLogRepo"];
   readonly omitEventLogRepo?: boolean;
   readonly revokeAffected?: number;
+  readonly now?: AuditorDependencies["now"];
 } = {}) {
   const evidenceCheckPort = {
     findMemoriesWithStaleEvidence: vi.fn(async () => options.staleEntries ?? [])
@@ -395,7 +431,7 @@ function createAuditor(options: {
       ...(options.omitEventLogRepo === true
         ? {}
         : { eventLogRepo: options.eventLogRepo ?? createPassthroughEventLogPort() }),
-      now: () => "2026-03-27T00:00:00.000Z"
+      now: options.now ?? (() => "2026-03-27T00:00:00.000Z")
     }),
     evidenceCheckPort,
     pointerHealthPort,
