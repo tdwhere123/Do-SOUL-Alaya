@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AlayaCliBridge, AlayaCliBridgeOptions, AlayaCliDaemonRuntime, AlayaCliResult } from "../bridge.js";
@@ -171,4 +172,34 @@ export async function runAlayaCli(
     }
   }
   return exitCode;
+}
+
+function isDirectCliExecution(launcherUrl: string): boolean {
+  if (process.argv[1] === undefined) {
+    return false;
+  }
+  return realpathSync(fileURLToPath(launcherUrl)) === realpathSync(resolve(process.argv[1]));
+}
+
+function flushStdioAndExit(exitCode: number): void {
+  // Drain both stdout and stderr before exit. Writes start stdout then stderr, but the
+  // drains need not complete in that order. macOS pipe buffers are small and a bare
+  // process.exit() drops un-drained output, truncating large --json payloads (e.g. the
+  // 16-tool `tools list --json`). write("", cb) fires after the stream buffer flushes.
+  let pending = 2;
+  const finish = () => {
+    pending -= 1;
+    if (pending === 0) process.exit(exitCode);
+  };
+  process.stdout.write("", finish);
+  process.stderr.write("", finish);
+}
+
+// Launchers pass their own import.meta.url so importing them, or executing this
+// module, does not start the process.
+export async function runDirectAlayaCli(launcherUrl: string): Promise<void> {
+  if (!isDirectCliExecution(launcherUrl)) {
+    return;
+  }
+  flushStdioAndExit(await runAlayaCli());
 }
