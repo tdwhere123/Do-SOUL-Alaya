@@ -4,8 +4,8 @@ import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions }
 // invariant: HealthInbox is a read-only projection over HealthIssueGroup
 // rows. The Inspector is a memory-tooling loopback, not an agent surface;
 // this route only forwards the workspace-scoped GET to the daemon.
-// see also: apps/core-daemon/src/routes/health-inbox.ts
-//           apps/inspector/web/src/pages/HealthInbox.tsx
+// see also: apps/core-daemon/src/routes/garden/health-inbox.ts
+//           apps/inspector/web/src/pages/health-inbox.tsx
 export function registerInspectorHealthInboxRoutes(
   app: Hono,
   options: InspectorProxyOptions

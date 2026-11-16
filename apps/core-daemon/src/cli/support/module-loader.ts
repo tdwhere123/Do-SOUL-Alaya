@@ -7,6 +7,11 @@ import { writeCliFailure } from "../errors/error-reporting.js";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+// Both `src/cli/support` and `dist/cli/support` sit five levels below the repo
+// root. Walk there, then join the built daemon paths, so Vitest loading this
+// TypeScript file and the GitHub-release / dual-launcher dist copies all import
+// `apps/core-daemon/dist/...`. A sibling `../bridge.js` would miss dist when
+// tests execute the source path.
 const repoRoot = resolve(scriptDirectory, "..", "..", "..", "..", "..");
 const bridgeDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/bridge.js");
 const registerDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/register.js");

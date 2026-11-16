@@ -7,8 +7,8 @@ import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions }
 // GET /workspaces/{ws}/evidence/{id}. The latter uses
 // `EvidenceService.findByIdScoped` so a caller cannot read another
 // workspace's evidence by object_id alone.
-// see also: apps/core-daemon/src/routes/memories.ts
-//          apps/core-daemon/src/routes/evidence.ts
+// see also: apps/core-daemon/src/routes/memory/entries/memories.ts
+//          apps/core-daemon/src/routes/memory/entries/evidence.ts
 export function registerInspectorMemoryEntryRoutes(
   app: Hono,
   options: InspectorProxyOptions

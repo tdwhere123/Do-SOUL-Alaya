@@ -207,8 +207,8 @@ export function stubWebgl(supported: boolean): void {
 // nodes carry {id, anchor, label, out_degree, in_degree} and edges carry the
 // full PathRelation in `relation` plus the projected edge fields. node ids are
 // authored as n1/n2/n3 so the existing fg-node-* / fg-link-* selectors hold.
-// see also: apps/core-daemon/src/routes/path-graph.ts
-//           packages/protocol/src/soul/graph.ts SoulPathGraphContract
+// see also: apps/core-daemon/src/routes/workspace/path-graph.ts
+//           packages/protocol/src/relations/graph.ts SoulPathGraphContract
 export function makeFixtureRelation(input: {
   readonly pathId: string;
   readonly sourceObjectId: string;

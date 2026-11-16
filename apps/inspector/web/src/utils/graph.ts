@@ -8,7 +8,7 @@ export interface GraphNodeShape {
 // Node hue basis on the path plane. The path plane carries no origin_kind, so
 // nodes are coloured by their anchor-derived node.kind (memory vs scope) rather
 // than the retired origin classification. Keyed by GraphNode.kind.
-// see also: apps/inspector/web/src/pages/graph-page/ anchorKindToNodeKind / NodeKindLegend
+// see also: apps/inspector/web/src/pages/graph-page/support.tsx anchorKindToNodeKind / GraphLegend
 export const NODE_KIND_BASE_COLOR: Record<string, string> = {
   memory: "#92A8B3", // calm blue-grey — object / object_facet anchors
   scope: "#C9ADA7" // warm clay — obligation / risk_concern / time_concern anchors
@@ -30,8 +30,8 @@ export const NODE_COLOR: Record<string, string> = {
 //   - neutral topology marker (exception_to): muted amber
 // The legacy SoulGraph edge kinds are kept so a mixed payload still colours.
 // Unknown free-string kinds fall back to the neutral grey in computeLinkColor.
-// see also: packages/protocol/src/memory/memory-graph.ts RELATION_KIND_TO_GRAPH_EDGE_TYPE
-//           apps/inspector/web/src/pages/graph-page/ EdgeRelationLegend
+// see also: packages/protocol/src/memory/memory-graph.ts mapRelationKindToGraphEdgeType
+//           apps/inspector/web/src/pages/graph-page/support.tsx GraphLegend
 export const EDGE_TYPE_BASE_COLOR: Record<string, [number, number, number]> = {
   // positive structural
   supports: [126, 168, 132], // sage green — strongest positive contribution
