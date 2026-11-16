@@ -65,4 +65,3 @@ export function sourceLiteralOccurs(body: string, needle: string): boolean {
   if (needle.length === 0) return true;
   return normalizeSourceLiteralNfc(body).includes(normalizeSourceLiteralNfc(needle));
 }
-
