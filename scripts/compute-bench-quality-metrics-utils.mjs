@@ -43,23 +43,19 @@ export function buildCohort(counters, goldHitCount) {
   );
 }
 
-// invariant: plane keys are whatever source_planes the gold candidates
-// exposed; no static plane list. Mirrors diagnostics.ts buildPerPlaneRecallCoverage.
-export function buildPerPlaneRecallCoverage(goldCounts, hitAt5Counts) {
+// Script presentation only: keep the diagnostic owner's plane keys/counts and
+// six-decimal-round its hit_at_5_rate. Division and zero-denominator policy stay
+// on the owner.
+export function roundPerPlaneRecallCoverageRates(coverage) {
   return Object.fromEntries(
-    [...goldCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([plane, goldCount]) => {
-        const hitCount = hitAt5Counts.get(plane) ?? 0;
-        return [
-          plane,
-          {
-            gold_count: goldCount,
-            hit_at_5_count: hitCount,
-            hit_at_5_rate: share(hitCount, goldCount)
-          }
-        ];
-      })
+    Object.entries(coverage).map(([plane, row]) => [
+      plane,
+      {
+        gold_count: row.gold_count,
+        hit_at_5_count: row.hit_at_5_count,
+        hit_at_5_rate: round(row.hit_at_5_rate)
+      }
+    ])
   );
 }
 
@@ -79,15 +75,6 @@ export function buildCountDistribution(counts, denominator) {
         }
       ])
   );
-}
-
-export function isScoreOrderNonMonotonic(scores) {
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > scores[i - 1]) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function readPlaneWithPresence(deliveredResult, goldDiagnostic, field) {

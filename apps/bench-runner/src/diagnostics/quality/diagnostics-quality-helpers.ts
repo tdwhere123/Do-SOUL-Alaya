@@ -197,7 +197,7 @@ export function isDeliveredOrderNonMonotonic(
   );
 }
 
-function isDeliveredScoreOrderNonMonotonic(scores: readonly number[]): boolean {
+export function isDeliveredScoreOrderNonMonotonic(scores: readonly number[]): boolean {
   for (let i = 1; i < scores.length; i++) {
     const current = scores[i];
     const previous = scores[i - 1];
@@ -213,7 +213,8 @@ export function ratio(count: number, total: number): number {
 
 // @anchor per-plane-recall-coverage: shared by buildLongMemEvalQualityMetrics
 // and cli-merge-quality.ts mergeQualityMetrics so single-shard and merged kpi.json carry
-// the same per-plane block shape.
+// the same unrounded per-plane block shape. The offline quality script reuses this
+// owner and applies six-decimal rate rounding only at its adapter.
 export function buildPerPlaneRecallCoverage(
   goldCounts: ReadonlyMap<string, number>,
   hitAt5Counts: ReadonlyMap<string, number>

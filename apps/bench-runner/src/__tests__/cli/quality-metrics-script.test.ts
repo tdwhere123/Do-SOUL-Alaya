@@ -310,6 +310,58 @@ function runQualityScript(value: unknown) {
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
+it("rounds per-plane hit_at_5 rates, missing hits, and localeCompare key order", () => {
+  const result = runQualityScript({
+    questions: [{
+      delivered_results: [],
+      gold: [
+        { object_id: "a", source_planes: ["zeta", "lexical"], final_rank: 1 },
+        { object_id: "b", source_planes: ["lexical"], final_rank: 6 },
+        { object_id: "c", source_planes: ["lexical", "alpha"], final_rank: 9 },
+        { object_id: "d", source_planes: ["beta"], final_rank: 2 },
+        { object_id: "e", source_planes: ["beta"], final_rank: 3 },
+        { object_id: "f", source_planes: ["beta"], final_rank: 8 }
+      ]
+    }]
+  });
+  expect(result.status, result.stderr).toBe(0);
+  const coverage = JSON.parse(result.stdout).per_plane_recall_coverage;
+  expect(Object.keys(coverage)).toEqual(["alpha", "beta", "lexical", "zeta"]);
+  expect(coverage).toEqual({
+    alpha: { gold_count: 1, hit_at_5_count: 0, hit_at_5_rate: 0 },
+    beta: { gold_count: 3, hit_at_5_count: 2, hit_at_5_rate: 0.666667 },
+    lexical: { gold_count: 3, hit_at_5_count: 1, hit_at_5_rate: 0.333333 },
+    zeta: { gold_count: 1, hit_at_5_count: 1, hit_at_5_rate: 1 }
+  });
+});
+
+it.each([
+  { name: "empty", scores: [], rate: 0, evaluable: 0, count: 0 },
+  { name: "single", scores: [0.4], rate: 0, evaluable: 0, count: 0 },
+  { name: "equal", scores: [0.5, 0.5], rate: 0, evaluable: 1, count: 0 },
+  { name: "increasing", scores: [0.2, 0.8], rate: 1, evaluable: 1, count: 1 },
+  { name: "decreasing", scores: [0.8, 0.2], rate: 0, evaluable: 1, count: 0 }
+])("classifies $name delivered score order against the question denominator", ({ scores, rate, evaluable, count }) => {
+  const result = runQualityScript({
+    questions: [{
+      delivered_results: scores.map((relevance_score, index) => ({
+        object_id: `d${index}`,
+        relevance_score
+      })),
+      gold: []
+    }]
+  });
+  expect(result.status, result.stderr).toBe(0);
+  const metrics = JSON.parse(result.stdout);
+  expect(metrics.non_monotonic_rate).toBe(rate);
+  expect(metrics.metadata.longmemeval).toMatchObject({
+    questions_count: 1,
+    non_monotonic_denominator: 1,
+    non_monotonic_count: count,
+    non_monotonic_evaluable_questions: evaluable
+  });
+});
+
 it.each(["missing", "malformed"])("does not emit measured-zero metrics for a %s archive", kind => {
   const root = mkdtempSync(path.join(tmpdir(), "alaya-quality-"));
   try {

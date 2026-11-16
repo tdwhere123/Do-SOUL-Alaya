@@ -11,23 +11,26 @@ import {
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { readGoldObjectIds } from "../apps/bench-runner/dist/diagnostics/gold-object-identities.js";
+import {
+  buildPerPlaneRecallCoverage,
+  isDeliveredScoreOrderNonMonotonic
+} from "../apps/bench-runner/dist/diagnostics/quality/diagnostics-quality-helpers.js";
 import { QualityMetricsSchema } from "../packages/eval/dist/contracts/kpi-quality-schema.js";
 import {
   asArray,
   asStringArray,
   buildCohort,
   buildCountDistribution,
-  buildPerPlaneRecallCoverage,
   countActiveConstraints,
   countPlane,
   createCohortCounters,
   errorMessage,
   hasOwnField,
   isRecord,
-  isScoreOrderNonMonotonic,
   readNumber,
   readPlaneWithPresence,
   readString,
+  roundPerPlaneRecallCoverageRates,
   share
 } from "./compute-bench-quality-metrics-utils.mjs";
 
@@ -303,7 +306,7 @@ function accumulateQuestionStats(questions) {
       const scores = deliveredResults.map((item) => readNumber(item?.relevance_score));
       if (scores.every((score) => score !== null)) {
         nonMonotonicEvaluable += 1;
-        if (isScoreOrderNonMonotonic(scores)) {
+        if (isDeliveredScoreOrderNonMonotonic(scores)) {
           nonMonotonicCount += 1;
         }
       } else {
@@ -450,9 +453,11 @@ function assignDiagnosticsOutput(output, ctx) {
     firstRows.path_expansion?.gold_hit_share ??
     0;
   output.active_constraints_count = activeConstraints.count;
-  output.per_plane_recall_coverage = buildPerPlaneRecallCoverage(
-    goldStats.planeGoldCounts,
-    goldStats.planeHitAt5Counts
+  output.per_plane_recall_coverage = roundPerPlaneRecallCoverageRates(
+    buildPerPlaneRecallCoverage(
+      goldStats.planeGoldCounts,
+      goldStats.planeHitAt5Counts
+    )
   );
 
   output.metadata.longmemeval = {
