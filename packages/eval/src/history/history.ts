@@ -304,68 +304,50 @@ export async function readLatest(
   opts: HistoryEntryQuery & { pointerKind?: HistoryPointerKind } = {}
 ): Promise<KpiPayload | null> {
   const pointerKind = opts.pointerKind ?? "run";
-  if (
-    opts.split !== undefined ||
-    opts.policyShape !== undefined ||
-    opts.simulateReport !== undefined
-  ) {
-    const slugs = await listEntries(layout, benchName);
-    for (let i = slugs.length - 1; i >= 0; i--) {
-      const slug = slugs[i];
-      if (slug === undefined) continue;
-      const entry = await readEntryForDiff(layout, benchName, slug);
+  const requiresCohortScan = opts.split !== undefined ||
+    opts.policyShape !== undefined || opts.simulateReport !== undefined;
+  if (!requiresCohortScan) {
+    const pointerFilename =
+      opts.embeddingProvider === undefined
+        ? latestPointerFilename(pointerKind)
+        : latestProviderPointerFilename(pointerKind, opts.embeddingProvider);
+    const pointerSlug = await readLatestPointerSlug(layout, benchName, pointerFilename);
+    if (pointerSlug !== null) {
+      const pointed = await readEntryForDiff(layout, benchName, pointerSlug);
       if (
-        entry !== null &&
-        matchesHistoryQuery(entry, opts) &&
+        pointed !== null &&
+        (opts.embeddingProvider === undefined ||
+          pointed.embedding_provider === opts.embeddingProvider) &&
         (pointerKind === "run" ||
-          (await entryIsPassing(layout, benchName, slug, entry)))
+          (await entryIsPassing(layout, benchName, pointerSlug, pointed)))
       ) {
-        return entry;
+        return pointed;
       }
     }
-    return null;
-  }
-
-  const pointerFilename =
-    opts.embeddingProvider === undefined
-      ? latestPointerFilename(pointerKind)
-      : latestProviderPointerFilename(pointerKind, opts.embeddingProvider);
-  const pointerSlug = await readLatestPointerSlug(layout, benchName, pointerFilename);
-  if (pointerSlug !== null) {
-    const pointed = await readEntryForDiff(layout, benchName, pointerSlug);
-    if (
-      pointed !== null &&
-      (opts.embeddingProvider === undefined ||
-        pointed.embedding_provider === opts.embeddingProvider) &&
-      (pointerKind === "run" ||
-        (await entryIsPassing(layout, benchName, pointerSlug, pointed)))
-    ) {
-      return pointed;
-    }
-  }
-  const legacyPointer =
-    pointerKind === "passing" && opts.embeddingProvider === undefined
-      ? await readLatestPointerSlug(layout, benchName, LATEST_BASELINE_FILENAME)
-      : null;
-  if (legacyPointer !== null) {
-    const pointed = await readEntryForDiff(layout, benchName, legacyPointer);
-    if (
-      pointed !== null &&
-      (await entryIsPassing(layout, benchName, legacyPointer, pointed))
-    ) {
-      return pointed;
+    const legacyPointer =
+      pointerKind === "passing" && opts.embeddingProvider === undefined
+        ? await readLatestPointerSlug(layout, benchName, LATEST_BASELINE_FILENAME)
+        : null;
+    if (legacyPointer !== null) {
+      const pointed = await readEntryForDiff(layout, benchName, legacyPointer);
+      if (
+        pointed !== null &&
+        (await entryIsPassing(layout, benchName, legacyPointer, pointed))
+      ) {
+        return pointed;
+      }
     }
   }
   const slugs = await listEntries(layout, benchName);
-  if (slugs.length === 0) return null;
   for (let i = slugs.length - 1; i >= 0; i -= 1) {
     const slug = slugs[i];
     if (slug === undefined) continue;
     const entry = await readEntryForDiff(layout, benchName, slug);
     if (
       entry !== null &&
-      (opts.embeddingProvider === undefined ||
-        entry.embedding_provider === opts.embeddingProvider) &&
+      (requiresCohortScan
+        ? matchesHistoryQuery(entry, opts)
+        : opts.embeddingProvider === undefined || entry.embedding_provider === opts.embeddingProvider) &&
       (pointerKind === "run" ||
         (await entryIsPassing(layout, benchName, slug, entry)))
     ) {
