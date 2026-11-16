@@ -261,6 +261,31 @@ describe("provider chat completion", () => {
     expect(caller.signal.aborted).toBe(true);
   });
 
+  it("updates timed-out transport cleanup after observing a late fetch rejection", async () => {
+    vi.useFakeTimers();
+    let rejectFetch!: (cause: unknown) => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const fetchImpl = vi.fn<typeof fetch>(() => new Promise<Response>((_resolve, reject) => {
+      rejectFetch = reject;
+      entered();
+    }));
+    const pending = fetchProviderChatCompletion({ ...CHAT_REQUEST, timeoutMs: 20, fetchImpl })
+      .catch((cause: unknown) => cause);
+    await started;
+    await vi.advanceTimersByTimeAsync(20);
+    const error = await pending;
+    expect(error).toMatchObject({ kind: "timeout", httpStatus: null,
+      transportCleanup: { status: "pending", failures: [] } });
+    const initialCause = (error as Error).cause;
+
+    rejectFetch(new Error("late socket failure"));
+    await vi.waitFor(() => expect(error).toMatchObject({ kind: "timeout", httpStatus: null,
+      transportCleanup: { status: "destroyed", failures: [] } }));
+    expect((error as Error).cause).toBe(initialCause);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("fails closed on a non-OK provider status", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 429 }));
     const error = await fetchProviderChatCompletion({

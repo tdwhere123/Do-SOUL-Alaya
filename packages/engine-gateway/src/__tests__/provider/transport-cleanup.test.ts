@@ -108,6 +108,31 @@ describe("request settlement and transport retirement", () => {
     });
   });
 
+  it("keeps the settled HTTP failure when the caller aborts during destroy", async () => {
+    await withProvider(400, '{"error":{"code":"invalid_request"}}', async (request, requests, agent) => {
+      const caller = new AbortController();
+      const destroy = agent.destroy.bind(agent);
+      vi.spyOn(agent, "destroy").mockImplementation(async () => {
+        caller.abort();
+        // The promise overload redispatches through this.destroy and would re-enter the spy.
+        await new Promise<void>(resolve => destroy(resolve));
+      });
+      let observed: unknown;
+      const error = await executeProviderChatCompletion({ ...request, abortSignal: caller.signal }, policy, {
+        onAttemptFailure: (_failure, cause) => { observed = cause; }
+      }).catch((cause: unknown) => cause);
+      expect(caller.signal.aborted).toBe(true);
+      expect(agent.destroy).toHaveBeenCalledTimes(1);
+      expect(requests()).toBe(1);
+      expect(error).toBe(observed);
+      expect(error).toMatchObject({ kind: "http_error", httpStatus: 400, providerCode: "invalid_request",
+        transportCleanup: { status: "destroyed", failures: [] } });
+      expect(error).not.toHaveProperty("cause");
+      expect(providerExecutionFailureOf(error)).toMatchObject({ retryCount: 0,
+        retryClassification: "failure_non_retryable_4xx", failures: [{ attempt: 1, kind: "http_error" }] });
+    });
+  });
+
   it("preserves primary HTTP failure and separately records a failing retry observer", async () => {
     await withProvider(503, "busy", async (request, requests) => {
       const observerError = new Error("receipt observer failed");

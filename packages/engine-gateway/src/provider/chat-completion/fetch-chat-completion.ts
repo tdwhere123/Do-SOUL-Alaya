@@ -43,13 +43,7 @@ export async function fetchProviderChatCompletion(
   const normalize = (error: unknown) => normalizeTransportError(error, request.abortSignal,
     deadline.signal, knownStatus, responseSnapshot?.());
   try {
-    return await deadline.settle(
-      runProviderChatRequest(request, deadline.signal,
-        (status) => { knownStatus = status; },
-        (snapshot) => { responseSnapshot = snapshot; }, cleanup,
-        error => { primaryFailure = normalize(error); return primaryFailure; },
-        () => { requestSettled = true; deadline.dispose(); })
-    );
+    return await deadline.settle(runRequest());
   } catch (error) {
     const primary = requestSettled && primaryFailure !== undefined ? primaryFailure : normalize(error);
     cleanup.bind(primary);
@@ -57,37 +51,34 @@ export async function fetchProviderChatCompletion(
   } finally {
     deadline.dispose();
   }
-}
 
-async function runProviderChatRequest(
-  request: ProviderChatCompletionRequest,
-  signal: AbortSignal,
-  observeStatus: (status: number) => void,
-  observeResponse: (snapshot: () => ProviderHttpResponseEvidence) => void,
-  cleanup: ReturnType<typeof createTransportCleanupOwner>,
-  normalize: (error: unknown) => Error,
-  settleRequest: () => void
-): Promise<ProviderChatCompletionResult> {
-  const url = providerChatCompletionsUrl(request.providerUrl, request.env);
-  const transport = await createProviderTransport(url, request, signal);
-  if (transport.owned) cleanup.acquired();
-  let completed = false;
-  try {
-    const response = await postChatCompletion(request, signal, url, transport.dispatcher);
-    const result = await readChatCompletionResponse(request, response, observeStatus, observeResponse);
-    completed = true;
-    if (!transport.owned) return result;
-    const outcome: ProviderChatCompletionResult = {
-      ...result, get transportCleanup() { return providerTransportCleanupOf(outcome); }
-    };
-    cleanup.bind(outcome);
-    return outcome;
-  } catch (error) {
-    throw normalize(error);
-  } finally {
-    // Deadlines and caller cancellation govern the request, not its retirement.
-    settleRequest();
-    if (transport.owned) await cleanup.retire(transport.dispatcher, completed);
+  async function runRequest(): Promise<ProviderChatCompletionResult> {
+    const signal = deadline.signal;
+    const url = providerChatCompletionsUrl(request.providerUrl, request.env);
+    const transport = await createProviderTransport(url, request, signal);
+    if (transport.owned) cleanup.acquired();
+    let completed = false;
+    try {
+      const response = await postChatCompletion(request, signal, url, transport.dispatcher);
+      const result = await readChatCompletionResponse(request, response,
+        (status) => { knownStatus = status; },
+        (snapshot) => { responseSnapshot = snapshot; });
+      completed = true;
+      if (!transport.owned) return result;
+      const outcome: ProviderChatCompletionResult = {
+        ...result, get transportCleanup() { return providerTransportCleanupOf(outcome); }
+      };
+      cleanup.bind(outcome);
+      return outcome;
+    } catch (error) {
+      primaryFailure = normalize(error);
+      throw primaryFailure;
+    } finally {
+      // Deadlines and caller cancellation govern the request, not its retirement.
+      requestSettled = true;
+      deadline.dispose();
+      if (transport.owned) await cleanup.retire(transport.dispatcher, completed);
+    }
   }
 }
 
