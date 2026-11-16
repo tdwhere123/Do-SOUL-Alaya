@@ -86,8 +86,10 @@ describe("statement key retention and evidence coverage", () => {
     expect(value.coverage[1]![1]).toBeCloseTo(0.5 / Math.sqrt(1.25), 6);
     expect(value.coverage[2]).toEqual([null, null]);
     expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 17 - 1 + 1, statements: 2 });
-    expect(restrictStatementAssociation(value, root => root !== "b")).toEqual({ roots: ["a", "c"], statements: 2,
+    const restricted = restrictStatementAssociation(value, root => root !== "b");
+    expect(restricted).toEqual({ roots: ["a", "c"], statements: 2,
       coverage: [value.coverage[1], value.coverage[2]], openings: [value.openings![1], value.openings![2]], decision: value.decision });
+    expect(restricted.decision).toBe(value.decision);
   });
 
   it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {
@@ -205,6 +207,31 @@ describe("statement key retention and evidence coverage", () => {
     expect(bindEvidenceDemands([condition("s")], [{ vector: { status: "available", embedding: Float32Array.of(1),
       profile_id: "p", input_digest: sourceEmbeddingInputDigest("s") } as never }], { status: "available", profile_id: "p" } as never, "derived"))
       .toMatchObject({ status: "ready", derived: true });
+  });
+
+  it("reads every nominated root in order, including empty-key roots, and does not reread after a keyed failure", () => {
+    const order: string[] = [];
+    const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
+    retained.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+    const value = retained.associate(["a", "z", "b"], (root, keys, anchors) => {
+      order.push(`${root}:${keys.length}`);
+      return witnesses()(root, keys, anchors);
+    })!;
+    expect(order).toEqual(["a:1", "z:0", "b:0"]);
+    expect(value.coverage[0]![0]).toBeCloseTo(1, 6);
+    expect(value.coverage[1]).toEqual([null]);
+    expect(value.coverage[2]).toEqual([null]);
+    const later: string[] = [];
+    const failed = new StatementKeyRetention(meter(), () => undefined, ready([1, 0]));
+    failed.consider("a", 1, Float32Array.of(1, 0), key("a0"));
+    failed.consider("b", 1, Float32Array.of(1, 0), key("b0"));
+    expect(failed.associate(["a", "b"], (root, keys, anchors) => {
+      later.push(root);
+      return root === "a" ? witnesses()(root, keys, anchors)
+        : { status: "unknown", reason: "statement_witness_message_binding", resources: zero };
+    })).toBeUndefined();
+    expect(later).toEqual(["a", "b"]);
+    expect(failed.associate(["a"], () => { throw new Error("abandoned association must not read again"); })).toBeUndefined();
   });
 
   it("leaves the whole association unavailable on an unknown or misaligned witness read", () => {

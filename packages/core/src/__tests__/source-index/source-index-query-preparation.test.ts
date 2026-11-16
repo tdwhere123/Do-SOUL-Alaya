@@ -334,6 +334,56 @@ describe("simulated query-preparation adapters, no native inference", () => {
       submitted_inputs: 0, external_api_attempts: null, binding_work: "unknown", execution_work: "not_run" });
   });
 
+  it("captures evidence statements before bind and prepares them after the original through the shared binding", async () => {
+    const selected = selectionFor(profile());
+    const statements = ["evidence one", "evidence two"];
+    const texts: string[] = [];
+    const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
+      texts.push(inputs[0]!.text);
+      return embedded(inputs);
+    });
+    const bind = vi.fn(async () => readyBind(selected, embed));
+    const pending = SourceIndexAcquisition.prepareQuery({
+      navigation: NAVIGATION, supplemental_navigation: "hint text", evidence_statements: statements,
+      selection: selected, bind, signal: new AbortController().signal, remainingMs: () => 5_000
+    });
+    statements.push("mutated after capture");
+    const result = await pending;
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(texts).toEqual([NAVIGATION, "evidence one", "evidence two", "hint text"]);
+    expect(result.evidence).toHaveLength(2);
+    expect(result.evidence?.every(route => route.receipt.status === "ready")).toBe(true);
+    expect(result.supplemental?.receipt.status).toBe("ready");
+  });
+
+  it("refuses remote evidence inference without submitting those statements or replacing original work", async () => {
+    const remote = selectionFor(profile({ provider_kind: "opaque-remote-api" }));
+    const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => embedded(inputs));
+    const result = await SourceIndexAcquisition.prepareQuery({
+      navigation: NAVIGATION, evidence_statements: ["evidence one"], selection: remote,
+      bind: async () => readyBind(remote, embed), signal: new AbortController().signal, remainingMs: () => 5_000
+    });
+    expect(embed.mock.calls.map(([inputs]) => inputs[0]?.text)).toEqual([NAVIGATION]);
+    expect(result.receipt.status).toBe("ready");
+    expect(result.vector.status).toBe("available");
+    expect(result.evidence?.[0]).toMatchObject({
+      vector: { status: "unavailable", reason: "evidence_statement_requires_local_inference" },
+      receipt: { status: "unavailable", reason: "evidence_statement_requires_local_inference",
+        submitted_inputs: 0, method: "not_run" }
+    });
+  });
+
+  it("gives each capturePreparedQuery consumer a private embedding view", async () => {
+    const ready = await prepare({});
+    const captured = SourceIndexAcquisition.capturePreparedQuery(ready);
+    expect(captured.vector.status).toBe("available");
+    if (captured.vector.status !== "available" || ready.vector.status !== "available") throw new Error("expected available");
+    const first = captured.vector.embedding;
+    first[0] = 0;
+    expect(captured.vector.embedding[0]).not.toBe(0);
+    expect(ready.vector.embedding[0]).not.toBe(0);
+  });
+
   it("lexical control does not bind or embed and reports not_requested", async () => {
     const bind = vi.fn(async () => { throw new Error("bind must not run"); });
     const prepared = await SourceIndexAcquisition.prepareQuery({

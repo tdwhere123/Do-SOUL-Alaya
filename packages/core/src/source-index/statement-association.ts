@@ -1,7 +1,7 @@
 import { statementEventIntervals } from "@do-soul/alaya-graph-algorithms";
-import { hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type QuestionTimePreference,
-  type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead, type SourceIndexTarget,
-  type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type HostOccurrence,
+  type QuestionTimePreference, type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead,
+  type SourceIndexTarget, type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
 
 /** A statement key reaches its raw root once per lexical lane, like a best vector window. */
@@ -131,6 +131,73 @@ export function statementKeyCosine(key: Float32Array, demand: Float32Array): num
   return dot / Math.sqrt(keyNorm * demandNorm);
 }
 
+type StatementWitnessFact = Extract<SourceIndexStatementWitnessRead, { status: "ready" }>["witnesses"][number];
+
+/** A reply depends on the prompt it answers: an assistant witness takes the user message before it. */
+function assistantPromptSpan(messages: readonly Pick<HostOccurrence, "role" | "utf8_span">[], start: number): readonly [number, number] | null {
+  return messages.reduce<readonly [number, number] | null>((found, message) => {
+    const at = message.utf8_span;
+    return message.role === "user" && at[1] <= start && (found === null || at[1] > found[1]) ? at : found;
+  }, null);
+}
+
+function scoreRootStatements(
+  kept: readonly Retained[], facts: readonly StatementWitnessFact[],
+  times: readonly ("satisfied" | "violated" | "unknown")[] | undefined,
+  demands: Extract<EvidenceDemands, { status: "ready" }>,
+  anchorIndex: ReadonlyMap<string, number>, messages: readonly Pick<HostOccurrence, "role" | "utf8_span">[],
+  windowActive: boolean
+): { coverage: (number | null)[]; possible: boolean[]; cells: ((readonly [number, number]) | null)[] } {
+  const open = Array<boolean>(demands.vectors.length).fill(windowActive && kept.length === 0);
+  const cells: ((readonly [number, number]) | null)[] = [];
+  const coverage = demands.vectors.map((vector, index) => {
+    const condition = demands.conditions[index]!;
+    let best: number | null = null;
+    let span: readonly [number, number] | null = null;
+    for (let position = 0; position < kept.length; position++) {
+      const key = kept[position]!;
+      const fact = facts[position]!;
+      const time = times?.[position] ?? "satisfied";
+      if (fact.role !== condition.speaker || condition.anchors.length > 0
+        && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") {
+        continue;
+      }
+      if (time === "unknown") { open[index] = true; continue; }
+      const value = statementKeyCosine(key.embedding, vector);
+      if (value > (best ?? -Infinity)) {
+        best = value;
+        span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span];
+      }
+    }
+    if (span !== null && condition.speaker === "assistant") {
+      const asked = assistantPromptSpan(messages, span[0]);
+      cells.push(asked === null ? span : [asked[0], span[1]]);
+    } else {
+      cells.push(span);
+    }
+    return best;
+  });
+  return { coverage, possible: open, cells };
+}
+
+/** The opening covers every necessary witness message of the root. Keys nominate witnesses;
+ * physical messages, including unkeyed ones, define ordinary units. */
+function evidenceOpening(
+  coverage: readonly (number | null)[],
+  cells: readonly ((readonly [number, number]) | null)[],
+  messages: readonly Pick<HostOccurrence, "utf8_span">[]
+): EvidenceOpening | null {
+  let top = -1, lo = Infinity, hi = -Infinity;
+  coverage.forEach((value, index) => {
+    const cell = cells[index];
+    if (value === null || cell == null) return;
+    lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]);
+    if (top < 0 || value > coverage[top]!) top = index;
+  });
+  const first = messages[0]?.utf8_span[1] ?? Infinity;
+  return top >= 0 ? { statement: top, span: [lo, hi] } : Number.isFinite(first) ? { statement: null, span: [0, first] } : null;
+}
+
 /** Optional retention cannot cancel the underlying scan or nomination. */
 export class StatementKeyRetention {
   private readonly byRoot = new Map<string, Retained[]>();
@@ -220,59 +287,43 @@ export class StatementKeyRetention {
     const openings: (EvidenceOpening | null)[] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
-      const read = witnesses?.(root, kept.map(row => row.key), anchors);
-      if (kept.length > 0 && (read === undefined || read.status !== "ready" || read.witnesses.length !== kept.length)) {
-        const reason = read === undefined ? "statement_witness_reader_absent" : read.status === "ready" ? "statement_witness_misaligned" : read.reason;
-        this.abandon(reason, reason.startsWith("statement_witness_read_budget")); return undefined;
-      }
-      const facts = read?.status === "ready" ? read.witnesses : [];
-      const inventory = read?.status === "ready" && read.inventory.status === "captured" ? read.inventory.inventory : undefined;
-      const occurrences = inventory?.occurrences ?? [];
-      if (!this.fund(occurrences.length * (statements + 1), occurrences.length * 8, "statement witness physical inventory")) return undefined;
-      const messages = occurrences.filter(hostOccurrenceIsMessage);
-      const session = read?.status === "ready" && read.session_time !== null ? civilDay(read.session_time) : null;
-      let times: readonly ("satisfied" | "violated" | "unknown")[] | undefined;
-      if (window !== undefined) {
-        const characters = facts.reduce((sum, fact) => sum + fact.statement.length, 0);
-        if (!this.fund(characters + facts.length, 8 * characters + 64, "statement key event time")) return undefined;
-        times = facts.map(fact => keyTime(fact.statement, session, window));
-      }
-      const open = Array<boolean>(statements).fill(window !== undefined && kept.length === 0);
-      const cells: ((readonly [number, number]) | null)[] = [];
-      // A reply depends on the prompt it answers: an assistant witness takes the user message before it.
-      const prompt = (start: number) => messages.reduce<readonly [number, number] | null>((found, message) => {
-        const at = message.utf8_span;
-        return message.role === "user" && at[1] <= start && (found === null || at[1] > found[1]) ? at : found;
-      }, null);
-      coverage.push(demands.vectors.map((vector, index) => {
-        const condition = demands.conditions[index]!;
-        let best: number | null = null, span: (readonly [number, number]) | null = null;
-        kept.forEach((key, position) => {
-          const fact = facts[position]!, time = times?.[position] ?? "satisfied";
-          if (fact.role !== condition.speaker || condition.anchors.length > 0
-            && !condition.anchors.some(anchor => fact.anchors[anchorIndex.get(anchor)!] === true) || time === "violated") return;
-          if (time === "unknown") { open[index] = true; return; }
-          const value = statementKeyCosine(key.embedding, vector);
-          if (value > (best ?? -Infinity)) { best = value; span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span]; }
-        });
-        const asked = span !== null && condition.speaker === "assistant" ? prompt((span as readonly [number, number])[0]) : null;
-        cells.push(span === null || asked === null ? span : [asked[0], (span as readonly [number, number])[1]]);
-        return best;
-      }));
-      possible.push(open); spans.push(cells);
-      // The opening covers every message of the root that necessarily witnesses some condition.
-      const row = coverage.at(-1)!;
-      let top = -1, lo = Infinity, hi = -Infinity;
-      row.forEach((value, index) => { const cell = cells[index]; if (value === null || cell == null) return;
-        lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]); if (top < 0 || value > row[top]!) top = index; });
-      // Keys nominate witnesses; physical messages, including unkeyed ones, define ordinary units.
-      const first = messages[0]?.utf8_span[1] ?? Infinity;
-      openings.push(top >= 0 ? { statement: top, span: [lo, hi] } : Number.isFinite(first) ? { statement: null, span: [0, first] } : null);
+      const loaded = this.loadRootWitness(root, kept, anchors, statements, witnesses, window);
+      if (loaded === undefined) return undefined;
+      const scored = scoreRootStatements(kept, loaded.facts, loaded.times, demands, anchorIndex, loaded.messages, window !== undefined);
+      coverage.push(scored.coverage);
+      possible.push(scored.possible);
+      spans.push(scored.cells);
+      openings.push(evidenceOpening(scored.coverage, scored.cells, loaded.messages));
     }
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
       ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
+  }
+
+  private loadRootWitness(
+    root: string, kept: readonly Retained[], anchors: readonly string[], statements: number,
+    witnesses: StatementWitnessReader | undefined, window: EvidenceWindow | undefined
+  ): { facts: readonly StatementWitnessFact[]; messages: readonly HostOccurrence[];
+    times?: readonly ("satisfied" | "violated" | "unknown")[] } | undefined {
+    const read = witnesses?.(root, kept.map(row => row.key), anchors);
+    if (kept.length > 0 && (read === undefined || read.status !== "ready" || read.witnesses.length !== kept.length)) {
+      const reason = read === undefined ? "statement_witness_reader_absent" : read.status === "ready" ? "statement_witness_misaligned" : read.reason;
+      this.abandon(reason, reason.startsWith("statement_witness_read_budget")); return undefined;
+    }
+    const facts = read?.status === "ready" ? read.witnesses : [];
+    const inventory = read?.status === "ready" && read.inventory.status === "captured" ? read.inventory.inventory : undefined;
+    const occurrences = inventory?.occurrences ?? [];
+    if (!this.fund(occurrences.length * (statements + 1), occurrences.length * 8, "statement witness physical inventory")) return undefined;
+    const messages = occurrences.filter(hostOccurrenceIsMessage);
+    const session = read?.status === "ready" && read.session_time !== null ? civilDay(read.session_time) : null;
+    let times: readonly ("satisfied" | "violated" | "unknown")[] | undefined;
+    if (window !== undefined) {
+      const characters = facts.reduce((sum, fact) => sum + fact.statement.length, 0);
+      if (!this.fund(characters + facts.length, 8 * characters + 64, "statement key event time")) return undefined;
+      times = facts.map(fact => keyTime(fact.statement, session, window));
+    }
+    return { facts, messages, times };
   }
 }
 
