@@ -89,19 +89,33 @@ export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
   limits: SourceIndexProducerLimits;
 }>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
-type Pass = {
-  signal: AbortSignal;
-  deadline: number;
-  binding: SourceIndexProducerPassReceipt["binding"];
-  outcome: PassOutcome;
-  spent: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
-  capturePages: number;
-  visitedRoots: number;
-  reclamation: { pages: number; projections: number; targets: number; generations: number };
-  vectorReclamation: { status: "not_run" | "available" | "unavailable";
-    pages: number; vectors: number; windows: number; targets: number; generations: number };
-  limits: SourceIndexProducerLimits;
-};
+/** One shared allowance and receipt shape for active, occupied and stopped passes. */
+class Pass {
+  public binding: SourceIndexProducerPassReceipt["binding"] = { status: "not_run" };
+  public outcome: PassOutcome = { status: "settled", reason: "pass_complete" };
+  public readonly spent = { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 };
+  public capturePages = 0;
+  public visitedRoots = 0;
+  public readonly reclamation = { pages: 0, projections: 0, targets: 0, generations: 0 };
+  public readonly vectorReclamation: { status: "not_run" | "available" | "unavailable";
+    pages: number; vectors: number; windows: number; targets: number; generations: number } = {
+      status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0
+    };
+
+  public constructor(readonly signal: AbortSignal, readonly deadline: number, readonly limits: SourceIndexProducerLimits) {}
+
+  public chargeNative(resources: Readonly<{ work: number; native_bytes: number }>): void {
+    this.spent.work += resources.work;
+    this.spent.native_bytes += resources.native_bytes;
+  }
+
+  public receipt(outcome: PassOutcome, startedAt?: number): SourceIndexProducerPassReceipt {
+    return { ...outcome, binding: this.binding, resources: { ...this.spent }, accounting: "lower_bound", limits: this.limits,
+      visited_roots: this.visitedRoots, capture_pages: this.capturePages, reclamation: this.reclamation,
+      vector_reclamation: this.vectorReclamation, model_execution_work: "unknown", warmup: "not_separately_measured",
+      elapsed_ms: startedAt === undefined ? 0 : performance.now() - startedAt };
+  }
+}
 
 /** Conservative private UTF-8 byte window, not the observation-chunk policy. */
 export function sourceIndexWindowBytes(maxInputTokens: number): number {
@@ -174,12 +188,8 @@ export class SourceIndexProducer {
       : SourceEmbeddingRepresentationSchema.parse(structuredClone(representation));
     const limits = restrictPassLimits(this.limits, remaining);
     if (this.inFlight !== null || this.stopping && !this.started) {
-      return { status: this.stopping ? "stopped" : "busy", reason: this.stopping ? "producer_stopped" : "producer_occupied",
-        binding: { status: "not_run" },
-        resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
-        accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
-        visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
-        vector_reclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
+      return new Pass(this.signal.signal, 0, limits).receipt({ status: this.stopping ? "stopped" : "busy",
+        reason: this.stopping ? "producer_stopped" : "producer_occupied" });
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
@@ -226,18 +236,13 @@ export class SourceIndexProducer {
     const started = performance.now();
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), this.limits.stepDeadlineMs);
-    const pass: Pass = { signal: AbortSignal.any([this.signal.signal, deadline.signal]),
-      deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
-      outcome: { status: "settled", reason: "pass_complete" },
-      spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0,
-      reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
-      vectorReclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 }, limits };
+    const pass = new Pass(AbortSignal.any([this.signal.signal, deadline.signal]),
+      Date.now() + this.limits.stepDeadlineMs, limits);
     try {
       await this.reconcilePass(pass, representation, windowing);
     } catch (error) {
       if (error instanceof SourceIndexOperationError) {
-        pass.spent.work += error.resources.work;
-        pass.spent.native_bytes += error.resources.native_bytes;
+        pass.chargeNative(error.resources);
       }
       const reason = boundedProducerFailureReason(error instanceof Error ? error.message : String(error));
       pass.outcome = { status: "failed", reason };
@@ -246,9 +251,7 @@ export class SourceIndexProducer {
     // A deadline may precede native settlement; these are observed lower bounds, not a native-call census.
     const outcome: PassOutcome = this.signal.signal.aborted ? { status: "stopped", reason: "producer_stopped" }
       : deadline.signal.aborted || Date.now() >= pass.deadline ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
-    return { ...outcome, binding: pass.binding, resources: { ...pass.spent }, accounting: "lower_bound", limits,
-      visited_roots: pass.visitedRoots, capture_pages: pass.capturePages, reclamation: pass.reclamation,
-      vector_reclamation: pass.vectorReclamation, model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
+    return pass.receipt(outcome, started);
   }
 
   private async reconcilePass(pass: Pass, representation?: SourceEmbeddingRepresentation, windowing?: SourceIndexWindowing): Promise<void> {
@@ -260,21 +263,7 @@ export class SourceIndexProducer {
       .then(value => ({ value }), error => ({ error }));
     if (pending === null) pass.outcome = { status: "busy", reason: "producer_occupied" };
     let tracked: SourceEmbeddingBindingResult | undefined;
-    const seen = new Set<string>();
-    let wrapped = false;
-    for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
-      // nextWorkspace clears afterWorkspace when the ring ends. Wrap once so a later pass
-      // can resume the first incomplete workspace after visiting a later empty one.
-      let workspace = this.nextWorkspace();
-      if (workspace === null && !wrapped) {
-        wrapped = true;
-        this.vectorFirstOnSingleSlot = !this.vectorFirstOnSingleSlot;
-        workspace = this.nextWorkspace();
-      }
-      if (workspace === null || seen.has(workspace)) return;
-      seen.add(workspace);
-      // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
-      this.afterWorkspace = workspace;
+    for (const workspace of this.scheduledWorkspaces(pass)) {
       this.reclaimVectors(workspace, pass);
       const singleSlot = pass.limits.maxRootsPerPass - pass.visitedRoots === 1
         || pass.limits.maxCapturePages - pass.capturePages === 1;
@@ -308,13 +297,34 @@ export class SourceIndexProducer {
     }
   }
 
+  /** Own the wrap-once ring and cursor advance without adding an asynchronous boundary to workspace fill. */
+  private *scheduledWorkspaces(pass: Pass): Generator<string> {
+    const seen = new Set<string>();
+    let wrapped = false;
+    for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
+      // nextWorkspace clears afterWorkspace when the ring ends. Wrap once so a later pass
+      // can resume the first incomplete workspace after visiting a later empty one.
+      let workspace = this.nextWorkspace();
+      if (workspace === null && !wrapped) {
+        wrapped = true;
+        this.vectorFirstOnSingleSlot = !this.vectorFirstOnSingleSlot;
+        workspace = this.nextWorkspace();
+      }
+      if (workspace === null || seen.has(workspace)) return;
+      seen.add(workspace);
+      // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
+      this.afterWorkspace = workspace;
+      yield workspace;
+    }
+  }
+
   /** One retired-only page per visited workspace, charged before preparation from the shared allowance. */
   private reclaimVectors(workspaceId: string, pass: Pass): void {
     const left = remainingBudget(pass.limits, pass.spent);
     if (pass.limits.maxCapturePages === 0 || left.work < 24 || left.native_bytes < 316) return;
     const result = this.lifecycle.reclaimVectorPage(workspaceId, pass.limits.capturePage,
       { work: Math.floor(left.work / 4), native_bytes: Math.floor(left.native_bytes / 4) });
-    pass.spent.work += result.resources.work; pass.spent.native_bytes += result.resources.native_bytes;
+    pass.chargeNative(result.resources);
     pass.vectorReclamation.status = result.status;
     if (result.status === "unavailable") {
       this.input.warn("source index vector reclamation unavailable", { workspace_id: workspaceId, reason: result.reason });
@@ -339,8 +349,7 @@ export class SourceIndexProducer {
     this.lexicalWork = work;
     let result: SourceIndexLexicalPassResult;
     try { result = await work; } finally { if (this.lexicalWork === work) this.lexicalWork = null; }
-    pass.spent.work += result.resources.work;
-    pass.spent.native_bytes += result.resources.native_bytes;
+    pass.chargeNative(result.resources);
     pass.visitedRoots += result.visited_roots;
     pass.capturePages += result.capture_pages;
     for (const key of ["pages", "projections", "targets", "generations"] as const) pass.reclamation[key] += result.reclamation[key];
@@ -391,8 +400,7 @@ export class SourceIndexProducer {
       pass.capturePages++;
       const result = this.lifecycle.capture(workspaceId, generation.generation_id, this.limits.capturePage,
         remainingBudget(pass.limits, pass.spent));
-      pass.spent.work += result.resources.work;
-      pass.spent.native_bytes += result.resources.native_bytes;
+      pass.chargeNative(result.resources);
       generation = result.generation;
       if (generation.reason !== "enumeration_page" || result.resources.work === 0) break;
     }
@@ -416,8 +424,7 @@ export class SourceIndexProducer {
       cursor.after = target.root_key;
       const pending = this.lifecycle.pendingWindows(workspace, generationId, target.root_key, 1,
         remainingBudget(pass.limits, pass.spent));
-      pass.spent.work += pending.resources.work;
-      pass.spent.native_bytes += pending.resources.native_bytes;
+      pass.chargeNative(pending.resources);
       if (pending.status === "stale" || pending.status === "superseded" || pending.status === "unbound") {
         return { status: pending.status, reason: boundedProducerFailureReason(pending.reason) };
       }
@@ -425,8 +432,7 @@ export class SourceIndexProducer {
       const result = await this.backfill.step({ selection, generation_id: generationId,
         root_key: target.root_key, binding, budget: remainingBudget(pass.limits, pass.spent),
         deadline_ms: pass.deadline, signal: pass.signal });
-      pass.spent.work += result.resources.work;
-      pass.spent.native_bytes += result.resources.native_bytes;
+      pass.chargeNative(result.resources);
       pass.spent.model_inputs += result.resources.model_inputs_submitted;
       pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
       if (result.status === "root_complete") continue;

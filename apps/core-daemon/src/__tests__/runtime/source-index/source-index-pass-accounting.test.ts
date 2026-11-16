@@ -21,13 +21,19 @@ it("reports no visits and effective restrictions when another pass is occupied o
     return { status: "unsupported", reason: "runtime_missing" };
   } });
   const limits = { maxRootsPerPass: 0, maxCapturePages: 0, work: 0 };
+  const idle = { binding: { status: "not_run" }, resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
+    accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0,
+    visited_roots: 0, capture_pages: 0, reclamation: { pages: 0, projections: 0, targets: 0, generations: 0 },
+    vector_reclamation: { status: "not_run", pages: 0, vectors: 0, windows: 0, targets: 0, generations: 0 },
+    limits: expect.objectContaining(limits) };
   try {
     const running = producer.runPass(limits);
-    expect(await producer.runPass(limits)).toMatchObject({ status: "busy", visited_roots: 0, capture_pages: 0, limits });
+    expect(await producer.runPass(limits)).toEqual({ ...idle, status: "busy", reason: "producer_occupied" });
     release();
-    expect(await running).toMatchObject({ visited_roots: 0, capture_pages: 0, limits });
+    expect(await running).toEqual({ ...idle, status: "unsupported", reason: "runtime_missing",
+      binding: { status: "unsupported", reason: "runtime_missing" }, elapsed_ms: expect.any(Number) });
     await producer.stop();
-    expect(await producer.runPass(limits)).toMatchObject({ status: "stopped", visited_roots: 0, capture_pages: 0, limits });
+    expect(await producer.runPass(limits)).toEqual({ ...idle, status: "stopped", reason: "producer_stopped" });
   } finally { release(); await producer.stop(); database.close({ optimize: false }); }
 });
 
