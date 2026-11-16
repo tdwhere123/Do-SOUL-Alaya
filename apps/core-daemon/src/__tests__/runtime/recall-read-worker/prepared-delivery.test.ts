@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { InformationIndexSchema, type InformationIndex } from "@do-soul/alaya-protocol";
-import { recallExecutionRetention } from "@do-soul/alaya-core";
+import { CoreError, recallExecutionRetention } from "@do-soul/alaya-core";
 import {
   acknowledgeWorkerDelivery,
   discardWorkerDelivery,
@@ -61,5 +61,35 @@ describe("worker recall delivery acknowledgment", () => {
     })).toThrow(/expired or discarded/);
     expect(discardWorkerDelivery(runtime, "unknown-preparation")).toBeNull();
     recallExecutionRetention.invalidate("released-on-discard");
+  });
+
+  it("refuses ACK and discard from a different runtime without issuing, then the owner can still settle", () => {
+    const owner = {} as RecallReadWorkerRuntime;
+    const stranger = {} as RecallReadWorkerRuntime;
+    const issue = vi.fn();
+    const receipt = { schema_version: 1 as const };
+    const preparationId = prepareWorkerDelivery(owner, {
+      index, execution_receipt: receipt, issue, execution_id: "foreign-runtime-settle"
+    } as never, {});
+    const foreignAck = () => acknowledgeWorkerDelivery(stranger, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    });
+    const foreignDiscard = () => discardWorkerDelivery(stranger, preparationId);
+    for (const run of [foreignAck, foreignDiscard]) {
+      try {
+        run();
+        expect.fail("expected CONFLICT");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CoreError);
+        expect((error as CoreError).code).toBe("CONFLICT");
+        expect((error as Error).message).toMatch(/belongs to another runtime/);
+      }
+    }
+    expect(issue).not.toHaveBeenCalled();
+    expect(acknowledgeWorkerDelivery(owner, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    })).toBe(receipt);
+    expect(issue).toHaveBeenCalledOnce();
+    recallExecutionRetention.invalidate("foreign-runtime-settle");
   });
 });

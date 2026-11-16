@@ -60,7 +60,7 @@ export function discardWorkerDelivery(
 export function acknowledgeWorkerDelivery(
   runtime: RecallReadWorkerRuntime,
   payload: WorkerOperationPayload<"conditionalField.acknowledge">
-): Execution["execution_receipt"] | null {
+): Execution["execution_receipt"] {
   const id = payload.preparation_id;
   const prepared = preparedFor(runtime, id);
   if (prepared === undefined) throw new Error("Recall preparation expired or discarded");
@@ -75,7 +75,7 @@ export function acknowledgeWorkerDelivery(
 }
 
 function settlePrepared(id: string, prepared: Prepared,
-  acknowledgePayload: WorkerOperationPayload<"conditionalField.acknowledge">): Execution["execution_receipt"] | null {
+  acknowledgePayload: WorkerOperationPayload<"conditionalField.acknowledge">): Execution["execution_receipt"] {
   // A retried or first acknowledgement must describe the same prepared membership;
   // a re-issued envelope may never substitute entries after the fact.
   const issuedIds = acknowledgePayload.issued_entry_ids;
