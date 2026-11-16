@@ -1,14 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import { SoulActiveConstraintSchema } from "@do-soul/alaya-protocol";
 import {
   BoundedRequestSchema,
   parseConditionalFieldRecallPayload,
+  parseWorkerOperation,
   parseWorkerOperationPayload,
   parseWorkerOperationResult,
+  type ParsedWorkerOperation,
   type WorkerOperationPayload
 } from "../../../runtime/recall-read-worker/operation-schemas.js";
-import { RECALL_READ_WORKER_OPERATIONS } from "../../../runtime/recall-read-worker/protocol.js";
+import type { runMemoryOperation } from "../../../runtime/recall-read-worker/memory-operations.js";
+import {
+  RECALL_READ_WORKER_OPERATIONS,
+  type RecallReadWorkerOperation
+} from "../../../runtime/recall-read-worker/protocol.js";
 
 const CLOCK = "2026-09-10T00:00:00.000Z";
 
@@ -166,4 +172,71 @@ describe("recall read worker operation schemas", () => {
       authorizedScopes: []
     })).toThrow();
   });
+
+  it("keeps parse-owner operation/payload pairing and rejects illegal pairs at compile time", () => {
+    const parsed = parseWorkerOperation("memory.findByIds", {
+      workspaceId: "workspace-1",
+      objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+    });
+    expect(parsed).toEqual({
+      operation: "memory.findByIds",
+      payload: {
+        workspaceId: "workspace-1",
+        objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+      }
+    });
+    expect(() => parseWorkerOperation("memory.findByIds", {
+      workspaceId: "workspace-1",
+      queryText: "needle",
+      limit: 3
+    })).toThrow();
+
+    type MemoryCall = Parameters<typeof runMemoryOperation>[1];
+    type MemoryOperation = Extract<RecallReadWorkerOperation, `memory.${string}`>;
+    type IllegalKeywordOnFindByIds = {
+      readonly operation: "memory.findByIds";
+      readonly payload: WorkerOperationPayload<"memory.searchByKeyword">;
+    };
+    type UncorrelatedMemoryCall = {
+      readonly operation: MemoryOperation;
+      readonly payload: WorkerOperationPayload<MemoryOperation>;
+    };
+    type Extends<A, B> = [A] extends [B] ? true : false;
+    const consumerRejectsMismatchedPair: Extends<IllegalKeywordOnFindByIds, MemoryCall> = false;
+    const uncorrelatedWouldAcceptMismatchedPair: Extends<
+      IllegalKeywordOnFindByIds,
+      UncorrelatedMemoryCall
+    > = true;
+    const consumerAcceptsLegalPair: Extends<{
+      readonly operation: "memory.findByIds";
+      readonly payload: WorkerOperationPayload<"memory.findByIds">;
+    }, MemoryCall> = true;
+    expect(consumerRejectsMismatchedPair).toBe(false);
+    expect(uncorrelatedWouldAcceptMismatchedPair).toBe(true);
+    expect(consumerAcceptsLegalPair).toBe(true);
+    expectTypeOf(parsed).toEqualTypeOf<ParsedWorkerOperation<"memory.findByIds">>();
+    expectTypeOf<IllegalKeywordOnFindByIds>().not.toMatchTypeOf<MemoryCall>();
+    acceptParsedWorkerOperation(parsed);
+    acceptParsedWorkerOperation({
+      operation: "ready",
+      payload: {}
+    });
+    acceptParsedWorkerOperation({
+      operation: "memory.findByIds",
+      // @ts-expect-error keyword payload is not valid for findByIds
+      payload: { workspaceId: "workspace-1", queryText: "needle", limit: 3 }
+    });
+    // @ts-expect-error ready does not accept a findByIds payload
+    acceptParsedWorkerOperation({
+      operation: "ready",
+      payload: {
+        workspaceId: "workspace-1",
+        objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+      }
+    });
+  });
 });
+
+function acceptParsedWorkerOperation(parsed: ParsedWorkerOperation): ParsedWorkerOperation {
+  return parsed;
+}

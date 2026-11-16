@@ -4,13 +4,9 @@ import type {
   RecallServiceMemoryRepoPort,
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
-import type { RecallReadWorkerOperation } from "./protocol.js";
-import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
+import type { ParsedWorkerOperation, WorkerOperationPayload } from "./operation-schemas.js";
 
-type FieldMemoryOperation = Extract<
-  RecallReadWorkerOperation,
-  "memory.searchByKeywordField" | "memory.searchByAnchorField"
->;
+type FieldMemoryOperation = "memory.searchByKeywordField" | "memory.searchByAnchorField";
 
 type FieldMemoryRepo = Pick<
   RecallServiceMemoryRepoPort,
@@ -19,34 +15,33 @@ type FieldMemoryRepo = Pick<
 
 export async function runMemoryFieldOperation(
   repo: FieldMemoryRepo,
-  operation: FieldMemoryOperation,
-  payload: WorkerOperationPayloadMap[FieldMemoryOperation]
+  parsed: ParsedWorkerOperation<FieldMemoryOperation>
 ): Promise<unknown> {
-  if (operation === "memory.searchByKeywordField") {
-    const keywordPayload = payload as WorkerOperationPayload<"memory.searchByKeywordField">;
+  if (parsed.operation === "memory.searchByKeywordField") {
+    const { payload } = parsed;
     if (repo.searchByKeywordField === undefined) {
       throw new Error("memory keyword field is unavailable");
     }
     return await repo.searchByKeywordField(
-      keywordPayload.workspaceId,
-      keywordPayload.queryText,
-      keywordPayload.limit,
-      readKeywordLaneScope(keywordPayload.scope),
-      keywordPayload.refinementDepths,
-      keywordPayload.capture
+      payload.workspaceId,
+      payload.queryText,
+      payload.limit,
+      readKeywordLaneScope(payload.scope),
+      payload.refinementDepths,
+      payload.capture
     );
   }
-  const anchorPayload = payload as WorkerOperationPayload<"memory.searchByAnchorField">;
+  const { payload } = parsed;
   if (repo.searchByAnchorField === undefined) {
     throw new Error("memory anchor field is unavailable");
   }
   return await repo.searchByAnchorField(
-    anchorPayload.workspaceId,
-    anchorPayload.anchorTokens,
-    anchorPayload.optionalTokens,
-    anchorPayload.limit,
-    readKeywordLaneScope(anchorPayload.scope),
-    anchorPayload.refinementDepths
+    payload.workspaceId,
+    payload.anchorTokens,
+    payload.optionalTokens,
+    payload.limit,
+    readKeywordLaneScope(payload.scope),
+    payload.refinementDepths
   );
 }
 

@@ -1,5 +1,5 @@
 import type { RecallReadWorkerRequest } from "./protocol.js";
-import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
+import type { ParsedWorkerOperation } from "./operation-schemas.js";
 import { readPathProjectionReadOptions } from "./worker-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
@@ -10,31 +10,30 @@ type PathOperation = Extract<
 
 export async function runPathOperation(
   runtime: RecallReadWorkerRuntime,
-  operation: PathOperation,
-  payload: WorkerOperationPayloadMap[PathOperation]
+  parsed: ParsedWorkerOperation<PathOperation>
 ) {
-  const options = readPathProjectionReadOptions(payload);
-  if (operation === "path.findByAnchors") {
-    const anchorPayload = payload as WorkerOperationPayload<"path.findByAnchors">;
+  const options = readPathProjectionReadOptions(parsed.payload);
+  if (parsed.operation === "path.findByAnchors") {
+    const { payload } = parsed;
     return await runtime.recallPathReadPorts.pathExpansionPort.findByAnchors(
-      anchorPayload.workspaceId,
-      anchorPayload.anchorRefs,
+      payload.workspaceId,
+      payload.anchorRefs,
       options
     );
   }
-  if (operation === "pathPlasticity.getStrengthByMemoryId") {
-    const strengthPayload = payload as WorkerOperationPayload<"pathPlasticity.getStrengthByMemoryId">;
+  if (parsed.operation === "pathPlasticity.getStrengthByMemoryId") {
+    const { payload } = parsed;
     const strengths = await runtime.recallPathReadPorts.pathPlasticityPort.getStrengthByMemoryId(
-      strengthPayload.workspaceId,
-      strengthPayload.memoryIds,
+      payload.workspaceId,
+      payload.memoryIds,
       options
     );
     return [...strengths.entries()];
   }
-  const digestPayload = payload as WorkerOperationPayload<"path.findByTimeConcernWindowDigests">;
+  const { payload } = parsed;
   return await runtime.recallPathReadPorts.pathExpansionPort.findByTimeConcernWindowDigests(
-    digestPayload.workspaceId,
-    digestPayload.windowDigests,
+    payload.workspaceId,
+    payload.windowDigests,
     options
   );
 }

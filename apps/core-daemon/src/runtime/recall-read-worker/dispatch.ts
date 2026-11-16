@@ -4,10 +4,9 @@ import {
 } from "./protocol.js";
 import {
   BoundedRequestSchema,
-  parseWorkerOperationPayload,
+  parseWorkerOperation,
   parseWorkerOperationResult,
-  type WorkerOperationPayload,
-  type WorkerOperationPayloadMap
+  type ParsedWorkerOperation
 } from "./operation-schemas.js";
 import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
@@ -54,20 +53,19 @@ export async function runOperation(
     }
     return parseWorkerOperationResult(request.operation, reader(parsed));
   }
-  const parsedPayload = parseWorkerOperationPayload(request.operation, request.payload);
-  if (request.operation === "conditionalField.sourceSemantics") {
+  const parsed = parseWorkerOperation(request.operation, request.payload);
+  if (parsed.operation === "conditionalField.sourceSemantics") {
     // Source operation finalizers own result admission; do not deep-copy their admitted envelopes again.
-    return runSourceSemanticWorker(runtime,
-      parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">, observer);
+    return runSourceSemanticWorker(runtime, parsed.payload, observer);
   }
-  if (request.operation === "conditionalField.recall") {
-    const payload = parsedPayload as WorkerOperationPayload<"conditionalField.recall">;
+  if (parsed.operation === "conditionalField.recall") {
+    const { payload } = parsed;
     const context = { operation: "recall", workspace_id: payload.workspace_id, as_of: payload.as_of,
       preparation: payload.prepared_query === undefined ? null
         : { status: payload.prepared_query.receipt.status, reason: payload.prepared_query.receipt.reason } };
     observer?.context(runtime, () => ({ ...context, snapshot_revision: null, index: null }));
     try {
-      return parseWorkerOperationResult(request.operation,
+      return parseWorkerOperationResult(parsed.operation,
         runConditionalFieldWorkerRecall(runtime, payload, observer === undefined ? {} : { observer }));
     } finally {
       // Observe the already pinned snapshot only after the native operation has read it.
@@ -75,42 +73,30 @@ export async function runOperation(
         snapshot_revision: sourceSemanticRevision(runtime), index: readSourceIndexSnapshotFact(runtime.database, payload.workspace_id) }));
     }
   }
-  if (request.operation === "conditionalField.acknowledge") {
-    const payload = parsedPayload as WorkerOperationPayload<"conditionalField.acknowledge">;
+  if (parsed.operation === "conditionalField.acknowledge") {
+    const { payload } = parsed;
     const receipt = settleWorkerDelivery(runtime, payload, false);
     // Settlement owns the final receipt. Preserve it separately through the bounded
     // diagnostic channel: preparation totals and the fitted public bytes stay intact.
     observer?.event("delivery_settlement", "delivery", () => ({
       preparation_id: payload.preparation_id, execution_receipt: receipt
     }));
-    return parseWorkerOperationResult(request.operation, receipt);
+    return parseWorkerOperationResult(parsed.operation, receipt);
   }
-  if (request.operation === "conditionalField.discard") {
+  if (parsed.operation === "conditionalField.discard") {
     return parseWorkerOperationResult(
-      request.operation,
-      settleWorkerDelivery(
-        runtime,
-        parsedPayload as WorkerOperationPayload<"conditionalField.discard">,
-        true
-      )
+      parsed.operation,
+      settleWorkerDelivery(runtime, parsed.payload, true)
     );
   }
-  return parseWorkerOperationResult(
-    request.operation,
-    await dispatchParsed(
-      runtime,
-      request.operation,
-      parsedPayload as WorkerOperationPayloadMap[DispatchParsedOperation]
-    )
-  );
+  return parseWorkerOperationResult(parsed.operation, await dispatchParsed(runtime, parsed));
 }
 
 async function dispatchParsed(
   runtime: RecallReadWorkerRuntime,
-  operation: DispatchParsedOperation,
-  payload: WorkerOperationPayloadMap[DispatchParsedOperation]
+  parsed: ParsedWorkerOperation<DispatchParsedOperation>
 ): Promise<unknown> {
-  switch (operation) {
+  switch (parsed.operation) {
     case "ready":
       return null;
     case "memory.findRecallTierWindow":
@@ -129,11 +115,7 @@ async function dispatchParsed(
     case "memory.findByEvidenceRefs":
     case "memory.findBoundEvidenceRefs":
     case "memory.findByIds":
-      return await runMemoryOperation(
-        runtime,
-        operation,
-        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `memory.${string}`>]
-      );
+      return await runMemoryOperation(runtime, parsed);
     case "evidence.searchByKeyword":
     case "evidence.searchByKeywordField":
     case "evidence.searchManyByKeywordField":
@@ -141,33 +123,19 @@ async function dispatchParsed(
     case "evidence.findRecallQualifiedByIds":
     case "evidence.findRecallQualifiedFactKeysByIds":
     case "evidence.findSourceAnchorsByIds":
-      return await runEvidenceOperation(
-        runtime,
-        operation,
-        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `evidence.${string}`>]
-      );
+      return await runEvidenceOperation(runtime, parsed);
     case "synthesis.searchByKeyword":
     case "synthesis.searchByKeywordField":
     case "synthesis.searchManyByKeywordField":
     case "synthesis.findByIds":
-      return await runSynthesisOperation(
-        runtime,
-        operation,
-        payload as WorkerOperationPayloadMap[Extract<DispatchParsedOperation, `synthesis.${string}`>]
-      );
+      return await runSynthesisOperation(runtime, parsed);
     case "path.findByAnchors":
     case "path.findByTimeConcernWindowDigests":
     case "pathPlasticity.getStrengthByMemoryId":
-      return await runPathOperation(
-        runtime,
-        operation,
-        payload as WorkerOperationPayloadMap[
-          Extract<DispatchParsedOperation, `path${string}` | "pathPlasticity.getStrengthByMemoryId">
-        ]
-      );
+      return await runPathOperation(runtime, parsed);
     case "constraints.findActive":
       return await runWorkerActiveConstraints({
-        payload: payload as WorkerOperationPayload<"constraints.findActive">,
+        payload: parsed.payload,
         memoryRepo: runtime.memoryEntryRepo,
         claimFormRepo: runtime.claimFormRepo,
         pathReadPorts: runtime.recallPathReadPorts
@@ -189,8 +157,10 @@ async function dispatchParsed(
       runtime.database.close();
       runtime.closed = true;
       return null;
-    default:
-      throwUnknownRecallReadWorkerOperation(operation);
+    default: {
+      const unreachable: never = parsed;
+      throwUnknownRecallReadWorkerOperation(unreachable);
+    }
   }
 }
 

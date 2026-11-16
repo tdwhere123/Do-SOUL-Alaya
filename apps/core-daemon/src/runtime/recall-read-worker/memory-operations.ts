@@ -1,5 +1,5 @@
 import type { RecallReadWorkerRequest } from "./protocol.js";
-import type { WorkerOperationPayload, WorkerOperationPayloadMap } from "./operation-schemas.js";
+import type { ParsedWorkerOperation } from "./operation-schemas.js";
 import {
   findMemoryEntriesByWorkspaceId,
   readRecallTierWindowQuery
@@ -9,146 +9,131 @@ import { runOrderedKeywordSearchBatch } from "./worker-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 type MemoryOperation = Extract<RecallReadWorkerRequest["operation"], `memory.${string}`>;
+type MemorySearchOperation =
+  | "memory.searchByKeyword"
+  | "memory.searchByKeywordWithinObjectIds"
+  | "memory.searchByKeywordWithinTier"
+  | "memory.searchManyByKeywordWithinObjectIds"
+  | "memory.searchByAnchorWithinObjectIds"
+  | "memory.searchByAnchorWithinTier";
 
 export async function runMemoryOperation(
   runtime: RecallReadWorkerRuntime,
-  operation: MemoryOperation,
-  payload: WorkerOperationPayloadMap[MemoryOperation]
+  parsed: ParsedWorkerOperation<MemoryOperation>
 ) {
   const { memoryEntryRepo } = runtime;
-  switch (operation) {
+  switch (parsed.operation) {
     case "memory.searchByKeywordField":
     case "memory.searchByAnchorField":
-      return await runMemoryFieldOperation(
-        memoryEntryRepo,
-        operation,
-        payload as WorkerOperationPayloadMap[typeof operation]
-      );
+      return await runMemoryFieldOperation(memoryEntryRepo, parsed);
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
     case "memory.searchByKeywordWithinTier":
     case "memory.searchManyByKeywordWithinObjectIds":
     case "memory.searchByAnchorWithinObjectIds":
     case "memory.searchByAnchorWithinTier":
-      return await runMemorySearchOperation(
-        runtime,
-        operation,
-        payload as WorkerOperationPayloadMap[typeof operation]
-      );
-    case "memory.findRecallTierWindow": {
-      const windowPayload = payload as WorkerOperationPayload<"memory.findRecallTierWindow">;
+      return await runMemorySearchOperation(runtime, parsed);
+    case "memory.findRecallTierWindow":
       return await memoryEntryRepo.findRecallTierWindow(
-        readRecallTierWindowQuery(windowPayload)
+        readRecallTierWindowQuery(parsed.payload)
       );
-    }
     case "memory.findByWorkspaceId": {
-      const listPayload = payload as WorkerOperationPayload<"memory.findByWorkspaceId">;
+      const { payload } = parsed;
       return await findMemoryEntriesByWorkspaceId(
         memoryEntryRepo,
-        listPayload.workspaceId,
-        listPayload.tier,
-        listPayload.page
+        payload.workspaceId,
+        payload.tier,
+        payload.page
       );
     }
     case "memory.findByEventTimeWindow": {
-      const windowPayload = payload as WorkerOperationPayload<"memory.findByEventTimeWindow">;
+      const { payload } = parsed;
       return await memoryEntryRepo.findByEventTimeWindow({
-        workspaceId: windowPayload.workspaceId,
-        tier: windowPayload.tier,
-        startTime: windowPayload.startTime,
-        endTime: windowPayload.endTime,
-        limit: windowPayload.limit
+        workspaceId: payload.workspaceId,
+        tier: payload.tier,
+        startTime: payload.startTime,
+        endTime: payload.endTime,
+        limit: payload.limit
       });
     }
-    case "memory.findByDimension": {
-      const dimensionPayload = payload as WorkerOperationPayload<"memory.findByDimension">;
+    case "memory.findByDimension":
       return await memoryEntryRepo.findByDimension(
-        dimensionPayload.workspaceId,
-        dimensionPayload.dimension
+        parsed.payload.workspaceId,
+        parsed.payload.dimension
       );
-    }
-    case "memory.findByScopeClass": {
-      const scopePayload = payload as WorkerOperationPayload<"memory.findByScopeClass">;
+    case "memory.findByScopeClass":
       return await memoryEntryRepo.findByScopeClass(
-        scopePayload.workspaceId,
-        scopePayload.scopeClass
+        parsed.payload.workspaceId,
+        parsed.payload.scopeClass
       );
-    }
-    case "memory.findByEvidenceRefs": {
-      const evidencePayload = payload as WorkerOperationPayload<"memory.findByEvidenceRefs">;
+    case "memory.findByEvidenceRefs":
       return await memoryEntryRepo.findByEvidenceRefs(
-        evidencePayload.workspaceId,
-        evidencePayload.evidenceObjectIds
+        parsed.payload.workspaceId,
+        parsed.payload.evidenceObjectIds
       );
-    }
-    case "memory.findBoundEvidenceRefs": {
-      const boundPayload = payload as WorkerOperationPayload<"memory.findBoundEvidenceRefs">;
+    case "memory.findBoundEvidenceRefs":
       return await memoryEntryRepo.findBoundEvidenceRefs(
-        boundPayload.workspaceId,
-        boundPayload.evidenceObjectIds
+        parsed.payload.workspaceId,
+        parsed.payload.evidenceObjectIds
       );
-    }
-    case "memory.findByIds": {
-      const idsPayload = payload as WorkerOperationPayload<"memory.findByIds">;
-      return await memoryEntryRepo.findByIds(idsPayload.workspaceId, idsPayload.objectIds);
-    }
+    case "memory.findByIds":
+      return await memoryEntryRepo.findByIds(parsed.payload.workspaceId, parsed.payload.objectIds);
   }
 }
 
 async function runMemorySearchOperation(
   runtime: RecallReadWorkerRuntime,
-  operation: Extract<MemoryOperation, `memory.search${string}`>,
-  payload: WorkerOperationPayloadMap[Extract<MemoryOperation, `memory.search${string}`>]
+  parsed: ParsedWorkerOperation<MemorySearchOperation>
 ) {
-  if (operation === "memory.searchManyByKeywordWithinObjectIds") {
-    const batchPayload = payload as WorkerOperationPayload<"memory.searchManyByKeywordWithinObjectIds">;
-    return runOrderedKeywordSearchBatch(batchPayload.queries, (query) =>
+  if (parsed.operation === "memory.searchManyByKeywordWithinObjectIds") {
+    const { payload } = parsed;
+    return runOrderedKeywordSearchBatch(payload.queries, (query) =>
       runtime.memoryEntryRepo.searchByKeywordWithinObjectIds(
-        batchPayload.workspaceId, query.queryText, query.limit, batchPayload.objectIds
+        payload.workspaceId, query.queryText, query.limit, payload.objectIds
       ));
   }
-  if (operation === "memory.searchByKeyword") {
-    const keywordPayload = payload as WorkerOperationPayload<"memory.searchByKeyword">;
+  if (parsed.operation === "memory.searchByKeyword") {
+    const { payload } = parsed;
     return await runtime.memoryEntryRepo.searchByKeyword(
-      keywordPayload.workspaceId,
-      keywordPayload.queryText,
-      keywordPayload.limit
+      payload.workspaceId,
+      payload.queryText,
+      payload.limit
     );
   }
-  if (operation === "memory.searchByKeywordWithinTier") {
-    const tierPayload = payload as WorkerOperationPayload<"memory.searchByKeywordWithinTier">;
+  if (parsed.operation === "memory.searchByKeywordWithinTier") {
+    const { payload } = parsed;
     return await runtime.memoryEntryRepo.searchByKeywordWithinTier(
-      tierPayload.workspaceId,
-      tierPayload.queryText,
-      tierPayload.limit,
-      tierPayload.tier
+      payload.workspaceId,
+      payload.queryText,
+      payload.limit,
+      payload.tier
     );
   }
-  if (operation === "memory.searchByAnchorWithinTier") {
-    const anchorPayload = payload as WorkerOperationPayload<"memory.searchByAnchorWithinTier">;
+  if (parsed.operation === "memory.searchByAnchorWithinTier") {
+    const { payload } = parsed;
     return await runtime.memoryEntryRepo.searchByAnchorWithinTier(
-      anchorPayload.workspaceId,
-      anchorPayload.anchorTokens,
-      anchorPayload.optionalTokens,
-      anchorPayload.limit,
-      anchorPayload.tier
+      payload.workspaceId,
+      payload.anchorTokens,
+      payload.optionalTokens,
+      payload.limit,
+      payload.tier
     );
   }
-  if (operation === "memory.searchByKeywordWithinObjectIds") {
-    const scopedPayload = payload as WorkerOperationPayload<"memory.searchByKeywordWithinObjectIds">;
+  if (parsed.operation === "memory.searchByKeywordWithinObjectIds") {
+    const { payload } = parsed;
     return await runtime.memoryEntryRepo.searchByKeywordWithinObjectIds(
-      scopedPayload.workspaceId,
-      scopedPayload.queryText,
-      scopedPayload.limit,
-      scopedPayload.objectIds
+      payload.workspaceId,
+      payload.queryText,
+      payload.limit,
+      payload.objectIds
     );
   }
-  const anchorScopedPayload = payload as WorkerOperationPayload<"memory.searchByAnchorWithinObjectIds">;
+  const { payload } = parsed;
   return await runtime.memoryEntryRepo.searchByAnchorWithinObjectIds(
-    anchorScopedPayload.workspaceId,
-    anchorScopedPayload.anchorTokens,
-    anchorScopedPayload.optionalTokens,
-    anchorScopedPayload.limit,
-    anchorScopedPayload.objectIds
+    payload.workspaceId,
+    payload.anchorTokens,
+    payload.optionalTokens,
+    payload.limit,
+    payload.objectIds
   );
 }

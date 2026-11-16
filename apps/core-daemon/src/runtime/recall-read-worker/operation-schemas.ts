@@ -216,6 +216,14 @@ export type WorkerOperationPayloadMap = {
 export type WorkerOperationPayload<O extends RecallReadWorkerOperation> =
   WorkerOperationPayloadMap[O];
 
+/** Parsed operation/payload pair derived from PAYLOAD_SCHEMAS. Independent unions are not this type. */
+export type ParsedWorkerOperation<O extends RecallReadWorkerOperation = RecallReadWorkerOperation> = {
+  [K in O]: {
+    readonly operation: K;
+    readonly payload: WorkerOperationPayloadMap[K];
+  };
+}[O];
+
 const KeywordHitSchema = z.object({
   object_id: z.string(),
   normalized_rank: z.number(),
@@ -320,6 +328,17 @@ export function parseWorkerOperationPayload<O extends RecallReadWorkerOperation>
   payload: unknown
 ): WorkerOperationPayload<O> {
   return PAYLOAD_SCHEMAS[operation].parse(payload ?? {}) as WorkerOperationPayload<O>;
+}
+
+export function parseWorkerOperation<O extends RecallReadWorkerOperation>(
+  operation: O,
+  payload: unknown
+): ParsedWorkerOperation<O> {
+  // Zod infers each schema separately; this is the single post-parse association.
+  return {
+    operation,
+    payload: parseWorkerOperationPayload(operation, payload)
+  } as ParsedWorkerOperation<O>;
 }
 
 export function parseWorkerOperationResult(
