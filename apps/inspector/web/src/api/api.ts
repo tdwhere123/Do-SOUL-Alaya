@@ -31,13 +31,9 @@ export const clearInspectorSession = (): void => {
 };
 
 export const markInspectorSessionReady = (): void => {
-  persistInspectorSessionReady();
-};
-
-function persistInspectorSessionReady(): void {
   inspectorSessionReady = true;
   sessionStorage.setItem(INSPECTOR_SESSION_READY_STORAGE_KEY, "1");
-}
+};
 
 export const hasInspectorSession = (): boolean => {
   if (inspectorSessionReady || sessionStorage.getItem(INSPECTOR_SESSION_READY_STORAGE_KEY) === "1") {
@@ -204,42 +200,30 @@ async function fetchWithRetry(
 ): Promise<ApiFetchResult<unknown>> {
   const canRetry = RETRYABLE_METHODS.has(method.toUpperCase());
   const maxAttempts = canRetry ? 2 : 1;
-  let lastError: unknown = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const attemptResult = await fetchAttempt(url, init, attempt, maxAttempts);
+  for (let attempt = 1; ; attempt++) {
+    const attemptResult = await fetchAttempt(url, init);
     if (attemptResult.kind === "network_error") {
-      lastError = attemptResult.error;
-      continue;
+      if (attempt >= maxAttempts) {
+        throw attemptResult.error;
+      }
+    } else if (!shouldRetryResponse(attemptResult.response, attempt, maxAttempts)) {
+      return await responsePayload(attemptResult.response);
     }
-    if (shouldRetryResponse(attemptResult.response, attempt, maxAttempts)) {
-      await sleep(200 * Math.pow(5, attempt - 1));
-      continue;
-    }
-    return await responsePayload(attemptResult.response);
+    await sleep(200 * Math.pow(5, attempt - 1));
   }
-
-  throw lastError instanceof Error ? lastError : new Error("apiFetch exhausted retries");
 }
 
 async function fetchAttempt(
   url: string,
-  init: RequestInit,
-  attempt: number,
-  maxAttempts: number
+  init: RequestInit
 ): Promise<{ readonly kind: "response"; readonly response: Response } | { readonly kind: "network_error"; readonly error: unknown }> {
   try {
     return { kind: "response", response: await fetch(url, init) };
-  } catch (err) {
-    // Caller abort is not a transient network fault; retrying it races the
-    // next query and marks a cancelled GET as network_error.
-    if (isAbortError(err) || init.signal?.aborted) {
-      throw err;
-    }
-    if (attempt < maxAttempts) {
-      await sleep(200 * Math.pow(5, attempt - 1));
-      return { kind: "network_error", error: err };
-    }
-    throw err;
+  } catch (error) {
+    // Observe cancellation at the transport rejection, before another
+    // microtask can abort the signal and reclassify this network failure.
+    if (isAbortError(error) || init.signal?.aborted) throw error;
+    return { kind: "network_error", error };
   }
 }
 
