@@ -259,6 +259,20 @@ function* relationAssignments(
   input: HyperedgeInput
 ): PathComputation<readonly PremiseAssignment[]> {
   const found: PremiseAssignment[] = [];
+  yield* premiseRelationDemands(relation, from, input);
+  for (const row of rows) {
+    const assignment = yield* assignmentFromRow(relation, from, row, input);
+    if (assignment !== undefined) found.push(assignment);
+    yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
+  }
+  return found;
+}
+
+function* premiseRelationDemands(
+  relation: QueryRelation,
+  from: ProductStateKey,
+  input: HyperedgeInput
+): PathComputation<void> {
   const physicalKinds = input.physicalKindSet ?? new Set<string>();
   for (const predicate of relationPhysicalCandidates(relation.relation_kind)) {
     yield { kind: "work" };
@@ -268,12 +282,6 @@ function* relationAssignments(
     yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
       relation_demand: { subject, predicate } } };
   }
-  for (const row of rows) {
-    const assignment = yield* assignmentFromRow(relation, from, row, input);
-    if (assignment !== undefined) found.push(assignment);
-    yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
-  }
-  return found;
 }
 
 function* nestedHyperedgeAssignments(
@@ -321,7 +329,9 @@ function* nestedHyperedgeAssignments(
   return assignments;
 }
 
-type SequenceStep = Readonly<{ node: ProductStateKey; reach: "population" | "join" }>;
+// Retained states read only delta rows until a hop introduces new information.
+// Population reach is sticky: all subsequent hops may reuse retained rows.
+type SequenceStep = Readonly<{ node: ProductStateKey; reach: "population" | "delta" }>;
 
 type SequenceFrontier = {
   readonly queue: SequenceStep[];
@@ -396,18 +406,39 @@ function* extendSequenceState(
   const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
   for (const advance of automaton.advancesByState.get(node.program_state) ?? []) {
     yield { kind: "work" };
-    const physicalKinds = input.physicalKindSet ?? new Set<string>();
-    for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
-      yield { kind: "work" };
-      if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
-      const subject = productEndpointId(node);
-      if (pairDemandRegistered(input.registeredDemands, subject, predicate)) continue;
-      yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
-        relation_demand: { subject, predicate } } };
+    yield* premiseRelationDemands(advance.relation, node, input);
+  }
+  const hopRows = step.reach === "delta" && input.joinRows !== undefined ? input.joinRows : rows;
+  yield* extendSequenceHyperedges(automaton, step, here, rows, input, deltaIds, observed, frontier);
+  for (const advance of advancesFor(automaton, node.program_state, () => true)) {
+    for (const row of hopRows) {
+      const assignment = yield* assignmentFromRow(advance.relation, here, row, input);
+      yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
+      if (assignment === undefined) {
+        if (row.sourceObjectId === productEndpointId(here) && relationMatches(advance.relation.relation_kind, row.predicate)
+          && observedTargetRevision(row.targetObjectId, input.sourceFacts, observed) === undefined) {
+          yield* retainUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
+        }
+        continue;
+      }
+      const successor = deltaIds === undefined || step.reach === "population" || deltaIds.has(row.assertionId)
+        ? "population" : "delta";
+      yield* retainSequenceAssignment(frontier, node, assignment, advance.to, successor, input, observed);
     }
   }
-  // A state reached by old rows reads only the row delta. New information reads the population.
-  const hopRows = step.reach === "join" && input.joinRows !== undefined ? input.joinRows : rows;
+}
+
+function* extendSequenceHyperedges(
+  automaton: ProgramAutomaton,
+  step: SequenceStep,
+  here: ProductStateKey,
+  rows: Iterable<AdjacencyRow>,
+  input: HyperedgeInput,
+  deltaIds: ReadonlySet<string> | undefined,
+  observed: RetainedRows<ProductStateKey>,
+  frontier: SequenceFrontier
+): PathComputation<void> {
+  const node = step.node;
   for (const hyperedge of automaton.hyperedgeAdvances) {
     if (hyperedge.from !== node.program_state) continue;
     // A newly reached state must emit proofs whose hops are already retained.
@@ -437,26 +468,10 @@ function* extendSequenceState(
       const assignment = terminalAssignment(node, productEndpointId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
         effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
       const carried = { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] };
-      const successor = deltaIds !== undefined && assignmentInDelta(carried, deltaIds, input.promotedIds) ? "population" : step.reach;
-      yield* retainSequenceAssignment(frontier, node, carried, hyperedge.to, deltaIds === undefined ? "population" : successor, input, observed);
+      const successor = deltaIds === undefined || assignmentInDelta(carried, deltaIds, input.promotedIds)
+        ? "population" : step.reach;
+      yield* retainSequenceAssignment(frontier, node, carried, hyperedge.to, successor, input, observed);
       yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(assignment), "utf8") };
-    }
-  }
-  for (const advance of advancesFor(automaton, node.program_state, () => true)) {
-    for (const row of hopRows) {
-      const assignment = yield* assignmentFromRow(advance.relation, here, row, input);
-      yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
-      if (assignment === undefined) {
-        if (row.sourceObjectId === productEndpointId(here) && relationMatches(advance.relation.relation_kind, row.predicate)
-          && observedTargetRevision(row.targetObjectId, input.sourceFacts, observed) === undefined) {
-          yield* retainUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
-        }
-        continue;
-      }
-      // A path that already used new information keeps reading retained rows.
-      const successor = deltaIds === undefined || step.reach === "population" || deltaIds.has(row.assertionId)
-        ? "population" : "join";
-      yield* retainSequenceAssignment(frontier, node, assignment, advance.to, successor, input, observed);
     }
   }
 }
@@ -496,11 +511,11 @@ function* walkCompiledPremise(
     // A program with no stored reach must not skip retained rows. A new product
     // beside a frontier that already exists only joins the row delta.
     const cold = deltaIds !== undefined && sequenceProgramIsCold(owner, program, input.coldPrograms);
-    const reach = deltaIds === undefined || cold ? "population" : "join";
+    const reach = deltaIds === undefined || cold ? "population" : "delta";
     for (const node of starts) frontier.queue.push({ node, reach });
   } else {
     // States already reached only extend along the row delta. A stored miss is rechecked alone.
-    for (const node of stored.states) frontier.queue.push({ node, reach: "join" });
+    for (const node of stored.states) frontier.queue.push({ node, reach: "delta" });
     for (const pair of stored.unresolved) {
       if (deltaIds?.has(pair.row.assertionId) === true) continue;
       const assignment = yield* assignmentFromRow(pair.relation, pair.here, pair.row, input);
@@ -537,17 +552,9 @@ function* orHyperedgeEffects(
     if (deltaIds !== undefined && input.retainPopulation !== true && !assignmentInDelta(option, deltaIds, input.promotedIds)) continue;
     if (emitted !== undefined && !claimHyperedge(emitted, from, [option])) continue;
     yield { kind: "work", retained_bytes: completionReservation([option]) };
-    for (const effect of yield* completionEffects(from, [option], {
-    target: option.target_object_id,
-    milligrades: option.milligrades,
-    validity: option.validity,
-    relation_kind: option.relation_kind,
-    join: "or",
-    binding: option.binding_context,
-    cap_contract_id: option.cap_contract_id,
-    transfer_id: option.transfer_id,
-    transfer_version: option.transfer_version
-    }, toProgramStates, input)) yield { kind: "effect", effect };
+    for (const effect of yield* completionEffects(from, [option], option, option.milligrades, "or", toProgramStates, input)) {
+      yield { kind: "effect", effect };
+    }
   }
 }
 
@@ -572,17 +579,9 @@ function* andHyperedgeEffects(
     const grade = bottleneck(merged);
     if (grade === undefined) continue;
     yield { kind: "work", retained_bytes: completionReservation(merged) };
-    for (const effect of yield* completionEffects(from, merged, {
-      target: first.target_object_id,
-      milligrades: grade,
-      validity: first.validity,
-      relation_kind: first.relation_kind,
-      join: "and",
-      binding: first.binding_context,
-      cap_contract_id: first.cap_contract_id,
-      transfer_id: first.transfer_id,
-      transfer_version: first.transfer_version
-    }, toProgramStates, input)) yield { kind: "effect", effect };
+    for (const effect of yield* completionEffects(from, merged, first, grade, "and", toProgramStates, input)) {
+      yield { kind: "effect", effect };
+    }
   }
 }
 
@@ -631,37 +630,31 @@ function hyperedgeTarget(
   return retargetRelationProduct(from, patch.object_id, patch.source_revision, patch, facts);
 }
 
+// AND selects metadata from the first merged assignment; only its grade and
+// proof combine all premises. OR keeps the selected assignment's own metadata.
 function* completionEffects(
   from: ProductStateKey,
   premises: readonly PremiseAssignment[],
-  spec: Readonly<{
-    readonly target: string;
-    readonly milligrades: number;
-    readonly validity: Transition["validity"];
-    readonly relation_kind: string;
-    readonly join: "and" | "or";
-    readonly binding: string;
-    readonly cap_contract_id?: string;
-    readonly transfer_id?: string;
-    readonly transfer_version?: string;
-  }>,
+  representative: PremiseAssignment,
+  milligrades: number,
+  join: "and" | "or",
   toProgramStates: readonly string[],
   input: HyperedgeInput
 ): PathComputation<readonly HyperedgeEffect[]> {
   const targetRevision = observedTargetRevision(
-    spec.target,
+    representative.target_object_id,
     input.sourceFacts,
     input.observedStates ?? input.liveStates
   );
   if (targetRevision === undefined) {
     return [{
-      observation_id: `revision:${productEndpointId(from)}:${from.program_state}:${spec.target}`,
+      observation_id: `revision:${productEndpointId(from)}:${from.program_state}:${representative.target_object_id}`,
       unresolved_guard: true,
       missing_target_revision: true
     }];
   }
   const children = premises.map((premise) => premise.derivation);
-  const derivation = joinDerivation(spec.join, children);
+  const derivation = joinDerivation(join, children);
   const forest = new Map<string, Derivation>();
   for (const premise of premises) for (const row of premise.derivations) {
     yield { kind: "work", retained_bytes: 72 }; forest.set(row.derivation_id, row);
@@ -671,18 +664,18 @@ function* completionEffects(
   for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; derivations.push(row); }
   const effects: HyperedgeEffect[] = [];
   for (const programState of toProgramStates) {
-    const binding = input.destinationAutomaton === undefined ? spec.binding : alignOutgoingBinding(
-      spec.binding, spec.target, input.destinationAutomaton, programState, input.bindingContexts
+    const binding = input.destinationAutomaton === undefined ? representative.binding_context : alignOutgoingBinding(
+      representative.binding_context, representative.target_object_id, input.destinationAutomaton, programState, input.bindingContexts
     );
     if (binding === undefined) continue;
     const to: ProductStateKey = hyperedgeTarget(from, {
-      object_id: spec.target,
+      object_id: representative.target_object_id,
       program_state: programState,
       binding_context: binding,
       source_revision: targetRevision
     }, input.sourceFacts);
     effects.push({
-      observation_id: `hyperedge:${productEndpointId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
+      observation_id: `hyperedge:${productEndpointId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${join}:${representative.relation_kind}:${representative.target_object_id}`,
       hyperedge_premises: premises.map((premise) => ({
         hypothesis_id: premise.hypothesis_id,
         binding_context: premise.binding_context,
@@ -692,13 +685,13 @@ function* completionEffects(
       hyperedge: {
         from,
         to,
-        relation_kind: spec.relation_kind,
-        strength_milligrades: spec.milligrades,
-        validity: spec.validity,
-        join: spec.join,
-        ...(spec.cap_contract_id === undefined ? {} : { cap_contract_id: spec.cap_contract_id }),
-        ...(spec.transfer_id === undefined ? {} : { transfer_id: spec.transfer_id }),
-        ...(spec.transfer_version === undefined ? {} : { transfer_version: spec.transfer_version })
+        relation_kind: representative.relation_kind,
+        strength_milligrades: milligrades,
+        validity: representative.validity,
+        join,
+        ...(representative.cap_contract_id === undefined ? {} : { cap_contract_id: representative.cap_contract_id }),
+        ...(representative.transfer_id === undefined ? {} : { transfer_id: representative.transfer_id }),
+        ...(representative.transfer_version === undefined ? {} : { transfer_version: representative.transfer_version })
       },
       derivation,
       derivations
