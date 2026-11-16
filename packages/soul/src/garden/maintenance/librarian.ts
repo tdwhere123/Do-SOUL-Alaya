@@ -248,51 +248,60 @@ export class Librarian {
     completedAt: string
   ): Promise<GardenTaskResult> {
     try {
-      const pathPlasticityPort = this.pathPlasticityPort;
-
-      if (pathPlasticityPort === null) {
-        const audit = ["path_plasticity_update: skipped because path plasticity port is not configured"];
-        const result = this.pathPlasticityDeferredReason === undefined
-          ? { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "path plasticity port is not configured")), audit_entries: audit }
-          : this.createSuccessResult(task, completedAt, [], audit, "skipped");
-        await this.scheduler.reportCompletion(result);
-        return result;
-      }
-
-      const untilRevision = parsePathPlasticityRevisionCursor(task.target_object_refs[1]);
-      if (untilRevision === undefined) {
-        const result = { ...this.createFailureResult(task, completedAt,
-          new AlayaError("VALIDATION", "path plasticity EventLog revision cursor is missing")),
-          audit_entries: ["path_plasticity_update: EventLog revision cursor is missing"] };
-        await this.scheduler.reportCompletion(result);
-        return result;
-      }
-      const sinceRevision = resolvePathPlasticitySinceRevision(task.target_object_refs, 0);
-      const computed = await runPathPlasticityWithinBudget(
-        (abortSignal, onMutationBoundaryEntered) => pathPlasticityPort.computeAndApplyPlasticity({
-          workspaceId: task.workspace_id,
-          sinceRevision,
-          untilRevision,
-          abortSignal,
-          onMutationBoundaryEntered
-        }),
-        this.pathPlasticityBudgetMs,
-        "path_plasticity_update"
-      );
-      await pathPlasticityPort.markProcessed?.({
-        workspaceId: task.workspace_id,
-        processedThroughRevision: untilRevision,
-        processedAuditEventId: null
-      });
-
-      const result = this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
-        `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since_revision=${sinceRevision} until_revision=${untilRevision} budget_ms=${this.pathPlasticityBudgetMs}`
-      ]);
+      const result = await this.applyPathPlasticityUpdate(task, completedAt);
       await this.scheduler.reportCompletion(result);
       return result;
     } finally {
       await this.pathPlasticityPendingPort?.clearPendingWorkspace(task.workspace_id);
     }
+  }
+
+  private async applyPathPlasticityUpdate(
+    task: GardenTaskDescriptor,
+    completedAt: string
+  ): Promise<GardenTaskResult> {
+    const pathPlasticityPort = this.pathPlasticityPort;
+    if (pathPlasticityPort === null) {
+      const audit = ["path_plasticity_update: skipped because path plasticity port is not configured"];
+      if (this.pathPlasticityDeferredReason !== undefined) {
+        return this.createSuccessResult(task, completedAt, [], audit, "skipped");
+      }
+      return {
+        ...this.createFailureResult(task, completedAt,
+          new AlayaError("UNAVAILABLE", "path plasticity port is not configured")),
+        audit_entries: audit
+      };
+    }
+
+    const untilRevision = parsePathPlasticityRevisionCursor(task.target_object_refs[1]);
+    if (untilRevision === undefined) {
+      return {
+        ...this.createFailureResult(task, completedAt,
+          new AlayaError("VALIDATION", "path plasticity EventLog revision cursor is missing")),
+        audit_entries: ["path_plasticity_update: EventLog revision cursor is missing"]
+      };
+    }
+    const sinceRevision = resolvePathPlasticitySinceRevision(task.target_object_refs, 0);
+    const computed = await runPathPlasticityWithinBudget(
+      (abortSignal, onMutationBoundaryEntered) => pathPlasticityPort.computeAndApplyPlasticity({
+        workspaceId: task.workspace_id,
+        sinceRevision,
+        untilRevision,
+        abortSignal,
+        onMutationBoundaryEntered
+      }),
+      this.pathPlasticityBudgetMs,
+      "path_plasticity_update"
+    );
+    await pathPlasticityPort.markProcessed?.({
+      workspaceId: task.workspace_id,
+      processedThroughRevision: untilRevision,
+      processedAuditEventId: null
+    });
+
+    return this.createSuccessResult(task, completedAt, computed.affectedPathIds, [
+      `path_plasticity_update: reinforced=${computed.reinforced} weakened=${computed.weakened} retired=${computed.retired} since_revision=${sinceRevision} until_revision=${untilRevision} budget_ms=${this.pathPlasticityBudgetMs}`
+    ]);
   }
 
   private createSuccessResult(

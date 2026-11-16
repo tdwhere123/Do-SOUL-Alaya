@@ -3,6 +3,7 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  type GardenTaskResult,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import { Librarian } from "../../../garden/maintenance/librarian.js";
@@ -42,7 +43,7 @@ function createLibrarian(
     readonly pathPlasticityPendingPort?: PathPlasticityPendingPort;
   } = {}
 ) {
-  const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+  const scheduler = { reportCompletion: vi.fn(async (_result: GardenTaskResult) => undefined) };
   const clearPendingWorkspace = vi.fn(async () => undefined);
   const librarian = new Librarian({
     neighborPort: { findSubjectNeighbors: vi.fn(async () => []) },
@@ -221,6 +222,90 @@ describe("Librarian.path_plasticity_update", () => {
     expect(result.audit_entries[0]).toMatch(/skipped because path plasticity port is not configured/);
     expect(clearPendingWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1");
     expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
+  });
+
+  it.each([
+    { mode: "missing", outcome: "failed", expected: ["report:failed", "clear"] },
+    { mode: "deferred", outcome: "skipped", expected: ["report:skipped", "clear"] },
+    { mode: "invalid", outcome: "failed", expected: ["report:failed", "clear"] },
+    {
+      mode: "completed",
+      outcome: "completed",
+      expected: ["compute", "checkpoint", "report:completed", "clear"]
+    }
+  ])("reports $mode before releasing the pending workspace", async ({ mode, outcome, expected }) => {
+    const calls: string[] = [];
+    const port = {
+      computeAndApplyPlasticity: async () => {
+        calls.push("compute");
+        return PATH_PLASTICITY_NO_MUTATION_RESULT;
+      },
+      markProcessed: async () => { calls.push("checkpoint"); }
+    };
+    const { librarian, scheduler, clearPendingWorkspace } = createLibrarian(
+      mode === "missing" || mode === "deferred" ? undefined : port,
+      mode === "deferred" ? { pathPlasticityDeferredReason: "temporal_assertion_provenance_required" } : {}
+    );
+    scheduler.reportCompletion.mockImplementation(async (result) => {
+      calls.push(`report:${result.outcome}`);
+      return undefined;
+    });
+    clearPendingWorkspace.mockImplementation(async () => {
+      calls.push("clear");
+      return undefined;
+    });
+
+    const result = await librarian.run(createTask({
+      target_object_refs: mode === "invalid" ? ["0"] : ["0", "10"]
+    }));
+
+    expect(result.outcome).toBe(outcome);
+    expect(calls).toEqual(expected);
+    expect(scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
+  });
+
+  it.each([
+    { failure: "compute", expected: ["compute", "clear", "report:failed"] },
+    { failure: "checkpoint", expected: ["compute", "checkpoint", "clear", "report:failed"] },
+    {
+      failure: "report",
+      expected: ["compute", "checkpoint", "report:completed", "clear", "report:failed"]
+    },
+    {
+      failure: "clear",
+      expected: ["compute", "checkpoint", "report:completed", "clear", "report:failed"]
+    }
+  ])("attempts pending cleanup before reporting a $failure failure", async ({ failure, expected }) => {
+    const calls: string[] = [];
+    const error = new Error(`${failure} failed`);
+    const { librarian, scheduler, clearPendingWorkspace } = createLibrarian({
+      computeAndApplyPlasticity: async () => {
+        calls.push("compute");
+        if (failure === "compute") throw error;
+        return PATH_PLASTICITY_NO_MUTATION_RESULT;
+      },
+      markProcessed: async () => {
+        calls.push("checkpoint");
+        if (failure === "checkpoint") throw error;
+      }
+    });
+    scheduler.reportCompletion.mockImplementation(async (result) => {
+      calls.push(`report:${result.outcome}`);
+      if (failure === "report" && result.outcome === "completed") throw error;
+      return undefined;
+    });
+    clearPendingWorkspace.mockImplementation(async () => {
+      calls.push("clear");
+      if (failure === "clear") throw error;
+      return undefined;
+    });
+
+    const result = await librarian.run(createTask({ target_object_refs: ["0", "10"] }));
+
+    expect(result).toMatchObject({ success: false, outcome: "failed", error_message: error.message });
+    expect(calls).toEqual(expected);
+    expect(clearPendingWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1");
+    expect(scheduler.reportCompletion).toHaveBeenLastCalledWith(result);
   });
 
   it("parsePathPlasticityRevisionCursor accepts integer cursors and rejects wall-clock ISO", () => {
