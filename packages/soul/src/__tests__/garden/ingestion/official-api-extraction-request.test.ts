@@ -7,6 +7,7 @@ import {
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
   collectOfficialApiExtractionCoverage,
+  officialApiExtractionRequestSourceBinding,
   parseOfficialApiExtractionRequest,
   planOfficialApiExtractionWindow,
   officialApiExtractionRequestTemplatePreimage,
@@ -217,6 +218,27 @@ describe("official API extraction request", () => {
     };
     expect(stringifyOfficialApiExtractionRequest(first.requests[0]!))
       .not.toBe(JSON.stringify(reordered));
+  });
+
+  it("binds a packed request to corpus identity before assertion catalog text", () => {
+    const source = "I own a blue bicycle. I prefer coffee in the morning.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const corpus = buildOfficialApiSourceCorpus(source, []);
+    expect(officialApiExtractionRequestSourceBinding(request, corpus)).toBeNull();
+
+    const tampered = {
+      ...request,
+      source_assertions: request.source_assertions.map((assertion) => ({
+        ...assertion,
+        text: "tampered assertion"
+      }))
+    };
+    expect(officialApiExtractionRequestSourceBinding(tampered, corpus))
+      .toBe("source_assertion_mismatch");
+    expect(officialApiExtractionRequestSourceBinding(tampered, "I own a red bicycle."))
+      .toBe("source_generation_mismatch");
+    expect(officialApiExtractionRequestSourceBinding(request, "I own a red bicycle."))
+      .toBe("source_generation_mismatch");
   });
 });
 

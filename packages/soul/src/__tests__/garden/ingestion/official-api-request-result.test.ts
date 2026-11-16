@@ -184,11 +184,74 @@ it("keeps self-contained condition semantics when a rejected sibling is unrelate
   }));
 });
 
-it("does not mark a receive complete when the source generation differs", () => {
-  const received = receiveOfficialApiRequestSignals('{"signals":[]}', request, "I own a red bicycle.");
+it("skips HOLD source binding when the corpus is omitted", () => {
+  const raw = JSON.stringify({
+    signals: [{ ...selected, matched_text: "I prefer tea every evening." }]
+  });
+  const received = receiveOfficialApiRequestSignals(raw, request);
+  expect(received.status).toBe("complete");
+  expect(received.drafts).toHaveLength(1);
+  expect(received.rejections).toEqual([]);
+  expect(() => classifyOfficialApiRequestResult(raw, request)).toThrow();
+});
+
+it("fans HOLD bound mismatches by draft count without request assertion fields", () => {
+  expect(request.source_assertions).toHaveLength(2);
+  const empty = receiveOfficialApiRequestSignals('{"signals":[]}', request, "I own a red bicycle.");
+  expect(empty.status).toBe("partial");
+  expect(empty.drafts).toEqual([]);
+  expect(empty.rejections).toEqual([
+    { index: 0, reason: "source_generation_mismatch" }
+  ]);
+  expect(Object.keys(empty.rejections[0]!)).toEqual(["index", "reason"]);
+  expect(Object.isFrozen(empty.rejections[0])).toBe(true);
+
+  const multiple = receiveOfficialApiRequestSignals(
+    JSON.stringify({ signals: [selected, selected, selected] }),
+    request,
+    "I own a red bicycle."
+  );
+  expect(multiple.rejections).toEqual([
+    { index: 0, reason: "source_generation_mismatch" },
+    { index: 1, reason: "source_generation_mismatch" },
+    { index: 2, reason: "source_generation_mismatch" }
+  ]);
+});
+
+it("keeps HOLD assertion mismatch on the draft-count fanout after generation matches", () => {
+  const tampered = {
+    ...request,
+    source_assertions: request.source_assertions.map((assertion) => ({
+      ...assertion,
+      text: "tampered assertion"
+    }))
+  };
+  const received = receiveOfficialApiRequestSignals(
+    JSON.stringify({ signals: [selected, selected] }),
+    tampered,
+    buildOfficialApiSourceCorpus(source, [])
+  );
   expect(received.status).toBe("partial");
-  expect(received.drafts).toHaveLength(0);
-  expect(received.rejections[0]?.reason).toBe("source_generation_mismatch");
+  expect(received.drafts).toEqual([]);
+  expect(received.rejections).toEqual([
+    { index: 0, reason: "source_assertion_mismatch" },
+    { index: 1, reason: "source_assertion_mismatch" }
+  ]);
+  expect(received.rejections.every((item) => !("assertion_id" in item))).toBe(true);
+});
+
+it("prefers HOLD generation mismatch when corpus identity and assertion text both differ", () => {
+  const tampered = {
+    ...request,
+    source_assertions: request.source_assertions.map((assertion) => ({
+      ...assertion,
+      text: "tampered assertion"
+    }))
+  };
+  const received = receiveOfficialApiRequestSignals('{"signals":[]}', tampered, "I own a red bicycle.");
+  expect(received.rejections).toEqual([
+    { index: 0, reason: "source_generation_mismatch" }
+  ]);
 });
 
 it("keeps request completion, catalog eligibility, and semantic preservation distinct", () => {

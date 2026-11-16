@@ -6,11 +6,11 @@ import {
 import type { OfficialApiInterpretationEntryRejection } from "./source-interpretation-receive.js";
 import {
   computeOfficialApiSourceCorpusIdentity,
+  officialApiExtractionRequestSourceBinding,
   type OfficialApiExtractionRequest
 } from "./extraction-request.js";
 import type { SourceAssertionCatalogPage } from
   "../../triage/grounding/source-locator/assertion-catalog.js";
-import { buildOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
 import { resolvePreferenceAwareSourceGrounding } from "../../triage/grounding/preference-profile.js";
 import { groundOfficialApiDraft } from "./source-grounding.js";
 import {
@@ -234,22 +234,14 @@ function requestBoundRejections(
   if (sourceCorpus === undefined) {
     return null;
   }
-  const indexes = Math.max(draftCount, 1);
-  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
-    return Array.from({ length: indexes }, (_, index) => Object.freeze({
-      index,
-      reason: "source_generation_mismatch" as const
-    }));
+  const reason = officialApiExtractionRequestSourceBinding(request, sourceCorpus);
+  if (reason === null) {
+    return null;
   }
-  const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus)
-    .map((assertion) => [assertion.assertion_id, assertion.text]));
-  if (request.source_assertions.some((assertion) => catalog.get(assertion.assertion_id) !== assertion.text)) {
-    return Array.from({ length: indexes }, (_, index) => Object.freeze({
-      index,
-      reason: "source_assertion_mismatch" as const
-    }));
-  }
-  return null;
+  return Array.from({ length: Math.max(draftCount, 1) }, (_, index) => Object.freeze({
+    index,
+    reason
+  }));
 }
 
 function isolateRequestDrafts(

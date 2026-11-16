@@ -100,6 +100,80 @@ describe("official API source interpretation receive", () => {
     ]);
   });
 
+  it("fans interpretation bound mismatches across packed request assertions", () => {
+    const packedSource = "Alice uses tools. Bob uses apps.";
+    const packed = buildOfficialApiExtractionRequest(packedSource, []);
+    expect(packed.source_assertions.length).toBeGreaterThan(1);
+    const mismatch = receiveOfficialApiSourceInterpretations(
+      '{"interpretations":[]}',
+      packed,
+      { sourceCorpus: "User: Carol uses maps.", artifactKey: "artifact-1" }
+    );
+    expect(mismatch.status).toBe("partial");
+    expect(mismatch.located).toEqual([]);
+    expect(mismatch.rejections).toEqual(packed.source_assertions.map((assertion, index) => ({
+      index,
+      index_scope: "request",
+      reason: "source_generation_mismatch",
+      assertion_id: assertion.assertion_id
+    })));
+    expect(Object.keys(mismatch.rejections[0]!)).toEqual([
+      "index", "index_scope", "reason", "assertion_id"
+    ]);
+    expect(Object.isFrozen(mismatch.rejections[0])).toBe(true);
+    expect(mismatch.request_assertion_ids).toEqual(
+      packed.source_assertions.map((assertion) => assertion.assertion_id)
+    );
+  });
+
+  it("keeps an empty packed interpretation mismatch as a bound empty list, not a skipped check", () => {
+    const empty = buildOfficialApiExtractionRequest("", []);
+    expect(empty.source_assertions).toEqual([]);
+    const mismatch = receiveOfficialApiSourceInterpretations(
+      '{"interpretations":[]}',
+      empty,
+      { sourceCorpus: "User: Carol uses maps.", artifactKey: "artifact-1" }
+    );
+    expect(mismatch.status).toBe("partial");
+    expect(mismatch.located).toEqual([]);
+    expect(mismatch.rejections).toEqual([]);
+    expect(mismatch.request_assertion_ids).toEqual([]);
+
+    const matchedEmpty = receiveOfficialApiSourceInterpretations(
+      '{"interpretations":[]}',
+      empty,
+      {
+        sourceCorpus: buildOfficialApiSourceCorpus("", []),
+        artifactKey: "artifact-1"
+      }
+    );
+    expect(matchedEmpty.status).toBe("complete");
+    expect(matchedEmpty.rejections).toEqual([]);
+  });
+
+  it("fans interpretation assertion catalog mismatch after generation matches", () => {
+    const tampered = {
+      ...request,
+      source_assertions: request.source_assertions.map((assertion) => ({
+        ...assertion,
+        text: "tampered assertion"
+      }))
+    };
+    const received = receiveOfficialApiSourceInterpretations(
+      interpretationRaw([usesRelation]),
+      tampered,
+      { sourceCorpus: corpus, artifactKey: "artifact-1" }
+    );
+    expect(received.status).toBe("partial");
+    expect(received.located).toEqual([]);
+    expect(received.rejections).toEqual(tampered.source_assertions.map((assertion, index) => ({
+      index,
+      index_scope: "request",
+      reason: "source_assertion_mismatch",
+      assertion_id: assertion.assertion_id
+    })));
+  });
+
   it("does not leak candidates across source or assertion mismatches", () => {
     const mismatch = receiveOfficialApiSourceInterpretations(
       interpretationRaw([usesRelation]),
@@ -108,7 +182,12 @@ describe("official API source interpretation receive", () => {
     );
     expect(mismatch.status).toBe("partial");
     expect(mismatch.located).toEqual([]);
-    expect(mismatch.rejections.every((item) => item.reason === "source_generation_mismatch")).toBe(true);
+    expect(mismatch.rejections).toEqual(request.source_assertions.map((assertion, index) => ({
+      index,
+      index_scope: "request",
+      reason: "source_generation_mismatch",
+      assertion_id: assertion.assertion_id
+    })));
 
     expect(() => classifyOfficialApiInterpretationResult(
       interpretationRaw([usesRelation], 9),

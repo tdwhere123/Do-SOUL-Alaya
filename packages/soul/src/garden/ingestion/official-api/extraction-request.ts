@@ -311,6 +311,22 @@ export function computeOfficialApiSourceCorpusIdentity(sourceCorpus: string): st
   }), "utf8").digest("hex");
 }
 
+/** Null means the packed request is bound to this corpus. HOLD omits the check when corpus is absent. */
+export function officialApiExtractionRequestSourceBinding(
+  request: Pick<OfficialApiExtractionRequest, "source_corpus_identity" | "source_assertions">,
+  sourceCorpus: string
+): "source_generation_mismatch" | "source_assertion_mismatch" | null {
+  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
+    return "source_generation_mismatch";
+  }
+  const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus)
+    .map((assertion) => [assertion.assertion_id, assertion.text]));
+  if (request.source_assertions.some((assertion) => catalog.get(assertion.assertion_id) !== assertion.text)) {
+    return "source_assertion_mismatch";
+  }
+  return null;
+}
+
 function resolveTrustedRole(
   markers: readonly { readonly start: number; readonly role: "user" | "assistant" }[],
   assertionStart: number

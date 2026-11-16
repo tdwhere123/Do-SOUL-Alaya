@@ -8,11 +8,10 @@ import {
   type SourceLocatedInterpretation
 } from "@do-soul/alaya-protocol";
 import {
-  computeOfficialApiSourceCorpusIdentity,
+  officialApiExtractionRequestSourceBinding,
   type OfficialApiExtractionRequest
 } from "./extraction-request.js";
 import {
-  buildOfficialApiSourceAssertions,
   indexOfficialApiSourceAssertions
 } from "../../triage/grounding/source-locator.js";
 
@@ -225,25 +224,16 @@ function requestBoundRejections(
   request: OfficialApiExtractionRequest,
   sourceCorpus: string
 ): readonly OfficialApiInterpretationEntryRejection[] | null {
-  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
-    return request.source_assertions.map((assertion, index) => Object.freeze({
-      index,
-      index_scope: "request" as const,
-      reason: "source_generation_mismatch" as const,
-      assertion_id: assertion.assertion_id
-    }));
+  const reason = officialApiExtractionRequestSourceBinding(request, sourceCorpus);
+  if (reason === null) {
+    return null;
   }
-  const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus)
-    .map((assertion) => [assertion.assertion_id, assertion.text]));
-  if (request.source_assertions.some((assertion) => catalog.get(assertion.assertion_id) !== assertion.text)) {
-    return request.source_assertions.map((assertion, index) => Object.freeze({
-      index,
-      index_scope: "request" as const,
-      reason: "source_assertion_mismatch" as const,
-      assertion_id: assertion.assertion_id
-    }));
-  }
-  return null;
+  return request.source_assertions.map((assertion, index) => Object.freeze({
+    index,
+    index_scope: "request" as const,
+    reason,
+    assertion_id: assertion.assertion_id
+  }));
 }
 
 function locateUnavailable(
