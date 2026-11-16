@@ -87,14 +87,8 @@ export class ContextLensAssembler {
     this.pruneLensStore(occurredAt);
 
     const prepared = await this.prepareAssemblyState(params);
-    const {
-      taskSurface,
-      recallPolicy,
-      recallResult,
-      strictWinners,
-      recalledMemories,
-      activeOverrides
-    } = prepared;
+    const { projectionInputs, recallPolicy } = prepared;
+    const { taskSurface } = projectionInputs;
     let { contextLens, workingProjection } = prepared;
 
     const policyBudget = recallPolicy?.fine_assessment.budgets.max_total_tokens ?? null;
@@ -106,14 +100,9 @@ export class ContextLensAssembler {
       workingProjection.total_token_estimate > policyBudget
     ) {
       const degradationApplication = await this.applyDegradation({
-        taskSurface,
+        projectionInputs: { ...projectionInputs, recallPolicyRef: recallPolicy?.runtime_id ?? null },
         contextLens,
         workingProjection,
-        recallResult,
-        strictWinners,
-        recalledMemories,
-        recallPolicyRuntimeId: recallPolicy?.runtime_id ?? null,
-        activeOverrides,
         policyBudget,
         run: params.run,
         runtimeMode: params.runtimeMode ?? RuntimeMode.FULL,
@@ -204,23 +193,19 @@ export class ContextLensAssembler {
       lens_entries: lensEntries,
       not_a_priority_source: true
     });
-    const workingProjection = this.projectionBuilder.buildWorkingProjection(
+    const projectionInputs = {
       taskSurface,
-      contextLens,
       recallResult,
       strictWinners,
       recalledMemories,
-      recallPolicy?.runtime_id ?? null,
+      recallPolicyRef: recallPolicy?.runtime_id ?? null,
       activeOverrides
-    );
+    };
+    const workingProjection = this.projectionBuilder.buildWorkingProjection(contextLens, projectionInputs);
 
     return {
-      taskSurface,
+      projectionInputs,
       recallPolicy,
-      recallResult,
-      strictWinners,
-      recalledMemories,
-      activeOverrides,
       contextLens,
       workingProjection
     };
@@ -242,15 +227,7 @@ export class ContextLensAssembler {
 
     if (degradationResult.degraded) {
       contextLens = degradationResult.finalLens;
-      workingProjection = this.projectionBuilder.buildWorkingProjection(
-        params.taskSurface,
-        contextLens,
-        params.recallResult,
-        params.strictWinners,
-        params.recalledMemories,
-        params.recallPolicyRuntimeId,
-        params.activeOverrides
-      );
+      workingProjection = this.projectionBuilder.buildWorkingProjection(contextLens, params.projectionInputs);
       tokensAfterDegradation = workingProjection.total_token_estimate;
       await bindEventPublisher({
         eventLogRepo: this.dependencies.eventLogRepo,
@@ -293,8 +270,8 @@ export class ContextLensAssembler {
           workspaceId: params.run.workspace_id,
           triggerKind: BankruptcyTriggerKind.TOKEN_OVERFLOW,
           triggerSummary: `Token estimate ${tokensAfterDegradation} exceeds budget ${params.policyBudget}`,
-          taskSurfaceRef: params.taskSurface.runtime_id,
-          taskSurfaceExpiresAt: params.taskSurface.expires_at,
+          taskSurfaceRef: params.projectionInputs.taskSurface.runtime_id,
+          taskSurfaceExpiresAt: params.projectionInputs.taskSurface.expires_at,
           currentMode: params.runtimeMode,
           protectedConstraints: degradationResult.protectedObjectIds,
           droppedCandidates: degradationResult.droppedObjectIds,
@@ -308,10 +285,7 @@ export class ContextLensAssembler {
 
     return {
       contextLens,
-      workingProjection,
-      degradationResult,
-      tokensAfterDegradation,
-      stillOverBudgetAfterDegradation
+      workingProjection
     };
   }
 

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { BudgetEventType, ObjectKind, RuntimeMode, ScopeClass, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { BudgetEventType, ObjectKind, RecallContextEventType, RuntimeMode, ScopeClass, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { ContextLensAssembler } from "../../conversation/context-lens-assembler.js";
-import { CLAIM_ID, GLOBAL_MEMORY_ID, PROJECT_MEMORY_ID, createDependencies, createGlobalCandidate, createMemoryEntry, createProjectCandidate, createRecallPolicy, createRecallResult, createRuntimeIdGenerator } from "./context-lens-assembler-test-fixtures.js";
+import { ContextLensProjectionBuilder } from "../../conversation/context-lens-projection-builder.js";
+import type { RecallCandidate } from "../../recall/recall-service.js";
+import { CLAIM_ID, GLOBAL_MEMORY_ID, PROJECT_MEMORY_ID, RECALL_POLICY_ID, TASK_SURFACE_ID, createClaimForm, createDependencies, createGlobalCandidate, createMemoryEntry, createProjectCandidate, createRecallPolicy, createRecallResult, createRuntimeIdGenerator } from "./context-lens-assembler-test-fixtures.js";
 
 describe("context lens assembler", () => {
 it("evicts the oldest cached lens when the store exceeds its cap", async () => {
@@ -237,10 +239,24 @@ it("rebuilds the working projection and emits a degraded event when degradation 
 
     expect(degradationPipeline.assess).toHaveBeenCalledTimes(1);
     expect(result.contextLens.lens_entries.some((entry) => entry.object_kind === ObjectKind.MEMORY_ENTRY)).toBe(false);
+    expect(result.workingProjection.entries.map((entry) => entry.content_snapshot)).toEqual([
+      "Goal: Trim context",
+      "Surface analyze: Trim context",
+      "Always run pnpm commands from the workspace root.",
+      "[evidence ref: evidence-1]"
+    ]);
+    expect(result.workingProjection.total_token_estimate).toBe(33);
+    expect(result.workingProjection.recall_policy_ref).toBe(RECALL_POLICY_ID);
+    expect(result.workingProjection.runtime_id).toBe("00000000-0000-4000-8000-000000000002");
+    expect(assembler.getLastLens("run-degraded")).toEqual(result.contextLens);
 
     const appendedEntries = dependencies.eventLogRepo.append.mock.calls.map(
       (call) => call[0] as Omit<EventLogEntry, "event_id" | "created_at" | "revision">
     );
+    expect(appendedEntries.map((entry) => entry.event_type)).toEqual([
+      BudgetEventType.SOUL_BUDGET_DEGRADED,
+      RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED
+    ]);
     const degradedEntry = appendedEntries.find(
       (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) =>
         entry.event_type === BudgetEventType.SOUL_BUDGET_DEGRADED
@@ -449,4 +465,106 @@ it("broadcasts degraded events and declares bankruptcy when the lens remains ove
       })
     );
   });
+
+it("resolves fresh projection lookups and estimates each ordered entry once per build", async () => {
+    const assembled = await new ContextLensAssembler(createDependencies()).assemble({
+      run: { run_id: "run-projection", workspace_id: "workspace-1", run_mode: "chat", title: "Projection" },
+      surfaceId: null,
+      displayName: "Projection"
+    });
+    const strictWinners = [createClaimForm()];
+    const candidates: Readonly<RecallCandidate>[] = [createProjectCandidate(), createGlobalCandidate()];
+    const inputs = {
+      taskSurface: assembled.taskSurface,
+      recallResult: { ...createRecallResult(candidates), candidates },
+      strictWinners,
+      recalledMemories: new Map([[PROJECT_MEMORY_ID, createMemoryEntry({
+        object_id: PROJECT_MEMORY_ID,
+        scope_class: ScopeClass.PROJECT,
+        content: "Local body"
+      })]]),
+      recallPolicyRef: RECALL_POLICY_ID,
+      activeOverrides: []
+    };
+    const generateRuntimeId = vi.fn(createRuntimeIdGenerator());
+    const builder = new ContextLensProjectionBuilder({ generateRuntimeId });
+    let estimatedCount = 0;
+    const estimate = vi.fn((_text: string): number => ++estimatedCount);
+    const initial = builder.buildWorkingProjection(assembled.contextLens, inputs, { estimate });
+
+    strictWinners[0] = { ...createClaimForm(), proposition_digest: "Updated claim" };
+    candidates[1] = { ...createGlobalCandidate(), content_preview: "Updated global preview" };
+    const rebuilt = builder.buildWorkingProjection({
+      ...assembled.contextLens,
+      lens_entries: assembled.contextLens.lens_entries.map((entry, index) =>
+        index === 0 ? { ...entry, manifestation: "hint" as const } :
+          index === 1 ? { ...entry, manifestation: "excerpt" as const } : entry
+      )
+    }, inputs, { estimate });
+
+    expect(estimate.mock.calls.map(([content]) => content)).toEqual([
+      "Goal: Projection",
+      "Surface analyze: Projection",
+      "Always run pnpm commands from the workspace root.",
+      "Local body",
+      "Prefer deterministic tests.",
+      "[evidence ref: evidence-1]",
+      `[task surface ref: ${TASK_SURFACE_ID}]`,
+      `Surface ref: ${TASK_SURFACE_ID}`,
+      "Updated claim",
+      "Local body",
+      "Updated global preview",
+      "[evidence ref: evidence-1]"
+    ]);
+    expect(initial.entries.map((entry) => entry.token_estimate)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(initial.total_token_estimate).toBe(21);
+    expect(rebuilt.entries.map((entry) => entry.token_estimate)).toEqual([7, 8, 9, 10, 11, 12]);
+    expect(rebuilt.total_token_estimate).toBe(57);
+    expect(rebuilt.derived_from).toBe(assembled.contextLens.runtime_id);
+    expect(rebuilt.recall_policy_ref).toBe(RECALL_POLICY_ID);
+    expect(generateRuntimeId).toHaveBeenCalledTimes(2);
+  });
+
+it.each([BudgetEventType.SOUL_BUDGET_DEGRADED, RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED])(
+  "retains the previous lens when %s audit fails after projection rebuild",
+  async (failedEvent) => {
+    const dependencies = createDependencies({
+      degradationPipeline: {
+        assess: ({ contextLens }) => ({
+          degraded: true,
+          finalLens: { ...contextLens, lens_entries: [] },
+          stepsApplied: [],
+          tokensAfter: 0,
+          stillOverBudget: false,
+          protectedObjectIds: [],
+          droppedObjectIds: []
+        })
+      }
+    });
+    const assembler = new ContextLensAssembler(dependencies);
+    const params = {
+      run: { run_id: "run-audit", workspace_id: "workspace-1", run_mode: "chat" as const, title: "Audit" },
+      surfaceId: null
+    };
+    const previous = await assembler.assemble(params);
+    dependencies.recallService.buildDefaultPolicy.mockImplementation(() => {
+      const policy = createRecallPolicy(TASK_SURFACE_ID, "analyze");
+      return {
+        ...policy,
+        fine_assessment: {
+          ...policy.fine_assessment,
+          budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 1 }
+        }
+      };
+    });
+    dependencies.eventLogRepo.append.mockImplementation(async (entry) => {
+      expect(assembler.getLastLens("run-audit")).toEqual(previous.contextLens);
+      if (entry.event_type === failedEvent) throw new Error("audit unavailable");
+      return { event_id: "evt-degraded", created_at: "2026-03-23T10:00:00.000Z", revision: 0, ...entry };
+    });
+
+    await expect(assembler.assemble(params)).rejects.toThrow("audit unavailable");
+    expect(assembler.getLastLens("run-audit")).toEqual(previous.contextLens);
+  }
+);
 });

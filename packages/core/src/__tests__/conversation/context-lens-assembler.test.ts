@@ -208,7 +208,7 @@ it("prepends session overrides and exposes correction content in the working pro
     );
   });
 
-it("filters cross-workspace memories when using the single-id fallback loader", async () => {
+it("omits missing and cross-workspace project memories when using the single-id fallback loader", async () => {
     const crossWorkspaceMemoryId = "9d599a9a-4940-4f23-a88e-0149f82ab099";
     const crossWorkspaceMemory = createMemoryEntry({
       object_id: crossWorkspaceMemoryId,
@@ -222,7 +222,8 @@ it("filters cross-workspace memories when using the single-id fallback loader", 
           {
             ...createProjectCandidate(),
             object_id: crossWorkspaceMemoryId
-          } satisfies RecallCandidate
+          } satisfies RecallCandidate,
+          createProjectCandidate()
         ])),
         buildDefaultPolicy: vi.fn(() => createRecallPolicy(TASK_SURFACE_ID, "analyze"))
       },
@@ -230,7 +231,7 @@ it("filters cross-workspace memories when using the single-id fallback loader", 
         findByWorkspace: vi.fn(async () => [])
       },
       memoryRepo: {
-        findById: vi.fn(async () => crossWorkspaceMemory),
+        findById: vi.fn(async (objectId: string) => objectId === crossWorkspaceMemoryId ? crossWorkspaceMemory : null),
         findByIds: undefined
       } as unknown as LensAssemblerDependencies["memoryRepo"]
     });
@@ -247,10 +248,12 @@ it("filters cross-workspace memories when using the single-id fallback loader", 
       displayName: "Implement ContextLens"
     });
 
-    expect(result.workingProjection.entries).not.toContainEqual(
-      expect.objectContaining({ object_id: crossWorkspaceMemoryId })
-    );
+    expect(result.workingProjection.entries.map((entry) => entry.content_snapshot)).toEqual([
+      "Goal: Implement ContextLens",
+      "Surface analyze: Implement ContextLens"
+    ]);
     expect(dependencies.memoryRepo.findById).toHaveBeenCalledWith(crossWorkspaceMemoryId);
+    expect(dependencies.memoryRepo.findById).toHaveBeenCalledWith(PROJECT_MEMORY_ID);
   });
 
 it("falls back to full global candidate content when no local memory row exists", async () => {

@@ -18,11 +18,20 @@ import { makeTokenEstimator, type TokenEstimator } from "../recall/runtime/recal
 
 import {
   createExcerptContent,
-  createLensEntry
+  createLensEntry,
+  type WorkingProjectionInputs
 } from "./context-lens-assembler-ports.js";
 
 export interface ContextLensProjectionBuilderDependencies {
   readonly generateRuntimeId: () => string;
+}
+
+interface ContentSnapshotSources {
+  readonly taskSurface: Readonly<TaskObjectSurface>;
+  readonly strictWinnerMap: ReadonlyMap<string, Readonly<ClaimForm>>;
+  readonly recallCandidateMap: ReadonlyMap<string, Readonly<RecallCandidate>>;
+  readonly recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>;
+  readonly overrideMap: ReadonlyMap<string, Readonly<SessionOverride>>;
 }
 
 export class ContextLensProjectionBuilder {
@@ -92,31 +101,27 @@ export class ContextLensProjectionBuilder {
   }
 
   public buildWorkingProjection(
-    taskSurface: Readonly<TaskObjectSurface>,
     contextLens: Readonly<ContextLens>,
-    recallResult: RecallResult,
-    strictWinners: readonly Readonly<ClaimForm>[],
-    recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
-    recallPolicyRef: string | null,
-    activeOverrides: readonly Readonly<SessionOverride>[],
+    inputs: WorkingProjectionInputs,
     tokenEstimator: TokenEstimator = makeTokenEstimator()
   ): Readonly<WorkingProjection> {
+    const { taskSurface, recallResult, strictWinners, recalledMemories, recallPolicyRef, activeOverrides } = inputs;
     let taskSurfaceEntryIndex = 0;
-    const strictWinnerMap = new Map(strictWinners.map((claim) => [claim.object_id, claim] as const));
-    const recallCandidateMap = new Map(recallResult.candidates.flatMap((candidate) =>
-      candidate.object_id === undefined ? [] : [[candidate.object_id, candidate] as const]
-    ));
-    const overrideMap = new Map(activeOverrides.map((override) => [override.runtime_id, override] as const));
+    const sources: ContentSnapshotSources = {
+      taskSurface,
+      strictWinnerMap: new Map(strictWinners.map((claim) => [claim.object_id, claim] as const)),
+      recallCandidateMap: new Map(recallResult.candidates.flatMap((candidate) =>
+        candidate.object_id === undefined ? [] : [[candidate.object_id, candidate] as const]
+      )),
+      recalledMemories,
+      overrideMap: new Map(activeOverrides.map((override) => [override.runtime_id, override] as const))
+    };
 
     const entries = contextLens.lens_entries.map((entry) => {
       const contentSnapshot = this.resolveContentSnapshot(
         entry,
-        taskSurface,
         taskSurfaceEntryIndex,
-        strictWinnerMap,
-        recallCandidateMap,
-        recalledMemories,
-        overrideMap
+        sources
       );
 
       if (entry.object_kind === ControlPlaneObjectKind.TASK_OBJECT_SURFACE) {
@@ -147,13 +152,10 @@ export class ContextLensProjectionBuilder {
 
   private resolveContentSnapshot(
     entry: Readonly<ContextLensEntry>,
-    taskSurface: Readonly<TaskObjectSurface>,
     taskSurfaceEntryIndex: number,
-    strictWinnerMap: ReadonlyMap<string, Readonly<ClaimForm>>,
-    recallCandidateMap: ReadonlyMap<string, Readonly<RecallCandidate>>,
-    recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>,
-    overrideMap: ReadonlyMap<string, Readonly<SessionOverride>>
+    sources: ContentSnapshotSources
   ): string {
+    const { taskSurface, strictWinnerMap, recallCandidateMap, recalledMemories, overrideMap } = sources;
     if (entry.object_kind === ControlPlaneObjectKind.SESSION_OVERRIDE) {
       const override = overrideMap.get(entry.object_id);
       return override === undefined

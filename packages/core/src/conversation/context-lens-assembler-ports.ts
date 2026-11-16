@@ -6,7 +6,6 @@ import {
   type ContextLensEntry,
   type EventLogEntry,
   type LensAssemblerDegradationPort,
-  type LensDegradationResult,
   type MemoryEntry,
   type RecallPolicy,
   type RuntimeMode as RuntimeModeValue,
@@ -122,20 +121,21 @@ export interface AssembleResult {
 export interface DegradationApplicationResult {
   readonly contextLens: Readonly<ContextLens>;
   readonly workingProjection: Readonly<WorkingProjection>;
-  readonly degradationResult: LensDegradationResult;
-  readonly tokensAfterDegradation: number;
-  readonly stillOverBudgetAfterDegradation: boolean;
 }
 
-export interface DegradationApplicationParams {
+export interface WorkingProjectionInputs {
   readonly taskSurface: Readonly<TaskObjectSurface>;
-  readonly contextLens: Readonly<ContextLens>;
-  readonly workingProjection: Readonly<WorkingProjection>;
   readonly recallResult: RecallResult;
   readonly strictWinners: readonly Readonly<ClaimForm>[];
   readonly recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly recallPolicyRuntimeId: string | null;
+  readonly recallPolicyRef: string | null;
   readonly activeOverrides: readonly Readonly<SessionOverride>[];
+}
+
+export interface DegradationApplicationParams {
+  readonly projectionInputs: WorkingProjectionInputs;
+  readonly contextLens: Readonly<ContextLens>;
+  readonly workingProjection: Readonly<WorkingProjection>;
   readonly policyBudget: number;
   readonly run: Pick<Run, "run_id" | "workspace_id" | "run_mode" | "title">;
   readonly runtimeMode: RuntimeModeValue;
@@ -144,12 +144,8 @@ export interface DegradationApplicationParams {
 }
 
 export interface PreparedAssemblyState {
-  readonly taskSurface: Readonly<TaskObjectSurface>;
+  readonly projectionInputs: WorkingProjectionInputs;
   readonly recallPolicy: Readonly<RecallPolicy> | null;
-  readonly recallResult: RecallResult;
-  readonly strictWinners: readonly Readonly<ClaimForm>[];
-  readonly recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly activeOverrides: readonly Readonly<SessionOverride>[];
   readonly contextLens: Readonly<ContextLens>;
   readonly workingProjection: Readonly<WorkingProjection>;
 }
