@@ -16,7 +16,7 @@ afterEach(() => {
   databases.clear();
 });
 
-async function fixture(deferred = false) {
+async function fixture(gcMode: "active" | "deferred" | "missing" = "active") {
   const now = new Date().toISOString();
   const storage = await createRecallRealStorage(db => databases.add(db));
   const eventLogRepo = new SqliteEventLogRepo(storage.database);
@@ -46,8 +46,8 @@ async function fixture(deferred = false) {
       memoryLookup: storage.memoryEntryRepo,
       capsuleLookup: new SqliteSynthesisCapsuleRepo(storage.database), tombstoneAuthority
     }),
-    tombstoneGcPort: gcPort,
-    ...(deferred ? { tombstoneGcDeferredReason: "temporal_assertion_provenance_required" } : {})
+    ...(gcMode === "missing" ? {} : { tombstoneGcPort: gcPort }),
+    ...(gcMode === "deferred" ? { tombstoneGcDeferredReason: "temporal_assertion_provenance_required" } : {})
   });
   const task: GardenTaskDescriptor = {
     task_id: "task-forget", task_kind: GardenTaskKind.TOMBSTONE_GC, required_tier: GardenTier.TIER_0,
@@ -95,6 +95,27 @@ describe("Janitor autonomous forget through Core and SQLite", () => {
     expect(f.scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
   });
 
+  it("reports unavailable GC without losing the already-committed disposition accounting", async () => {
+    const f = await fixture("missing");
+
+    const result = await f.janitor.run(f.task);
+
+    expect(result).toMatchObject({ success: false, outcome: "failed", objects_affected: [FIRST],
+      audit_entries: [
+        "disposition_sweep: 1 dormant memories autonomously tombstoned (0 retained, no disposition or strong ref)",
+        "[UNAVAILABLE] tombstone_gc: gc port not wired"
+      ], error_message: "tombstone GC port is not configured" });
+    expect(await f.memoryEntryRepo.findById(FIRST)).toMatchObject({ lifecycle_state: "tombstone", forget_disposition: "judged_useless" });
+    expect(await f.memoryEntryRepo.findById(SECOND)).toMatchObject({ lifecycle_state: "tombstone" });
+    expect(f.findGcCandidates).not.toHaveBeenCalled();
+    expect((await f.eventLogRepo.queryByTypeAll("soul.memory.state_changed")).map(event =>
+      [event.entity_id, event.payload_json.to_state])).toEqual([[FIRST, "tombstone"]]);
+    expect(f.notifications.map(notification => [notification.committed, notification.row])).toEqual([
+      [true, { lifecycle_state: "tombstone" }]
+    ]);
+    expect(f.scheduler.reportCompletion).toHaveBeenCalledExactlyOnceWith(result);
+  });
+
   it("keeps committed disposition work on a physical-delete SQL fault and retries only remaining GC", async () => {
     const f = await fixture();
     f.database.connection.exec(`CREATE TRIGGER reject_memory_delete BEFORE DELETE ON memory_entries
@@ -122,7 +143,7 @@ describe("Janitor autonomous forget through Core and SQLite", () => {
   });
 
   it("commits the disposition sweep before intentional physical-GC deferral", async () => {
-    const f = await fixture(true);
+    const f = await fixture("deferred");
 
     const result = await f.janitor.run(f.task);
 
