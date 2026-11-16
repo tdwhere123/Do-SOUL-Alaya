@@ -38,9 +38,17 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
     return incompatibleCapInterpretation({ query_id: queryId, snapshot_id: snapshotId,
       program: EPSILON, view, interpretation_clock: input.interpretation_clock });
   }
-  const hints = compileTimeHints(input.since, input.until);
-  if (input.text.length > MAX_ORDINARY_TEXT || normalizeOrdinaryText(input.text).length === 0
-    || !IsoDatetimeStringSchema.safeParse(input.interpretation_clock).success || hints.kind === "invalid") {
+  const timeHints = compileTimeHints(input.since, input.until);
+  if (input.text.length > MAX_ORDINARY_TEXT) {
+    return ordinaryMalformed(input, snapshotId, view);
+  }
+  if (normalizeOrdinaryText(input.text).length === 0) {
+    return ordinaryMalformed(input, snapshotId, view);
+  }
+  if (!IsoDatetimeStringSchema.safeParse(input.interpretation_clock).success) {
+    return ordinaryMalformed(input, snapshotId, view);
+  }
+  if (timeHints.kind === "invalid") {
     return ordinaryMalformed(input, snapshotId, view);
   }
   const proposal = admitQueryProposal(input.interpretation_proposal, input.text,
@@ -53,14 +61,14 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
   }
   const relations = input.relations ?? proposeOrdinaryRelations(input.text);
   try {
-    const window = hints.kind === "window" ? hints.window : undefined;
+    const window = timeHints.kind === "window" ? timeHints.window : undefined;
     const compiled = relations.length === 0 ? EPSILON : programFromOpenRelations(relations,
       window === undefined ? undefined : anchorTimeGuard(window));
     const parsed = QueryProgramSchema.safeParse(compiled);
     if (!parsed.success || admitQueryPredicates(parsed.data).kind === "malformed") {
       return ordinaryMalformed(input, snapshotId, view);
     }
-    const filters = sourceFiltersFrom(input, hints);
+    const filters = sourceFiltersFrom(input, timeHints);
     const program = relations.length === 0 ? EPSILON : attachSourceFilters(parsed.data, filters);
     const predicate = relations.length === 0 ? encodeSourceFilters(filters) : undefined;
     const sourceGuard: Guard | undefined = predicate === undefined ? undefined : {
@@ -70,7 +78,7 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return finishOrdinary(input, snapshotId, view, queryId, proposal, relations, interpretationOf({
       query_id: fallbackQueryId(queryId, "ordinary"), status: "partial", snapshot_id: snapshotId,
-      program, view, holes: [...(relations.length === 0 ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(hints)],
+      program, view, holes: [...(relations.length === 0 ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(timeHints)],
       source_guard: sourceGuard, interpretation_clock: input.interpretation_clock, time_window: window
     }));
   } catch (error) {

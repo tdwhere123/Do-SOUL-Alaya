@@ -233,16 +233,13 @@ export function admitQueryPredicates(
   const holes: QueryHole[] = [];
   try {
     for (const relation of collectRelations(program)) {
-      if (admitPredicateName(relation.guard.predicate_name, holes) === "malformed") {
-        return { kind: "malformed" };
-      }
+      admitPredicateName(relation.guard.predicate_name, holes);
     }
     for (const guard of extraGuards) {
-      if (admitPredicateName(guard.predicate_name, holes) === "malformed") {
-        return { kind: "malformed" };
-      }
+      admitPredicateName(guard.predicate_name, holes);
     }
   } catch {
+    // Reserved source.filters encodings fail by throwing from decodeSourceFilters.
     return { kind: "malformed" };
   }
   return holes.length === 0 ? { kind: "ok" } : { kind: "unknown", holes };
@@ -350,19 +347,15 @@ export function admittedProposalConditions(
   return (proposal?.conditions ?? []).map(admitProposedGuard);
 }
 
-function admitPredicateName(
-  name: string | undefined,
-  holes: QueryHole[]
-): "ok" | "malformed" {
+function admitPredicateName(name: string | undefined, holes: QueryHole[]): void {
   const classified = classifyQueryPredicate(name);
   if (classified.kind === "memory_filters") {
     decodeSourceFilters(name);
-    return "ok";
+    return;
   }
   if (classified.kind === "unknown" && holes.length === 0) {
     holes.push(unsupportedPredicateHole());
   }
-  return "ok";
 }
 
 function unknownUnresolvedPredicate(guard: Guard): boolean {
