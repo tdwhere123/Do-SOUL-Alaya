@@ -1544,7 +1544,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/daemon/lifecycle/daemon-runtime-support.ts": {
-    "max": 3,
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/daemon/support/daemon-env.ts": {
