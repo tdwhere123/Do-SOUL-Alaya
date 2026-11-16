@@ -149,11 +149,12 @@ try {
     if (problem === 'invalid-provenance') assert.equal(run.receipt, null);
     else { assert.equal(run.receipt.rows.length, 0); assert.ok(run.receipt.frozen_admissions[0].index_guard.native_bytes > 0); }
   }
-  const { default: Database } = await import('better-sqlite3');
+  const { initDatabase, closeCachedDatabase } = await import('@do-soul/alaya-storage');
   const stalePath = join(root, 'stale.sqlite'); copyFileSync(fixture.input.rows[0].snapshot, stalePath);
-  const connection = new Database(stalePath);
-  try { connection.prepare('UPDATE source_records SET retained_content_bytes = retained_content_bytes + 1 WHERE record_id = ?').run(fixture.members[0].record_id); }
-  finally { connection.close(); }
+  // Keep the production connection's trigger functions during deliberate tampering.
+  const database = initDatabase({ filename: stalePath });
+  try { database.connection.prepare('UPDATE source_records SET retained_content_bytes = retained_content_bytes + 1 WHERE record_id = ?').run(fixture.members[0].record_id); }
+  finally { closeCachedDatabase(stalePath); }
   const stale = freezeFixture(join(root, 'origin-stale'), fixture, input => input.rows.forEach(row => {
     row.snapshot = stalePath; row.snapshot_sha256 = hash(readFileSync(stalePath));
   }));
