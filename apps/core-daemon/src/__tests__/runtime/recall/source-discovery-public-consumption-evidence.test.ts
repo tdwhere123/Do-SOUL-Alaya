@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { SOURCE_DISCOVERY_CANARY } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/observers/source-discovery-canary.fixture.js";
 import { RUN, WS } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -6,6 +10,7 @@ import { applyPublicPayloads, consumePublicSources } from "./source-discovery-pu
 import { publicSearchRequest, type PublicConsumer } from "./source-discovery-public-consumption.js";
 import {
   deriveRunOutcome,
+  persistRunEvidence,
   type CaseCoverage,
   type CaseIdentity
 } from "./source-discovery-public-consumption-evidence.js";
@@ -17,6 +22,75 @@ const identity: CaseIdentity = {
   enumeration: "canonical",
   lookup: "proposal"
 };
+
+describe("public consumption evidence output", () => {
+  let root: string;
+  let repository: string;
+  let originalDirectory: string;
+  const input = {
+    rows: [{ source: "retained source" }],
+    traces: [{ operation: "read" }],
+    selected: [identity],
+    completed: [identity],
+    failed: [],
+    fileFailed: false
+  };
+
+  beforeEach(() => {
+    originalDirectory = process.cwd();
+    root = mkdtempSync(join(tmpdir(), "alaya-consumption-evidence-"));
+    repository = join(root, "repository");
+    execFileSync("git", ["init", "--quiet", repository]);
+    execFileSync("git", [
+      "-C", repository, "-c", "user.name=Evidence Test", "-c", "user.email=evidence@example.invalid",
+      "commit", "--quiet", "--allow-empty", "-m", "Clean evidence candidate"
+    ]);
+    process.chdir(repository);
+  });
+
+  afterEach(() => {
+    process.chdir(originalDirectory);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("does not write when no output directory is supplied for a clean candidate", () => {
+    persistRunEvidence(input);
+    expect(readdirSync(repository)).toEqual([".git"]);
+  });
+
+  it.each(["", "   "])("does not write for a blank output directory (%j)", (evidenceDirectory) => {
+    persistRunEvidence({ ...input, evidenceDirectory });
+    expect(readdirSync(repository)).toEqual([".git"]);
+  });
+
+  it("writes paired evidence only into the explicitly selected directory", () => {
+    const evidenceDirectory = join(root, "requested-output");
+    const sha = execFileSync("git", ["-C", repository, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    persistRunEvidence({ ...input, evidenceDirectory });
+    const directory = join(evidenceDirectory, "public-source-consumption-runs", sha);
+    const files = readdirSync(directory);
+    expect(files).toHaveLength(2);
+    const matrix = JSON.parse(readFileSync(join(directory, files.find((name) => name.endsWith("-matrix.json"))!), "utf8"));
+    const traces = JSON.parse(readFileSync(join(directory, files.find((name) => name.endsWith("-traces.json"))!), "utf8"));
+    expect(matrix).toMatchObject({ result_identity: { result_sha: sha }, run_outcome: "success", rows: input.rows });
+    expect(traces).toMatchObject({ result_identity: { result_sha: sha }, run_outcome: "success", traces: input.traces });
+    expect(readdirSync(repository)).toEqual([".git"]);
+  });
+
+  it("still refuses to attribute an explicitly requested output to a dirty candidate", () => {
+    const evidenceDirectory = join(root, "requested-output");
+    writeFileSync(join(repository, "untracked.txt"), "not committed");
+    persistRunEvidence({ ...input, evidenceDirectory });
+    expect(existsSync(evidenceDirectory)).toBe(false);
+  });
+
+  it("propagates an explicit destination failure without overwriting existing content", () => {
+    const evidenceDirectory = join(root, "requested-output");
+    writeFileSync(evidenceDirectory, "existing file");
+    expect(() => persistRunEvidence({ ...input, evidenceDirectory })).toThrow();
+    expect(readFileSync(evidenceDirectory, "utf8")).toBe("existing file");
+  });
+});
 
 describe("public consumption run outcome", () => {
   it("derives success when selected cases completed with no observed failures", () => {

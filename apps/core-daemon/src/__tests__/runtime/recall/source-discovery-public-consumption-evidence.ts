@@ -116,6 +116,8 @@ export function persistRunEvidence(input: Readonly<{
   readonly provenance?: string;
   readonly summary?: unknown;
 }>): void {
+  // Ordinary test runs must not create persistent experiment artifacts.
+  if (!input.evidenceDirectory?.trim()) return;
   const identity = resultCandidateIdentity();
   if (identity.result_sha === "unavailable" || identity.result_tree === "unavailable") {
     return;
@@ -131,7 +133,7 @@ export function persistRunEvidence(input: Readonly<{
     file_failed: input.fileFailed
   };
   const runOutcome = deriveRunOutcome(coverage);
-  const directory = join(input.evidenceDirectory ?? evidenceDirectory(), "public-source-consumption-runs", identity.result_sha);
+  const directory = join(input.evidenceDirectory, "public-source-consumption-runs", identity.result_sha);
   mkdirSync(directory, { recursive: true });
   const envelope = {
     protocol: PUBLIC_CONSUMPTION_PROTOCOL,
@@ -284,8 +286,4 @@ export function resultCandidateIdentity(): Readonly<{
 
 function writeExclusive(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
-}
-
-function evidenceDirectory(): string {
-  return join(process.cwd(), ".do-it/bench-runs/query-source-discovery");
 }
