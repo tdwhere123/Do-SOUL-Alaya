@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
 import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from
+  "../../../garden/triage/grounding/source-locator.js";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CREATED_AT = "2026-07-17T00:00:00.000Z";
@@ -262,6 +264,150 @@ describe("auditOfficialApiSignalFormation", () => {
         status: "rejected",
         reason: "semantic_factor_graph_invalid_shape"
       }
+    });
+  });
+
+  it("rejects timing and locator-trust failures before grounding", () => {
+    const created = auditOfficialApiSignalFormation(auditInput({
+      created_at: "not-a-timestamp",
+      raw_json: JSON.stringify({
+        signals: [{ ...validSignal, matched_text: "Call me Ash." }]
+      })
+    }));
+    expect(created.entries[0]).toEqual({
+      index: 0,
+      disposition: "invalid",
+      stage: "created_at",
+      reason: "created_at_invalid"
+    });
+
+    const observed = auditOfficialApiSignalFormation(auditInput({
+      source_observed_at: "not-a-timestamp",
+      raw_json: JSON.stringify({
+        signals: [{ ...validSignal, matched_text: "Call me Ash." }]
+      })
+    }));
+    expect(observed.entries[0]).toEqual({
+      index: 0,
+      disposition: "invalid",
+      stage: "source_observation",
+      reason: "source_observed_at_invalid"
+    });
+
+    const locator = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [withOpenSemanticFactorGraph({
+          ...validSignal,
+          source_locator: {
+            contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+            kind: "assertion_catalog",
+            assertion_id: 1
+          }
+        })]
+      }),
+      allow_legacy_single_user_source: true
+    }));
+    expect(locator.entries[0]).toEqual({
+      index: 0,
+      disposition: "rejected",
+      stage: "grounding",
+      reason: "source_locator_messages_missing"
+    });
+  });
+
+  it("grounds locator-less legacy turns on trimmed content, not surrounding whitespace", () => {
+    const turn = "We decided to ship on Friday.";
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({ signals: [validSignal] }),
+      turn_content: ` \n${turn}\n `,
+      allow_legacy_single_user_source: true
+    }));
+    expect(result.entries[0]).toMatchObject({
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      signal: {
+        signal_id: "audit-0",
+        created_at: CREATED_AT
+      }
+    });
+    expect(result.entries[0]?.signal?.raw_payload.full_turn_content).toBe(
+      "User: We decided to ship on Friday."
+    );
+  });
+
+  it("forms locator-bound material from the message corpus through candidate construction", () => {
+    const locator = {
+      contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+      kind: "assertion_catalog" as const,
+      assertion_id: 1
+    };
+    const messages = [{
+      role: "user" as const,
+      content: "I own a blue bicycle.",
+      message_id: "message-1"
+    }];
+    const rejected = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [withOpenSemanticFactorGraph({
+          ...validSignal,
+          matched_text: "We decided to ship on Friday.",
+          source_locator: locator
+        })]
+      }),
+      turn_content: "We decided to ship on Friday.",
+      turn_messages: messages
+    }));
+    expect(rejected.entries[0]).toMatchObject({
+      disposition: "rejected",
+      stage: "grounding"
+    });
+
+    const admitted = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [withOpenSemanticFactorGraph({
+          ...validSignal,
+          matched_text: "I own a blue bicycle.",
+          source_locator: locator
+        })]
+      }),
+      turn_content: "  We decided to ship on Friday.  ",
+      turn_messages: messages
+    }));
+    expect(admitted.entries[0]).toMatchObject({
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      signal: {
+        signal_id: "audit-0",
+        created_at: CREATED_AT,
+        raw_payload: {
+          source_locator: { assertion_id: 1 },
+          source_assertion: "I own a blue bicycle.",
+          source_grounding: { status: "grounded" }
+        }
+      }
+    });
+    expect(admitted.entries[0]?.signal?.raw_payload.full_turn_content).toBe(
+      "User: I own a blue bicycle."
+    );
+    expect(admitted.entries[0]?.signal?.raw_payload.turn_content_excerpt).toContain(
+      "I own a blue bicycle."
+    );
+    expect(String(admitted.entries[0]?.signal?.raw_payload.full_turn_content))
+      .not.toContain("Friday");
+  });
+
+  it("keeps late candidate formation failure distinct from grounding rejection", () => {
+    const result = auditOfficialApiSignalFormation(auditInput({
+      workspace_id: "",
+      raw_json: JSON.stringify({ signals: [validSignal] })
+    }));
+    expect(result.entries[0]).toEqual({
+      index: 0,
+      disposition: "invalid",
+      stage: "formation",
+      reason: "candidate_signal_invalid"
     });
   });
 });

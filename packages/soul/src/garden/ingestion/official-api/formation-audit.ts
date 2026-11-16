@@ -254,7 +254,8 @@ function auditDraftCore(
     index,
     input,
     timing.sourceObservedAt!,
-    timing.createdAt!
+    timing.createdAt!,
+    groundingSourceText
   );
 }
 
@@ -297,7 +298,8 @@ function formGroundedDraft(
   index: number,
   input: OfficialApiSignalFormationAuditInput,
   sourceObservedAt: string | undefined,
-  createdAt: string
+  createdAt: string,
+  groundingSourceText: string
 ): OfficialApiSignalFormationAuditEntry {
   try {
     const temporalSelection = inspectObservedTemporalProjection(
@@ -313,9 +315,7 @@ function formGroundedDraft(
       surfaceId: input.surface_id,
       normalizedTurnContent: input.turn_content.trim(),
       turnMessages: input.turn_messages ?? [],
-      groundingSourceText: draft.source_locator === undefined
-        ? input.turn_content.trim()
-        : buildOfficialApiSourceCorpus(input.turn_content.trim(), input.turn_messages!),
+      groundingSourceText,
       confidence: clampConfidence(draft.confidence),
       temporalProjection: temporalSelection.projection,
       temporalProjectionAudit: temporalSelection.audit,
