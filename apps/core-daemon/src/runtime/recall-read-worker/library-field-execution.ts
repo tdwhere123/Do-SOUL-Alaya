@@ -2,7 +2,7 @@ import { SNAPSHOT_PIN_NATIVE_WORK, type RequestBudget, type SourceSemanticWorker
 import { CoreError, type ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { workOf } from "./source-semantic-discovery.js";
-import { settleWorkerDelivery } from "./prepared-delivery.js";
+import { discardWorkerDelivery } from "./prepared-delivery.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 type Page = ConditionalFieldRecallPortResult;
@@ -38,7 +38,7 @@ export function executeLibraryField(runtime: RecallReadWorkerRuntime, meter: Sou
     finally { releaseIssue(); }
   } catch (error) {
     release();
-    if (page?.preparation_id !== undefined) settleWorkerDelivery(runtime, { preparation_id: page.preparation_id }, true);
+    if (page?.preparation_id !== undefined) discardWorkerDelivery(runtime, page.preparation_id);
     attachIncurredLibraryWork(error, meter, page, transferred);
     throw error;
   } finally { release(); }

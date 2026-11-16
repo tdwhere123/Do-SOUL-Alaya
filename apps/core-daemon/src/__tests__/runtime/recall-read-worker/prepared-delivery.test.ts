@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { InformationIndexSchema, type InformationIndex } from "@do-soul/alaya-protocol";
 import { recallExecutionRetention } from "@do-soul/alaya-core";
 import {
-  prepareWorkerDelivery,
-  settleWorkerDelivery
+  acknowledgeWorkerDelivery,
+  discardWorkerDelivery,
+  prepareWorkerDelivery
 } from "../../../runtime/recall-read-worker/prepared-delivery.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 
@@ -20,11 +21,11 @@ describe("worker recall delivery acknowledgment", () => {
       issue
     } as never, {});
     const parse = vi.spyOn(InformationIndexSchema, "parse");
-    const settled = settleWorkerDelivery(runtime, {
+    const settled = acknowledgeWorkerDelivery(runtime, {
       preparation_id: preparationId,
       issued_entry_ids: [],
       previews: {}
-    }, false);
+    });
     expect(settled).toBe(receipt);
     expect(issue).toHaveBeenCalledWith({ index, previews: new Map(), metadata: {} });
     expect(parse).not.toHaveBeenCalled();
@@ -39,8 +40,26 @@ describe("worker recall delivery acknowledgment", () => {
       execution_id: "released-on-settle", retained_bytes: 4_000_000
     } as never, {});
     expect(recallExecutionRetention.snapshot().retained_bytes - before).toBeGreaterThan(4_000_000);
-    settleWorkerDelivery(runtime, { preparation_id: preparationId, issued_entry_ids: [], previews: {} }, false);
+    acknowledgeWorkerDelivery(runtime, { preparation_id: preparationId, issued_entry_ids: [], previews: {} });
     expect(recallExecutionRetention.snapshot().retained_bytes - before).toBeLessThan(10_000);
     recallExecutionRetention.invalidate("released-on-settle");
+  });
+
+  it("releases the prepared field on discard without issuing", () => {
+    const runtime = {} as RecallReadWorkerRuntime;
+    const issue = vi.fn();
+    const before = recallExecutionRetention.snapshot().retained_bytes;
+    const preparationId = prepareWorkerDelivery(runtime, {
+      index, execution_receipt: { schema_version: 1 as const }, issue,
+      execution_id: "released-on-discard", retained_bytes: 4_000_000
+    } as never, {});
+    expect(discardWorkerDelivery(runtime, preparationId)).toBeNull();
+    expect(issue).not.toHaveBeenCalled();
+    expect(recallExecutionRetention.snapshot().retained_bytes - before).toBe(0);
+    expect(() => acknowledgeWorkerDelivery(runtime, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    })).toThrow(/expired or discarded/);
+    expect(discardWorkerDelivery(runtime, "unknown-preparation")).toBeNull();
+    recallExecutionRetention.invalidate("released-on-discard");
   });
 });

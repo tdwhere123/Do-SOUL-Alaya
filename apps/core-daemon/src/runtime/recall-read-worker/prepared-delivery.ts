@@ -35,19 +35,37 @@ export function prepareWorkerDelivery(
   return id;
 }
 
-export function settleWorkerDelivery(
+function preparedFor(
   runtime: RecallReadWorkerRuntime,
-  payload: WorkerOperationPayload<"conditionalField.acknowledge"> | WorkerOperationPayload<"conditionalField.discard">,
-  discard: boolean
+  preparationId: string
+): Prepared | undefined {
+  const prepared = recallExecutionRetention.get<Prepared>(`prepared:${preparationId}`);
+  if (prepared !== undefined && prepared.owner !== OWNERS.get(runtime)) {
+    throw new CoreError("CONFLICT", "Recall preparation belongs to another runtime");
+  }
+  return prepared;
+}
+
+/** Independent bounded cleanup. Unknown or already-released ids are no-ops;
+ * a live record owned by another runtime still fails closed. */
+export function discardWorkerDelivery(
+  runtime: RecallReadWorkerRuntime,
+  preparationId: string
+): null {
+  preparedFor(runtime, preparationId);
+  recallExecutionRetention.delete(`prepared:${preparationId}`);
+  return null;
+}
+
+export function acknowledgeWorkerDelivery(
+  runtime: RecallReadWorkerRuntime,
+  payload: WorkerOperationPayload<"conditionalField.acknowledge">
 ): Execution["execution_receipt"] | null {
   const id = payload.preparation_id;
-  const prepared = recallExecutionRetention.get<Prepared>(`prepared:${id}`);
-  if (prepared !== undefined && prepared.owner !== OWNERS.get(runtime)) throw new CoreError("CONFLICT", "Recall preparation belongs to another runtime");
-  if (discard) { recallExecutionRetention.delete(`prepared:${id}`); return null; }
+  const prepared = preparedFor(runtime, id);
   if (prepared === undefined) throw new Error("Recall preparation expired or discarded");
   try {
-    return settlePrepared(id, prepared,
-      payload as WorkerOperationPayload<"conditionalField.acknowledge">);
+    return settlePrepared(id, prepared, payload);
   } catch (error) {
     // issue() refreshes this same receipt even on refusal (including its pin read).
     const measured = measuredWorkerCostOfReceipt(prepared.receipt);

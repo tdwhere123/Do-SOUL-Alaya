@@ -16,7 +16,7 @@ import { runPathOperation } from "./path-operations.js";
 import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import { runSourceSemanticWorker } from "./source-semantic-reasoning.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
-import { settleWorkerDelivery } from "./prepared-delivery.js";
+import { acknowledgeWorkerDelivery, discardWorkerDelivery } from "./prepared-delivery.js";
 
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 import { readSourceIndexSnapshotFact } from "./source-index-measurement.js";
@@ -75,7 +75,7 @@ export async function runOperation(
   }
   if (parsed.operation === "conditionalField.acknowledge") {
     const { payload } = parsed;
-    const receipt = settleWorkerDelivery(runtime, payload, false);
+    const receipt = acknowledgeWorkerDelivery(runtime, payload);
     // Settlement owns the final receipt. Preserve it separately through the bounded
     // diagnostic channel: preparation totals and the fitted public bytes stay intact.
     observer?.event("delivery_settlement", "delivery", () => ({
@@ -86,7 +86,7 @@ export async function runOperation(
   if (parsed.operation === "conditionalField.discard") {
     return parseWorkerOperationResult(
       parsed.operation,
-      settleWorkerDelivery(runtime, parsed.payload, true)
+      discardWorkerDelivery(runtime, parsed.payload.preparation_id)
     );
   }
   return parseWorkerOperationResult(parsed.operation, await dispatchParsed(runtime, parsed));

@@ -23,7 +23,7 @@ import type {
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { CoreError, encodeIndexResults } from "@do-soul/alaya-core";
 import { runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
-import { settleWorkerDelivery } from "../../../runtime/recall-read-worker/prepared-delivery.js";
+import { acknowledgeWorkerDelivery } from "../../../runtime/recall-read-worker/prepared-delivery.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import {
   RSS_SAMPLING_METHOD,
@@ -487,11 +487,11 @@ function collectPages(
     if (page.preparation_id === undefined) {
       throw new Error("expected preparation_id for worker delivery settle");
     }
-    settleWorkerDelivery(worker, {
+    acknowledgeWorkerDelivery(worker, {
       preparation_id: page.preparation_id,
       issued_entry_ids: page.index.entries.map(indexEntryCacheKey),
       previews: page.previews
-    }, false);
+    });
     pages.push(page);
     continuation = page.index.continuation;
     if (continuation === null) break;
