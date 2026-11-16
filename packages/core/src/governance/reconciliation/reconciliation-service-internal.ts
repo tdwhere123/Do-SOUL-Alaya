@@ -12,8 +12,10 @@ export type { EventLogEntry, MemoryEntry };
 import { KeyedMutex } from "@do-soul/alaya-protocol";
 import type { GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 import type { PreWriteRecallPort } from "./pre-write-recall-service.js";
+import type { ReconciliationMemoryProjectionFields } from "./reconciliation-memory-fields.js";
 
 export type { ReconciliationDecisionKindValue as ReconciliationDecisionKind, ReconciliationDeferral };
+export type { ReconciliationMemoryProjectionFields };
 
 export interface ReconciliationDecision {
   readonly kind: ReconciliationDecisionKindValue;
@@ -35,25 +37,6 @@ export interface ReconciliationInput {
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
 }
-
-// Merge-owned projection fields. Storage update also accepts creation-only
-// `facet_tags`; do not add that column here to look consistent with the writer.
-export type ReconciliationMemoryProjectionFields = Pick<
-  MemoryEntry,
-  | "projection_schema_version"
-  | "event_time_start"
-  | "event_time_end"
-  | "valid_from"
-  | "valid_to"
-  | "time_precision"
-  | "time_source"
-  | "preference_subject"
-  | "preference_predicate"
-  | "preference_object"
-  | "preference_category"
-  | "preference_polarity"
-  | "canonical_entities"
->;
 
 export type ReconciliationVerdictApplier = (
   verdict: ReconciliationDecision
