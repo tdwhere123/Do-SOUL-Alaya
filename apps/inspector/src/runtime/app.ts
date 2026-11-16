@@ -15,6 +15,7 @@ import { registerInspectorMemoryEntryRoutes } from "../routes/memory-entries.js"
 import { registerInspectorProposalRoutes } from "../routes/proposals.js";
 import { registerInspectorRecallStatsRoutes } from "../routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "../routes/soul-search.js";
+import { isRequestBodyTooLargeError } from "../routes/request-body-guard.js";
 import { registerInspectorStatusRoutes } from "../routes/status.js";
 import { registerInspectorStaticRoutes } from "../routes/static.js";
 import {
@@ -240,43 +241,4 @@ function summarizeInspectorError(
     status,
     messageRedacted: true
   };
-}
-
-function isRequestBodyTooLargeError(error: unknown): boolean {
-  return readStatusCode(error) === 413 || readErrorName(error) === "BodyLimitError";
-}
-
-function readStatusCode(error: unknown): number | null {
-  if (error === null || typeof error !== "object") {
-    return null;
-  }
-
-  const candidate = error as {
-    readonly status?: unknown;
-    readonly statusCode?: unknown;
-    readonly cause?: unknown;
-  };
-
-  if (typeof candidate.status === "number") {
-    return candidate.status;
-  }
-
-  if (typeof candidate.statusCode === "number") {
-    return candidate.statusCode;
-  }
-
-  return candidate.cause === undefined ? null : readStatusCode(candidate.cause);
-}
-
-function readErrorName(error: unknown): string | null {
-  if (error instanceof Error) {
-    return error.name;
-  }
-
-  if (error === null || typeof error !== "object") {
-    return null;
-  }
-
-  const candidate = error as { readonly cause?: unknown };
-  return candidate.cause === undefined ? null : readErrorName(candidate.cause);
 }

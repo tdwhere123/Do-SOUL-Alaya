@@ -250,7 +250,7 @@ describe("inspector routes", () => {
       };
     };
     expect(body.data.self).toBeNull();
-    expect(body.data.errors.self).toMatch(/kpi_json_invalid|kpi_schema_invalid|summary_failed/);
+    expect(body.data.errors.self).toBe("kpi_json_invalid");
     expect(body.data.errors.public).toBeNull();
     expect(body.data.public_multiturn).toBeNull();
     expect(body.data.errors.public_multiturn).toBeNull();
