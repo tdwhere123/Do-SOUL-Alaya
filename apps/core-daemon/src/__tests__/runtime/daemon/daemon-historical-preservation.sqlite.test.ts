@@ -9,7 +9,7 @@ import { createKnowledgeFoundation } from "../../../runtime/daemon/wiring/daemon
 import { createDaemonRepositories } from "../../../runtime/daemon/wiring/daemon-repositories.js";
 import { createGardenRuntimeEventLogPort, createGardenRuntimeJanitor } from "../../../garden/runtime/runtime-composition.js";
 import { createGardenSchedulerEventLogPort, createHealthJournalPort } from "../../../garden/runtime/runtime-core-support.js";
-import { createTombstoneDispositionSweepPort } from "../../../garden/support/forget-disposition-ports.js";
+import { createTombstoneDispositionSweepPort, createTombstoneGcPort } from "../../../garden/support/forget-disposition-ports.js";
 import { createRuntimeInput } from "../../garden/runtime-fixture.js";
 import { createPreservationFixture, PRESERVATION_CLOCK, PRESERVATION_RUN,
   PRESERVATION_WORKSPACE as WS } from "../../garden/independent-preservation.test-support.js";
@@ -146,5 +146,46 @@ it("the production Janitor defaults to deferred GC while retaining foundation di
   expect(events.filter(event => event.payload_json.to_state === "tombstone").map(event => event.entity_id))
     .toEqual([supported.memory.object_id]);
   expect(events.filter(event => event.payload_json.to_state === "deleted")).toEqual([]);
+  expect(report).toHaveBeenCalledExactlyOnceWith(result);
+});
+
+it("the production Janitor with explicit tombstoneGcPort deletes a past-grace foundation member without losing its history", async () => {
+  const f = await fixture();
+  const { memory, capsule } = await f.adopt("janitor-foundation-gc");
+  vi.useRealTimers();
+  const authority = f.foundation.memoryService;
+  const hardDelete = vi.spyOn(authority, "autonomousHardDeleteTombstoned");
+  const tombstoneAuthority = {
+    autonomousTombstone: authority.autonomousTombstone.bind(authority),
+    autonomousHardDeleteTombstoned: authority.autonomousHardDeleteTombstoned.bind(authority),
+    findTombstonedMemoriesWithDisposition: f.repositories.memoryEntryRepo.findTombstonedMemoriesWithDisposition.bind(f.repositories.memoryEntryRepo)
+  };
+  const scheduler = new GardenScheduler(createGardenSchedulerEventLogPort(f.eventPublisher));
+  const report = vi.spyOn(scheduler, "reportCompletion").mockResolvedValue(undefined);
+  const janitor = createGardenRuntimeJanitor({
+    ...createRuntimeInput(), now: () => PRESERVATION_CLOCK,
+    eventPublisher: f.eventPublisher, eventLogRepo: f.repositories.eventLogRepo,
+    gardenDataPorts: createGardenBackgroundDataPorts(f.database),
+    tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort({
+      memoryLookup: f.repositories.memoryEntryRepo, capsuleLookup: f.repositories.synthesisCapsuleRepo,
+      tombstoneAuthority
+    }),
+    tombstoneGcPort: createTombstoneGcPort({ tombstoneAuthority })
+  }, scheduler, createHealthJournalPort(f.repositories.healthJournalRepo), createGardenRuntimeEventLogPort);
+  const task: GardenTaskDescriptor = { task_id: "foundation-physical-gc", task_kind: GardenTaskKind.TOMBSTONE_GC,
+    required_tier: GardenTier.TIER_0, workspace_id: WS, run_id: PRESERVATION_RUN,
+    target_object_refs: [], priority: 10, created_at: PRESERVATION_CLOCK };
+  const result = await janitor.run(task);
+  expect(result).toMatchObject({ success: true, objects_affected: [memory.object_id], audit_entries: [
+    "disposition_sweep: 0 dormant memories autonomously tombstoned (0 retained, no disposition or strong ref)",
+    "tombstone_gc: 1 tombstoned memories hard-deleted"
+  ] });
+  expect(hardDelete).toHaveBeenCalledTimes(1);
+  expect(await f.repositories.memoryEntryRepo.findById(memory.object_id)).toBeNull();
+  expect(await f.foundation.synthesisService.readHistoricalMember(WS, capsule.object_id, memory.object_id))
+    .toMatchObject({ status: "ready", history: { member: memory } });
+  const events = await f.repositories.eventLogRepo.queryByEntityAll("memory_entry", memory.object_id);
+  expect(events.filter(event => event.payload_json.to_state === "deleted")).toHaveLength(1);
+  expect(f.notifications.every(notification => notification.committed)).toBe(true);
   expect(report).toHaveBeenCalledExactlyOnceWith(result);
 });
