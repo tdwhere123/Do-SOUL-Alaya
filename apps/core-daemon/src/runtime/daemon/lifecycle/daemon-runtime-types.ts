@@ -26,6 +26,7 @@ import type {
 import type { MemoryHqRepo } from "@do-soul/alaya-storage";
 import type { GardenCaptureHealth } from "../../../garden/host-session/capture-health.js";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
+import type { SourceIndexProducer } from "../../source-index/source-index-producer.js";
 import type { FieldProjectionCheckpointPort } from
   "../../field/admission-checkpoint.js";
 import type { RelationProjectionCheckpointPort } from
@@ -54,14 +55,13 @@ export interface AlayaDaemonRuntime {
   readonly services: AlayaDaemonRuntimeServices;
   startBackgroundServices(): void;
   /** One bounded normal Source producer pass, without scheduling Garden or future mutation. */
-  runSourceIndexPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-    representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
-    windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
+  runSourceIndexPass?(
+    ...args: Parameters<SourceIndexProducer["runPass"]>
+  ): ReturnType<SourceIndexProducer["runPass"]>;
   /** Explicit lexical-only preparation; independent of embedding configuration, no scheduled activation. */
-  runSourceIndexLexicalPass?(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-    allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
-    Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt>;
+  runSourceIndexLexicalPass?(
+    ...args: Parameters<SourceIndexProducer["runLexicalPass"]>
+  ): ReturnType<SourceIndexProducer["runLexicalPass"]>;
   runGardenBackgroundPass(): Promise<void>;
   // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
   // Runs only the requested workspace's BULK_ENRICH worker loop, leaving the

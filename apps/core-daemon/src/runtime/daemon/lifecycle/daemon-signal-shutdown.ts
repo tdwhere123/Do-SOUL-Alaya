@@ -63,7 +63,7 @@ function forceExitAfterSecondSignal(input: {
   readonly warnLogger: LifecycleWarnLogger;
 }): void {
   input.warnLogger.warn(`received second ${input.signal}, forcing immediate exit`, {});
-  exitProcess(input.processPort, 1);
+  exitLifecycleProcess(input.processPort, 1);
 }
 
 function forceExitAfterTimeout(input: {
@@ -75,7 +75,7 @@ function forceExitAfterTimeout(input: {
     timeout_ms: SIGNAL_SHUTDOWN_TIMEOUT_MS
   });
   input.processPort.exitCode = 1;
-  exitProcess(input.processPort, 1);
+  exitLifecycleProcess(input.processPort, 1);
 }
 
 async function runSignalShutdown(input: {
@@ -90,20 +90,16 @@ async function runSignalShutdown(input: {
     await input.shutdown();
     clearSignalShutdownTimeout(input.state, input.timerPort);
     const exitCode = typeof input.processPort.exitCode === "number" ? input.processPort.exitCode : 0;
-    exitProcess(input.processPort, exitCode);
+    exitLifecycleProcess(input.processPort, exitCode);
   } catch (error) {
     input.warnLogger.warn(`daemon shutdown failed after ${input.signal}`, {
       error: error instanceof Error ? error.message : String(error)
     });
     input.processPort.exitCode = 1;
-    exitProcess(input.processPort, 1);
+    exitLifecycleProcess(input.processPort, 1);
   }
 }
 
 export function exitLifecycleProcess(processPort: LifecycleProcessPort, code: number): void {
   processPort.exit(code);
-}
-
-function exitProcess(processPort: LifecycleProcessPort, code: number): void {
-  exitLifecycleProcess(processPort, code);
 }

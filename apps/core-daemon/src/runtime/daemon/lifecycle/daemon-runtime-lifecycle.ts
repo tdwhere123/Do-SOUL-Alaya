@@ -26,6 +26,7 @@ import {
 import { serveDaemonUnixSocket, waitForServerListening } from "../../unix-socket-serve.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
+import type { SourceIndexProducer } from "../../source-index/source-index-producer.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;
@@ -64,15 +65,10 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
   closeSignalService?: () => Promise<void>;
-  sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void>;
-    runPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-      representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
-      windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing):
-      Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
-    runLexicalPass?(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-      remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-      allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
-      Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt> }>;
+  sourceIndexProducer?: Readonly<
+    Pick<SourceIndexProducer, "start" | "stop"> &
+    Partial<Pick<SourceIndexProducer, "runPass" | "runLexicalPass">>
+  >;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -104,13 +100,12 @@ const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
-  runSourceIndexPass(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-    representation?: import("@do-soul/alaya-protocol").SourceEmbeddingRepresentation,
-    windowing?: import("@do-soul/alaya-protocol").SourceIndexWindowing): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
-  runSourceIndexLexicalPass(workspaceId: string, representation: import("@do-soul/alaya-protocol").SourceIndexLexicalRepresentation,
-    remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining,
-    allocation?: import("@do-soul/alaya-protocol").SourceIndexLexicalPreparationAllocation):
-    Promise<import("../../source-index/source-index-producer.js").SourceIndexLexicalProducerPassReceipt>;
+  runSourceIndexPass(
+    ...args: Parameters<SourceIndexProducer["runPass"]>
+  ): ReturnType<SourceIndexProducer["runPass"]>;
+  runSourceIndexLexicalPass(
+    ...args: Parameters<SourceIndexProducer["runLexicalPass"]>
+  ): ReturnType<SourceIndexProducer["runLexicalPass"]>;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   runGardenEmbeddingBackfillPass(
@@ -466,17 +461,17 @@ async function stopBackgroundServices(
     return "not_started";
   }
 
-    let stopResult: "drained" | "timed_out" | "failed" = "drained";
-    try {
-      const result = await input.gardenRuntime.backgroundManager.stop({
-        timeoutMs: BACKGROUND_STOP_TIMEOUT_MS
-      });
-      if (result === "timed_out") {
-        input.warnLogger.warn("garden background manager shutdown timed out", {});
-        state.backgroundDrainOwed = true;
-        stopResult = "timed_out";
-      }
-    } catch (error) {
+  let stopResult: "drained" | "timed_out" | "failed" = "drained";
+  try {
+    const result = await input.gardenRuntime.backgroundManager.stop({
+      timeoutMs: BACKGROUND_STOP_TIMEOUT_MS
+    });
+    if (result === "timed_out") {
+      input.warnLogger.warn("garden background manager shutdown timed out", {});
+      state.backgroundDrainOwed = true;
+      stopResult = "timed_out";
+    }
+  } catch (error) {
     input.warnLogger.warn("garden background manager shutdown failed", {
       error: error instanceof Error ? error.message : String(error)
     });
