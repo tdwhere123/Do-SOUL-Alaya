@@ -132,6 +132,9 @@ describe("invokeBoundRecall request forwarding", () => {
     const [mcpCall, benchCall] = (recallService.recall as ReturnType<typeof vi.fn>).mock.calls.map(
       ([params]) => params as Record<string, unknown>
     );
+    if (mcpCall === undefined || benchCall === undefined) {
+      throw new Error("Expected both production MCP and benchmark recall calls");
+    }
     expect(mcpCall.defer_delivery).toBe(true);
     expect(benchCall).not.toHaveProperty("defer_delivery");
     const sharedIdentity = (call: Record<string, unknown>) => ({
