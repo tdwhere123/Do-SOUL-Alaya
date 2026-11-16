@@ -139,7 +139,23 @@ export type CreateFieldInput = Readonly<{
   readonly extra_work_regions?: readonly FairWorkRegion[];
 }>;
 
-export type FieldEngineState = Readonly<{
+type FieldRoutingProgress = Readonly<{
+  resume_cursors: Readonly<Record<string, string | null>>;
+  pair_progress: PersistentStringMap<string | null>;
+  pair_demands: PersistentStringMap<true>;
+  pair_demand_bytes: number;
+  pair_progress_bytes: number;
+  source_fact_demands: PersistentStringMap<"pending" | "done">;
+  source_fact_demand_bytes: number;
+  source_fact_pending_count: number;
+  source_fact_scan_offset: number;
+  pair_completed_count: number;
+  pair_revision: number;
+  pair_scan_offset: number;
+  resume_subjects: PersistentStringMap<true>;
+}>;
+
+export type FieldEngineState = FieldRoutingProgress & Readonly<{
   /** undefined is unobserved; null is an absent native discovery capability. */
   readonly native_sources?: import("../observers/observe-ports.js").NativeSourceNomination | null;
   readonly native_source_retained_bytes?: number;
@@ -232,19 +248,6 @@ export type FieldEngineState = Readonly<{
   readonly roles: ReadonlyMap<string, IndexRole>;
   readonly remaining_work: readonly RemainingWork[];
   readonly last_observer_status: ObserverStatus | undefined;
-  readonly resume_cursors: Readonly<Record<string, string | null>>;
-  readonly pair_progress: PersistentStringMap<string | null>;
-  readonly pair_demands: PersistentStringMap<true>;
-  readonly pair_demand_bytes: number;
-  readonly pair_progress_bytes: number;
-  readonly source_fact_demands: PersistentStringMap<"pending" | "done">;
-  readonly source_fact_demand_bytes: number;
-  readonly source_fact_pending_count: number;
-  readonly source_fact_scan_offset: number;
-  readonly pair_completed_count: number;
-  readonly pair_revision: number;
-  readonly pair_scan_offset: number;
-  readonly resume_subjects: PersistentStringMap<true>;
   readonly discoveries: RetainedRows<RoutingDiscovery>;
   readonly support_work_status?: "complete" | "open";
   readonly closure: FieldClosureFacts;
@@ -312,13 +315,7 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     roles: input.roles ?? new Map(),
     remaining_work: [],
     last_observer_status: undefined,
-    resume_cursors: {},
-    pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
-    pair_progress_bytes: 0,
-    source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
-    source_fact_pending_count: 0, source_fact_scan_offset: 0,
-    pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
-    resume_subjects: new PersistentStringMap(),
+    ...createRoutingProgress(),
     discoveries: []
   });
 }
@@ -367,58 +364,16 @@ export function applyObserverPage(
   });
 }
 
+type WithdrawalGraph = Pick<FieldEngineState,
+  "seeds" | "guaranteed_seeds" | "transitions" | "derivations" | "transition_derivations">;
+
 export function withdrawDerivationLeaves(
   state: FieldEngineState,
   withdrawnLeafId: string
 ): FieldEngineState {
-  const nodeIds = [
-    ...state.seeds.map((seed) => productStateNodeId(seed.state)),
-    ...state.transitions.flatMap((transition) => [
-      productStateNodeId(transition.from),
-      productStateNodeId(transition.to)
-    ])
-  ];
-  const edges = state.transitions.flatMap((transition) => transition.applicable
-    ? [{ from: productStateNodeId(transition.from), to: productStateNodeId(transition.to) }]
-    : []);
-  const touched = productsTouchedByLeaf({
-    withdrawnLeafId,
-    seeds: state.seeds,
-    transitions: state.transitions,
-    derivations: state.derivations,
-    transition_derivations: state.transition_derivations
-  });
-  const affected = sccMembersOf(productSccs(nodeIds, edges), touched);
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const edge of edges) if (affected.has(edge.from) && !affected.has(edge.to)) {
-      affected.add(edge.to);
-      changed = true;
-    }
-  }
+  const affected = affectedProductsForWithdrawal(state, withdrawnLeafId);
   const subjects = affectedSubjectsOf(state.seeds, state.transitions, affected);
-  const revised = reviseDerivations(state.derivations, withdrawnLeafId);
-  const derivations = revised.derivations;
-  const forest = derivationForest(derivations);
-  const grades = new Map(derivations.flatMap((row) => row.association_milligrades === undefined ? [] :
-    row.leaf_ids.map((id) => [id, row.association_milligrades!] as const)));
-  const seeds = state.seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
-  const guaranteedSeeds = state.guaranteed_seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
-  const retained = state.transitions.filter((transition) => {
-    const derivationId = state.transition_derivations.get(transitionKey(transition));
-    if (derivationId === undefined) {
-      return !leafTouchesTransition(transition, withdrawnLeafId);
-    }
-    return revised.roots.get(derivationId) !== undefined;
-  });
-  let transitionRoots = new PersistentStringMap<string>();
-  const transitions = retained.map((transition) => {
-    const root = revised.roots.get(state.transition_derivations.get(transitionKey(transition)) ?? "");
-    const grade = root === undefined ? undefined : evaluateDerivation(forest, root, grades);
-    const next = grade === undefined ? transition : { ...transition, strength_milligrades: grade };
-    if (root !== undefined) transitionRoots = transitionRoots.with(transitionKey(next), root);
-    return next;
-  });
+  const graph = reviseWithdrawalGraph(state, withdrawnLeafId);
   const { binding: _binding, closure: _closure, ...rest } = state;
   const affectedClaims = new Set(Object.entries(state.support_dependencies ?? {})
     .filter(([, leaves]) => leaves.includes(withdrawnLeafId)).map(([key]) => key));
@@ -469,17 +424,77 @@ export function withdrawDerivationLeaves(
     observed_relations: [...state.observed_relations ?? []].filter((row) => row.assertionId !== withdrawnLeafId).map((row) => ({ ...row,
       evidenceRefs: row.evidenceRefs?.filter((id) => id !== withdrawnLeafId),
       evidenceReceipts: row.evidenceReceipts?.filter((receipt) => receipt.evidenceId !== withdrawnLeafId && receipt.eventId !== withdrawnLeafId) })),
-    seeds: mergeSeeds(seeds),
-    guaranteed_seeds: mergeSeeds(guaranteedSeeds),
-    derivations,
-    transitions: mergeTransitions(transitions),
-    guaranteed_transitions: mergeTransitions(transitions.filter((transition) => transition.applicable)),
-    transition_derivations: transitionRoots,
+    seeds: mergeSeeds(graph.seeds),
+    guaranteed_seeds: mergeSeeds(graph.guaranteed_seeds),
+    derivations: graph.derivations,
+    transitions: mergeTransitions(graph.transitions),
+    guaranteed_transitions: mergeTransitions(graph.transitions.filter((transition) => transition.applicable)),
+    transition_derivations: graph.transition_derivations,
     support
   });
   const listedRelation = [...state.observed_relations ?? []].some((row) => row.assertionId === withdrawnLeafId);
   const oweScan = (state.sequence_reach_bytes ?? 0) > 0 && !listedRelation;
   return rebuildPendingPathEffects(withdrawn, state.pending_path_effects, oweScan);
+}
+
+function affectedProductsForWithdrawal(state: WithdrawalGraph, withdrawnLeafId: string): Set<string> {
+  const nodeIds = [
+    ...state.seeds.map((seed) => productStateNodeId(seed.state)),
+    ...state.transitions.flatMap((transition) => [
+      productStateNodeId(transition.from),
+      productStateNodeId(transition.to)
+    ])
+  ];
+  const edges = state.transitions.flatMap((transition) => transition.applicable
+    ? [{ from: productStateNodeId(transition.from), to: productStateNodeId(transition.to) }]
+    : []);
+  const touched = productsTouchedByLeaf({
+    withdrawnLeafId,
+    seeds: state.seeds,
+    transitions: state.transitions,
+    derivations: state.derivations,
+    transition_derivations: state.transition_derivations
+  });
+  const affected = sccMembersOf(productSccs(nodeIds, edges), touched);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const edge of edges) {
+      if (!affected.has(edge.from) || affected.has(edge.to)) continue;
+      affected.add(edge.to);
+      changed = true;
+    }
+  }
+  return affected;
+}
+
+function reviseWithdrawalGraph(state: WithdrawalGraph, withdrawnLeafId: string) {
+  const revised = reviseDerivations(state.derivations, withdrawnLeafId);
+  const derivations = revised.derivations;
+  const forest = derivationForest(derivations);
+  const grades = new Map(derivations.flatMap((row) => row.association_milligrades === undefined ? [] :
+    row.leaf_ids.map((id) => [id, row.association_milligrades!] as const)));
+  const seeds = state.seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
+  const guaranteedSeeds = state.guaranteed_seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
+  const retained = state.transitions.filter((transition) => {
+    const derivationId = state.transition_derivations.get(transitionKey(transition));
+    if (derivationId === undefined) return !leafTouchesTransition(transition, withdrawnLeafId);
+    return revised.roots.get(derivationId) !== undefined;
+  });
+  let transitionRoots = new PersistentStringMap<string>();
+  const transitions = retained.map((transition) => {
+    const root = revised.roots.get(state.transition_derivations.get(transitionKey(transition)) ?? "");
+    const grade = root === undefined ? undefined : evaluateDerivation(forest, root, grades);
+    const next = grade === undefined ? transition : { ...transition, strength_milligrades: grade };
+    if (root !== undefined) transitionRoots = transitionRoots.with(transitionKey(next), root);
+    return next;
+  });
+  return {
+    seeds,
+    guaranteed_seeds: guaranteedSeeds,
+    derivations,
+    transitions,
+    transition_derivations: transitionRoots
+  } satisfies WithdrawalGraph;
 }
 
 // A withdrawal invalidates a pass that already read the old population. The open pending
@@ -555,24 +570,28 @@ export function applyEvidenceEffect(
   state: FieldEngineState,
   effect: EvidenceEffect
 ): FieldEngineState {
-  const supportById = effect.support.length === 0 ? undefined
-    : new Map(state.support.map((record) => [record.proposition_id, record]));
-  let supportChanged = false;
-  for (const record of effect.support) {
-    if (supportById!.get(record.proposition_id) !== record) supportChanged = true;
-    supportById!.set(record.proposition_id, record);
+  let support = state.support;
+  if (effect.support.length > 0) {
+    const supportById = new Map(support.map((record) => [record.proposition_id, record]));
+    let supportChanged = false;
+    for (const record of effect.support) {
+      if (supportById.get(record.proposition_id) !== record) supportChanged = true;
+      supportById.set(record.proposition_id, record);
+    }
+    if (supportChanged) support = Object.freeze([...supportById.values()]);
   }
-  let claims = state.claims;
+  let updatedClaims: Map<string, ClaimState> | undefined;
   if (effect.claims !== undefined) {
-    for (const [objectId, claim] of effect.claims) if (claims.get(objectId) !== claim) {
-      if (claims === state.claims) claims = new Map(state.claims);
-      (claims as Map<string, ClaimState>).set(objectId, claim);
+    for (const [objectId, claim] of effect.claims) {
+      if ((updatedClaims ?? state.claims).get(objectId) === claim) continue;
+      updatedClaims ??= new Map(state.claims);
+      updatedClaims.set(objectId, claim);
     }
   }
   const next = {
     ...state,
-    support: supportChanged ? Object.freeze([...supportById!.values()]) : state.support,
-    claims,
+    support,
+    claims: updatedClaims ?? state.claims,
     ...(effect.work_status === undefined ? {} : { support_work_status: effect.work_status })
   };
   return Object.freeze({ ...next, closure: closureFacts(next, state.closure.propagation) });
@@ -692,13 +711,7 @@ function rejectedField(
     roles: input.roles ?? new Map(),
     remaining_work: [],
     last_observer_status: undefined,
-    resume_cursors: {},
-    pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
-    pair_progress_bytes: 0,
-    source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
-    source_fact_pending_count: 0, source_fact_scan_offset: 0,
-    pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
-    resume_subjects: new PersistentStringMap(),
+    ...createRoutingProgress(),
     discoveries: [],
     closure: {
       propagation: "open",
@@ -709,6 +722,24 @@ function rejectedField(
     }
   };
   return Object.freeze(state);
+}
+
+function createRoutingProgress(): FieldRoutingProgress {
+  return {
+    resume_cursors: {},
+    pair_progress: new PersistentStringMap(),
+    pair_demands: new PersistentStringMap(),
+    pair_demand_bytes: 0,
+    pair_progress_bytes: 0,
+    source_fact_demands: new PersistentStringMap(),
+    source_fact_demand_bytes: 0,
+    source_fact_pending_count: 0,
+    source_fact_scan_offset: 0,
+    pair_completed_count: 0,
+    pair_revision: 0,
+    pair_scan_offset: 0,
+    resume_subjects: new PersistentStringMap()
+  };
 }
 
 function reviseEpoch(

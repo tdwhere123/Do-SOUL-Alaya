@@ -116,6 +116,16 @@ function solverResourceResiduals(residuals: readonly CoverageRegion[], exhausted
     : remaining.length === residuals.length ? residuals : remaining;
 }
 
+type ObservationAdditions = {
+  readonly measurements: FieldMeasurement[];
+  readonly seeds: SeedActivation[];
+  readonly guaranteedSeeds: SeedActivation[];
+  readonly transitions: Transition[];
+  readonly facets: FacetVector[];
+  readonly derivations: Derivation[];
+  readonly discoveries: RoutingDiscovery[];
+};
+
 export function absorbObservations(
   state: FieldEngineState,
   consumption: ObserverConsumption
@@ -130,14 +140,15 @@ export function absorbObservations(
   }
   const priorIds = index.observations;
   const observations = new RetainedRowDraft(RetainedSequence.from(index.rows.observations));
-  const measurements: FieldMeasurement[] = [];
-  const seeds: SeedActivation[] = [];
-  const guaranteedSeeds: SeedActivation[] = [];
-  const transitions: Transition[] = [];
-  const guaranteedTransitions: Transition[] = [];
-  const facets: FacetVector[] = [];
-  const derivations: Derivation[] = [];
-  const discoveries: RoutingDiscovery[] = [];
+  const additions: ObservationAdditions = {
+    measurements: [],
+    seeds: [],
+    guaranteedSeeds: [],
+    transitions: [],
+    facets: [],
+    derivations: [],
+    discoveries: []
+  };
   let remainingExploration = state.remaining_exploration;
   const remainingWork: RemainingWork[] = [...state.remaining_work];
   const quota = newMemoryQuota(state, index, consumption, remainingWork);
@@ -146,28 +157,19 @@ export function absorbObservations(
   );
   absorbPageObservations(
     consumption.page.observations,
-    priorIds,
     observations,
-    seeds,
-    guaranteedSeeds,
+    additions,
     effectSeedIds,
     quota
   );
   remainingExploration = absorbEffects(
     consumption,
     priorIds,
-    measurements,
-    seeds,
-    guaranteedSeeds,
-    transitions,
-    guaranteedTransitions,
-    facets,
-    derivations,
-    discoveries,
+    additions,
     remainingExploration,
-    remainingWork,
     quota
   );
+  const { measurements, seeds, guaranteedSeeds, transitions, facets, derivations, discoveries } = additions;
   const remainingMemory = quota.remaining;
   const memoryExhausted = quota.exhausted;
   const workUnits = consumption.work?.work_units ?? 0;
@@ -303,10 +305,8 @@ type MemoryQuota = {
 
 function absorbPageObservations(
   pageObservations: readonly TypedObservation[],
-  _priorIds: Readonly<{ has(key: string): boolean }>,
   observations: RetainedRowDraft<TypedObservation>,
-  seeds: SeedActivation[],
-  guaranteedSeeds: SeedActivation[],
+  additions: Pick<ObservationAdditions, "seeds" | "guaranteedSeeds">,
   effectSeedIds: ReadonlySet<string>,
   quota: MemoryQuota
 ): void {
@@ -328,8 +328,8 @@ function absorbPageObservations(
     const seed = seedFromObservation(observation, productStateFromObservation(observation));
     if (seed === undefined) continue;
     if (!retainPayload(seed, quota)) continue;
-    seeds.push(seed);
-    if (observationIsGuaranteed(observation)) guaranteedSeeds.push(seed);
+    additions.seeds.push(seed);
+    if (observationIsGuaranteed(observation)) additions.guaranteedSeeds.push(seed);
   }
 }
 
@@ -352,18 +352,11 @@ function absorbMeasurement(
 function absorbEffects(
   consumption: ObserverConsumption,
   priorIds: Readonly<{ has(key: string): boolean }>,
-  measurements: FieldMeasurement[],
-  seeds: SeedActivation[],
-  guaranteedSeeds: SeedActivation[],
-  transitions: Transition[],
-  guaranteedTransitions: Transition[],
-  facets: FacetVector[],
-  derivations: Derivation[],
-  discoveries: RoutingDiscovery[],
+  additions: ObservationAdditions,
   remainingExploration: number,
-  remainingWork: RemainingWork[],
   quota: MemoryQuota
 ): number {
+  const { measurements, seeds, guaranteedSeeds, transitions, facets, derivations, discoveries } = additions;
   let exploration = remainingExploration;
   const pageOffsets = indexObservationOffsets(consumption.page.observations);
   const pageRows = {
@@ -389,7 +382,6 @@ function absorbEffects(
         ? { ...effect.transition, instance_id: effect.derivation.observation_ids[0] ?? effect.derivation.derivation_id }
         : effect.transition;
       transitions.push(transition);
-      if (transition.applicable) guaranteedTransitions.push(transition);
       rememberTransitionDerivation(effect, transition, derivations, quota);
     }
     if (effect.facet !== undefined && !quota.facetIds.has(effect.facet.path_id) && retainFacet(effect.facet, quota)) {
@@ -405,36 +397,24 @@ function absorbEffects(
     for (const derivation of effect.derivations ?? (effect.derivation === undefined ? [] : [effect.derivation])) {
       if (retainPayload(derivation, quota)) retainDerivation(derivation, derivations, quota);
     }
-    exploration = absorbHyperedge(
-      effect,
-      transitions,
-      guaranteedTransitions,
-      derivations,
-      exploration,
-      remainingWork,
-      quota
-    );
+    exploration = absorbHyperedge(effect, additions, exploration, quota);
   }
   return exploration;
 }
 
 function absorbHyperedge(
   effect: FieldObservationEffect,
-  transitions: Transition[],
-  guaranteedTransitions: Transition[],
-  derivations: Derivation[],
+  additions: Pick<ObservationAdditions, "transitions" | "derivations">,
   exploration: number,
-  remainingWork: RemainingWork[],
   quota: MemoryQuota
 ): number {
   if (effect.hyperedge === undefined || effect.hyperedge_premises === undefined) return exploration;
-  if (exploration < 1) remainingWork.push({ kind: "join", units: 1 });
+  if (exploration < 1) quota.remainingWork.push({ kind: "join", units: 1 });
   else exploration -= 1;
   const completed = tryCompleteHyperedge(effect.hyperedge_premises, effect.hyperedge);
   if (completed !== undefined) {
-    transitions.push(completed);
-    guaranteedTransitions.push(completed);
-    rememberTransitionDerivation(effect, completed, derivations, quota);
+    additions.transitions.push(completed);
+    rememberTransitionDerivation(effect, completed, additions.derivations, quota);
   }
   return exploration;
 }
