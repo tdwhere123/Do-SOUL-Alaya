@@ -137,6 +137,8 @@ export async function hardDeleteTombstonedWithDisposition(
     readonly onDeleted?: () => void;
   }
 ): Promise<boolean> {
+  // The compatibility option names compressed GC's independent historical-proof guard,
+  // not a lease on the mutable capsule's current liveness or membership.
   const requireLiveCapsuleRef = options?.requireLiveCapsuleRef === true;
   const requireJudgedUselessVerdict = options?.requireJudgedUselessVerdict === true;
   const onDeleted = options?.onDeleted;

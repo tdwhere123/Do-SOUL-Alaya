@@ -11,7 +11,8 @@ import {
   MemoryService,
   PathRelationProposalService,
   RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
-  SynthesisService
+  SynthesisService,
+  type MemoryServiceSynthesisCapsuleLookupPort
 } from "@do-soul/alaya-core";
 import {
   SqliteGardenTaskRepo,
@@ -197,9 +198,8 @@ function createMemoryService(
     runtimeNotifier: input.runtimeNotifier,
     dynamicsService,
     greenService,
-    synthesisCapsuleLookup: {
-      findById: (objectId: string) => input.synthesisCapsuleRepo.findById(objectId)
-    },
+    // The daemon has both live lookup and historical proof; do not narrow either away.
+    synthesisCapsuleLookup: input.synthesisCapsuleRepo satisfies Required<MemoryServiceSynthesisCapsuleLookupPort>,
     enrichPendingWriter: { enqueue: input.enqueueEnrichPending },
     gardenIntentPort,
     objectKeyWriter: createDaemonMemoryObjectKeyWriter(input.database)

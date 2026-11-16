@@ -214,9 +214,9 @@ export class MemoryAutonomousForget {
 
     const isCompressed = existing.forget_disposition === "compressed";
 
-    // invariant: compressed deletes re-verify live capsule preservation both
-    // before and inside the guarded DELETE.
-    // see also: apps/core-daemon/src/forget-disposition-ports.ts:isCapsuleLive.
+    // invariant: compressed deletes re-verify independently retained history both
+    // before and inside the guarded DELETE; capsule membership gates adoption only.
+    // see also: packages/storage/src/repos/preservation/historical-memory-capture.ts:readHistoricalMember.
     if (isCompressed) {
       const preserved = await this.compressedPreservationStillValid(existing);
       if (!preserved) {
@@ -233,7 +233,7 @@ export class MemoryAutonomousForget {
     }
 
     // invariant: compressed DELETE runs before the deleted audit and returns
-    // false when capsule preservation is revoked by a race.
+    // false when historical preservation is revoked by a race.
     if (isCompressed) {
       // invariant: onDeleted appends the to_state=deleted audit inside the
       // guarded DELETE transaction.
@@ -312,7 +312,7 @@ export class MemoryAutonomousForget {
   }
 
   // invariant: preservation_revoked leaves compressed rows tombstoned and
-  // recoverable when capsule preservation no longer holds.
+  // recoverable when independent historical preservation no longer holds.
   private async emitPreservationRevoked(
     existing: Readonly<MemoryEntry>,
     parsedReason: string,
@@ -376,8 +376,7 @@ export class MemoryAutonomousForget {
     });
   }
 
-  // invariant: compressed physical delete requires a live preserving capsule at
-  // delete time; missing or stale preservation returns false.
+  // Persist one audited refusal for the inspected revision before notification.
   private async deferGc(existing: MemoryEntry,
     input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<void> {
     const defer = this.memoryEntryRepo.deferAutonomousGc;
@@ -387,6 +386,7 @@ export class MemoryAutonomousForget {
     if (event !== null) await this.runtimeNotifier.notifyEntry(event);
   }
 
+  // Compressed GC needs ready independent history; missing capability or proof fails closed.
   private async compressedPreservationStillValid(existing: Readonly<MemoryEntry>): Promise<boolean> {
     const ref = existing.forget_disposition_ref;
     if (ref === null || ref === undefined) {

@@ -131,7 +131,7 @@ export class SqliteMemoryEntryRepo
   public get hardDeleteTombstonedWithDispositionStatement(): SqliteRunStatement {
     return this.workflowStatementHolder.active().hardDeleteTombstonedWithDispositionStatement;
   }
-  // invariant: compressed delete rechecks capsule liveness atomically with removal.
+  // invariant: compressed delete rechecks sealed historical proof atomically with removal.
   public get hardDeleteTombstonedCompressedGuardedStatement(): SqliteRunStatement {
     return this.workflowStatementHolder.active().hardDeleteTombstonedCompressedGuardedStatement;
   }
