@@ -48,6 +48,8 @@ import {
 } from "./daemon-embedding-provider-readiness.js";
 import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
 
+type SourceEmbeddingBindingOptions = Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0];
+
 export type EmbeddingStartupProbe = "eager" | "omit";
 export type LoadedMemoryEmbeddingProfile =
   | Readonly<{ status: "ready"; profile_id: string; profile: SourceIndexProfile }>
@@ -85,13 +87,20 @@ export function createDaemonEmbeddingRuntime(input: {
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
     // A separately selected Source provider is shared by index preparation and query binding only.
-    bindSourceEmbedding: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
-      runtimeConfig.sourceLocalEmbedding !== null ? bindLocalSourceIndex(sourceState.provider, options) :
-      sourceState.provider?.bindSourceEmbedding?.(structuredClone(options)) ??
-        Promise.resolve({ status: "unsupported" as const, reason: sourceState.provider === null
-          ? "embedding_provider_unavailable" : "provider_source_evidence_pending" }),
+    bindSourceEmbedding: (options: SourceEmbeddingBindingOptions) => {
+      if (runtimeConfig.sourceLocalEmbedding !== null) {
+        return bindLocalSourceIndex(sourceState.provider, options);
+      }
+      return sourceState.provider?.bindSourceEmbedding?.(structuredClone(options)) ??
+        Promise.resolve({
+          status: "unsupported" as const,
+          reason: sourceState.provider === null
+            ? "embedding_provider_unavailable"
+            : "provider_source_evidence_pending"
+        });
+    },
     // Source-index producer binds only a cached local runtime. Missing/API providers stay unbound.
-    bindLocalSourceIndex: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
+    bindLocalSourceIndex: (options: SourceEmbeddingBindingOptions) =>
       bindLocalSourceIndex(sourceState.provider, options),
     getProviderDimensions: () => providerState.readiness.dimensions,
     getSourceProviderDimensions: () => sourceState.readiness.dimensions,
@@ -105,12 +114,20 @@ export function createDaemonEmbeddingRuntime(input: {
 }
 
 function createSourceEmbeddingProviderState(
-  input: Parameters<typeof createDaemonEmbeddingRuntime>[0], config: EmbeddingRuntimeConfig, memory: EmbeddingProviderState
+  input: Parameters<typeof createDaemonEmbeddingRuntime>[0],
+  config: EmbeddingRuntimeConfig,
+  memory: EmbeddingProviderState
 ): Readonly<{ provider: EmbeddingProviderPort | null; readiness: EmbeddingProviderReadiness }> {
-  if (config.sourceLocalEmbedding === null) return { provider: memory.embeddingProvider, readiness: memory.readiness };
-  const resolved = input.sourceEmbeddingProviderOverride === undefined ? new LocalOnnxEmbeddingClient({
-    env: processEnvLookup(), cacheDir: config.sourceLocalEmbedding.cacheDir, modelId: config.sourceLocalEmbedding.modelId
-  }) : input.sourceEmbeddingProviderOverride;
+  if (config.sourceLocalEmbedding === null) {
+    return { provider: memory.embeddingProvider, readiness: memory.readiness };
+  }
+  const resolved = input.sourceEmbeddingProviderOverride === undefined
+    ? new LocalOnnxEmbeddingClient({
+        env: processEnvLookup(),
+        cacheDir: config.sourceLocalEmbedding.cacheDir,
+        modelId: config.sourceLocalEmbedding.modelId
+      })
+    : input.sourceEmbeddingProviderOverride;
   if (resolved !== null && resolved === input.embeddingProviderOverride) {
     throw new AlayaError("VALIDATION", "Separately selected Source provider must not share the Memory provider instance.");
   }
@@ -389,12 +406,9 @@ function resolveEmbeddingProvider(input: {
   }
 
   if (input.apiKey === null) {
-    if (input.optInEnabled) {
-      throw new Error(
-        "ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF"
-      );
-    }
-    return null;
+    throw new Error(
+      "ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF"
+    );
   }
   return new OpenAIEmbeddingClient({
     apiKey: input.apiKey,
@@ -420,7 +434,7 @@ async function closeEmbeddingProviders(...providers: readonly (EmbeddingProvider
 
 function bindLocalSourceIndex(
   provider: EmbeddingProviderPort | null,
-  options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]
+  options: SourceEmbeddingBindingOptions
 ) {
   const captured = structuredClone(options);
   if (provider === null || !provider.isAvailable) {

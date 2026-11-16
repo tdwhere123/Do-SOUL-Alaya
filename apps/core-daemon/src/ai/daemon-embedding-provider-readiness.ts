@@ -62,14 +62,21 @@ export function observeEmbeddingProviderReadiness(
       bindSourceEmbedding: async (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) => {
         const binding = await provider.bindSourceEmbedding!(structuredClone(options));
         if (binding.status !== "ready") return binding;
-        return Object.freeze<typeof binding>({ ...binding, embedInputs: async (...args: Parameters<typeof binding.embedInputs>) => {
-          const results = await binding.embedInputs(...args);
-          const vectors = results.flatMap(result => result.status === "embedded" ? [result.vector] : []);
-          assertValidEmbeddingBatch(vectors, vectors.length);
-          if (vectors.some(vector => vector.length !== binding.profile.dimensions)) throw new AlayaError("OBLIGATION_VIOLATION", "Source embedding dimensions differ from bound profile");
-          if (vectors.length > 0) readiness.markReady(binding.profile.dimensions);
-          return results;
-        } });
+        return Object.freeze<typeof binding>({
+          ...binding,
+          embedInputs: async (...args: Parameters<typeof binding.embedInputs>) => {
+            const results = await binding.embedInputs(...args);
+            const vectors = results.flatMap(result => result.status === "embedded" ? [result.vector] : []);
+            assertValidEmbeddingBatch(vectors, vectors.length);
+            if (vectors.some(vector => vector.length !== binding.profile.dimensions)) {
+              throw new AlayaError("OBLIGATION_VIOLATION", "Source embedding dimensions differ from bound profile");
+            }
+            if (vectors.length > 0) {
+              readiness.markReady(binding.profile.dimensions);
+            }
+            return results;
+          }
+        });
       }
     } : {}),
     // Wrapper must not drop close; the port documents why the isolate needs it.
