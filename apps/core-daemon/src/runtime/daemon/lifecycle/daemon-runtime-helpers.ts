@@ -16,14 +16,6 @@ type ConfigRepoPort = {
   ): TValue | null | Promise<TValue | null>;
 };
 
-type CurrencyRecord = Readonly<{
-  updated_at: string;
-}>;
-
-type CurrencyRecordRepo = {
-  findById(id: string): Promise<CurrencyRecord | null>;
-};
-
 export type WarnLogger = Pick<LoggerPort, "warn">;
 
 type UnhandledRejectionListener = (reason: unknown) => void;
@@ -439,55 +431,6 @@ export function createManifestationBudgetConfigProvider(configRepo: ConfigRepoPo
       const configKey = `workspace:${workspaceId}:manifestation_budget`;
       const rawConfig = await configRepo.getParsed(configKey, ManifestationBudgetConfigSchema);
       return rawConfig === null ? null : ManifestationBudgetConfigSchema.parse(rawConfig);
-    }
-  });
-}
-
-export function createTargetCurrencyCheckPort(input: {
-  readonly claimFormRepo: CurrencyRecordRepo;
-  readonly slotRepo: CurrencyRecordRepo;
-}): Readonly<{
-  checkCurrency(
-    targetEntityType: string,
-    targetEntityId: string,
-    sinceTimestamp: string
-  ): Promise<
-    | Readonly<{ status: "missing" }>
-    | Readonly<{ status: "fresh" }>
-    | Readonly<{ status: "stale"; stale_since: string }>
-  >;
-}> {
-  return Object.freeze({
-    checkCurrency: async (targetEntityType, targetEntityId, sinceTimestamp) => {
-      const sinceEpoch = Date.parse(sinceTimestamp);
-      if (!Number.isFinite(sinceEpoch)) {
-        return { status: "missing" as const };
-      }
-
-      const resolveStatus = (updatedAt: string) => {
-        const updatedEpoch = Date.parse(updatedAt);
-        if (!Number.isFinite(updatedEpoch)) {
-          return { status: "missing" as const };
-        }
-
-        return updatedEpoch > sinceEpoch
-          ? { status: "stale" as const, stale_since: updatedAt }
-          : { status: "fresh" as const };
-      };
-
-      switch (targetEntityType) {
-        case "claim":
-        case "claim_form": {
-          const claim = await input.claimFormRepo.findById(targetEntityId);
-          return claim === null ? { status: "missing" as const } : resolveStatus(claim.updated_at);
-        }
-        case "slot": {
-          const slot = await input.slotRepo.findById(targetEntityId);
-          return slot === null ? { status: "missing" as const } : resolveStatus(slot.updated_at);
-        }
-        default:
-          return { status: "missing" as const };
-      }
     }
   });
 }

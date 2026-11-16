@@ -9,36 +9,26 @@ import {
   ProjectMappingState,
   parseEnvBoolean,
   parseEnvOptionalBoolean,
-  type AgentRuntimePort,
   type EngineBindingTestPort,
   type GlobalMemoryEntry,
   type GardenBacklogThresholds
 } from "@do-soul/alaya-protocol";
 import {
-  CanonicalAliasService,
-  ClaimService,
   CoreError,
   ProjectMappingService,
-  StrongRefService,
-  ToolGovernanceClient,
-  SqliteKarmaEventStore,
   createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
   type GlobalMemoryRecallServicePort
 } from "@do-soul/alaya-core";
 import * as StorageModule from "@do-soul/alaya-storage";
 import {
-  SqliteEventLogRepo,
   SqliteGlobalMemoryRecallCacheRepo,
   SqliteGlobalMemoryRepo,
-  SqliteKarmaEventRepo,
-  SqliteToolExecutionRecordRepo,
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRepo,
   type MemoryEmbeddingRepo,
   type MemoryHqRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { createWarnLogger } from "./daemon-runtime-helpers.js";
 import type { RequestProtectionConfig } from "../../app.js";
 import {
   applyRemoteBindTokenRotation,
@@ -52,7 +42,6 @@ import { resolveConfiguredDatabasePath } from "../support/storage-config.js";
 import { isNodeErrorWithCode } from "../../../services/support/private-file-service.js";
 import { resolveSecretRef, type ResolveSecretError } from "../../../secrets/index.js";
 import { assertRegisteredDaemonEnvKey, processEnvLookup } from "../../config/daemon-config-environment.js";
-import type { AlayaRuntimeNotifier } from "../support/runtime-notifier.js";
 export {
   classifySoulGraphOriginKind,
   createSoulGraphService,
@@ -357,40 +346,6 @@ export function createEngineBindingTester(): EngineBindingTestPort {
       );
     }
   };
-}
-
-export function createUnavailableRuntimeAdapter(): AgentRuntimePort {
-  return {
-    kind: "unavailable",
-    getCapabilities: () => ({
-      supports_resume: false,
-      supports_interrupt: false,
-      supports_streaming_updates: false,
-      supports_tool_events: false,
-      supports_permission_requests: false,
-      supports_artifact_events: false,
-      supports_terminal_events: false
-    }),
-    createSession: async () => {
-      throw new Error("Principal runtime adapter is not configured.");
-    },
-    prompt: async () => {
-      throw new Error("Principal runtime adapter is not configured.");
-    },
-    cancel: async (sessionId: string) => ({
-      session_id: sessionId,
-      status: "not_found",
-      message: "Principal runtime adapter is not configured."
-    }),
-    onEvent: () => () => undefined
-  };
-}
-
-export function createKarmaEventStore(
-  karmaEventRepo: SqliteKarmaEventRepo,
-  warnLogger: ReturnType<typeof createWarnLogger>
-) {
-  return new SqliteKarmaEventStore(karmaEventRepo, warnLogger);
 }
 
 function formatSecretResolutionError(label: string, error: ResolveSecretError): string {
