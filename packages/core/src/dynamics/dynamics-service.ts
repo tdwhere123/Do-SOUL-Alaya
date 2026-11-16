@@ -27,6 +27,15 @@ import {
   type KarmaTransitionContext
 } from "./dynamics-service-ports.js";
 
+interface KarmaEventInput {
+  readonly kind: KarmaEventKind;
+  readonly objectId: string;
+  readonly workspaceId: string;
+  readonly amount?: number;
+  readonly runId?: string | null;
+  readonly supersedingObjectId?: string;
+}
+
 export interface KarmaEventTransactionMutation {
   readonly events: readonly DynamicsEventLogInput[];
   readonly afterCommit: () => void;
@@ -79,61 +88,39 @@ export class DynamicsService {
     });
   }
 
-  public async emitKarmaEvent(input: {
-    readonly kind: KarmaEventKind;
-    readonly objectId: string;
-    readonly workspaceId: string;
-    readonly amount?: number;
-    readonly runId?: string | null;
-    readonly supersedingObjectId?: string;
-  }): Promise<void> {
-    const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
-    const transitionContext =
-      input.supersedingObjectId === undefined
-        ? undefined
-        : Object.freeze({ supersedingObjectId: input.supersedingObjectId });
-    await this.processKarmaEvent(
-      {
-        event_id: this.generateEventId(),
-        kind: input.kind,
-        object_id: input.objectId,
-        amount,
-        created_at: this.now(),
-        workspace_id: input.workspaceId,
-        run_id: input.runId ?? null
-      },
-      transitionContext
-    );
+  public async emitKarmaEvent(input: KarmaEventInput): Promise<void> {
+    const { event, context } = this.prepareKarmaEvent(input);
+    await this.processKarmaEvent(event, context);
   }
 
-  public emitKarmaEventInCurrentTransaction(input: {
-    readonly kind: KarmaEventKind;
-    readonly objectId: string;
-    readonly workspaceId: string;
-    readonly amount?: number;
-    readonly runId?: string | null;
-    readonly supersedingObjectId?: string;
-  }): KarmaEventTransactionMutation {
-    const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
-    const transitionContext =
-      input.supersedingObjectId === undefined
-        ? undefined
-        : Object.freeze({ supersedingObjectId: input.supersedingObjectId });
-    const mutation = this.karmaEngine.processKarmaEventInCurrentTransaction(
-      {
-        event_id: this.generateEventId(),
-        kind: input.kind,
-        object_id: input.objectId,
-        amount,
-        created_at: this.now(),
-        workspace_id: input.workspaceId,
-        run_id: input.runId ?? null
-      },
-      transitionContext
-    );
+  public emitKarmaEventInCurrentTransaction(input: KarmaEventInput): KarmaEventTransactionMutation {
+    const { event, context } = this.prepareKarmaEvent(input);
+    const mutation = this.karmaEngine.processKarmaEventInCurrentTransaction(event, context);
     return {
       events: mutation.events,
       afterCommit: () => this.karmaEngine.scheduleKarmaTransactionSideEffects(mutation)
+    };
+  }
+
+  private prepareKarmaEvent(input: KarmaEventInput): {
+    readonly event: KarmaEvent;
+    readonly context: KarmaTransitionContext | undefined;
+  } {
+    const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
+    const context = input.supersedingObjectId === undefined
+      ? undefined
+      : Object.freeze({ supersedingObjectId: input.supersedingObjectId });
+    return {
+      event: {
+        event_id: this.generateEventId(),
+        kind: input.kind,
+        object_id: input.objectId,
+        amount,
+        created_at: this.now(),
+        workspace_id: input.workspaceId,
+        run_id: input.runId ?? null
+      },
+      context
     };
   }
 
