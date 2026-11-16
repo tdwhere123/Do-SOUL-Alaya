@@ -10,6 +10,14 @@ import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 
+// Production EventLog payload: buildEraseBarrierEventInput.
+// SQL apply/tombstone is SqliteFieldEraseBarrierRepo in storage, not this
+// module. EventLogSafeEraseBarrier and InMemoryErase* are in-memory test
+// doubles for barrier identity, idempotence, and irreversible plaintext
+// clear; they do not append EventLog. InMemoryGovernanceEventLog is not
+// wired to that double or to production EventPublisher.
+// see also: packages/storage/src/repos/field/erase-repo.ts
+
 export interface EraseSubjectStore {
   getPlaintext(workspaceId: string, subjectId: string): string | null;
   clearPlaintext(workspaceId: string, subjectId: string): void;

@@ -37,12 +37,11 @@ export interface ProposalServiceDependencies {
   readonly runtimeNotifier: ProposalRuntimeNotifier;
 }
 
-// invariant: Proposal lifecycle reads only. Create / accept / reject of
-// memory-governance proposals flow through ResolutionService (typed
-// dispatch from soul.resolve verb). Strictly-governed path_relation
-// proposals are created by the daemon promote endpoint and applied by
-// the daemon's review handler.
-// see also: packages/core/src/governance/resolution-service.ts
+// invariant: ProposalService is a read facade over stored proposals.
+// Memory-governance propose/review is owned by the daemon MCP workflow
+// (`soul.propose_memory_update` / `soul.review_memory_proposal`), not
+// ResolutionService / `soul.resolve` (inline claim lifecycle).
+// see also: apps/core-daemon/src/mcp-memory/proposal/proposal-workflow-handlers.ts
 export class ProposalService {
   public constructor(private readonly dependencies: ProposalServiceDependencies) {}
 
