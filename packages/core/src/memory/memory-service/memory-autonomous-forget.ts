@@ -114,7 +114,8 @@ export class MemoryAutonomousForget {
 
     let updated: Readonly<MemoryEntry>;
     try {
-      updated = await autonomousTombstone(
+      updated = await autonomousTombstone.call(
+        this.memoryEntryRepo,
         {
           objectId: parsedObjectId,
           disposition,
@@ -219,7 +220,7 @@ export class MemoryAutonomousForget {
       // guarded DELETE transaction.
       const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
       let deletedEvent: EventLogEntry | undefined;
-      const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+      const deleted = await hardDeleteWithDisposition.call(this.memoryEntryRepo, parsedObjectId, {
         requireLiveCapsuleRef: true,
         onDeleted: () => {
           deletedEvent = appendAuditEventSynchronously(this.eventLogRepo, deleteEventInput);
@@ -246,7 +247,7 @@ export class MemoryAutonomousForget {
 
     const deleteEventInput = this.buildAutonomousDeleteEventInput(existing, parsedReason, parsedCausedBy);
     let deletedEvent: EventLogEntry | undefined;
-    const deleted = await hardDeleteWithDisposition(parsedObjectId, {
+    const deleted = await hardDeleteWithDisposition.call(this.memoryEntryRepo, parsedObjectId, {
       requireJudgedUselessVerdict: true,
       onDeleted: () => {
         deletedEvent = appendAuditEventSynchronously(this.eventLogRepo, deleteEventInput);

@@ -45,6 +45,7 @@ it("autonomousHardDeleteTombstoned REFUSES a judged_useless delete when the atom
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       expect.objectContaining({ requireJudgedUselessVerdict: true })
     );
+    expect(hardDeleteSpy.mock.contexts).toEqual([dependencies.memoryEntryRepo]);
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
       payload_json: expect.objectContaining({
@@ -210,6 +211,7 @@ it("hard-deletes a compressed member only when the capsule is STILL live + refer
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       expect.objectContaining({ requireLiveCapsuleRef: true })
     );
+    expect(vi.mocked(hardDeleteSpy).mock.contexts).toEqual([dependencies.memoryEntryRepo]);
     // Exactly ONE "deleted" audit, appended via onDeleted (atomic with the
     // physical delete), then notified post-commit.
     expect(appendSpy).toHaveBeenCalledTimes(1);
@@ -278,6 +280,7 @@ it("REFUSES the delete (memory survives) when the capsule is revoked AFTER the p
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       expect.objectContaining({ requireLiveCapsuleRef: true })
     );
+    expect(hardDeleteSpy.mock.contexts).toEqual([dependencies.memoryEntryRepo]);
     // The guarded delete returns 0 rows so onDeleted never fires, so the ONLY
     // emitted event is the preservation_revoked skip (no spurious "deleted"
     // audit). The memory is never notified as deleted.
