@@ -5,11 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
   AlayaError,
-  ControlPlaneObjectKind,
-  RetentionPolicy,
-  TaskObjectSurfaceSchema,
   type MemorySearchResult,
-  type RecallPolicy,
   type SoulReportContextUsageResponse
 } from "@do-soul/alaya-protocol";
 import {
@@ -21,7 +17,6 @@ import {
 } from "../seed/daemon-seed-operations.js";
 import { createBenchSeedProposalReviewer } from "../seed/daemon-seed-review.js";
 import {
-  buildBenchDiagnosticRecallPolicy,
   callMcpTool,
   closeBenchDaemonResources,
   emitBenchContextLensAssembledEvent,
@@ -45,10 +40,7 @@ import {
   drainEmbeddingWarmupPasses
 } from "../../embedding/embedding-warmup.js";
 import { resolveTreatmentEmbeddingInputIdentity } from "../../strict-treatment-config.js";
-import {
-  applyBenchRecallWeightOverrides,
-  type BenchRecallWeightOverrides
-} from "../../recall/recall-weight-overrides.js";
+import type { BenchRecallWeightOverrides } from "../../recall/recall-weight-overrides.js";
 import {
   assertWarmEmbeddingReady,
   buildReportContextUsageArgs,
@@ -60,10 +52,13 @@ import {
   shouldRunBenchEdgePlane
 } from "./daemon-handle-ops-support.js";
 import { buildBenchRecallResponse, encodeBenchRecallResults } from "./bench-recall-response.js";
+import {
+  prepareBenchRecallRequest,
+  type PreparedBenchRecallRequest
+} from "./bench-recall-request.js";
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
 import { createFieldProjectionCheckpointOperation } from "../runtime/daemon-field-projection.js";
 import { createRelationProjectionCheckpointOperation } from "../runtime/daemon-relation-projection.js";
-import { benchRequestFilters, resolveBenchRequestBudget } from "../../recall/conditional-request-budget.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -92,12 +87,21 @@ interface BenchDaemonOpsInput {
   readonly cleanupManagedWorkspaceRoots: () => Promise<void>;
 }
 
-interface BenchDeliveryRecord {
-  readonly deliveryId: string;
-  readonly deliveredObjects: readonly {
-    readonly object_id: string;
-    readonly object_kind: string;
-  }[];
+export interface BenchRecallOperationInput {
+  readonly dataDir: string;
+  readonly activeContext: ActiveBenchContext;
+  readonly activeRuntime: {
+    readonly services: {
+      readonly recallService: AlayaDaemonRuntime["services"]["recallService"];
+      readonly trustStateRecorder: Pick<
+        AlayaDaemonRuntime["services"]["trustStateRecorder"],
+        "recordDelivery"
+      >;
+    };
+  };
+  readonly recallWeightOverrides?: BenchRecallWeightOverrides;
+  readonly embeddingMode: BenchEmbeddingMode;
+  readonly effectiveEnv: Readonly<Record<string, string | undefined>>;
 }
 
 export function createBenchDaemonOps(
@@ -149,80 +153,68 @@ export function createBenchDaemonOps(
   };
 }
 
-function createBenchRecallOperation(
-  input: BenchDaemonOpsInput
+export function createBenchRecallOperation(
+  input: BenchRecallOperationInput
 ): BenchDaemonHandle["recall"] {
   const exposureSession = new FirstExposureSession();
   return async (
     query: string,
     opts: BenchRecallOptions = {}
   ): ReturnType<BenchDaemonHandle["recall"]> => {
-    const taskSurface = createBenchTaskSurface(query);
-    const policy = buildBenchRecallPolicy(
-      taskSurface.runtime_id,
-      opts,
-      input.recallWeightOverrides
-    );
-    const requestBudget = resolveBenchRequestBudget(opts);
-    const interpretationClock = new Date(opts.interpretationClock ?? opts.referenceTime
-      ?? opts.continuation?.interpretation_clock ?? new Date().toISOString()).toISOString();
-    const rawRecallResult = await invokeBoundRecall({
-      sideEffectMode: "benchmark",
-      recallService: input.activeRuntime.services.recallService,
-      taskSurface,
+    const prepared = prepareBenchRecallRequest(input, query, opts);
+    const recallResult = await invokeBoundRecall({
+      ...prepared.invoke,
+      recallService: input.activeRuntime.services.recallService
+    });
+    return await deliverBenchRecallResponse(input, prepared, recallResult, exposureSession);
+  };
+}
+
+async function deliverBenchRecallResponse(
+  input: BenchRecallOperationInput,
+  prepared: PreparedBenchRecallRequest,
+  recallResult: BenchRecallServiceResult,
+  exposureSession: FirstExposureSession
+): ReturnType<BenchDaemonHandle["recall"]> {
+  const results = encodeBenchRecallResults(
+    recallResult,
+    prepared.policy,
+    prepared.requestBudget,
+    {
+      queryText: prepared.queryText,
       workspaceId: input.activeContext.workspaceId,
-      runId: input.activeContext.runId,
-      strategy: "chat",
-      policyOverride: policy,
-      diagnosticCapture:
-        input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"
-          ? "packet_trace"
-          : "answer_features",
-      ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
-      ...(opts.querySemanticFactorFormationCapture === undefined
-        ? {}
-        : { querySemanticFactorFormationCapture: opts.querySemanticFactorFormationCapture }),
-      ...(opts.querySemanticFactorCompletenessReceipt === undefined
-        ? {}
-        : { querySemanticFactorCompletenessReceipt:
-            opts.querySemanticFactorCompletenessReceipt }),
-      ...(opts.snapshotDigest === undefined ? {} : { snapshotDigest: opts.snapshotDigest }),
-      queryText: query,
-      budget: requestBudget,
-      ...(opts.continuation === undefined ? {} : { continuation: opts.continuation }),
-      ...(opts.cancelled === undefined ? {} : { cancelled: opts.cancelled }),
-      interpretationClock,
-      ...(opts.since === undefined ? {} : { since: opts.since }),
-      ...(opts.until === undefined ? {} : { until: opts.until }),
-      ...(opts.timeFilter === undefined ? {} : { timeFilter: opts.timeFilter }),
-      ...(opts.enumeration_policy === undefined ? {} : { enumeration_policy: opts.enumeration_policy }),
-      ...(opts.cap_contracts === undefined ? {} : { cap_contracts: opts.cap_contracts }),
-      ...(opts.result_kind_view === undefined ? {} : { result_kind_view: opts.result_kind_view }),
-      protocol_version: 1,
-      supports_source_evidence: true,
-      supported_result_kinds: ["memory_entry", "source_evidence"],
-      activeConstraintsCap: null
-    });
-    const recallResult = rawRecallResult;
-    const results = encodeBenchRecallResults(recallResult, policy, requestBudget, {
-      queryText: query, workspaceId: input.activeContext.workspaceId, referenceTime: interpretationClock,
-      requestBudget, requestFilters: benchRequestFilters(opts, policy),
-      expectedIndexSnapshotId: opts.continuation?.snapshot_id
-    });
-    const delivery = await recordBenchRecallDelivery(input, results, recallResult);
-    await emitBenchContextLensAssembledEvent(input.dataDir, {
-      taskSurfaceRef: taskSurface.runtime_id,
-      lensEntryCount: results.length,
-      totalTokenEstimate: results.reduce(
-        (sum, result) => sum + result.budget_state.token_estimate,
-        0
-      ),
-      runId: input.activeContext.runId,
-      workspaceId: input.activeContext.workspaceId
-    });
-    const response = buildBenchRecallResponse(delivery.deliveryId, results, recallResult, requestBudget);
-    return { ...response, first_exposure_page: exposureSession.record(response, opts.continuation,
-      enrichAbstentionConfidence(joinFusedScoresOntoResults(exposureSlots(response), response, input.embeddingMode))) };
+      referenceTime: prepared.interpretationClock,
+      requestBudget: prepared.requestBudget,
+      requestFilters: prepared.requestFilters,
+      expectedIndexSnapshotId: prepared.expectedIndexSnapshotId
+    }
+  );
+  const deliveryId = await recordBenchRecallDelivery(input, results, recallResult);
+  await emitBenchContextLensAssembledEvent(input.dataDir, {
+    taskSurfaceRef: prepared.taskSurface.runtime_id,
+    lensEntryCount: results.length,
+    totalTokenEstimate: results.reduce(
+      (sum, result) => sum + result.budget_state.token_estimate,
+      0
+    ),
+    runId: input.activeContext.runId,
+    workspaceId: input.activeContext.workspaceId
+  });
+  const response = buildBenchRecallResponse(
+    deliveryId,
+    results,
+    recallResult,
+    prepared.requestBudget
+  );
+  return {
+    ...response,
+    first_exposure_page: exposureSession.record(
+      response,
+      prepared.continuation,
+      enrichAbstentionConfidence(
+        joinFusedScoresOntoResults(exposureSlots(response), response, input.embeddingMode)
+      )
+    )
   };
 }
 
@@ -394,38 +386,11 @@ function createBenchSeedOperations(
   };
 }
 
-function createBenchTaskSurface(query: string) {
-  return TaskObjectSurfaceSchema.parse({
-    runtime_id: randomUUID(),
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: null,
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "mcp_memory_tool",
-    display_name: query,
-    context_refs: []
-  });
-}
-
-function buildBenchRecallPolicy(
-  taskSurfaceId: string,
-  opts: BenchRecallOptions,
-  recallWeightOverrides: BenchRecallWeightOverrides | undefined
-): RecallPolicy {
-  const basePolicy = buildBenchDiagnosticRecallPolicy(
-    taskSurfaceId,
-    opts.maxResults ?? 10,
-    opts.conflictAwareness ?? true
-  );
-  return applyBenchRecallWeightOverrides(basePolicy, recallWeightOverrides);
-}
-
 async function recordBenchRecallDelivery(
-  input: BenchDaemonOpsInput,
+  input: BenchRecallOperationInput,
   results: readonly MemorySearchResult[],
   recallResult: BenchRecallServiceResult
-): Promise<BenchDeliveryRecord> {
+): Promise<string> {
   const deliveryId = `delivery_${randomUUID()}`;
   const deliveredObjects = dedupeDeliveredObjects([
     ...results.flatMap((result) => result.object_id === undefined
@@ -450,5 +415,5 @@ async function recordBenchRecallDelivery(
     delivered_objects: deliveredObjects,
     delivered_at: new Date().toISOString()
   });
-  return { deliveryId, deliveredObjects };
+  return deliveryId;
 }
