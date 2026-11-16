@@ -484,6 +484,22 @@ describe("recallRatioSampleSize", () => {
       answerable_evaluated_count: 9
     })).toBe(9);
   });
+
+  it("treats explicit zero as authoritative rather than falling back", () => {
+    expect(recallRatioSampleSize({
+      evaluated_count: 50,
+      answerable_evaluated_count: 0
+    })).toBe(0);
+    expect(recallRatioSampleSize({
+      evaluated_count: 50,
+      reporting_recall_denominator: 0
+    })).toBe(0);
+    expect(recallRatioSampleSize({
+      evaluated_count: 50,
+      reporting_recall_denominator: 10,
+      answerable_evaluated_count: 0
+    })).toBe(0);
+  });
 });
 
 function currentMeasurementPayload() {

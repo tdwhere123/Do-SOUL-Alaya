@@ -1,6 +1,6 @@
 import type { RefinementCtx } from "zod";
 
-export type RecallRatioSampleSizePayload = Readonly<{
+type RecallRatioSampleSizePayload = Readonly<{
   readonly evaluated_count: number;
   readonly answerable_evaluated_count?: number;
   readonly reporting_recall_denominator?: number;
