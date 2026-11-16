@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { VerificationVerdict } from "@do-soul/alaya-protocol";
+import { VerificationResultSchema, VerificationVerdict, WorkspaceSchema } from "@do-soul/alaya-protocol";
 import { registerGovernanceRoutes } from "../../routes/governance/matrix/governance.js";
 import { registerGreenStatusRoutes } from "../../routes/garden/green-status.js";
 import { registerOverrideRoutes } from "../../routes/governance/matrix/overrides.js";
@@ -85,18 +85,29 @@ describe("routes-governance port batch", () => {
     expect(services.governanceLeaseService.getActive).toHaveBeenCalledWith("run-1");
   });
 
-  it("registerGreenStatusRoutes verifies green status via service call", async () => {
+  it("registerGreenStatusRoutes verifies through only its required service capabilities", async () => {
     const app = new Hono();
+    const workspace = WorkspaceSchema.parse({
+      workspace_id: "ws-1", name: "workspace", root_path: "/tmp/workspace",
+      workspace_kind: "local_repo", repo_path: null, default_engine_binding: null,
+      workspace_state: "active", created_at: "2026-03-25T00:00:00.000Z", archived_at: null
+    });
+    const verificationResult = VerificationResultSchema.parse({
+      runtime_id: "00000000-0000-4000-8000-000000000001", object_kind: "verification_result",
+      task_surface_ref: null, expires_at: null, derived_from: "memory-1",
+      retention_policy: "session_only", verdict: VerificationVerdict.GO,
+      micro_correction_hint: null, necessary_patch: null
+    });
     const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+      workspaceService: { getById: vi.fn(async () => workspace) },
       greenService: {
-        findEligible: vi.fn(),
-        findGrace: vi.fn(),
-        getStatus: vi.fn(),
-        runVerification: vi.fn(async () => ({ status: "updated" }))
+        findEligible: vi.fn(async () => []),
+        findGrace: vi.fn(async () => []),
+        getStatus: vi.fn(async () => null),
+        runVerification: vi.fn(async () => verificationResult)
       }
-    };
-    registerGreenStatusRoutes(app, routeServices<GreenStatusRouteServices>(services));
+    } satisfies GreenStatusRouteServices;
+    registerGreenStatusRoutes(app, services);
 
     const response = await app.request("/workspaces/ws-1/green-statuses/verify", {
       method: "POST",
@@ -110,7 +121,7 @@ describe("routes-governance port batch", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       success: true,
-      data: { status: "updated" }
+      data: verificationResult
     });
     expect(services.greenService.runVerification).toHaveBeenCalledWith({
       targetObjectId: "memory-1",

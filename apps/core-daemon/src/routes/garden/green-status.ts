@@ -4,8 +4,8 @@ import { parseJsonBody } from "../shared/shared.js";
 import { VerificationVerdict } from "@do-soul/alaya-protocol";
 
 export interface GreenStatusRouteServices {
-  readonly workspaceService: WorkspaceService;
-  readonly greenService: GreenService;
+  readonly workspaceService: Pick<WorkspaceService, "getById">;
+  readonly greenService: Pick<GreenService, "findEligible" | "findGrace" | "getStatus" | "runVerification">;
 }
 
 export function registerGreenStatusRoutes(app: Hono, services: GreenStatusRouteServices): void {

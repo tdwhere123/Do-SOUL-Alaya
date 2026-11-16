@@ -7,14 +7,9 @@ import {
   VerificationBasis,
   VerificationResultSchema,
   VerificationVerdict,
-  type GreenStatus,
   type MemoryEntry,
-  type RevokeReason as RevokeReasonType,
-  type ScopeClass,
-  type VerificationBasis as VerificationBasisType,
   type VerificationResult,
-  type VerificationVerdict as VerificationVerdictType,
-  type VerifiedBy as VerifiedByType
+  type VerificationVerdict as VerificationVerdictType
 } from "@do-soul/alaya-protocol";
 
 import {
@@ -25,6 +20,7 @@ import {
 } from "./green-service-ports.js";
 import { readConsecutiveNoGo, writeConsecutiveNoGo } from "./green-service-consecutive-no-go.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
+import type { GreenService } from "./green-service.js";
 
 export interface GreenVerificationInput {
   readonly targetObjectId: string;
@@ -39,22 +35,9 @@ export interface GreenVerificationInput {
   readonly consecutiveNoGoMaxEntries: number;
   readonly warn: GreenWarnPort;
   readonly generateObjectId: () => string;
-  readonly dependencies: GreenServiceDependencies;
-  readonly grant: (params: {
-    readonly targetObjectId: string;
-    readonly workspaceId: string;
-    readonly basis: VerificationBasisType;
-    readonly validUntil: string | null;
-    readonly verifiedBy: VerifiedByType;
-    readonly boundSurfaces?: readonly string[] | null;
-    readonly boundScopeClass?: ScopeClass | null;
-  }) => Promise<Readonly<GreenStatus>>;
-  readonly pierce: (params: {
-    readonly targetObjectId: string;
-    readonly workspaceId: string;
-    readonly reason: RevokeReasonType;
-    readonly runId?: string;
-  }) => Promise<Readonly<GreenStatus> | null>;
+  readonly dependencies: Pick<GreenServiceDependencies, "eventLogRepo" | "runtimeNotifier">;
+  readonly grant: GreenService["grant"];
+  readonly pierce: GreenService["pierce"];
 }
 
 export async function runGreenVerification(
