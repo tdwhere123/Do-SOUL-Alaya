@@ -1,5 +1,7 @@
-import type { MemoryEntry, StorageTier } from "@do-soul/alaya-protocol";
+import type { AutonomousTombstoneArguments, EventLogEntry, MemoryEntry, StorageTier } from "@do-soul/alaya-protocol";
+import { deferAutonomousGc } from "./writes/gc-deferral.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { readHistoricalCaptureCandidate } from "../preservation/historical-memory-capture.js";
 import { requirePrivacyObjectAvailable, requirePrivacyRowsAvailable, requirePrivacyWorkspaceAvailable } from "../field/privacy-availability.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
@@ -51,7 +53,6 @@ import {
 } from "./writes/update-workflows.js";
 import { findRecallActivationTopK } from "./reads/recall/activation-top-k-query.js";
 import {
-  type AutonomousTombstoneInput,
   type MemoryEntryKeywordSearchResult,
   type MemoryKeywordFieldCapture,
   type MemoryEntryRepo,
@@ -337,12 +338,17 @@ export class SqliteMemoryEntryRepo
     );
   }
 
-  public async autonomousTombstone(
-    input: AutonomousTombstoneInput,
-    options?: { readonly onTransition?: () => void }
-  ): Promise<Readonly<MemoryEntry>> {
-    this.requireMutationAvailability(input.objectId);
-    return autonomousTombstone.call(this, input, options);
+  public async readHistoricalCaptureCandidate(workspaceId: string, memoryId: string, capsuleId: string) {
+    return readHistoricalCaptureCandidate(this.db, workspaceId, memoryId, capsuleId);
+  }
+
+  public async deferAutonomousGc(expected: MemoryEntry, onDeferred: () => EventLogEntry): Promise<EventLogEntry | null> {
+    return deferAutonomousGc(this.db, expected, onDeferred);
+  }
+
+  public async autonomousTombstone(...args: AutonomousTombstoneArguments): Promise<Readonly<MemoryEntry>> {
+    this.requireMutationAvailability(args[0].objectId);
+    return autonomousTombstone.call(this, ...args);
   }
 
   public async hardDeleteTombstonedWithDisposition(

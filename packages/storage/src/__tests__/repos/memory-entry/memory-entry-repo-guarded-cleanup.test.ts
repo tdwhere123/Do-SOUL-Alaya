@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  SynthesisStatus,
-  type MemoryEntry,
-  type SynthesisCapsule
-} from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import {
-  SqliteMemoryEntryRepo} from "../../../repos/memory-entry/index.js";
-import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
+import { seedCompressedMember } from "./historical-preservation-fixture.js";
 import {
   createMemoryEntry,
   createRepo,
@@ -24,46 +17,6 @@ afterEach(() => {
   databases.clear();
 });
 
-async function seedCompressedMember(input: {
-  readonly memoryId: string;
-  readonly capsule: Partial<SynthesisCapsule> | null;
-  readonly capsuleId: string;
-  readonly memory?: Partial<MemoryEntry>;
-}): Promise<{ readonly repo: SqliteMemoryEntryRepo }> {
-  const { repo, database } = await createRepo();
-  if (input.capsule !== null) {
-    const capsuleRepo = new SqliteSynthesisCapsuleRepo(database);
-    await capsuleRepo.create({
-      object_id: input.capsuleId,
-      object_kind: "synthesis_capsule",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: "2026-03-21T00:00:00.000Z",
-      updated_at: "2026-03-21T00:00:00.000Z",
-      created_by: "consolidation-executor",
-      topic_key: "tooling/pnpm",
-      synthesis_type: "phase_synthesis",
-      summary: "Use pnpm for workspace commands.",
-      evidence_refs: ["evidence-1"],
-      source_memory_refs: [input.memoryId],
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      synthesis_status: SynthesisStatus.STABLE,
-      ...input.capsule
-    });
-  }
-  await repo.create(
-    createMemoryEntry({
-      object_id: input.memoryId,
-      retention_state: "tombstoned",
-      lifecycle_state: "tombstone",
-      forget_disposition: "compressed",
-      forget_disposition_ref: input.capsuleId,
-      ...input.memory
-    })
-  );
-  return { repo };
-}
 
 describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
   it("hardDeleteTombstonedWithDisposition (compressed-guarded) rolls the physical delete back when onDeleted throws (one transaction)", async () => {

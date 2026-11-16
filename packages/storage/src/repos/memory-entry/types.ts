@@ -2,6 +2,7 @@ import {
   StorageTier,
   type MemoryDimension,
   type MemoryEntry,
+  type AutonomousTombstoneArguments,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
   type ScopeClass
 } from "@do-soul/alaya-protocol";
@@ -329,10 +330,7 @@ export interface MemoryEntryRepo {
   // invariant: autonomous tombstone candidates are dormant-only and pre-disposition.
   findDormantMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   // invariant: autonomous tombstone can terminalize only currently dormant rows.
-  autonomousTombstone(
-    input: AutonomousTombstoneInput,
-    options?: { readonly onTransition?: () => void }
-  ): Promise<Readonly<MemoryEntry>>;
+  autonomousTombstone(...args: AutonomousTombstoneArguments): Promise<Readonly<MemoryEntry>>;
   // invariant: disposition-gated GC deletes only tombstones with live delete authority.
   hardDeleteTombstonedWithDisposition(
     objectId: string,
@@ -349,12 +347,7 @@ export interface MemoryEntryRepo {
 }
 
 // invariant: dispositionRef is live-capsule-only for compressed and null for judged_useless.
-export interface AutonomousTombstoneInput {
-  readonly objectId: string;
-  readonly disposition: MemoryEntry["forget_disposition"];
-  readonly dispositionRef: string | null;
-  readonly updatedAt: string;
-}
+export type AutonomousTombstoneInput = AutonomousTombstoneArguments[0];
 
 // invariant: evidence-ref lookup is bounded and reports truncation at the repo boundary.
 export const FIND_BY_EVIDENCE_REFS_INPUT_CAP = 256;

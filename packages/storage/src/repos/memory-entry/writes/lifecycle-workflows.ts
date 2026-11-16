@@ -1,4 +1,5 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { EventLogEntrySchema, type AutonomousTombstoneArguments, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { adoptHistoricalMemoryCapture, sealHistoricalMemoryCapture, readHistoricalMember } from "../../preservation/historical-memory-capture.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import {
@@ -41,14 +42,14 @@ interface ParsedAutonomousTombstoneRequest {
 
 export async function autonomousTombstone(
   this: MemoryEntryLifecycleWorkflowHost,
-  input: AutonomousTombstoneInput,
-  options?: { readonly onTransition?: () => void }
+  ...[input, options]: AutonomousTombstoneArguments
 ): Promise<Readonly<MemoryEntry>> {
   const request = parseAutonomousTombstoneRequest(input);
   const onTransition = options?.onTransition;
 
   try {
     return this.transaction(() => {
+      if (input.preservation !== undefined) adoptHistoricalMemoryCapture(this.db, input.preservation);
       const result = this.autonomousTombstoneStatement.run(
         request.disposition,
         input.dispositionRef,
@@ -63,8 +64,12 @@ export async function autonomousTombstone(
         );
       }
 
-      onTransition?.();
-
+      const audited: unknown = onTransition?.();
+      if (input.preservation !== undefined) {
+        sealHistoricalMemoryCapture(this.db, input.preservation, EventLogEntrySchema.parse(audited).event_id);
+        if (readHistoricalMember(this.db, input.preservation.workspace_id, input.preservation.capsule_id,
+          input.objectId).status !== "ready") throw new StorageError("CONFLICT", "adopted historical capture is not ready");
+      }
       return loadMemoryEntryAfterTransition(this, input.objectId, "autonomous tombstone");
     });
   } catch (error) {
@@ -84,6 +89,15 @@ function parseAutonomousTombstoneRequest(
   input: AutonomousTombstoneInput
 ): ParsedAutonomousTombstoneRequest {
   const disposition = parseForgetDisposition(input.disposition);
+  const preservation = input.preservation;
+  if (disposition === "compressed") {
+    if (preservation === undefined || preservation.member.object_id !== input.objectId ||
+        preservation.capsule_id !== input.dispositionRef || preservation.terminal_updated_at !== input.updatedAt) {
+      throw new StorageError("VALIDATION_FAILED", "compressed transition requires its exact historical preservation capture");
+    }
+  } else if (preservation !== undefined) {
+    throw new StorageError("VALIDATION_FAILED", "only compressed transitions may adopt historical preservation");
+  }
   if (disposition === "judged_useless" && input.dispositionRef !== null) {
     throw new StorageError(
       "VALIDATION_FAILED",
@@ -135,7 +149,8 @@ export async function hardDeleteTombstonedWithDisposition(
     }
 
     return this.transaction(() => {
-      if (requireLiveCapsuleRef) {
+      const current = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+      if (requireLiveCapsuleRef || (!requireJudgedUselessVerdict && current?.forget_disposition === "compressed")) {
         return deleteCompressedTombstone(this, objectId, onDeleted);
       }
 
@@ -160,6 +175,8 @@ function deleteCompressedTombstone(
   onDeleted: (() => void) | undefined
 ): boolean {
   const memory = host.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
+  if (memory === undefined || memory.forget_disposition_ref === null ||
+      readHistoricalMember(host.db, memory.workspace_id, memory.forget_disposition_ref, objectId).status !== "ready") return false;
   const guarded = host.hardDeleteTombstonedCompressedGuardedStatement.run(objectId);
   if (guarded.changes === 0) {
     return false;

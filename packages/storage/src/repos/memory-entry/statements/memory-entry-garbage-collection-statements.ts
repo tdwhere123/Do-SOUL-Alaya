@@ -24,6 +24,13 @@ const MEMORY_ENTRY_GC_SQL: SqlDefinitionMap<MemoryEntryGarbageCollectionStatemen
         AND retention_state = 'tombstoned'
         AND forget_disposition IS NOT NULL
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
+        AND NOT EXISTS (SELECT 1 FROM memory_gc_deferrals deferred
+          WHERE deferred.workspace_id=memory_entries.workspace_id AND deferred.memory_id=memory_entries.object_id)
+        -- Irreversible capture invalidation/erase already owns refusal of this proof.
+        -- Keep the row recoverable without re-auditing that transition on every sweep.
+        AND NOT EXISTS (SELECT 1 FROM historical_memory_captures proof
+          WHERE proof.workspace_id=memory_entries.workspace_id AND proof.memory_id=memory_entries.object_id
+            AND proof.capsule_id=memory_entries.forget_disposition_ref AND proof.state<>'active')
       ORDER BY updated_at ASC, object_id ASC
     `,
   hardDeleteTombstonedWithDispositionStatement: `
@@ -41,15 +48,9 @@ const MEMORY_ENTRY_GC_SQL: SqlDefinitionMap<MemoryEntryGarbageCollectionStatemen
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
         AND COALESCE(decay_profile, '') NOT IN ('pinned', 'hazard')
         AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
-        AND EXISTS (
-          SELECT 1
-          FROM synthesis_capsules AS capsule,
-               json_each(capsule.source_memory_refs) AS member
-          WHERE capsule.object_id = memory_entries.forget_disposition_ref
-            AND COALESCE(capsule.lifecycle_state, '') != 'tombstone'
-            AND COALESCE(capsule.synthesis_status, '') != 'archived'
-            AND member.value = memory_entries.object_id
-        )
+        AND EXISTS (SELECT 1 FROM historical_preservation_available proof
+          WHERE proof.workspace_id=memory_entries.workspace_id AND proof.memory_id=memory_entries.object_id
+            AND proof.capsule_id=memory_entries.forget_disposition_ref AND proof.audit_event_id IS NOT NULL)
     `,
   hardDeleteTombstonedJudgedUselessGuardedStatement: `
       DELETE FROM memory_entries

@@ -7,6 +7,7 @@ import {
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 import { StorageTierSchema } from "../memory/memory-entry.js";
+import { HistoricalMemoryCaptureCommitmentSchema } from "../memory/historical-memory-capture.js";
 
 const memoryGovernanceEventTypeValues = [
   "soul.evidence.created",
@@ -110,7 +111,9 @@ export const SoulMemoryUpdatedPayloadSchema = MemoryGovernanceObjectPayloadObjec
   updated_fields: z.array(NonEmptyStringSchema).readonly().nullable()
 }).readonly();
 export const SoulMemoryArchivedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
-export const SoulMemoryStateChangedPayloadSchema = TransitionEventPayloadObjectSchema.readonly();
+export const SoulMemoryStateChangedPayloadSchema = TransitionEventPayloadObjectSchema.extend({
+  preservation: HistoricalMemoryCaptureCommitmentSchema.optional()
+}).readonly();
 export const SoulMemoryRetentionUpdatedPayloadSchema = TransitionEventPayloadObjectSchema.extend({
   retention_score: z.number().min(0).max(1).nullable()
 }).readonly();

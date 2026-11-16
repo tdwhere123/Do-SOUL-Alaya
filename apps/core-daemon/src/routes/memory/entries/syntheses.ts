@@ -7,6 +7,14 @@ export interface SynthesisRouteServices {
 }
 
 export function registerSynthesisRoutes(app: Hono, services: SynthesisRouteServices): void {
+  app.get("/workspaces/:wsId/syntheses/:id/historical-members/:memoryId", async (context) => {
+    const workspaceId = context.req.param("wsId");
+    await services.workspaceService.getById(workspaceId);
+    const history = await services.synthesisService.readHistoricalMember(workspaceId,
+      context.req.param("id"), context.req.param("memoryId"));
+    return context.json({ success: true, data: history }, 200);
+  });
+
   app.get("/workspaces/:wsId/syntheses", async (context) => {
     const workspaceId = context.req.param("wsId");
     await services.workspaceService.getById(workspaceId);

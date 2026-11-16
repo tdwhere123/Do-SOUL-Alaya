@@ -2,6 +2,9 @@ import {
   RevokeReason,
   type EventLogEntry,
   type MemoryEntry,
+  type AutonomousTombstoneArguments,
+  type HistoricalMemoryCaptureNomination,
+  type HistoricalMemoryReadResult,
   type MemoryEntryMutableFields,
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
   type ScopeClass,
@@ -70,6 +73,7 @@ export interface MemoryServiceEventLogRepoPort {
 // facets so a narrow consumer (e.g. a query path) can depend on the read facet
 // alone. A full repo satisfies the composed MemoryServiceMemoryEntryRepoPort.
 export interface MemoryEntryReadPort {
+  readHistoricalCaptureCandidate?(workspaceId: string, memoryId: string, capsuleId: string): Promise<HistoricalMemoryCaptureNomination>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByIds?(
     workspaceId: string,
@@ -200,15 +204,12 @@ export interface MemoryEntryLifecyclePort {
   hardDeleteTombstoned?(objectId: string, onDeleted?: () => void): Promise<void>;
   // invariant: gated autonomous tombstone writes the durable forget_disposition
   // marker and terminalizes only a dormant row.
-  autonomousTombstone?(input: {
-    readonly objectId: string;
-    readonly disposition: MemoryEntry["forget_disposition"];
-    readonly dispositionRef: string | null;
-    readonly updatedAt: string;
-  }, options?: { readonly onTransition?: () => void }): Promise<Readonly<MemoryEntry>>;
+  autonomousTombstone?(...args: AutonomousTombstoneArguments): Promise<Readonly<MemoryEntry>>;
+  deferAutonomousGc?(expected: MemoryEntry, onDeferred: () => EventLogEntry): Promise<EventLogEntry | null>;
   // invariant: gated autonomous physical delete removes only tombstoned
   // past-grace rows that carry a non-null disposition.
-  // requireLiveCapsuleRef makes capsule liveness + membership atomic with delete.
+  // requireLiveCapsuleRef requires the audited independent capture atomically with delete;
+  // capsule liveness/membership is an adoption gate, not a historical-retention lease.
   hardDeleteTombstonedWithDisposition?(
     objectId: string,
     options?: {
@@ -229,9 +230,10 @@ export interface MemoryServiceEvidenceServicePort {
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly { readonly object_id: string; readonly lifecycle_state?: string }[]>;
 }
 
-// invariant: compressed physical delete re-verifies live capsule preservation
-// at delete time, not only at tombstone marking time.
+// invariant: compressed physical delete re-verifies independent historical proof
+// at delete time; live membership is required when first adopting the capture.
 export interface MemoryServiceSynthesisCapsuleLookupPort {
+  readHistoricalMember?(workspaceId: string, capsuleId: string, memoryId: string): Promise<HistoricalMemoryReadResult>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
 }
 

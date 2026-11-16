@@ -218,6 +218,10 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
     ...overrides
   };
 
+  // Refusal tests exercise Core's event ownership; native tests cover durable
+  // revision CAS and idempotence in the SQLite deferral owner.
+  dependencies.memoryEntryRepo.deferAutonomousGc ??= vi.fn(async (_expected, onDeferred) => onDeferred());
+
   return {
     dependencies,
     appendSpy,

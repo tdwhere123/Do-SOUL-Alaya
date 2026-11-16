@@ -54,8 +54,9 @@ const preferencePolarityValues = ["positive", "negative", "neutral"] as const;
 // autonomous-tombstone step and the physical-delete authority (defense in
 // depth). Set only by an audited dormant->tombstoned transition emitting a
 // SOUL_MEMORY_STATE_CHANGED EventLog row, never implicitly.
-//   compressed     — content preserved in a live synthesis capsule that
-//                    references this memory; forget_disposition_ref = capsule id.
+//   compressed     — an audited, independently validated historical capture
+//                    retains this memory for its owning live synthesis capsule;
+//                    membership/summary alone is not proof. Ref = capsule id.
 //   judged_useless — the mechanical memory importance gate cleared it for drop;
 //                    forget_disposition_ref is null.
 // see also: packages/core/src/manifestation/importance-gate.ts classifyMemoryImportance.

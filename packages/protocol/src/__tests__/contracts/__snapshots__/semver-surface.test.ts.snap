@@ -258,7 +258,7 @@ evt:green-governance.ts#SoulSessionOverridePromotedPayloadSchema(dimension,occur
 evt:green-governance.ts#SoulVerificationCompletedEventSchema(payload,type)#08a5a9d
 evt:green-governance.ts#SoulVerificationCompletedPayloadSchema(consecutive_no_go_count,micro_correction_hint,occurred_at,target_object_id,verdict,workspace_id)#44edd06
 evt:memory-governance.ts#MemoryGovernanceEventBaseSchema(caused_by,created_at,entity_id,entity_type,event_id,revision,run_id,workspace_id)#8978c65
-evt:memory-governance.ts#MemoryGovernanceEventSchema()#e940355
+evt:memory-governance.ts#MemoryGovernanceEventSchema()#125f595
 evt:memory-governance.ts#MemoryGovernanceEventTypeSchema()#c109281|enum=soul.claim.contested|soul.claim.created|soul.claim.lifecycle_changed|soul.claim.superseded|soul.claim.won|soul.evidence.created|soul.evidence.deleted|soul.evidence.health_changed|soul.memory.archived|soul.memory.created|soul.memory.manifestation_changed|soul.memory.retention_updated|soul.memory.state_changed|soul.memory.tier_changed|soul.memory.tier_promoted|soul.memory.updated|soul.proposal.created|soul.proposal.resolved|soul.review.completed|soul.review.created|soul.synthesis.created|soul.synthesis.promoted|soul.synthesis.status_changed
 evt:memory-governance.ts#SoulClaimContestedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#1b9555c
 evt:memory-governance.ts#SoulClaimContestedPayloadSchema(contested_by,object_id,object_kind,run_id,triage_result,workspace_id)#e3de673
@@ -284,8 +284,8 @@ evt:memory-governance.ts#SoulMemoryManifestationChangedEventSchema(caused_by,cre
 evt:memory-governance.ts#SoulMemoryManifestationChangedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#abaa033
 evt:memory-governance.ts#SoulMemoryRetentionUpdatedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#42681ef
 evt:memory-governance.ts#SoulMemoryRetentionUpdatedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,retention_score,run_id,to_state,workspace_id)#15c0dbd
-evt:memory-governance.ts#SoulMemoryStateChangedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#898130c
-evt:memory-governance.ts#SoulMemoryStateChangedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,reason_code,run_id,to_state,workspace_id)#abaa033
+evt:memory-governance.ts#SoulMemoryStateChangedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#d1a7055
+evt:memory-governance.ts#SoulMemoryStateChangedPayloadSchema(caused_by,evidence_refs,from_state,object_id,object_kind,occurred_at,preservation,reason_code,run_id,to_state,workspace_id)#9e73787
 evt:memory-governance.ts#SoulMemoryTierChangedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#d585180
 evt:memory-governance.ts#SoulMemoryTierChangedPayloadSchema(from_tier,object_id,object_kind,occurred_at,reason,run_id,task_id,to_tier,workspace_id)#75f843f
 evt:memory-governance.ts#SoulMemoryTierPromotedEventSchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload,revision,run_id,workspace_id)#6b9f4b2

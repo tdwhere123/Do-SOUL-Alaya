@@ -6,6 +6,8 @@ import {
   SynthesisCapsuleSchema,
   SynthesisStatus,
   SynthesisStatusSchema,
+  HistoricalMemoryReadResultSchema,
+  type HistoricalMemoryReadResult,
   isValidSynthesisTransition,
   TransitionCausedBySchema,
   type EventLogEntry,
@@ -38,6 +40,7 @@ export interface SynthesisServiceEventLogRepoPort {
 }
 
 export interface SynthesisServiceSynthesisCapsuleRepoPort {
+  readHistoricalMember?(workspaceId: string, capsuleId: string, memoryId: string): Promise<HistoricalMemoryReadResult>;
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
   createInCurrentTransaction?(capsule: SynthesisCapsule): Readonly<SynthesisCapsule>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
@@ -180,6 +183,14 @@ export class SynthesisService {
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
+  }
+
+  /** A retained snapshot is history, not a revived or current MemoryEntry. */
+  public async readHistoricalMember(workspaceId: string, capsuleId: string, memoryId: string): Promise<HistoricalMemoryReadResult> {
+    const reader = this.dependencies.synthesisCapsuleRepo.readHistoricalMember;
+    if (reader === undefined) throw new CoreError("CONFLICT", "Historical member reader is unavailable", { subCode: "PORT_UNAVAILABLE" });
+    return HistoricalMemoryReadResultSchema.parse(await reader.call(this.dependencies.synthesisCapsuleRepo,
+      workspaceId, parseObjectId(capsuleId), parseObjectId(memoryId)));
   }
 
   public findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null> {

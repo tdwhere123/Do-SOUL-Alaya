@@ -22,13 +22,20 @@ export function scrubDerivedPrivacyClosure(
   redact: EraseAuditRedactor | undefined
 ): void {
   scrubStatementSignals(database, barrier);
-  const memoryIds = findLinkedMemoryIds(database, barrier.workspace_id, evidenceIds);
-  const synthesisIds = findLinkedSynthesisIds(
-    database,
-    barrier.workspace_id,
-    evidenceIds,
-    memoryIds
-  );
+  // Captured lineage outlives the member and its evidence-index/binding rows.
+  const retained = database.connection.prepare(`SELECT DISTINCT p.memory_id,p.capsule_id
+    FROM historical_memory_captures p LEFT JOIN historical_memory_capture_sources root
+      ON root.workspace_id=p.workspace_id AND root.memory_id=p.memory_id AND root.capsule_id=p.capsule_id
+    WHERE p.workspace_id=? AND (root.record_id IN (SELECT value FROM json_each(?))
+      OR p.evidence_id IN (SELECT value FROM json_each(?)))`)
+    .all(barrier.workspace_id, JSON.stringify(sourceIds), JSON.stringify(evidenceIds)) as { memory_id: string; capsule_id: string }[];
+  const memoryIds = uniqueIds([...findLinkedMemoryIds(database, barrier.workspace_id, evidenceIds),
+    ...retained.map(row => row.memory_id)]);
+  const synthesisIds = uniqueIds([...findLinkedSynthesisIds(database, barrier.workspace_id, evidenceIds, memoryIds),
+    ...retained.map(row => row.capsule_id)]);
+  const scrubCapture = database.connection.prepare(`UPDATE historical_memory_captures SET material_json=NULL,state='erased'
+    WHERE workspace_id=? AND memory_id=? AND capsule_id=?`);
+  for (const row of retained) scrubCapture.run(barrier.workspace_id, row.memory_id, row.capsule_id);
   scrubGovernancePrivacyClosure(database, barrier, evidenceIds,
     [...sourceIds, ...evidenceIds, ...memoryIds, ...synthesisIds], redact);
   scrubEmbeddingFollowUps(database, barrier, evidenceIds, memoryIds);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { TransitionCausedBy } from "@do-soul/alaya-protocol";
+import { TransitionCausedBy, HistoricalMemoryReadResultSchema } from "@do-soul/alaya-protocol";
 import { MemoryService, type MemoryServiceDependencies } from "../../memory/memory-service.js";
 import { createDependencies, createMemoryEntry } from "./memory-service-test-fixtures.js";
 
@@ -150,7 +150,17 @@ it("autonomousHardDeleteTombstoned REFUSES a judged_useless delete when the atom
         hardDeleteTombstonedWithDisposition: input.hardDeleteSpy
       },
       synthesisCapsuleLookup: {
-        findById: vi.fn(input.capsuleFindById)
+        findById: vi.fn(input.capsuleFindById),
+        // This unit fake represents an already-validated storage proof, not legacy membership.
+        // Real digest/adoption/privacy and post-GC validity run through the SQLite suites.
+        readHistoricalMember: vi.fn(async () => HistoricalMemoryReadResultSchema.parse({ status: "ready", history: {
+          kind: "historical_memory_capture", schema_version: 1, workspace_id: "workspace-1", capsule_id: "capsule-1",
+          capsule_revision: 0, capsule_digest: `sha256:${"a".repeat(64)}`, capture_id: `sha256:${"b".repeat(64)}`,
+          evidence_id: "evidence-1", evidence_digest: `sha256:${"c".repeat(64)}`, artifact_digest: `sha256:${"d".repeat(64)}`,
+          member: createMemoryEntry({ lifecycle_state: "dormant" }), terminal_updated_at: "2026-03-21T00:00:00.000Z",
+          source_roots: [{ workspace_id: "workspace-1", root_id: `sha256:${"e".repeat(64)}`, source_id: "source-1",
+            source_version: "1", content_digest: `sha256:${"f".repeat(64)}` }]
+        } }))
       } as MemoryServiceDependencies["synthesisCapsuleLookup"]
     });
   }
@@ -305,30 +315,26 @@ it.each([
     ["capsule dropped the member during grace", async () => liveCapsule({ source_memory_refs: [] })],
     ["capsule cascade-deleted during grace", async () => null]
   ])(
-    "REFUSES the physical delete (memory survives, recoverable) when %s",
+    "keeps independent historical delete authority when the mutable %s",
     async (_label, capsuleFindById) => {
-      const hardDeleteSpy = vi.fn(async () => true);
+      const hardDeleteSpy = compressedHardDeleteSuccessSpy();
       const { dependencies, appendSpy, notifySpy } = compressedDeps({
         capsuleFindById,
         hardDeleteSpy
       });
       const service = new MemoryService(dependencies);
 
-      // The call RESOLVES (no throw) but performs NO physical delete: the row
-      // stays tombstoned and a preservation_revoked skip event is audited.
+      // The historical proof has its own source authority; the organizer is not a lease.
       await service.autonomousHardDeleteTombstoned(
         "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
         "autonomous_tombstone_gc",
         TransitionCausedBy.DETERMINISTIC_RULE
       );
 
-      expect(hardDeleteSpy).not.toHaveBeenCalled();
+      expect(hardDeleteSpy).toHaveBeenCalledTimes(1);
       expect(appendSpy).toHaveBeenCalledTimes(1);
       expect(appendSpy.mock.calls[0]?.[0]).toMatchObject({
-        payload_json: expect.objectContaining({
-          to_state: "tombstone",
-          reason_code: expect.stringContaining("preservation_revoked")
-        })
+        payload_json: expect.objectContaining({ to_state: "deleted" })
       });
       expect(notifySpy).toHaveBeenCalledTimes(1);
     }

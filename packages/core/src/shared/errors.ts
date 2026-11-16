@@ -14,7 +14,8 @@ export type CoreErrorCode =
 export type CoreErrorSubCode =
   | "PORT_UNAVAILABLE"
   | "CONCURRENT_MODIFICATION"
-  | "RETRYABLE_BACKPRESSURE";
+  | "RETRYABLE_BACKPRESSURE"
+  | "PRESERVATION_INELIGIBLE";
 
 export interface CoreErrorOptions extends AlayaErrorOptions {
   readonly subCode?: CoreErrorSubCode;

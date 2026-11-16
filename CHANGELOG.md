@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 41.1.0, engine gateway 3.1.0
+## Unreleased — protocol 41.2.0, engine gateway 3.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -26,6 +26,14 @@ namespaces stay denied.
 Protocol adds shared pure helpers `normalizeCanonicalEntities`,
 `readLocalJsonPointer`, `SURFACE_URI_PATTERN`, and `projectSoulActiveConstraint`
 (additive TypeScript, no MCP schema change; invariant §25 patch).
+
+Protocol 41.2.0 adds the optional `preservation` commitment to
+`soul.memory.state_changed` (capture identity/digest, capsule identity and format
+version; no copied content), an additive EventLog minor under invariant §25.
+Historical retention keeps exact source-bound member material independently of
+mutable capsule summaries, with atomic audited capture, guarded GC and durable
+source-erase lineage. Unsupported provenance remains ineligible; physical GC
+remains deferred by default. This does not change MCP tools or app/gateway versions.
 
 Protocol 41.1.0 adds the optional first-page `soul.recall` field `member_index`
 (`RecallMemberIndexLineSchema`), an additive minor under invariant §25. After the

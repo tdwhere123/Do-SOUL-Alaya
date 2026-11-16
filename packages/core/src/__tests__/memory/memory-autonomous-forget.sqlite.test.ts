@@ -5,6 +5,7 @@ import { MemoryService } from "../../memory/memory-service.js";
 import { createRecallRealStorage } from "../shared/real-sqlite.test-support.js";
 import { createMemoryEntry } from "./memory-service-test-fixtures.js";
 import { createSynthesisCapsule } from "../../../../storage/src/__tests__/repos/proposal/proposal-repo-fixture.js";
+import { seedHistoricalMember } from "../../../../storage/src/__tests__/repos/memory-entry/historical-preservation-fixture.js";
 
 const MEMORY_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const CAPSULE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
@@ -20,20 +21,16 @@ async function fixture(disposition: "judged_useless" | "compressed" = "judged_us
   const storage = await createRecallRealStorage(db => databases.add(db));
   const eventLogRepo = new SqliteEventLogRepo(storage.database);
   const capsuleRepo = new SqliteSynthesisCapsuleRepo(storage.database);
-  // Form preservation before terminalizing its member; SQLite rejects attaching tombstoned dependencies.
-  const startsDormant = dormant || disposition === "compressed";
-  await storage.memoryEntryRepo.create(createMemoryEntry({
+  const startsDormant = dormant;
+  if (disposition === "compressed") {
+    await seedHistoricalMember(storage.database, storage.memoryEntryRepo, MEMORY_ID, CAPSULE_ID);
+  } else await storage.memoryEntryRepo.create(createMemoryEntry({
     object_id: MEMORY_ID, lifecycle_state: startsDormant ? "dormant" : "tombstone",
     retention_state: startsDormant ? "working" : "tombstoned", evidence_refs: [], reinforcement_count: 0,
     created_at: "2020-01-01T00:00:00.000Z", updated_at: "2020-01-01T00:00:00.000Z",
     forget_disposition: startsDormant ? null : disposition,
     forget_disposition_ref: null
   }));
-  if (disposition === "compressed") {
-    await capsuleRepo.create(createSynthesisCapsule({
-      object_id: CAPSULE_ID, source_memory_refs: [MEMORY_ID], evidence_refs: [], run_id: "run-1"
-    }));
-  }
   const notifications: { event: EventLogEntry; committed: boolean; row: unknown }[] = [];
   let beforeTimestamp = () => {};
   const service = new MemoryService({
@@ -46,10 +43,6 @@ async function fixture(disposition: "judged_useless" | "compressed" = "judged_us
         row: storage.database.connection.prepare("SELECT lifecycle_state FROM memory_entries WHERE object_id = ?").get(event.entity_id) });
     } }
   });
-  if (disposition === "compressed" && !dormant) {
-    await service.autonomousTombstone(MEMORY_ID, disposition, CAPSULE_ID, "preserved in capsule", CAUSED_BY);
-    expect(notifications).toMatchObject([{ committed: true, row: { lifecycle_state: "tombstone" } }]);
-  }
   const setupEvents = await eventLogRepo.queryByEntityAll("memory_entry", MEMORY_ID);
   notifications.length = 0;
   return { ...storage, service, eventLogRepo, capsuleRepo, notifications, setupEvents,
@@ -122,6 +115,11 @@ describe("MemoryService autonomous forget through SQLite", () => {
     await expect(deleteMemory(f)).resolves.toBe(false);
 
     expect(await f.memoryEntryRepo.findById(MEMORY_ID)).toMatchObject({ lifecycle_state: "tombstone" });
+    // A stale inspected revision cannot acquire a durable refusal receipt.
+    expect(await eventsAfterSetup(f)).toEqual([]);
+    expect(f.notifications).toEqual([]);
+    await expect(deleteMemory(f)).resolves.toBe(false);
+    await expect(deleteMemory(f)).resolves.toBe(false);
     const events = await eventsAfterSetup(f);
     expect(events).toHaveLength(1);
     expect(events[0]?.payload_json).toMatchObject({ to_state: "tombstone",
@@ -130,18 +128,28 @@ describe("MemoryService autonomous forget through SQLite", () => {
     expect(f.notifications).toHaveLength(1);
   });
 
-  it("keeps a compressed tombstone when its preserving capsule is quarantined by the dependency boundary", async () => {
+  it("deletes a proven compressed member atomically while leaving its historical capsule readable", async () => {
     const f = await fixture("compressed");
-    const before = await f.memoryEntryRepo.findById(MEMORY_ID);
-    expect(f.database.connection.prepare("SELECT object_kind, object_id FROM privacy_current_quarantine WHERE workspace_id = ?")
-      .all("workspace-1")).toContainEqual({ object_kind: "synthesis_capsule", object_id: CAPSULE_ID });
+    await expect(deleteMemory(f)).resolves.toBe(true);
+    expect(await f.memoryEntryRepo.findById(MEMORY_ID)).toBeNull();
+    expect(await f.capsuleRepo.readHistoricalMember("workspace-1", CAPSULE_ID, MEMORY_ID)).toMatchObject({ status: "ready" });
+    expect(await eventsAfterSetup(f)).toMatchObject([{ payload_json: { to_state: "deleted" } }]);
+    expect(f.notifications).toMatchObject([{ committed: true, row: undefined }]);
+  });
 
-    await expect(deleteMemory(f)).rejects.toMatchObject({ code: "CONFLICT",
-      message: "Object is unavailable because a dependency has unknown provenance." });
-
-    expect(await f.memoryEntryRepo.findById(MEMORY_ID)).toEqual(before);
-    expect(await eventsAfterSetup(f)).toEqual([]);
-    expect(f.notifications).toEqual([]);
+  it("never backfills proof or releases quarantine for legacy compressed membership", async () => {
+    const f = await fixture("judged_useless", true);
+    await f.capsuleRepo.create(createSynthesisCapsule({ object_id: CAPSULE_ID,
+      source_memory_refs: [MEMORY_ID], evidence_refs: [], run_id: "run-1" }));
+    await expect(f.service.autonomousTombstone(MEMORY_ID, "compressed", CAPSULE_ID, "legacy membership", CAUSED_BY))
+      .rejects.toMatchObject({ code: "VALIDATION", subCode: "PRESERVATION_INELIGIBLE" });
+    // A historical marker below the owner is still not proof and cannot clear its privacy quarantine.
+    f.database.connection.prepare(`UPDATE memory_entries SET lifecycle_state='tombstone', retention_state='tombstoned',
+      forget_disposition='compressed', forget_disposition_ref=? WHERE object_id=?`).run(CAPSULE_ID, MEMORY_ID);
+    await expect(deleteMemory(f)).resolves.toBe(false);
+    await expect(f.capsuleRepo.findById(CAPSULE_ID)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await f.capsuleRepo.readHistoricalMember("workspace-1", CAPSULE_ID, MEMORY_ID)).toEqual({ status: "missing" });
+    expect(await f.memoryEntryRepo.findById(MEMORY_ID)).not.toBeNull();
   });
 
   it.each(["tombstone", "judged_useless"] as const)("rolls back %s and emits no notification when its audit insert fails, then permits retry", async operation => {

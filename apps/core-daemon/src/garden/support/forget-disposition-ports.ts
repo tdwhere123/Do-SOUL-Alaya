@@ -13,14 +13,8 @@ import type {
   TombstonedMemoryRecord
 } from "@do-soul/alaya-soul";
 
-// invariant: a synthesis capsule consolidates its subset members ONLY while it is
-// live. It carries the cluster's SHARED EVIDENCE (which survives independently as
-// evidence_capsules) plus a deterministic gist-level summary forward — it does
-// NOT byte-preserve a member's distilled `content`. compress-delete is acceptable
-// only for a member FULLY consolidated by a LIVE capsule (its evidence_refs are a
-// subset of the capsule's). A tombstoned envelope or an archived synthesis_status
-// no longer carries the summary forward, so a member backed only by such a capsule
-// is NOT consolidated and must not earn the `compressed` disposition.
+// Live membership nominates a capsule only. Core must adopt a complete historical
+// capture in the guarded terminal transaction; a summary/evidence subset is not preservation.
 function isCapsuleLive(capsule: Readonly<SynthesisCapsule>): boolean {
   return capsule.lifecycle_state !== "tombstone" && capsule.synthesis_status !== "archived";
 }
@@ -58,31 +52,11 @@ export interface ForgetDispositionTombstoneAuthorityPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-/**
- * Computes the durable disposition for a single dormant memory, mechanically and
- * without an LLM. Returns:
- *   - { disposition: null } when the memory is EXPLICITLY PROTECTED (pinned /
- *     hazard / canon / consolidated): it stays dormant (reversible) and is NEVER
- *     autonomously removed, even when it is also a live-capsule member.
- *   - { disposition: 'compressed', ref } when a LIVE capsule lists a NON-protected
- *     member in source_memory_refs; ref is the capsule id stored in
- *     forget_disposition_ref (the member is FULLY consolidated by the capsule:
- *     its evidence is the shared cluster evidence preserved as
- *     evidence_capsules + a deterministic gist summary; the member's distilled
- *     `content` is NOT byte-preserved — R3a output).
- *   - { disposition: 'judged_useless', ref: null } when the mechanical importance
- *     gate finds the memory safe to drop (failed ALL keep-criteria).
- *   - { disposition: null } otherwise (preserved-or-kept): stays dormant.
- *
- * invariant (protection-before-compressed): explicit-keep is evaluated BEFORE the
- * `compressed` arm. Compression OVERRIDES ordinary value signals (evidence
- * richness, reinforcement_count — the importance gate's `keep` disposition) but
- * must NEVER override an explicit-keep category, so a pinned/canon/hazard/
- * consolidated memory that happens to sit in a live capsule is left dormant and
- * recoverable rather than marked deletable.
- *
- * see also: packages/core/src/manifestation/importance-gate.ts isMemoryExplicitlyProtected,
- * classifyMemoryImportance.
+/** Nominate a disposition, never a preservation certificate. Explicit protections
+ * precede compression nominations; the judged-useless value policy is unchanged.
+ * A compressed nomination remains dormant when Core cannot establish complete
+ * source-bound historical retention. Capturing exact material is not a claim of
+ * semantic compression or storage savings.
  */
 export function computeForgetDisposition(
   memory: Readonly<MemoryEntry>,
@@ -222,6 +196,7 @@ async function classifyBenignTombstoneRefusal(
   if (!(error instanceof CoreError) || error.code !== "VALIDATION") {
     return null;
   }
+  if (error.subCode === "PRESERVATION_INELIGIBLE") return "independent historical preservation unavailable (kept)";
   return await classifyTombstoneRefusal(memoryLookup, objectId);
 }
 

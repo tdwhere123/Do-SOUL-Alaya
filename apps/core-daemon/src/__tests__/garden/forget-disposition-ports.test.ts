@@ -67,7 +67,7 @@ function capsule(overrides: Partial<SynthesisCapsule> = {}): Readonly<SynthesisC
 }
 
 describe("computeForgetDisposition", () => {
-  it("marks a member preserved in a live capsule as compressed", () => {
+  it("nominates live capsule membership for Core's independent capture admission", () => {
     const result = computeForgetDisposition(memory(), new Map([["mem-1", "capsule-1"]]));
     expect(result.disposition).toBe("compressed");
     expect(result.ref).toBe("capsule-1");
@@ -85,10 +85,9 @@ describe("computeForgetDisposition", () => {
   });
 
   it("compresses an evidence-rich (non-protected) member in a live capsule", () => {
-    // invariant (protection-before-compressed): evidence richness is an ordinary
-    // value signal (the `keep` disposition), which compression OVERRIDES — so an
-    // evidence-rich but non-explicitly-protected member in a live capsule is
-    // compressed (its content is preserved by the capsule).
+    // Membership nominates compression even for an ordinarily valuable member;
+    // Core must still validate and atomically adopt exact historical material.
+    // This selector never establishes preservation from the capsule summary.
     const result = computeForgetDisposition(
       memory({ evidence_refs: ["e1", "e2"] }),
       new Map([["mem-1", "capsule-1"]])
@@ -98,8 +97,8 @@ describe("computeForgetDisposition", () => {
   });
 
   it("compresses a reinforced (non-protected) member in a live capsule", () => {
-    // reinforcement_count is also an ordinary value signal that compression
-    // overrides when a live capsule preserves the content.
+    // Reinforcement is an ordinary value signal; it does not prevent nomination.
+    // The capture authority, not this selector, decides whether retention is complete.
     const result = computeForgetDisposition(
       memory({ reinforcement_count: 5 }),
       new Map([["mem-1", "capsule-1"]])

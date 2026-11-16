@@ -1,3 +1,8 @@
+export { HistoricalMemoryCaptureCandidateSchema, HistoricalMemoryCaptureMaterialSchema, HistoricalMemoryCaptureSchema,
+  HistoricalMemoryCaptureCommitmentSchema, HistoricalMemoryReadResultSchema, createHistoricalMemoryCapture,
+  verifyHistoricalMemoryCapture, historicalCaptureTerminalMember, type HistoricalMemoryCaptureCandidate,
+  type AutonomousTombstoneArguments, type HistoricalMemoryCapture, type HistoricalMemoryReadResult, type HistoricalMemoryCaptureNomination
+} from "./memory/historical-memory-capture.js";
 export { SOURCE_STATEMENTS_CONTRACT, SOURCE_STATEMENT_LIMITS, SourceStatementSchema,
   SourceStatementMessageSchema, SourceStatementRequestSchema, SourceStatementResponseEnvelopeSchema,
   SourceStatementResponseMessageSchema, LocatedSourceStatementSchema, BoundSourceStatementSchema,

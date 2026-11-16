@@ -234,6 +234,67 @@ revision, not reconciliation of independent contradictory reports or semantic
 truth. Erasure uses the governed effect and source-closure barrier; source,
 interpretation and index projections cannot bypass that transaction.
 
+### Independent historical memory retention
+
+Autonomous `compressed` disposition is lossless historical relocation, not semantic
+compression, storage savings, or promotion to active truth. Protocol's
+`historical-memory-capture.ts` owns the versioned material, digest inputs and the
+five permitted terminal-field substitutions. V1 admits only strictly parsed,
+source-statement-bound observations: exact statement content, typed artifact,
+evidence identity, complete input/context dependencies and explicitly declared
+canonical-projection origins must agree with current, available sources in the
+same workspace and scope. Unsupported or incomplete provenance is ineligible;
+legacy capsule membership and summaries are not preservation proof. An ineligible
+compressed nomination stays dormant and is reported as a Janitor skip; it never
+falls through to judged-useless deletion.
+
+Core validates the native nomination; storage re-reads it inside the guarded
+terminal transaction. Capture, durable source lineage, tombstone, privacy effects
+and transition audit commit together. The temporary unsealed capture is usable
+only inside adoption for the privacy trigger; the workflow cannot commit without
+sealing it to its actual audit. Notification follows commit. The optional
+`soul.memory.state_changed.preservation` commitment contains identities/digest,
+not copied material: additive EventLog **minor**, protocol **41.2.0**, per
+invariant §25. MCP tools, app/gateway versions and external dependencies do not
+change; this is not release publication.
+
+Only the exact captured memory-to-owning-capsule privacy edge is substituted.
+The memory stays unavailable to other dependents. Existing quarantine is never
+automatically cleared. Capsule membership/revision is a real adoption gate and
+continues to bind the live capsule's substituted privacy edge, but is not a lease
+on the independently retained member. Historical payloads include the member and
+its own source roots, never capsule summaries, membership lists or sibling bytes.
+Erasing one member's sources can erase the shared live capsule without revoking
+another member's independent history. Its own source/evidence/dependency, member
+and audit invalidations remain irreversible. Child captures do not rewrite the
+capsule. Physical GC checks historical proof again at DELETE, including the exact
+terminal member; grace and default production GC deferral are unchanged.
+
+With physical GC explicitly enabled, Core records a failed preservation/value
+verdict as an audited, revision-bound deferral. Storage atomically compares the
+inspected member and persists that deferral once with its audit. Later sweeps
+omit that unchanged deferred revision, so unsupported oldest rows cannot starve
+newer eligible work or emit repeated no-transition audits. Member mutation
+withdraws the deferral for reevaluation; irreversible erased/invalidated capture
+states already prohibit GC and remain safely retained. No refusal authorizes
+unsafe deletion.
+
+`SynthesisService.readHistoricalMember` and the existing daemon synthesis surface
+`GET /workspaces/:wsId/syntheses/:id/historical-members/:memoryId` return a typed
+historical result (`ready`, `missing`, `unavailable`, `invalidated`, `erased`),
+never a revived MemoryEntry. Workspace containment applies at storage as well as
+the route. Ordinary/bounded capsule readers retain their privacy checks. This is
+memory-domain tooling under invariants §21–§24, not a new MCP operation.
+
+Capture lineage outlives both the memory row and its live indexes. Source erase
+uses every retained input/context/projection-origin identity to scrub archival
+payloads and the existing downstream claim, slot and source-derived audit-copy
+closure, while retaining independent controls and immutable receipts. Erased
+identities cannot be reinserted with stripped references; capture invalidation
+cannot be undone. Versioned startup closure repair reuses the existing 32-receipt
+batches and exact-source dirty checkpoints. A clean reopen does not replay clean
+history or restore unavailable material.
+
 ## Daemon Startup Ordering
 
 1. Open SQLite and migrate before serving; confidential DB and credentials

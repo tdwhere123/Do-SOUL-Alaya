@@ -1,12 +1,16 @@
 import {
   MemoryGovernanceEventType,
   SoulMemoryStateChangedPayloadSchema,
+  createHistoricalMemoryCapture,
+  canonicalJson,
+  type HistoricalMemoryCapture,
+  type AutonomousTombstoneArguments,
   type EventLogEntry,
   type MemoryEntry,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
@@ -90,6 +94,8 @@ export class MemoryAutonomousForget {
     }
 
     const occurredAt = this.now();
+    const preservation = disposition === "compressed"
+      ? await this.capturePreservation(existing, dispositionRef!, occurredAt) : undefined;
     const eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
@@ -107,27 +113,25 @@ export class MemoryAutonomousForget {
         reason_code: `forget_disposition=${disposition}: ${parsedReason}`,
         caused_by: parsedCausedBy,
         evidence_refs: dispositionRef === null ? null : [dispositionRef],
-        occurred_at: occurredAt
+        occurred_at: occurredAt,
+        ...(preservation === undefined ? {} : { preservation: {
+          schema_version: 1, capture_id: preservation.capture_id, capsule_id: preservation.capsule_id
+        } })
       })
     };
     let event: EventLogEntry | undefined;
 
     let updated: Readonly<MemoryEntry>;
     try {
-      updated = await autonomousTombstone.call(
-        this.memoryEntryRepo,
-        {
-          objectId: parsedObjectId,
-          disposition,
-          dispositionRef,
-          updatedAt: occurredAt
-        },
-        {
-          onTransition: () => {
-            event = appendAuditEventSynchronously(this.eventLogRepo, eventInput);
-          }
-        }
-      );
+      const onTransition = (): EventLogEntry => {
+        event = appendAuditEventSynchronously(this.eventLogRepo, eventInput);
+        return event;
+      };
+      const base = { objectId: parsedObjectId, updatedAt: occurredAt };
+      const args: AutonomousTombstoneArguments = preservation === undefined
+        ? [{ ...base, disposition: "judged_useless", dispositionRef: null }, { onTransition }]
+        : [{ ...base, disposition: "compressed", dispositionRef: preservation.capsule_id, preservation }, { onTransition }];
+      updated = await autonomousTombstone.call(this.memoryEntryRepo, ...args);
     } catch (error) {
       const benignRace = await this.classifyAutonomousTombstoneRepoRefusal(parsedObjectId, error);
       if (benignRace !== null) {
@@ -140,6 +144,21 @@ export class MemoryAutonomousForget {
     }
     await this.runtimeNotifier.notifyEntry(event);
     return updated;
+  }
+
+  private async capturePreservation(existing: Readonly<MemoryEntry>, capsuleId: string,
+    occurredAt: string): Promise<HistoricalMemoryCapture> {
+    const read = this.memoryEntryRepo.readHistoricalCaptureCandidate;
+    const nomination = read === undefined ? null : await read.call(this.memoryEntryRepo,
+      existing.workspace_id, existing.object_id, capsuleId);
+    const capture = nomination?.status === "ready" && canonicalJson(nomination.candidate.member) === canonicalJson(existing)
+      ? createHistoricalMemoryCapture(nomination.candidate, occurredAt, fieldContractSha256) : null;
+    if (capture === null) {
+      throw new CoreError("VALIDATION", "Compressed preservation requires a complete current historical capture", {
+        subCode: "PRESERVATION_INELIGIBLE"
+      });
+    }
+    return capture;
   }
 
   private async classifyAutonomousTombstoneRepoRefusal(
@@ -299,14 +318,7 @@ export class MemoryAutonomousForget {
     parsedReason: string,
     parsedCausedBy: TransitionCausedBy
   ): Promise<void> {
-    await bindEventPublisher({
-      eventLogRepo: this.eventLogRepo,
-      runtimeNotifier: {
-        notify: () => undefined,
-        notifyEntry: (entry) => this.runtimeNotifier.notifyEntry(entry)
-      },
-      purpose: "MemoryAutonomousForget"
-    }).publish({
+    await this.deferGc(existing, {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -341,14 +353,7 @@ export class MemoryAutonomousForget {
     parsedReason: string,
     parsedCausedBy: TransitionCausedBy
   ): Promise<void> {
-    await bindEventPublisher({
-      eventLogRepo: this.eventLogRepo,
-      runtimeNotifier: {
-        notify: () => undefined,
-        notifyEntry: (entry) => this.runtimeNotifier.notifyEntry(entry)
-      },
-      purpose: "MemoryAutonomousForget"
-    }).publish({
+    await this.deferGc(existing, {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -373,23 +378,27 @@ export class MemoryAutonomousForget {
 
   // invariant: compressed physical delete requires a live preserving capsule at
   // delete time; missing or stale preservation returns false.
+  private async deferGc(existing: MemoryEntry,
+    input: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<void> {
+    const defer = this.memoryEntryRepo.deferAutonomousGc;
+    if (defer === undefined) throw new CoreError("CONFLICT", "Audited GC deferral port is unavailable", { subCode: "PORT_UNAVAILABLE" });
+    const event = await defer.call(this.memoryEntryRepo, existing,
+      () => appendAuditEventSynchronously(this.eventLogRepo, input));
+    if (event !== null) await this.runtimeNotifier.notifyEntry(event);
+  }
+
   private async compressedPreservationStillValid(existing: Readonly<MemoryEntry>): Promise<boolean> {
     const ref = existing.forget_disposition_ref;
     if (ref === null || ref === undefined) {
       return false;
     }
     const capsuleLookup = this.synthesisCapsuleLookup;
-    if (capsuleLookup === undefined) {
+    if (capsuleLookup?.readHistoricalMember === undefined) {
       return false;
     }
-    const capsule = await capsuleLookup.findById(ref);
-    if (capsule === null) {
-      return false;
-    }
-    const isLive = capsule.lifecycle_state !== "tombstone" && capsule.synthesis_status !== "archived";
-    if (!isLive) {
-      return false;
-    }
-    return capsule.source_memory_refs.includes(existing.object_id);
+    const retained = await capsuleLookup.readHistoricalMember(existing.workspace_id, ref, existing.object_id);
+    // Membership and capsule revision were adoption gates. A mutable organizer
+    // cannot revoke this member's independently audited, source-bound history.
+    return retained.status === "ready";
   }
 }
