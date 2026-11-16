@@ -29,7 +29,9 @@ export type RecallPageSourceMetadata = Readonly<Record<string, Readonly<{
   semantic_dependencies?: import("@do-soul/alaya-protocol").HostDependencyExposure;
 }>>>;
 
-/** Numeric evidence from the existing encoder decisions, never a second fit policy. */
+/** Numeric evidence from the existing encoder decisions, never a second fit policy.
+ * `used_tokens` and `remaining_tokens` are UTF-8 encoded-byte charges; the field
+ * names are the public diagnostic contract. */
 export type RecallResultEncodingObservation = Readonly<{
   candidate_count: number; result_count: number; used_tokens: number;
   count_limited_entries: number;
@@ -38,6 +40,8 @@ export type RecallResultEncodingObservation = Readonly<{
 
 /** The field and its public adapter use this exact codec. Recorded structural
  * ends shorten literal previews only; unavailable boundaries retain UTF-8 prefixes.
+ * `maxTotalTokens` is a UTF-8 byte cap; `budget_state` and encoding diagnostics
+ * keep the historical token field names.
  */
 export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMap<string, string> = new Map(),
   maxTotalTokens = 2_000, sourceMetadata: RecallPageSourceMetadata = {}, onEntry?: () => void,
@@ -77,7 +81,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
   let optionalAllowance = Math.max(0, maxTotalTokens - rows.reduce((sum, row) =>
     sum + Math.max(1, Buffer.byteLength(row.preview) + row.essentialBytes), 0));
   const encoded: MemorySearchResult[] = [];
-  let usedTokens = 0;
+  let usedBytes = 0;
   let metadataBlock: RecallResultEncodingObservation["metadata_block"] = null;
   for (const row of rows) {
     const { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
@@ -85,14 +89,14 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const optionalBytes = reasonedBytes - essentialBytes;
     const retainedReasons = reasons !== undefined && optionalBytes <= optionalAllowance
-      && reasonedBytes < maxTotalTokens - usedTokens ? reasons : undefined;
+      && reasonedBytes < maxTotalTokens - usedBytes ? reasons : undefined;
     const metadataBytes = retainedReasons === undefined ? essentialBytes : reasonedBytes;
     if (retainedReasons !== undefined) optionalAllowance -= optionalBytes;
-    if (metadataBytes > maxTotalTokens - usedTokens) {
-      metadataBlock = { essential_bytes: essentialBytes, remaining_tokens: maxTotalTokens - usedTokens };
+    if (metadataBytes > maxTotalTokens - usedBytes) {
+      metadataBlock = { essential_bytes: essentialBytes, remaining_tokens: maxTotalTokens - usedBytes };
       break;
     }
-    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens, boundaryEnds);
+    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedBytes, boundaryEnds);
     if (encoded.length > 0 && boundaryEnds !== undefined
       && completeSourceDeliveryEnd(fitted?.preview ?? "", boundaryEnds) === undefined) {
       const fresh = fitEncodedPreview(preview, metadataBytes, maxTotalTokens, boundaryEnds);
@@ -103,8 +107,8 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     }
     const content = fitted?.preview ?? "[payload omitted]";
     const target = deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined);
-    const tokenEstimate = fitted?.tokenEstimate ?? metadataBytes;
-    usedTokens += tokenEstimate;
+    const encodedBytes = fitted?.encodedBytes ?? metadataBytes;
+    usedBytes += encodedBytes;
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
       target,
       relevance_score: score, content_preview: content,
@@ -115,13 +119,13 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       hypothesis_id: entry.hypothesis_id, program_state: entry.program_state, time_state: entry.time_state, output_binding: entry.output_binding,
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       source_channels: ["conditional_field"], score_factors: { activation: score, relevance: score },
-      budget_state: { token_estimate: tokenEstimate, max_entries: index.representation.page_budget, max_total_tokens: maxTotalTokens,
+      budget_state: { token_estimate: encodedBytes, max_entries: index.representation.page_budget, max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
-        remaining_tokens: Math.max(0, maxTotalTokens - usedTokens), within_budget: true } });
+        remaining_tokens: Math.max(0, maxTotalTokens - usedBytes), within_budget: true } });
   }
   // Every ordinary row and byte has already fitted. Optional prerequisites may
   // consume only the page's residual, never the next ordinary row's allowance.
-  let dependencyAllowance = Math.min(options.dependency_byte_limit ?? Infinity, Math.max(0, maxTotalTokens - usedTokens));
+  let dependencyAllowance = Math.min(options.dependency_byte_limit ?? Infinity, Math.max(0, maxTotalTokens - usedBytes));
   for (let offset = 0; offset < encoded.length; offset++) {
     const row = encoded[offset]!, entry = rows[offset]!.entry;
     const dependencies = metadataDependency(entry, sourceMetadata, rows[offset]!.objectId);
@@ -131,12 +135,12 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       span === undefined ? undefined : [span.content_start, span.content_end], Math.max(0, dependencyAllowance - 26));
     if (exposure === undefined) continue;
     const bytes = Buffer.byteLength(JSON.stringify({ semantic_dependencies: exposure })) - 2;
-    dependencyAllowance -= bytes; usedTokens += bytes;
+    dependencyAllowance -= bytes; usedBytes += bytes;
     encoded[offset] = { ...row, semantic_dependencies: exposure, budget_state: { ...row.budget_state,
       token_estimate: row.budget_state.token_estimate + bytes,
-      remaining_tokens: Math.max(0, maxTotalTokens - usedTokens) } };
+      remaining_tokens: Math.max(0, maxTotalTokens - usedBytes) } };
   }
-  observe?.({ candidate_count: rows.length, result_count: encoded.length, used_tokens: usedTokens,
+  observe?.({ candidate_count: rows.length, result_count: encoded.length, used_tokens: usedBytes,
     count_limited_entries: index.entries.length - rows.length, metadata_block: metadataBlock });
   return encoded;
 }
@@ -185,9 +189,9 @@ function deliveredTarget(target: MemorySearchResult["target"], content: string, 
 function fitEncodedPreview(preview: string, metadataBytes: number, remaining: number,
   boundaryEnds?: readonly number[]) {
   const cost = (text: string) => Math.max(1, Buffer.byteLength(text) + metadataBytes);
-  if (cost(preview) <= remaining && boundaryEnds === undefined) return { preview, tokenEstimate: cost(preview) };
+  if (cost(preview) <= remaining && boundaryEnds === undefined) return { preview, encodedBytes: cost(preview) };
   if (remaining - metadataBytes < 1 || remaining <= 1) return null;
   const truncated = sourceDeliveryPrefix(preview, text => cost(text) <= remaining, boundaryEnds);
   if (truncated.length < 1) return null;
-  return { preview: truncated, tokenEstimate: cost(truncated) };
+  return { preview: truncated, encodedBytes: cost(truncated) };
 }
