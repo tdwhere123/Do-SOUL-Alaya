@@ -82,13 +82,13 @@ describe("reconciliation memory field derivation", () => {
 
   it("never copies facet_tags into merge or replacement payloads", () => {
     const existing = createMemoryEntry({ facet_tags: [{ facet: "person", value: "alice" }] });
-    const merge = buildProjectionMergeFields(existing, {
+    const incoming = {
       projection_schema_version: 1,
-      canonical_entities: ["alice"]
-    });
-    const update = buildUpdateFields(existing, "next", ["tag"], "evidence-1", {
-      projection_schema_version: 1
-    });
+      canonical_entities: ["alice"],
+      facet_tags: [{ facet: "person", value: "bob" }]
+    };
+    const merge = buildProjectionMergeFields(existing, incoming);
+    const update = buildUpdateFields(existing, "next", ["tag"], "evidence-1", incoming);
     expect(merge).not.toHaveProperty("facet_tags");
     expect(update).not.toHaveProperty("facet_tags");
   });
