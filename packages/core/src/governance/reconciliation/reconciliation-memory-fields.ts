@@ -108,28 +108,22 @@ export function buildUpdateFields(
         ? existing.evidence_refs
         : [...existing.evidence_refs, incomingEvidenceRef]
       : undefined;
-  return evidenceRefs === undefined
-    ? {
-        content: incomingContent,
-        domain_tags: incomingDomainTags,
-        ...buildProjectionReplacementFields(incomingProjectionFields)
-      }
-    : {
-        content: incomingContent,
-        domain_tags: incomingDomainTags,
-        evidence_refs: evidenceRefs,
-        ...buildProjectionReplacementFields(incomingProjectionFields)
-      };
+  return {
+    content: incomingContent,
+    domain_tags: incomingDomainTags,
+    ...(evidenceRefs === undefined ? {} : { evidence_refs: evidenceRefs }),
+    ...buildProjectionReplacementFields(incomingProjectionFields)
+  };
 }
 
 export function updateFieldsMatch(
   row: Readonly<MemoryEntry>,
   fields: ReconciliationMemoryUpdateFields
 ): boolean {
-  if (row.content !== fields.content || !sameStringSet(row.domain_tags, fields.domain_tags)) {
+  if (row.content !== fields.content || !sameStringMultiset(row.domain_tags, fields.domain_tags)) {
     return false;
   }
-  if (fields.evidence_refs !== undefined && !sameStringSet(row.evidence_refs, fields.evidence_refs)) {
+  if (fields.evidence_refs !== undefined && !sameStringMultiset(row.evidence_refs, fields.evidence_refs)) {
     return false;
   }
   return PROJECTION_FIELD_KEYS.every(
@@ -137,7 +131,7 @@ export function updateFieldsMatch(
   );
 }
 
-function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+function sameStringMultiset(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) {
     return false;
   }
@@ -153,9 +147,10 @@ function projectionValuesMatch(
   if (expected === null) {
     return actual === null || actual === undefined;
   }
-  // canonical_entities is array-valued; compare by set membership, not reference.
+  // canonical_entities is array-valued; compare as a duplicate-sensitive
+  // multiset, not by reference.
   if (Array.isArray(expected)) {
-    return Array.isArray(actual) && sameStringSet(actual, expected);
+    return Array.isArray(actual) && sameStringMultiset(actual, expected);
   }
   return actual === expected;
 }
