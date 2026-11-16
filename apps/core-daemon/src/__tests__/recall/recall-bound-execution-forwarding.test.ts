@@ -33,7 +33,38 @@ function makeSharedPolicy(): RecallPolicy {
   });
 }
 
-describe("invokeBoundRecall shared input contract", () => {
+function makeTaskSurface(policy: RecallPolicy) {
+  return TaskObjectSurfaceSchema.parse({
+    runtime_id: policy.task_surface_ref,
+    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+    task_surface_ref: null,
+    expires_at: null,
+    derived_from: null,
+    retention_policy: RetentionPolicy.SESSION_ONLY,
+    surface_kind: "mcp_memory_tool",
+    display_name: "deployment rules",
+    context_refs: []
+  });
+}
+
+function makeSearchRequest(
+  overrides: Partial<SoulMemorySearchRequest> = {}
+): SoulMemorySearchRequest {
+  return {
+    protocol_version: 1,
+    supported_result_kinds: ["memory_entry", "source_evidence"],
+    supports_source_evidence: true,
+    supports_product_updates: true,
+    query: "deployment rules",
+    max_results: 5,
+    scope_class: null,
+    dimension: null,
+    domain_tags: null,
+    ...overrides
+  };
+}
+
+describe("invokeBoundRecall request forwarding", () => {
   it("forwards target request options without normalizing clock or replacing the caller budget", async () => {
     const recall = vi.fn(async (_params: BoundRecallInvokeParams) => "result");
     const budget = { schema_version: 1 as const, work_units: 1000, memory_bytes: 65536,
@@ -52,102 +83,77 @@ describe("invokeBoundRecall shared input contract", () => {
     expect(recall.mock.calls[0]?.[0].budget).toBe(budget);
   });
 
-  it("keeps production_mcp and benchmark wrappers on the same recall-service inputs", async () => {
-    const policy = makeSharedPolicy();
-    const taskSurfaceId = policy.task_surface_ref;
-    const taskSurface = TaskObjectSurfaceSchema.parse({
-      runtime_id: taskSurfaceId,
-      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: null,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      surface_kind: "mcp_memory_tool",
-      display_name: "deployment rules",
-      context_refs: []
-    });
-    const recallService = {
-      recall: vi.fn(async (params: { readonly taskSurface: { readonly display_name: string } }) =>
-        buildSeededRecallResult(params.taskSurface.display_name)
-      )
+  it("ignores sideEffectMode and does not set defer_delivery", async () => {
+    const recall = vi.fn(async (_params: BoundRecallInvokeParams) => "result");
+    const shared = {
+      recallService: { recall },
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      policyOverride: makeSharedPolicy()
     };
-    const request: SoulMemorySearchRequest = {
-      protocol_version: 1,
-      supported_result_kinds: ["memory_entry", "source_evidence"],
-      supports_source_evidence: true,
-      supports_product_updates: true,
-      query: "deployment rules",
-      max_results: 5,
-      scope_class: null,
-      dimension: null,
-      domain_tags: null
-    };
+    await invokeBoundRecall({ sideEffectMode: "benchmark", ...shared });
+    await invokeBoundRecall({ sideEffectMode: "production_mcp", ...shared });
+    expect(recall).toHaveBeenCalledTimes(2);
+    const [benchmarkCall, productionLabelCall] = recall.mock.calls.map(([params]) => params);
+    expect(benchmarkCall).not.toHaveProperty("sideEffectMode");
+    expect(benchmarkCall).not.toHaveProperty("defer_delivery");
+    expect(productionLabelCall).toEqual(benchmarkCall);
+  });
 
-    const mcpResult = await runProductionBoundRecall({
+  it("keeps production MCP defer_delivery distinct from this wrapper's forwarded fields", async () => {
+    const policy = makeSharedPolicy();
+    const taskSurface = makeTaskSurface(policy);
+    const recallService = {
+      recall: vi.fn(async () => buildSeededRecallResult())
+    };
+    await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
-      request,
+      request: makeSearchRequest(),
       context: {
-        workspaceId: "ws-parity",
-        runId: "run-parity",
+        workspaceId: "ws-forward",
+        runId: "run-forward",
         agentTarget: "codex",
-        sessionId: "session-parity"
+        sessionId: "session-forward"
       },
       taskSurface,
       policyOverride: policy
     });
-    const benchResult = await invokeBoundRecall({
+    await invokeBoundRecall({
       sideEffectMode: "benchmark",
       recallService,
       taskSurface,
-      workspaceId: "ws-parity",
-      runId: "run-parity",
+      workspaceId: "ws-forward",
+      runId: "run-forward",
       strategy: "chat",
       policyOverride: policy,
       activeConstraintsCap: null
     });
-
-    expect(mcpResult.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "mem-a",
-      "mem-b"
-    ]);
-    expect(benchResult.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "mem-a",
-      "mem-b"
-    ]);
     expect(recallService.recall).toHaveBeenCalledTimes(2);
     const [mcpCall, benchCall] = (recallService.recall as ReturnType<typeof vi.fn>).mock.calls.map(
-      ([params]) => params
+      ([params]) => params as Record<string, unknown>
     );
-    const sharedWrapper = (call: Record<string, unknown>) => ({
+    expect(mcpCall.defer_delivery).toBe(true);
+    expect(benchCall).not.toHaveProperty("defer_delivery");
+    const sharedIdentity = (call: Record<string, unknown>) => ({
       workspaceId: call.workspaceId,
       policyOverride: call.policyOverride,
       strategy: call.strategy,
       runId: call.runId
     });
-    expect(sharedWrapper(mcpCall)).toEqual({
-      workspaceId: "ws-parity",
+    expect(sharedIdentity(mcpCall)).toEqual({
+      workspaceId: "ws-forward",
       policyOverride: policy,
       strategy: "chat",
-      runId: "run-parity"
+      runId: "run-forward"
     });
-    expect(sharedWrapper(mcpCall)).toEqual(sharedWrapper(benchCall));
+    expect(sharedIdentity(mcpCall)).toEqual(sharedIdentity(benchCall));
   });
 
-  it("forwards snapshotDigest only when the benchmark supplies it", async () => {
+  it("forwards snapshotDigest only when the caller supplies it", async () => {
     const policy = makeSharedPolicy();
-    const taskSurface = TaskObjectSurfaceSchema.parse({
-      runtime_id: policy.task_surface_ref,
-      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: null,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      surface_kind: "mcp_memory_tool",
-      display_name: "deployment rules",
-      context_refs: []
-    });
+    const taskSurface = makeTaskSurface(policy);
     const recallService = {
-      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
+      recall: vi.fn(async () => buildSeededRecallResult())
     };
     const snapshotDigest = `sha256:${"b".repeat(64)}`;
     await invokeBoundRecall({
@@ -161,14 +167,7 @@ describe("invokeBoundRecall shared input contract", () => {
     expect(recallService.recall).toHaveBeenCalledWith(expect.objectContaining({ snapshotDigest }));
     await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
-      request: {
-        protocol_version: 1,
-        supported_result_kinds: ["memory_entry", "source_evidence"],
-        supports_source_evidence: true,
-        supports_product_updates: true,
-        query: "deployment rules", max_results: 5, scope_class: null,
-        dimension: null, domain_tags: null
-      },
+      request: makeSearchRequest(),
       context: {
         workspaceId: "ws-snapshot",
         runId: null,
@@ -185,35 +184,16 @@ describe("invokeBoundRecall shared input contract", () => {
 
   it("does not default MCP time_field to created_at when since/until omit it", async () => {
     const policy = makeSharedPolicy();
-    const taskSurface = TaskObjectSurfaceSchema.parse({
-      runtime_id: policy.task_surface_ref,
-      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: null,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      surface_kind: "mcp_memory_tool",
-      display_name: "deployment rules",
-      context_refs: []
-    });
+    const taskSurface = makeTaskSurface(policy);
     const recallService = {
-      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
+      recall: vi.fn(async () => buildSeededRecallResult())
     };
     await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
-      request: {
-        protocol_version: 1,
-        supported_result_kinds: ["memory_entry", "source_evidence"],
-        supports_source_evidence: true,
-        supports_product_updates: true,
-        query: "deployment rules",
-        max_results: 5,
-        scope_class: null,
-        dimension: null,
-        domain_tags: null,
+      request: makeSearchRequest({
         since: "2026-09-05T00:00:00.000Z",
         until: "2026-09-06T00:00:00.000Z"
-      },
+      }),
       context: {
         workspaceId: "ws-time",
         runId: null,
@@ -232,47 +212,35 @@ describe("invokeBoundRecall shared input contract", () => {
   });
 });
 
-function buildSeededRecallResult(query: string) {
-  const seed = [
-    {
-      object_id: "mem-b",
-      content_preview: "beta deployment",
-      relevance_score: score(query, "beta deployment")
-    },
-    {
-      object_id: "mem-a",
-      content_preview: "alpha deployment rules",
-      relevance_score: score(query, "alpha deployment rules")
-    },
-    { object_id: "mem-c", content_preview: "unrelated", relevance_score: score(query, "unrelated") }
-  ];
-  const candidates = seed
-    .sort((left, right) => right.relevance_score - left.relevance_score)
-    .slice(0, 2)
-    .map((candidate, index) =>
+function buildSeededRecallResult() {
+  return Object.freeze({
+    candidates: Object.freeze([
       Object.freeze({
-        ...candidate,
+        object_id: "mem-a",
+        content_preview: "alpha deployment rules",
+        relevance_score: 2,
         object_kind: "memory_entry",
-        activation_score: 0.8 - index / 10,
+        activation_score: 0.8,
+        token_estimate: 10
+      }),
+      Object.freeze({
+        object_id: "mem-b",
+        content_preview: "beta deployment",
+        relevance_score: 1,
+        object_kind: "memory_entry",
+        activation_score: 0.7,
         token_estimate: 10
       })
-    );
-  return Object.freeze({
-    candidates: Object.freeze(candidates),
+    ]),
     active_constraints: Object.freeze([]),
     active_constraints_count: 0,
-    total_scanned: seed.length,
-    coarse_filter_count: seed.length,
-    fine_assessment_count: candidates.length,
+    total_scanned: 2,
+    coarse_filter_count: 2,
+    fine_assessment_count: 2,
     diagnostics: Object.freeze({
       scoring_weight_overrides: Object.freeze({
         fusion_weights: Object.freeze({ embedding_similarity: 1 })
       })
     })
   });
-}
-
-function score(query: string, content: string): number {
-  const queryTerms = query.toLowerCase().split(/\s+/);
-  return queryTerms.filter((term) => content.includes(term)).length;
 }

@@ -1,3 +1,4 @@
+import { recallRatioSampleSize } from "../contracts/kpi-measurement-contract.js";
 import type { KpiPayload } from "../contracts/kpi-schema.js";
 import { readEmbeddingLatencyClaim } from "../metrics/embedding-latency-claim.js";
 import { wilsonInterval } from "../metrics/wilson-ci.js";
@@ -18,7 +19,7 @@ function pushAbsoluteKpiHeader(lines: string[]): void {
 }
 
 function pushRecallHeadlineKpis(lines: string[], current: KpiPayload): void {
-  const denominator = current.answerable_evaluated_count ?? current.reporting_recall_denominator ?? current.evaluated_count;
+  const denominator = recallRatioSampleSize(current);
   lines.push(
     `- R@1: ${formatRatio(current.kpi.r_at_1)}${ciAnnotation(current.kpi.r_at_1, denominator)}`
   );

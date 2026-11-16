@@ -43,6 +43,7 @@ export type BoundRecallInvokeParams = BoundRecallFieldOptions & Readonly<{
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = BoundRecallFieldOptions & Readonly<{
+  /** Caller label only; not forwarded and not a delivery or ACK switch. */
   readonly sideEffectMode: RecallBoundSideEffectMode;
   readonly recallService: {
     recall(params: BoundRecallInvokeParams): Promise<TRecallResult>;
@@ -62,9 +63,10 @@ export type InvokeBoundRecallParams<TRecallResult> = BoundRecallFieldOptions & R
   readonly snapshotDigest?: string;
 }>;
 
-// Recall scoring is identical across modes; sideEffectMode documents post-recall
-// divergence (MCP delivery/plasticity/garden vs bench diagnostics-only).
-// Embedding warmup hold annotation is applied by the daemon recall-service proxy.
+// sideEffectMode is a required caller label. This wrapper does not branch on it
+// and does not set defer_delivery or ACK. Production MCP uses runProductionBoundRecall;
+// the bench handle records delivery separately. Scoring identity is not established here.
+// Embedding warmup hold annotation is applied by the daemon RecallService proxy.
 export async function invokeBoundRecall<TRecallResult>(
   params: InvokeBoundRecallParams<TRecallResult>
 ): Promise<TRecallResult> {

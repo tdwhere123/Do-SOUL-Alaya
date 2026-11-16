@@ -47,8 +47,9 @@ export function wilsonHalfWidthPp(
 // so a noise-level delta does not trip a regression alarm.
 //
 // Asymmetry note: the caller (packages/eval/src/history/diff.ts) drives the
-// band from the *current* run's evaluated_count and observed
-// proportion only. When the previous baseline is also undersampled,
+// band from the *current* run's recall-ratio sample size
+// (answerable_evaluated_count, else reporting_recall_denominator, else
+// evaluated_count) and observed proportion only. When the previous baseline is also undersampled,
 // the previous run's wider CI is not blended into the current band;
 // the regression verdict reflects today's confidence in today's
 // number, not a joint confidence with stale baseline noise. This is

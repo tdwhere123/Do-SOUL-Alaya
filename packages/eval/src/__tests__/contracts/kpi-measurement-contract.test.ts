@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { recallRatioSampleSize } from "../../contracts/kpi-measurement-contract.js";
 import { QualityMetricsSchema } from "../../contracts/kpi-quality-schema.js";
 import { KpiPayloadSchema } from "../../contracts/kpi-schema.js";
 import {
@@ -467,6 +468,21 @@ describe("KPI measurement denominator contract", () => {
     };
 
     expect(() => KpiPayloadSchema.parse(payload)).not.toThrow();
+  });
+});
+
+describe("recallRatioSampleSize", () => {
+  it("does not treat an omitted answerable count as zero", () => {
+    expect(recallRatioSampleSize({ evaluated_count: 50 })).toBe(50);
+    expect(recallRatioSampleSize({
+      evaluated_count: 50,
+      reporting_recall_denominator: 10
+    })).toBe(10);
+    expect(recallRatioSampleSize({
+      evaluated_count: 50,
+      reporting_recall_denominator: 10,
+      answerable_evaluated_count: 9
+    })).toBe(9);
   });
 });
 

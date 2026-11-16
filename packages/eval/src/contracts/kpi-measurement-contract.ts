@@ -1,5 +1,21 @@
 import type { RefinementCtx } from "zod";
 
+export type RecallRatioSampleSizePayload = Readonly<{
+  readonly evaluated_count: number;
+  readonly answerable_evaluated_count?: number;
+  readonly reporting_recall_denominator?: number;
+}>;
+
+/**
+ * Sample size for recall-ratio CI and undersample guards when reading a KPI payload.
+ * Prefers answerable_evaluated_count. reporting_recall_denominator is historical merge
+ * reporting only and is not answerable-cohort authority. evaluated_count is last fallback.
+ * An omitted answerable count is not treated as 0.
+ */
+export function recallRatioSampleSize(payload: RecallRatioSampleSizePayload): number {
+  return payload.answerable_evaluated_count ?? payload.reporting_recall_denominator ?? payload.evaluated_count;
+}
+
 interface MeasurementDenominatorPayload {
   readonly evaluated_count: number;
   readonly answerable_evaluated_count?: number;

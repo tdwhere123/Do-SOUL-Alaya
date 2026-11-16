@@ -17,11 +17,12 @@ export interface ThresholdConfig {
   readonly token_saved_drop_pp: RatioBand;
   readonly hot_share_drop_pp: RatioBand;
   // @anchor min-sample-for-ratio-diff
-  // Below this evaluated_count on the previous baseline, the runner
-  // treats ratio-based diffs as advisory (verdict = warn instead of
-  // fail) rather than emitting a real regression alarm. Rationale: a
-  // 5-question smoke that happens to all hit gives previous R@5 = 1.0;
-  // diffing a 500-question full run against that produces a 20pp
+  // Below this recall-ratio sample size on either side of a diff
+  // (answerable_evaluated_count, else reporting_recall_denominator, else
+  // evaluated_count), the runner treats ratio-based diffs as advisory
+  // (verdict = warn instead of fail) rather than emitting a real regression
+  // alarm. A 5-question smoke that happens to all hit gives previous R@5 =
+  // 1.0; diffing a 500-question full run against that produces a 20pp
   // "drop" that is sample-size artefact, not a regression.
   readonly min_sample_for_ratio_diff: number;
 }

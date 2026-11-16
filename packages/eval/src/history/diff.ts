@@ -1,3 +1,4 @@
+import { recallRatioSampleSize } from "../contracts/kpi-measurement-contract.js";
 import type {
   DiffVsPrevious,
   KpiPayload,
@@ -45,14 +46,14 @@ function createFailDowngrader(
   thresholds: ThresholdConfig
 ): (verdict: Verdict) => Verdict {
   // @anchor sample-too-small: see thresholds.min_sample_for_ratio_diff.
-  // Whenever either side of the diff has a recall denominator below the
+  // Whenever either side of the diff has a recall-ratio sample size below the
   // guard, ratio-based + latency + tier-share aggregates are variance
   // noise (e.g. smoke 1-shard vs full 2-shard latency, or current=smoke
   // vs previous=full giving spurious deltas). Downgrade FAIL to WARN
   // universally. Fixture flips remain FAIL; pass/fail per row is not
   // sample-size sensitive.
   const undersampled =
-    Math.min(recallDenominator(previous), recallDenominator(current)) <
+    Math.min(recallRatioSampleSize(previous), recallRatioSampleSize(current)) <
     thresholds.min_sample_for_ratio_diff;
   return (verdict: Verdict): Verdict =>
     undersampled && verdict === "fail" ? "warn" : verdict;
@@ -111,15 +112,11 @@ function pushCiAwareRatioDelta(
     previousValue,
     ciAwareBand(
       band,
-      Math.round(currentValue * recallDenominator(current)),
-      recallDenominator(current)
+      Math.round(currentValue * recallRatioSampleSize(current)),
+      recallRatioSampleSize(current)
     ),
     downgradeFail
   );
-}
-
-function recallDenominator(payload: KpiPayload): number {
-  return payload.answerable_evaluated_count ?? payload.reporting_recall_denominator ?? payload.evaluated_count;
 }
 
 function pushTokenEconomyDelta(
