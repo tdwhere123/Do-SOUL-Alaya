@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RotateCcw, Save } from "lucide-react";
 import { clsx } from "clsx";
 import { apiFetch, type ApiError } from "../api";
@@ -40,6 +40,11 @@ interface ConfigSectionState {
 
 type ConfigPayload = Record<string, unknown>;
 
+interface ConfigDraft {
+  readonly initial: ConfigPayload | null;
+  readonly current: ConfigPayload | null;
+}
+
 interface PatchResult {
   readonly success?: boolean;
   readonly requires_daemon_restart?: boolean;
@@ -59,11 +64,17 @@ export function ConfigSection(props: ConfigSectionProps) {
 
 function useConfigSectionState(props: ConfigSectionProps, title: string, t: Translate): ConfigSectionState {
   const { showToast } = useToasts();
-  const [initial, setInitial] = useState<ConfigPayload | null>(null);
-  const [current, setCurrent] = useState<ConfigPayload | null>(null);
+  const [draft, setDraft] = useState<ConfigDraft>({ initial: null, current: null });
   const [saving, setSaving] = useState(false);
-  const fetchConfig = useConfigFetcher(props.workspaceId, props.meta);
   const configIdentity = `${props.workspaceId}:${props.meta.key}`;
+  const loadCursorRef = useRef<{ identity: string; seen: ConfigPayload | null }>({
+    identity: configIdentity,
+    seen: null
+  });
+  const fetchConfig = useCallback(async (signal: AbortSignal): Promise<ConfigPayload> => {
+    const data = await apiFetch<ConfigPayload>(`/config/${props.workspaceId}/${props.meta.key}`, { signal });
+    return normalizeConfigPayload(data);
+  }, [props.meta.key, props.workspaceId]);
   const { data: loadedConfig, loading, error } = useApiQuery(fetchConfig, [
     props.workspaceId,
     props.meta.key
@@ -72,52 +83,59 @@ function useConfigSectionState(props: ConfigSectionProps, title: string, t: Tran
       showToast({ message: t("config:error.load", { section: title, message }), type: "error" });
     }
   });
-  useLoadedConfig(loadedConfig, configIdentity, initial, current, setInitial, setCurrent);
-  const dirty = useMemo(() => configDirty(initial, current), [current, initial]);
+  useEffect(() => {
+    const cursor = loadCursorRef.current;
+    if (cursor.identity !== configIdentity) {
+      // Consume whatever payload is currently loaded so a previous identity cannot populate this one.
+      cursor.identity = configIdentity;
+      cursor.seen = loadedConfig;
+      setDraft({ initial: null, current: null });
+      return;
+    }
+    if (loadedConfig === null || loadedConfig === cursor.seen) return;
+    // Each GET object is consumed once; re-applying it after a clean save would revert the editor.
+    cursor.seen = loadedConfig;
+    if (configDirty(draft.initial, draft.current)) return;
+    setDraft({ initial: loadedConfig, current: loadedConfig });
+  }, [configIdentity, draft, loadedConfig]);
+  const dirty = useMemo(() => configDirty(draft.initial, draft.current), [draft.current, draft.initial]);
   useSectionDirtyReport(props.meta.key, dirty, props.onDirtyChange);
+  const handleSave = useCallback(async () => {
+    if (!draft.current) return;
+    const savedConfig = draft.current;
+    const baselineAtSave = draft.initial;
+    try {
+      setSaving(true);
+      const result = await patchSectionConfig(props.workspaceId, props.meta.key, savedConfig);
+      showToast({
+        message: result.requires_daemon_restart
+          ? t("config:toast.patchedRestart", { section: title })
+          : t("config:toast.saved", { section: title }),
+        type: "success"
+      });
+      setDraft((previous) => previous.initial === baselineAtSave ? { ...previous, initial: savedConfig } : previous);
+      if (result.requires_daemon_restart) props.onRequiresRestart();
+    } catch (err) {
+      if ((err as ApiError).status !== 401) {
+        showToast({ message: t("config:error.save", { section: title, message: (err as Error).message }), type: "error" });
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [draft, props, showToast, t, title]);
   return {
-    current,
+    current: draft.current,
     dirty,
     loading,
     error,
     saving,
-    handleChange: (key, value) => setCurrent((prev) => patchConfigField(prev, key, value)),
-    handleReset: () => setCurrent(initial),
-    handleSave: useSaveConfigSection(props, title, t, current, initial, showToast, setInitial, setSaving)
+    handleChange: (key, value) => setDraft((previous) => ({
+      ...previous,
+      current: patchConfigField(previous.current, key, value)
+    })),
+    handleReset: () => setDraft((previous) => ({ ...previous, current: previous.initial })),
+    handleSave
   };
-}
-
-function useConfigFetcher(workspaceId: string, meta: SectionMeta) {
-  return useCallback(async (signal: AbortSignal): Promise<ConfigPayload> => {
-    const data = await apiFetch<ConfigPayload>(`/config/${workspaceId}/${meta.key}`, { signal });
-    return normalizeConfigPayload(data);
-  }, [meta.key, workspaceId]);
-}
-
-function useLoadedConfig(
-  loadedConfig: ConfigPayload | null,
-  configIdentity: string,
-  initial: ConfigPayload | null,
-  current: ConfigPayload | null,
-  setInitial: Dispatch<SetStateAction<ConfigPayload | null>>,
-  setCurrent: Dispatch<SetStateAction<ConfigPayload | null>>
-) {
-  const identityRef = useRef(configIdentity);
-  const seenConfigRef = useRef<ConfigPayload | null>(null);
-  useEffect(() => {
-    if (identityRef.current !== configIdentity) {
-      identityRef.current = configIdentity;
-      seenConfigRef.current = loadedConfig;
-      setInitial(null);
-      setCurrent(null);
-      return;
-    }
-    if (loadedConfig === null || loadedConfig === seenConfigRef.current) return;
-    seenConfigRef.current = loadedConfig;
-    if (configDirty(initial, current)) return;
-    setInitial(loadedConfig);
-    setCurrent(loadedConfig);
-  }, [configIdentity, current, initial, loadedConfig, setCurrent, setInitial]);
 }
 
 function useSectionDirtyReport(
@@ -129,41 +147,6 @@ function useSectionDirtyReport(
     onDirtyChange(key, dirty);
   }, [dirty, key, onDirtyChange]);
   useEffect(() => () => onDirtyChange(key, false), [key, onDirtyChange]);
-}
-
-function useSaveConfigSection(
-  props: ConfigSectionProps,
-  title: string,
-  t: Translate,
-  current: ConfigPayload | null,
-  initial: ConfigPayload | null,
-  showToast: ReturnType<typeof useToasts>["showToast"],
-  setInitial: Dispatch<SetStateAction<ConfigPayload | null>>,
-  setSaving: (saving: boolean) => void
-) {
-  return useCallback(async () => {
-    if (!current) return;
-    const savedConfig = current;
-    const baselineAtSave = initial;
-    try {
-      setSaving(true);
-      const result = await patchSectionConfig(props.workspaceId, props.meta.key, savedConfig);
-      showToast({
-        message: result.requires_daemon_restart
-          ? t("config:toast.patchedRestart", { section: title })
-          : t("config:toast.saved", { section: title }),
-        type: "success"
-      });
-      setInitial((previous) => previous === baselineAtSave ? savedConfig : previous);
-      if (result.requires_daemon_restart) props.onRequiresRestart();
-    } catch (err) {
-      if ((err as ApiError).status !== 401) {
-        showToast({ message: t("config:error.save", { section: title, message: (err as Error).message }), type: "error" });
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [current, initial, props, setInitial, setSaving, showToast, t, title]);
 }
 
 function ConfigSectionView(props: { readonly meta: SectionMeta; readonly title: string; readonly state: ConfigSectionState; readonly t: Translate }) {
