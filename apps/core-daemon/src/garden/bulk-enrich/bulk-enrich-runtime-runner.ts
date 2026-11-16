@@ -14,8 +14,11 @@ import { SignalService, type EventPublisher } from "@do-soul/alaya-core";
 import {
   isPerSourceEnrichmentTask,
   type BulkEnrichAvailability,
+  type BulkEnrichMemoryRecord,
   type BulkEnrichPendingClaim,
-  type BulkEnrichReadyPorts
+  type BulkEnrichReadyPorts,
+  type BulkEnrichSchedulerPort,
+  type CreateBulkEnrichRuntimeSupportInput
 } from "./bulk-enrich-runtime-helpers.js";
 
 type BulkEnrichReporter = Readonly<{
@@ -37,21 +40,7 @@ type BulkEnrichReporter = Readonly<{
 
 export function createBulkEnrichReporter(input: Readonly<{
   readonly eventPublisher: EventPublisher;
-  readonly gardenScheduler: {
-    reportCompletion(task: {
-      readonly task_id: string;
-      readonly task_kind: string;
-      readonly role: string;
-      readonly tier: string;
-      readonly workspace_id: string;
-      readonly success: boolean;
-      readonly outcome?: GardenTaskOutcome;
-      readonly objects_affected: readonly string[];
-      readonly audit_entries: readonly string[];
-      readonly error_message: string | null;
-      readonly completed_at: string;
-    }): Promise<void>;
-  };
+  readonly gardenScheduler: Pick<BulkEnrichSchedulerPort, "reportCompletion">;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>): BulkEnrichReporter {
   return {
@@ -93,17 +82,15 @@ export function createBulkEnrichReporter(input: Readonly<{
   };
 }
 
-export async function runBulkEnrichTask(input: Readonly<{
+type BulkEnrichTaskInput = Readonly<{
   readonly now: () => string;
   readonly task: Readonly<GardenTaskDescriptor>;
   readonly availability: BulkEnrichAvailability;
   readonly reporter: BulkEnrichReporter;
-  readonly sourceEnrichment?: {
-    run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
-    readonly capability?: SourceEnrichmentCapability;
-    readonly ownsCompletion?: boolean;
-  };
-}>): Promise<void> {
+  readonly sourceEnrichment?: CreateBulkEnrichRuntimeSupportInput["sourceEnrichment"];
+}>;
+
+export async function runBulkEnrichTask(input: BulkEnrichTaskInput): Promise<void> {
   const completedAt = input.now();
   if (isPerSourceEnrichmentTask(input.task)) {
     await runPerSourceEnrichmentTask(input, completedAt);
@@ -137,9 +124,9 @@ export async function runBulkEnrichTask(input: Readonly<{
     await input.reporter.reportCompletion(
       input.task,
       completedAt,
-      summary.failedCount > 0 ? "failed" : "completed",
+      summary.failed > 0 ? "failed" : "completed",
       summarizeClaimedBatch(summary),
-      summary.failedCount > 0 ? new AlayaError("UNAVAILABLE", "bulk enrich batch has unfinished failed items") : undefined
+      summary.failed > 0 ? new AlayaError("UNAVAILABLE", "bulk enrich batch has unfinished failed items") : undefined
     );
   } catch (error) {
     await input.reporter.reportCompletion(input.task, completedAt, "failed", [], error);
@@ -151,15 +138,7 @@ export async function runBulkEnrichTask(input: Readonly<{
 }
 
 async function runPerSourceEnrichmentTask(
-  input: Readonly<{
-    readonly task: Readonly<GardenTaskDescriptor>;
-    readonly reporter: BulkEnrichReporter;
-    readonly sourceEnrichment?: {
-      run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
-      readonly capability?: SourceEnrichmentCapability;
-      readonly ownsCompletion?: boolean;
-    };
-  }>,
+  input: Pick<BulkEnrichTaskInput, "task" | "reporter" | "sourceEnrichment">,
   completedAt: string
 ): Promise<void> {
   if (input.sourceEnrichment === undefined) {
@@ -256,48 +235,27 @@ function claimBulkEnrichBatch(
   );
 }
 
+type BulkEnrichBatchSummary = Readonly<{
+  processed: number;
+  missing: number;
+  failed: number;
+  abandoned: number;
+  withheld: number;
+}>;
+
 async function processClaimedBatch(
   claimed: readonly BulkEnrichPendingClaim[],
   processedAt: string,
   ports: BulkEnrichReadyPorts,
   reporter: BulkEnrichReporter
-): Promise<Readonly<{
-  readonly processedCount: number;
-  readonly missingCount: number;
-  readonly failedCount: number;
-  readonly abandonedCount: number;
-  readonly withheldCount: number;
-}>> {
-  let processedCount = 0;
-  let missingCount = 0;
-  let failedCount = 0;
-  let abandonedCount = 0;
-  let withheldCount = 0;
-
+): Promise<BulkEnrichBatchSummary> {
+  const summary = { processed: 0, missing: 0, failed: 0, abandoned: 0, withheld: 0 };
   for (const pending of claimed) {
     try {
-      const memory = await ports.memoryLookup.findById(pending.memoryId);
-      if (memory === null) {
-        ports.enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
-        missingCount += 1;
-        continue;
-      }
-      if (memory.workspace_id !== pending.workspaceId) throw new AlayaError("CONFLICT", "BULK_ENRICH memory workspace does not match its obligation.");
-      if (pending.independentProcessedAt == null) {
-        await produceBulkEnrichEdges(pending, memory, ports);
-        await detectBulkEnrichConflicts(memory, ports);
-        ports.enrichPendingRepo.markIndependentProcessed(pending.workspaceId, pending.memoryId, processedAt);
-      }
-      const replay = await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
-      if (replay === "withheld") {
-        ports.enrichPendingRepo.parkSignalRefs(pending.workspaceId, pending.memoryId);
-        withheldCount += 1;
-        continue;
-      }
-      ports.enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, processedAt);
-      processedCount += 1;
+      const outcome = await processClaimedMemory(pending, processedAt, ports);
+      summary[outcome] += 1;
     } catch (error) {
-      failedCount += 1;
+      summary.failed += 1;
       const abandoned = await handleBulkEnrichFailure(
         pending,
         processedAt,
@@ -306,18 +264,36 @@ async function processClaimedBatch(
         reporter
       );
       if (abandoned) {
-        abandonedCount += 1;
+        summary.abandoned += 1;
       }
     }
   }
+  return summary;
+}
 
-  return {
-    processedCount,
-    missingCount,
-    failedCount,
-    abandonedCount,
-    withheldCount
-  };
+async function processClaimedMemory(
+  pending: BulkEnrichPendingClaim,
+  processedAt: string,
+  ports: BulkEnrichReadyPorts
+): Promise<"processed" | "missing" | "withheld"> {
+  const memory = await ports.memoryLookup.findById(pending.memoryId);
+  if (memory === null) {
+    ports.enrichPendingRepo.delete(pending.workspaceId, pending.memoryId);
+    return "missing";
+  }
+  if (memory.workspace_id !== pending.workspaceId) {
+    throw new AlayaError("CONFLICT", "BULK_ENRICH memory workspace does not match its obligation.");
+  }
+  if (pending.independentProcessedAt == null) {
+    await processIndependentEnrichment(pending, memory, processedAt, ports);
+  }
+  const replay = await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
+  if (replay === "withheld") {
+    ports.enrichPendingRepo.parkSignalRefs(pending.workspaceId, pending.memoryId);
+    return "withheld";
+  }
+  ports.enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, processedAt);
+  return "processed";
 }
 
 async function replayBulkEnrichSignalRefs(
@@ -344,54 +320,37 @@ async function replayBulkEnrichSignalRefs(
   });
 }
 
-async function produceBulkEnrichEdges(
+async function processIndependentEnrichment(
   pending: BulkEnrichPendingClaim,
-  memory: Awaited<ReturnType<BulkEnrichReadyPorts["memoryLookup"]["findById"]>> & {
-    readonly object_id: string;
-    readonly workspace_id: string;
-    readonly run_id: string | null;
-  },
+  memory: BulkEnrichMemoryRecord,
+  processedAt: string,
   ports: BulkEnrichReadyPorts
 ): Promise<void> {
-  if (ports.edgeProducer === undefined) {
-    return;
+  if (ports.edgeProducer !== undefined) {
+    await ports.edgeProducer.produceForNewMemory({
+      newMemoryId: memory.object_id,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      sourceSignalId: pending.sourceSignalId ?? memory.object_id
+    });
   }
-  await ports.edgeProducer.produceForNewMemory({
-    newMemoryId: memory.object_id,
-    workspaceId: memory.workspace_id,
-    runId: memory.run_id,
-    sourceSignalId: pending.sourceSignalId ?? memory.object_id
-  });
-}
-
-async function detectBulkEnrichConflicts(
-  memory: Awaited<ReturnType<BulkEnrichReadyPorts["memoryLookup"]["findById"]>> & {
-    readonly object_id: string;
-    readonly dimension: string;
-    readonly scope_class: string;
-    readonly content: string;
-    readonly domain_tags: readonly string[];
-    readonly workspace_id: string;
-    readonly run_id: string | null;
-  },
-  ports: BulkEnrichReadyPorts
-): Promise<void> {
-  if (ports.conflictDetection === undefined) {
-    return;
+  if (ports.conflictDetection !== undefined) {
+    const scan = await ports.conflictDetection.detectAndLinkConflicts({
+      newMemoryId: memory.object_id,
+      newMemoryDimension: memory.dimension,
+      newMemoryScopeClass: memory.scope_class,
+      newMemoryContent: memory.content,
+      newMemoryDomainTags: memory.domain_tags,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      strictNoDrop: true
+    });
+    if (scan.availability === "unavailable") {
+      throw new AlayaError("UNAVAILABLE", "conflict candidate scan unavailable");
+    }
   }
-  const scan = await ports.conflictDetection.detectAndLinkConflicts({
-    newMemoryId: memory.object_id,
-    newMemoryDimension: memory.dimension,
-    newMemoryScopeClass: memory.scope_class,
-    newMemoryContent: memory.content,
-    newMemoryDomainTags: memory.domain_tags,
-    workspaceId: memory.workspace_id,
-    runId: memory.run_id,
-    strictNoDrop: true
-  });
-  if (scan.availability === "unavailable") {
-    throw new AlayaError("UNAVAILABLE", "conflict candidate scan unavailable");
-  }
+  // Replay can remain withheld without repeating this completed phase on retry.
+  ports.enrichPendingRepo.markIndependentProcessed(pending.workspaceId, pending.memoryId, processedAt);
 }
 
 async function handleBulkEnrichFailure(
@@ -429,18 +388,12 @@ async function handleBulkEnrichFailure(
   return false;
 }
 
-function summarizeClaimedBatch(summary: Readonly<{
-  readonly processedCount: number;
-  readonly missingCount: number;
-  readonly failedCount: number;
-  readonly abandonedCount: number;
-  readonly withheldCount: number;
-}>): readonly string[] {
+function summarizeClaimedBatch(summary: BulkEnrichBatchSummary): readonly string[] {
   return [
-    `bulk_enrich:processed_${summary.processedCount}`,
-    `bulk_enrich:missing_${summary.missingCount}`,
-    `bulk_enrich:failed_${summary.failedCount}`,
-    `bulk_enrich:abandoned_${summary.abandonedCount}`,
-    `bulk_enrich:withheld_${summary.withheldCount}`
+    `bulk_enrich:processed_${summary.processed}`,
+    `bulk_enrich:missing_${summary.missing}`,
+    `bulk_enrich:failed_${summary.failed}`,
+    `bulk_enrich:abandoned_${summary.abandoned}`,
+    `bulk_enrich:withheld_${summary.withheld}`
   ];
 }
