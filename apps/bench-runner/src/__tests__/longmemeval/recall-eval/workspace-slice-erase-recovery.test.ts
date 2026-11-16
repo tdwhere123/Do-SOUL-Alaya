@@ -25,12 +25,12 @@ describe("workspace slice erase recovery", () => {
     const packedPath = join(root, "packed.db");
     try {
       await createPackedTwoWorkspaceDb(packedPath);
-      const packed = new BetterSqlite3(packedPath);
+      const packed = initDatabase({ filename: packedPath });
       try {
-        seedRecovery(packed, WORKSPACE_A, 7, 7, 0);
-        seedRecovery(packed, WORKSPACE_B, 9, 4, 1);
+        seedRecovery(packed.connection, WORKSPACE_A, 7, 7, 0);
+        seedRecovery(packed.connection, WORKSPACE_B, 9, 4, 1);
         // Defensive reset: even an incorrectly persisted active flag must not transfer.
-        packed.exec("UPDATE source_erase_repair_control SET repairing = 1");
+        packed.connection.exec("UPDATE source_erase_repair_control SET repairing = 1");
       } finally { packed.close(); }
       const slices = await explodePackedWorkingCopy({
         packedDbPath: packedPath, destDir: join(root, "slices"),
