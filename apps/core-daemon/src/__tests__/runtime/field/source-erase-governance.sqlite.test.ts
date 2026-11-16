@@ -9,6 +9,7 @@ import { initDatabase, SqliteClaimFormRepo, SqliteConflictMatrixRepo, SqliteEven
   SqliteSlotRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
+import { removeHistoricalPreservationMigration } from "../../../../../../packages/storage/src/__tests__/sqlite/historical-preservation-migration-fixture.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { createClaimForm } from "../../../../../../packages/core/src/__tests__/governance/claim-service.test-support.js";
 import { createEvidenceCapsule } from "../../../../../../packages/storage/src/__tests__/repos/capsules/evidence-capsule-repo-fixture.js";
@@ -248,22 +249,17 @@ it("repairs an attributable historical barrier on reopen without reauthoring its
     name GLOB 'quarantine_*' OR name GLOB 'claim_reject_unknown_*' OR name GLOB 'synthesis_reject_unknown_*'
     OR name GLOB 'slot_reject_unknown_*' OR name GLOB 'edge_reject_unknown_*')`).all() as { name: string }[];
   for (const trigger of quarantineTriggers) f.database.connection.exec(`DROP TRIGGER ${trigger.name}`);
-  // Roll back the preservation layer too: its views/triggers depend on the
-  // quarantine schema being removed. Reopen must reinstall the complete layer.
-  const preservationSchema = f.database.connection.prepare(`SELECT type, name FROM sqlite_master
-    WHERE type IN ('trigger','view','table') AND (name GLOB 'historical_*' OR name GLOB 'preservation_*'
-      OR name GLOB 'preserved_*' OR name GLOB 'independent_preservation_*'
-      OR name GLOB 'memory_gc_*' OR name GLOB 'erased_historical_*')
-    ORDER BY CASE type WHEN 'trigger' THEN 0 WHEN 'view' THEN 1 ELSE 2 END, name`).all() as { type: string; name: string }[];
-  for (const object of preservationSchema) f.database.connection.exec(`DROP ${object.type} ${object.name}`);
+  removeHistoricalPreservationMigration(f.database);
   f.database.connection.exec("DROP VIEW privacy_current_quarantine");
   f.database.connection.exec("DROP VIEW privacy_dependency_candidates");
   f.database.connection.exec("DROP TABLE privacy_dependency_quarantine");
   f.database.connection.exec("ALTER TABLE slots DROP COLUMN subject_claim_id");
-  f.database.connection.prepare("DELETE FROM schema_version WHERE version IN (35, 36, 46)").run();
+  f.database.connection.prepare("DELETE FROM schema_version WHERE version IN (35, 36)").run();
   f.database.close();
   const reopened = initDatabase({ filename });
   databases.add(reopened);
+  expect(reopened.connection.prepare("SELECT version FROM schema_version WHERE version IN (35,36,46) ORDER BY version").all())
+    .toEqual([35, 36, 46].map(version => ({ version })));
   createDaemonFieldRepos({ database: reopened });
   const claims = new SqliteClaimFormRepo(reopened);
   const events = new SqliteEventLogRepo(reopened);

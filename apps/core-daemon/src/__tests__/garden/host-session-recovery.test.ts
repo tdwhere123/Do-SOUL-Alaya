@@ -4,6 +4,7 @@ import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { removeHistoricalPreservationMigration } from "../../../../../packages/storage/src/__tests__/sqlite/historical-preservation-migration-fixture.js";
 import { createHash } from "node:crypto";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
 import { createDaemonHostSessionCapture, createHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
@@ -137,6 +138,8 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
     run_id: RUN, producer: MCP_HOST_SESSION_ISSUER.producer, admitted_at: env.now(), pending_body: later.content });
   const sql039 = readFileSync("packages/storage/src/migrations/039-host-session-capture.sql", "utf8");
   const oldTable = sql039.slice(0, sql039.indexOf("CREATE INDEX idx_host_session_messages_admitted"));
+  // Remove dependent preservation before recovery: both must really reinstall on reopen.
+  removeHistoricalPreservationMigration(env.database);
   // Remove the later recovery migration as well: the fixture must represent a real pre-intent schema.
   const recoveryTriggers = env.database.connection.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger'
     AND name LIKE 'source_erase_recovery_%'`).all() as { name: string }[];
@@ -155,6 +158,8 @@ it("migrates a stranded legacy receipt using its host inventory before accepting
       PRIMARY KEY (workspace_id, container_key)) WITHOUT ROWID;
     DELETE FROM schema_version WHERE version = 40;`);
   const resumed = restartedCapture(env);
+  expect(env.database.connection.prepare("SELECT version FROM schema_version WHERE version IN (40,44,45,46) ORDER BY version").all())
+    .toEqual([40, 44, 45, 46].map(version => ({ version })));
   expect(persisted(env)).toEqual([
     expect.objectContaining({ round_index: 0, round_root_id: originalRoot, pending_body: "secret first" }),
     expect.objectContaining({ message_id: "message-1", round_index: null, pending_body: "later reply" })]);

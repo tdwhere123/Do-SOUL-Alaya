@@ -12,7 +12,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { canonicalJson, RuntimeGardenComputeConfigSchema, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
 import { fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
@@ -145,10 +144,12 @@ it("preserves host unavailability, unknown occupancy, cancellation, expiry and s
         const result = prepareFixtureCorrespondence(action);
         if (mode === "late_cancel") controller.abort(new Error("caller revoked during correspondence preparation"));
         if (mode === "stale") {
-          // Another connection invalidates the exposed descriptor's query lease.
-          const db = new DatabaseSync(filename);
-          try { db.prepare("UPDATE source_records SET source_version='replacement' WHERE source_id='z'").run(); }
-          finally { db.close(); }
+          // Another initialized connection preserves trigger/UDF behavior while
+          // invalidating the exposed descriptor's query lease.
+          const db = initDatabase({ filename });
+          try {
+            expect(db.connection.prepare("UPDATE source_records SET source_version='replacement' WHERE source_id='z'").run().changes).toBe(1);
+          } finally { closeCachedDatabase(filename); }
         }
         return result;
       } };
@@ -166,7 +167,7 @@ it("preserves host unavailability, unknown occupancy, cancellation, expiry and s
           accounting: { reserved_work: child.work_units, reserved_memory_bytes: child.memory_bytes } });
         if (mode === "late_cancel") expect(trace.terminal_cause).toMatchObject({ kind: "caller_abort" });
       } else if (mode === "stale" || mode === "expired") {
-        expect(trace.status).toBe("failed");
+        expect(trace.status, `${mode}: ${JSON.stringify(trace.terminal_cause)}`).toBe("failed");
         expect(trace.qualification).toMatchObject({ status: "unavailable", reason: "reason_failed",
           terminal_cause: { kind: "execution_error", reason: { details: { admission: mode === "stale" ? "filtered" : "expired" } } } });
         expect(trace.accounting.reserved_work).toBe(0);

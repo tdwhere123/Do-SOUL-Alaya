@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { canonicalGovernanceSubject } from "@do-soul/alaya-protocol";
 import { initDatabase, scanObjectKeyRetrofitSources, SqliteClaimFormRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo,
   SqliteMemoryObjectKeyRepo, SqliteSlotRepo, SqliteSynthesisCapsuleRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { removeHistoricalPreservationMigration } from "../../../../../../packages/storage/src/__tests__/sqlite/historical-preservation-migration-fixture.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { createClaimForm } from "../../../../../../packages/core/src/__tests__/governance/claim-service.test-support.js";
 import { createEvidenceCapsule } from "../../../../../../packages/storage/src/__tests__/repos/capsules/evidence-capsule-repo-fixture.js";
@@ -73,6 +74,8 @@ it("quarantines unindexed tombstone descendants on upgrade and retains independe
 
   const reopened = initDatabase({ filename });
   tracked.add(reopened);
+  expect(reopened.connection.prepare("SELECT version FROM schema_version WHERE version IN (36,46) ORDER BY version").all())
+    .toEqual([{ version: 36 }, { version: 46 }]);
   const memory = new SqliteMemoryEntryRepo(reopened);
   const synthesis = new SqliteSynthesisCapsuleRepo(reopened);
   const claim = new SqliteClaimFormRepo(reopened);
@@ -129,6 +132,7 @@ it("quarantines unindexed tombstone descendants on upgrade and retains independe
 });
 
 function removeQuarantineMigration(database: StorageDatabase): void {
+  removeHistoricalPreservationMigration(database);
   const triggers = database.connection.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND
     (name GLOB 'quarantine_*' OR name GLOB 'claim_reject_unknown_*' OR name GLOB 'synthesis_reject_unknown_*'
     OR name GLOB 'slot_reject_unknown_*' OR name GLOB 'edge_reject_unknown_*')`).all() as { name: string }[];

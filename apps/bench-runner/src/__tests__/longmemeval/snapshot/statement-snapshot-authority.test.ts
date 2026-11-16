@@ -2,7 +2,7 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { closeCachedDatabase, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SOURCE_STATEMENTS_PROMPT } from "@do-soul/alaya-soul";
 import { startBenchDaemon } from "../../../harness/daemon.js";
@@ -92,15 +92,16 @@ async function seedStatementSnapshot(baseRoot: string): Promise<StatementSnapsho
   }
 }
 
-function verifyCopy(mutate?: (db: DatabaseSync) => void): void {
+function verifyCopy(mutate?: (db: StorageDatabase["connection"]) => void): void {
   const copyRoot = mkdtempSync(join(tmpdir(), "statement-snapshot-authority-copy-"));
   const dbPath = join(copyRoot, "snapshot.db");
   copyFileSync(fixture.dbPath, dbPath);
-  const db = new DatabaseSync(dbPath);
+  // Source mutations execute preservation triggers and need the storage-owned UDFs.
+  const db = initDatabase({ filename: dbPath });
   try {
-    mutate?.(db);
+    mutate?.(db.connection);
   } finally {
-    db.close();
+    closeCachedDatabase(dbPath);
   }
   try {
     assertSnapshotDatasetSubstrateIdentity({ dbPath, sidecar: fixture.sidecar, questions: [fixture.question],

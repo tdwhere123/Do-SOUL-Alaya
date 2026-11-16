@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import BetterSqlite3 from "better-sqlite3";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { closeCachedDatabase, initDatabase } from "@do-soul/alaya-storage";
 import { warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
 import { hashContentDigest, indexEntryCacheKey } from "@do-soul/alaya-protocol";
 import { ordinaryIndexedSnapshot } from "./ordinary-indexed-snapshot.test-support.js";
@@ -156,10 +157,12 @@ it("captures and re-encodes the actual MCP/SQLite order, and refuses scoring on 
     .toThrow("counterfactual projection attempts were not observed");
   const changedSnapshot = join(fixture.root, "changed.sqlite");
   copyFileSync(row.snapshot, changedSnapshot);
-  const changedDb = new BetterSqlite3(changedSnapshot);
-  changedDb.prepare("UPDATE source_records SET source_body=replace(source_body, 'Project', 'ProjeCt') WHERE workspace_id=?")
-    .run(row.workspace);
-  changedDb.close();
+  // Keep the production connection's trigger functions during deliberate tampering.
+  const changedDb = initDatabase({ filename: changedSnapshot });
+  try {
+    changedDb.connection.prepare("UPDATE source_records SET source_body=replace(source_body, 'Project', 'ProjeCt') WHERE workspace_id=?")
+      .run(row.workspace);
+  } finally { closeCachedDatabase(changedSnapshot); }
   expect(() => delivery.simulateRecallDelivery({ ...completed, snapshot: changedSnapshot }, order))
     .toThrow("captured snapshot digest changed");
   const unsealed = join(fixture.root, "unsealed.sqlite");
