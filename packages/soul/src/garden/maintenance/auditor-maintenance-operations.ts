@@ -12,7 +12,8 @@ import {
   SoulGreenRevokedPayloadSchema,
   type AuditorPointerHealPort,
   type GardenTaskDescriptor,
-  type GardenTaskResult
+  type GardenTaskResult,
+  type StaleMemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
   addMillisecondsIso,
@@ -32,44 +33,11 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
     const noopMemoryIds: string[] = [];
 
     for (const entry of batch) {
-      const revokedAt = this.now();
-      const payload = SoulGreenRevokedPayloadSchema.parse({
-        target_object_id: entry.memory_entry_id,
-        workspace_id: task.workspace_id,
-        revoke_reason: "verification_fail",
-        task_id: task.task_id,
-        occurred_at: revokedAt
-      });
-      try {
-        await this.appendEventLogAndMutate(
-          {
-            event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
-            entity_type: "memory_entry",
-            entity_id: entry.memory_entry_id,
-            workspace_id: task.workspace_id,
-            run_id: task.run_id,
-            caused_by: this.role,
-            payload_json: payload
-          },
-          () => {
-            const result = this.dependencies.greenMaintenancePort.revokeGreen(
-              entry.memory_entry_id,
-              "verification_fail",
-              task.task_id,
-              task.workspace_id
-            );
-            if (result.affected === 0) {
-              throw new GreenRevokeNoopError(entry.memory_entry_id, task.workspace_id);
-            }
-          }
-        );
+      const outcome = await this.revokeStaleEvidenceGreen(task, entry.memory_entry_id);
+      if (outcome === "revoked") {
         revokedMemoryIds.push(entry.memory_entry_id);
-      } catch (err) {
-        if (err instanceof GreenRevokeNoopError) {
-          noopMemoryIds.push(entry.memory_entry_id);
-          continue;
-        }
-        throw err;
+      } else {
+        noopMemoryIds.push(entry.memory_entry_id);
       }
     }
 
@@ -79,6 +47,50 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
+  }
+
+  private async revokeStaleEvidenceGreen(
+    task: GardenTaskDescriptor,
+    memoryEntryId: string
+  ): Promise<"revoked" | "noop"> {
+    const payload = SoulGreenRevokedPayloadSchema.parse({
+      target_object_id: memoryEntryId,
+      workspace_id: task.workspace_id,
+      revoke_reason: "verification_fail",
+      task_id: task.task_id,
+      occurred_at: this.now()
+    });
+    try {
+      await this.appendEventLogAndMutate(
+        {
+          event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
+          entity_type: "memory_entry",
+          entity_id: memoryEntryId,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          payload_json: payload
+        },
+        () => {
+          const result = this.dependencies.greenMaintenancePort.revokeGreen(
+            memoryEntryId,
+            "verification_fail",
+            task.task_id,
+            task.workspace_id
+          );
+          // Throw inside the transaction: a zero-row revoke must also roll back its EventLog row.
+          if (result.affected === 0) {
+            throw new GreenRevokeNoopError(memoryEntryId, task.workspace_id);
+          }
+        }
+      );
+      return "revoked";
+    } catch (error) {
+      if (error instanceof GreenRevokeNoopError) {
+        return "noop";
+      }
+      throw error;
+    }
   }
 
   protected async executePointerHealthCheck(
@@ -288,7 +300,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
   private async recordEvidenceCheckEffects(
     task: GardenTaskDescriptor,
     completedAt: string,
-    batch: readonly { readonly memory_entry_id: string; readonly stale_evidence_refs: readonly unknown[] }[],
+    batch: readonly StaleMemoryEntry[],
     revokedMemoryIds: readonly string[],
     noopMemoryIds: readonly string[]
   ): Promise<void> {
@@ -323,7 +335,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
   private async upsertEvidenceFailureGroups(
     workspaceId: string,
     completedAt: string,
-    batch: readonly { readonly memory_entry_id: string; readonly stale_evidence_refs: readonly unknown[] }[],
+    batch: readonly StaleMemoryEntry[],
     revokedMemoryIds: readonly string[]
   ): Promise<void> {
     for (const memoryId of revokedMemoryIds) {
