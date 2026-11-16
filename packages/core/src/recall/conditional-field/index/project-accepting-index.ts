@@ -185,8 +185,33 @@ export type AcceptingProjectionInput = Readonly<{
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
+type EncodedAcceptingPage = Readonly<{
+  readonly projected: ReturnType<typeof acceptingEntries>;
+  readonly emitted: ReturnType<typeof emittedRevisionsOf>;
+  readonly useEmittedSet: boolean;
+  readonly entries: readonly IndexEntry[];
+  readonly members: readonly IndexEntry[];
+  readonly updates: readonly IndexEntry[];
+  readonly remaining: number;
+  readonly offset: number;
+  readonly productUpdates: readonly ProductUpdate[];
+  readonly explanations?: readonly Derivation[];
+}>;
+
 function workIsOpen(status: "complete" | "open" | undefined): boolean {
   return status === "open";
+}
+
+function finalizationAllowance(input: AcceptingProjectionInput): number {
+  return input.remaining_reserve ?? input.budget.finalization_reserve;
+}
+
+function availableMemory(input: AcceptingProjectionInput): number {
+  return input.remaining_memory_bytes ?? input.budget.memory_bytes;
+}
+
+function committedLedgerOf(input: AcceptingProjectionInput): EmittedProductLedger {
+  return input.delivered_product_states ?? committedProductStatesOf(input.prior_continuation) ?? {};
 }
 
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
@@ -235,11 +260,11 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
   }
   const count = ids.length;
   const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
-  const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+  const allowance = finalizationAllowance(input);
   if (semantic === undefined ? packetId !== hypothesisId : sourceSemanticInterpretationIdentity(semantic.source_interpretation, fieldContractSha256) !== packetId) {
     throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
   }
-  if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
+  if (work > allowance || count * 128 > availableMemory(input)) return null;
   const nodes = new Set(ids);
   const check = (product: ProductStateKey) => {
     const node = product.interpretation_node;
@@ -260,34 +285,34 @@ export function continueAcceptingIndex(
   previous: InformationIndex,
   input: Omit<AcceptingProjectionInput, "query_id" | "snapshot_id" | "result_version" | "prior_continuation">
 ): InformationIndex {
-  if (previous.continuation === null) {
+  const continuation = previous.continuation;
+  if (continuation === null) {
     return closedIndex({
       query_id: previous.query_id,
       snapshot_id: previous.snapshot_id,
       result_version: previous.result_version
     }, previous.representation, invalidatedCompleteness());
   }
-  const serverRevisions = committedRevisionsOf(previous);
-  const emitted = serverRevisions
+  const emitted = committedRevisionsOf(previous)
     ?? input.delivered_entry_revisions
-    ?? previous.continuation.emitted_revisions
+    ?? continuation.emitted_revisions
     ?? {};
   const products = committedProductStatesOf(previous)
-    ?? committedProductStatesOf(previous.continuation)
+    ?? committedProductStatesOf(continuation)
     ?? {};
   return projectAcceptingIndex({
     ...input,
     query_id: previous.query_id,
     snapshot_id: previous.snapshot_id,
     result_version: previous.result_version,
-    prior_continuation: previous.continuation,
+    prior_continuation: continuation,
     delivered_entry_revisions: emitted,
     delivered_product_states: { ...products, ...input.delivered_product_states },
     delivered_product_ids: new Set([
       ...input.delivered_product_ids ?? [],
       ...Object.keys(emitted)
     ]),
-    interpretation_id: input.interpretation_id ?? previous.continuation.interpretation_id
+    interpretation_id: input.interpretation_id ?? continuation.interpretation_id
   });
 }
 
@@ -295,18 +320,18 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
   if (input.transition_derivations === undefined || input.output_derivations !== undefined) {
     return input;
   }
-  const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+  const allowance = finalizationAllowance(input);
   const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
   // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
   const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
-  const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
+  const memory = availableMemory(input);
   const payloadMemory = input.finalize_payload === undefined ? 0
-    : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
+    : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(memory / 4));
   const groundingInput = { seeds: input.grounding_seeds ?? input.snapshot.seeds,
     transitions: input.grounding_transitions ?? input.snapshot.retained_transitions,
     derivations: input.grounding_derivations ?? input.derivations ?? [],
     transition_derivations: input.transition_derivations ?? {},
-    progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
+    progress: input.grounding_progress, memory_bytes: memory - payloadMemory,
     ...(input.grounding_input_revision === undefined ? {} : { input_revision: input.grounding_input_revision }),
     allowance: groundingAllowance };
   const grounded = input.cost === undefined
@@ -329,7 +354,7 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
     grounding_complete: grounded.complete,
     ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
     remaining_reserve: allowance - grounded.work,
-    remaining_memory_bytes: Math.max(0, availableMemory - grounded.retained_bytes),
+    remaining_memory_bytes: Math.max(0, memory - grounded.retained_bytes),
     ...(!grounded.complete ? { resource_work: "open" } : {}) };
 }
 
@@ -353,18 +378,8 @@ function pageAcceptingIndex(
   const pageEnd = resolvePageOffset(input, scanSize) + input.budget.page_budget;
   const projected = acceptingEntries(input, useEmittedSet ? emitted : undefined, pageEnd);
   const entries = useEmittedSet ? projected.entries : sortIndexEntries(projected.entries, policy);
-  if (!useEmittedSet && continuationPrefixUnverified(input, entries, projected.truncated)) {
-    input.on_remaining_reserve?.(projected.remaining);
-    return { ...closedIndex(input, representation, indexCompleteness(input, {
-      total: entries.length, remaining: 1, omitted_payload: false,
-      expand_payload: input.expand_payload !== false, resource_work: "open"
-    })),
-      continuation: input.prior_continuation ?? null };
-  }
-  if (!useEmittedSet && continuationSetMismatch(input, entries)) {
-    input.on_remaining_reserve?.(projected.remaining);
-    return closedIndex(input, representation, invalidatedCompleteness());
-  }
+  const blocked = blockedProjectedContinuation(input, representation, entries, projected, useEmittedSet);
+  if (blocked !== undefined) return blocked;
   input.on_projection_progress?.(projected.next, projected.facet);
   if (projected.facet !== undefined) {
     input.cost?.add("index", {
@@ -373,12 +388,127 @@ function pageAcceptingIndex(
       cache_misses: projected.facet.cache_misses
     });
   }
+  const allocated = allocateAcceptingPage(input, projected, entries, emitted, useEmittedSet);
+  const finalized = input.finalize_payload?.(allocated.members, projected.remaining);
+  if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
+  const explanation = projectPageExplanations({
+    input, members: allocated.members, updates: allocated.updates,
+    productUpdates: allocated.productUpdates, retractions: allocated.retractions,
+    remaining: allocated.remaining, preparation_origin: preparationOrigin, facet_index: projected.facet?.index,
+    available: finalized?.remaining ?? projected.remaining,
+    memory: finalized?.remaining_memory_bytes ?? availableMemory(input),
+    updatesFor: entry => componentUpdatesFor(entry, emitted, allocated.ledger)
+  });
+  input = explanation.input;
+  if (explanation.terminal !== undefined) {
+    input.on_remaining_reserve?.(explanation.available);
+    return closedIndex(input, representation, explanation.terminal === "invalid"
+      ? invalidatedCompleteness() : resourceRejectedCompleteness());
+  }
+  if (!useEmittedSet || explanation.members.length > 0) input.on_semantic_entries?.(explanation.members);
+  input.on_remaining_reserve?.(explanation.available);
+  return encodeAcceptingIndex(input, representation, {
+    projected, emitted, useEmittedSet, entries,
+    members: explanation.members, updates: explanation.updates,
+    remaining: explanation.remaining, offset: allocated.offset,
+    productUpdates: explanation.productUpdates, explanations: explanation.explanations
+  });
+}
+
+function prepareProjectionInput(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  return prepareExplanationProgress(prepareSeedProofIndex(applyProjectionGrounding(input)));
+}
+
+function prepareSeedProofIndex(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  if (input.grounding_complete === false && input.derivation_forest === undefined && (input.derivations?.length ?? 0) > 0) {
+    const rows = input.derivations!;
+    const previous = input.seed_proof_index;
+    const same = previous?.matchesSource(rows, input.explanation_source_revision) === true;
+    const owner = same && previous !== undefined ? previous.fork() : new SeedProofIndex(rows, input.explanation_source_revision);
+    const released = previous !== undefined && !same ? previous.retainedBytes : 0;
+    const allowance = finalizationAllowance(input);
+    const memory = availableMemory(input) + released;
+    const step = owner.advance(allowance, memory);
+    if (!step.complete && allowance < 1) input.on_atomic_work_block?.({
+      phase: "proof_index", required_work: 1, available_work: allowance });
+    input.cost?.add("index", { budget_work: step.work, charged_retained_bytes: step.bytes });
+    input.on_seed_proof_index?.(owner, step.bytes - released, step.work);
+    const roots = input.output_derivations;
+    return { ...input, derivations: undefined, derivation_forest: owner.forest, seed_proof_index: owner,
+      output_derivation_roots: { get: key => roots?.[key] }, remaining_reserve: allowance - step.work,
+      remaining_memory_bytes: memory - step.bytes, ...(!step.complete ? { expand_payload: false, resource_work: "open" as const } : {}) };
+  }
+  return input;
+}
+
+function prepareExplanationProgress(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  if (input.explanation_progress !== undefined && !input.explanation_progress.matchesSource(
+    input.derivation_forest ?? input.derivations, input.support, input.explanation_source_revision)) {
+    const released = input.explanation_progress.retainedBytes;
+    input.on_explanation_progress?.(undefined, -released, 0);
+    input = { ...input, explanation_progress: undefined,
+      remaining_memory_bytes: availableMemory(input) + released };
+  }
+  if (input.explanation_progress !== undefined) {
+    // A one-unit continuation must be able to advance its retained proof before
+    // the same update is scanned again; otherwise projection can consume every page.
+    const allowance = finalizationAllowance(input);
+    const memory = availableMemory(input);
+    const owner = input.explanation_progress.fork();
+    const progress = owner.advance(allowance, memory);
+    if (!progress.complete && allowance < 1) input.on_atomic_work_block?.({
+      phase: "explanation", required_work: 1, available_work: allowance });
+    input.on_explanation_progress?.(owner, progress.bytes, progress.work);
+    input = { ...input, explanation_progress: owner, remaining_reserve: allowance - progress.work,
+      remaining_memory_bytes: memory - progress.bytes };
+  }
+  return input;
+}
+
+function blockedProjectedContinuation(
+  input: AcceptingProjectionInput,
+  representation: InformationIndex["representation"],
+  entries: readonly IndexEntry[],
+  projected: ReturnType<typeof acceptingEntries>,
+  useEmittedSet: boolean
+): InformationIndex | undefined {
+  if (useEmittedSet) return undefined;
+  if (continuationPrefixUnverified(input, entries, projected.truncated)) {
+    input.on_remaining_reserve?.(projected.remaining);
+    return { ...closedIndex(input, representation, indexCompleteness(input, {
+      total: entries.length, remaining: 1, omitted_payload: false,
+      expand_payload: input.expand_payload !== false, resource_work: "open"
+    })),
+      continuation: input.prior_continuation ?? null };
+  }
+  if (continuationSetMismatch(input, entries)) {
+    input.on_remaining_reserve?.(projected.remaining);
+    return closedIndex(input, representation, invalidatedCompleteness());
+  }
+  return undefined;
+}
+
+function allocateAcceptingPage(
+  input: AcceptingProjectionInput,
+  projected: ReturnType<typeof acceptingEntries>,
+  entries: readonly IndexEntry[],
+  emitted: ReturnType<typeof emittedRevisionsOf>,
+  useEmittedSet: boolean
+): Readonly<{
+  readonly offset: number;
+  readonly members: readonly IndexEntry[];
+  readonly updates: readonly IndexEntry[];
+  readonly productUpdates: readonly ProductUpdate[];
+  readonly retractions: readonly ProductUpdate[];
+  readonly remaining: number;
+  readonly ledger: EmittedProductLedger;
+}> {
   const offset = useEmittedSet ? 0 : resolvePageOffset(input, entries.length);
   const candidateMembers = useEmittedSet
     ? projected.members
     : entries.slice(offset, offset + input.budget.page_budget);
   const candidates = useEmittedSet ? projected.updates : [];
-  const ledger = input.delivered_product_states ?? committedProductStatesOf(input.prior_continuation) ?? {};
+  const ledger = committedLedgerOf(input);
   const retractions = retractionUpdates(projected.retracted, ledger);
   const pendingUpdates = [...retractions, ...candidates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))];
   // Retractions and retained refinements precede new exposure; only selected
@@ -391,87 +521,15 @@ function pageAcceptingIndex(
   const remaining = useEmittedSet
     ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length, deliveryPending)
     : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
-  const finalized = input.finalize_payload?.(members, projected.remaining);
-  if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
-  const explanation = projectPageExplanations({ input, members, updates, productUpdates, retractions, remaining,
-    preparation_origin: preparationOrigin, facet_index: projected.facet?.index,
-    available: finalized?.remaining ?? projected.remaining,
-    memory: finalized?.remaining_memory_bytes ?? input.remaining_memory_bytes ?? input.budget.memory_bytes,
-    updatesFor: entry => componentUpdatesFor(entry, emitted, ledger) });
-  input = explanation.input;
-  if (explanation.terminal !== undefined) {
-    input.on_remaining_reserve?.(explanation.available);
-    return closedIndex(input, representation, explanation.terminal === "invalid"
-      ? invalidatedCompleteness() : resourceRejectedCompleteness());
-  }
-  const prepared = explanation.members;
-  if (!useEmittedSet || prepared.length > 0) input.on_semantic_entries?.(prepared);
-  input.on_remaining_reserve?.(explanation.available);
-  return encodeAcceptingIndex({
-    input, representation, projected, emitted, useEmittedSet, entries, members: explanation.members, updates: explanation.updates,
-    remaining: explanation.remaining, offset, prepared, productUpdates: explanation.productUpdates, explanations: explanation.explanations
-  });
+  return { offset, members, updates, productUpdates, retractions, remaining, ledger };
 }
 
-function prepareProjectionInput(input: AcceptingProjectionInput): AcceptingProjectionInput {
-  input = applyProjectionGrounding(input);
-  if (input.grounding_complete === false && input.derivation_forest === undefined && (input.derivations?.length ?? 0) > 0) {
-    const rows = input.derivations!;
-    const previous = input.seed_proof_index;
-    const same = previous?.matchesSource(rows, input.explanation_source_revision) === true;
-    const owner = same && previous !== undefined ? previous.fork() : new SeedProofIndex(rows, input.explanation_source_revision);
-    const released = previous !== undefined && !same ? previous.retainedBytes : 0;
-    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
-    const memory = (input.remaining_memory_bytes ?? input.budget.memory_bytes) + released;
-    const step = owner.advance(allowance, memory);
-    if (!step.complete && allowance < 1) input.on_atomic_work_block?.({
-      phase: "proof_index", required_work: 1, available_work: allowance });
-    input.cost?.add("index", { budget_work: step.work, charged_retained_bytes: step.bytes });
-    input.on_seed_proof_index?.(owner, step.bytes - released, step.work);
-    const roots = input.output_derivations;
-    input = { ...input, derivations: undefined, derivation_forest: owner.forest, seed_proof_index: owner,
-      output_derivation_roots: { get: key => roots?.[key] }, remaining_reserve: allowance - step.work,
-      remaining_memory_bytes: memory - step.bytes, ...(!step.complete ? { expand_payload: false, resource_work: "open" as const } : {}) };
-  }
-  if (input.explanation_progress !== undefined && !input.explanation_progress.matchesSource(
-    input.derivation_forest ?? input.derivations, input.support, input.explanation_source_revision)) {
-    const released = input.explanation_progress.retainedBytes;
-    input.on_explanation_progress?.(undefined, -released, 0);
-    input = { ...input, explanation_progress: undefined,
-      remaining_memory_bytes: (input.remaining_memory_bytes ?? input.budget.memory_bytes) + released };
-  }
-  if (input.explanation_progress !== undefined) {
-    // A one-unit continuation must be able to advance its retained proof before
-    // the same update is scanned again; otherwise projection can consume every page.
-    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
-    const memory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
-    const owner = input.explanation_progress.fork();
-    const progress = owner.advance(allowance, memory);
-    if (!progress.complete && allowance < 1) input.on_atomic_work_block?.({
-      phase: "explanation", required_work: 1, available_work: allowance });
-    input.on_explanation_progress?.(owner, progress.bytes, progress.work);
-    input = { ...input, explanation_progress: owner, remaining_reserve: allowance - progress.work,
-      remaining_memory_bytes: memory - progress.bytes };
-  }
-  return input;
-}
-
-function encodeAcceptingIndex(page: Readonly<{
-  readonly input: AcceptingProjectionInput;
-  readonly representation: InformationIndex["representation"];
-  readonly projected: ReturnType<typeof acceptingEntries>;
-  readonly emitted: ReturnType<typeof emittedRevisionsOf>;
-  readonly useEmittedSet: boolean;
-  readonly entries: IndexEntry[];
-  readonly members: readonly IndexEntry[];
-  readonly updates: readonly IndexEntry[];
-  readonly remaining: number;
-  readonly offset: number;
-  readonly prepared: readonly IndexEntry[];
-  readonly productUpdates: readonly ProductUpdate[];
-  readonly explanations?: readonly Derivation[];
-}>): InformationIndex {
-  const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared, productUpdates } = page;
+function encodeAcceptingIndex(
+  input: AcceptingProjectionInput,
+  representation: InformationIndex["representation"],
+  page: EncodedAcceptingPage
+): InformationIndex {
+  const { projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, productUpdates } = page;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const retryableOmission = mixedPayload || input.payload_work === "open"
@@ -499,10 +557,7 @@ function encodeAcceptingIndex(page: Readonly<{
   const nextOffset = offset + members.length;
   const scanOffset = projected.truncated || useEmittedSet
       || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
-  const ledger = input.delivered_product_states
-    ?? committedProductStatesOf(input.prior_continuation)
-    ?? {};
-  const committedProducts = mergeCommittedProductStates(ledger, members, updates, productUpdates);
+  const committedProducts = mergeCommittedProductStates(committedLedgerOf(input), members, updates, productUpdates);
   const fullyDeliveredUpdates = updates.filter((entry) => productUpdatesBetween(
     productStateKeyFromIndexEntry(entry), committedProducts[productIdOfEntry(entry)], productComponentState(entry)
   ).length === 0);
@@ -523,7 +578,7 @@ function encodeAcceptingIndex(page: Readonly<{
     query_id: input.query_id,
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
-    entries: prepared,
+    entries: members,
     explanations: page.explanations ?? [],
     completeness: completenessWithOrder(completeness, order),
     continuation: refused ? null : nextContinuation({
