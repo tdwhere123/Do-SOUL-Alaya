@@ -5,7 +5,8 @@ import { runAlayaMcpStdioServer } from "../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolDispatcher } from "../../mcp-memory/tool/tool-handler-dispatch.js";
 import type { McpMemoryToolOperations, GardenTaskOperations } from "../../mcp-memory/tool/tool-handler-operations.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
-import { listAlayaMemoryTools, type AlayaMemoryToolName } from "../../mcp-memory/tool/tool-catalog.js";
+import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools, type AlayaMemoryToolName } from "../../mcp-memory/tool/tool-catalog.js";
+import { expectedEffectiveDescriptionByName } from "../mcp-memory/tool/mcp-memory-tool-effective-description.fixture.js";
 
 class PipeClientTransport {
   public onclose?: () => void;
@@ -132,6 +133,41 @@ describe("Alaya MCP stdio pipe", () => {
           total_count: 0
         }
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("serves exact effective descriptions over real stdio list_tools", async () => {
+    const clientToServer = new PassThrough();
+    const serverToClient = new PassThrough();
+    const handler: McpMemoryToolHandler = {
+      call: async () => {
+        throw new Error("stdio effective-description list_tools test must not call tools");
+      }
+    };
+    const server = await runAlayaMcpStdioServer({
+      memoryToolHandler: handler,
+      contextProvider: () => ({
+        workspaceId: "workspace-1",
+        runId: null,
+        agentTarget: "inspector",
+        sessionId: "stdio-pipe-effective-description"
+      }),
+      stdin: clientToServer,
+      stdout: serverToClient
+    });
+    const client = new Client({ name: "stdio-pipe-effective-description", version: "test" }, { capabilities: {} });
+
+    try {
+      await client.connect(new PipeClientTransport(serverToClient, clientToServer));
+      const listed = await client.listTools();
+      const expectedByName = expectedEffectiveDescriptionByName();
+      expect(listed.tools.map((tool) => tool.name)).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
+      for (const published of listed.tools) {
+        expect(published.description).toBe(expectedByName.get(published.name as AlayaMemoryToolName));
+      }
     } finally {
       await client.close();
       await server.close();
