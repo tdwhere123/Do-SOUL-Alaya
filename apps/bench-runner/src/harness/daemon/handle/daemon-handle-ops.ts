@@ -54,11 +54,12 @@ import {
 import { buildBenchRecallResponse, encodeBenchRecallResults } from "./bench-recall-response.js";
 import {
   prepareBenchRecallRequest,
-  type PreparedBenchRecallRequest
+  type BenchRecallInvokeRequest
 } from "./bench-recall-request.js";
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
 import { createFieldProjectionCheckpointOperation } from "../runtime/daemon-field-projection.js";
 import { createRelationProjectionCheckpointOperation } from "../runtime/daemon-relation-projection.js";
+import { benchRequestFilters } from "../../recall/conditional-request-budget.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -161,37 +162,38 @@ export function createBenchRecallOperation(
     query: string,
     opts: BenchRecallOptions = {}
   ): ReturnType<BenchDaemonHandle["recall"]> => {
-    const prepared = prepareBenchRecallRequest(input, query, opts);
+    const invoke = prepareBenchRecallRequest(input, query, opts);
     const recallResult = await invokeBoundRecall({
-      ...prepared.invoke,
+      ...invoke,
       recallService: input.activeRuntime.services.recallService
     });
-    return await deliverBenchRecallResponse(input, prepared, recallResult, exposureSession);
+    return await deliverBenchRecallResponse(input, invoke, recallResult, exposureSession, opts);
   };
 }
 
 async function deliverBenchRecallResponse(
   input: BenchRecallOperationInput,
-  prepared: PreparedBenchRecallRequest,
+  invoke: BenchRecallInvokeRequest,
   recallResult: BenchRecallServiceResult,
-  exposureSession: FirstExposureSession
+  exposureSession: FirstExposureSession,
+  opts: BenchRecallOptions
 ): ReturnType<BenchDaemonHandle["recall"]> {
   const results = encodeBenchRecallResults(
     recallResult,
-    prepared.policy,
-    prepared.requestBudget,
+    invoke.policyOverride,
+    invoke.budget,
     {
-      queryText: prepared.queryText,
+      queryText: invoke.queryText,
       workspaceId: input.activeContext.workspaceId,
-      referenceTime: prepared.interpretationClock,
-      requestBudget: prepared.requestBudget,
-      requestFilters: prepared.requestFilters,
-      expectedIndexSnapshotId: prepared.expectedIndexSnapshotId
+      referenceTime: invoke.interpretationClock,
+      requestBudget: invoke.budget,
+      requestFilters: benchRequestFilters(opts, invoke.policyOverride),
+      expectedIndexSnapshotId: opts.continuation?.snapshot_id
     }
   );
   const deliveryId = await recordBenchRecallDelivery(input, results, recallResult);
   await emitBenchContextLensAssembledEvent(input.dataDir, {
-    taskSurfaceRef: prepared.taskSurface.runtime_id,
+    taskSurfaceRef: invoke.taskSurface.runtime_id,
     lensEntryCount: results.length,
     totalTokenEstimate: results.reduce(
       (sum, result) => sum + result.budget_state.token_estimate,
@@ -204,13 +206,13 @@ async function deliverBenchRecallResponse(
     deliveryId,
     results,
     recallResult,
-    prepared.requestBudget
+    invoke.budget
   );
   return {
     ...response,
     first_exposure_page: exposureSession.record(
       response,
-      prepared.continuation,
+      opts.continuation,
       enrichAbstentionConfidence(
         joinFusedScoresOntoResults(exposureSlots(response), response, input.embeddingMode)
       )

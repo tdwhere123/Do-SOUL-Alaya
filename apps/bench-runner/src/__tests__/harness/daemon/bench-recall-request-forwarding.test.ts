@@ -63,8 +63,7 @@ function continuation(clock = CLOCK_C, snapshot = SNAPSHOT): Continuation {
 
 describe("prepareBenchRecallRequest forwarding", () => {
   it("omits undefined optional own-properties and keeps protocol support flags", () => {
-    const prepared = prepareBenchRecallRequest(requestInput(), "needle");
-    const invoke = prepared.invoke;
+    const invoke = prepareBenchRecallRequest(requestInput(), "needle");
     for (const key of OPTIONAL_INVOKE_KEYS) {
       expect(Object.hasOwn(invoke, key)).toBe(false);
     }
@@ -82,17 +81,12 @@ describe("prepareBenchRecallRequest forwarding", () => {
     expect(invoke.workspaceId).toBe("workspace-1");
     expect(invoke.runId).toBe("run-1");
     expect(invoke.diagnosticCapture).toBe("answer_features");
-    expect(invoke.budget).toBe(prepared.requestBudget);
-    expect(invoke.policyOverride).toBe(prepared.policy);
-    expect(invoke.taskSurface).toBe(prepared.taskSurface);
-    expect(invoke.interpretationClock).toBe(prepared.interpretationClock);
-    expect(prepared.taskSurface.display_name).toBe("needle");
-    expect(prepared.taskSurface.object_kind).toBe(ControlPlaneObjectKind.TASK_OBJECT_SURFACE);
-    expect(prepared.taskSurface.retention_policy).toBe(RetentionPolicy.SESSION_ONLY);
-    expect(prepared.taskSurface.surface_kind).toBe("mcp_memory_tool");
-    expect(prepared.taskSurface.task_surface_ref).toBeNull();
-    expect(prepared.policy.task_surface_ref).toBe(prepared.taskSurface.runtime_id);
-    expect(prepared.expectedIndexSnapshotId).toBeUndefined();
+    expect(invoke.taskSurface.display_name).toBe("needle");
+    expect(invoke.taskSurface.object_kind).toBe(ControlPlaneObjectKind.TASK_OBJECT_SURFACE);
+    expect(invoke.taskSurface.retention_policy).toBe(RetentionPolicy.SESSION_ONLY);
+    expect(invoke.taskSurface.surface_kind).toBe("mcp_memory_tool");
+    expect(invoke.taskSurface.task_surface_ref).toBeNull();
+    expect(invoke.policyOverride.task_surface_ref).toBe(invoke.taskSurface.runtime_id);
   });
 
   it("forwards supplied optional fields without replacing caller budget identity", () => {
@@ -104,10 +98,8 @@ describe("prepareBenchRecallRequest forwarding", () => {
       enumeration_policy: "native_query", result_kind_view: "mixed", budget,
       interpretationClock: CLOCK_A
     };
-    const prepared = prepareBenchRecallRequest(requestInput(), "needle", opts);
-    const invoke = prepared.invoke;
-    expect(invoke.budget).toBe(prepared.requestBudget);
-    expect(prepared.requestBudget).toEqual(budget);
+    const invoke = prepareBenchRecallRequest(requestInput(), "needle", opts);
+    expect(invoke.budget).toEqual(budget);
     expect(invoke.referenceTime).toBe(CLOCK_B);
     expect(invoke.snapshotDigest).toBe(SNAPSHOT);
     expect(invoke.continuation).toBe(token);
@@ -117,18 +109,12 @@ describe("prepareBenchRecallRequest forwarding", () => {
     expect(invoke.timeFilter).toBe(timeFilter);
     expect(invoke.enumeration_policy).toBe("native_query");
     expect(invoke.result_kind_view).toBe("mixed");
-    expect(prepared.continuation).toBe(token);
-    expect(prepared.expectedIndexSnapshotId).toBe(SNAPSHOT);
-    expect(prepared.requestFilters.enumeration_policy).toBe("native_query");
-    expect(prepared.requestFilters.result_kind_view).toBe("mixed");
   });
 
   it("forwards continuation: null as an own property rather than omitting it", () => {
-    const prepared = prepareBenchRecallRequest(requestInput(), "needle", { continuation: null });
-    expect(Object.hasOwn(prepared.invoke, "continuation")).toBe(true);
-    expect(prepared.invoke.continuation).toBeNull();
-    expect(prepared.continuation).toBeNull();
-    expect(prepared.expectedIndexSnapshotId).toBeUndefined();
+    const invoke = prepareBenchRecallRequest(requestInput(), "needle", { continuation: null });
+    expect(Object.hasOwn(invoke, "continuation")).toBe(true);
+    expect(invoke.continuation).toBeNull();
   });
 
   it.each([
@@ -148,23 +134,22 @@ describe("prepareBenchRecallRequest forwarding", () => {
       expected: CLOCK_C
     }
   ])("uses $name", ({ opts, expected }) => {
-    const prepared = prepareBenchRecallRequest(requestInput(), "needle", opts);
-    expect(prepared.interpretationClock).toBe(expected);
-    expect(prepared.invoke.interpretationClock).toBe(expected);
+    const invoke = prepareBenchRecallRequest(requestInput(), "needle", opts);
+    expect(invoke.interpretationClock).toBe(expected);
   });
 
   it("falls back to the current clock only after explicit and continuation clocks are absent", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(CLOCK_A));
-    const prepared = prepareBenchRecallRequest(requestInput(), "needle");
-    expect(prepared.interpretationClock).toBe(CLOCK_A);
+    const invoke = prepareBenchRecallRequest(requestInput(), "needle");
+    expect(invoke.interpretationClock).toBe(CLOCK_A);
   });
 
   it("selects packet_trace only for the exact env flag and not other truthy values", () => {
     expect(prepareBenchRecallRequest(requestInput({ ALAYA_BENCH_RECALL_PACKET_TRACE: "1" }), "needle")
-      .invoke.diagnosticCapture).toBe("packet_trace");
+      .diagnosticCapture).toBe("packet_trace");
     expect(prepareBenchRecallRequest(requestInput({ ALAYA_BENCH_RECALL_PACKET_TRACE: "true" }), "needle")
-      .invoke.diagnosticCapture).toBe("answer_features");
+      .diagnosticCapture).toBe("answer_features");
   });
 
   it("keeps distinct task surface ids across preparations of the same query", () => {

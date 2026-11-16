@@ -28,6 +28,7 @@ import {
   type BenchRecallOperationInput
 } from "../../../harness/daemon/handle/daemon-handle-ops.js";
 import { prepareBenchRecallRequest } from "../../../harness/daemon/handle/bench-recall-request.js";
+import { benchRequestFilters } from "../../../harness/recall/conditional-request-budget.js";
 import type { BenchRecallOptions } from "../../../harness/daemon/daemon-types.js";
 
 afterAll(() => {
@@ -45,9 +46,9 @@ const identity = {
   query_id: "query", snapshot_id: SNAPSHOT, interpretation_id: "interpretation", as_of: CLOCK
 };
 
-function token(cursor = "next"): Continuation {
+function token(cursor = "next", snapshot_id = identity.snapshot_id): Continuation {
   return {
-    schema_version: 1, continuation_id: cursor, query_id: identity.query_id, snapshot_id: identity.snapshot_id,
+    schema_version: 1, continuation_id: cursor, query_id: identity.query_id, snapshot_id,
     result_version: "v1", cursor, expires_at: "2099-01-01T00:00:00.000Z",
     interpretation_id: identity.interpretation_id, interpretation_clock: CLOCK
   };
@@ -156,9 +157,9 @@ describe("bench recall delivery effects", () => {
     expect(Object.hasOwn(forwarded, "sideEffectMode")).toBe(false);
     expect(Object.hasOwn(forwarded, "defer_delivery")).toBe(false);
     expect(Object.hasOwn(forwarded, "recallService")).toBe(false);
-    expect(forwarded.queryText).toBe(prepared.invoke.queryText);
-    expect(forwarded.workspaceId).toBe(prepared.invoke.workspaceId);
-    expect(forwarded.runId).toBe(prepared.invoke.runId);
+    expect(forwarded.queryText).toBe(prepared.queryText);
+    expect(forwarded.workspaceId).toBe(prepared.workspaceId);
+    expect(forwarded.runId).toBe(prepared.runId);
     expect(forwarded.strategy).toBe("chat");
     expect(forwarded.snapshotDigest).toBe(SNAPSHOT);
     expect(forwarded.cancelled).toBe(true);
@@ -257,6 +258,74 @@ describe("bench recall delivery effects", () => {
         { object_id: "constraint", object_kind: "constraint" }
       ]
     });
+  });
+
+  it("reads encode filters and continuation snapshot from opts after recall awaits", async () => {
+    const input = operationInput();
+    stubEffects();
+    const before = token("before", `sha256:${"b".repeat(64)}`);
+    const afterRecall = token("after-recall", `sha256:${"c".repeat(64)}`);
+    const opts: {
+      interpretationClock: string;
+      continuation?: Continuation | null;
+      enumeration_policy?: BenchRecallOptions["enumeration_policy"];
+      since?: string;
+    } = {
+      interpretationClock: CLOCK,
+      continuation: before,
+      enumeration_policy: "native_query"
+    };
+    input.recall.mockImplementation(async () => {
+      input.order.push("recall");
+      opts.continuation = afterRecall;
+      opts.since = "2020-01-01T00:00:00.000Z";
+      opts.enumeration_policy = undefined;
+      return { active_constraints: [] };
+    });
+    const result = await createBenchRecallOperation(input)("needle", opts);
+    const forwarded = input.recall.mock.calls[0]?.[0] as { continuation?: Continuation } | undefined;
+    expect(forwarded?.continuation).toBe(before);
+    const encodeArgs = stubs.encode.mock.calls[0] as unknown[] | undefined;
+    if (encodeArgs === undefined) throw new Error("expected encode after recall");
+    const policy = encodeArgs[1] as Parameters<typeof benchRequestFilters>[1];
+    const expected = encodeArgs[3] as {
+      readonly requestFilters?: ReturnType<typeof benchRequestFilters>;
+      readonly expectedIndexSnapshotId?: string;
+    };
+    expect(expected.expectedIndexSnapshotId).toBe(afterRecall.snapshot_id);
+    expect(expected.expectedIndexSnapshotId).not.toBe(before.snapshot_id);
+    expect(expected.requestFilters).toEqual(benchRequestFilters(opts, policy));
+    expect(expected.requestFilters?.since).toBe("2020-01-01T00:00:00.000Z");
+    expect(expected.requestFilters?.enumeration_policy).toBeUndefined();
+    expect(result.first_exposure_page?.request_continuation).toEqual(afterRecall);
+  });
+
+  it("reads exposure continuation from opts after delivery and lens event await", async () => {
+    const input = operationInput();
+    stubEffects();
+    const before = token("before", `sha256:${"b".repeat(64)}`);
+    const afterDelivery = token("after-delivery", `sha256:${"c".repeat(64)}`);
+    const afterEvent = token("after-event", `sha256:${"d".repeat(64)}`);
+    const opts: { interpretationClock: string; continuation?: Continuation | null } = {
+      interpretationClock: CLOCK, continuation: before
+    };
+    input.recordDelivery.mockImplementation(async (row) => {
+      input.order.push("delivery");
+      opts.continuation = afterDelivery;
+      return row;
+    });
+    stubs.emit.mockImplementation(async () => {
+      input.order.push("event");
+      opts.continuation = afterEvent;
+    });
+    const result = await createBenchRecallOperation(input)("needle", opts);
+    const encodeArgs = stubs.encode.mock.calls[0] as unknown[] | undefined;
+    const expected = encodeArgs?.[3] as { readonly expectedIndexSnapshotId?: string } | undefined;
+    expect(expected?.expectedIndexSnapshotId).toBe(before.snapshot_id);
+    expect(result.first_exposure_page?.request_continuation).toEqual(afterEvent);
+    expect(result.first_exposure_page?.request_continuation).not.toEqual(afterDelivery);
+    expect(result.first_exposure_page?.request_continuation).not.toEqual(before);
+    expect(input.order).toEqual(["recall", "delivery", "event"]);
   });
 
   it("keeps first-exposure session ownership across a continuation page", async () => {
