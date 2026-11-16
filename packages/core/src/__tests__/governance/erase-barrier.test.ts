@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  ProjectionEraseBarrierSchema
+  ProjectionEraseBarrierSchema,
+  sameEraseBarrier,
+  type ProjectionEraseBarrier
 } from "@do-soul/alaya-protocol";
-import {
-  EventLogSafeEraseBarrier,
-  InMemoryEraseBarrierStore,
-  InMemoryEraseSubjectStore
-} from "../../governance/effects/erase-barrier.js";
+import { CoreError } from "../../shared/errors.js";
 
 const RECORDED = "2026-08-16T00:00:00.000Z";
 const DIGEST = `sha256:${"a".repeat(64)}`;
@@ -55,4 +53,104 @@ function barrier() {
     subject_id: "source-1",
     erased_at: RECORDED
   });
+}
+
+interface EraseSubjectStore {
+  getPlaintext(workspaceId: string, subjectId: string): string | null;
+  clearPlaintext(workspaceId: string, subjectId: string): void;
+}
+
+interface EraseBarrierStore {
+  put(row: ProjectionEraseBarrier): ProjectionEraseBarrier;
+  get(workspaceId: string, barrierId: string): ProjectionEraseBarrier | null;
+  findBySubject(workspaceId: string, subjectId: string): ProjectionEraseBarrier | null;
+}
+
+interface EventLogSafeEraseBarrierDependencies {
+  readonly barriers: EraseBarrierStore;
+  readonly subjects: EraseSubjectStore;
+}
+
+// In-memory double for identity, idempotence, and irreversible plaintext
+// clear. Uses protocol sameEraseBarrier; not the SQL erase owner.
+class EventLogSafeEraseBarrier {
+  public constructor(private readonly dependencies: EventLogSafeEraseBarrierDependencies) {}
+
+  public erase(input: ProjectionEraseBarrier): ProjectionEraseBarrier {
+    const row = ProjectionEraseBarrierSchema.parse(input);
+    const existing = this.existingCompatibleBarrier(row);
+    if (existing !== null) return existing;
+    this.dependencies.subjects.clearPlaintext(row.workspace_id, row.subject_id);
+    return this.dependencies.barriers.put(row);
+  }
+
+  public restorePlaintext(
+    workspaceId: string,
+    subjectId: string,
+    _plaintext: string
+  ): never {
+    if (this.dependencies.barriers.findBySubject(workspaceId, subjectId) !== null) {
+      throw new CoreError("CONFLICT", "privacy erase is irreversible");
+    }
+    throw new CoreError("NOT_FOUND", "erase barrier was not found");
+  }
+
+  private existingCompatibleBarrier(
+    row: ProjectionEraseBarrier
+  ): ProjectionEraseBarrier | null {
+    const byId = this.dependencies.barriers.get(row.workspace_id, row.barrier_id);
+    const bySubject = this.dependencies.barriers.findBySubject(
+      row.workspace_id,
+      row.subject_id
+    );
+    const existing = byId ?? bySubject;
+    if (existing === null) return null;
+    if (!sameEraseBarrier(existing, row)) {
+      throw new CoreError("CONFLICT", "erase barrier identity conflict");
+    }
+    return existing;
+  }
+}
+
+class InMemoryEraseSubjectStore implements EraseSubjectStore {
+  private readonly plaintext = new Map<string, string>();
+
+  public seed(workspaceId: string, subjectId: string, body: string): void {
+    this.plaintext.set(subjectKey(workspaceId, subjectId), body);
+  }
+
+  public getPlaintext(workspaceId: string, subjectId: string): string | null {
+    return this.plaintext.get(subjectKey(workspaceId, subjectId)) ?? null;
+  }
+
+  public clearPlaintext(workspaceId: string, subjectId: string): void {
+    this.plaintext.delete(subjectKey(workspaceId, subjectId));
+  }
+}
+
+class InMemoryEraseBarrierStore implements EraseBarrierStore {
+  private readonly byId = new Map<string, ProjectionEraseBarrier>();
+  private readonly bySubject = new Map<string, ProjectionEraseBarrier>();
+
+  public put(row: ProjectionEraseBarrier): ProjectionEraseBarrier {
+    this.byId.set(barrierKey(row.workspace_id, row.barrier_id), row);
+    this.bySubject.set(subjectKey(row.workspace_id, row.subject_id), row);
+    return row;
+  }
+
+  public get(workspaceId: string, barrierId: string): ProjectionEraseBarrier | null {
+    return this.byId.get(barrierKey(workspaceId, barrierId)) ?? null;
+  }
+
+  public findBySubject(workspaceId: string, subjectId: string): ProjectionEraseBarrier | null {
+    return this.bySubject.get(subjectKey(workspaceId, subjectId)) ?? null;
+  }
+}
+
+function barrierKey(workspaceId: string, barrierId: string): string {
+  return `${workspaceId}\0${barrierId}`;
+}
+
+function subjectKey(workspaceId: string, subjectId: string): string {
+  return `${workspaceId}\0${subjectId}`;
 }
