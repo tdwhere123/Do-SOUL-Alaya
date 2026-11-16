@@ -86,10 +86,6 @@ export class SqliteConfigRepo implements ConfigRepo {
 
   private getRaw(key: string): unknown | null {
     const row = this.getStatement.get(key) as ConfigRow | undefined;
-    return row === undefined ? null : parseStoredConfigValue(row.value);
+    return row === undefined ? null : parseJsonColumn(row.value, "stored config");
   }
-}
-
-function parseStoredConfigValue(value: string): unknown {
-  return parseJsonColumn(value, "stored config");
 }
