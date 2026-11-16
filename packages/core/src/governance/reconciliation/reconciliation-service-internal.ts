@@ -221,8 +221,6 @@ export const DEFAULT_SIMILARITY_FLOOR = 0.35;
 
 export const DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD = 0.5;
 
-export const DEFAULT_TOP_K = 8;
-
 export const DEFAULT_MAX_LLM_CANDIDATES = 4;
 
 // invariant: the reconciliation advisory-lease TTL. The lease covers a

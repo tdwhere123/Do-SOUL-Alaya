@@ -18,6 +18,7 @@ import {
   readSqliteBooleanIntField,
   type RowParser
 } from "../../shared/parse-row.js";
+import { parseJsonColumn } from "../../shared/parse-json-column.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../../shared/validators.js";
 import type { ProposalReviewerAssignment, ProposalReviewerAssignmentInput } from "../types.js";
 import type { PendingProposalSummaryRow, ProposalReviewerAssignmentRow, ProposalRow } from "./rows.js";
@@ -81,13 +82,7 @@ export const PendingProposalSummaryRowParser: RowParser<PendingProposalSummaryRo
 };
 
 export function parseProposalRow(row: ProposalRow): Readonly<Proposal> {
-  let proposalOptions: unknown;
-
-  try {
-    proposalOptions = JSON.parse(row.proposal_options);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal options JSON.", error);
-  }
+  const proposalOptions = parseJsonColumn(row.proposal_options, "proposal options");
 
   try {
     return deepFreeze(
@@ -130,12 +125,7 @@ export function parseProposedChanges(value: string | null): Readonly<MemoryEntry
     return null;
   }
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal proposed_changes JSON.", error);
-  }
+  const parsedJson = parseJsonColumn(value, "proposal proposed_changes");
 
   try {
     return deepFreeze(PublicMemoryEntryMutableFieldsSchema.parse(parsedJson));
@@ -158,17 +148,10 @@ export function parseSourceDeliveryIds(value: string | null): readonly string[] 
     return null;
   }
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal source_delivery_ids JSON.", error);
-  }
-
-  return parseSourceDeliveryIdsArray(parsedJson);
+  return parseSourceDeliveryIdsArray(parseJsonColumn(value, "proposal source_delivery_ids"));
 }
 
-export function parseSourceDeliveryIdsArray(value: unknown): readonly string[] {
+function parseSourceDeliveryIdsArray(value: unknown): readonly string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new StorageError("VALIDATION_FAILED", "Proposal source_delivery_ids must be a non-empty array.");
   }

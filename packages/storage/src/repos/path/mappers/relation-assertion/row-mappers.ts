@@ -8,6 +8,7 @@ import {
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../../shared/errors.js";
+import { parseJsonColumn } from "../../../shared/parse-json-column.js";
 import {
   readNonEmptyStringField,
   readNullableStringField,
@@ -45,7 +46,7 @@ export const AssertionRowParser: RowParser<Readonly<RelationAssertion>> = {
   parse: parseAssertionRow
 };
 
-export function parseAssertionRow(value: unknown): Readonly<RelationAssertion> {
+function parseAssertionRow(value: unknown): Readonly<RelationAssertion> {
   const row = readRecord(value, "relation assertion row");
   return RelationAssertionSchema.parse({
     assertion_id: row.assertion_id,
@@ -76,7 +77,7 @@ export const ResolutionRowParser: RowParser<Readonly<RelationAssertionResolution
   parse: parseResolutionRow
 };
 
-export function parseResolutionRow(value: unknown): Readonly<RelationAssertionResolution> {
+function parseResolutionRow(value: unknown): Readonly<RelationAssertionResolution> {
   const row = readRecord(value, "relation assertion resolution row");
   return RelationAssertionResolutionSchema.parse({
     resolution_id: row.resolution_id,
@@ -167,15 +168,9 @@ export function verifyEvidenceReceipt(
   }
 }
 
-export function parsePersistedEventAnchor(raw: string | null): EventAnchor | null {
+function parsePersistedEventAnchor(raw: string | null): EventAnchor | null {
   if (raw === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse evidence event_anchor JSON.", error);
-  }
-  const result = EventAnchorSchema.safeParse(parsed);
+  const result = EventAnchorSchema.safeParse(parseJsonColumn(raw, "evidence event_anchor"));
   return result.success ? result.data : null;
 }
 

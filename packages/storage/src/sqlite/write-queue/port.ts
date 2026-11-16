@@ -28,7 +28,7 @@ export interface SqliteWriteJob {
   execute?(): void | Promise<void>;
 }
 
-export function assertSqliteWriteJobWorkerShape(job: SqliteWriteJob): void {
+function assertSqliteWriteJobWorkerShape(job: SqliteWriteJob): void {
   if (job.execute !== undefined && job.payload !== undefined) {
     throw new Error("SqliteWriteJob must not set both execute and payload");
   }

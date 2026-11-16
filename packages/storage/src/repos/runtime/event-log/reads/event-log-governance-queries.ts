@@ -5,6 +5,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../../shared/errors.js";
+import { parseJsonColumn } from "../../../shared/parse-json-column.js";
 import { parseRows } from "../../../shared/parse-row.js";
 import { EventLogEntryRowParser, type CountRow } from "../mappers/event-log-rows.js";
 import type {
@@ -119,13 +120,7 @@ export function executeQueryNarrativeDigestPayloadsByRun(
     readonly payload_json: string;
   }>;
   return rows.map((row) => {
-    let payload: unknown;
-    try {
-      payload = JSON.parse(row.payload_json);
-    } catch (error) {
-      throw new StorageError("VALIDATION_FAILED", "Failed to parse narrative digest payload JSON.", error);
-    }
-    return Object.freeze({ payload_json: payload });
+    return Object.freeze({ payload_json: parseJsonColumn(row.payload_json, "narrative digest payload") });
   });
 }
 

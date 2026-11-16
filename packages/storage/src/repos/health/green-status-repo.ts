@@ -2,6 +2,7 @@ import { GreenStatusSchema, type GreenStatus } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 import { parseRows } from "../shared/parse-row.js";
 
@@ -294,13 +295,10 @@ function parseGreenStatus(value: unknown): Readonly<GreenStatus> {
 }
 
 function parseGreenStatusRow(row: GreenStatusRow): Readonly<GreenStatus> {
-  let parsedBoundSurfaces: GreenStatus["bound_surfaces"];
-
-  try {
-    parsedBoundSurfaces = JSON.parse(row.bound_surfaces) as GreenStatus["bound_surfaces"];
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse green status bound_surfaces JSON.", error);
-  }
+  const parsedBoundSurfaces = parseJsonColumn(
+    row.bound_surfaces,
+    "green status bound_surfaces"
+  ) as GreenStatus["bound_surfaces"];
 
   return parseGreenStatus({
     object_id: parseNonEmptyString(row.object_id, "green status object id"),

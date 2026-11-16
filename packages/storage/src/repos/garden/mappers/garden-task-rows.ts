@@ -14,6 +14,7 @@ import {
   readSqliteAggregateCountField,
   type RowParser
 } from "../../shared/parse-row.js";
+import { parseJsonColumn } from "../../shared/parse-json-column.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../../shared/validators.js";
 import type { GardenTaskBacklogCount, GardenTaskRow, GardenTaskStatus } from "../garden-task-types.js";
 
@@ -102,13 +103,7 @@ export const GardenTaskKindCountDbRowParser: RowParser<GardenTaskKindCountDbRow>
 };
 
 export function parseGardenTaskRow(row: GardenTaskDbRow): GardenTaskRow {
-  let payload: unknown;
-
-  try {
-    payload = JSON.parse(row.payload_json) as unknown;
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse Garden task payload JSON.", error);
-  }
+  const payload = parseJsonColumn(row.payload_json, "Garden task payload");
 
   return deepFreeze({
     id: parseNonEmptyString(row.id, "garden_task.id"),
@@ -181,7 +176,7 @@ export function resolveDuplicateGardenEnqueue(
   throw new StorageError("DUPLICATE_KEY", `Garden task ${taskId} already exists.`, error);
 }
 
-export function duplicateGardenEnqueueDisposition(
+function duplicateGardenEnqueueDisposition(
   existingPayload: unknown,
   existingPayloadJson: string,
   incomingPayload: unknown,

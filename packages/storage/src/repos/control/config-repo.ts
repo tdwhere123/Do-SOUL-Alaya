@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 
 export interface ConfigValueParser<T> {
   parse(value: unknown): T;
@@ -90,9 +91,5 @@ export class SqliteConfigRepo implements ConfigRepo {
 }
 
 function parseStoredConfigValue(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse stored config JSON.", error);
-  }
+  return parseJsonColumn(value, "stored config");
 }

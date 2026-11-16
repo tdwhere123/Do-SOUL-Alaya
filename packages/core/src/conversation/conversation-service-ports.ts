@@ -115,16 +115,6 @@ export function buildRecalledContextSection(workingProjection: Readonly<WorkingP
   return `<recalled_context>\n${recalledBody}\n</recalled_context>`;
 }
 
-export function applyMessagePage(
-  messages: readonly ConversationMessage[],
-  page: ConversationListPageOptions | undefined
-): readonly ConversationMessage[] {
-  if (page === undefined) {
-    return messages;
-  }
-  return messages.slice(page.offset, page.offset + page.limit);
-}
-
 export async function queryConversationMessageEvents(
   repo: ConversationEventLogRepoPort,
   runId: string,

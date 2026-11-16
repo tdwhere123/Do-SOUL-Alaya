@@ -14,6 +14,7 @@ import {
   type EventLogDraftInput
 } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString, parseSurfaceUri, parseTimestamp } from "../shared/validators.js";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 import { parseRows } from "../shared/parse-row.js";
 
 export interface CrossCuttingPermissionRecord {
@@ -419,13 +420,7 @@ function parseAllowedSurfaces(value: readonly string[]): readonly string[] {
 }
 
 function parseAllowedSurfacesJson(value: string): readonly string[] {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse allowed_surfaces JSON.", error);
-  }
+  const parsed = parseJsonColumn(value, "allowed_surfaces");
 
   if (!Array.isArray(parsed)) {
     throw new StorageError("VALIDATION_FAILED", "allowed_surfaces must deserialize to a string array.");

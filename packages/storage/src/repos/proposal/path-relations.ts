@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 import {
   readNonEmptyStringField,
   readRecord,
@@ -31,17 +32,10 @@ export function parseProposedPathRelation(value: string | null): Readonly<PathRe
     return null;
   }
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse proposal proposed_path_relation JSON.", error);
-  }
-
-  return parsePathRelationProposalPayload(parsedJson);
+  return parsePathRelationProposalPayload(parseJsonColumn(value, "proposal proposed_path_relation"));
 }
 
-export function parsePathRelationProposalPayload(value: unknown): Readonly<PathRelationProposalPayload> {
+function parsePathRelationProposalPayload(value: unknown): Readonly<PathRelationProposalPayload> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal proposed_path_relation.");
   }

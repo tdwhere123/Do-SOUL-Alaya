@@ -14,8 +14,6 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import type { MemoryEntryUpdateFields } from "./types.js";
 
-export { isPromiseLike } from "../../shared/promise-utils.js";
-
 export function parseMemoryEntry(value: MemoryEntry): MemoryEntry {
   try {
     return MemoryEntrySchema.parse(value);

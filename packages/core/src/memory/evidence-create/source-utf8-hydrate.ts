@@ -66,10 +66,3 @@ export function sourceLiteralOccurs(body: string, needle: string): boolean {
   return normalizeSourceLiteralNfc(body).includes(normalizeSourceLiteralNfc(needle));
 }
 
-export function hydrateLoadedSourceContent(
-  content: string | undefined,
-  input: Readonly<{ readonly offset?: number; readonly byteLimit: number }>
-): Utf8HydrateResult | { readonly status: "unavailable"; readonly reason: "missing" } {
-  if (content === undefined) return { status: "unavailable", reason: "missing" };
-  return hydrateUtf8Chunk(content, input);
-}
