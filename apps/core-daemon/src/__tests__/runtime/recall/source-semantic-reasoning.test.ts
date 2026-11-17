@@ -773,18 +773,17 @@ it("paginates current interpretations including a large source interpretation an
   }, { count: 20, large: true, prepareSourceQuery: prepare });
 }, 30000);
 
-it("does not disclose unauthorized or obsolete descriptors", async () => {
+// Give each independent authorization case its own cold SQLite/worker lifecycle.
+it.each([
+  ["unauthorized", { scope: "global_core" }],
+  ["obsolete", { state: "superseded" }]
+] as const)("does not disclose %s descriptors", async (_label, fixture) => {
   await withPublished(async ({ execute }) => {
     const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     if (page.kind !== "prepare_query") throw new Error("expected query page");
     expect(page.candidates).toEqual([]);
-  }, { scope: "global_core" });
-  await withPublished(async ({ execute }) => {
-    const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
-    if (page.kind !== "prepare_query") throw new Error("expected query page");
-    expect(page.candidates).toEqual([]);
-  }, { state: "superseded" });
-});
+  }, fixture);
+}, 15_000);
 
 it("binds query handles to query semantics, candidates and permissions and keeps one-shot discovery unexercised", async () => {
   await withPublished(async ({ sourceInterpretationId, execute }) => {

@@ -292,6 +292,7 @@ it("interleaves actual source, header and verification work before freezing reco
   });
 }, 30_000);
 
+// Allow SQLite seeding, cold-worker startup, and verification to fit on a contended runner.
 it("keeps chronological verification independent of navigation arrival across pages and shared identities", async () => {
   await withAccessLibrary([{ id: "cursor", text: "Granite walls.", reading: "surround", count: 40 },
     ...["nav-one", "nav-two", "nav-three"].map(id => ({ id, text: "Orchid irrigation.", reading: orchid }))],
@@ -322,7 +323,7 @@ it("keeps chronological verification independent of navigation arrival across pa
     expect(prepared.access).toMatchObject({ observed_interpretation_count: 43,
       unvisited_sources: false, unvisited_interpretations: false });
   });
-});
+}, 30_000);
 
 it("verifies a lexical nominee beyond an unavailable census row and reuses its complete source observation", async () => {
   await withAccessLibrary([{ id: "a", text: "Granite walls." },
@@ -389,7 +390,7 @@ it("reuses one source reader within an observation and creates a fresh reader fo
   });
 });
 
-// This pool is about 3.4s locally and crossed Vitest's 5s default under Ubuntu coverage.
+// The timeout covers seeding 131 interpretations, cold-worker startup, and the full paging sequence.
 it("orders the complete observed pool for two queries before native descriptor pages and keeps raw sources without interpretations", async () => {
   await withAccessLibrary([
     { id: "filler", text: "Granite walls surround the courtyard.", reading: "surround", count: 128 },
@@ -451,7 +452,7 @@ it("orders the complete observed pool for two queries before native descriptor p
     expect(first.work.logical_work).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
     expect(first.work.logical_memory_bytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
   }, { prepareDatabase: prepareAccessNativeIndex });
-}, 15_000);
+}, 45_000);
 
 it("rejects changed query, budget, policy, scope and stale revision instead of borrowing a frozen access cursor", async () => {
   await withAccessLibrary([{ id: "orchard", text: "Orchid irrigation.", reading: orchid, count: 20 }], async ({ execute, filename }) => {
@@ -540,6 +541,7 @@ it("treats missing and wrong hashes as hints while independently verifying share
   });
 });
 
+// The per-request work assertions do not include seeding 60 interpretations in SQLite.
 it.each([80_000, 200_000])("keeps unvisited growth and body tails open within %i work units", async (workUnits) => {
   await withAccessLibrary([{ id: "many", text: "Orchid irrigation.", reading: orchid, count: 60 },
     { id: "tail", text: "granite ".repeat(20_000) }], async ({ execute }) => {
@@ -555,7 +557,7 @@ it.each([80_000, 200_000])("keeps unvisited growth and body tails open within %i
     expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
     expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
   });
-});
+}, 30_000);
 
 it("pages all 512 observed source traces without rereading or overflowing the public envelope", async () => {
   await withAccessLibrary(Array.from({ length: 512 }, (_, index) => ({ id: `source-${String(index).padStart(3, "0")}`,

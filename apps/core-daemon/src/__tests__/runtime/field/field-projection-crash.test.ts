@@ -27,7 +27,9 @@ it("recovers one projection after killing the writer before source audit, then r
     .run(workspace, "Crash fixture", root, "2026-08-16T00:00:00.000Z");
   seed.close();
   const repo = fileURLToPath(new URL("../../../../../../", import.meta.url));
-  const child = startOwnedTestChild([join(repo, "node_modules/vitest/vitest.mjs"), "run", "--config",
+  // Load the standalone JS config directly. Bundling its imports would probe
+  // Windows mapped drives before the config's preserveSymlinks can take effect.
+  const child = startOwnedTestChild([join(repo, "node_modules/vitest/vitest.mjs"), "run", "--configLoader=native", "--config",
     fileURLToPath(new URL("./projection-recovery.vitest.config.mjs", import.meta.url))],
     AbortSignal.timeout(45_000), { cwd: repo, env: { ...process.env, ALAYA_FIELD_CRASH_DATABASE: filename } });
   let database: ReturnType<typeof initDatabase> | undefined;
