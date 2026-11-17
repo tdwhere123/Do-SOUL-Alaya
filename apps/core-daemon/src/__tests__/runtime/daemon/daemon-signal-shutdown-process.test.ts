@@ -1,13 +1,15 @@
+import { ok } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const shutdownModule = new URL("../../../../dist/runtime/daemon/lifecycle/daemon-signal-shutdown.js", import.meta.url).href;
 const timingModule = new URL("./daemon-runtime-timing.js", shutdownModule).href;
-const guard = fileURLToPath(new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url));
+const guard = new URL("../../../../../../scripts/test-support/provider-free/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+const transports = process.platform === "win32" ? ["ipc"] as const : ["signal", "ipc"] as const;
 type Scenario = "complete" | "failure" | "second-signal";
 
-async function runShutdownChild(scenario: Scenario) {
+async function runShutdownChild(scenario: Scenario, transport: "signal" | "ipc") {
+  const useIpc = transport === "ipc";
   const source = `
     import { installSignalShutdownHandler } from ${JSON.stringify(shutdownModule)};
     import { defaultLifecycleTimerPort } from ${JSON.stringify(timingModule)};
@@ -24,25 +26,33 @@ async function runShutdownChild(scenario: Scenario) {
         warnLogger: { warn(message) { process.stdout.write(message + "\\n"); } }
       });
     }
+    // Windows kill() terminates the child instead of dispatching a catchable signal.
+    // Drive the installed process listeners over IPC there; POSIX uses real OS signals.
+    if (${useIpc}) process.on("message", signal => process.emit(signal, signal));
     setInterval(() => {}, 1000);
     process.stdout.write("ready\\n");
   `;
   const child = spawn(process.execPath, ["--import", guard, "--input-type=module", "--eval", source], {
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: useIpc ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"]
   });
   const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000);
+  ok(child.stdout && child.stderr, "shutdown child must have piped output");
   let stdout = "";
   let stderr = "";
+  const deliverSignal = (signal: "SIGTERM" | "SIGINT") => {
+    if (useIpc) child.send(signal);
+    else child.kill(signal);
+  };
   let signalCount = 0;
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
     stdout += chunk;
     if (signalCount === 0 && stdout.includes("ready\n")) {
       signalCount = 1;
-      child.kill("SIGTERM");
+      deliverSignal("SIGTERM");
     }
     if (scenario === "second-signal" && signalCount === 1 && stdout.includes("shutdown-called\n")) {
       signalCount = 2;
-      child.kill("SIGINT");
+      deliverSignal("SIGINT");
     }
   });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
@@ -58,13 +68,13 @@ async function runShutdownChild(scenario: Scenario) {
   }
 }
 
-describe("daemon signal shutdown through OS processes", () => {
+describe.each(transports)("daemon signal shutdown in a child process (%s)", (transport) => {
   it.each([
     ["complete", 0, "shutdown-called"],
     ["failure", 1, "daemon shutdown failed after SIGTERM"],
     ["second-signal", 1, "received second SIGINT, forcing immediate exit"]
   ] as const)("exits after %s with the existing status", async (scenario, code, message) => {
-    const result = await runShutdownChild(scenario);
+    const result = await runShutdownChild(scenario, transport);
     expect(result, result.stderr).toMatchObject({ code, signal: null });
     expect(result.stdout).toContain(message);
     expect(result.stdout.match(/shutdown-called/g)).toHaveLength(1);
