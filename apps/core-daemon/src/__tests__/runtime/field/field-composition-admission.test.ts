@@ -15,7 +15,8 @@ import {
   hashSourceRecordId,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { EvidenceService, fieldContractSha256 } from "@do-soul/alaya-core";
+import { SOURCE_PROVENANCE_CAPSULE } from "../../../../../../packages/core/src/memory/evidence-create/create-evidence.js";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -130,6 +131,89 @@ describe("field composition admission", () => {
     expect(restarted.fieldRepos.generations.readActive(WORKSPACE)?.status).toBe("active");
     expect(field.database.connection.prepare(`SELECT COUNT(*) AS n FROM event_log
       WHERE event_type = 'soul.field.source_record.admitted'`).get()).toEqual({ n: 0 });
+  });
+
+  it.each(["failed", "provenance"] as const)("retains capsule repair intent without relying on %s source formation", async mode => {
+    const root = mkdtempSync(join(tmpdir(), "capsule-recovery-")); roots.add(root);
+    const filename = join(root, "alaya.sqlite");
+    const field = openComposition("immediate", filename);
+    seedRun(field.database);
+    const active = field.projectionLifecycle.rebuild(WORKSPACE, CLOCK);
+    const evidence = new SqliteEvidenceCapsuleRepo(field.database);
+    const admit = vi.fn(() => { throw new Error("optional formation unavailable"); });
+    const service = new EvidenceService({ evidenceCapsuleRepo: evidence, eventLogRepo: field.eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined }, projectionLifecycle: field.projectionLifecycle,
+      sourceAdmission: { admit }, fieldStores: field.stores, now: () => CLOCK,
+      generateObjectId: () => EVIDENCE_ID });
+    const create = () => service.create({ created_by: "system", evidence_kind: "user_statement",
+      semantic_anchor: { topic: "notes", keywords: ["Ada"], summary: "Ada notes" },
+      event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "Ada notes",
+      excerpt: "Ada wrote notes.", source_hash: null, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
+    }, [], undefined, undefined, undefined, undefined, mode === "provenance" ? SOURCE_PROVENANCE_CAPSULE : undefined);
+    field.database.connection.exec(`CREATE TRIGGER reject_capsule_intent BEFORE INSERT ON field_projection_rebuild_requests
+      BEGIN SELECT RAISE(ABORT, 'capsule repair intent unavailable'); END`);
+    await expect(create()).rejects.toThrow("capsule repair intent unavailable");
+    expect(await evidence.findById(EVIDENCE_ID)).toBeNull();
+    expect(await field.eventLogRepo.queryByEntity("evidence_capsule", EVIDENCE_ID)).toEqual([]);
+    expect(pendingRebuildCount(field.database)).toBe(0);
+    field.database.connection.exec(`DROP TRIGGER reject_capsule_intent;
+      CREATE TRIGGER reject_capsule_activation BEFORE INSERT ON event_log
+      WHEN NEW.event_type = 'soul.field.generation.activated'
+      BEGIN SELECT RAISE(ABORT, 'capsule activation unavailable'); END`);
+    await expect(create()).resolves.toMatchObject({ object_id: EVIDENCE_ID });
+    expect(admit).toHaveBeenCalledTimes(mode === "provenance" ? 0 : 1);
+    expect(field.stores.listRecords(WORKSPACE)).toEqual([]);
+    expect(pendingRebuildCount(field.database)).toBe(1);
+    expect(field.fieldRepos.generations.readActive(WORKSPACE)?.generation_id).toBe(active.generation_id);
+    field.database.connection.exec("DROP TRIGGER reject_capsule_activation");
+    field.database.close(); tracked.delete(field.database);
+    const database = initDatabase({ filename }); tracked.add(database);
+    const recovered = createDaemonFieldComposition({ database, eventLogRepo: new SqliteEventLogRepo(database) });
+    expect(await new SqliteEvidenceCapsuleRepo(database).findById(EVIDENCE_ID)).toMatchObject({ excerpt: "Ada wrote notes." });
+    expect(pendingRebuildCount(database)).toBe(0);
+    expect(recovered.fieldRepos.generations.readActive(WORKSPACE)?.governance_frontier).not.toBe(active.governance_frontier);
+    expect(recovered.fieldRepos.generations.readActive(WORKSPACE)?.input_event_frontier).toBe(active.input_event_frontier);
+  });
+
+  it("commits evidence health with repair intent and recovers a failed projection after reopen", async () => {
+    const root = mkdtempSync(join(tmpdir(), "health-recovery-")); roots.add(root);
+    const filename = join(root, "alaya.sqlite");
+    const field = openComposition("immediate", filename);
+    seedRun(field.database);
+    await produceAdaSource(field.database, field.stores, "Ada");
+    const active = field.fieldRepos.generations.readActive(WORKSPACE)!;
+    const evidence = new SqliteEvidenceCapsuleRepo(field.database);
+    const service = new EvidenceService({ evidenceCapsuleRepo: evidence, eventLogRepo: field.eventLogRepo,
+      runtimeNotifier: { notifyEntry: () => undefined }, projectionLifecycle: field.projectionLifecycle,
+      now: () => "2026-08-16T00:01:00.000Z" });
+    const transition = () => service.transitionHealth(EVIDENCE_ID, "broken", "health_failure_probe", "system");
+    const audits = () => field.database.connection.prepare(`SELECT COUNT(*) AS n FROM event_log
+      WHERE event_type = 'soul.evidence.health_changed'`).get();
+    field.database.connection.exec(`CREATE TRIGGER reject_health_intent BEFORE INSERT ON field_projection_rebuild_requests
+      BEGIN SELECT RAISE(ABORT, 'health repair intent unavailable'); END`);
+    await expect(transition()).rejects.toThrow("health repair intent unavailable");
+    expect(await evidence.findById(EVIDENCE_ID)).toMatchObject({ evidence_health_state: "verified" });
+    expect(audits()).toEqual({ n: 0 });
+    expect(pendingRebuildCount(field.database)).toBe(0);
+    expect(field.fieldRepos.generations.readActive(WORKSPACE)).toEqual(active);
+
+    field.database.connection.exec(`DROP TRIGGER reject_health_intent;
+      CREATE TRIGGER reject_health_activation BEFORE INSERT ON event_log
+      WHEN NEW.event_type = 'soul.field.generation.activated'
+      BEGIN SELECT RAISE(ABORT, 'health activation unavailable'); END`);
+    await expect(transition()).rejects.toThrow();
+    expect(await evidence.findById(EVIDENCE_ID)).toMatchObject({ evidence_health_state: "broken" });
+    expect(audits()).toEqual({ n: 1 });
+    expect(pendingRebuildCount(field.database)).toBe(1);
+    expect(field.fieldRepos.generations.readActive(WORKSPACE)).toEqual(active);
+    field.database.connection.exec("DROP TRIGGER reject_health_activation");
+    field.database.close(); tracked.delete(field.database);
+    const database = initDatabase({ filename }); tracked.add(database);
+    const recovered = createDaemonFieldComposition({ database, eventLogRepo: new SqliteEventLogRepo(database) });
+    expect(pendingRebuildCount(database)).toBe(0);
+    expect(recovered.fieldRepos.generations.readActive(WORKSPACE)?.governance_frontier).not.toBe(active.governance_frontier);
+    expect(recovered.fieldRepos.generations.readActive(WORKSPACE)?.input_event_frontier).toBe(active.input_event_frontier);
+    expect(await new SqliteEvidenceCapsuleRepo(database).findById(EVIDENCE_ID)).toMatchObject({ evidence_health_state: "broken" });
   });
 
   it("rolls back an effect decision when its durable rebuild request cannot be stored", () => {

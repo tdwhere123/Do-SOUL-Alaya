@@ -223,6 +223,7 @@ export class EvidenceService {
       factorIncidence: this.factorIncidence,
       fieldStores: this.fieldStores,
       semanticExtractor: this.dependencies.semanticExtractor,
+      projectionLifecycle: this.dependencies.projectionLifecycle,
       ...(this.dependencies.gardenIntentPort === undefined
         ? {}
         : { gardenIntentPort: this.dependencies.gardenIntentPort }),
@@ -259,7 +260,6 @@ export class EvidenceService {
       occurredAt
     );
 
-    this.dependencies.projectionLifecycle?.requestRebuild(updated.workspace_id, occurredAt);
     this.dependencies.projectionLifecycle?.drainPending();
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
@@ -461,6 +461,9 @@ function persistHealthTransition(
         parsedHealth,
         occurredAt
       );
+      // The health frontier and its repair obligation must survive or roll back
+      // together; a later generation failure is recovered from this durable intent.
+      dependencies.projectionLifecycle?.requestRebuild(updated.workspace_id, occurredAt);
       return { event, updated };
     },
     "Evidence health transition requires a transactional EventLog port"

@@ -87,6 +87,10 @@ export async function createEvidenceCapsule(input: Readonly<{
   readonly fieldStores?: FieldFormationStores;
   readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
   readonly gardenIntentPort?: SourceWriteGardenIntentPort;
+  readonly projectionLifecycle?: Readonly<{
+    requestRebuild(workspaceId: string, requestedAt: string): void;
+    drainPending(): void;
+  }>;
   readonly enqueueEnrichment?: {
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
@@ -105,6 +109,16 @@ export async function createEvidenceCapsule(input: Readonly<{
   const { event, created } = persistCreatedEvidence(input, evidence, formation, enqueueEnrichment);
   if (input.sourceFieldFormation !== SOURCE_PROVENANCE_CAPSULE) {
     await admitOptionalFieldFormation(input, created, formation);
+  }
+  try {
+    input.projectionLifecycle?.drainPending();
+  } catch (error) {
+    // A valid capsule survives optional projection failure; its transactional
+    // rebuild intent remains available to checkpoint/startup recovery.
+    input.warn?.("optional evidence projection failed", {
+      evidence_object_id: created.object_id,
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
   try {
     await input.runtimeNotifier.notifyEntry(event);
@@ -239,6 +253,9 @@ function persistCreatedEvidence(
       transactional?<T>(fn: () => T): T;
     };
     readonly gardenIntentPort?: SourceWriteGardenIntentPort;
+    readonly projectionLifecycle?: Readonly<{
+      requestRebuild(workspaceId: string, requestedAt: string): void;
+    }>;
   }>,
   evidence: EvidenceCapsule,
   formation: EvidenceFormationPlan,
@@ -277,6 +294,9 @@ function persistCreatedEvidence(
           createdAt: created.created_at
         });
       }
+      // Even provenance-only capsules participate in the governance frontier.
+      // Optional source formation cannot own this already committed obligation.
+      input.projectionLifecycle?.requestRebuild(created.workspace_id, created.created_at);
       return { event, created };
     },
     "Evidence create requires a transactional EventLog port"
