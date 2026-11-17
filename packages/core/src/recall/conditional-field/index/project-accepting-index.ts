@@ -24,7 +24,7 @@ import {
   type SupportRecord
 } from "@do-soul/alaya-protocol";
 import { associativeCapDomainAdmission } from "../query/query-admission.js";
-import { capContractId } from "../cap-contract.js";
+import { capContractId, composeCapContracts, isHardIdentityContractId, normalizeFieldPartitionContract } from "../cap-contract.js";
 import { CoreError } from "../../../shared/errors.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
@@ -674,9 +674,10 @@ function assertAssociativeMilligradeContract(values: readonly FieldValue[], view
     if (reachableMilligradesOf(value) === undefined) continue;
     const id = value.cap_contract_id
       ?? (value.activation?.kind === "reachable" ? value.activation.cap_contract_id : undefined);
-    if (id !== undefined) seen.add(id);
+    seen.add(normalizeFieldPartitionContract(id));
   }
-  if (seen.size > 1 || (expected !== undefined && seen.size === 1 && !seen.has(expected))) {
+  if (composeCapContracts([...seen]).kind === "incomparable"
+    || expected !== undefined && [...seen].some(id => id !== expected && !isHardIdentityContractId(id))) {
     throw new CoreError(
       "VALIDATION",
       "unsupported-policy: associative requires a shared milligrade cap contract"

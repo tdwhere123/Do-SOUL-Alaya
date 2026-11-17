@@ -1,13 +1,15 @@
 import { extendMaxMinGraph, solveMaxMinField, MaxMinWorkQueue, PersistentStringMap,
   type MaxMinPreparedGraph } from "@do-soul/alaya-graph-algorithms";
 import { canonicalProductIdentity, type ProductStateKey, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
-import { fieldPartitionNodeId, hardIdentityCapContractId, normalizeFieldPartitionContract } from "../cap-contract.js";
+import { contractScalar, fieldPartitionNodeId, joinContractGrade,
+  normalizeFieldPartitionContract, selectedCapCoordinate, type ContractGradeSummary } from "../cap-contract.js";
+import { admitContractRow, advanceContractCoordinates, coordinateOf, emptyContractCoordinates, nextCoordinateRow,
+  type ContractCoordinates } from "./contract-coordinates.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 
 export type FieldGraphAdditions = Readonly<{ seeds: RetainedRows<SeedActivation>; transitions: RetainedRows<Transition> }>;
 type PartitionNode = Readonly<{ product: string; contract: string; explicit: boolean }>;
-type ProductGrade = Readonly<{ hard?: number; hardExplicit?: boolean; soft?: number; contract?: string; conflict?: boolean }>;
-const HARD = hardIdentityCapContractId();
+type ProductGrade = ContractGradeSummary;
 
 /** Persistent product projection; conflicting declared contracts never regain a scalar by arrival order. */
 class PreparedProductValues implements ReadonlyMap<string, number> {
@@ -16,25 +18,24 @@ class PreparedProductValues implements ReadonlyMap<string, number> {
   public get [Symbol.toStringTag](): string { return "PreparedProductValues"; }
   public get(key: string): number | undefined {
     const row = this.rows.get(key);
-    return row?.conflict ? undefined : row?.soft ?? row?.hard;
+    return row === undefined ? undefined : contractScalar(row);
   }
   public has(key: string): boolean { return this.get(key) !== undefined; }
-  public conflicted(key: string): boolean { return this.rows.get(key)?.conflict === true; }
-  public contract(key: string): string | undefined {
+  public conflicted(key: string): boolean {
     const row = this.rows.get(key);
-    return row?.conflict ? undefined : row?.contract ?? (row?.hardExplicit ? HARD : undefined);
+    return row?.conflict === true && row.hard === undefined;
   }
+  public summary(key: string): ContractGradeSummary { return this.rows.get(key) ?? {}; }
+  public contract(key: string): string | undefined { return selectedCapCoordinate(this.summary(key)); }
   public with(node: PartitionNode, grade: number): PreparedProductValues {
     const prior = this.rows.get(node.product) ?? {};
-    const next: ProductGrade = node.contract === HARD
-      ? { ...prior, hard: Math.max(prior.hard ?? -1, grade), hardExplicit: prior.hardExplicit || node.explicit }
-      : { ...prior, soft: prior.contract === node.contract ? Math.max(prior.soft ?? -1, grade) : grade,
-          contract: node.contract, conflict: prior.conflict || prior.contract !== undefined && prior.contract !== node.contract };
-    if (prior.hard === next.hard && prior.hardExplicit === next.hardExplicit && prior.soft === next.soft
-      && prior.contract === next.contract && prior.conflict === next.conflict) return this;
-    const exists = !next.conflict && (next.soft ?? next.hard) !== undefined;
+    const next = joinContractGrade(prior, node.contract, grade);
+    if (prior.hard === next.hard && prior.grade === next.grade
+      && prior.coordinate === next.coordinate && prior.conflict === next.conflict) return this;
+    const exists = contractScalar(next) !== undefined;
     return new PreparedProductValues(this.rows.with(node.product, next), this.size + Number(exists) - Number(this.has(node.product)),
-      this.conflictCount + Number(next.conflict === true) - Number(prior.conflict === true));
+      this.conflictCount + Number(next.conflict === true && next.hard === undefined)
+        - Number(prior.conflict === true && prior.hard === undefined));
   }
   public *entries(): MapIterator<[string, number]> {
     for (const [key] of this.rows) { const value = this.get(key); if (value !== undefined) yield [key, value]; }
@@ -49,6 +50,7 @@ class PreparedProductValues implements ReadonlyMap<string, number> {
 
 export type PreparedFieldGraph = Readonly<{
   graph: MaxMinPreparedGraph;
+  coordinates: ContractCoordinates;
   keys: PersistentStringMap<ProductStateKey>;
   nodes: PersistentStringMap<PartitionNode>;
   numericValues: ReadonlyMap<string, number>;
@@ -74,7 +76,8 @@ export function appendFieldGraph(prior: PreparedFieldGraph | undefined, addition
   // retained rows are sufficient to rebuild; old roots remain charged to continuations.
   if (incoming && prior?.deferred !== undefined) return { ...appendFieldGraph(undefined, replacement), retainedBytes: prior.retainedBytes };
   const state: PreparedFieldGraph = prior ?? {
-    graph: extendMaxMinGraph(undefined, [], []), keys: new PersistentStringMap(), nodes: new PersistentStringMap(),
+    graph: extendMaxMinGraph(undefined, [], []), coordinates: emptyContractCoordinates(),
+    keys: new PersistentStringMap(), nodes: new PersistentStringMap(),
     numericValues: new PersistentStringMap(), values: new PreparedProductValues(), queue: new MaxMinWorkQueue(),
     pending: RetainedSequence.empty(), allocatedPendingSlots: 0, admittedEdges: 0, retainedBytes: 0,
     seedOffset: 0, transitionOffset: 0, next: "prepare"
@@ -83,10 +86,11 @@ export function appendFieldGraph(prior: PreparedFieldGraph | undefined, addition
 }
 
 export function fieldGraphComplete(state: PreparedFieldGraph): boolean {
-  return state.deferred === undefined && state.pending.length === 0 && state.queue.size === 0;
+  return state.deferred === undefined && state.pending.length === 0 && state.queue.size === 0
+    && state.coordinates.pending === undefined;
 }
 
-export type FieldGraphAtom = Readonly<{ seed?: SeedActivation; transition?: Transition; bytes: number }>;
+export type FieldGraphAtom = Readonly<{ seed?: SeedActivation; transition?: Transition; coordinate?: string; bytes: number }>;
 
 /** Accounted retained representation, not a JavaScript RSS estimate. A cell is
  * 32 accounted bytes; AVL/heap path copies are bounded by twice log2(n+2),
@@ -95,7 +99,9 @@ export type FieldGraphAtom = Readonly<{ seed?: SeedActivation; transition?: Tran
 export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0): FieldGraphAtom {
   let seed: SeedActivation | undefined;
   let transition: Transition | undefined;
-  if ((state.pending.length > 0 || state.deferred !== undefined) && (state.next === "prepare" || state.queue.size === 0)) {
+  const lifted = nextCoordinateRow(state.coordinates);
+  if (lifted !== undefined) { seed = lifted.seed; transition = lifted.transition; }
+  else if ((state.pending.length > 0 || state.deferred !== undefined) && (state.next === "prepare" || state.queue.size === 0)) {
     const batch = state.pending.at(0) ?? state.deferred!;
     if (state.seedOffset < batch.seeds.length) seed = batch.seeds.at(state.seedOffset)!;
     else transition = batch.transitions.at(state.transitionOffset)!;
@@ -103,15 +109,16 @@ export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0
   const encodedBytes = seed === undefined ? transition === undefined ? 0
     : escapedTextBytes(transition.from) + escapedTextBytes(transition.to) + (transition.cap_contract_id?.length ?? 0)
     : escapedTextBytes(seed.state) + (seed.cap_contract_id?.length ?? 0);
-  const size = state.nodes.size + state.admittedEdges + state.queue.size + state.allocatedPendingSlots + auxiliaryNodes + 2;
+  const size = state.nodes.size + state.admittedEdges + state.queue.size + state.allocatedPendingSlots
+    + state.coordinates.coordinates.size + state.coordinates.hard.length + auxiliaryNodes + 2;
   const depth = 2 * Math.ceil(Math.log2(size + 2)) + 4;
   const preparing = seed !== undefined || transition !== undefined;
   // Seed: three registration maps, numeric/product/cross values, queue and pending.
   // Edge: two registrations, outgoing list/map, queue and pending. Relax:
   // heap pop/two pushes and numeric/product/cross values. Strings are shared on relax.
-  const updates = transition !== undefined ? 12 : seed !== undefined ? 9 : 7;
+  const updates = transition !== undefined ? 15 : seed !== undefined ? 12 : 7;
   const bytes = 1024 + 32 * depth * updates + (preparing ? 4 * encodedBytes : 0);
-  return { seed, transition, bytes };
+  return { seed, transition, coordinate: lifted?.coordinate, bytes };
 }
 
 function escapedTextBytes(value: unknown): number {
@@ -135,6 +142,12 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
   if (atom.bytes > availableBytes) return state;
   if (atom.seed !== undefined || atom.transition !== undefined) {
     const current = { ...state, changedProduct: undefined };
+    if (atom.coordinate !== undefined) {
+      const expanded = { ...current, coordinates: advanceContractCoordinates(state.coordinates) };
+      const prepared = atom.seed === undefined ? admitTransition(expanded, atom.transition!, atom.coordinate)
+        : admitSeed(expanded, atom.seed, atom.coordinate);
+      return { ...prepared, retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
+    }
     const admitted = state.deferred === undefined ? current : { ...current, deferred: undefined,
       pending: state.pending.append(state.deferred), allocatedPendingSlots: state.allocatedPendingSlots + 1 };
     // Live version includes every admitted atom; a peak-atom stamp hides the rest of the tree.
@@ -155,6 +168,8 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
 
 function prepareRow(state: PreparedFieldGraph, atom: FieldGraphAtom): PreparedFieldGraph {
   const batch = state.pending.at(0)!;
+  const row = atom.seed === undefined ? { transition: atom.transition! } : { seed: atom.seed };
+  state = { ...state, coordinates: admitContractRow(state.coordinates, row) };
   let next: PreparedFieldGraph;
   if (state.seedOffset < batch.seeds.length) {
     next = { ...admitSeed(state, atom.seed!), seedOffset: state.seedOffset + 1 };
@@ -178,8 +193,8 @@ function registerNode(state: PreparedFieldGraph, key: ProductStateKey, contract:
     keys: state.keys.has(product) ? state.keys : state.keys.with(product, key), nodes: state.nodes.with(id, node) } };
 }
 
-function admitSeed(state: PreparedFieldGraph, seed: SeedActivation): PreparedFieldGraph {
-  const registered = registerNode(state, seed.state, seed.cap_contract_id);
+function admitSeed(state: PreparedFieldGraph, seed: SeedActivation, coordinate = coordinateOf({ seed })): PreparedFieldGraph {
+  const registered = registerNode(state, seed.state, coordinate);
   const prior = registered.state.numericValues.get(registered.id);
   const grade = Math.max(prior ?? -1, seed.milligrades);
   const result = solveMaxMinField({ nodeIds: [], seeds: new Map([[registered.id, grade]]), transitions: [], bottom: 0, top: 1000,
@@ -191,10 +206,10 @@ function admitSeed(state: PreparedFieldGraph, seed: SeedActivation): PreparedFie
     queue: prior === normalizedGrade ? registered.state.queue : registered.state.queue.push({ nodeId: registered.id, strength: normalizedGrade }) };
 }
 
-function admitTransition(state: PreparedFieldGraph, edge: Transition): PreparedFieldGraph {
+function admitTransition(state: PreparedFieldGraph, edge: Transition, coordinate = coordinateOf({ transition: edge })): PreparedFieldGraph {
   // Inapplicable rows expose identities without bridging partitions or activating a product.
-  const from = registerNode(state, edge.from, edge.cap_contract_id);
-  const to = registerNode(from.state, edge.to, edge.cap_contract_id);
+  const from = registerNode(state, edge.from, coordinate);
+  const to = registerNode(from.state, edge.to, coordinate);
   if (!edge.applicable) return to.state;
   const offset = to.state.graph.edges.get(from.id)?.length ?? 0;
   const graph = extendMaxMinGraph(to.state.graph, [], [{ from: from.id, to: to.id, strength: edge.strength_milligrades }]);

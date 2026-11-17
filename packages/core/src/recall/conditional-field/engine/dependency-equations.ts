@@ -26,13 +26,14 @@ export type SharedRule = Readonly<{
 
 export function incomingRules(
   transitions: RetainedRows<Transition>,
-  transitionRoots: DerivationRootLookup
+  transitionRoots: DerivationRootLookup,
+  coordinate?: string
 ): Map<string, SharedRule[]> {
   const incoming = new Map<string, SharedRule[]>();
   for (const transition of transitions) {
     if (!transition.applicable) continue;
     const key = transitionKey(transition);
-    const contract = normalizeFieldPartitionContract(transition.cap_contract_id);
+    const contract = coordinate ?? normalizeFieldPartitionContract(transition.cap_contract_id);
     const to = fieldPartitionNodeId(productStateNodeId(transition.to), contract);
     const rule: SharedRule = {
       rule_id: key,

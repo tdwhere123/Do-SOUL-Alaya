@@ -23,7 +23,7 @@ import {
 import { appendFieldGraph, fieldGraphComplete, stepFieldGraph,
   type FieldGraphAdditions, type PreparedFieldGraph } from "../engine/field-graph-preparation.js";
 import type { RetainedRows } from "../engine/retained-sequence.js";
-import { hardIdentityCapContractId, isHardIdentityContractId } from "../cap-contract.js";
+import { assertContractGrade, normalizeFieldPartitionContract } from "../cap-contract.js";
 
 export type BindMaxMinSuccess = Readonly<{
   readonly kind: "bound";
@@ -152,7 +152,11 @@ export function preparedFieldBinding(input: BindMaxMinInput, prepared: PreparedF
 
 function bindNumericMaxMinField(input: BindMaxMinInput, contractId: string | undefined): BindMaxMinResult {
   const keys = input.identities ?? collectKeys(input.seeds, input.transitions);
-  const seeds = new Map(input.seeds.map((seed) => [productStateNodeId(seed.state), seed.milligrades]));
+  const seeds = new Map<string, number>();
+  for (const seed of input.seeds) {
+    const id = productStateNodeId(seed.state);
+    seeds.set(id, Math.max(seeds.get(id) ?? -1, seed.milligrades));
+  }
   const legalTransitions = input.transitions.filter((transition) => transition.applicable);
   const solved = solveMaxMinField({
     nodeIds: [...keys.keys()],
@@ -190,91 +194,16 @@ function bindNumericMaxMinField(input: BindMaxMinInput, contractId: string | und
 }
 
 function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
-  const groups = new Map<string, { seeds: SeedActivation[]; transitions: Transition[] }>();
-  for (const seed of input.seeds) {
-    const key = normalizeGradeContract(seed.cap_contract_id);
-    const group = groups.get(key) ?? { seeds: [], transitions: [] };
-    group.seeds.push(seed);
-    groups.set(key, group);
-  }
-  for (const transition of input.transitions) {
-    if (!transition.applicable) continue;
-    const key = normalizeGradeContract(transition.cap_contract_id);
-    const group = groups.get(key) ?? { seeds: [], transitions: [] };
-    group.transitions.push(transition);
-    groups.set(key, group);
-  }
-  const parts: BindMaxMinSuccess[] = [];
-  const contractByNode = new Map<string, string>();
-  const values = new Map<string, number>();
-  const conflicts = new Set<string>();
+  const additions = { seeds: input.seeds, transitions: input.transitions };
+  let prepared = appendFieldGraph(undefined, additions);
   let steps = 0;
-  let complete = true;
-  for (const [contract, group] of groups) {
-    const bound = bindNumericMaxMinField({
-      ...input,
-      seeds: group.seeds,
-      transitions: group.transitions,
-      incremental: undefined,
-      identities: collectKeys(group.seeds, group.transitions)
-    }, contract === "" ? undefined : contract);
-    if (bound.kind !== "bound") return bound;
-    parts.push(bound);
-    steps += bound.solver_steps;
-    complete = complete && bound.solver_complete;
-    for (const [nodeId, milligrades] of bound.values) {
-      if (conflicts.has(nodeId)) continue;
-      const prior = values.get(nodeId);
-      const priorContract = contractByNode.get(nodeId);
-      if (prior === undefined || priorContract === undefined) {
-        values.set(nodeId, milligrades);
-        contractByNode.set(nodeId, contract);
-        continue;
-      }
-      if (priorContract === contract) continue;
-      const keepIncoming = isHardIdentityContractId(priorContract === "" ? undefined : priorContract)
-        && !isHardIdentityContractId(contract === "" ? undefined : contract);
-      const keepPrior = isHardIdentityContractId(contract === "" ? undefined : contract)
-        && !isHardIdentityContractId(priorContract === "" ? undefined : priorContract);
-      if (keepIncoming) {
-        values.set(nodeId, milligrades);
-        contractByNode.set(nodeId, contract);
-      } else if (!keepPrior) {
-        values.delete(nodeId);
-        contractByNode.delete(nodeId);
-        conflicts.add(nodeId);
-      }
-    }
+  while (!fieldGraphComplete(prepared) && steps < (input.work_limit ?? Number.MAX_SAFE_INTEGER)) {
+    const next = stepFieldGraph(prepared, input.budget.memory_bytes - prepared.retainedBytes);
+    if (next === prepared) break;
+    prepared = next;
+    steps += 1;
   }
-  const keys = input.identities ?? collectKeys(input.seeds, input.transitions);
-  const last = parts.at(-1);
-  let snapshotSeeds: FieldSnapshot["seeds"] | undefined;
-  let snapshotValues: FieldSnapshot["values"] | undefined;
-  let snapshotTransitions: FieldSnapshot["retained_transitions"] | undefined;
-  let snapshotFacets: FieldSnapshot["facets"] | undefined;
-  return {
-    kind: "bound",
-    values,
-    solver_steps: steps,
-    solver_runs: parts.length,
-    solver_complete: complete,
-    get remaining_worklist() { return last?.remaining_worklist ?? []; },
-    work_queue: last?.work_queue,
-    snapshot: {
-      schema_version: 1,
-      snapshot_id: input.snapshot_id,
-      query_id: input.query_id,
-      has_incomparable_activations: conflicts.size > 0,
-      get seeds() { return snapshotSeeds ??= [...input.seeds]; },
-      get values() {
-        return snapshotValues ??= fieldValues(keys, values, undefined, contractByNode, (id) => conflicts.has(id));
-      },
-      get retained_transitions() {
-        return snapshotTransitions ??= input.transitions.filter((row) => row.applicable);
-      },
-      get facets() { return snapshotFacets ??= [...input.facets ?? []]; }
-    }
-  };
+  return preparedFieldBinding(input, prepared, steps);
 }
 
 function uniqueGradeContract(
@@ -287,9 +216,9 @@ function uniqueGradeContract(
     raw.add(id ?? "");
     normalized.add(normalizeGradeContract(id));
   };
-  for (const seed of seeds) note(seed.cap_contract_id);
+  for (const seed of seeds) { assertContractGrade(seed.cap_contract_id, seed.milligrades); note(seed.cap_contract_id); }
   for (const transition of transitions) {
-    if (transition.applicable) note(transition.cap_contract_id);
+    if (transition.applicable) { assertContractGrade(transition.cap_contract_id, transition.strength_milligrades); note(transition.cap_contract_id); }
   }
   if (normalized.size > 1) return "mixed";
   if (raw.size === 1 && raw.has("")) return "";
@@ -297,8 +226,7 @@ function uniqueGradeContract(
 }
 
 function normalizeGradeContract(id: string | undefined): string {
-  if (id === undefined || id.length === 0) return hardIdentityCapContractId();
-  return id;
+  return normalizeFieldPartitionContract(id);
 }
 
 function collectKeys(
@@ -346,7 +274,7 @@ function fieldValues(
       });
       continue;
     }
-    const stamped = contractId ?? emptyToUndefined(contractByNode?.get(nodeId));
+    const stamped = emptyToUndefined(contractId ?? contractByNode?.get(nodeId));
     fields.push({
       schema_version: 1,
       state,

@@ -1,11 +1,11 @@
-import { CONDITIONAL_FIELD_SCHEMA_VERSION, MILLIGRADE_BOTTOM, MILLIGRADE_TOP,
+import { CONDITIONAL_FIELD_SCHEMA_VERSION, MILLIGRADE_TOP,
   type FieldValue } from "@do-soul/alaya-protocol";
 import { preparedFieldBinding, productStateNodeId, type BindMaxMinResult, type BindMaxMinSuccess
 } from "../reference/bind-max-min.js";
 import type { BindableState, FieldEngineState, RemainingWork } from "./field-engine.js";
 import { appendFieldGraph, fieldGraphComplete, nextFieldGraphAtom, stepFieldGraph, type FieldGraphAdditions } from "./field-graph-preparation.js";
 import { residualGradeUpper, residualsInvalidateBounds } from "../index/completeness.js";
-import { isHardIdentityContractId } from "../cap-contract.js";
+import { fieldPartitionNodeId, hardIdentityCapContractId, joinContractSummaries, selectedCapCoordinate } from "../cap-contract.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 
 const NO_ADDITIONS: FieldGraphAdditions = { seeds: [], transitions: [] };
@@ -119,8 +119,7 @@ function annotateBounds(state: BindableState, possible: SolveBand, guaranteed: S
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       query_id: state.query_id,
       snapshot_id: state.snapshot_id,
-      has_incomparable_activations: cross.count > 0 || bound.preparation!.values.conflictCount > 0
-        || lower.preparation!.values.conflictCount > 0,
+      has_incomparable_activations: cross.count > 0,
       get seeds() { return seeds ??= [...state.seeds]; },
       get facets() { return facets ??= [...state.facets]; },
       get retained_transitions() { return retainedTransitions ??= state.transitions.filter((row) => row.applicable); },
@@ -152,45 +151,45 @@ export function orderedProjectionValues(state: FieldEngineState): Readonly<{ siz
 function projectedValue(key: FieldValue["state"], bound: BindMaxMinSuccess, lower: ReadonlyMap<string, number> | undefined,
   lowerPreparation: BindMaxMinSuccess["preparation"], residualHigh: number | undefined, invalidated: boolean): FieldValue {
   const id = productStateNodeId(key);
-  const possibleGrade = bound.values.get(id);
-  const low = lower?.get(id);
-  const possibleContract = bound.preparation?.values.contract(id);
-  const lowerContract = lowerPreparation?.values.contract(id);
-  const possibleHard = possibleContract === undefined || isHardIdentityContractId(possibleContract);
-  const lowerHard = lowerContract === undefined || isHardIdentityContractId(lowerContract);
-  const conflict = bound.preparation?.values.conflicted(id) || lowerPreparation?.values.conflicted(id)
-    || bound.preparation !== undefined && lowerPreparation !== undefined
-      && crossContractConflict(bound.preparation.values, lowerPreparation.values, id);
-  const sameContract = possibleGrade === undefined || low === undefined
-    || possibleContract === lowerContract || possibleHard && lowerHard;
-  const useLowerContract = low !== undefined && (possibleGrade === undefined || possibleHard && !lowerHard);
-  const grade = conflict ? undefined : sameContract && low !== undefined ? Math.max(possibleGrade ?? low, low)
-    : useLowerContract ? low : possibleGrade;
+  const possible = bound.preparation?.values.summary(id) ?? {};
+  const guaranteed = lowerPreparation?.values.summary(id) ?? {};
+  const combined = joinContractSummaries(possible, guaranteed);
+  const coordinate = selectedCapCoordinate(combined);
   const base = { schema_version: 1 as const, state: key, accepting: key.program_state === "accepting" };
-  if (conflict) return { ...base, activation: { kind: "incomparable", reason: "cap_contract_conflict" } };
+  if (coordinate === undefined && combined.conflict) {
+    return { ...base, activation: { kind: "incomparable", reason: "cap_contract_conflict" } };
+  }
+  const possibleGrade = coordinate === undefined ? bound.values.get(id) : coordinateGrade(bound.preparation, id, coordinate);
+  const low = coordinate === undefined ? lower?.get(id) : coordinateGrade(lowerPreparation, id, coordinate);
+  const grade = low === undefined ? possibleGrade : Math.max(possibleGrade ?? low, low);
   if (grade === undefined) return { ...base, activation: { kind: "unreachable" } };
-  const contract = useLowerContract ? lowerContract : possibleContract;
-  const admitted = low !== undefined && (useLowerContract || sameContract) ? low : undefined;
+  const contract = coordinate === undefined || coordinate.length === 0 ? undefined : coordinate;
   return { ...base, activation: { kind: "reachable", milligrades: grade,
       ...(contract === undefined ? {} : { cap_contract_id: contract }) }, milligrades: grade,
     ...(contract === undefined ? {} : { cap_contract_id: contract }),
-    ...valueBounds(grade, admitted, residualHigh, invalidated, bound.possible_complete ?? bound.solver_complete) };
+    ...valueBounds(grade, low, residualHigh, invalidated, bound.possible_complete ?? bound.solver_complete) };
+}
+
+/** Read both bands in the selected coordinate. An independently grounded Hard
+ * value can be lifted before its queued numeric copy is prepared; no Soft value
+ * can stand in for a missing lower-bound premise in another coordinate. */
+function coordinateGrade(preparation: BindMaxMinSuccess["preparation"], id: string, coordinate: string): number | undefined {
+  const direct = preparation?.numericValues.get(fieldPartitionNodeId(id, coordinate));
+  const hard = preparation?.numericValues.get(fieldPartitionNodeId(id, hardIdentityCapContractId()));
+  return hard ?? direct;
 }
 
 function crossContractConflict(possible: NonNullable<BindMaxMinSuccess["preparation"]>["values"],
   guaranteed: NonNullable<BindMaxMinSuccess["preparation"]>["values"], id: string): boolean {
-  const highContract = possible.contract(id);
-  const lowContract = guaranteed.contract(id);
-  return possible.has(id) && guaranteed.has(id) && highContract !== undefined && lowContract !== undefined
-    && highContract !== lowContract && !isHardIdentityContractId(highContract) && !isHardIdentityContractId(lowContract);
+  const combined = joinContractSummaries(possible.summary(id), guaranteed.summary(id));
+  return combined.conflict === true && selectedCapCoordinate(combined) === undefined;
 }
 
 function valueBounds(grade: number, admitted: number | undefined, residualHigh: number | undefined,
   invalidated: boolean, possibleComplete: boolean): Pick<FieldValue, "high_milligrades"> & Partial<Pick<FieldValue, "low_milligrades">> {
   return {
-    ...(invalidated
-      ? { low_milligrades: MILLIGRADE_BOTTOM }
-      : admitted === undefined ? {} : { low_milligrades: admitted }),
+    // Unknown support is lattice bottom (no lower proof), not a reachable zero.
+    ...(invalidated || admitted === undefined ? {} : { low_milligrades: admitted }),
     high_milligrades: invalidated || !possibleComplete ? MILLIGRADE_TOP : Math.max(grade, admitted ?? grade, residualHigh ?? grade)
   };
 }

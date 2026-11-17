@@ -58,7 +58,7 @@ describe("residual semantics on incremental delivery", () => {
 
   it.each([
     { status: "unknown" as const, low: 400, high: 1000 },
-    { status: "invalidated" as const, low: 0, high: 1000 },
+    { status: "invalidated" as const, low: undefined, high: 1000 },
     { status: "exhausted" as const, low: 400, high: 400 }
   ])("preserves $status bounds through the ordered projection port", ({ status, low, high }) => {
     const residuals: CoverageRegion[] = [{ schema_version: 1, region_id: "source_domain", kind: "source_domain",
@@ -71,19 +71,52 @@ describe("residual semantics on incremental delivery", () => {
     if (field.binding.kind !== "bound") throw new Error("field was not bound");
     const ordered = orderedProjectionValues(field);
     expect(ordered?.size).toBe(1);
-    expect(ordered?.at(0)).toMatchObject({ milligrades: 400, low_milligrades: low, high_milligrades: high });
-    expect(field.binding.snapshot.values[0]).toMatchObject({ low_milligrades: low, high_milligrades: high });
+    expect(ordered?.at(0)).toMatchObject({ milligrades: 400, high_milligrades: high });
+    expect(ordered?.at(0)?.low_milligrades).toBe(low);
+    expect(field.binding.snapshot.values[0]?.low_milligrades).toBe(low);
+    expect(field.binding.snapshot.values[0]?.high_milligrades).toBe(high);
     const index = projectAcceptingIndex({ snapshot: field.binding.snapshot, ordered_values: ordered,
       view: query.view, query_id: QUERY_ID, snapshot_id: SNAPSHOT_ID, result_version: "v1", budget,
       expand_payload: false, observer: { outcome: { schema_version: 1, status }, open_regions: residuals } });
     expect(index.entries).toHaveLength(1);
     expect(index.entries[0]).toMatchObject({ object_id: "known", association_milligrades: 400 });
+    expect(index.entries[0]?.guaranteed_milligrades).toBe(low);
     if (status === "exhausted") expect(index.completeness.logical_index).toBe("complete");
     else {
       expect(index.completeness.logical_index).not.toBe("complete");
       expect(index.order_status).toBe("open");
       expect(index.completeness.certificate_id).toBeUndefined();
     }
+  });
+
+  it.each([0, 400])("does not deliver guaranteed zero after the snapshot observer invalidates a %i proof", (grade) => {
+    const query = { ...interpretation(), view: { ...defaultView(), result_kind_view: "memory_only" as const } };
+    const budget = defaultBudget({ work_units: 10_000, finalization_reserve: 1000 });
+    const initial = createConditionalField({ interpretation: query, budget,
+      residuals: [{ schema_version: 1, region_id: "seed", kind: "seed", status: "open" }],
+      seeds: [{ schema_version: 1, state: productKey("known"), milligrades: grade }] });
+    const project = (field: typeof initial) => {
+      if (field.binding.kind !== "bound") throw new Error("field was not bound");
+      return projectAcceptingIndex({ snapshot: field.binding.snapshot, ordered_values: orderedProjectionValues(field),
+        view: query.view, query_id: QUERY_ID, snapshot_id: SNAPSHOT_ID, result_version: "v1", budget,
+        expand_payload: false, observer: { outcome: { schema_version: 1, status: field.closure.observation }, open_regions: field.residuals } });
+    };
+    expect(project(initial).entries[0]?.guaranteed_milligrades).toBe(grade);
+    const invalidated = observeField(query, { workspace_id: "ws", query_text: "known", budget,
+      as_of: "2026-09-10T00:00:00.000Z", expected_source_revision: "old",
+      resume_field: { ...initial, observation_workspace_id: "ws", observation_query_text: "known",
+        observation_as_of: "2026-09-10T00:00:00.000Z", observation_source_revision: "old" },
+      readers: { snapshotPin: () => ({ source_revision: "changed" }),
+        lexical: () => { throw new Error("Invalidation must precede lexical reads"); } } });
+    expect(invalidated.residuals.find(region => region.region_id === "seed")?.status).toBe("invalidated");
+    expect(invalidated.closure.observation).toBe("invalidated");
+    expect(orderedProjectionValues(invalidated)?.at(0)?.low_milligrades).toBeUndefined();
+    const index = project(invalidated);
+    expect(index.entries).toHaveLength(1);
+    expect(index.entries[0]).toMatchObject({ object_id: "known", association_milligrades: grade });
+    expect(index.entries[0]).not.toHaveProperty("guaranteed_milligrades");
+    expect(index.completeness.observed_coverage).toBe("invalidated");
+    expect(index.completeness.logical_index).not.toBe("complete");
   });
 
   it("settles source coverage after advancing through truncated SQLite pages in one observation", () => {

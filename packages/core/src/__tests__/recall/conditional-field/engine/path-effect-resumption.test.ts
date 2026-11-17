@@ -111,7 +111,7 @@ describe("bounded path effect continuation", () => {
     const offset = frontier === "earlier-batch" ? 0 : prepared.seen_identities.length;
     const derivation = { ...oldEffect.derivation!, derivation_id: "updated-leaf" };
     const updated = { ...preparation.effects[0]!, observation_id: "updated-edge",
-      transition: { ...oldEffect.transition!, instance_id: "updated-edge", strength_milligrades: 400 },
+      transition: { ...oldEffect.transition!, instance_id: "updated-edge", cap_contract_id: undefined, transfer_id: undefined, transfer_version: undefined, strength_milligrades: 400 },
       facet: { ...oldEffect.facet!, coordinates: [400] }, derivation, derivations: [derivation] };
     const resumed = resumePathEffects({ ...prepared, remaining_exploration: 1,
       pending_path_effects: { ...pending, preparation: { ...preparation,

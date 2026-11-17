@@ -8,6 +8,7 @@ import { forkSequenceReachOwner, readSequenceReach, sequenceReachAccountBytes, s
 import type { AdjacencyRow } from "../../../../recall/conditional-field/engine/path-matching.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { productKey } from "../reference/deployment.fixture.js";
+import { hardIdentityCapContractId } from "../../../../recall/conditional-field/cap-contract.js";
 
 const AS_OF = "2026-09-10T00:00:00.000Z";
 const FROM = productKey("a", "h0", "unbound", "entry");
@@ -57,7 +58,7 @@ function leaves(effects: readonly HyperedgeEffect[]): string[] {
 function expectSequenceProof(effects: readonly HyperedgeEffect[], starts: readonly string[], assertions: readonly string[]) {
   // Compiled premises run relative to identity seeds at their automaton starts.
   // These are proof dependencies as well as the declared relation assertions.
-  const seedIds = starts.map((program_state) => seedActivationDerivationId({ state: { ...FROM, program_state } }));
+  const seedIds = starts.map((program_state) => seedActivationDerivationId({ state: { ...FROM, program_state }, cap_contract_id: hardIdentityCapContractId() }));
   const expectedLeaves = [...assertions, ...seedIds].sort();
   const expectedNodes = [
     ...assertions.map((id) => ({ derivation_id: `leaf:${id}`, observation_ids: [id], leaf_ids: [id] })),
@@ -101,7 +102,7 @@ describe("hyperedge completion and resumable sequence steps", () => {
     const program: Hyperedge = { schema_version: 1, kind: "hyperedge", join, premises: [EPSILON, EPSILON] };
     const makeSteps = () => hyperedgeEffectSteps([], program, { ...input(), toProgramStates: ["left", "right"] });
     const steps = [...makeSteps()];
-    const keyBytes = Buffer.byteLength(JSON.stringify(["h0", "unbound", "as_of", "a", { kind: "query_snapshot", as_of: AS_OF }]), "utf8");
+    const keyBytes = Buffer.byteLength(JSON.stringify(["h0", "unbound", "as_of", "a", { kind: "query_snapshot", as_of: AS_OF }, hardIdentityCapContractId()]), "utf8");
     const roleWork = [96 + keyBytes, 328, 0, 8];
     const completionWork = join === "and" ? [0, 2464, 72, 72, 8, 8] : [2256, 72, 8];
     expect(steps.filter((step) => step.kind === "work").map((step) => step.retained_bytes ?? 0))

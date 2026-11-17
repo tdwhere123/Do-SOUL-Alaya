@@ -172,13 +172,15 @@ describe("conditional-field production information index", () => {
   });
 
   it("associative order uses guaranteed lower milligrades then the canonical product identity", () => {
+    const contract = { ...identityAssociationCap(), normalization: "l2.dot.v1", transfer_id: "policy.cosine.linear.milligrade.v1" };
+    const view = defaultView({ enumeration_policy: "associative", cap_contracts: [contract] });
+    const declared = (value: FieldValue): FieldValue => ({ ...value, cap_contract_id: capContractId(contract) });
     const dual = [
       fieldValue("z", 900, { low_milligrades: 0 }),
       fieldValue("a", 600, { low_milligrades: 600 })
     ];
     const dualAssociative = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf(dual),
-      view: defaultView({ enumeration_policy: "associative" })
+      snapshot: snapshotOf(dual.map(declared)), view
     }));
     expect(dualAssociative.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     const members = [
@@ -190,8 +192,7 @@ describe("conditional-field production information index", () => {
       view: defaultView({ enumeration_policy: "canonical" })
     }));
     const associative = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf(members),
-      view: defaultView({ enumeration_policy: "associative" })
+      snapshot: snapshotOf(members.map(declared)), view
     }));
     expect(canonical.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     expect(associative.entries.map((entry) => entry.object_id)).toEqual(["z", "a"]);
@@ -199,17 +200,15 @@ describe("conditional-field production information index", () => {
       .toEqual(new Set(canonical.entries.map((entry) => entry.object_id)));
     const tied = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([
-        guaranteedFieldValue("z", 700),
-        guaranteedFieldValue("a", 700)
-      ]),
-      view: defaultView({ enumeration_policy: "associative" })
+        declared(guaranteedFieldValue("z", 700)),
+        declared(guaranteedFieldValue("a", 700))
+      ]), view
     }));
     expect(tied.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     const missingLow = fieldValue("z", 900);
     const guaranteedPeer = guaranteedFieldValue("a", 600);
     const omitted = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf([missingLow, guaranteedPeer]),
-      view: defaultView({ enumeration_policy: "associative" })
+      snapshot: snapshotOf([missingLow, guaranteedPeer].map(declared)), view
     }));
     expect(omitted.entries.find((entry) => entry.object_id === "z")?.guaranteed_milligrades)
       .toBeUndefined();
@@ -217,8 +216,7 @@ describe("conditional-field production information index", () => {
       .not.toHaveProperty("guaranteed_milligrades");
     expect(omitted.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     const mismatched = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf(members),
-      view: defaultView({ enumeration_policy: "associative" }),
+      snapshot: snapshotOf(members.map(declared)), view,
       prior_continuation: associative.continuation === null
         ? {
           schema_version: 1,
@@ -575,13 +573,20 @@ describe("conditional-field production information index", () => {
     expect(hypotheses.completeness.logical_index).not.toBe("complete");
   });
 
-  it("continues to reject missing or mixed cap contracts for admitted associative fields", () => {
-    const contract = identityAssociationCap();
+  it("continues to reject missing or mixed Soft cap contracts for admitted associative fields", () => {
+    const contract = { ...identityAssociationCap(), normalization: "l2.dot.v1",
+      transfer_id: "policy.cosine.linear.milligrade.v1" };
     const view = { ...defaultView(), enumeration_policy: "associative" as const, cap_contracts: [contract] };
     const a = { ...fieldValue("a", 1000), cap_contract_id: capContractId(contract) };
     const b = { ...fieldValue("b", 900), cap_contract_id: capContractId(contract) };
     expect(() => projectAcceptingIndex(baseInput({ view, snapshot: snapshotOf([a, b]), interpretation_status: "resolved" })))
       .not.toThrow();
+    const hard = { ...guaranteedFieldValue("hard", 1000), cap_contract_id: capContractId(identityAssociationCap()) };
+    const compatible = projectAcceptingIndex(baseInput({ view,
+      snapshot: snapshotOf([hard, { ...b, low_milligrades: 900 }]), interpretation_status: "resolved" }));
+    expect(compatible.entries.map(entry => entry.object_id)).toEqual(["hard", "b"]);
+    expect(() => projectAcceptingIndex(baseInput({ view, snapshot: snapshotOf([fieldValue("untagged", 400)]),
+      interpretation_status: "resolved" }))).toThrow(/shared milligrade cap/);
     expect(() => projectAcceptingIndex(baseInput({ view: { ...view, cap_contracts: undefined },
       snapshot: snapshotOf([a]), interpretation_status: "resolved" }))).toThrow(/shared milligrade cap/);
     expect(() => projectAcceptingIndex(baseInput({ view, snapshot: snapshotOf([a, {

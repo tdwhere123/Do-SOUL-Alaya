@@ -2,7 +2,11 @@ import { MaxMinWorkQueue, PersistentStringMap } from "@do-soul/alaya-graph-algor
 import { productEndpointId, type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../../shared/errors.js";
 import { incomingRules, type SharedRule } from "./dependency-equations.js";
-import { joinDerivation, leafDerivation, seedActivationDerivationId, seedActivationNodeId, seedDerivationIdentity } from "./path-derivation.js";
+import { joinDerivation, leafDerivation, seedActivationDerivationId } from "./path-derivation.js";
+import { canonicalProductIdentity } from "@do-soul/alaya-protocol";
+import { fieldPartitionNodeId } from "../cap-contract.js";
+import { admitContractRow, advanceContractCoordinates, coordinateOf, emptyContractCoordinates, nextCoordinateRow,
+  type ContractCoordinates, type ContractRow, type CoordinateRow } from "./contract-coordinates.js";
 
 type RuleIndex = PersistentStringMap<PersistentStringMap<SharedRule>>;
 type CurrentProduct = Readonly<{ id: string; grade: number; phase: "incoming" | "outgoing"; offset: number; root?: Derivation }>;
@@ -18,6 +22,8 @@ type ProofFrame = Readonly<{
 type InputReferences = readonly unknown[];
 
 export type GroundingProgress = Readonly<{
+  coordinates: ContractCoordinates;
+  seed_roots: PersistentStringMap<Derivation>;
   input_digest: string;
   input_references: InputReferences;
   completed_work: number;
@@ -98,6 +104,8 @@ export function groundedOutputDerivations(input: GroundingInput): {
 class GroundingMachine {
   public work = 0;
   public retainedBytes = 0;
+  private coordinates: ContractCoordinates;
+  private seedRoots: PersistentStringMap<Derivation>;
   private forest: PersistentStringMap<Derivation>;
   private incoming: RuleIndex;
   private outgoing: RuleIndex;
@@ -119,6 +127,8 @@ class GroundingMachine {
   private readonly memory: number;
 
   public constructor(private readonly input: GroundingInput, private readonly prior: GroundingProgress | undefined) {
+    this.coordinates = prior?.coordinates ?? emptyContractCoordinates();
+    this.seedRoots = prior?.seed_roots ?? new PersistentStringMap();
     this.forest = prior?.forest ?? new PersistentStringMap();
     this.incoming = prior?.incoming ?? new PersistentStringMap();
     this.outgoing = prior?.outgoing ?? new PersistentStringMap();
@@ -142,7 +152,8 @@ class GroundingMachine {
 
   public get complete(): boolean {
     return this.derivationOffset === this.input.derivations.length && this.transitionOffset === this.input.transitions.length
-      && this.seedOffset === this.input.seeds.length && this.current === undefined && this.queue.size === 0
+      && this.seedOffset === this.input.seeds.length && this.coordinates.pending === undefined
+      && this.current === undefined && this.queue.size === 0
       && (!this.proofNeeded || (this.proofOffset === this.settled.size && this.proofFrame === undefined));
   }
 
@@ -154,8 +165,22 @@ class GroundingMachine {
       this.derivationOffset += 1;
       return true;
     }
-    if (this.transitionOffset < this.input.transitions.length) return this.indexTransition();
-    if (this.seedOffset < this.input.seeds.length) return this.indexSeed();
+    const lifted = nextCoordinateRow(this.coordinates);
+    if (lifted !== undefined) {
+      if (!this.indexCoordinate(lifted)) return false;
+      this.coordinates = advanceContractCoordinates(this.coordinates);
+      return true;
+    }
+    if (this.transitionOffset < this.input.transitions.length) {
+      if (!this.indexRow({ transition: this.input.transitions.at(this.transitionOffset)! })) return false;
+      this.transitionOffset += 1;
+      return true;
+    }
+    if (this.seedOffset < this.input.seeds.length) {
+      if (!this.indexRow({ seed: this.input.seeds.at(this.seedOffset)! })) return false;
+      this.seedOffset += 1;
+      return true;
+    }
     if (this.current !== undefined) return this.advanceProduct(this.current);
     const next = this.queue.pop();
     if (next !== undefined) {
@@ -169,40 +194,54 @@ class GroundingMachine {
     return this.advanceProof();
   }
 
-  private indexTransition(): boolean {
-    const edge = this.input.transitions.at(this.transitionOffset)!;
+  private indexRow(row: ContractRow): boolean {
+    // Reserve persistent coordinate/row-index paths before mutating either owner.
+    const bytes = 256 + 192 * (2 * Math.ceil(Math.log2(this.coordinates.hard.length + this.coordinates.coordinates.size + 2)) + 4);
+    if (this.retainedBytes + bytes > this.memory) return false;
+    if (!this.indexCoordinate({ ...row, coordinate: coordinateOf(row) }, bytes)) return false;
+    this.coordinates = admitContractRow(this.coordinates, row);
+    return true;
+  }
+
+  private indexCoordinate(row: CoordinateRow, indexBytes = 0): boolean {
+    return row.seed === undefined ? this.indexTransition(row.transition, row.coordinate, indexBytes)
+      : this.indexSeed(row.seed, row.coordinate, indexBytes);
+  }
+
+  private indexTransition(edge: Transition, coordinate: string, indexBytes: number): boolean {
     if (edge.applicable) {
-      const rule = [...incomingRules([edge], this.input.transition_derivations).values()][0]?.[0];
+      const rule = [...incomingRules([edge], this.input.transition_derivations, coordinate).values()][0]?.[0];
       if (rule !== undefined && !this.incoming.get(rule.to)?.has(rule.rule_id)) {
         const missing = this.forest.has(rule.derivation_id) ? [] : [leafDerivation({ derivation_id: rule.derivation_id,
           observation_id: edge.instance_id ?? edge.relation_kind, leaf_id: edge.instance_id ?? rule.derivation_id,
           source_revision: edge.revision_id, association_milligrades: edge.strength_milligrades })];
-        if (!this.retainNodes(missing, 128 + Buffer.byteLength(rule.rule_id, "utf8"))) return false;
+        if (!this.retainNodes(missing, indexBytes + 128 + Buffer.byteLength(rule.rule_id, "utf8"))) return false;
+        indexBytes = 0;
         this.incoming = addRule(this.incoming, rule.to, rule);
         this.outgoing = addRule(this.outgoing, rule.from, rule);
         this.ruleReferences += 1;
       }
     }
-    this.transitionOffset += 1;
-    return true;
+    return this.retain(indexBytes);
   }
 
-  private indexSeed(): boolean {
-    const seed = this.input.seeds.at(this.seedOffset)!;
-    const key = seedActivationNodeId(seed);
+  private indexSeed(seed: SeedActivation, coordinate: string, indexBytes: number): boolean {
+    const key = fieldPartitionNodeId(canonicalProductIdentity(seed.state), coordinate);
+    const seedId = seedActivationDerivationId(seed);
+    const leaf = leafDerivation({ derivation_id: seedId, observation_id: productEndpointId(seed.state),
+      leaf_id: seedId, source_revision: seed.state.target.kind === "memory_entry" ? seed.state.target.source_revision : seed.state.target.source_version,
+      association_milligrades: seed.milligrades });
+    const prior = this.seedRoots.get(key);
+    const root = prior === undefined || prior.derivation_id === leaf.derivation_id ? leaf : joinDerivation("or", [prior, leaf]);
+    if (!this.retainNodes([leaf, root], indexBytes + 128 + Buffer.byteLength(key, "utf8"))) return false;
+    this.seedRoots = this.seedRoots.with(key, root);
+    this.assembled = this.assembled.with(key, root);
+    this.roots = this.roots.with(key, [root.derivation_id]);
     if ((this.grades.get(key) ?? -1) < seed.milligrades) {
-      const seedId = seedActivationDerivationId(seed);
-      const root = leafDerivation({ derivation_id: seedId, observation_id: productEndpointId(seed.state),
-        leaf_id: seedId, source_revision: seed.state.target.kind === "memory_entry" ? seed.state.target.source_revision : seed.state.target.source_version,
-        association_milligrades: seed.milligrades });
-      if (!this.retainNodes([root], 64 + Buffer.byteLength(key, "utf8"))) return false;
-      this.assembled = this.assembled.with(key, root);
-      this.roots = this.roots.with(key, [root.derivation_id]);
       this.grades = this.grades.with(key, seed.milligrades);
       if (this.input.transitions.length > 0) this.queue = this.queue.push({ nodeId: key, strength: seed.milligrades });
-      this.ruleReferences += 1;
     }
-    this.seedOffset += 1;
+    this.ruleReferences += 1;
     return true;
   }
 
@@ -219,7 +258,7 @@ class GroundingMachine {
       }
       // Only a seed with no incoming rules is an independent, single-edge premise.
       // Assembled roots may already contain a weaker seed or a walk through this product.
-      const premise = this.incoming.has(rule.from) ? undefined : this.forest.get(seedDerivationIdentity(rule.from));
+      const premise = this.incoming.has(rule.from) ? undefined : this.seedRoots.get(rule.from);
       const edge = this.forest.get(rule.derivation_id);
       let root = current.root;
       if (premise !== undefined && edge !== undefined && rule.from !== current.id) {
@@ -277,7 +316,7 @@ class GroundingMachine {
       if (!this.retain(128 + copiedNodes * 96)) return false;
       this.proofCapacity = depth;
     }
-    this.proofFrame = { id, offset: 0, root: this.forest.get(seedDerivationIdentity(id)), cycle: false,
+    this.proofFrame = { id, offset: 0, root: this.seedRoots.get(id), cycle: false,
       depth, active: (parent?.active ?? new PersistentStringMap<true>()).with(id, true), parent };
     return true;
   }
@@ -341,7 +380,8 @@ class GroundingMachine {
   }
 
   public progress(inputDigest: string, references: InputReferences, completedSteps: number): GroundingProgress {
-    return { input_digest: inputDigest, input_references: references, completed_steps: completedSteps,
+    return { coordinates: this.coordinates, seed_roots: this.seedRoots,
+      input_digest: inputDigest, input_references: references, completed_steps: completedSteps,
       completed_work: (this.prior?.completed_work ?? 0) + this.work,
       retained_bytes: (this.prior?.retained_bytes ?? 0) + this.retainedBytes, forest: this.forest, incoming: this.incoming,
       outgoing: this.outgoing, root_map: this.roots, assembled: this.assembled, grades: this.grades, settled: this.settled,

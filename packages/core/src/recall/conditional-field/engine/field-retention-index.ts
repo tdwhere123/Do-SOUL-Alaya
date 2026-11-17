@@ -1,6 +1,6 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import type { Derivation, SeedActivation, Transition } from "@do-soul/alaya-protocol";
-import { productStateNodeId } from "../reference/bind-max-min.js";
+import { seedActivationNodeId } from "./path-derivation.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
 import type { FieldEngineState } from "./field-engine.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
@@ -87,7 +87,7 @@ export function lookupIndexedObservation<T>(
 
 function seedOffsets(seeds: RetainedRows<SeedActivation>): PersistentStringMap<number> {
   let offsets = new PersistentStringMap<number>();
-  seeds.forEach((row, index) => { offsets = offsets.with(productStateNodeId(row.state), index); });
+  seeds.forEach((row, index) => { offsets = offsets.with(seedActivationNodeId(row), index); });
   return offsets;
 }
 
@@ -97,14 +97,12 @@ export function mergeSeedAdditions(prior: RetainedRows<SeedActivation>, incoming
   if (incoming.length === 0) return { rows: prior, additions: [], offsets, reset: false };
   let rows = RetainedSequence.from(prior);
   const additions: SeedActivation[] = [];
-  let reset = false;
+  const reset = false;
   for (const seed of incoming) {
-    const key = productStateNodeId(seed.state);
+    const key = seedActivationNodeId(seed);
     const offset = offsets.get(key);
     const previous = offset === undefined ? undefined : rows.at(offset)!;
     if (selectSeedActivation(previous, seed) === previous) continue;
-    // The incremental graph only adds maxima; a new activation contract must rebind both bounds.
-    if (previous !== undefined && previous.cap_contract_id !== seed.cap_contract_id) reset = true;
     if (offset === undefined) { offsets = offsets.with(key, rows.length); rows = rows.append(seed); }
     else rows = rows.replace(offset, seed);
     additions.push(seed);

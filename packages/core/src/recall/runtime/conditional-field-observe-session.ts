@@ -78,6 +78,11 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
   const observationWork = sourceIdentityObservationWork(input.readers);
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
     memoryBox.remaining = Math.max(0, session.state.remaining_memory_bytes - memoryBox.cachedBytes);
+    // A finalization reserve can leave no observation bytes at all. Report that
+    // boundary instead of issuing identical interrupted reads forever.
+    if (memoryBox.remaining === 0 && session.state.residuals.some(row => row.status === "open" || row.status === "interrupted")) {
+      return { ...interruptObservedField(session.state), memory_exhausted: true };
+    }
     const seedFirst = session.state.pending_path_effects === undefined && session.state.pair_demands.size === 0
       && session.state.residuals.some((region) => region.kind === "seed"
         && (region.status === "open" || region.status === "interrupted"));

@@ -18,6 +18,7 @@ import {
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { identityAssociationCap } from "../reference/deployment.fixture.js";
+import { capContractId } from "../../../../recall/conditional-field/cap-contract.js";
 import {
   issuedDeliveryRevoked,
   productIdOfEntry,
@@ -31,6 +32,7 @@ const DIGEST = `sha256:${"a".repeat(64)}`;
 const QUERY_ID = "failed-deployment";
 const RESULT_VERSION = "v1";
 const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
+const NUMERIC_CONTRACT = { ...identityAssociationCap(), normalization: "l2.dot.v1", transfer_id: "policy.cosine.linear.milligrade.v1" };
 
 describe("emitted-set pagination", () => {
   it("delivers late stronger B after A instead of offsetting into [B,A]", () => {
@@ -370,6 +372,7 @@ function fieldValue(
       time_state: "as_of"
     }),
     milligrades,
+    cap_contract_id: capContractId(NUMERIC_CONTRACT),
     accepting: extras.accepting ?? true,
     ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades }),
     ...(extras.activation === undefined ? {} : { activation: extras.activation })
@@ -411,6 +414,7 @@ function sourceValue(
       time_state: "as_of"
     },
     milligrades,
+    cap_contract_id: capContractId(NUMERIC_CONTRACT),
     accepting: true,
     ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })
   };
@@ -458,7 +462,7 @@ function defaultView(overrides: Partial<QueryView> = {}): QueryView {
   });
   if ((parsed.enumeration_policy ?? "canonical") !== "associative") return parsed;
   if ((parsed.cap_contracts?.length ?? 0) > 0) return parsed;
-  return { ...parsed, cap_contracts: [identityAssociationCap()] };
+  return { ...parsed, cap_contracts: [NUMERIC_CONTRACT] };
 }
 
 function objectId(entry: IndexEntry): string {

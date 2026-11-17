@@ -9,7 +9,7 @@ import { productStateNodeId } from "../../../../recall/conditional-field/referen
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
-import { capContractId, HARD_IDENTITY_CAP_CONTRACT } from "../../../../recall/conditional-field/cap-contract.js";
+import { capContractId } from "../../../../recall/conditional-field/cap-contract.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const NOW = "2026-09-10T00:00:00.000Z";
@@ -28,7 +28,7 @@ function field(grade: number, transitionContract?: string): FieldEngineState {
       guard: { schema_version: 1, kind: "query_predicate", verdict: "true", time_scope: "none" } } };
   const initial = createConditionalField({ interpretation, budget: defaultBudget(), seeds: seedProgramStates(interpretation.program)
     .map((state) => ({ schema_version: 1 as const, state: productKey("a", "h0", "unbound", state), milligrades: grade,
-      ...(transitionContract === undefined ? {} : { cap_contract_id: capContractId(HARD_IDENTITY_CAP_CONTRACT) }) })) });
+      ...(transitionContract === undefined ? {} : { cap_contract_id: `sha256:${"b".repeat(64)}` }) })) });
   const row = { assertionId: "assertion-p", sourceObjectId: "a", targetObjectId: "b", resultObjectId: "b", predicate: "p",
     source_revision: "rev", validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" },
     evidenceReceipts: [{ evidenceId: "evidence-p", eventId: "event-p", eventType: "relation.evidence",

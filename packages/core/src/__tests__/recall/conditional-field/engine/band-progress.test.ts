@@ -10,6 +10,7 @@ import { productComponentState } from "../../../../recall/conditional-field/inde
 import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
 import { snapshotRestoredEngineWork } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
+import { hardIdentityCapContractId } from "../../../../recall/conditional-field/cap-contract.js";
 
 const interpretation: QueryInterpretation = { schema_version: 1, query_id: "band-progress", snapshot_id: SNAPSHOT_ID,
   status: "resolved", holes: [], hypotheses: [], view: defaultView(), program: { schema_version: 1, kind: "epsilon" } };
@@ -82,7 +83,7 @@ describe("finite budget service for guaranteed and possible fields", () => {
     expect(bound.values.size).toBe(3);
   });
 
-  it.each([1, 2, 7, 31])("matches the independent full binder with %s-unit continuations across mixed contracts", (work) => {
+  it.each([1, 2, 7, 31])("matches full preparation with %s-unit continuations across mixed contracts", (work) => {
     const contract = `sha256:${"a".repeat(64)}`;
     const seeds = [seed("a", 1000), seed("a", 400, contract)];
     const transitions = [edge("a", "hard", 900), edge("a", "soft", 800, contract), edge("soft", "end", 300, contract)];
@@ -132,7 +133,7 @@ describe("finite budget service for guaranteed and possible fields", () => {
     const reference = bindMaxMinField({ query_id: base.query_id, snapshot_id: base.snapshot_id,
       budget: base.budget, seeds, transitions: [] });
     if (reference.kind !== "bound") throw new Error("reference rejected");
-    // Three activated non-hard contracts have no shared numeric scale, regardless of duplicates or hard identity.
+    // Three Soft contracts plus an untagged numeric seed have no shared scale, regardless of duplicates.
     for (const result of [bound, reference]) {
       expect(result.solver_complete).toBe(true);
       expect(result.snapshot.values).toHaveLength(1);
@@ -184,12 +185,27 @@ describe("finite budget service for guaranteed and possible fields", () => {
     expect(project(bound).completeness.logical_index).not.toBe("complete");
   });
 
-  it("keeps a guaranteed soft scale when only hard identity has been visited in possible", () => {
-    const hard = seed("same", 1000);
+  it("lifts explicit Hard possible reach into the guaranteed Soft coordinate without lowering the upper bound", () => {
+    const hard = seed("same", 1000, hardIdentityCapContractId());
     const soft = seed("same", 400, `sha256:${"a".repeat(64)}`);
     const bound = bind(input([hard, soft], [soft], 2));
-    expect(bound.snapshot.values[0]).toMatchObject({ milligrades: 400, low_milligrades: 400,
+    expect(bound.snapshot.values[0]).toMatchObject({ milligrades: 1000, low_milligrades: 400,
       high_milligrades: 1000, cap_contract_id: soft.cap_contract_id });
+  });
+
+  it("never borrows a lower proof from a Soft coordinate when independent Hard is selected", () => {
+    const hard = seed("same", 1000, hardIdentityCapContractId());
+    const a = seed("same", 400, `sha256:${"a".repeat(64)}`);
+    const b = seed("same", 700, `sha256:${"b".repeat(64)}`);
+    const bound = bind(input([hard, a, b], [a], 100));
+    expect(bound.snapshot.values[0]).toMatchObject({ milligrades: 1000, high_milligrades: 1000,
+      cap_contract_id: hard.cap_contract_id });
+    expect(bound.snapshot.values[0]).not.toHaveProperty("low_milligrades");
+    expect(project(bound).entries[0]).not.toHaveProperty("guaranteed_milligrades");
+    const zero = seed("same", 0, a.cap_contract_id);
+    const withZero = bind(input([hard, zero], [zero], 100));
+    expect(withZero.snapshot.values[0]).toMatchObject({ low_milligrades: 0, cap_contract_id: a.cap_contract_id });
+    expect(project(withZero).entries[0]?.guaranteed_milligrades).toBe(0);
   });
 
   it("removes conflict and its required residual when withdrawal rebuilds the activated contract set", () => {

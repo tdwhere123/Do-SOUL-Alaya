@@ -242,7 +242,7 @@ describe("conditional-field engine", () => {
     expect(proposeFieldWork(state).actions).toHaveLength(0);
   });
 
-  it.each([1000, 500, 0])("rebinds both bounds when hard activation becomes soft grade %s", (grade) => {
+  it.each([1000, 500, 0])("retains independent Hard and Soft grade %s activations in both bounds", (grade) => {
     const hard = { ...seed(productKey("r"), 1000), cap_contract_id: capContractId(HARD_IDENTITY_CAP_CONTRACT) };
     const soft = { ...seed(productKey("r"), grade), cap_contract_id: capContractId({
       domain_id: ASSOCIATION_DOMAIN_ID, normalization: "l2.dot.v1",
@@ -254,7 +254,7 @@ describe("conditional-field engine", () => {
     expect(numericReplaced.binding.kind).toBe("bound");
     if (numericReplaced.binding.kind !== "bound") return;
     expect(numericReplaced.binding.snapshot.values[0]).toMatchObject({
-      milligrades: grade, low_milligrades: grade, cap_contract_id: soft.cap_contract_id });
+      milligrades: 1000, low_milligrades: 1000, cap_contract_id: soft.cap_contract_id });
     const initial = createConditionalField({ interpretation: interpretation(), budget: defaultBudget(),
       seeds: [hard], transitions: [
         { ...edge(productKey("r"), productKey("c"), "observed_log", 1000, true), cap_contract_id: hard.cap_contract_id },
@@ -262,21 +262,21 @@ describe("conditional-field engine", () => {
       ] });
     expect(valueOf(initial, "r")).toBe(1000);
     expect(valueOf(initial, "c")).toBe(1000);
-    expect(activationOf(initial, "s")).toEqual({ kind: "unreachable" });
+    expect(valueOf(initial, "s")).toBe(900);
     const replaced = applyObserverPage(initial, replacement);
-    expect(replaced.seeds.at(0)).toEqual(soft);
-    expect(replaced.guaranteed_seeds.at(0)).toEqual(soft);
+    expect([...replaced.seeds]).toEqual([hard, soft]);
+    expect([...replaced.guaranteed_seeds]).toEqual([hard, soft]);
     expect(replaced.binding.kind).toBe("bound");
     if (replaced.binding.kind !== "bound") return;
-    expect(activationOf(replaced, "c")).toEqual({ kind: "unreachable" });
-    for (const [id, expected] of [["r", grade], ["s", Math.min(grade, 900)]] as const) {
+    expect(valueOf(replaced, "c")).toBe(1000);
+    for (const [id, expected] of [["r", 1000], ["s", 900]] as const) {
       expect(replaced.binding.snapshot.values.find((value) => productSubjectId(value.state) === id)).toMatchObject({
         milligrades: expected, low_milligrades: expected });
     }
     const duplicate = applyObserverPage(replaced, { page: page({ observations: [{ ...observation("later-hard-observation", "r", 1000), source_revision: "rev" }] }),
       effects: [{ observation_id: "later-hard-observation", seed: hard, admitted_seed: true }] });
-    expect(duplicate.seeds.at(0)).toEqual(soft);
-    expect(valueOf(duplicate, "r")).toBe(grade);
+    expect([...duplicate.seeds]).toEqual([hard, soft]);
+    expect(valueOf(duplicate, "r")).toBe(1000);
   });
 
   it("does not let duplicate observations manufacture association strength", () => {

@@ -10,6 +10,7 @@ import {
   type Witness
 } from "@do-soul/alaya-protocol";
 import type { QueryRelation } from "../query/compile-query.js";
+import { composeCapContracts, normalizeFieldPartitionContract } from "../cap-contract.js";
 import {
   joinHyperedgeAnd,
   joinHyperedgeOr,
@@ -196,7 +197,7 @@ function* shareCompatibleAssignments(assignments: readonly PremiseAssignment[]):
   const grouped = new Map<string, PremiseAssignment[]>();
   for (const assignment of assignments) {
     const key = JSON.stringify([assignment.hypothesis_id, assignment.binding_context, assignment.time_state,
-      assignment.target_object_id, assignment.validity]);
+      assignment.target_object_id, assignment.validity, normalizeFieldPartitionContract(assignment.cap_contract_id)]);
     const group = grouped.get(key) ?? [];
     group.push(assignment);
     grouped.set(key, group);
@@ -318,7 +319,8 @@ function* nestedHyperedgeAssignments(
       effect.hyperedge.validity,
       effect.hyperedge.relation_kind,
       effect.hyperedge.to.binding_context,
-      effect.observation_id
+      effect.observation_id,
+      normalizeFieldPartitionContract(effect.hyperedge.cap_contract_id)
     );
     assignments.push({
       ...assigned,
@@ -611,7 +613,7 @@ function assignmentInDelta(
 
 function claimHyperedge(emitted: Set<string>, from: ProductStateKey, premises: readonly PremiseAssignment[]): boolean {
   // Leaf ids from a compiled path omit the binding, so two endpoints can still differ.
-  const key = `${productStateNodeId(from)}\0${premises.map((premise) => `${premise.binding_context}\0${premise.derivation.derivation_id}`).sort().join("\0")}`;
+  const key = `${productStateNodeId(from)}\0${premises.map((premise) => `${premise.binding_context}\0${normalizeFieldPartitionContract(premise.cap_contract_id)}\0${premise.derivation.derivation_id}`).sort().join("\0")}`;
   if (emitted.has(key)) return false;
   emitted.add(key);
   return true;
@@ -630,8 +632,8 @@ function hyperedgeTarget(
   return retargetRelationProduct(from, patch.object_id, patch.source_revision, patch, facts);
 }
 
-// AND selects metadata from the first merged assignment; only its grade and
-// proof combine all premises. OR keeps the selected assignment's own metadata.
+// Endpoint/binding selection is grammatical. Value-contract composition is not
+// positional: Hard premises are units and distinct Soft coordinates never join.
 function* completionEffects(
   from: ProductStateKey,
   premises: readonly PremiseAssignment[],
@@ -641,6 +643,9 @@ function* completionEffects(
   toProgramStates: readonly string[],
   input: HyperedgeInput
 ): PathComputation<readonly HyperedgeEffect[]> {
+  const contract = composeCapContracts(premises.map((row) => row.cap_contract_id));
+  if (contract.kind === "incomparable") return [];
+  const transfer = premises.find((row) => normalizeFieldPartitionContract(row.cap_contract_id) === contract.contract) ?? representative;
   const targetRevision = observedTargetRevision(
     representative.target_object_id,
     input.sourceFacts,
@@ -689,9 +694,9 @@ function* completionEffects(
         strength_milligrades: milligrades,
         validity: representative.validity,
         join,
-        ...(representative.cap_contract_id === undefined ? {} : { cap_contract_id: representative.cap_contract_id }),
-        ...(representative.transfer_id === undefined ? {} : { transfer_id: representative.transfer_id }),
-        ...(representative.transfer_version === undefined ? {} : { transfer_version: representative.transfer_version })
+        ...(contract.contract.length === 0 ? {} : { cap_contract_id: contract.contract }),
+        ...(transfer.transfer_id === undefined ? {} : { transfer_id: transfer.transfer_id }),
+        ...(transfer.transfer_version === undefined ? {} : { transfer_version: transfer.transfer_version })
       },
       derivation,
       derivations
@@ -725,12 +730,7 @@ function* cartesian<T>(groups: readonly (readonly T[])[], index = 0, prefix: rea
 
 function bottleneck(assignments: readonly PremiseAssignment[]): number | undefined {
   if (assignments.length === 0) return MILLIGRADE_BOTTOM;
-  const contracts = new Set(
-    assignments.flatMap((row) => row.cap_contract_id === undefined || row.cap_contract_id.length === 0
-      ? []
-      : [row.cap_contract_id])
-  );
-  if (contracts.size > 1) return undefined;
+  if (composeCapContracts(assignments.map((row) => row.cap_contract_id)).kind === "incomparable") return undefined;
   let grade = MILLIGRADE_TOP;
   for (const row of assignments) {
     if (row.milligrades < grade) grade = row.milligrades;

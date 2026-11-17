@@ -13,7 +13,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   identitySeedGrade,
-  isHardIdentityContractId
+  fieldPartitionNodeId
 } from "../cap-contract.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { interpretQuery } from "../reference/interpret-query.js";
@@ -192,17 +192,13 @@ export function seedActivationsForObservation(
 
 export function selectSeedActivation(prior: SeedActivation | undefined, incoming: SeedActivation): SeedActivation {
   if (prior === undefined) return incoming;
-  if ((prior.cap_contract_id ?? "") === (incoming.cap_contract_id ?? "")) {
-    return incoming.milligrades > prior.milligrades ? incoming : prior;
-  }
-  return isHardIdentityContractId(prior.cap_contract_id) && !isHardIdentityContractId(incoming.cap_contract_id)
-    ? incoming : prior;
+  return incoming.milligrades > prior.milligrades ? incoming : prior;
 }
 
 export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActivation[] {
   const best = new Map<string, SeedActivation>();
   for (const seed of seeds) {
-    const nodeId = productStateNodeId(seed.state);
+    const nodeId = fieldPartitionNodeId(productStateNodeId(seed.state), seed.cap_contract_id);
     const prior = best.get(nodeId);
     best.set(nodeId, selectSeedActivation(prior, seed));
   }

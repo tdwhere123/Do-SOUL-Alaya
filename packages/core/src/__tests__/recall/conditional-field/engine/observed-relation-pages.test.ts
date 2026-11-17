@@ -189,7 +189,12 @@ describe("observed relation pages", () => {
     const guarded = edge("p", "a", "b", "p-row");
     const plain = Array.from({ length: 20 }, (_, index) => edge("q", "a", `q-${String(index).padStart(2, "0")}`, `q-${String(index).padStart(2, "0")}`));
     const cost = new RequestCostLedger();
-    const observed = run([guarded, ...plain], { unavailable: new Set(["x"]), cost });
+    const interrupted = run([guarded, ...plain], { unavailable: new Set(["x"]), cost });
+    expect(interrupted.state.memory_exhausted).toBe(true);
+    expect(interrupted.accepted.length).toBeGreaterThan(0);
+    expect(interrupted.accepted.length).toBeLessThan(plain.length);
+    const observed = run([guarded, ...plain], { unavailable: new Set(["x"]), cost,
+      resume: interrupted.state, memory: 20_000_000 });
     expect(observed.state.observation_gaps?.guards).toBe(true);
     expect(observed.accepted).toEqual(plain.map((row) => row.targetObjectId));
     expect(cost.snapshot().phases.adjacency.joins).toBeGreaterThan(0);

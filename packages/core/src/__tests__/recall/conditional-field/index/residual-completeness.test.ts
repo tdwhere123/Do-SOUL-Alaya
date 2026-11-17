@@ -4,7 +4,6 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   CompletenessReportSchema,
   CoverageRegionSchema,
-  MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   productSubjectId,
   type CoverageRegion,
@@ -434,7 +433,7 @@ describe("residual influence and completeness", () => {
       seeds: [seed("r", 400)],
       residuals: invalidated
     });
-    expect(lowOf(field, "r")).toBe(MILLIGRADE_BOTTOM);
+    expect(lowOf(field, "r")).toBeUndefined();
     expect(highOf(field, "r")).toBe(MILLIGRADE_TOP);
     expect(certifyClosure({
       query_id: QUERY_ID,
