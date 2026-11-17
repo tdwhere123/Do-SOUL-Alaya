@@ -490,8 +490,10 @@ function chargeIdentities(state: BindableState): BindableState {
   const pending = incoming.slice(processed);
   return {
     ...state,
-    remaining_exploration: pending.length > 0 ? 0 : exploration,
-    remaining_reserve: pending.length > 0 ? 0 : state.remaining_reserve,
+    // A refused allocation is not work consumption. Preserve the allowance for
+    // rollback and delivery; the solver does not run on memory-rejected staging.
+    remaining_exploration: pending.length > 0 && !exhausted ? 0 : exploration,
+    remaining_reserve: pending.length > 0 && !exhausted ? 0 : state.remaining_reserve,
     remaining_memory_bytes: memory,
     admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + state.remaining_memory_bytes - memory,
     memory_exhausted: exhausted,

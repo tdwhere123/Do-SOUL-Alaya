@@ -140,7 +140,8 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   it("paged 32-cap observation concatenates without skip or duplicate", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 40, 701);
-    const memoryBytes = 1_010_000;
+    // Fund the ~1.3 MB retained numeric/proof state for all forty seeds in both arms.
+    const memoryBytes = 2_000_000;
     const full = runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000, memory_bytes: memoryBytes })

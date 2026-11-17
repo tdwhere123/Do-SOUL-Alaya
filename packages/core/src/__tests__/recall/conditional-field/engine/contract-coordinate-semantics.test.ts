@@ -9,6 +9,7 @@ import { fieldPartitionNodeId, hardIdentityCapContractId, composeCapContracts } 
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { defaultBudget, defaultView, productKey } from "../reference/deployment.fixture.js";
 import { query, relation } from "./relation-grounding.fixture.js";
+import { rolesFrom } from "../../../../recall/runtime/semantic-attribution.js";
 
 const HARD = hardIdentityCapContractId();
 const A = `sha256:${"a".repeat(64)}`;
@@ -115,6 +116,10 @@ describe("finite input contract coordinates (not production Soft relation admiss
     }
     expect(incremental.transitions).toHaveLength(2);
     expect(incremental.guaranteed_transitions).toHaveLength(2);
+    const roles = rolesFrom(incremental);
+    expect(roles.get(productStateNodeId(initial.state))).toBe("requested");
+    expect(roles.get(productStateNodeId(productKey("end")))).toBe("associated");
+    expect(roles.get(productStateNodeId({ ...initial.state, hypothesis_id: "other" }))).toBe("associated");
     expect(bound(incremental).snapshot.values).toEqual(bound(field).snapshot.values);
     expect(proof(incremental, "end", A).leaves).toEqual([seedActivationDerivationId(initial), "support-a"].sort());
     expect(proof(incremental, "end", B).leaves).toEqual(contract === HARD

@@ -1,11 +1,16 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import type { Derivation, SeedActivation, Transition } from "@do-soul/alaya-protocol";
-import { seedActivationNodeId } from "./path-derivation.js";
+import { productStateNodeId } from "../reference/bind-max-min.js";
+import { normalizeFieldPartitionContract } from "../cap-contract.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
 import type { FieldEngineState } from "./field-engine.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 import { selectSeedActivation } from "./path-composition-seed.js";
 import { indexFacetsByIdentity, type FacetIdentityIndex } from "./path-composition-facet.js";
+
+// Product membership establishes the requested role; coordinate offsets retain
+// independent seed alternatives without conflating that role with a grade domain.
+type SeedOffsets = PersistentStringMap<PersistentStringMap<number>>;
 
 export type FieldRetentionIndex = Readonly<{
   rows: Pick<FieldEngineState, "observations" | "measurements" | "seeds" | "guaranteed_seeds" | "transitions"
@@ -13,8 +18,8 @@ export type FieldRetentionIndex = Readonly<{
   payloads: PersistentStringMap<true>;
   observations: PersistentStringMap<number>;
   measurements: PersistentStringMap<true>;
-  seeds: PersistentStringMap<number>;
-  guaranteedSeeds: PersistentStringMap<number>;
+  seeds: SeedOffsets;
+  guaranteedSeeds: SeedOffsets;
   transitions: PersistentStringMap<true>;
   ruleRevisions: PersistentStringMap<string>;
   derivations: PersistentStringMap<Derivation>;
@@ -85,25 +90,31 @@ export function lookupIndexedObservation<T>(
   }
 }
 
-function seedOffsets(seeds: RetainedRows<SeedActivation>): PersistentStringMap<number> {
-  let offsets = new PersistentStringMap<number>();
-  seeds.forEach((row, index) => { offsets = offsets.with(seedActivationNodeId(row), index); });
+function seedOffsets(seeds: RetainedRows<SeedActivation>): SeedOffsets {
+  let offsets: SeedOffsets = new PersistentStringMap();
+  seeds.forEach((row, index) => {
+    const key = productStateNodeId(row.state);
+    const coordinates = offsets.get(key) ?? new PersistentStringMap<number>();
+    offsets = offsets.with(key, coordinates.with(normalizeFieldPartitionContract(row.cap_contract_id), index));
+  });
   return offsets;
 }
 
 export function mergeSeedAdditions(prior: RetainedRows<SeedActivation>, incoming: readonly SeedActivation[],
-  offsets: PersistentStringMap<number>): Readonly<{ rows: RetainedRows<SeedActivation>; additions: readonly SeedActivation[];
-    offsets: PersistentStringMap<number>; reset: boolean }> {
+  offsets: SeedOffsets): Readonly<{ rows: RetainedRows<SeedActivation>; additions: readonly SeedActivation[];
+    offsets: SeedOffsets; reset: boolean }> {
   if (incoming.length === 0) return { rows: prior, additions: [], offsets, reset: false };
   let rows = RetainedSequence.from(prior);
   const additions: SeedActivation[] = [];
   const reset = false;
   for (const seed of incoming) {
-    const key = seedActivationNodeId(seed);
-    const offset = offsets.get(key);
+    const key = productStateNodeId(seed.state);
+    const coordinate = normalizeFieldPartitionContract(seed.cap_contract_id);
+    const coordinates = offsets.get(key) ?? new PersistentStringMap<number>();
+    const offset = coordinates.get(coordinate);
     const previous = offset === undefined ? undefined : rows.at(offset)!;
     if (selectSeedActivation(previous, seed) === previous) continue;
-    if (offset === undefined) { offsets = offsets.with(key, rows.length); rows = rows.append(seed); }
+    if (offset === undefined) { offsets = offsets.with(key, coordinates.with(coordinate, rows.length)); rows = rows.append(seed); }
     else rows = rows.replace(offset, seed);
     additions.push(seed);
   }

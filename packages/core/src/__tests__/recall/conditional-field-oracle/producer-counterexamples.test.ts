@@ -1,4 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
+  return { safe: installProviderFreeBoundary(), strict: installStrictProviderFreeBoundary() };
+});
+afterAll(() => {
+  try { expect(isolation.safe.violations).toEqual([]); expect(isolation.strict.forbidden).toEqual([]); }
+  finally { isolation.strict.restore(); isolation.safe.restore(); }
+});
 import {
   productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -24,6 +33,7 @@ import {
   type SourceSlice
 } from "./bound-producer.js";
 import { defaultBudget } from "./finite-worlds.js";
+import { restoreField } from "../../../recall/runtime/index-continuation.js";
 
 const databases = new Set<StorageDatabase>();
 const OPEN = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
@@ -38,6 +48,8 @@ const CONFLICT = "aaaaaaaa-aaaa-4aaa-8aaa-000000000304";
 afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
+  expect(isolation.safe.violations).toEqual([]);
+  expect(isolation.strict.forbidden).toEqual([]);
 });
 
 describe("conditional-field producer-consumer counterexamples", () => {
@@ -178,7 +190,8 @@ describe("conditional-field producer-consumer counterexamples", () => {
       lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
         inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
     };
-    const memoryBytes = 1_010_000;
+    // Forty coordinate-aware seeds retain ~1.3 MB including numeric bands and proofs.
+    const memoryBytes = 2_000_000;
     const full = runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: memoryBytes }),
@@ -203,7 +216,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(concatenated).toEqual(fullIds);
     expect(planted.length).toBe(40);
     expect(full.completeness.logical_index).toBe("complete");
-    expect(full.completeness.payload).toBe("resource_rejected");
+    expect(full.completeness.payload).toBe("complete");
     expect(fullIds).toHaveLength(40);
   });
 
@@ -213,12 +226,47 @@ describe("conditional-field producer-consumer counterexamples", () => {
     const inner = readersFor(slice);
     const full = runRecall(slice, { query_text: "needle", readers: {
       ...inner, lexical: input => inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
-    }, budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: 1_050_000 }) });
+    }, budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000, memory_bytes: 2_000_000 }) });
     expect(full.entries.map(entry => entry.object_id)).toEqual(planted);
     expect(full.completeness.logical_index).toBe("complete");
     expect(full.completeness.payload).toBe("complete");
     expect(full.entries.every(entry => entry.explanation_ids.length > 0)).toBe(true);
     expect(full.explanations!.length).toBeGreaterThan(0);
+  });
+
+  it.each([false, true])("preserves framing work on memory refusal and resumes with larger memory=%s", async recover => {
+    const slice = await openBoundSlice(database => databases.add(database));
+    const planted = await plantNeedles(slice, 40, 501);
+    let continuation: ReturnType<typeof runRecall>["continuation"] = null;
+    let memory = 1_050_000;
+    let refused = false;
+    const entries: ReturnType<typeof runRecall>["entries"][number][] = [];
+    let last: ReturnType<typeof runRecall> | undefined;
+    for (let turn = 0; turn < 20; turn++) {
+      last = runRecall(slice, { query_text: "needle", continuation,
+        budget: defaultBudget({ page_budget: 8, memory_bytes: memory }) });
+      entries.push(...last.entries);
+      continuation = last.continuation;
+      const state = restoreField(continuation);
+      if (last.entries.length === 0 && state?.memory_exhausted) {
+        refused = true;
+        expect(state.remaining_exploration + state.remaining_reserve).toBeGreaterThan(0);
+        if (recover) memory = 2_000_000;
+      }
+      if (continuation === null) break;
+    }
+    expect(refused).toBe(true);
+    expect(continuation).toBeNull();
+    expect(new Set(entries.map(entry => entry.object_id)).size).toBe(entries.length);
+    expect(entries.every(entry => entry.explanation_ids.length > 0)).toBe(true);
+    if (recover) {
+      expect(entries.map(entry => entry.object_id)).toEqual(planted);
+      expect(last?.completeness.logical_index).toBe("complete");
+    } else {
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.length).toBeLessThan(planted.length);
+      expect(last?.completeness.logical_index).not.toBe("complete");
+    }
   });
 
   it("native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {

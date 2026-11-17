@@ -34,7 +34,7 @@ export function bindChargedField(charged: BindableState, remainingWork: Remainin
   let retained = charged.solver_retained_bytes ?? 0;
   let possibleBlocked = false;
   let guaranteedBlocked = false;
-  const allowance = charged.remaining_exploration + charged.remaining_reserve;
+  const allowance = charged.memory_exhausted ? 0 : charged.remaining_exploration + charged.remaining_reserve;
   while (possibleSteps + guaranteedSteps < allowance && (!fieldGraphComplete(possibleGraph) || !fieldGraphComplete(guaranteedGraph))) {
     const possibleRunnable = !possibleBlocked && !fieldGraphComplete(possibleGraph);
     const guaranteedRunnable = !guaranteedBlocked && !fieldGraphComplete(guaranteedGraph);

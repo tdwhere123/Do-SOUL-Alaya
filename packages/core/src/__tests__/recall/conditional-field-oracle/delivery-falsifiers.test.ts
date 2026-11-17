@@ -51,16 +51,20 @@ import {
   FAR_FUTURE_EXPIRY,
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
-  associativeView,
+  associativeView as deploymentAssociativeView,
   defaultBudget,
   defaultView,
   identityAssociationCap
 } from "../conditional-field/reference/deployment.fixture.js";
 import { identitySet, plantSource, recallPlantedSource } from "./planted-source.js";
+import { capContractId } from "../../../recall/conditional-field/cap-contract.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
 
+// These ordering fixtures contain fractional grades, not Boolean Hard identities.
+const NUMERIC_CONTRACT = { ...identityAssociationCap(), normalization: "l2.dot.v1", transfer_id: "policy.cosine.linear.milligrade.v1" };
+const associativeView = () => ({ ...deploymentAssociativeView(), cap_contracts: [NUMERIC_CONTRACT] });
 const QUERY_ID = "failed-deployment";
 const DIGEST = `sha256:${"a".repeat(64)}`;
 const MEASURE_NOW = "2026-09-08T00:00:00.000Z";
@@ -202,6 +206,7 @@ describe("delivery falsifiers", () => {
       domain_id: "cosine.embedding.v1", normalization: "l2.dot.v1",
       transfer_id: "policy.fixture.v1", transfer_version: "1"
     }]).status).toBe("unsupported");
+    expect(compileCaps([NUMERIC_CONTRACT]).status).toBe("resolved");
     const admitted = compileCaps([identityAssociationCap()]);
     expect(admitted.status).toBe("resolved");
     expect(admitted.query_id).not.toBe(UNSUPPORTED_POLICY_QUERY_ID);
@@ -366,6 +371,7 @@ function fieldValue(
       workspace_id: "ws", object_id: objectId, source_revision: "rev",
       program_state: "accepting", hypothesis_id: "h0", binding_context: "default", time_state: "as_of"
     }),
+    cap_contract_id: capContractId(NUMERIC_CONTRACT),
     milligrades,
     accepting: true,
     ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })
@@ -388,6 +394,7 @@ function sourceValue(
       content_digest: DIGEST, evidence_object_id: null, program_state: "accepting",
       hypothesis_id: "h0", binding_context: "default", time_state: "as_of"
     }),
+    cap_contract_id: capContractId(NUMERIC_CONTRACT),
     milligrades,
     accepting: true,
     ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })

@@ -191,8 +191,9 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     try {
       await worker.ready();
       let now = "2026-09-07T23:59:59.000Z";
-      // Budget the retained partition identities in both arms; this tests paging, not default-budget refusal.
-      const memoryBytes = 1_010_000;
+      // Forty coordinate-aware seeds retain ~1.3 MB with both numeric bands and proofs.
+      // Fund that state in both arms; this tests paging, not default-budget refusal.
+      const memoryBytes = 2_000_000;
       const direct = await collectBoundaryPages(handlerFor(slice.database, serviceFor(slice.database, () => now, undefined, memoryBytes)));
       const service = serviceFor(slice.database, () => now, worker, memoryBytes);
       const handler = handlerFor(slice.database, service);

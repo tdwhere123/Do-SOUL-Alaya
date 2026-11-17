@@ -165,18 +165,10 @@ export function derivationIdentity(
   return clipId(`local-leaves.v1:${kind}:${children.map((child) => child.derivation_id).join("+")}`);
 }
 
-export function seedDerivationIdentity(productNodeId: string): string {
-  return clipId(`seed:${productNodeId}`);
-}
-
-/** Graph node id of a seed; the same contract+product partition as numeric preparation. */
-export function seedActivationNodeId(seed: Pick<SeedActivation, "state" | "cap_contract_id">): string {
-  return fieldPartitionNodeId(canonicalProductIdentity(seed.state), seed.cap_contract_id);
-}
-
 /** Emitted seed-leaf identity. Withdrawal consumers must match this, not a second formula. */
 export function seedActivationDerivationId(seed: Pick<SeedActivation, "state" | "cap_contract_id">): string {
-  return seedDerivationIdentity(seedActivationNodeId(seed));
+  const node = fieldPartitionNodeId(canonicalProductIdentity(seed.state), seed.cap_contract_id);
+  return clipId(`seed:${node}`);
 }
 
 export function ruleDerivationIdentity(transitionKeyValue: string): string {
