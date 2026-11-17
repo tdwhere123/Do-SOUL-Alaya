@@ -1,10 +1,9 @@
 /**
- * EventLog-first write owner. Prefer `appendManyWithMutation` when apply can
- * share the SQLite transaction. `appendApplyThenPropagate` is the leftover
- * path when apply cannot join that transaction — an EventLog row can then
- * exist without ontology. `bindEventPublisher` must receive a real notifier;
- * an inert adapter hides "never wired" as "no subscribers".
+ * Atomic EventLog/state write owner, plus event-only publication. Internal
+ * statement order differs by mode; all mutation callbacks must share the
+ * synchronous SQLite transaction. Notification follows commit.
  */
+import { types } from "node:util";
 import {
   AlayaError,
   WorkspaceRunEventSchema,
@@ -140,6 +139,7 @@ export class EventPublisher {
       entries: EventLogEntry[];
       result: T;
     }>(() => {
+      assertSynchronousMutationFunction(mutate);
       const produced = mutate();
       assertSynchronousMutationResult(produced);
       const collected: EventLogEntry[] = [];
@@ -147,7 +147,9 @@ export class EventPublisher {
         collected.push(appendEventLogSynchronously(repo, input));
       }
       if (produced.apply) {
+        assertSynchronousMutationFunction(produced.apply);
         const postApplyEvents = produced.apply();
+        assertSynchronousMutationResult(postApplyEvents);
         if (postApplyEvents !== undefined && postApplyEvents.length > 0) {
           for (const input of postApplyEvents) {
             collected.push(appendEventLogSynchronously(repo, input));
@@ -173,8 +175,10 @@ export class EventPublisher {
   ): Promise<T> {
     const repo = this.dependencies.eventLogRepo;
     const { entries, result } = repo.transactional(() => {
+      assertSynchronousMutationFunction(decide);
       const decision = decide();
       assertSynchronousMutationResult(decision);
+      assertSynchronousMutationFunction(decision.apply);
       const entries = decision.eventInputs.map((input) => appendEventLogSynchronously(repo, input));
       const result = decision.apply(entries);
       assertSynchronousMutationResult(result);
@@ -267,6 +271,7 @@ export class EventPublisher {
       entries: EventLogEntry[];
       mutateResult: T;
     }>(() => {
+      assertSynchronousMutationFunction(mutate);
       const collected: EventLogEntry[] = [];
       for (const input of eventInputs) {
         collected.push(appendEventLogSynchronously(repo, input));
@@ -324,13 +329,24 @@ export class EventPublisher {
   }
 }
 
+function assertSynchronousMutationFunction(callback: unknown): void {
+  // Reject native async callbacks before invoking their synchronous prefix or
+  // scheduling their continuation. A returned thenable still needs the check below.
+  if (types.isAsyncFunction(callback)) rejectAsynchronousMutation();
+}
+
 function assertSynchronousMutationResult(result: unknown): void {
-  if (result instanceof Promise || typeof (result as { readonly then?: unknown })?.then === "function") {
-    throw new Error(
-      "appendManyWithMutation: mutate callback must be synchronous. " +
-        "Move any awaitable work outside of appendManyWithMutation."
-    );
+  if (isPromiseLike(result)) {
+    // Rollback cannot cancel an already scheduled continuation. Observe its
+    // rejection; SQLite EventLog's closed write scope rejects later audit writes.
+    // Arbitrary external effects remain forbidden, not transactionally reversible.
+    void Promise.resolve(result).catch(() => undefined);
+    rejectAsynchronousMutation();
   }
+}
+
+function rejectAsynchronousMutation(): never {
+  throw new Error("EventPublisher mutation callbacks must be synchronous. Move awaitable work outside the transaction.");
 }
 
 /**

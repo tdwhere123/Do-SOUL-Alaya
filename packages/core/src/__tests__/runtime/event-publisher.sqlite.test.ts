@@ -19,6 +19,13 @@ import { EventPublisher } from "../../runtime/event-publisher.js";
 
 const databases = new Set<StorageDatabase>();
 
+function probeEvent() {
+  return { event_type: WorkspaceRunEventType.RUN_CREATED, entity_type: "run", entity_id: "run-probe",
+    workspace_id: "ws_publisher", run_id: "run-probe", caused_by: "user_action",
+    payload_json: RunCreatedPayloadSchema.parse({ run_id: "run-probe", workspace_id: "ws_publisher",
+      run_mode: RunMode.CHAT, title: "transaction probe" }) };
+}
+
 afterEach(() => {
   for (const database of databases) {
     database.close();
@@ -27,6 +34,47 @@ afterEach(() => {
 });
 
 describe("EventPublisher + SqliteEventLogRepo", () => {
+  it("rejects a native async apply before its prefix and continuation can mutate", async () => {
+    const database = initDatabase({ filename: ":memory:" }); databases.add(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const publisher = new EventPublisher({ eventLogRepo, runHotStateService: { apply: () => undefined },
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined } });
+    database.connection.exec("CREATE TABLE transaction_probe (value TEXT)");
+    const decision = { events: [probeEvent()], result: "not committed", apply: () => undefined };
+    let invoked = false;
+    // Simulate an untyped adapter violating the synchronous callback contract.
+    Object.defineProperty(decision, "apply", { value: async () => {
+      invoked = true;
+      database.connection.prepare("INSERT INTO transaction_probe VALUES ('prefix')").run();
+      await Promise.resolve();
+      database.connection.prepare("INSERT INTO transaction_probe VALUES ('tail')").run();
+    } });
+    await expect(publisher.mutateThenAppendMany(() => decision)).rejects.toThrow(/must be synchronous/);
+    await Promise.resolve();
+    expect(invoked).toBe(false);
+    expect(database.connection.prepare("SELECT * FROM transaction_probe").all()).toEqual([]);
+    expect(await eventLogRepo.queryByEntity("run", "run-probe")).toEqual([]);
+  });
+
+  it("rolls back a thenable apply and rejects its late EventLog write without promising cancellation", async () => {
+    const database = initDatabase({ filename: ":memory:" }); databases.add(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const publisher = new EventPublisher({ eventLogRepo, runHotStateService: { apply: () => undefined },
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined } });
+    database.connection.exec("CREATE TABLE transaction_probe (value TEXT)");
+    let lateWrite: Promise<unknown> | undefined;
+    const decision = { events: [probeEvent()], result: "not committed", apply: () => undefined };
+    Object.defineProperty(decision, "apply", { value: () => {
+      database.connection.prepare("INSERT INTO transaction_probe VALUES ('prefix')").run();
+      lateWrite = Promise.resolve().then(() => eventLogRepo.append(probeEvent()));
+      return lateWrite;
+    } });
+    await expect(publisher.mutateThenAppendMany(() => decision)).rejects.toThrow(/must be synchronous/);
+    await expect(lateWrite).rejects.toThrow(/must not continue asynchronously/);
+    expect(database.connection.prepare("SELECT * FROM transaction_probe").all()).toEqual([]);
+    expect(await eventLogRepo.queryByEntity("run", "run-probe")).toEqual([]);
+  });
+
   it("returns the committed mutation and records notification failure without inviting a write retry", async () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);
