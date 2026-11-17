@@ -6,8 +6,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
-  sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
-  type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
+  SOURCE_EMBEDDING_MAX_BATCH_INPUTS, sourceEmbeddingInputDigest, sourceEmbeddingSha256,
+  type SourceEmbeddingBindingResult, type SourceEmbeddingBindingOptions,
+  type SourceEmbeddingResult } from "../embedding-recall/source-embedding-runtime.js";
 
 /** Disabled-channel receipts; not infrastructure unavailability. */
 export const ACQUISITION_CHANNEL_NOT_REQUESTED = "acquisition_channel_not_requested";
@@ -104,7 +105,8 @@ export function capturePreparedSourceQuery(prepared: PreparedSourceQuery): Prepa
 /** Private inference before the native snapshot. Observe the selected configuration; never create one.
  * Capture both texts, the selected configuration and control before the first asynchronous bind.
  * The same binding/profile serves both distinct routes; a failed hint cannot replace original work.
- * Evidence statements reuse the query binding one input at a time, and only through local inference. */
+ * Local inference batches the query and evidence statements in one embedInputs call; remote inference
+ * runs only the primary route and refuses evidence statements without remote submission. */
 export async function prepareSourceQuery(input: SourceQueryPreparationInput,
   control?: SourceAcquisitionChannelControl): Promise<PreparedSourceQuery> {
   const capturedControl = control;
@@ -121,67 +123,146 @@ export async function prepareSourceQuery(input: SourceQueryPreparationInput,
   let binding: Promise<SourceEmbeddingBindingResult> | undefined;
   const captured = { navigation, selection, signal, remainingMs,
     bind: (options: SourceEmbeddingBindingOptions) => binding ??= bind(options) };
-  const primary = await prepareRoute(captured), evidence: PreparedRoute[] = [];
-  for (const statement of statements ?? []) evidence.push(await prepareRoute({ ...captured, navigation: statement }, true));
-  const original = statements === undefined ? primary : { ...primary, evidence };
+  const original = statements === undefined || statements.length === 0
+    ? await prepareRoute(captured).then(primary => statements === undefined ? primary : { ...primary, evidence: [] })
+    : await prepareQueryWithStatements(captured, statements);
   if (supplemental_navigation === undefined || supplemental_navigation === navigation) return original;
   const supplemental = await prepareRoute({ ...captured, navigation: supplemental_navigation });
   return { ...original, supplemental };
 }
 
-async function prepareRoute(input: SourceQueryPreparationInput, localOnly = false): Promise<PreparedRoute> {
-  const navigation = input.navigation, selection = input.selection, started = performance.now();
-  const bind = input.bind, signal = input.signal, remainingMs = input.remainingMs;
-  const digest = sourceEmbeddingInputDigest(navigation);
-  let receipt: SourceSemanticQueryPreparation = {
+type RouteBase = Readonly<{ text: string; digest: string; receipt: SourceSemanticQueryPreparation }>;
+type BoundProfile = Readonly<{
+  profileId: string;
+  actual: ReturnType<typeof captureSourceEmbeddingProfile>;
+  method: "local_inference" | "external_api";
+  embed: (inputs: ReturnType<typeof captureSourceEmbeddingInputs>, options: { profile_id: string; signal: AbortSignal; timeoutMs: number }) => Promise<readonly SourceEmbeddingResult[]>;
+}>;
+
+function createRouteBase(text: string): RouteBase {
+  const digest = sourceEmbeddingInputDigest(text);
+  return { text, digest, receipt: {
     status: "unavailable", reason: "source_profile_unbound", navigation_digest: digest, selected: null,
     method: "not_run", submitted_inputs: 0, token_count: null, external_api_attempts: 0,
     binding_work: "not_run", execution_work: "not_run", elapsed_ms: 0
-  };
-  const unavailable = (reason: string, status: "unavailable" | "failed" = "unavailable"): PreparedRoute => ({
-    vector: { status: "unavailable", reason: reason.length <= 256 ? reason : "query_preparation_failed" },
-    receipt: { ...receipt, status, reason: reason.length <= 256 ? reason : "query_preparation_failed", elapsed_ms: performance.now() - started }
-  });
-  if (selection === null) return unavailable("source_profile_unbound");
+  } };
+}
+
+function unavailableFromReceipt(receipt: SourceSemanticQueryPreparation, reason: string, started: number,
+  status: "unavailable" | "failed" = "unavailable"): PreparedRoute {
+  const bounded = reason.length <= 256 ? reason : "query_preparation_failed";
+  return { vector: { status: "unavailable", reason: bounded },
+    receipt: { ...receipt, status, reason: bounded, elapsed_ms: performance.now() - started } };
+}
+
+async function resolveBoundProfile(input: Pick<SourceQueryPreparationInput, "selection" | "bind" | "signal" | "remainingMs">,
+  receiptTemplate: SourceSemanticQueryPreparation): Promise<
+    { ok: true; bound: BoundProfile; selected: NonNullable<SourceSemanticQueryPreparation["selected"]> } |
+    { ok: false; failure: { reason: string; status: "unavailable" | "failed"; selected: SourceSemanticQueryPreparation["selected"]; bindingWork: "not_run" | "unknown"; externalApiAttempts: number | null } }
+  > {
+  const { selection, bind, signal, remainingMs } = input;
+  if (selection === null) {
+    return { ok: false, failure: { reason: "source_profile_unbound", status: "unavailable", selected: null, bindingWork: "not_run", externalApiAttempts: 0 } };
+  }
+  let selected: NonNullable<SourceSemanticQueryPreparation["selected"]> | null = null;
+  let bindingWork: "not_run" | "unknown" = "not_run";
+  let externalApiAttempts: number | null = 0;
   try {
     const profile = captureSourceEmbeddingProfile(selection.configuration.profile, selection.profile_id);
     if (sourceIndexConfigurationId(selection.configuration, sourceEmbeddingSha256) !== selection.config_id) {
-      return unavailable("selected_configuration_mismatch");
+      return { ok: false, failure: { reason: "selected_configuration_mismatch", status: "unavailable", selected: null, bindingWork, externalApiAttempts } };
     }
-    receipt = { ...receipt, selected: { selection_revision: selection.selection_revision,
-      config_id: selection.config_id, profile_id: selection.profile_id, profile } };
+    selected = { selection_revision: selection.selection_revision, config_id: selection.config_id, profile_id: selection.profile_id, profile };
     signal.throwIfAborted();
-    receipt = { ...receipt, binding_work: "unknown", external_api_attempts: null };
+    bindingWork = "unknown"; externalApiAttempts = null;
     const binding = await bind({ window_bytes: profile.window_bytes, max_input_tokens: profile.max_input_tokens,
-      windowing: profile.windowing,
-      ...(profile.representation === undefined ? {} : { representation: profile.representation }) });
+      windowing: profile.windowing, ...(profile.representation === undefined ? {} : { representation: profile.representation }) });
     // Binding may not support cancellation. Discard anything arriving after the inherited deadline.
     signal.throwIfAborted();
-    if (remainingMs() <= 0) return unavailable("preparation_deadline");
-    if (binding.status !== "ready") return unavailable(binding.reason);
-    const profileId = binding.profile_id;
-    const actual = captureSourceEmbeddingProfile(binding.profile, profileId);
-    const embed = binding.embedInputs.bind(binding);
+    if (remainingMs() <= 0) return { ok: false, failure: { reason: "preparation_deadline", status: "unavailable", selected, bindingWork, externalApiAttempts } };
+    if (binding.status !== "ready") return { ok: false, failure: { reason: binding.reason, status: "unavailable", selected, bindingWork, externalApiAttempts } };
+    const profileId = binding.profile_id, actual = captureSourceEmbeddingProfile(binding.profile, profileId);
     if (profileId !== selection.profile_id || canonicalJson(actual) !== canonicalJson(profile) ||
-        sourceIndexProfileId(actual, sourceEmbeddingSha256) !== selection.profile_id) return unavailable("selected_profile_mismatch");
+        sourceIndexProfileId(actual, sourceEmbeddingSha256) !== selection.profile_id) {
+      return { ok: false, failure: { reason: "selected_profile_mismatch", status: "unavailable", selected, bindingWork, externalApiAttempts } };
+    }
     const method = actual.provider_kind === "local_onnx" ? "local_inference" : "external_api";
-    if (localOnly && method !== "local_inference") return unavailable("evidence_statement_requires_local_inference");
-    receipt = { ...receipt, method, submitted_inputs: 1, execution_work: "unknown",
-      external_api_attempts: method === "local_inference" ? 0 : null };
-    const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation, role: "query" }]);
-    const observed = validateSourceEmbeddingResults(inputs, await embed(inputs, {
-      profile_id: profileId, signal, timeoutMs: Math.max(1, remainingMs())
-    }), actual)[0]!;
-    signal.throwIfAborted();
-    if (remainingMs() <= 0) return unavailable("preparation_deadline");
-    receipt = { ...receipt, token_count: observed.token_count };
-    if (observed.status !== "embedded") return unavailable(observed.reason, "failed");
-    if (!observed.vector.some(value => value !== 0)) return unavailable("zero_query_vector", "failed");
-    return { vector: { status: "available", profile: actual, profile_id: profileId,
-      input_digest: observed.input_digest, embedding: observed.vector },
-      receipt: { ...receipt, status: "ready", reason: null, elapsed_ms: performance.now() - started } };
+    return { ok: true, selected, bound: { profileId, actual, method, embed: binding.embedInputs.bind(binding) } };
   } catch (error) {
-    return unavailable(signal.aborted ? "preparation_deadline" :
-      error instanceof Error ? "query_preparation_failed" : "query_preparation_unknown", "failed");
+    return { ok: false, failure: {
+      reason: signal.aborted ? "preparation_deadline" : error instanceof Error ? "query_preparation_failed" : "query_preparation_unknown",
+      status: "failed", selected: selected ?? receiptTemplate.selected, bindingWork, externalApiAttempts
+    } };
   }
+}
+
+function routeFromEmbeddingResult(receipt: SourceSemanticQueryPreparation, observed: SourceEmbeddingResult,
+  actual: BoundProfile["actual"], profileId: string, started: number): PreparedRoute {
+  const withTokens = { ...receipt, token_count: observed.token_count };
+  if (observed.status !== "embedded") return unavailableFromReceipt(withTokens, observed.reason, started, "failed");
+  if (!observed.vector.some(value => value !== 0)) return unavailableFromReceipt(withTokens, "zero_query_vector", started, "failed");
+  return {
+    vector: { status: "available", profile: actual, profile_id: profileId, input_digest: observed.input_digest, embedding: new Float32Array(observed.vector) },
+    receipt: { ...withTokens, status: "ready", reason: null, elapsed_ms: performance.now() - started }
+  };
+}
+
+async function embedBatch(bases: readonly RouteBase[], bound: BoundProfile, selected: NonNullable<SourceSemanticQueryPreparation["selected"]>,
+  input: Pick<SourceQueryPreparationInput, "signal" | "remainingMs">, started: number): Promise<PreparedRoute[]> {
+  const uniqueByText = new Map<string, RouteBase>();
+  for (const base of bases) if (!uniqueByText.has(base.text)) uniqueByText.set(base.text, base);
+  const uniqueList = [...uniqueByText.values()];
+  const routeReceipts = bases.map(base => ({ ...base.receipt, selected, binding_work: "unknown" as const,
+    method: bound.method, submitted_inputs: 1, execution_work: "unknown" as const,
+    external_api_attempts: bound.method === "local_inference" ? 0 : null }));
+  const observedByText = new Map<string, SourceEmbeddingResult>();
+  try {
+    for (let offset = 0; offset < uniqueList.length; offset += SOURCE_EMBEDDING_MAX_BATCH_INPUTS) {
+      input.signal.throwIfAborted();
+      if (input.remainingMs() <= 0) return routeReceipts.map(receipt => unavailableFromReceipt(receipt, "preparation_deadline", started));
+      const slice = uniqueList.slice(offset, offset + SOURCE_EMBEDDING_MAX_BATCH_INPUTS);
+      const inputs = captureSourceEmbeddingInputs(slice.map(item => ({ input_id: item.digest, text: item.text, role: "query" })));
+      const validated = validateSourceEmbeddingResults(inputs, await bound.embed(inputs, {
+        profile_id: bound.profileId, signal: input.signal, timeoutMs: Math.max(1, input.remainingMs())
+      }), bound.actual);
+      input.signal.throwIfAborted();
+      if (input.remainingMs() <= 0) return routeReceipts.map(receipt => unavailableFromReceipt(receipt, "preparation_deadline", started));
+      for (let idx = 0; idx < slice.length; idx += 1) observedByText.set(slice[idx]!.text, validated[idx]!);
+    }
+    return bases.map((base, idx) => routeFromEmbeddingResult(routeReceipts[idx]!, observedByText.get(base.text)!, bound.actual, bound.profileId, started));
+  } catch (error) {
+    const reason = input.signal.aborted ? "preparation_deadline" : error instanceof Error ? "query_preparation_failed" : "query_preparation_unknown";
+    return routeReceipts.map(receipt => unavailableFromReceipt(receipt, reason, started, "failed"));
+  }
+}
+
+async function prepareQueryWithStatements(input: SourceQueryPreparationInput, statements: readonly string[]): Promise<PreparedSourceQuery> {
+  const started = performance.now();
+  const primaryBase = createRouteBase(input.navigation);
+  const statementBases = statements.map(createRouteBase);
+  const resolved = await resolveBoundProfile(input, primaryBase.receipt);
+  if (!resolved.ok) {
+    const { reason, status, selected, bindingWork, externalApiAttempts } = resolved.failure;
+    const toUnavailable = (base: RouteBase) => unavailableFromReceipt({ ...base.receipt, selected, binding_work: bindingWork,
+      external_api_attempts: externalApiAttempts }, reason, started, status);
+    return { ...toUnavailable(primaryBase), evidence: statementBases.map(toUnavailable) };
+  }
+  if (resolved.bound.method !== "local_inference") {
+    const [primary] = await embedBatch([primaryBase], resolved.bound, resolved.selected, input, started);
+    const evidence = statementBases.map(base => unavailableFromReceipt({ ...base.receipt, selected: resolved.selected,
+      binding_work: "unknown", external_api_attempts: null }, "evidence_statement_requires_local_inference", started));
+    return { ...primary!, evidence };
+  }
+  const [primary, ...evidence] = await embedBatch([primaryBase, ...statementBases], resolved.bound, resolved.selected, input, started);
+  return { ...primary!, evidence };
+}
+
+async function prepareRoute(input: SourceQueryPreparationInput): Promise<PreparedRoute> {
+  const started = performance.now(), base = createRouteBase(input.navigation);
+  const resolved = await resolveBoundProfile(input, base.receipt);
+  if (!resolved.ok) {
+    const { reason, status, selected, bindingWork, externalApiAttempts } = resolved.failure;
+    return unavailableFromReceipt({ ...base.receipt, selected, binding_work: bindingWork, external_api_attempts: externalApiAttempts }, reason, started, status);
+  }
+  return (await embedBatch([base], resolved.bound, resolved.selected, input, started))[0]!;
 }

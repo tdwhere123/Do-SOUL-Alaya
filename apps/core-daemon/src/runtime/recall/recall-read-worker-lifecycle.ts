@@ -79,7 +79,6 @@ export class RecallReadWorkerLifecycle {
         status: scope.overflow ? "overflow" : scope.rows.length === 0 ? "not_observed" : "available" };
     }
   };
-  private nextIndex = 0;
   private nextRequestId = 1;
   private closed = false;
   private closePromise: Promise<void> | undefined;
@@ -296,14 +295,18 @@ export class RecallReadWorkerLifecycle {
       this.assertUsable(resource);
       return resource.lease === undefined ? resource : undefined;
     }
-    for (let offset = 0; offset < this.slots.length; offset += 1) {
-      const index = waiter.index ?? (this.nextIndex + offset) % this.slots.length;
-      const resource = this.slots[index] ?? this.spawn(index);
-      if (resource.state === "active" && resource.lease === undefined) {
-        this.nextIndex = (index + 1) % this.slots.length;
+    if (waiter.index !== undefined) {
+      const resource = this.slots[waiter.index] ?? this.spawn(waiter.index);
+      return resource.state === "active" && resource.lease === undefined ? resource : undefined;
+    }
+    for (let index = 0; index < this.slots.length; index += 1) {
+      const resource = this.slots[index];
+      if (resource !== undefined && resource.state === "active" && resource.lease === undefined) {
         return resource;
       }
-      if (waiter.index !== undefined) break;
+    }
+    for (let index = 0; index < this.slots.length; index += 1) {
+      if (this.slots[index] === undefined) return this.spawn(index);
     }
     return undefined;
   }

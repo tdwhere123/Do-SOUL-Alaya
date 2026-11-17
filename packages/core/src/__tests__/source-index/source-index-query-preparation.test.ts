@@ -334,12 +334,12 @@ describe("simulated query-preparation adapters, no native inference", () => {
       submitted_inputs: 0, external_api_attempts: null, binding_work: "unknown", execution_work: "not_run" });
   });
 
-  it("captures evidence statements before bind and prepares them after the original through the shared binding", async () => {
+  it("captures evidence statements before bind and batches them with the original through the shared local binding", async () => {
     const selected = selectionFor(profile());
     const statements = ["evidence one", "evidence two"];
-    const texts: string[] = [];
+    const batches: string[][] = [];
     const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
-      texts.push(inputs[0]!.text);
+      batches.push(inputs.map(row => row.text));
       return embedded(inputs);
     });
     const bind = vi.fn(async () => readyBind(selected, embed));
@@ -350,10 +350,77 @@ describe("simulated query-preparation adapters, no native inference", () => {
     statements.push("mutated after capture");
     const result = await pending;
     expect(bind).toHaveBeenCalledTimes(1);
-    expect(texts).toEqual([NAVIGATION, "evidence one", "evidence two", "hint text"]);
+    expect(batches).toEqual([[NAVIGATION, "evidence one", "evidence two"], ["hint text"]]);
     expect(result.evidence).toHaveLength(2);
     expect(result.evidence?.every(route => route.receipt.status === "ready")).toBe(true);
     expect(result.supplemental?.receipt.status).toBe("ready");
+  });
+
+  it("deduplicates identical texts in a local batch while preserving independent route receipts and vector buffers", async () => {
+    const selected = selectionFor(profile());
+    const statements = [NAVIGATION, "unique statement", NAVIGATION];
+    const batches: string[][] = [];
+    const vectors = new Map([
+      [NAVIGATION, new Float32Array([0.6, 0.8, 0])],
+      ["unique statement", new Float32Array([0, 0.6, 0.8])]
+    ]);
+    const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
+      batches.push(inputs.map(row => row.text));
+      return inputs.map(input => ({
+        status: "embedded" as const, input_id: input.input_id,
+        input_digest: sourceEmbeddingInputDigest(input.text),
+        vector: vectors.get(input.text)!, token_count: input.text === NAVIGATION ? 2 : 4, truncated: false as const
+      }));
+    });
+    const result = await SourceIndexAcquisition.prepareQuery({
+      navigation: NAVIGATION, evidence_statements: statements, selection: selected,
+      bind: async () => readyBind(selected, embed), signal: new AbortController().signal, remainingMs: () => 5_000
+    });
+    expect(batches).toEqual([[NAVIGATION, "unique statement"]]);
+    expect(result.receipt).toMatchObject({ status: "ready", submitted_inputs: 1, token_count: 2, navigation_digest: DIGEST });
+    expect(result.evidence).toHaveLength(3);
+    const [dupNav, uniqueRoute, dupNav2] = result.evidence!;
+    expect(dupNav?.receipt).toMatchObject({ status: "ready", submitted_inputs: 1, token_count: 2, navigation_digest: DIGEST });
+    expect(uniqueRoute?.receipt).toMatchObject({ status: "ready", submitted_inputs: 1, token_count: 4,
+      navigation_digest: sourceEmbeddingInputDigest("unique statement") });
+    expect(dupNav2?.receipt).toMatchObject({ status: "ready", submitted_inputs: 1, token_count: 2, navigation_digest: DIGEST });
+    if (result.vector.status !== "available" || dupNav?.vector.status !== "available" || uniqueRoute?.vector.status !== "available") {
+      throw new Error("expected available vectors");
+    }
+    expect(Array.from(dupNav.vector.embedding)).toEqual(Array.from(result.vector.embedding));
+    expect(dupNav.vector.embedding).not.toBe(result.vector.embedding);
+    expect(Array.from(uniqueRoute.vector.embedding)).toEqual(Array.from(vectors.get("unique statement")!));
+  });
+
+  it("preserves per-route zero-vector and refusal accounting within a batched local inference call", async () => {
+    const selected = selectionFor(profile());
+    const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => inputs.map(input => {
+      if (input.text === "zero") {
+        return { status: "embedded" as const, input_id: input.input_id, input_digest: sourceEmbeddingInputDigest(input.text),
+          vector: new Float32Array([0, 0, 0]), token_count: 3, truncated: false as const };
+      }
+      if (input.text === "too-long") {
+        return { status: "not_embedded" as const, input_id: input.input_id, input_digest: sourceEmbeddingInputDigest(input.text),
+          reason: "input_token_limit", token_count: 99 };
+      }
+      return { status: "embedded" as const, input_id: input.input_id, input_digest: sourceEmbeddingInputDigest(input.text),
+        vector: new Float32Array([0.6, 0.8, 0]), token_count: 2, truncated: false as const };
+    }));
+    const result = await SourceIndexAcquisition.prepareQuery({
+      navigation: NAVIGATION, evidence_statements: ["zero", "too-long"], selection: selected,
+      bind: async () => readyBind(selected, embed), signal: new AbortController().signal, remainingMs: () => 5_000
+    });
+    expect(embed).toHaveBeenCalledTimes(1);
+    expect(result.receipt.status).toBe("ready");
+    expect(result.vector.status).toBe("available");
+    expect(result.evidence?.[0]).toMatchObject({
+      vector: { status: "unavailable", reason: "zero_query_vector" },
+      receipt: { status: "failed", reason: "zero_query_vector", submitted_inputs: 1, token_count: 3 }
+    });
+    expect(result.evidence?.[1]).toMatchObject({
+      vector: { status: "unavailable", reason: "input_token_limit" },
+      receipt: { status: "failed", reason: "input_token_limit", submitted_inputs: 1, token_count: 99 }
+    });
   });
 
   it("refuses remote evidence inference without submitting those statements or replacing original work", async () => {

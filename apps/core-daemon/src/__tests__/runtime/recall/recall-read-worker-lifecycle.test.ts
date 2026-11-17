@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import Database from "better-sqlite3";
 import { RecallReadWorkerLifecycle } from "../../../runtime/recall/recall-read-worker-lifecycle.js";
+import { RecallExecutionRetention } from "../../../../../../packages/core/src/recall/runtime/recall-execution-retention.js";
 import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import { createMemoryEntry } from "./recall-read-worker-client-fixture.js";
 
@@ -500,5 +501,76 @@ describe("caller-linked native execution scopes", () => {
       await Promise.allSettled(assertions);
       clock.restore(); await h.cleanup();
     }
+  });
+
+  it("prefers the lowest-index idle active slot for unaffined requests, falls back when busy or quarantined, and preserves preferred affinity", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-native-worker-locality-"));
+    const filename = join(directory, "native.db");
+    const database = new Database(filename);
+    database.exec("PRAGMA journal_mode=DELETE; CREATE TABLE transport_probe(value TEXT); INSERT INTO transport_probe VALUES ('present')");
+    const lifecycle = new RecallReadWorkerLifecycle({ databaseFilename: filename, workerUrl: fixtureUrl,
+      workerCount: 2, requestTimeoutMs: 600, onUnavailable: vi.fn() });
+    const events = (): Event[] => !existsSync(`${filename}.events`) ? []
+      : readFileSync(`${filename}.events`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as Event);
+    try {
+      const seenWorkers: Worker[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        await lifecycle.isolate(async () => {
+          seenWorkers.push(lifecycle.pinnedWorker()!);
+          await lifecycle.request("ready", {});
+        });
+      }
+      expect(new Set(seenWorkers).size).toBe(1);
+      expect(events().filter(event => event.kind === "spawn")).toHaveLength(1);
+      const slot0 = seenWorkers[0]!;
+      const held = deferred(), entered = deferred();
+      const first = lifecycle.isolate(async () => { entered.resolve(); await held.promise; });
+      await entered.promise;
+      let fallbackWorker!: Worker;
+      await lifecycle.isolate(async () => {
+        fallbackWorker = lifecycle.pinnedWorker()!;
+        await lifecycle.request("ready", {});
+      });
+      expect(fallbackWorker).not.toBe(slot0);
+      expect(events().filter(event => event.kind === "spawn")).toHaveLength(2);
+      held.resolve();
+      await first;
+      await lifecycle.isolate(async () => {
+        expect(lifecycle.pinnedWorker()).toBe(slot0);
+      });
+      await lifecycle.isolate(async () => {
+        expect(lifecycle.pinnedWorker()).toBe(fallbackWorker);
+      }, fallbackWorker);
+      database.exec("BEGIN EXCLUSIVE");
+      await expect(read(lifecycle, "native-lock", slot0)).rejects.toThrow(/timed out/);
+      await lifecycle.isolate(async () => {
+        expect(lifecycle.pinnedWorker()).toBe(fallbackWorker);
+      });
+      database.exec("ROLLBACK");
+    } finally {
+      if (database.inTransaction) database.exec("ROLLBACK");
+      await lifecycle.close();
+      database.close();
+      removeTempDirectorySync(directory);
+    }
+  });
+
+  it("keeps actively continued executions pinned under single-worker retention capacity without premature eviction", () => {
+    const retention = new RecallExecutionRetention(128 * 1024 * 1024, 64 * 1024 * 1024);
+    const executionSize = 2 * 1024 * 1024;
+    retention.set("prepared:active-cont", {
+      execution: "exec-active-cont", workspace: "ws-1", bytes: executionSize,
+      handles: ["active-cont", "cont-1"], value: { page: 1 }
+    });
+    for (let i = 0; i < 40; i += 1) {
+      expect(retention.get("prepared:active-cont")).toBeDefined();
+      retention.set(`prepared:q-${i}`, {
+        execution: `exec-q-${i}`, workspace: "ws-1", bytes: executionSize,
+        handles: [`q-${i}`], value: { page: 1 }
+      });
+      retention.reduce(`prepared:q-${i}`, 4096);
+    }
+    expect(retention.get("prepared:active-cont")).toEqual({ page: 1 });
+    expect(retention.snapshot().retained_bytes).toBeLessThanOrEqual(64 * 1024 * 1024);
   });
 });
