@@ -1,5 +1,6 @@
 import { type Transition } from "@do-soul/alaya-protocol";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import { normalizeFieldPartitionContract } from "../cap-contract.js";
 import type { RetainedRows } from "./retained-sequence.js";
 
 export function mergeTransitions(
@@ -37,6 +38,7 @@ export function ruleIdentity(transition: Transition): string {
 export function transitionKey(transition: Transition): string {
   return [
     ruleIdentity(transition),
+    normalizeFieldPartitionContract(transition.cap_contract_id),
     String(transition.strength_milligrades),
     String(transition.applicable),
     transition.revision_id ?? "",

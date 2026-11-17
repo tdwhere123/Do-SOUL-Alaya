@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SeedActivation, Transition } from "@do-soul/alaya-protocol";
-import { createConditionalField, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
+import { applyObserverPage, createConditionalField, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { traceDerivationForest, localLeafIds } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
-import { seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
+import { leafDerivation, seedActivationDerivationId } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { bindMaxMinField, productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { fieldPartitionNodeId, hardIdentityCapContractId, composeCapContracts } from "../../../../recall/conditional-field/cap-contract.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
@@ -77,6 +77,60 @@ describe("finite input contract coordinates (not production Soft relation admiss
       expect(binding.preparation?.numericValues.get(fieldPartitionNodeId(productStateNodeId(productKey("end")), contract))).toBe(grade);
       expect(proof(field, "end", contract).leaves).toContain(seedActivationDerivationId(seed("same", grade, contract)));
     }
+  });
+
+  it.each([HARD, A].flatMap(contract => [false, true].map(reverse => ({ contract, reverse }))))(
+    "retains same-observation Soft transfers by coordinate (seed=$contract, reverse=$reverse)", ({ contract, reverse }) => {
+    const initial = seed("start", contract === HARD ? 1000 : 700, contract);
+    const transitions = [edge("start", "end", 500, A), edge("start", "end", 500, B)];
+    if (reverse) transitions.reverse();
+    const field = build([initial], transitions);
+    expect(field.transitions).toHaveLength(2);
+    expect(field.guaranteed_transitions).toHaveLength(2);
+    const value = bound(field).snapshot.values.find(row => productStateNodeId(row.state) === productStateNodeId(productKey("end")));
+    if (contract === HARD) {
+      expect(value?.activation).toEqual({ kind: "incomparable", reason: "cap_contract_conflict" });
+      expect(value).not.toHaveProperty("low_milligrades");
+      expect(proof(field, "end", A).roots).not.toEqual(proof(field, "end", B).roots);
+    } else {
+      expect(value).toMatchObject({ milligrades: 500, low_milligrades: 500, high_milligrades: 500, cap_contract_id: A });
+      expect(proof(field, "end", B).roots).toEqual([]);
+    }
+    expect(proof(field, "end", A).roots).toHaveLength(1);
+    const direct = bindMaxMinField({ query_id: field.query_id, snapshot_id: field.snapshot_id, budget,
+      seeds: [initial], transitions });
+    if (direct.kind !== "bound") throw new Error("direct field rejected");
+    expect(direct.snapshot.values.find(row => productStateNodeId(row.state) === productStateNodeId(productKey("end")))?.activation)
+      .toEqual(value?.activation);
+
+    let incremental = build([initial], []);
+    for (const transition of transitions) {
+      const leaf = transition.cap_contract_id === A ? "support-a" : "support-b";
+      incremental = applyObserverPage(incremental, { page: { schema_version: 1, query_id: field.query_id,
+        snapshot_id: field.snapshot_id, cursor: { schema_version: 1, cursor_id: "adjacency", region_id: "adjacency",
+          query_id: field.query_id, snapshot_id: field.snapshot_id, position: leaf, committed_through: leaf },
+        observations: [], outcome: { schema_version: 1, status: "open" }, open_regions: [] },
+        effects: [{ observation_id: "same-observation", transition, derivation: leafDerivation({
+          derivation_id: leaf, observation_id: "same-observation", leaf_id: leaf, association_milligrades: 500 }) }] });
+    }
+    expect(incremental.transitions).toHaveLength(2);
+    expect(incremental.guaranteed_transitions).toHaveLength(2);
+    expect(bound(incremental).snapshot.values).toEqual(bound(field).snapshot.values);
+    expect(proof(incremental, "end", A).leaves).toEqual([seedActivationDerivationId(initial), "support-a"].sort());
+    expect(proof(incremental, "end", B).leaves).toEqual(contract === HARD
+      ? [seedActivationDerivationId(initial), "support-b"].sort() : []);
+    const withdrawn = withdrawDerivationLeaves(incremental, "support-a");
+    expect(bound(withdrawn).snapshot.values).toEqual(bound(build([initial], [edge("start", "end", 500, B)])).snapshot.values);
+    expect(incremental.transitions).toHaveLength(2);
+  });
+
+  it.each([false, true])("retains omitted numeric and explicit Hard transfers separately (reverse=%s)", reverse => {
+    const transitions = [edge("start", "end", 1000), edge("start", "end", 1000, HARD)];
+    if (reverse) transitions.reverse();
+    const field = build([seed("start", 700, A)], transitions);
+    expect(field.transitions).toHaveLength(2);
+    expect(bound(field).values.get(productStateNodeId(productKey("end")))).toBe(700);
+    expect(proof(field, "end", A).roots).toHaveLength(1);
   });
 
   it("selects an independent Hard proof without comparing two optional Soft routes, retaining both histories", () => {
