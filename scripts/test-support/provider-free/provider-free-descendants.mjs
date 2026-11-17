@@ -1,10 +1,11 @@
 import cp from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
+import { writeSync } from "node:fs";
 import workers from "node:worker_threads";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { ProviderFreeIsolation, ISOLATION_SIGNAL_FAILURE_EXIT } from "./provider-free-isolation.mjs";
+import { ProviderFreeIsolation, ProviderFreeIsolationError, ISOLATION_SIGNAL_FAILURE_EXIT } from "./provider-free-isolation.mjs";
 
 export const providerFreeDescendantPreload = new URL("./provider-free-descendant-bootstrap.mjs", import.meta.url).href;
 const ownerKey = Symbol.for("alaya.provider-free-descendant-owner");
@@ -21,7 +22,13 @@ export function installProviderFreeActor(preload) {
   installProviderFreeDescendants(isolation, preload);
   process.on("exit", () => {
     try { isolation.assertSafe(); }
-    catch { if (process.exitCode !== ISOLATION_SIGNAL_FAILURE_EXIT) process.exitCode = 1; }
+    catch (error) {
+      if (process.exitCode !== ISOLATION_SIGNAL_FAILURE_EXIT) process.exitCode = 1;
+      const reason = error instanceof ProviderFreeIsolationError ? error.reasons.join(", ") : "unknown";
+      // Exit handlers cannot rely on draining asynchronous stderr.
+      try { writeSync(2, `Provider-free exit verification failed: ${reason}\n`); }
+      catch { /* A closed diagnostic stream does not change the isolation status. */ }
+    }
   });
   return isolation;
 }

@@ -27,7 +27,10 @@ export const PROVIDER_FREE_WORKER_IMPORT = `--import=${new URL("../../../../../.
 {
   const current = process.env.NODE_OPTIONS ?? "";
   if (!current.includes(PROVIDER_FREE_WORKER_IMPORT)) {
-    process.env.NODE_OPTIONS = `${current} ${PROVIDER_FREE_WORKER_IMPORT}`.trim();
+    // Node requires this full descriptor when an existing environment key is set through the strict proxy.
+    Object.defineProperty(process.env, "NODE_OPTIONS", {
+      value: `${current} ${PROVIDER_FREE_WORKER_IMPORT}`.trim(), configurable: true, enumerable: true, writable: true
+    });
   }
 }
 

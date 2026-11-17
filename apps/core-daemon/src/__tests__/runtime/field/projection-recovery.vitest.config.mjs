@@ -5,7 +5,9 @@ const project = projects.find(candidate => candidate.test?.name === "@do-soul/al
 if (project === undefined) throw new Error("daemon test project unavailable");
 export default defineConfig({
   root: fileURLToPath(new URL("../../../../../../", import.meta.url)),
-  resolve: project.resolve,
+  // The checkout paths are explicit. Do not let Vite shell out to discover
+  // Windows mapped drives inside the provider-free crash fixture.
+  resolve: { ...project.resolve, preserveSymlinks: true },
   test: {
     include: ["apps/core-daemon/src/__tests__/runtime/field/projection-recovery-child.ts"],
     pool: "threads", maxWorkers: 1, minWorkers: 1, testTimeout: 30_000

@@ -10,7 +10,8 @@ import { createHash } from "node:crypto";
 
 const scripts = new URL("../../../scripts/", import.meta.url);
 
-// Budget each case independently: the compiled scorer starts twice per case.
+// Exercise the actual CLI on one valid-to-invalid transition. The remaining
+// cases use the same scorer and real disk inputs without repeated cold boots.
 it.each(["dataset", "rows", "census", "invalid-census", "late-truncated-row", "missing-rows"] as const)(
   "qualifies successful CLI scoring but invalidates prior success on %s failure",
   async (badInput) => {
@@ -25,9 +26,13 @@ it.each(["dataset", "rows", "census", "invalid-census", "late-truncated-row", "m
       writeFileSync(data, JSON.stringify([{ question_id: "empty", haystack_sessions: [[]] }]));
       writeFileSync(census, JSON.stringify({ question_ids: ["empty"], arms: ["base"], reader: "current", capture_pool: false }));
       writeFileSync(rows, goodRows);
-      const score = () => promisify(execFile)(process.execPath, [fileURLToPath(new URL("recall-harness-score.mjs", scripts)),
+      const scorer = new URL("recall-harness-score.mjs", scripts);
+      const scoreCli = () => promisify(execFile)(process.execPath, [fileURLToPath(scorer),
         "--out", root, "--dataset", data, "--census", census]);
-      await score();
+      const { runRecallHarnessScore } = await import(scorer.href);
+      const score = () => runRecallHarnessScore({ outDir: root, datasetPath: data, censusPath: census });
+      if (badInput === "dataset") await scoreCli();
+      else score();
       const reportPath = join(root, "census.json");
       const success = JSON.parse(readFileSync(reportPath, "utf8"));
       expect(success.status).toBe("qualifiable");
@@ -40,7 +45,8 @@ it.each(["dataset", "rows", "census", "invalid-census", "late-truncated-row", "m
       } else if (badInput === "invalid-census") writeFileSync(census, "{}");
       else writeFileSync({ dataset: data, rows, census }[badInput], "not json");
 
-      await expect(score()).rejects.toMatchObject({ code: 1 });
+      if (badInput === "dataset") await expect(scoreCli()).rejects.toMatchObject({ code: 1 });
+      else expect(score).toThrow();
       expect(JSON.parse(readFileSync(reportPath, "utf8")))
         .toMatchObject({ status: "not_qualifiable", reason: "scoring_incomplete" });
     } finally { rmSync(root, { recursive: true, force: true }); }

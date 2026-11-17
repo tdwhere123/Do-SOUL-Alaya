@@ -165,32 +165,37 @@ it("caps grouped and shared-withdrawal index memory at the live ledger, includin
       && row.memory <= projections[row.index]!.memory)).toBe(true);
   };
   try {
-    const partial = execute(3800000);
+    // These fixtures separate one admitted binding, both bindings, and a funded
+    // base with an unfunded withdrawal. Retained cap coordinates are part of each allocation.
+    const prefixBudget = 4_100_000;
+    const groupedBudget = 4_400_000;
+    const withdrawalBudget = 5_400_000;
+    const partial = execute(prefixBudget);
     assertAdmitted(partial.result.resource_usage);
     expect(projections.some((row, index) => index > 0 && row.historical > attempts[index]!.bytes
       && row.memory < row.historical)).toBe(true);
     expect(partial.result.outcome.status).toBe("resource_exhausted");
     expect(partial.result.binding_results).toHaveLength(1);
     expect(partial.index?.entries).toHaveLength(1);
-    expect(partial.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(3800000);
+    expect(partial.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(prefixBudget);
 
     attempts.length = 0; projections.length = 0; groundings.length = 0; charges.clear(); ownerMeter = undefined;
-    const funded = execute(4200000);
+    const funded = execute(groupedBudget);
     assertAdmitted(funded.result.resource_usage);
     expect(funded.result.outcome.status).toBe("interpreted");
     expect(funded.result.binding_results?.map(row => row.kind === "evidence" ? row.input : -1)).toEqual([0, 1]);
-    expect(funded.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(4200000);
+    expect(funded.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(groupedBudget);
 
     attempts.length = 0; projections.length = 0; groundings.length = 0; charges.clear(); ownerMeter = undefined;
-    const withdrawn = execute(5000000, true);
+    const withdrawn = execute(withdrawalBudget, true);
     assertAdmitted(withdrawn.result.resource_usage);
     expect(projections.length).toBeGreaterThan(4);
     expect(withdrawn.result.outcome.status).toBe("interpreted");
     expect(withdrawn.result.binding_results).toHaveLength(2);
     expect(withdrawn.withdrawal_trace?.arms).toHaveLength(1);
     expect(withdrawn.withdrawal_trace!.arms[0]!.result.outcome.status).toBe("resource_exhausted");
-    expect(withdrawn.withdrawal_trace!.arms[0]!.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(5000000);
-    expect(withdrawn.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(5000000);
+    expect(withdrawn.withdrawal_trace!.arms[0]!.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(withdrawalBudget);
+    expect(withdrawn.result.resource_usage!.memory_bytes).toBeLessThanOrEqual(withdrawalBudget);
   } finally { sourceSpy.mockRestore(); indexSpy.mockRestore(); groundingSpy.mockRestore(); chargedSpy.mockRestore(); }
 });
 
