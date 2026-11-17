@@ -49,7 +49,10 @@ expansion. Each lifted equation keeps its original seed or transition evidence
 identity. Separate contract/product seed rows and independent proof leaves survive;
 lifting never manufactures a measurement observation. AND grouping and nested
 premise assignments retain their coordinate instead of borrowing the first premise's
-metadata. Withdrawal recomputes from remaining founded derivations.
+metadata. Requested-role membership is indexed by the product proposition, while
+seed alternatives remain indexed by coordinate within that product. A coordinate
+key must not replace the product key used by role consumers. Withdrawal recomputes
+from remaining founded derivations.
 
 ## Bounds, delivery, and recovery
 
@@ -66,7 +69,11 @@ remains based on access ordinals rather than these grades.
 
 Expansion cursors survive bounded work and memory interruptions. Old retained
 states are immutable; subsequent additions and larger-budget retries resume from
-funded work. Observation with no bytes left after finalization reservation reports
+funded work. Refused memory allocation does not consume unspent work: rejected
+staging must not run the solver, and remaining work stays available for rollback
+and delivery. Same-budget retries terminate explicitly when they cannot progress;
+a sufficiently funded larger-memory retry can recover complete membership and
+proofs. Observation with no bytes left after finalization reservation reports
 memory exhaustion instead of offering an indefinitely unchanged continuation.
 
 ## Implementation and verification
