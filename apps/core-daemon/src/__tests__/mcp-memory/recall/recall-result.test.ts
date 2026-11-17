@@ -8,6 +8,7 @@ import {
   type InformationIndex
 } from "@do-soul/alaya-protocol";
 import {
+  RECALL_PROTOCOL_VERSION_INCOMPATIBLE_MESSAGE,
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
   encodeIndexResults, frameEncodedIndex,
   encodeRecallResult,
@@ -245,7 +246,7 @@ describe("conditional-field result encoding", () => {
     expect(frameEncodedIndex(index, tooTight).completeness.payload).toBe("omitted");
   });
 
-  it("rejects an undeclared mixed consumer before execute instead of emitting source rows", async () => {
+  it("executes plain MCP mixed recall without capability headers and rejects explicit incompatibilities before execute", async () => {
     const deps = createDeps();
     const handler = createRecallHandler({
       deps,
@@ -253,9 +254,28 @@ describe("conditional-field result encoding", () => {
       generateId: () => "00000000-0000-4000-8000-000000000001",
       warn: () => undefined
     });
+    const plainToolHandler = createMcpMemoryToolHandler(deps);
+    const plainToolResult = await plainToolHandler.call({
+      toolName: "soul.recall",
+      arguments: { query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null },
+      context
+    });
+    expect(plainToolResult.ok).toBe(true);
+    expect(deps.recallService.recall).toHaveBeenCalledTimes(1);
+
+    (deps.recallService.recall as ReturnType<typeof vi.fn>).mockClear();
     await expect(handler({
-      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
+      supports_source_evidence: false
     }, context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    await expect(handler({
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
+      supported_result_kinds: ["memory_entry"]
+    }, context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    await expect(handler({
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
+      protocol_version: 2
+    }, context)).rejects.toThrow(RECALL_PROTOCOL_VERSION_INCOMPATIBLE_MESSAGE);
     expect(deps.recallService.recall).not.toHaveBeenCalled();
   });
 

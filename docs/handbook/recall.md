@@ -39,9 +39,13 @@ The ordinary route is `native_query`; Core rejects explicit historical
 old algorithm. Retained schemas and offline archive readers do not execute the
 retired comparison, prefix, flood, SliceKey, Gamma, fusion or budget-aware-q
 selectors. `RECALL_CONSUMER_PROTOCOL_VERSION` negotiates source-evidence
-support, not ranking. Mixed and source-only requests require declared
-source-evidence capability; the explicit compatibility view is
-`result_kind_view: "memory_only"`.
+support, not ranking. Under Protocol 43.0.0, omitted `protocol_version` defaults to
+`1` and omitted `supports_source_evidence` / `supported_result_kinds` default to
+`["memory_entry", "source_evidence"]` on `mixed` and `source_only` views; explicit
+`supports_source_evidence: false`, explicit `supported_result_kinds` lacking
+`source_evidence`, or unsupported `protocol_version !== 1` are rejected before
+execution, while `result_kind_view: "memory_only"` remains the explicit memory-only
+compatibility view.
 Incompatible consumers receive an error rather than a silently reduced index.
 The worker RPC uses a versioned result envelope, not a bare index.
 
@@ -296,7 +300,14 @@ showed the model are its context dependencies and withdraw it on erasure.
 ## Question-time preference
 
 Protocol 28.0.0 admits `interpretation_proposal.question_time` from the narrow
-`alaya.query.question-time.v1` producer. The proposal binds the original-query digest
+`alaya.query.question-time.v1` producer. Under Protocol 43.0.0, callers may also
+supply `query_coordinates` (`question_time.intervals`, `evidence_conditions`,
+`evidence_relation: "derived"`) without computing `sha256` or duplicating
+`interpretation_clock`; `bindCallerQueryCoordinates` binds the query digest and
+clock server-side into `alaya.query.question-time.v1` before `admitQueryProposal`
+and degrades invalid date intervals or non-verbatim condition anchors safely
+without dropping raw recall. Pre-sealed `interpretation_proposal` packets retain
+strict original-query digest and clock verification. The proposal binds the original-query digest
 and interpretation clock, and contains up to 32 closed UTC calendar-day intervals on
 source `event_time`. Formation reads only the question and clock; Recall performs
 no provider call or language-specific time inference. The retired ordinary English
@@ -594,7 +605,10 @@ Member reads reuse the source template reader's currentness, erase and statement
 checks; an erased, changed or unreadable member is omitted, and a read-budget refusal ends
 the list without touching the ranked page. It lets the consumer see and choose beyond the ranked five; it is never ranking evidence
 and does not change the pool, accounting or ranked stream. Pool members read through
-continuation; listed statements open with `soul.open_pointer`.
+continuation; listed `statement_ids` or workspace-scoped `source_target` handles open
+with `soul.open_pointer` (`start_offset`, `byte_budget <= 65536`), enforcing
+currentness, `source_version`, `content_digest`, and privacy-erase/quarantine
+refusals without minting a memory ID.
 
 See [Protocol index view](../../packages/protocol/src/recall/conditional-field/index-view.ts).
 `RecallNavigationWitness` records original/hint view, native operator,

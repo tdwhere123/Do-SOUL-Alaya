@@ -36,13 +36,13 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.recall",
     description:
-      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall a structured information index for the current task: association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. `max_results` is the page budget, not a ranking cutoff. When the index cannot fit one packet, the response `index.continuation` can be sent back as request `continuation` to fetch the next page. Optional `since` / `until` are compiler hints. `recent_turn` is ignored for extraction; ordinary recall does not enqueue Garden work or call a missing embedding provider. Additive `index` carries the target view; older agents can keep using `results` in the same order. The first page may add `member_index`: one short line per further member after the ranked results (an interpretation, not ranking evidence); `in_pool` members arrive on later pages through `continuation`, and listed `statement_ids` open with soul.open_pointer.",
+      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall a structured information index for the current task: association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. Optionally supply `query_coordinates` (`question_time.intervals`, `evidence_conditions`, `evidence_relation`) directly in one call without hashing or clock duplication. `max_results` is the page budget, not a ranking cutoff. When the index cannot fit one packet, the response `index.continuation` can be sent back as request `continuation` to fetch the next page. Optional `since` / `until` are compiler hints. `recent_turn` is ignored for extraction; ordinary recall does not enqueue Garden work or call a missing embedding provider. Additive `index` carries the target view; older agents can keep using `results` in the same order. The first page may add `member_index`: one short line per further member after the ranked results (an interpretation, not ranking evidence); `in_pool` members arrive on later pages through `continuation`, and listed `statement_ids` or `source_target` open with soul.open_pointer.",
     parametersSchema: SoulMemorySearchRequestSchema
   },
   {
     name: "soul.open_pointer",
     description:
-      "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
+      "WHEN: a recall result preview or `member_index` entry is insufficient and you need the full content before citing it. Open a recalled memory/evidence pointer by `object_id`, or open a `member_index` source root by `source_target` with optional `start_offset` and `byte_budget` (`<= 65536` bytes). Read-only.",
     parametersSchema: SoulOpenPointerRequestSchema
   },
   {

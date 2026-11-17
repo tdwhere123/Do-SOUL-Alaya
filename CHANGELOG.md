@@ -8,15 +8,44 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 42.0.0, engine gateway 3.1.0
+## Unreleased — protocol 43.0.0, engine gateway 4.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
-`@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `4.0.0`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under invariant §25:
+- **Caller-ergonomic `query_coordinates` on `soul.recall`:** adds optional `query_coordinates`
+  (`question_time.intervals`, `1..4` `evidence_conditions`, `evidence_relation: "derived"`),
+  mutually exclusive with `interpretation_proposal`. The core coordinate binder
+  (`bindCallerQueryCoordinates`) binds `original_query_digest` and `interpretation_clock`
+  server-side into `alaya.query.question-time.v1` before `admitQueryProposal` and
+  `withPreparedExecution` local ONNX preparation, while safely dropping invalid date
+  intervals or non-verbatim condition anchors without revoking raw recall. Pre-sealed
+  `interpretation_proposal` packets retain strict `original_query_digest` and clock
+  verification.
+- **Default `mixed` v1 compatibility:** `assertRecallConsumerCompatibility` treats omitted
+  `protocol_version` as `1` and omitted `supports_source_evidence` / `supported_result_kinds`
+  as capable of `["memory_entry", "source_evidence"]` on `mixed` / `source_only` views so
+  plain `soul.recall` calls succeed out of the box, while keeping explicit
+  `supports_source_evidence: false`, lacking `supported_result_kinds`, unsupported
+  `protocol_version !== 1`, and `result_kind_view: "memory_only"` contracts enforced.
+- **Bounded workspace-scoped `member_index` `source_target` openability:** adds optional
+  workspace-omitted `source_target` to `RecallMemberIndexLineSchema` (populated by
+  `renderMemberIndex`) and extends `SoulOpenPointerRequestSchema` /
+  `SoulOpenPointerResponseSchema` (making `object_id` optional for `source_evidence`
+  responses) so `soul.open_pointer` opens `source_target` handles (`start_offset`,
+  `byte_budget <= 65536`) via the shared workspace-scoped `SqliteSourceRootRecallReader.hydrate`
+  owner using only `context.workspaceId`, enforcing currentness, `source_version`,
+  `content_digest`, and privacy-erase/quarantine refusal without minting a memory ID.
+- **Tool guidance (`@do-soul/alaya-engine-gateway` `4.0.0`):** updates `soul.recall` and
+  `soul.open_pointer` specs and daemon catalog descriptions for `query_coordinates`,
+  `member_index` `source_target` openability, default `mixed` compatibility, and selective
+  `payload_continuation` on relevant `content_complete === false` ranked results.
 
 Protocol 42.0.0 records a **semantic major** under invariant §25, without changing
 MCP JSON shapes: conditional-field Hard identity is a Boolean polymorphic unit

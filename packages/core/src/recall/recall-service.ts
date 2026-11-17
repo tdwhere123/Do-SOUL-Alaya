@@ -104,6 +104,7 @@ export {
   compileConditionalFieldQuery,
   interpretationIdentity
 } from "./conditional-field/query/compile-query.js";
+export { bindCallerQueryCoordinates } from "./conditional-field/query/caller-query-coordinates.js";
 export type {
   KeywordSearchBatchQuery,
   KeywordSearchLaneScope,

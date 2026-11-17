@@ -22,7 +22,11 @@ export type RecallConsumerCapability = Readonly<{
 
 export function consumerSupportsSourceEvidence(input: RecallConsumerCapability): boolean {
   if (input.supports_source_evidence === true) return true;
-  return input.supported_result_kinds?.includes("source_evidence") === true;
+  if (input.supports_source_evidence === false) return false;
+  if (input.supported_result_kinds !== undefined) {
+    return input.supported_result_kinds.includes("source_evidence");
+  }
+  return true;
 }
 
 export function declaredRecallResultKinds(
@@ -54,7 +58,7 @@ export function assertRecallConsumerCompatibility(input: RecallConsumerCapabilit
   }
   const view = input.result_kind_view ?? "mixed";
   if (view === "memory_only") return;
-  if (input.protocol_version !== RECALL_CONSUMER_PROTOCOL_VERSION || !consumerSupportsSourceEvidence(input)) {
+  if (!consumerSupportsSourceEvidence(input)) {
     throw new CoreError("VALIDATION", RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
   }
 }

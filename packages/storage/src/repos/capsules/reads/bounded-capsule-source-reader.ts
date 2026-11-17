@@ -1,4 +1,5 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import { cachedReadStatement } from "../../../sqlite/dynamic-prepared-statement-cache.js";
 import { readRetainedSourceChunk } from "../../field/retained-source-chunks.js";
 
 export type BoundedCapsuleSource = Readonly<{
@@ -49,6 +50,20 @@ export class BoundedCapsuleSourceReader {
       workspace: workspaceId, id: objectId
     }) as BoundedCapsuleSource | undefined ?? null;
     return row === null ? null : this.withBody(row, byteLimit, offset);
+  }
+
+  public readTargetAvailability(workspaceId: string, objectId: string): "ok" | "not_found" | "erased_or_quarantined" {
+    const row = cachedReadStatement(this.database, `SELECT
+      lifecycle_state,
+      EXISTS(
+        SELECT 1 FROM privacy_current_quarantine q
+        WHERE q.workspace_id = evidence_capsules.workspace_id
+          AND q.object_kind = 'evidence_capsule' AND q.object_id = evidence_capsules.object_id
+      ) AS quarantined
+      FROM evidence_capsules WHERE workspace_id = ? AND object_id = ? LIMIT 1`).get(workspaceId, objectId) as
+      { lifecycle_state: string; quarantined: number } | undefined;
+    if (row === undefined) return "not_found";
+    return row.lifecycle_state !== "active" || row.quarantined === 1 ? "erased_or_quarantined" : "ok";
   }
 
   /** Same standalone membership as capture, without changing direct retained-target reads. */

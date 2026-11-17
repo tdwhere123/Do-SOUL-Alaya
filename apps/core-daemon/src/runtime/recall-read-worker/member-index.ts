@@ -62,7 +62,14 @@ function renderLine(listing: Listing, inputs: MemberIndexInputs, source: SourceI
   if (text.length === 0) return null;
   return { label, root_id: source.target.root_id, date: listing.event_time === null ? null : listing.event_time.slice(0, 10),
     line: clipUtf8(text, MEMBER_INDEX_LINE_BYTES), producer: statements ? "source-statements-v1" : "first-message",
-    statement_ids: ids, in_pool: inPool };
+    statement_ids: ids, in_pool: inPool,
+    source_target: {
+      root_kind: source.target.root_kind,
+      root_id: source.target.root_id,
+      source_version: source.target.source_version,
+      content_digest: source.target.content_digest,
+      evidence_object_id: source.target.evidence_object_id
+    } };
 }
 
 /** Members after the delivered page: pool roots not on it (acquisition order), then the listed overflow. */

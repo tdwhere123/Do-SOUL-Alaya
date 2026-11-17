@@ -3,7 +3,8 @@ import {
   encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort,
-  type EventPublisher
+  type EventPublisher,
+  type SourceTargetOpenPort
 } from "@do-soul/alaya-core";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -140,12 +141,7 @@ export interface RecallUsageHandlerDependencies {
       readonly evidence_health_state: string;
     }> | null>;
   };
-  readonly fieldSource?: {
-    isCurrentTarget(
-      workspaceId: string,
-      target: import("@do-soul/alaya-protocol").SourceEvidenceTarget
-    ): Promise<boolean> | boolean;
-  };
+  readonly fieldSource?: SourceTargetOpenPort;
   readonly asyncSideEffectAudit?: {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;
@@ -185,7 +181,8 @@ async function executeRecall(
     request,
     context,
     taskSurface,
-    policyOverride
+    policyOverride,
+    now: params.now
   });
   try {
     throwIfAborted(context.abortSignal);

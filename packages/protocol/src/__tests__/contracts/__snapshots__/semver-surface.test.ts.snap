@@ -44,6 +44,10 @@ soul:edge-proposal.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total
 soul:edge-proposal.ts#SoulPendingEdgeProposalSummarySchema(confidence,created_at,edge_type,expires_at,proposal_id,reason,run_id,source_memory_id,source_signal_id,target_memory_id,trigger_source)#b6088de
 soul:edge-proposal.ts#SoulProposeEdgeRequestSchema(confidence,edge_type,reason,source_memory_id,target_memory_id)#2e6410f
 soul:edge-proposal.ts#SoulProposeEdgeResponseSchema(proposal_id,status)#6b20a6f
+soul:mcp-types.ts#CallerEvidenceConditionSchema(anchors,speaker,statement)#892caa3
+soul:mcp-types.ts#CallerQueryCoordinatesSchema(evidence_conditions,evidence_relation,question_time)#1828850
+soul:mcp-types.ts#CallerQuestionTimeIntervalSchema(end,start)#94e0191
+soul:mcp-types.ts#CallerQuestionTimeSchema(intervals)#2f1949b
 soul:mcp-types.ts#GardenClaimTaskRequestSchema(task_id)#50b8195
 soul:mcp-types.ts#GardenClaimTaskResponseSchema(kind,payload,role,status,task_id)#051875c
 soul:mcp-types.ts#GardenCompleteTaskRequestSchema(last_error_text,result_envelope,status,task_id)#f319da2
@@ -54,7 +58,7 @@ soul:mcp-types.ts#GardenMcpWorkerRoleSchema()#16723db|enum=auditor|host_worker|j
 soul:mcp-types.ts#GardenPendingTaskSnapshotSchema(created_at,kind,payload,role,task_id)#97fd702
 soul:mcp-types.ts#GardenTaskResultEnvelopeSchema(candidate_signals,edge_verdict,extracted_proposals,notes,source_statement_responses)#be6d1ec
 soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,hypothesis_id,object_id,object_kind,output_binding,payload_available,pending_incomplete,program_state,relevance_score,score_factors,selection_reason,semantic_dependencies,source_channels,source_disclosure,source_lookup_reasons,staged_warnings,target,time_state,unfinishedness_bias)#381e2d7
-soul:mcp-types.ts#RecallMemberIndexLineSchema(date,in_pool,label,line,producer,root_id,statement_ids)#cb1bab5
+soul:mcp-types.ts#RecallMemberIndexLineSchema(date,in_pool,label,line,producer,root_id,source_target,statement_ids)#236fd73
 soul:mcp-types.ts#RecallTimeFieldSchema()#4ac42fd|enum=created_at|last_used_at
 soul:mcp-types.ts#SoulActiveConstraintGovernanceStateSchema(claim_status,governance_class,source_channels)#6360c27
 soul:mcp-types.ts#SoulActiveConstraintSchema(content,dimension,governance_state,object_id,object_kind,scope_class)#efb6e45
@@ -95,11 +99,11 @@ soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_cou
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#766d3d9
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#3f3dfc2
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a36fda8|enum=cold_cascade_engaged|no_stored_vectors|provider_failed|provider_missing|provider_unavailable|recall_explainability_partial|warm_cascade_engaged
-soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,cap_contracts,claim_demands,continuation,dimension,domain_tags,enumeration_policy,host_context,interpretation_proposal,max_results,payload_continuation,protocol_version,query,recent_turn,result_kind_view,scope_class,since,source_observed_at,supported_result_kinds,supports_product_updates,supports_source_evidence,time_field,until)#484c670
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_completeness,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,member_index,order_status,page_purpose,product_updates,protocol_version,ranking_authority,results,total_count)#fe816ec
-soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version,text_disclosures)#03be617
-soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
-soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#88fc9df
+soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,cap_contracts,claim_demands,continuation,dimension,domain_tags,enumeration_policy,host_context,interpretation_proposal,max_results,payload_continuation,protocol_version,query,query_coordinates,recent_turn,result_kind_view,scope_class,since,source_observed_at,supported_result_kinds,supports_product_updates,supports_source_evidence,time_field,until)#88a68d6
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_completeness,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,member_index,order_status,page_purpose,product_updates,protocol_version,ranking_authority,results,total_count)#ac93feb
+soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version,source_disclosure,span,text_disclosures)#a6a0050
+soul:mcp-types.ts#SoulOpenPointerRequestSchema(byte_budget,object_id,source_target,start_offset)#2d544b8
+soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind,target)#65826f9
 soul:mcp-types.ts#SoulPendingProposalSummarySchema(assigned_at,assigned_reviewer_identity,created_at,deadline_at,is_overdue,proposal_id,proposal_operation,proposed_change_summary,proposed_changes,target_object_id,target_object_kind)#33cd2a2
 soul:mcp-types.ts#SoulProposeEdgeRequestSchema(confidence,edge_type,reason,source_memory_id,target_memory_id)#2e6410f
 soul:mcp-types.ts#SoulProposeEdgeResponseSchema(proposal_id,status)#6b20a6f
@@ -111,6 +115,7 @@ soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery
 soul:mcp-types.ts#SoulReportContextUsageResponseSchema(delivery_id,status)#802bcfe
 soul:mcp-types.ts#SoulReviewMemoryProposalRequestSchema(proposal_id,reason,reviewer_identity,reviewer_token,verdict)#4c52522
 soul:mcp-types.ts#SoulReviewMemoryProposalResponseSchema(proposal_id,resolution_state)#45fd743
+soul:mcp-types.ts#SourceOpenTargetSchema(content_digest,evidence_object_id,root_id,root_kind,source_version)#ba0cb90
 soul:memory-entry.ts#MemoryDimensionSchema()#2de31a1|enum=constraint|decision|episode|fact|glossary|hazard|observation|preference|procedure
 soul:memory-entry.ts#PublicMemoryEntryMutableFieldsSchema(confidence,content,domain_tags,evidence_refs,retention_state,storage_tier)#7897dd6
 soul:memory-entry.ts#RetentionStateSchema()#9036fa5|enum=archived|canon|consolidated|tombstoned|working

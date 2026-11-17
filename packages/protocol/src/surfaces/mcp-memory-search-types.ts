@@ -33,13 +33,19 @@ import {
 import {
   AssociationCapContractSchema,
   ClaimDemandSchema,
+  EVIDENCE_CONDITION_LIMITS,
   EnumerationPolicySchema,
   QueryInterpretationProposalSchema,
   ResultKindViewSchema
 } from "../recall/conditional-field/query.js";
 import {
+  ConditionalFieldIdSchema,
+  Sha256DigestSchema
+} from "../recall/conditional-field/common.js";
+import {
   RecallTargetKindSchema,
-  RecallTargetRefSchema
+  RecallTargetRefSchema,
+  SourceEvidenceRootKindSchema
 } from "../recall/conditional-field/product-identity.js";
 
 export const SoulMemorySearchDegradationReasonSchema = z.enum([
@@ -167,6 +173,63 @@ export const SoulRecallHostContextSchema = z
   .strict()
   .readonly();
 
+/** Caller-ergonomic closed UTC calendar-day range (`YYYY-MM-DD`); invalid dates degrade safely at admission. */
+export const CallerQuestionTimeIntervalSchema = z
+  .object({
+    start: z.string().min(1).max(64),
+    end: z.string().min(1).max(64)
+  })
+  .strict()
+  .readonly();
+
+export const CallerQuestionTimeSchema = z
+  .object({
+    intervals: z.array(CallerQuestionTimeIntervalSchema).min(1).max(32).readonly()
+  })
+  .strict()
+  .readonly();
+
+export const CallerEvidenceConditionSchema = z
+  .object({
+    statement: z.string().min(1).max(EVIDENCE_CONDITION_LIMITS.max_characters),
+    speaker: z.enum(["user", "assistant"]),
+    anchors: z
+      .array(z.string().min(1).max(EVIDENCE_CONDITION_LIMITS.max_anchor_characters))
+      .max(EVIDENCE_CONDITION_LIMITS.max_anchors)
+      .readonly()
+  })
+  .strict()
+  .readonly();
+
+/** Optional caller-formed recall coordinates bound server-side without caller sha256 or clock duplication. */
+export const CallerQueryCoordinatesSchema = z
+  .object({
+    question_time: CallerQuestionTimeSchema.optional(),
+    evidence_conditions: z
+      .array(CallerEvidenceConditionSchema)
+      .min(1)
+      .max(EVIDENCE_CONDITION_LIMITS.max_conditions)
+      .readonly()
+      .optional(),
+    evidence_relation: z.literal("derived").optional()
+  })
+  .strict()
+  .readonly();
+export type CallerQueryCoordinates = z.infer<typeof CallerQueryCoordinatesSchema>;
+
+/** Workspace-omitted source target handle for opening a member_index root via soul.open_pointer. */
+export const SourceOpenTargetSchema = z
+  .object({
+    root_kind: SourceEvidenceRootKindSchema,
+    root_id: ConditionalFieldIdSchema,
+    source_version: ConditionalFieldIdSchema,
+    content_digest: Sha256DigestSchema,
+    evidence_object_id: ConditionalFieldIdSchema.nullable().optional()
+  })
+  .strict()
+  .readonly();
+export type SourceOpenTarget = z.infer<typeof SourceOpenTargetSchema>;
+
 export const SoulMemorySearchRequestSchema = z
   .object({
     query: BoundedQuerySchema,
@@ -191,6 +254,7 @@ export const SoulMemorySearchRequestSchema = z
     // parseable for historical readers but are rejected by live execution.
     enumeration_policy: EnumerationPolicySchema.default("native_query"),
     result_kind_view: ResultKindViewSchema.default("mixed"),
+    query_coordinates: CallerQueryCoordinatesSchema.optional(),
     interpretation_proposal: QueryInterpretationProposalSchema.optional(),
     payload_continuation: PayloadContinuationRequestSchema.optional(),
     protocol_version: NonNegativeIntSchema.min(1).optional(),
@@ -202,6 +266,13 @@ export const SoulMemorySearchRequestSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.query_coordinates !== undefined && value.interpretation_proposal !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["query_coordinates"],
+        message: "query_coordinates and interpretation_proposal cannot both be provided."
+      });
+    }
     if (
       value.since !== null &&
       value.since !== undefined &&
@@ -232,7 +303,7 @@ export const SoulMemorySearchRequestSchema = z
 
 /** First page only: one source-bound line per further member after the ranked results (pool members
  * not on this page, then roots refused only by the nomination limit). A line is an interpretation of the
- * listed statements, never ranking evidence; `statement_ids` open with soul.open_pointer. */
+ * listed statements, never ranking evidence; `statement_ids` or `source_target` open with soul.open_pointer. */
 export const RecallMemberIndexLineSchema = z
   .object({
     label: z.string().regex(/^R\d{2,3}$/u),
@@ -241,7 +312,8 @@ export const RecallMemberIndexLineSchema = z
     line: z.string().max(4096),
     producer: z.enum(["source-statements-v1", "first-message"]),
     statement_ids: z.array(NonEmptyStringSchema).max(64).readonly(),
-    in_pool: z.boolean()
+    in_pool: z.boolean(),
+    source_target: SourceOpenTargetSchema.optional()
   })
   .strict()
   .readonly();

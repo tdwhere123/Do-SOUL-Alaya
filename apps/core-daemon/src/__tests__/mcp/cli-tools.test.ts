@@ -184,6 +184,93 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
     expect(cliOutput).toEqual(mcpOutput);
   });
 
+  it("returns the same soul.open_pointer source_target output through MCP and CLI without minting object_id", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const {
+      SqliteEvidenceCapsuleRepo,
+      SqliteFieldSourceRecordRepo,
+      SqliteSourceRootRecallReader,
+      initDatabase
+    } = await import("@do-soul/alaya-storage");
+    const { fieldContractSha256 } = await import("@do-soul/alaya-core");
+    const {
+      UNKNOWN_UTTERANCE_ATTRIBUTION,
+      hashContentDigest,
+      hashSourceRecordId
+    } = await import("@do-soul/alaya-protocol");
+    const directory = mkdtempSync(path.join(tmpdir(), "alaya-cli-source-open-"));
+    const db = initDatabase({ filename: path.join(directory, "alaya.db") });
+    try {
+      db.connection.prepare(`INSERT INTO workspaces (workspace_id, name, root_path, workspace_kind, default_engine_binding, workspace_state, created_at, archived_at, default_engine_class) VALUES (?, ?, ?, 'local', 'native', 'active', '2026-09-01T00:00:00.000Z', NULL, 'coding_engine')`).run(realHandlerContext.workspaceId, "test-ws", directory);
+      const records = new SqliteFieldSourceRecordRepo(db, fieldContractSha256);
+      const body = "user: Remember the espresso blend from Blue Bottle.\n";
+      const digest = hashContentDigest(body, fieldContractSha256);
+      const record = records.insert({
+        record_id: hashSourceRecordId({
+          source_id: "session-1",
+          source_version: "v1",
+          content_digest: digest
+        }, fieldContractSha256),
+        workspace_id: realHandlerContext.workspaceId,
+        source_id: "session-1",
+        source_version: "v1",
+        content_digest: digest,
+        evidence_object_id: null,
+        recorded_at: "2026-09-01T00:00:00.000Z",
+        event_time: "2026-09-01T00:00:00.000Z",
+        valid_from: "2026-09-01T00:00:00.000Z",
+        valid_to: null,
+        operator_id: "op-1",
+        speaker: "user",
+        scope_class: "project",
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+        source_body: body
+      });
+      const fieldSource = new SqliteSourceRootRecallReader(records, new SqliteEvidenceCapsuleRepo(db));
+      const deps = { ...createDeps(), fieldSource };
+      const args = {
+        source_target: {
+          root_kind: "source_record",
+          root_id: record.record_id,
+          source_version: "v1",
+          content_digest: digest,
+          evidence_object_id: null
+        }
+      };
+      const mcpResult = await callAlayaMcpMemoryTool(
+        { memoryToolHandler: createMcpMemoryToolHandler(deps), contextProvider: () => realHandlerContext },
+        "soul.open_pointer",
+        args
+      );
+      const mcpOutput = (mcpResult.structuredContent as { readonly output: unknown }).output;
+      const command = createToolsCommand({
+        handler: createMcpMemoryToolHandler(deps),
+        defaultWorkspaceId: realHandlerContext.workspaceId,
+        defaultRunId: realHandlerContext.runId,
+        defaultAgentTarget: realHandlerContext.agentTarget,
+        runService: createRunLookup({ run1: realHandlerContext.workspaceId })
+      });
+      const parsed = command.argsSchema.safeParse(["call", "soul.open_pointer", JSON.stringify(args)]);
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) throw new Error("CLI args parse failed");
+      const cliResult = await command.handler(createContext(), parsed.data);
+      expect(cliResult.exitCode).toBe(ALAYA_SYSEXITS.OK);
+      expect(cliResult.json).toEqual(mcpOutput);
+      expect(mcpOutput).toMatchObject({
+        object_kind: "source_evidence",
+        content: {
+          object_kind: "source_evidence",
+          content: body,
+          span: { content_start: 0, content_complete: true }
+        }
+      });
+      expect(mcpOutput).not.toHaveProperty("object_id");
+    } finally {
+      db.close({ optimize: false });
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns the same soul.emit_candidate_signal output through MCP and CLI", async () => {
     const args = {
       signal_kind: "potential_preference",

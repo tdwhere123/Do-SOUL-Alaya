@@ -1,4 +1,4 @@
-import { assertRecallConsumerCompatibility } from "@do-soul/alaya-core";
+import { assertRecallConsumerCompatibility, bindCallerQueryCoordinates } from "@do-soul/alaya-core";
 import {
   ContinuationSchema,
   PayloadContinuationRequestSchema,
@@ -18,9 +18,25 @@ export async function runProductionBoundRecall(input: Readonly<{
   readonly context: RecallUsageToolCallContext;
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly policyOverride: RecallPolicy;
+  readonly now?: () => string;
 }>): Promise<Awaited<ReturnType<RecallUsageHandlerDependencies["recallService"]["recall"]>>> {
   assertRecallConsumerCompatibility(input.request);
   const timeFilter = buildRecallTimeFilter(input.request);
+  const resolvedClock = input.request.source_observed_at
+    ?? input.request.continuation?.interpretation_clock
+    ?? (input.now ?? (() => new Date().toISOString()))();
+  const boundProposal = input.request.interpretation_proposal === undefined
+    ? bindCallerQueryCoordinates({
+        queryText: input.request.query,
+        interpretationClock: resolvedClock,
+        coordinates: input.request.query_coordinates
+      })
+    : undefined;
+  const proposal = input.request.interpretation_proposal !== undefined
+    ? QueryInterpretationProposalSchema.parse(input.request.interpretation_proposal)
+    : boundProposal;
+  const interpretationClock = input.request.source_observed_at
+    ?? (boundProposal !== undefined ? resolvedClock : undefined);
   return await input.deps.recallService.recall({
     defer_delivery: true,
     ...(input.context.abortSignal === undefined ? {} : { abortSignal: input.context.abortSignal }),
@@ -34,9 +50,7 @@ export async function runProductionBoundRecall(input: Readonly<{
     continuation: input.request.continuation === undefined || input.request.continuation === null
       ? null
       : ContinuationSchema.parse(input.request.continuation),
-    ...(input.request.source_observed_at === undefined
-      ? {}
-      : { interpretationClock: input.request.source_observed_at }),
+    ...(interpretationClock === undefined ? {} : { interpretationClock }),
     ...(input.request.since === undefined || input.request.since === null
       ? {}
       : { since: input.request.since }),
@@ -48,9 +62,7 @@ export async function runProductionBoundRecall(input: Readonly<{
     activeConstraintsCap: input.request.active_constraints_cap ?? null,
     enumeration_policy: input.request.enumeration_policy,
     result_kind_view: input.request.result_kind_view,
-    ...(input.request.interpretation_proposal === undefined
-      ? {}
-      : { interpretation_proposal: QueryInterpretationProposalSchema.parse(input.request.interpretation_proposal) }),
+    ...(proposal === undefined ? {} : { interpretation_proposal: proposal }),
     ...(input.request.payload_continuation === undefined
       ? {}
       : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) }),

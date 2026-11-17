@@ -6,8 +6,13 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => isolation.restore());
-import { RecallService, capableRecallConsumerDeclaration } from "@do-soul/alaya-core";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { RecallService, capableRecallConsumerDeclaration, fieldContractSha256 } from "@do-soul/alaya-core";
+import { SoulMemorySearchResponseSchema, SoulOpenPointerResponseSchema } from "@do-soul/alaya-protocol";
+import {
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteSourceRootRecallReader
+} from "@do-soul/alaya-storage";
 import { fixture as storageFixture } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { publishMessages, publishStatement } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-template-fixture.js";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
@@ -55,7 +60,35 @@ it("lists further members once on the first page through real SQLite, built Work
       expect(line.producer).toBe(withStatement(id) ? "source-statements-v1" : "first-message");
       expect(line.statement_ids).toHaveLength(withStatement(id) ? 1 : 0);
       expect(line.date).toBe(sources.find(source => source.id === id)!.eventTime.slice(0, 10));
+      expect(line.source_target).toMatchObject({
+        root_kind: "source_record",
+        root_id: line.root_id
+      });
+      expect(line.source_target).not.toHaveProperty("workspace_id");
     }
+    const overflowFirstMessage = lines.find(line => !line.in_pool && line.producer === "first-message");
+    expect(overflowFirstMessage?.source_target).toBeDefined();
+    const openHandler = createMcpMemoryToolHandler({
+      ...createDeps(),
+      now: () => CLOCK,
+      fieldSource: new SqliteSourceRootRecallReader(
+        new SqliteFieldSourceRecordRepo(fixture.database, fieldContractSha256),
+        new SqliteEvidenceCapsuleRepo(fixture.database)
+      )
+    });
+    const opened = await openHandler.call({
+      toolName: "soul.open_pointer",
+      arguments: { source_target: overflowFirstMessage!.source_target },
+      context: { workspaceId: WS, runId: "run-1", sessionId: "member-index-session", agentTarget: "codex" }
+    });
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) throw new Error(JSON.stringify(opened.error));
+    const parsedOpen = SoulOpenPointerResponseSchema.parse(opened.output);
+    expect(parsedOpen.object_id).toBeUndefined();
+    expect(parsedOpen.object_kind).toBe("source_evidence");
+    expect(parsedOpen.content.content).toContain("needle event");
+    expect(parsedOpen.content.span?.content_complete).toBe(true);
+    expect(parsedOpen.content.text_disclosures).toBeDefined();
     expect(lines.some(line => line.line.endsWith("…"))).toBe(true);
     const next = await call({ continuation: first.index!.continuation });
     expect(next.member_index).toBeUndefined();

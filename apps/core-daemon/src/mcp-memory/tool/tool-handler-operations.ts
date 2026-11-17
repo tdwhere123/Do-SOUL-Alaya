@@ -43,7 +43,7 @@ import {
   type SoulReviewMemoryProposalRequest,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
-import { projectEvidenceRead } from "@do-soul/alaya-core";
+import { openWorkspaceSourceTarget, projectEvidenceRead } from "@do-soul/alaya-core";
 import {
   ToolNotFoundError,
   ToolUnavailableError,
@@ -116,7 +116,7 @@ export function createAgentSurfaceRegistrar(
 
 export function createMcpMemoryToolOperations(input: McpMemoryOperationFactoryInput): McpMemoryToolOperations {
   return {
-    openPointer: (request, context) => openPointer(input.deps, request, context),
+    openPointer: (request, context) => openPointer(input.deps, request, context, input.now),
     emitCandidateSignal: (request, context) => emitCandidateSignal(input, request, context),
     proposeMemoryUpdate: (request, context) => proposeMemoryUpdate(input.deps, request, context),
     reviewMemoryProposal: (request, context) => reviewMemoryProposal(input.deps, request, context),
@@ -133,13 +133,28 @@ export function createMcpMemoryToolOperations(input: McpMemoryOperationFactoryIn
 async function openPointer(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulOpenPointerRequest,
-  context: McpMemoryToolCallContext
+  context: McpMemoryToolCallContext,
+  now: () => string
 ): Promise<SoulOpenPointerResponse> {
-  const memory = await deps.memoryService.findByIdScoped(request.object_id, context.workspaceId);
+  if (request.source_target !== undefined) {
+    if (deps.fieldSource === undefined) {
+      throw new ToolUnavailableError("Source target reader is not available.");
+    }
+    return await openWorkspaceSourceTarget({
+      reader: deps.fieldSource,
+      workspaceId: context.workspaceId,
+      sourceTarget: request.source_target,
+      ...(request.start_offset === undefined ? {} : { startOffset: request.start_offset }),
+      ...(request.byte_budget === undefined ? {} : { byteBudget: request.byte_budget }),
+      evaluatedAsOf: now()
+    });
+  }
+  const objectId = request.object_id!;
+  const memory = await deps.memoryService.findByIdScoped(objectId, context.workspaceId);
   if (memory !== null) return memoryPointerResponse(memory);
-  const evidence = await deps.evidenceService?.findByIdScoped?.(request.object_id, context.workspaceId);
-  if (evidence !== undefined && evidence !== null) return evidencePointerResponse(projectEvidenceRead(evidence, new Date().toISOString()));
-  throw new ToolNotFoundError(`Pointer object not found: ${request.object_id}`);
+  const evidence = await deps.evidenceService?.findByIdScoped?.(objectId, context.workspaceId);
+  if (evidence !== undefined && evidence !== null) return evidencePointerResponse(projectEvidenceRead(evidence, now()));
+  throw new ToolNotFoundError(`Pointer object not found: ${objectId}`);
 }
 
 function memoryPointerResponse(memory: Awaited<ReturnType<McpMemoryToolHandlerDependencies["memoryService"]["findByIdScoped"]>>) {

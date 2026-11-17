@@ -4,6 +4,7 @@ import { readSourceDeliveryBoundaries } from "./source-delivery-boundaries.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import { HOST_OCCURRENCE_LIMITS, bindHostOccurrenceInventory, describeHostStructure, canonicalJson, IsoDatetimeStringSchema, sameSourceRecordFields as sameRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
 import { readSourceProjectionDependencies, SOURCE_RECORD_METADATA_BYTE_MAX as SOURCE_METADATA_BYTE_MAX,
@@ -426,6 +427,43 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       fieldSourceEvidenceBindingParser,
       "source evidence binding"
     );
+  }
+
+  /** Enforces existence, erase-barrier/quarantine, body retention, and currentness in one workspace-scoped query. */
+  public readTargetAvailability(
+    workspaceId: string,
+    recordId: string
+  ): "ok" | "not_found" | "erased_or_quarantined" | "not_current" {
+    const raw = cachedReadStatement(this.database, `
+      SELECT
+        source_body IS NOT NULL AS has_body,
+        EXISTS(
+          SELECT 1 FROM projection_erase_barriers b
+          WHERE b.workspace_id = source_records.workspace_id
+            AND b.subject_kind = 'source_record' AND b.subject_id = source_records.record_id
+        ) AS erased,
+        EXISTS(
+          SELECT 1 FROM privacy_current_quarantine q
+          WHERE q.workspace_id = source_records.workspace_id
+            AND q.object_kind = 'source_record' AND q.object_id = source_records.record_id
+        ) AS quarantined,
+        (
+          SELECT current.record_id FROM source_records current INDEXED BY idx_source_records_current
+          WHERE current.workspace_id = source_records.workspace_id AND current.source_id = source_records.source_id
+          ORDER BY ${CURRENT_RECORD_ORDER} LIMIT 1
+        ) = source_records.record_id AS is_current
+      FROM source_records
+      WHERE workspace_id = ? AND record_id = ?
+      LIMIT 1
+    `).get(workspaceId, recordId);
+    if (raw === undefined) return "not_found";
+    const row = readRecord(raw, "source target availability");
+    if (readIntegerField(row, "erased") === 1
+      || readIntegerField(row, "quarantined") === 1
+      || readIntegerField(row, "has_body") !== 1) {
+      return "erased_or_quarantined";
+    }
+    return readIntegerField(row, "is_current") === 1 ? "ok" : "not_current";
   }
 }
 

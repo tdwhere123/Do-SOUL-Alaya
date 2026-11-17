@@ -7,8 +7,16 @@ import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { describe, expect, it, vi } from "vitest";
 import {
-  RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE
+  RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
+  RecallService
 } from "@do-soul/alaya-core";
+import {
+  ControlPlaneObjectKind,
+  RetentionPolicy,
+  SoulMemorySearchRequestSchema,
+  TaskObjectSurfaceSchema,
+  unavailableSourceQueryPreparation
+} from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase,
   initDatabase,
@@ -39,6 +47,7 @@ describe("RecallReadWorkerClient", () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-runtime-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
+    prepareIndexedRecallProjection(database);
     database.close();
     closeCachedDatabase(databasePath);
     const client = createRecallReadWorkerClient({
@@ -307,6 +316,7 @@ describe("RecallReadWorkerClient", () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-invalid-msg-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
+    prepareIndexedRecallProjection(database);
     database.close();
     closeCachedDatabase(databasePath);
 
@@ -371,6 +381,7 @@ describe("RecallReadWorkerClient", () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-missing-protocol-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
+    prepareIndexedRecallProjection(database);
     database.close();
     closeCachedDatabase(databasePath);
 
@@ -455,18 +466,25 @@ describe("RecallReadWorkerClient", () => {
     }
   });
 
-  it("rejects an undeclared mixed consumer before worker execute", async () => {
+  it("admits omitted mixed v1 capabilities and rejects explicit supports_source_evidence=false before worker execute", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-undeclared-mixed-"));
     const database = initDatabase({ filename: join(directory, "alaya.db") });
+    prepareIndexedRecallProjection(database);
     try {
       const { protocol_version: _protocol, supported_result_kinds: _kinds,
         supports_source_evidence: _source, supports_product_updates: _updates,
-        ...undeclared } = conditionalRecallPayload("needle");
+        ...plainMixed } = conditionalRecallPayload("needle");
       await expect(runOperation(createQueryOnlyRuntime(database), {
         protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id: 1,
         operation: "conditionalField.recall",
-        payload: encodeWorkerRecallPayload(undeclared)
+        payload: encodeWorkerRecallPayload(plainMixed)
+      })).resolves.toMatchObject({ index: expect.objectContaining({ query_id: expect.any(String) }) });
+      await expect(runOperation(createQueryOnlyRuntime(database), {
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+        id: 2,
+        operation: "conditionalField.recall",
+        payload: encodeWorkerRecallPayload({ ...plainMixed, supports_source_evidence: false })
       })).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
     } finally {
       database.close();
@@ -474,6 +492,89 @@ describe("RecallReadWorkerClient", () => {
       removeTempDirectorySync(directory);
     }
   });
+
+  it("passes normalized evidence_conditions from query_coordinates to withPreparedExecution", async () => {
+    assertBuiltWorker();
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-coords-prep-"));
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
+    prepareIndexedRecallProjection(database);
+    database.close();
+    closeCachedDatabase(databasePath);
+    const prepareSourceQuery = vi.fn(async () => ({
+      receipt: unavailableSourceQueryPreparation("test_stub"),
+      vector: { status: "unavailable" as const, reason: "test_stub" }
+    }));
+    const client = createRecallReadWorkerClient({
+      databaseFilename: databasePath,
+      workerUrl: builtWorkerUrl,
+      workerCount: 1,
+      prepareSourceQuery
+    });
+    try {
+      expect(client).not.toBeNull();
+      if (client === null) return;
+      const { createDependencies } = await import("../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js");
+      const { runProductionBoundRecall } = await import("../../../mcp-memory/recall/recall-bound-service.js");
+      const { buildRecallPolicy } = await import("@do-soul/alaya-core");
+      const recallService = new RecallService({
+        ...createDependencies().dependencies,
+        now: () => "2026-09-08T00:00:00.000Z",
+        readSnapshot: client.readSnapshot,
+        conditionalFieldPort: client.conditionalFieldPort,
+        activeConstraintsPort: client.activeConstraintsPort
+      });
+      const request = SoulMemorySearchRequestSchema.parse({
+        query: "Which café did Alice visit last week?",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 5,
+        query_coordinates: {
+          question_time: { intervals: [{ start: "2026-09-01", end: "2026-09-07" }] },
+          evidence_conditions: [
+            { statement: "Alice visited <café>.", speaker: "user", anchors: ["Alice"] },
+            { statement: "Bob visited <café>.", speaker: "user", anchors: ["Bob"] }
+          ]
+        }
+      });
+      const taskSurfaceId = randomUUID();
+      const policyOverride = buildRecallPolicy({
+        runtimeId: randomUUID(),
+        taskSurfaceId,
+        maxResults: 5,
+        filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
+        conflictAwareness: true,
+        maxTotalTokens: 2000
+      });
+      await runProductionBoundRecall({
+        deps: { recallService } as unknown as Parameters<typeof runProductionBoundRecall>[0]["deps"],
+        request,
+        context: { workspaceId: "ws-prep", runId: null, agentTarget: "codex", sessionId: "s-prep" },
+        taskSurface: TaskObjectSurfaceSchema.parse({
+          runtime_id: policyOverride.task_surface_ref,
+          object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+          task_surface_ref: null,
+          expires_at: null,
+          derived_from: null,
+          retention_policy: RetentionPolicy.SESSION_ONLY,
+          surface_kind: "mcp_memory_tool",
+          display_name: request.query,
+          context_refs: []
+        }),
+        policyOverride,
+        now: () => "2026-09-08T00:00:00.000Z"
+      });
+      expect(prepareSourceQuery).toHaveBeenCalledWith(expect.objectContaining({
+        workspace_id: "ws-prep",
+        navigation: request.query,
+        evidence_statements: ["Alice visited <café>."]
+      }));
+    } finally {
+      await client?.close();
+      removeTempDirectorySync(directory);
+    }
+  }, 30_000);
 });
 
 async function collectWorkerResponses(

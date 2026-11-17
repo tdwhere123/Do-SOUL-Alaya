@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EvidenceTextDisclosuresSchema } from "../recall/source-disclosure.js";
+import { EvidenceTextDisclosuresSchema, SourceDisclosureSchema } from "../recall/source-disclosure.js";
+import { RecallTargetRefSchema, SourceDeliveredSpanSchema } from "../recall/conditional-field/product-identity.js";
 import {
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
@@ -57,7 +58,8 @@ export const SoulCaptureHostSessionResponseSchema = HostSessionCaptureResponseSc
 import { deriveJsonSchema } from "./mcp-json-schema.js";
 import {
   SoulMemorySearchRequestSchema,
-  SoulMemorySearchResponseSchema
+  SoulMemorySearchResponseSchema,
+  SourceOpenTargetSchema
 } from "./mcp-memory-search-types.js";
 import { SoulInterpretationRequestSchema } from "./mcp-interpretation-types.js";
 
@@ -83,6 +85,10 @@ export {
 } from "./mcp-interpretation-types.js";
 
 export {
+  CallerEvidenceConditionSchema,
+  CallerQueryCoordinatesSchema,
+  CallerQuestionTimeIntervalSchema,
+  CallerQuestionTimeSchema,
   SoulMemorySearchDegradationReasonSchema,
   MemorySearchResultSchema,
   SoulActiveConstraintGovernanceStateSchema,
@@ -92,6 +98,8 @@ export {
   SoulRecallHostContextSchema,
   SoulMemorySearchRequestSchema,
   RecallMemberIndexLineSchema,
+  SourceOpenTargetSchema,
+  type CallerQueryCoordinates,
   type RecallMemberIndexLine,
   type MemorySearchResult,
   type SoulActiveConstraintGovernanceState,
@@ -100,7 +108,8 @@ export {
   type SoulRecallTokenizerHint,
   type SoulRecallHostContext,
   type SoulMemorySearchRequest,
-  type SoulMemorySearchResponse
+  type SoulMemorySearchResponse,
+  type SourceOpenTarget
 } from "./mcp-memory-search-types.js";
 
 export {
@@ -128,21 +137,45 @@ export {
   SoulReportContextUsageResponseSchema
 } from "./mcp-context-usage-types.js";
 
+// workspace_id is intentionally omitted from source_target: the daemon binds
+// workspace from the trusted MCP call context per invariants §29 Default Scope.
 export const SoulOpenPointerRequestSchema = z
   .object({
-    object_id: BoundedIdSchema
+    object_id: BoundedIdSchema.optional(),
+    source_target: SourceOpenTargetSchema.optional(),
+    start_offset: NonNegativeIntSchema.optional(),
+    byte_budget: z.number().int().min(1).max(65536).optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    const hasObjectId = value.object_id !== undefined;
+    const hasSourceTarget = value.source_target !== undefined;
+    if (hasObjectId === hasSourceTarget) {
+      context.addIssue({
+        code: "custom",
+        path: [hasObjectId ? "source_target" : "object_id"],
+        message: "soul.open_pointer requires exactly one of object_id or source_target"
+      });
+      return;
+    }
+    if (hasObjectId && (value.start_offset !== undefined || value.byte_budget !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: [value.start_offset !== undefined ? "start_offset" : "byte_budget"],
+        message: "start_offset and byte_budget are only valid with source_target"
+      });
+    }
+  })
   .readonly();
 
 // Public projection: only the fields agents may read. MemoryEntry internals
 // (lifecycle_state, created_by, storage_tier, workspace_id, ...) are not
 // exposed (invariants §29 Default Scope). EvidenceCapsule projection adds
 // gist / excerpt so attached agents can inspect retained evidence reductions.
-// They are not necessarily original turn bytes or current semantic proof.
+// Source_evidence reads stay bounded and never mint a memory or capsule object_id.
 export const SoulOpenPointerContentSchema = z
   .object({
-    object_id: NonEmptyStringSchema,
+    object_id: NonEmptyStringSchema.optional(),
     object_kind: NonEmptyStringSchema,
     schema_version: z.number().int().min(1),
     content: BoundedContentSchema.nullable(),
@@ -150,23 +183,51 @@ export const SoulOpenPointerContentSchema = z
     evidence_refs: z.array(NonEmptyStringSchema).readonly(),
     gist: BoundedContentSchema.nullable().optional(),
     excerpt: BoundedContentSchema.nullable().optional(),
-    text_disclosures: EvidenceTextDisclosuresSchema.optional()
+    text_disclosures: EvidenceTextDisclosuresSchema.optional(),
+    source_disclosure: SourceDisclosureSchema.optional(),
+    span: SourceDeliveredSpanSchema.optional()
   })
   .strict()
   .superRefine((value, context) => {
     if (value.object_kind === "evidence_capsule" && value.text_disclosures === undefined) {
       context.addIssue({ code: "custom", path: ["text_disclosures"], message: "evidence pointer requires text disclosure" });
     }
+    if (value.object_kind === "source_evidence") {
+      if (value.object_id !== undefined) {
+        context.addIssue({ code: "custom", path: ["object_id"], message: "source_evidence must not fill object_id" });
+      }
+      if (value.text_disclosures === undefined && value.source_disclosure === undefined) {
+        context.addIssue({ code: "custom", path: ["text_disclosures"], message: "source_evidence pointer requires disclosure" });
+      }
+      if (value.span === undefined) {
+        context.addIssue({ code: "custom", path: ["span"], message: "source_evidence pointer requires span" });
+      }
+    } else if (value.object_id === undefined) {
+      context.addIssue({ code: "custom", path: ["object_id"], message: "memory or capsule pointer requires object_id" });
+    }
   })
   .readonly();
 
 export const SoulOpenPointerResponseSchema = z
   .object({
-    object_id: NonEmptyStringSchema,
+    object_id: NonEmptyStringSchema.optional(),
     object_kind: NonEmptyStringSchema,
+    target: RecallTargetRefSchema.optional(),
     content: SoulOpenPointerContentSchema
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.object_kind === "source_evidence") {
+      if (value.object_id !== undefined) {
+        context.addIssue({ code: "custom", path: ["object_id"], message: "source_evidence must not fill object_id" });
+      }
+      if (value.target?.kind !== "source_evidence") {
+        context.addIssue({ code: "custom", path: ["target"], message: "source_evidence pointer requires target" });
+      }
+    } else if (value.object_id === undefined) {
+      context.addIssue({ code: "custom", path: ["object_id"], message: "memory or capsule pointer requires object_id" });
+    }
+  })
   .readonly();
 
 export const SoulExploreGraphRequestSchema = z

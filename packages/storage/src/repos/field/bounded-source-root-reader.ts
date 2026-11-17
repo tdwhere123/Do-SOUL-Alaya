@@ -163,6 +163,33 @@ export class SqliteSourceRootRecallReader {
     });
   }
 
+  public openCurrentSourceTarget(
+    workspaceId: string,
+    target: SourceEvidenceTarget,
+    byteLimit = DEFAULT_BYTE_LIMIT,
+    offset = 0
+  ):
+    | { readonly status: "ok"; readonly row: SourceRootRow }
+    | { readonly status: "not_found" }
+    | { readonly status: "conflict"; readonly reason: string }
+    | { readonly status: "unavailable"; readonly reason: string } {
+    if (target.workspace_id !== workspaceId) return { status: "not_found" };
+    const availability = target.root_kind === "source_record"
+      ? this.records.readTargetAvailability(workspaceId, target.root_id)
+      : this.boundedCapsules.readTargetAvailability(workspaceId, target.root_id);
+    if (availability === "not_found") return { status: "not_found" };
+    if (availability !== "ok") return { status: "conflict", reason: availability };
+    if (target.root_kind === "source_record" && target.evidence_object_id !== null) {
+      if (this.boundedCapsules.readTargetAvailability(workspaceId, target.evidence_object_id) === "erased_or_quarantined") {
+        return { status: "conflict", reason: "erased_or_quarantined" };
+      }
+    }
+    const page = this.hydrate(workspaceId, target, byteLimit, offset, Math.max(byteLimit + 32_768, RETAINED_SOURCE_READ_RESERVATION));
+    if (page.row !== null && !page.unavailable) return { status: "ok", row: page.row };
+    if (page.resourceLimited && !page.unavailable) return { status: "unavailable", reason: "resource_limited" };
+    return { status: "conflict", reason: "identity_or_dependency_unavailable" };
+  }
+
   public hydrate(
     workspaceId: string,
     target: SourceEvidenceTarget,
