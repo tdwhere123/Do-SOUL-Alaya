@@ -111,6 +111,7 @@ describe("P5 v0.1 release loop E2E", () => {
     await seedReleaseFixtureAtDbPath(configuredDbPath);
 
     const runtime = await createAlayaDaemonRuntime();
+    await runtime.runSourceIndexPass?.();
     runtime.startBackgroundServices();
     const server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,

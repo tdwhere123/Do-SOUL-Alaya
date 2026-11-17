@@ -214,19 +214,31 @@ describe("source semantic worker snapshot and preparation ownership", () => {
       if (prepared.kind !== "prepare_source") throw new Error("source handle expected");
       const owner = posts.calls()[0]!.worker;
       const validate = payload({ kind: "validate_source", source_handle: prepared.source_handle, budget: BUDGET });
-      await h.client.readSnapshot.isolate!(async () => {
-        await h.client.readSnapshot.beginDeferred();
-        try {
-          const pin = posts.calls().at(-1)!.worker;
-          expect(pin).not.toBe(owner);
-          const count = posts.calls().length;
-          await expect(h.client.sourceSemanticsPort!.execute(validate)).rejects.toMatchObject({ code: "VALIDATION",
-            message: "preparation handle belongs to another snapshot worker" });
-          expect(posts.calls()).toHaveLength(count);
-          expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(1);
-          expect(posts.calls().at(-1)!.worker).toBe(pin);
-        } finally { await h.client.readSnapshot.rollback(); }
+      // Regime A prefers idle slot 0; lease slot 0 concurrently so the second snapshot acquires slot 1.
+      const holdEntered = deferred(), releaseHold = deferred();
+      const hold = h.client.readSnapshot.isolate!(async () => {
+        holdEntered.resolve();
+        await releaseHold.promise;
       });
+      await holdEntered.promise;
+      try {
+        await h.client.readSnapshot.isolate!(async () => {
+          await h.client.readSnapshot.beginDeferred();
+          try {
+            const pin = posts.calls().at(-1)!.worker;
+            expect(pin).not.toBe(owner);
+            const count = posts.calls().length;
+            await expect(h.client.sourceSemanticsPort!.execute(validate)).rejects.toMatchObject({ code: "VALIDATION",
+              message: "preparation handle belongs to another snapshot worker" });
+            expect(posts.calls()).toHaveLength(count);
+            expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(1);
+            expect(posts.calls().at(-1)!.worker).toBe(pin);
+          } finally { await h.client.readSnapshot.rollback(); }
+        });
+      } finally {
+        releaseHold.resolve();
+        await hold;
+      }
       await expect(h.client.sourceSemanticsPort!.execute(validate)).resolves.toMatchObject({ kind: "validate_source", source: BODY });
       expect(posts.calls().at(-1)!.worker).toBe(owner);
       expect(h.warn).not.toHaveBeenCalled();
