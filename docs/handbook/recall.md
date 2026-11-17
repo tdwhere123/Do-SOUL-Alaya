@@ -74,17 +74,43 @@ storage time and lease lifetime remain separate. Memory `created_at` is existenc
 time, not assertion validity and not an authorization coordinate. Unknown source
 time is never inferred from `created_at`.
 
-Association is `assoc.bottleneck.milligrade.v1`: compatible serial/AND paths
-use minimum, OR alternatives maximum. Separate rule instances, witnesses and
-alternative roots remain separate even at equal grades. Hard admitted relations
-transfer at identity (1000); a relation name alone carries no grade. An
-associative view requires a declared common cap contract: incomparable domains
-are not assigned a fabricated scalar. A reachable grade zero differs from no
-activation. Causal support requires admitted current evidence; a lexical hit,
-vector hit, source mention, search hint or common-cause unknown is not a causal
-claim. Optional stored cosine admission needs an explicit prepared producer,
-current source provenance, matching query/object vector profile and threshold;
-reader presence alone creates neither obligation nor seed. See
+Association is `assoc.bottleneck.milligrade.v1`. Its finite coordinate is
+`{unreachable, 0, …, 1000}`: compatible serial/AND steps use minimum and OR
+alternatives maximum. Reachable zero is not unreachable. These are permitted
+derivation thresholds, not probabilities, measured cosine values, relevance or
+world-truth confidence. Separate rule instances, witnesses and alternative roots
+remain separate even when their numerical values coincide.
+
+A declared Hard identity has only unreachable/top (1000). For a fixed product
+proposition, its embedding into a Soft coordinate preserves bottom and top:
+Hard followed by Soft, Soft followed by Hard, and Hard AND Soft preserve the
+Soft bottleneck; an independent pure-Hard OR alternative contributes top. This
+embedding does not change source, hypothesis, binding, temporal or proof identity.
+Different Soft contracts remain incomparable without an explicit supported
+conversion; two individually reachable premises do not establish a joint proof
+in a common coordinate. An omitted contract on a numeric input is not proof of
+Boolean Hard identity. The [cap-contract owner](../../packages/core/src/recall/conditional-field/cap-contract.ts)
+provides these composition rules. See [cap coordinates](recall-cap-contracts.md)
+for the complete value, proof, bound and continuation contract.
+
+Numerical activation, possible/guaranteed bounds and explanation roots must refer
+to the same coordinate. A missing guaranteed proof is not a guaranteed zero.
+Evidence in other coordinates is not discarded merely because it lacks a common
+scalar; an incomparable activation is not an unreachable one. An associative
+view requires a declared common cap contract, not a fabricated comparison across
+domains. Hard admitted relations transfer at identity; a relation name alone
+carries no grade.
+
+Optional stored-cosine admission adds a measured admission route: it requires an
+explicit prepared producer, current source provenance, matching query/object
+vector profile and threshold. Reader presence alone creates neither obligation
+nor seed. Missing or rejected measurement cannot manufacture a measurement proof,
+but does not revoke an independent authorized lexical/source route. A Hard proof
+of that route may contribute to derivability; it is not proof that a cosine
+obligation was measured or satisfied. Measurement-dependent predicates and facets
+still require their own evidence. Causal support requires admitted current
+evidence: a lexical hit, vector hit, source mention, search hint or common-cause
+unknown is not a causal claim. See
 [query compilation](../../packages/core/src/recall/conditional-field/query/)
 and [field engine](../../packages/core/src/recall/conditional-field/engine/)
 for supported grammar and exact equations; this handbook does not replace them.
@@ -527,8 +553,8 @@ algorithm gains. Unknown samples remain in denominators and support sufficiency 
 ## Ordinary native field delivery
 
 Current public `QueryView` defaults to `native_query`; field index and
-continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v15`, Protocol
-41.0.0; library field protocol 15). Ordinary delivery is a semantic major under
+continuation use `ORDINARY_NATIVE_FIELD_RESULT_VERSION` (`ordinary-native-field.v16`, Protocol
+42.0.0; library field protocol remains 15). Ordinary delivery is a semantic major under
 invariant §25: old continuations cannot execute the new policy (see the
 [cutover and rollback entry](../../CHANGELOG.md)). A native vector hit locates a
 root; observation and initial payload reading start at byte zero in document order.

@@ -208,8 +208,8 @@ A failed or ambiguous append must not be reported as proof that no row exists.
 Raw retained-source reads and audited admission acknowledgements have distinct
 meanings; there is no universal ready flag covering both.
 
-Source/incidence and governing effect writes commit their durable projection
-repair intent with the state they change. Rebuild, activation audit and intent
+Source/incidence, evidence creation/health and governing effect writes commit
+their durable projection repair intent with the state they change. Rebuild, activation audit and intent
 acknowledgement share a serialized transaction; interruption leaves unfinished
 intent for restart/checkpoint. Nested projection work may safely share an outer
 transaction, but a savepoint is not an independent commit or ready acknowledgement.

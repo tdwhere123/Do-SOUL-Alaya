@@ -3,8 +3,8 @@ import { ConditionalFieldIdSchema, Sha256DigestSchema } from "./common.js";
 import { QuestionTimeCaptureDomainSchema } from "./question-time.js";
 import { QualifiedTaskObservationSchema } from "./source-task-observation.js";
 
-/** Supplied evidence statements can permute the source first five; old identities cannot execute this ranking. */
-export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v15" as const;
+/** Contract-indexed Hard/Soft proofs and bounds; old identities cannot execute these semantics. */
+export const ORDINARY_NATIVE_FIELD_RESULT_VERSION = "ordinary-native-field.v16" as const;
 
 /** Ordinal discovery evidence, not an association grade or factual support. */
 export const RecallNavigationWitnessSchema = z.object({

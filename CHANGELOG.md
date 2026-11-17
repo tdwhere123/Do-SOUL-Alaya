@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 41.2.0, engine gateway 3.1.0
+## Unreleased — protocol 42.0.0, engine gateway 3.1.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,6 +17,37 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `3.1.0`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Protocol 42.0.0 records a **semantic major** under invariant §25, without changing
+MCP JSON shapes: conditional-field Hard identity is a Boolean polymorphic unit
+across compatible numerical derivations, not an isolated Soft contract. Mixed
+Hard/Soft serial and AND proofs retain the Soft bottleneck; an independent Hard
+OR proof contributes top. Distinct Soft contracts remain isolated, with their
+support and provenance retained. Untagged numerical inputs do not assert Hard
+identity. Numerical projection, proof roots and possible/guaranteed coordinates
+agree; missing or invalidated lower proofs are not reported as guaranteed zero.
+These repairs can change supplied-program membership, association grades and
+explanations. They do not turn derivation grades into relevance or measurement
+claims, revoke independent lexical access when optional measurements are absent,
+or re-score historical captures. No new recall selector or benchmark result is
+introduced; app and engine-gateway versions remain unchanged.
+
+Ordinary results and continuations advance to `ordinary-native-field.v16`;
+library field protocol remains 15. Old capabilities cannot execute the new
+semantics. Restart clears process-local solver/proof state; no SQLite migration
+or source/governance generation-manifest change is required. Offline readers keep
+exact historical package/result pairs, including 41.2.0/v15, without rewriting
+captures or authorizing replay. Rollback restores a compatible prior package and
+its result semantics, not a relabelled continuation. Extra accounted coordinate
+work can reach existing resource limits earlier; interruption is explicit and
+funded continuation remains supported.
+
+Runtime source/incidence/effect persistence and evidence creation/health now
+commit durable projection repair intent atomically with their state, and serialize
+generation activation, audit and request acknowledgement. EventPublisher rejects asynchronous transaction callbacks,
+including apply callbacks. Receipt-first native source audit remains distinct from
+atomic generation/usage audit; notification failure does not undo committed state.
+See `docs/handbook/runtime-transactions.md` for retry and recovery ownership.
 
 Inspector `soul.open_pointer` copy uses strict `object_id`. MCP bridge executes
 published `garden.*` catalog tools through the soul handler. Both are adapter

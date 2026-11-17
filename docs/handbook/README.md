@@ -6,6 +6,7 @@
 | [`architecture.md`](architecture.md) | Package shape, surfaces, write model, governance routes |
 | [`runtime-transactions.md`](runtime-transactions.md) | Transaction owners, receipt/audit readiness, retry and crash recovery |
 | [`recall.md`](recall.md) | Live Recall query, native source observation, conditional proof, delivery and recovery |
+| [`recall-cap-contracts.md`](recall-cap-contracts.md) | Hard/Soft coordinate algebra, proofs, bounds and interruption semantics |
 | [`glossary.md`](glossary.md) | Stable SOUL / Alaya vocabulary |
 
 ## When to edit

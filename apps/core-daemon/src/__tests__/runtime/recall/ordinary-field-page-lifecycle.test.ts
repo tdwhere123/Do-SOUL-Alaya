@@ -1,10 +1,10 @@
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
-  const { installProviderFreeBoundary } = await import(
-    "../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
-  return installProviderFreeBoundary();
+  const { installStrictProviderFreeBoundary } = await import(
+    "../../../../../../scripts/test-support/provider-free/strict-provider-free-boundary.js");
+  return installStrictProviderFreeBoundary();
 });
-afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
+afterEach(() => { expect(isolation.forbidden).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => isolation.restore());
 import {
   SourceSemanticResourceLedger, indexEntryCacheKey, sourceGoldRootIdentity, sourceRecallTarget,
@@ -37,7 +37,7 @@ it("delivers a generation-pinned membership page and replays its issued retry id
   ], async fixture => {
     const { request, prepared } = await fieldRequest(fixture, { page_budget: 2 });
     const first = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
-    expect(first.index.result_version).toBe("ordinary-native-field.v15");
+    expect(first.index.result_version).toBe("ordinary-native-field.v16");
     expect(first.index.entries.some(entry => entry.target.kind === "source_evidence")).toBe(true);
     expect(first.index.entries.filter(entry => entry.target.kind === "source_evidence")
       .every(entry => entry.navigation?.contract === "native-query-navigation.v1")).toBe(true);
@@ -64,6 +64,15 @@ it("delivers a generation-pinned membership page and replays its issued retry id
     expect(independent.execution_id).not.toBe(first.execution_id);
     expect(issue(first)).toBe(first.delivery_id);
     expect(first.index.continuation).not.toBeNull();
+    // Stale capabilities use the existing explicit invalidation protocol, not
+    // exceptions or a successful empty page, and do not consume the live token.
+    const obsolete = runConditionalFieldRecallWithReceipt({ ...request,
+      continuation: { ...first.index.continuation!, result_version: "ordinary-native-field.v15" }
+    }, { issue: "defer" });
+    expect(obsolete.index).toMatchObject({ entries: [], continuation: null,
+      completeness: { logical_index: "invalidated", observed_coverage: "invalidated",
+        transport: "invalidated", payload: "invalidated", representation: "invalidated" } });
+    expect(actualOf(obsolete.execution_receipt).phases.observe.native_visits).toBe(0);
 
     // Only preparations for the same execution and request token compete.
     const next = { ...request, continuation: first.index.continuation };
