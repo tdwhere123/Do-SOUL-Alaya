@@ -108,6 +108,7 @@ describe("P5 v0.1 release loop E2E", () => {
     await seedReleaseFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
+    await runtime.runSourceIndexPass?.();
     runtime.startBackgroundServices();
     let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({

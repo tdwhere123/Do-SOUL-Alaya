@@ -110,6 +110,9 @@ describe("profile mutation", () => {
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("START every memory-sensitive turn");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("soul.recall -> continue cut sources (payload_continuation) -> soul.open_pointer");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("content_complete is false");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("query_coordinates");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("source_target");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).not.toContain("for each source result");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("soul.report_context_usage");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("soul.list_pending_proposals");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("garden.list_pending_tasks");

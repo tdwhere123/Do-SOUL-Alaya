@@ -76,6 +76,7 @@ describe("attached-agent MCP proof", () => {
     await seedRecallFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
+    await runtime.runSourceIndexPass?.();
     runtime.startBackgroundServices();
     let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({

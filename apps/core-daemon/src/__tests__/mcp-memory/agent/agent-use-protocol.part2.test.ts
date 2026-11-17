@@ -99,6 +99,7 @@ describe("accept-as-apply MCP agent-use protocol proof", () => {
     await seedAcceptAsApplyFixture(dataDir);
 
     const runtime = await createAlayaDaemonRuntime();
+    await runtime.runSourceIndexPass?.();
     runtime.startBackgroundServices();
     let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({

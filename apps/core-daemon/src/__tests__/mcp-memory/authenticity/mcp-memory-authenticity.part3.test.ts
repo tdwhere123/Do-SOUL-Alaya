@@ -108,6 +108,7 @@ async function createAuthenticityHarness(
   await seedFixture(dataDir, extraSeed);
 
   const runtime = await createAlayaDaemonRuntime();
+  await runtime.runSourceIndexPass?.();
   runtime.startBackgroundServices();
   const server = createAlayaMcpServer({
     memoryToolHandler: runtime.services.mcpMemoryToolHandler,
