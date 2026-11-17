@@ -330,8 +330,8 @@ export class EventPublisher {
 }
 
 function assertSynchronousMutationFunction(callback: unknown): void {
-  // Reject native async callbacks before invoking their synchronous prefix or
-  // scheduling their continuation. A returned thenable still needs the check below.
+  // Reject recognizable native async callbacks before invoking their prefix.
+  // Bound/wrapped callbacks can escape recognition; check returned thenables too.
   if (types.isAsyncFunction(callback)) rejectAsynchronousMutation();
 }
 

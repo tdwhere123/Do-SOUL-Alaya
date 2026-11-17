@@ -228,6 +228,42 @@ describe("file-backed source replacement transaction and effects", () => {
     expect(notifyEntry).toHaveBeenCalledTimes(phase === "notification" ? 1 : 0);
   });
 
+  it("repairs historical replacement audit without reverting a peer successor, but refuses erased replay", async () => {
+    const f = fixture(), first = await f.admission.admit(sourceRequest(), context);
+    const replacement = nextRequest();
+    f.database.connection.exec(`CREATE TRIGGER reject_replacement_audit BEFORE INSERT ON event_log
+      WHEN NEW.event_type = 'soul.field.source_record.admitted'
+      BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`);
+    const incomplete = await f.writer.replaceCurrent({ expected_current: first.record, replacement }, context);
+    expect(incomplete.status).toBe("committed_audit_incomplete");
+    if (incomplete.status !== "committed_audit_incomplete") throw new Error("committed transition required");
+    const second = incomplete.transition.replacement.record;
+    expect(await f.eventLogRepo.queryByEntity("source_record", second.identity)).toEqual([]);
+    f.database.connection.exec("DROP TRIGGER reject_replacement_audit");
+    const third = await f.peer.writer.replaceCurrent({ expected_current: second, replacement: nextRequest({
+      source_version: "3", content_bytes: "A café record. Current.", recorded_at: "2026-09-13T00:00:02.000Z"
+    }) }, context);
+    expect(third.status).toBe("ready");
+    if (third.status !== "ready") throw new Error("peer successor required");
+    const current = third.transition.replacement.record;
+
+    const repaired = await f.admission.admit(replacement, context);
+    expect(repaired.record).toEqual(second);
+    expect(await f.eventLogRepo.queryByEntity("source_record", second.identity)).toHaveLength(1);
+    expect(f.peer.field.stores.getCurrentRecord(WORKSPACE, "message")).toEqual(current);
+    expect(f.peer.field.stores.getStoredRecord(WORKSPACE, second.identity)?.content_bytes).toBe(replacement.content_bytes);
+
+    f.peer.field.fieldRepos.erase.apply({ workspace_id: WORKSPACE, barrier_id: "historical-replacement-erased",
+      generation_id: null, subject_kind: "source_record", subject_id: second.identity,
+      erased_at: "2026-09-13T00:00:03.000Z" });
+    const auditCount = sourceAudits(f.database);
+    await expect(f.admission.admit(replacement, context)).rejects.toThrow();
+    expect(f.field.stores.getStoredRecord(WORKSPACE, second.identity)).toBeNull();
+    expect(f.peer.field.stores.getCurrentRecord(WORKSPACE, "message")).toEqual(current);
+    expect(f.peer.field.stores.getStoredRecord(WORKSPACE, current.identity)?.content_bytes).toBe("A café record. Current.");
+    expect(sourceAudits(f.database)).toBe(auditCount);
+  });
+
   it("preserves the historical transition when a peer supersedes the replacement during audit", async () => {
     const f = fixture(), first = await f.admission.admit(sourceRequest(), context);
     let release!: () => void;

@@ -24,8 +24,10 @@ append in a current transaction remains synchronous. A savepoint is not a durabl
 commit. `FieldAtomicOutcome` only attests a top-level commit; rejected, unknown,
 committed-but-unready, and deferred are not interchangeable.
 
-Native async callbacks are rejected before invocation. A synchronous function
-returning a thenable is rejected and its rejection observed. Rollback cannot
+Recognizable, unwrapped native async callbacks are rejected before invocation.
+Bound or wrapped callbacks may not be recognized by `util.types.isAsyncFunction`;
+their returned thenables are rejected after invocation and their rejection is
+observed. Rollback cannot
 cancel an already scheduled continuation or reverse an external effect. The
 SQLite EventLog closed-scope guard rejects its late audit writes; it is not a
 universal sandbox around arbitrary repository, filesystem, or network effects.
@@ -36,7 +38,14 @@ decay) use synchronous storage methods, not async callbacks.
 
 `createProjectionRebuildingFieldStores` commits each source/incidence mutation
 and its `field_projection_rebuild_requests` upsert together. The effect-decision
-store does the same for its receipt. There is no process-local dirty map standing
+store does the same for its receipt; evidence creation and health transitions
+enqueue their governance-frontier repair inside their existing state/audit
+transaction. Optional creation-time projection failure retains the capsule and
+repair request; it does not make optional source formation mandatory.
+Source-admission spans share their record transaction, and deterministic factor
+formation writes every descriptor with its corresponding incidence in one
+formation transaction. These producers need no separate span/descriptor queue.
+There is no process-local dirty map standing
 in for durable repair intent. A failed intent write rolls back its state write;
 a later projection failure does not undo a committed source or effect.
 
@@ -88,8 +97,12 @@ republishing the request. No exactly-once notification guarantee is made.
 projection-unready/deferred, audit-incomplete, notification-failed, or ready.
 Its expected-predecessor CAS is not a retry token after a successful replacement.
 A caller with a known committed transition can checkpoint projection and replay
-exact source admission to repair audit; it must not infer this invocation's
-authorship from a later current-source read. Unknown outcomes remain unknown.
+exact source admission to repair audit only while that receipt's retained body
+remains available. Replaying historical B after B → C does not move currentness
+back to B. Retirement or erasure rejects admission replay; it is not permission
+to restore content or an automatic audit-repair path. The caller must not infer
+this invocation's authorship from a later current-source read. Unknown outcomes
+remain unknown.
 Later consumers revalidate currentness even after a ready result.
 
 ### Optional evidence formation
