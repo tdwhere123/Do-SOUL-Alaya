@@ -38,6 +38,21 @@ afterEach(() => {
 });
 
 describe("field composition", () => {
+  it("rolls back an incidence when its durable rebuild request cannot be stored", () => {
+    const { database, stores } = openComposition();
+    seedProjectionSource(stores);
+    const before = stores.listIncidences("workspace-1");
+    const original = before[0]!;
+    const fields = { span_id: original.span_id, factor_id: original.factor_id,
+      scope: "another-scope", operator_id: original.operator_id };
+    database.connection.exec(`CREATE TRIGGER reject_rebuild BEFORE INSERT ON field_projection_rebuild_requests
+      BEGIN SELECT RAISE(ABORT, 'rebuild intent unavailable'); END`);
+    expect(() => stores.putIncidence({ ...original, ...fields,
+      identity: hashIncidenceId(fields, fieldContractSha256) })).toThrow("rebuild intent unavailable");
+    expect(stores.listIncidences("workspace-1")).toEqual(before);
+  });
+
+
   it("does not expose a retired selector or create a generation on construction", () => {
     const field = openComposition();
     const { database, fieldRepos } = field;

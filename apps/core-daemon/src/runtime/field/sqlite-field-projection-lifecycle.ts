@@ -80,12 +80,21 @@ function drainPendingRebuilds(
     SELECT workspace_id, requested_at FROM field_projection_rebuild_requests
     ORDER BY workspace_id
   `).all() as readonly Readonly<{ workspace_id: string; requested_at: string }>[];
-  for (const request of pending) {
-    lifecycle.rebuild(request.workspace_id, request.requested_at);
-    database.connection.prepare(`
-      DELETE FROM field_projection_rebuild_requests
-      WHERE workspace_id = ? AND requested_at = ?
-    `).run(request.workspace_id, request.requested_at);
+  for (const { workspace_id } of pending) {
+    database.connection.transaction(() => {
+      // Re-read under the write lock: another process may have advanced or
+      // consumed this request since the initial scan.
+      const request = database.connection.prepare(`
+        SELECT requested_at FROM field_projection_rebuild_requests WHERE workspace_id = ?
+      `).get(workspace_id) as Readonly<{ requested_at: string }> | undefined;
+      if (request === undefined) return;
+      lifecycle.rebuild(workspace_id, request.requested_at);
+      // Activation, its audit, and acknowledgement share one commit. Otherwise
+      // a same-timestamp request arriving after rebuild can be lost by this delete.
+      database.connection.prepare(`
+        DELETE FROM field_projection_rebuild_requests WHERE workspace_id = ?
+      `).run(workspace_id);
+    }).immediate();
   }
 }
 

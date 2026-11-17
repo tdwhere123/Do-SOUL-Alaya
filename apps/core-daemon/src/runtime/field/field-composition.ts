@@ -73,7 +73,8 @@ export function createDaemonFieldComposition(input: Readonly<{
     }),
     effectDecisionStore: createEffectDecisionStore(
       fieldRepos,
-      admitted.projectionLifecycle
+      admitted.projectionLifecycle,
+      input.database
     ),
     projectionLifecycle: admitted.projectionLifecycle,
     fieldProjectionCheckpoint: admitted.fieldProjectionCheckpoint
@@ -82,30 +83,33 @@ export function createDaemonFieldComposition(input: Readonly<{
 
 function createEffectDecisionStore(
   repos: DaemonFieldRepos,
-  lifecycle: SqliteFieldProjectionLifecycle
+  lifecycle: SqliteFieldProjectionLifecycle,
+  database: StorageDatabase
 ): EffectDecisionStore {
   return {
     insert(receipt: EffectDecisionReceipt): EffectDecisionReceipt {
-      repos.effects.insert({
-        schema_version: receipt.schema_version,
-        request_digest: receipt.request_digest,
-        workspace_id: receipt.workspace_id,
-        actor_id: receipt.actor_id,
-        run_id: receipt.run_id,
-        delivery_id: receipt.delivery_id,
-        action: receipt.action,
-        target: receipt.target,
-        scope: receipt.scope,
-        effective_as_of: receipt.effective_as_of,
-        decision: receipt.decision,
-        supporting_receipt_ids_json: JSON.stringify(receipt.supporting_receipt_ids),
-        supporting_proof_witnesses_json: JSON.stringify(receipt.supporting_proof_witnesses),
-        governance_frontier: receipt.governance_frontier,
-        policy_operator_id: receipt.policy_operator_id,
-        policy_operator_version: receipt.policy_operator_version,
-        recorded_at: receipt.recorded_at
-      });
-      lifecycle.requestRebuild(receipt.workspace_id, receipt.recorded_at);
+      database.connection.transaction(() => {
+        repos.effects.insert({
+          schema_version: receipt.schema_version,
+          request_digest: receipt.request_digest,
+          workspace_id: receipt.workspace_id,
+          actor_id: receipt.actor_id,
+          run_id: receipt.run_id,
+          delivery_id: receipt.delivery_id,
+          action: receipt.action,
+          target: receipt.target,
+          scope: receipt.scope,
+          effective_as_of: receipt.effective_as_of,
+          decision: receipt.decision,
+          supporting_receipt_ids_json: JSON.stringify(receipt.supporting_receipt_ids),
+          supporting_proof_witnesses_json: JSON.stringify(receipt.supporting_proof_witnesses),
+          governance_frontier: receipt.governance_frontier,
+          policy_operator_id: receipt.policy_operator_id,
+          policy_operator_version: receipt.policy_operator_version,
+          recorded_at: receipt.recorded_at
+        });
+        lifecycle.requestRebuild(receipt.workspace_id, receipt.recorded_at);
+      }).immediate();
       lifecycle.drainPending();
       return receipt;
     }
