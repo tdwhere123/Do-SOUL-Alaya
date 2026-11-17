@@ -31,6 +31,35 @@ function fixture() {
 }
 
 describe("mandatory audited source admission", () => {
+  it.each(["unknown_append", "notification"])("reuses source identity but retains separate audit attempts after %s failure", async failure => {
+    const f = fixture();
+    let fail = true;
+    const notifications: string[] = [];
+    const admission = createAuditedSourceAdmission({ stores: f.field.stores, sha256: fieldContractSha256,
+      eventLogRepo: { append: async event => {
+        const entry = await f.eventLogRepo.append(event);
+        if (fail && failure === "unknown_append") throw new Error("append acknowledgement lost");
+        return entry;
+      } },
+      runtimeNotifier: { notifyEntry: entry => {
+        notifications.push(entry.event_id);
+        if (fail && failure === "notification") throw new Error("notification unavailable");
+      } } });
+    await expect(admission.admit(request(), { workspaceId: "workspace-a" })).rejects.toThrow();
+    const retained = f.field.stores.listRecords("workspace-a")[0]!;
+    expect(await f.eventLogRepo.queryByEntity("source_record", retained.identity)).toHaveLength(1);
+    expect(f.field.stores.getStoredRecord("workspace-a", retained.identity)?.content_bytes).toBe("A café record.");
+    fail = false;
+    expect((await admission.admit(request(), { workspaceId: "workspace-a" })).record.identity).toBe(retained.identity);
+    expect(f.field.stores.listRecords("workspace-a")).toHaveLength(1);
+    const attempts = await f.eventLogRepo.queryByEntity("source_record", retained.identity);
+    expect(attempts).toHaveLength(2);
+    expect(new Set(attempts.map(row => row.event_id)).size).toBe(2);
+    expect(attempts[0]!.payload_json).toEqual(attempts[1]!.payload_json);
+    expect(notifications).toHaveLength(failure === "notification" ? 2 : 1);
+  });
+
+
   it("persists exact source bytes and stable duplicate identities without capsules", async () => {
     const f = fixture();
     const first = await f.admission.admit(request(), { workspaceId: "workspace-a" });

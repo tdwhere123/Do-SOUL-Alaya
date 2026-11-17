@@ -15,6 +15,41 @@ const FIRST = "2026-08-16T00:00:00.000Z";
 const REPLAY = "2026-08-17T00:00:00.000Z";
 
 describe("causal usage recorder", () => {
+  it.each(["receipt", "audit"])('rolls back usage on a real SQLite %s append failure and retries once', async boundary => {
+    const harness = createHarness();
+    try {
+      harness.database.connection.exec(boundary === "receipt"
+        ? `CREATE TRIGGER reject_usage BEFORE INSERT ON causal_usage_receipts
+            BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END`
+        : `CREATE TRIGGER reject_usage BEFORE INSERT ON event_log
+            WHEN NEW.event_type = 'soul.field.usage.causal_recorded'
+            BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`);
+      await expect(recordCausalUsedReceipts(harness.usagePort, input(harness, FIRST)))
+        .rejects.toThrow();
+      expect(harness.database.connection.prepare("SELECT COUNT(*) AS n FROM causal_usage_receipts").get()).toEqual({ n: 0 });
+      expect((await harness.eventLogRepo.queryByType(FieldGenerationEventType.SOUL_FIELD_USAGE_CAUSAL_RECORDED)).events).toEqual([]);
+      harness.database.connection.exec("DROP TRIGGER reject_usage");
+      const [first, duplicate] = await Promise.all([
+        recordCausalUsedReceipts(harness.usagePort, input(harness, FIRST)),
+        recordCausalUsedReceipts(harness.usagePort, input(harness, REPLAY))
+      ]);
+      expect(duplicate).toEqual(first);
+      expect(await usageAudits(harness.eventLogRepo, first[0]!.identity)).toHaveLength(1);
+    } finally { harness.database.close(); }
+  });
+
+  it("preserves the committed usage result after notification failure without repeating its audit", async () => {
+    const harness = createHarness(() => { throw new Error("listener unavailable"); });
+    try {
+      const first = await recordCausalUsedReceipts(harness.usagePort, input(harness, FIRST));
+      const replay = await recordCausalUsedReceipts(harness.usagePort, input(harness, REPLAY));
+      expect(replay).toEqual(first);
+      expect(await usageAudits(harness.eventLogRepo, first[0]!.identity)).toHaveLength(1);
+      expect(harness.database.connection.prepare("SELECT COUNT(*) AS n FROM causal_usage_receipts").get()).toEqual({ n: 1 });
+      expect(harness.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log WHERE event_type = 'runtime.side_effect_failed'").get()).toEqual({ n: 1 });
+    } finally { harness.database.close(); }
+  });
+
   it("persists and audits once, then replays the canonical occurred_at", async () => {
     const harness = createHarness();
     try {
@@ -91,14 +126,14 @@ describe("causal usage recorder", () => {
   });
 });
 
-function createHarness() {
+function createHarness(notifyEntry: () => void = () => undefined) {
   const database = initDatabase({ filename: ":memory:" });
   seedWorkspace(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const eventPublisher = new EventPublisher({
     eventLogRepo,
     runHotStateService: { apply: () => undefined },
-    runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
+    runtimeNotifier: { notify: () => undefined, notifyEntry }
   });
   const usagePort = createSqliteCausalUsagePort({
     repo: new SqliteFieldCausalUsageRepo(database, fieldContractSha256),

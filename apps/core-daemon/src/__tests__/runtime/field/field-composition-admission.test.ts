@@ -19,6 +19,7 @@ import { fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteEventLogRepo,
+  SqliteEvidenceCapsuleRepo,
   StorageDatabase
 } from "@do-soul/alaya-storage";
 import type { FieldProjectionAdmissionMode } from
@@ -26,7 +27,7 @@ import type { FieldProjectionAdmissionMode } from
 import { createDaemonFieldComposition } from
   "../../../runtime/field/field-composition.js";
 
-import { plantRevoke } from "./source-field-harness.js";
+import { EVIDENCE_ID, plantRevoke, produceAdaSource, seedRun } from "./source-field-harness.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
 const WORKSPACE = "workspace-1";
@@ -87,7 +88,7 @@ describe("field composition admission", () => {
     first.projectionLifecycle.checkpoint();
     interception.mockRestore();
     expect(attempted).toBe(true);
-    expect(conflict).toBeDefined();
+    expect(conflict).toMatchObject({ cause: { code: "SQLITE_BUSY" } });
     expect(competitor.stores.listStoredRecords(WORKSPACE)).toHaveLength(1);
     const before = first.fieldRepos.generations.readActive(WORKSPACE)!.generation_id;
     // The rejected writer can retry; its same-clock intent must not disappear.
@@ -97,6 +98,38 @@ describe("field composition admission", () => {
     expect(competitor.fieldRepos.generations.readActive(WORKSPACE)!.generation_id).not.toBe(before);
     expect(competitor.stores.listStoredRecords(WORKSPACE)).toHaveLength(2);
     expect(pendingRebuildCount(database)).toBe(0);
+  });
+
+  it("keeps a direct write and its synchronous projection inside an enclosing SQLite transaction", () => {
+    const field = openComposition();
+    expect(() => field.database.connection.transaction(() => {
+      field.stores.putRecord(sourceRecord("Ada wrote notes."), "Ada wrote notes.");
+      expect(field.fieldRepos.generations.readActive(WORKSPACE)?.status).toBe("active");
+      expect(field.stores.runAtomicWithOutcome!(() => undefined).status).toBe("not_committed");
+      throw new Error("outer transaction aborted");
+    })()).toThrow("outer transaction aborted");
+    expect(field.stores.listRecords(WORKSPACE)).toEqual([]);
+    expect(field.fieldRepos.generations.readActive(WORKSPACE)).toBeNull();
+    expect(rebuildStartedCount(field.database)).toBe(0);
+    expect(pendingRebuildCount(field.database)).toBe(0);
+  });
+
+  it("retains independently audited evidence when optional source audit fails without inventing startup repair", async () => {
+    const field = openComposition("explicit_checkpoint");
+    seedRun(field.database);
+    field.database.connection.exec(`CREATE TRIGGER reject_source_audit BEFORE INSERT ON event_log
+      WHEN NEW.event_type = 'soul.field.source_record.admitted'
+      BEGIN SELECT RAISE(ABORT, 'optional audit unavailable'); END`);
+    await produceAdaSource(field.database, field.stores, "Ada");
+    expect(await new SqliteEvidenceCapsuleRepo(field.database).findById(EVIDENCE_ID)).toMatchObject({ excerpt: "Ada wrote notes." });
+    expect(field.stores.listStoredRecords(WORKSPACE)).toHaveLength(1);
+    expect((await field.eventLogRepo.queryByEntity("evidence_capsule", EVIDENCE_ID))
+      .filter(row => row.event_type === "soul.evidence.created")).toHaveLength(1);
+    field.database.connection.exec("DROP TRIGGER reject_source_audit");
+    const restarted = createDaemonFieldComposition({ database: field.database, eventLogRepo: field.eventLogRepo });
+    expect(restarted.fieldRepos.generations.readActive(WORKSPACE)?.status).toBe("active");
+    expect(field.database.connection.prepare(`SELECT COUNT(*) AS n FROM event_log
+      WHERE event_type = 'soul.field.source_record.admitted'`).get()).toEqual({ n: 0 });
   });
 
   it("rolls back an effect decision when its durable rebuild request cannot be stored", () => {
