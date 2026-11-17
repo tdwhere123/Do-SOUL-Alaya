@@ -4,6 +4,7 @@
 |---|---|
 | [`invariants.md`](invariants.md) | Rules that always win |
 | [`architecture.md`](architecture.md) | Package shape, surfaces, write model, governance routes |
+| [`runtime-transactions.md`](runtime-transactions.md) | Transaction owners, receipt/audit readiness, retry and crash recovery |
 | [`recall.md`](recall.md) | Live Recall query, native source observation, conditional proof, delivery and recovery |
 | [`glossary.md`](glossary.md) | Stable SOUL / Alaya vocabulary |
 
@@ -13,6 +14,7 @@
 |---|---|
 | An invariant or dependency rule | `invariants.md` |
 | A surface, package boundary, or governance route | `architecture.md` |
+| Commit, audit, notification, retry or recovery ownership | `runtime-transactions.md`; update governing invariants and architecture when needed |
 | Recall query, source discovery, field transfer, delivery or read-time qualification | `recall.md` |
 | A stable term | `glossary.md` |
 

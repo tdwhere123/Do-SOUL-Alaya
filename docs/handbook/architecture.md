@@ -189,16 +189,40 @@ in invariant §25. No internal adapter alone publishes a new public API.
 
 ## Runtime Write Model
 
-EventPublisher-owned transitions append EventLog and mutate DB in one SQLite
-transaction, then notify via in-process `RuntimeNotifier`; audit precedes
-observable broadcast. Storage owns transaction/CAS mechanics, Core and daemon
-own runtime truth and effects. A committed mutation is not rolled back by
-postcommit notification failure: keep the durable result, invalidate affected
-caches and report propagation diagnostics. Field formation,
-projection-generation and causal-usage receipts instead persist first and
-append EventLog as a separate audit step; a missing append does not erase an
-already committed receipt. In-process Garden scheduler claim and
-`soul.garden.task_dispatched` share that EventLog-first transaction.
+Storage owns transaction/CAS mechanics; Core and daemon own runtime truth,
+audit obligations and effects. Statement order, commit boundary and business
+visibility are separate properties:
+
+| Write model | Commit and visibility contract |
+| --- | --- |
+| Atomic state + audit | `EventPublisher` mutation methods pair state and EventLog in one synchronous SQLite transaction on the same connection. Append-before-mutate supplies event identities; `mutateThenAppendMany` derives events from the guarded mutation. Either order rolls back together on failure. |
+| Atomic receipt + audit | Projection generation/pointer activation and causal-usage recording also commit their rows and audit together. Calling these receipts does not imply a separate audit transaction. |
+| Independently retained source + audit | Source admission may retain its source receipt before a separate audit. Retention survives audit failure, but successful retention alone is not the audited operation's ready acknowledgement. Its specific retry/recovery owner must preserve identity and unfinished work. |
+| Event-only publication | `publish` commits an event before propagation. A propagation error carries its committed identity; it is not evidence that append failed. |
+
+Notifications run after commit via in-process `RuntimeNotifier`; audit precedes
+notification. A committed mutation is not rolled back by notification failure:
+keep its durable result and report propagation diagnostics rather than repeat
+its effects. Notification delivery itself is not durable exactly-once delivery.
+A failed or ambiguous append must not be reported as proof that no row exists.
+Raw retained-source reads and audited admission acknowledgements have distinct
+meanings; there is no universal ready flag covering both.
+
+Source/incidence and governing effect writes commit their durable projection
+repair intent with the state they change. Rebuild, activation audit and intent
+acknowledgement share a serialized transaction; interruption leaves unfinished
+intent for restart/checkpoint. Nested projection work may safely share an outer
+transaction, but a savepoint is not an independent commit or ready acknowledgement.
+
+Native source admission uses importer-owned exact replay and at-least-once audit;
+host-session capture has its own durable ledger and audit deduplication. Optional
+evidence formation does not promise eventual source-admission audit: the capsule
+and its creation audit already committed together. See
+[runtime transactions](runtime-transactions.md) for owner-specific outcomes,
+recovery obligations, consumers and boundary tests.
+
+In-process Garden scheduler claim and `soul.garden.task_dispatched` share an
+atomic state/audit transaction.
 Host-worker MCP claim is task-row CAS without that event: claim transfers
 ownership, it is not proof that work was dispatched. Statement-session
 in-process work commits the claim first, then publishes the dispatch audit;

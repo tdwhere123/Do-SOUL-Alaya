@@ -31,10 +31,16 @@ These rules always win over lower-level docs and task-card convenience.
 
 ## Event And State
 
-7. EventPublisher-owned runtime transitions stay EventLog-first: append
-   EventLog, update DB, then notify (per §10 below — there is no SSE).
-   Field formation, projection-generation, and causal-usage writes persist
-   the receipt first, then append EventLog as a separate audit step.
+7. EventPublisher-owned state transitions commit their EventLog rows and
+   state mutation atomically on the same SQLite connection, then notify
+   (per §10 below — there is no SSE). EventLog-first describes audit ownership,
+   not a universal SQL statement order: mutation-derived events may be appended
+   after the mutation inside that transaction. Callbacks must be synchronous.
+   Projection-generation activation and causal-usage recording also pair state
+   and audit in one transaction. Independently committed source-admission
+   receipts use a distinct receipt-first contract with explicit identity,
+   retry/recovery ownership and operation-specific readiness; do not generalize
+   that exception to all formation writes.
 8. Only `packages/core` and `apps/core-daemon` may author
    EventLog-producing runtime transitions or mutate run truth.
    `packages/storage` may provide mechanical persistence helpers behind
@@ -57,8 +63,12 @@ These rules always win over lower-level docs and task-card convenience.
 9. New event names use dot notation, for example `memory.created` and
    `garden.audit_pass.completed`. Existing frozen underscore names
    require coordinated contract migration before renaming.
-10. Audit precedes broadcast. Every state change records an audit row
-    before any consumer can observe it.
+10. Audit precedes runtime notification and the owning audited operation's
+    ready acknowledgement. An atomic transition exposes state and audit together.
+    Receipt-first retention may be readable before its separate audit succeeds;
+    that proves retention, not completed admission or notification. Consumers
+    must honor the applicable readiness contract. A postcommit notification
+    failure does not undo durable state or authorize repeating its mutation.
 11. **Alaya does not run an SSE event stream.** Upstream do-what-new
     used SSE because it had GUI / TUI consumers; Alaya does not.
     Daemon-internal eventing is via in-process audit log +
