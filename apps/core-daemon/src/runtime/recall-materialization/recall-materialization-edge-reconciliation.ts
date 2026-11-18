@@ -6,11 +6,12 @@ import {
   PRODUCT_FORMATION_DEFAULTS,
   PreWriteRecallService,
   ReconciliationService,
+  RelationAssertionService,
   createRuleOnlyReconciliationDecisionPort,
   resolveProductFormationEnabled,
   type PathCandidateSink
 } from "@do-soul/alaya-core";
-import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import { SqliteRelationAssertionRepo, type SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { OFFICIAL_API_GARDEN_MODEL } from "@do-soul/alaya-soul";
 import { createEdgeAutoProducerLlmPort } from "../../ai/edge-auto-producer-llm-adapter.js";
 import { createReconciliationLlmDecisionPort } from "../../ai/reconciliation-llm-decision.js";
@@ -21,7 +22,10 @@ import {
   resolveGardenSecretRefValue
 } from "../garden-wiring/garden-compute-support.js";
 import { resolveEdgeClassifyWiring } from "../daemon/lifecycle/daemon-runtime-support.js";
-import { createGardenLegacyPathCandidateRejectionPort } from "../garden-wiring/garden-legacy-path-admission.js";
+import {
+  createGardenLegacyPathCandidateRejectionPort,
+  createProvenanceVerifiedPathCandidatePort
+} from "../garden-wiring/garden-legacy-path-admission.js";
 import type { ReconciliationBasisStatus } from
   "../daemon/lifecycle/daemon-runtime-types.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
@@ -49,7 +53,11 @@ type ReconciliationRuntimeWiring = Pick<
   | "warn"
 >;
 
-type EdgeAndReconciliationRuntimeWiring = EdgeRuntimeWiring & ReconciliationRuntimeWiring;
+type EdgeAndReconciliationRuntimeWiring = EdgeRuntimeWiring &
+  ReconciliationRuntimeWiring &
+  Readonly<{
+    readonly relationAssertionService?: Pick<RelationAssertionService, "admit">;
+  }>;
 
 export async function createEdgeAndReconciliationRuntime(
   wiring: EdgeAndReconciliationRuntimeWiring
@@ -69,7 +77,7 @@ export async function createEdgeAndReconciliationRuntime(
 }>> {
   const sharedGardenComputeConfig = await wiring.rawConfigService.getRuntimeGardenComputeConfig();
   const edgeClassifyRuntime = createEdgeClassifyRuntime(wiring, sharedGardenComputeConfig);
-  const pathCandidatePort = createGardenLegacyPathCandidateRejectionPort(wiring.warn);
+  const pathCandidatePort = resolvePathCandidateSink(wiring);
   const edgeAutoProducerService = createEdgeAutoProducerService(
     wiring,
     pathCandidatePort,
@@ -85,6 +93,25 @@ export async function createEdgeAndReconciliationRuntime(
     reconciliationService: reconciliationRuntime.reconciliationService,
     reconciliationBasisStatus: reconciliationRuntime.reconciliationBasisStatus,
     edgeClassifyQueueRepoHolder: edgeClassifyRuntime.edgeClassifyQueueRepoHolder
+  });
+}
+
+function resolvePathCandidateSink(wiring: EdgeAndReconciliationRuntimeWiring) {
+  const database = wiring.eventLogRepo?.getStorageConnectionIdentity?.();
+  if (database === undefined) {
+    return createGardenLegacyPathCandidateRejectionPort(wiring.warn);
+  }
+  const assertionService =
+    wiring.relationAssertionService ??
+    new RelationAssertionService({
+      repo: new SqliteRelationAssertionRepo(database),
+      eventPublisher: wiring.eventPublisher,
+      eventHistory: wiring.eventLogRepo
+    });
+  return createProvenanceVerifiedPathCandidatePort({
+    database,
+    assertionService,
+    warn: wiring.warn
   });
 }
 

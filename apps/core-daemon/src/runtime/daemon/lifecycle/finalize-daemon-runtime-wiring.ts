@@ -14,6 +14,7 @@ import {
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import { createDaemonHostSessionCapture, type HostSessionCapture } from "../../../garden/host-session/host-session-capture.js";
+import { materializeWorkspaceSessionStructuralRelations } from "../../garden-wiring/session-structural-relations.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
@@ -22,7 +23,8 @@ export async function finalizeDaemonRuntimeFromWiring(
   const receiptTime = input.hostSessionReceiptTime;
   const hostSessionCapture = input.gardenTaskRepo === undefined ? undefined : createDaemonHostSessionCapture({
     stores: input.fieldComposition.stores, eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier,
-    gardenTaskRepo: input.gardenTaskRepo, warn: input.warnLogger.warn,
+    gardenTaskRepo: input.gardenTaskRepo, relationAssertionService: input.relationAssertionService,
+    warn: input.warnLogger.warn,
     now: receiptTime === undefined ? () => new Date().toISOString() : () => receiptTime });
   return await finalizeAlayaDaemonRuntime({
     startupConfig: input.startupConfig,
@@ -81,6 +83,15 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     synthesisMemberResolver: createSynthesisMemberResolver(input),
     signalService: input.signalService,
     postTurnSignalReceiver: createPostTurnSignalReceiver(input.signalService),
+    onStatementSessionSettled: async (evt: Readonly<{ workspaceId: string; runId: string | null }>) => {
+      await materializeWorkspaceSessionStructuralRelations({
+        database: input.eventLogRepo.getStorageConnectionIdentity(),
+        assertionService: input.relationAssertionService,
+        workspaceId: evt.workspaceId,
+        runId: evt.runId,
+        warn: input.warnLogger.warn
+      });
+    },
     graphExploreService: input.graphExploreService,
     edgeProposalService: input.edgeProposalService,
     graphEdgePort: input.graphEdgePort,

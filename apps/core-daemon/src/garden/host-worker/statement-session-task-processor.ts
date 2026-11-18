@@ -24,6 +24,7 @@ type StatementSessionRuntimeInput = Readonly<{
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly signalReceiver?: PostTurnSignalReceiver;
   readonly hostSessionCapture?: HostSessionCapture;
+  readonly onStatementSessionSettled?: (input: Readonly<{ workspaceId: string; runId: string | null }>) => Promise<void>;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>;
 type StatementSessionRuntime = StatementSessionRuntimeInput & {
@@ -84,6 +85,17 @@ async function processClaimedStatementSession(row: GardenTaskRow, claimedAt: str
       signalReceiver: input.signalReceiver, outcomes,
       beforeReceive: async () => await refreshInProcessClaim(input.gardenTaskRepo, row.id, input.now)
     });
+    if (input.onStatementSessionSettled !== undefined && emittedSignalIds.length > 0) {
+      try {
+        await input.onStatementSessionSettled({ workspaceId: payload.workspace_id, runId: payload.run_id });
+      } catch (error) {
+        input.warn("statement structural relation admission failed", {
+          workspace_id: payload.workspace_id,
+          task_id: row.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
     const outcome = { emittedSignalIds, signalCounts: outcomes.snapshot() };
     await settleInProcessTask(row, payload.run_id, receipt.status === "complete" ? { status: "completed", ...outcome }
       : { status: "failed", error: cause ?? new GardenProviderError(

@@ -266,12 +266,20 @@ export function runConditionalFieldRecallWithReceipt(
       : { budget: reserveSnapshotPinWork(reserveSnapshotPinWork(capturedBudget).budget).budget }),
     requested_budget: requestedBudget
   });
+  const hasEvidenceConditions =
+    (input.interpretation_proposal?.evidence_conditions?.length ?? 0) >= 1;
+  const availableRelationKinds = hasEvidenceConditions && input.readers.relationKinds !== undefined
+    ? input.readers.relationKinds({ workspaceId: input.workspace_id, subject: null, limit: 32 })
+    : undefined;
   const compileInput = {
     source: "ordinary" as const,
     text: input.query_text,
     snapshot_id: input.snapshot_id,
     budget: input.budget,
     interpretation_clock: input.interpretation_clock,
+    ...(availableRelationKinds === undefined || availableRelationKinds.length === 0
+      ? {}
+      : { available_relation_kinds: availableRelationKinds }),
     ...(input.since === undefined ? {} : { since: input.since }),
     ...(input.until === undefined ? {} : { until: input.until }),
     ...(input.time_field === undefined ? {} : { time_field: input.time_field }),

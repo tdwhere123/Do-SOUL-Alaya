@@ -29,6 +29,7 @@ import {
   createGardenEdgeProposalReconcileDeferralPort,
   deferGardenBootstrapPathReconciliation
 } from "./garden-legacy-path-admission.js";
+import { materializeWorkspaceSessionStructuralRelations } from "./session-structural-relations.js";
 import { createGardenSignalRefReplayPort } from "./garden-signal-ref-replay.js";
 import type { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import type { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
@@ -194,6 +195,11 @@ function createGardenSchedulerRuntime(
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
   answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
+  const relationAssertionService = new RelationAssertionService({
+    repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher,
+    eventHistory: input.eventLogRepo
+  });
   return createGardenRuntime({
     databaseConnection: input.database.connection,
     backlogThresholds: input.gardenBacklogThresholds,
@@ -217,7 +223,16 @@ function createGardenSchedulerRuntime(
     signalReceiver: createPostTurnSignalReceiver(input.signalService),
     hostSessionCaptureFor: gardenTaskRepo => createDaemonHostSessionCapture({ stores: input.fieldStores,
       eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, gardenTaskRepo,
-      now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
+      relationAssertionService, now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
+    onStatementSessionSettled: async (evt) => {
+      await materializeWorkspaceSessionStructuralRelations({
+        database: input.database,
+        assertionService: relationAssertionService,
+        workspaceId: evt.workspaceId,
+        runId: evt.runId,
+        warn: input.warnLogger.warn
+      });
+    },
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(

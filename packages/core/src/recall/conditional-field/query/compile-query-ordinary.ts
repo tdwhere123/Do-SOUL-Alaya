@@ -1,11 +1,12 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION, IsoDatetimeStringSchema, QueryProgramSchema,
-  type Guard, type QueryHole, type QueryInterpretation, type QueryTimeWindow, type QueryView, type RequestBudget
+  type Guard, type QueryHole, type QueryInterpretation, type QueryProgram,
+  type QueryTimeWindow, type QueryView, type RequestBudget
 } from "@do-soul/alaya-protocol";
 import { identityFor, type QueryDenotationParts } from "./compile-query-identity.js";
 import type { OrdinaryLanguageCompileInput } from "./compile-query.js";
 import {
-  attachSourceFilters, encodeSourceFilters, normalizeOrdinaryText, proposeOrdinaryRelations,
+  attachSourceFilters, associatedItemGuard, encodeSourceFilters, normalizeOrdinaryText, proposeOrdinaryRelations,
   programFromOpenRelations, SourceFilterCapacityError, uninterpretedQueryHole, anchorTimeGuard,
   type OrdinarySourceFilters
 } from "./ordinary-language.js";
@@ -17,6 +18,19 @@ import {
 import { admitQueryProposal } from "./query-proposal-admission.js";
 
 const MAX_ORDINARY_TEXT = 4096;
+const MAX_STRUCTURAL_PREMISES = 12;
+const CONDITIONAL_FIELD_STRUCTURAL_KINDS = new Set([
+  "next_round_in_session",
+  "prev_round_in_session",
+  "restates",
+  "supersedes",
+  "supports",
+  "elaborates",
+  "derives_from",
+  "answers_with",
+  "coheres_with",
+  "contradicts"
+]);
 
 function ordinaryRestriction(input: OrdinaryLanguageCompileInput):
   Pick<QueryDenotationParts, "source_id" | "access_hint"> {
@@ -60,16 +74,29 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
       authorized_scopes: input.authorized_scopes, ...ordinaryRestriction(input), lexical_text: input.text });
   }
   const relations = input.relations ?? proposeOrdinaryRelations(input.text);
+  const structuralKinds = input.relations === undefined
+    && relations.length === 0
+    && proposal.kind === "admitted"
+    && (proposal.stored_proposal.evidence_conditions?.length ?? 0) >= 1
+    ? selectStructuralRelationKinds(input.available_relation_kinds)
+    : [];
   try {
     const window = timeHints.kind === "window" ? timeHints.window : undefined;
-    const compiled = relations.length === 0 ? EPSILON : programFromOpenRelations(relations,
-      window === undefined ? undefined : anchorTimeGuard(window));
+    const structuralProgram = structuralKinds.length === 0
+      ? undefined
+      : compileStructuralHyperedgeAlternative(
+          structuralKinds,
+          window === undefined ? undefined : anchorTimeGuard(window)
+        );
+    const compiled = relations.length > 0
+      ? programFromOpenRelations(relations, window === undefined ? undefined : anchorTimeGuard(window))
+      : structuralProgram ?? EPSILON;
     const parsed = QueryProgramSchema.safeParse(compiled);
     if (!parsed.success || admitQueryPredicates(parsed.data).kind === "malformed") {
       return ordinaryMalformed(input, snapshotId, view);
     }
     const filters = sourceFiltersFrom(input, timeHints);
-    const program = relations.length === 0 ? EPSILON : attachSourceFilters(parsed.data, filters);
+    const program = compiled === EPSILON ? EPSILON : attachSourceFilters(parsed.data, filters);
     const predicate = relations.length === 0 ? encodeSourceFilters(filters) : undefined;
     const sourceGuard: Guard | undefined = predicate === undefined ? undefined : {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "query_predicate",
@@ -78,7 +105,7 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return finishOrdinary(input, snapshotId, view, queryId, proposal, relations, interpretationOf({
       query_id: fallbackQueryId(queryId, "ordinary"), status: "partial", snapshot_id: snapshotId,
-      program, view, holes: [...(relations.length === 0 ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(timeHints)],
+      program, view, holes: [...(program.kind === "epsilon" ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(timeHints)],
       source_guard: sourceGuard, interpretation_clock: input.interpretation_clock, time_window: window
     }));
   } catch (error) {
@@ -143,5 +170,45 @@ function sourceFiltersFrom(input: OrdinaryLanguageCompileInput, hints: TimeHints
     ...(input.domain_tag_filter === undefined || input.domain_tag_filter.length === 0 ? {} : { domain_tag_filter: input.domain_tag_filter }),
     ...(input.time_field === undefined ? {} : { time_field: input.time_field }),
     ...(since === undefined ? {} : { since }), ...(until === undefined ? {} : { until })
+  };
+}
+
+function selectStructuralRelationKinds(kinds: readonly string[] | undefined): readonly string[] {
+  if (kinds === undefined || kinds.length === 0) return [];
+  const selected = new Set<string>();
+  for (const kind of kinds) {
+    if (CONDITIONAL_FIELD_STRUCTURAL_KINDS.has(kind)) selected.add(kind);
+  }
+  return [...selected].sort().slice(0, MAX_STRUCTURAL_PREMISES);
+}
+
+function compileStructuralHyperedgeAlternative(
+  kinds: readonly string[],
+  anchorGuard: Guard | undefined
+): QueryProgram {
+  const guard: Guard = anchorGuard === undefined
+    ? associatedItemGuard("y")
+    : { ...anchorGuard, variable: "y" };
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "alternative",
+    options: [
+      EPSILON,
+      {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "hyperedge",
+        join: "or",
+        premises: kinds.map((relation_kind) => ({
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          kind: "relation",
+          relation_kind,
+          source_variable: "x",
+          target_variable: "y",
+          guard,
+          facet_mode: "same_path",
+          threshold_milligrades: 0
+        }))
+      }
+    ]
   };
 }

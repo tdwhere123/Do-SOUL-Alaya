@@ -87,6 +87,25 @@ export function alignOutgoingBinding(
   return encodeBindingContext(env, bindingContexts);
 }
 
+export type SourceEvidenceTargetRef = Extract<RecallTargetRef, { readonly kind: "source_evidence" }>;
+
+const BOUND_SOURCE_EVIDENCE_TARGETS = new WeakMap<BoundSourceFacts, SourceEvidenceTargetRef>();
+
+/** Associates a retained source fact with its source-evidence target without inflating serialized fact byte metering. */
+export function registerBoundSourceEvidenceTarget(
+  fact: BoundSourceFacts,
+  target: SourceEvidenceTargetRef
+): void {
+  BOUND_SOURCE_EVIDENCE_TARGETS.set(fact, target);
+}
+
+/** Returns the source-evidence target attached to a retained source fact, if any. */
+export function boundSourceEvidenceTargetOf(
+  fact: BoundSourceFacts | undefined
+): SourceEvidenceTargetRef | undefined {
+  return fact === undefined ? undefined : BOUND_SOURCE_EVIDENCE_TARGETS.get(fact);
+}
+
 export type BoundSourceFacts = Readonly<{
   readonly interpretation_node?: InterpretationNodeCoordinate;
   readonly source_lookup_reasons?: import("@do-soul/alaya-protocol").RecallCandidate["source_lookup_reasons"];

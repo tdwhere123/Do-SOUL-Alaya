@@ -200,7 +200,10 @@ async function createRecallMaterializationRuntime(
   recallReadRuntime: ReturnType<typeof createRecallReadRuntime>
 ) {
   const pathRelationRuntime = createPathRelationRuntime(input);
-  const edgeRuntime = await createEdgeAndReconciliationRuntime(input);
+  const edgeRuntime = await createEdgeAndReconciliationRuntime({
+    ...input,
+    relationAssertionService: pathRelationRuntime.relationAssertionService
+  });
   const materializationRuntime = createSignalMaterializationRuntime({
     wiring: input,
     pathRelationProposalPort: pathRelationRuntime.pathRelationProposalPort,

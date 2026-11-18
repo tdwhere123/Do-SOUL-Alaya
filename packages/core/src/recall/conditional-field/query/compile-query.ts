@@ -98,6 +98,7 @@ export type OrdinaryLanguageCompileInput = CompileCommon & Readonly<{
   readonly domain_tag_filter?: readonly string[];
   readonly time_field?: "created_at" | "last_used_at";
   readonly relations?: readonly OpenRelationCapture[];
+  readonly available_relation_kinds?: readonly string[];
   /** Library lease restriction; part of ordinary query identity. */
   readonly source_id?: string;
   /** Prepared access hint; part of ordinary query identity and cost. */

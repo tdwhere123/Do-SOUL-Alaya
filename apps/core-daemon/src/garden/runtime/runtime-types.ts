@@ -217,6 +217,7 @@ export type CreateGardenRuntimeInput = {
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly signalReceiver?: PostTurnSignalReceiver;
   readonly hostSessionCaptureFor?: (gardenTaskRepo: SqliteGardenTaskRepo) => HostSessionCapture;
+  readonly onStatementSessionSettled?: (input: Readonly<{ workspaceId: string; runId: string | null }>) => Promise<void>;
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
   readonly tombstoneDispositionSweepPort?: JanitorDispositionSweepPort;

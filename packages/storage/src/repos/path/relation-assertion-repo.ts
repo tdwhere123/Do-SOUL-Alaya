@@ -94,8 +94,18 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
                json_extract(value, '$.source_event_anchor.event_id') AS source_event_id
         FROM json_each(?)
       )
-      SELECT receipt.evidence_id, evidence.workspace_id, evidence.event_anchor,
-             source.event_id AS verified_source_event_id
+      SELECT receipt.evidence_id,
+             COALESCE(evidence.workspace_id, sr.workspace_id) AS workspace_id,
+             CASE
+               WHEN evidence.object_id IS NOT NULL THEN evidence.event_anchor
+               WHEN evidence.object_id IS NULL AND sr.record_id IS NOT NULL AND sr_source.event_id IS NOT NULL THEN json_object(
+                 'event_type', sr_source.event_type,
+                 'event_id', sr_source.event_id,
+                 'occurred_at', COALESCE(sr.event_time, sr.recorded_at)
+               )
+               ELSE NULL
+             END AS event_anchor,
+             COALESCE(source.event_id, sr_source.event_id) AS verified_source_event_id
       FROM receipts AS receipt
       LEFT JOIN evidence_capsules AS evidence
         ON evidence.object_id = receipt.evidence_id
@@ -103,6 +113,24 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
         ON source.event_id = receipt.source_event_id
        AND source.event_type = receipt.source_event_type
        AND source.workspace_id = evidence.workspace_id
+      LEFT JOIN source_records AS sr
+        ON evidence.object_id IS NULL
+       AND sr.workspace_id = ?
+       AND sr.record_id = receipt.evidence_id
+       AND NOT EXISTS (
+         SELECT 1 FROM projection_erase_barriers AS barrier
+         WHERE barrier.workspace_id = sr.workspace_id
+           AND barrier.subject_kind = 'source_record'
+           AND barrier.subject_id = sr.record_id
+       )
+      LEFT JOIN event_log AS sr_source
+        ON sr.record_id IS NOT NULL
+       AND sr_source.event_id = receipt.source_event_id
+       AND sr_source.event_type = receipt.source_event_type
+       AND sr_source.event_type = 'soul.field.source_record.admitted'
+       AND sr_source.entity_type = 'source_record'
+       AND sr_source.entity_id = sr.record_id
+       AND sr_source.workspace_id = sr.workspace_id
     `);
     this.findEventFormationSourceStatement = db.connection.prepare(`
       SELECT event_id, event_type, entity_type, entity_id, workspace_id, run_id,
@@ -261,7 +289,8 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   ): void {
     requireUniqueRelationAssertionEvidenceIds(evidenceReceipts.map((receipt) => receipt.evidence_id));
     try {
-      const rows = parseRows(this.assertEvidenceReceiptsStatement.all(JSON.stringify(evidenceReceipts)),
+      const rows = parseRows(
+        this.assertEvidenceReceiptsStatement.all(JSON.stringify(evidenceReceipts), workspaceId),
         EvidenceReceiptVerificationRowParser,
         "relation assertion evidence receipt verification row"
       );

@@ -1,6 +1,11 @@
 import { SourceLookupReasonsSchema, sameSourceEvidenceRoot, type TypedObservation } from "@do-soul/alaya-protocol";
 import type { ObserverReaders, SourceObserverPage, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
-import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
+import {
+  boundSourceEvidenceTargetOf,
+  registerBoundSourceEvidenceTarget,
+  sourceFactKey,
+  type BoundSourceFacts
+} from "../conditional-field/engine/binding-environment.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
 
@@ -13,7 +18,9 @@ export class ObservedSourceFacts {
   public set(id: string, facts: BoundSourceFacts): this {
     const before = this.snapshot.get(id);
     if (facts.source_lookup_reasons === undefined && before?.source_lookup_reasons !== undefined) {
+      const preservedTarget = boundSourceEvidenceTargetOf(facts);
       facts = { ...facts, source_lookup_reasons: before.source_lookup_reasons };
+      if (preservedTarget !== undefined) registerBoundSourceEvidenceTarget(facts, preservedTarget);
     }
     if (before === facts) return this;
     this.bytes += Buffer.byteLength(JSON.stringify([id, facts]), "utf8")
@@ -76,7 +83,7 @@ export function retainSourceFact(
   workspaceId: string,
   observedAt: Record<string, string>
 ): void {
-    sourceFacts.set(objectId, {
+    const fact: BoundSourceFacts = {
       object_id: row.object_id,
       ...(row.interpretation_node === undefined ? {} : { interpretation_node: row.interpretation_node }),
       workspace_id: workspaceId,
@@ -91,7 +98,11 @@ export function retainSourceFact(
       ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
       ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
       ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings })
-    });
+    };
+    if (row.target?.kind === "source_evidence") {
+      registerBoundSourceEvidenceTarget(fact, row.target);
+    }
+    sourceFacts.set(objectId, fact);
     if (row.observed_at !== undefined) observedAt[objectId] = row.observed_at;
 }
 

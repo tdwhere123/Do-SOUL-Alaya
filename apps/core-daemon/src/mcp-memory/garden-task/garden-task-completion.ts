@@ -246,6 +246,17 @@ async function commitCandidateSignalCompletion(
   const emittedSignalIds = await emitTaskCandidateSignals(
     params, row, candidateSignals, completionClaimedBy, outcomes, sessionPayload !== null
   );
+  if (sessionPayload !== null && emittedSignalIds.length > 0 && params.deps.onStatementSessionSettled !== undefined) {
+    try {
+      await params.deps.onStatementSessionSettled({ workspaceId: context.workspaceId, runId: resolvedRunId });
+    } catch (error) {
+      params.warn("statement structural relation admission after completion failed", {
+        workspace_id: context.workspaceId,
+        task_id: row.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
   const counts = outcomes.snapshot();
   throwIfAborted(context.abortSignal);
   await requireGardenTaskRepo(params.deps).completeWithEvents(

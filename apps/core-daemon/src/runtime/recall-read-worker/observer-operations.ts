@@ -1,4 +1,4 @@
-import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, SourceSemanticResourceLedger,
+import { indexEntryCacheKey, sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceRecallTarget, SourceSemanticResourceLedger,
   SourceSemanticResourceExhausted, type SourceIndexQueryVector,
   type SourceSemanticAcquisitionPhase, type SourceIndexNominationAllowance } from "@do-soul/alaya-protocol";
 import {
@@ -382,8 +382,27 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   const projection = new SqliteIndexedRecallProjection(database.connection);
   const kindsSql = database.connection.prepare(
     `SELECT relation_kind AS kind FROM relation_assertions
-     WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
+     WHERE workspace_id = ? AND relation_kind > ?
+       AND NOT EXISTS (
+         SELECT 1 FROM relation_assertion_resolution_current r
+         WHERE r.assertion_id = relation_assertions.assertion_id
+           AND r.workspace_id = relation_assertions.workspace_id
+       )
+     ORDER BY relation_kind LIMIT 1`
   );
+  const sourceRecordSql = database.connection.prepare(`
+    SELECT record_id, source_id, source_version, content_digest, evidence_object_id,
+           recorded_at, event_time, valid_from, valid_to
+    FROM source_records
+    WHERE workspace_id = ? AND record_id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM projection_erase_barriers barrier
+        WHERE barrier.workspace_id = source_records.workspace_id
+          AND barrier.subject_kind = 'source_record'
+          AND barrier.subject_id = source_records.record_id
+      )
+    LIMIT 1
+  `);
   return {
     permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
     sourceDependencies: input => readSourceDependencyDelivery(new SqliteSourceIndexRepository(database, fieldContractSha256), input),
@@ -401,12 +420,59 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         input.objectId,
         input.byteLimit ?? 65536
       );
+      if (page.row !== null || page.unavailable || page.resourceLimited) {
+        return {
+          row: page.row === null ? null : toSourceObserverRow(page.row),
+          rowsRead: page.rowsRead,
+          bytesRead: page.bytesRead,
+          unavailable: page.unavailable,
+          resourceLimited: page.resourceLimited
+        };
+      }
+      const sr = sourceRecordSql.get(input.workspaceId, input.objectId) as
+        | {
+            readonly record_id: string;
+            readonly source_id: string;
+            readonly source_version: string;
+            readonly content_digest: string;
+            readonly evidence_object_id: string | null;
+            readonly recorded_at: string;
+            readonly event_time: string | null;
+            readonly valid_from: string | null;
+            readonly valid_to: string | null;
+          }
+        | undefined;
+      if (sr === undefined) {
+        return {
+          row: null,
+          rowsRead: page.rowsRead,
+          bytesRead: page.bytesRead,
+          unavailable: false,
+          resourceLimited: false
+        };
+      }
+      const row = {
+        target: sourceRecallTarget({
+          workspace_id: input.workspaceId,
+          root_kind: "source_record",
+          root_id: sr.record_id,
+          source_version: sr.source_version,
+          content_digest: sr.content_digest,
+          evidence_object_id: sr.evidence_object_id
+        }),
+        object_id: sr.record_id,
+        sourceRevision: sr.source_version,
+        observed_at: sr.event_time ?? sr.recorded_at,
+        scope_class: "project",
+        ...(sr.valid_from === null ? {} : { valid_from: sr.valid_from }),
+        ...(sr.valid_to === null ? {} : { valid_to: sr.valid_to })
+      };
       return {
-        row: page.row === null ? null : toSourceObserverRow(page.row),
-        rowsRead: page.rowsRead,
-        bytesRead: page.bytesRead,
-        unavailable: page.unavailable,
-        resourceLimited: page.resourceLimited
+        row,
+        rowsRead: Math.max(1, page.rowsRead),
+        bytesRead: Math.max(page.bytesRead, Buffer.byteLength(JSON.stringify(row), "utf8")),
+        unavailable: false,
+        resourceLimited: false
       };
     },
     ...sourceRootReaders(database),
