@@ -152,7 +152,7 @@ it("refuses coordinate-bearing soul.recall on a plain-query profile without call
   }), port);
   expect(execution.terminal).toEqual({
     outcome: "host_policy_refusal", tool: "soul.recall",
-    reason: "plain_query forbids query_coordinates and interpretation_proposal"
+    reason: "plain_query forbids caller coordinates and host replay proposals"
   });
   expect(execution.mcp_dispatches).toBe(0);
   expect(execution.caller_capability_profile).toBe("plain_query");

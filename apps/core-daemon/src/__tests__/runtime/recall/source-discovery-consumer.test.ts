@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   capableRecallConsumerDeclaration,
@@ -37,7 +39,8 @@ import { prepareRetainedSourceLexicalIndex } from "../../../../../bench-runner/s
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { createToolsCommand } from "../../../cli/tools.js";
 import { ALAYA_SYSEXITS } from "../../../cli/bridge.js";
-import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
+import { createMcpMemoryToolHandler, type McpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
+import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
 
 const databases: StorageDatabase[] = [];
 afterEach(() => {
@@ -142,7 +145,10 @@ describe("source discovery consumer surfaces", () => {
     const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
       .insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
     prepareRetainedSourceLexicalIndex(slice.database, WS);
-    const result = await recallNativeSourcesThroughCli(slice.database, canary.original_query);
+    const handler = createSourceRecallToolHandler(slice.database);
+    const result = SoulMemorySearchResponseSchema.parse((await recallThroughCli(handler, {
+      query: canary.original_query
+    })).json);
     const row = result.results.find((result) => result.target?.kind === "source_evidence"
       && result.target.root_id === record.record_id);
     expect(row?.content_preview).toBe(canary.intended);
@@ -152,6 +158,50 @@ describe("source discovery consumer surfaces", () => {
       target: expect.objectContaining({ kind: "source_evidence", root_id: record.record_id }),
       navigation: expect.objectContaining({ operator: "source_lexical", view: "original" })
     })]));
+  });
+
+  it("shares ranked source recall, coordinate recovery, and hard filters between MCP and CLI", async () => {
+    const canary = SOURCE_DISCOVERY_CANARY[1]!;
+    const slice = await openSourceSlice(database => databases.push(database));
+    const record = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256)
+      .insert({ ...hashedRecord(WS, canary.intended, "intended"), scope_class: ScopeClass.PROJECT });
+    prepareRetainedSourceLexicalIndex(slice.database, WS);
+    const handler = createSourceRecallToolHandler(slice.database);
+    const client = new Client({ name: "source-recall-parity", version: "test" });
+    const server = createAlayaMcpServer({ memoryToolHandler: handler,
+      contextProvider: () => ({ workspaceId: WS, runId: null, sessionId: RUN, agentTarget: "codex" }) });
+    const [mcpTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(mcpTransport);
+      const query = canary.original_query;
+      const baseline = await recallOnBothSurfaces(client, handler, { query });
+      expect(baseline[0]).toEqual(expect.arrayContaining([expect.objectContaining({
+        target: expect.objectContaining({ kind: "source_evidence", root_id: record.record_id }),
+        content_preview: canary.intended
+      })]));
+      expect(baseline[0]).toEqual(baseline[1]);
+      const invalidTime = { intervals: [{ start: "invalid", end: "2026-09-05" }] };
+      for (const args of [
+        { scope_class: null, dimension: null, domain_tags: null, max_results: 10 },
+        { query_coordinates: { question_time: { ...invalidTime, interpretation_clock: "ignored" } } },
+        { question_time: invalidTime },
+        { query_coordinates: { question_time: invalidTime } }
+      ]) {
+        expect(await recallOnBothSurfaces(client, handler, { query, ...args })).toEqual(baseline);
+      }
+      for (const result_kind_view of ["mixed", "source_only"]) {
+        for (const filter of [{ dimension: MemoryDimension.FACT }, { domain_tags: ["deployment"] }]) {
+          const [mcp, cli] = await recallOnBothSurfaces(client, handler, { query, result_kind_view, ...filter });
+          expect(mcp).toEqual(cli);
+          expect(mcp.filter(row => row.target?.kind === "source_evidence")).toEqual([]);
+        }
+      }
+      await expectStrictRecallOnBothSurfaces(client, handler, query);
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it.each(["source_only", "mixed", "memory_only"] as const)("resumes %s membership and invalidates old continuations after worker restart", async (view) => {
@@ -234,29 +284,55 @@ describe("source discovery consumer surfaces", () => {
   }, 30_000);
 });
 
-async function recallNativeSourcesThroughCli(
-  database: StorageDatabase,
-  query: string
-) {
+function createSourceRecallToolHandler(database: StorageDatabase) {
   const service = new RecallService({
     ...createDependencies().dependencies,
     now: () => INTERPRETATION_CLOCK,
     observerReaders: createConditionalFieldObserverReaders(database)
   });
+  return createMcpMemoryToolHandler({ ...createDeps(), recallService: service });
+}
+
+async function recallThroughCli(handler: McpMemoryToolHandler, args: Record<string, unknown>) {
   const command = createToolsCommand({
-    handler: createMcpMemoryToolHandler({ ...createDeps(), recallService: service }),
+    handler,
     defaultWorkspaceId: WS,
     defaultAgentTarget: "codex"
   });
-  const parsed = command.argsSchema.safeParse(["call", "soul.recall", JSON.stringify({
-    ...capableRecallConsumerDeclaration(), query, max_results: 8,
-    result_kind_view: "source_only", scope_class: null, dimension: null, domain_tags: null
-  }), "--workspace", WS]);
+  const parsed = command.argsSchema.safeParse(["call", "soul.recall", JSON.stringify(args), "--workspace", WS]);
   if (!parsed.success) throw new Error("CLI args parse failed");
-  const result = await command.handler({
+  return command.handler({
     cwd: "/tmp", env: {}, argv: [], stdin: new PassThrough(), stdout: new PassThrough(),
     stderr: new PassThrough(), isTTY: false, jsonRequested: true, daemon: { startupSteps: [] }
   }, parsed.data);
-  expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
-  return SoulMemorySearchResponseSchema.parse(result.json);
+}
+
+async function recallOnBothSurfaces(client: Client, handler: McpMemoryToolHandler, args: Record<string, unknown>) {
+  const call = await client.callTool({ name: "soul.recall", arguments: args });
+  expect(call.isError).not.toBe(true);
+  const envelope = call.structuredContent;
+  if (envelope === null || typeof envelope !== "object" || !("output" in envelope)) {
+    throw new Error("MCP recall omitted output");
+  }
+  const cli = await recallThroughCli(handler, args);
+  expect(cli.exitCode).toBe(ALAYA_SYSEXITS.OK);
+  return [SoulMemorySearchResponseSchema.parse(envelope.output).results,
+    SoulMemorySearchResponseSchema.parse(cli.json).results] as const;
+}
+
+async function expectStrictRecallOnBothSurfaces(client: Client, handler: McpMemoryToolHandler, query: string) {
+  for (const [args, detail] of [
+    [{ query_coordinates: null, interpretation_proposal: null }, { path: ["query_coordinates"], code: "custom" }],
+    [{ original_query_digest: "private-value" }, { path: [], code: "unrecognized_keys" }]
+  ] as const) {
+    const request = { query, ...args };
+    const mcp = await client.callTool({ name: "soul.recall", arguments: request });
+    expect(mcp.isError).toBe(true);
+    const cli = await recallThroughCli(handler, request);
+    expect(cli.exitCode).toBe(ALAYA_SYSEXITS.DATAERR);
+    const expected = { ok: false, error: { code: "VALIDATION", details: [detail] } };
+    expect(cli.json).toMatchObject(expected);
+    expect(mcp.structuredContent).toMatchObject(expected);
+    expect(JSON.stringify(mcp.structuredContent)).not.toContain("private-value");
+  }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   encodeSourceDisclosure, MemorySearchResultSchema,
+  SoulMemorySearchRequestSchema,
   SoulMemorySearchResponseSchema,
   SourceLookupReasonsSchema,
   indexEntryCacheKey,
@@ -125,10 +126,10 @@ describe("conditional-field result encoding", () => {
       generateId: () => "00000000-0000-4000-8000-000000000001",
       warn: () => undefined
     });
-    await expect(handler({
+    await expect(handler(SoulMemorySearchRequestSchema.parse({
       query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
       ...capableRecallConsumerDeclaration()
-    }, context)).rejects.toThrow(/requires an authoritative index/);
+    }), context)).rejects.toThrow(/requires an authoritative index/);
     expect(deps.trustStateRecorder.recordDelivery).not.toHaveBeenCalled();
   });
 
@@ -264,18 +265,18 @@ describe("conditional-field result encoding", () => {
     expect(deps.recallService.recall).toHaveBeenCalledTimes(1);
 
     (deps.recallService.recall as ReturnType<typeof vi.fn>).mockClear();
-    await expect(handler({
+    await expect(handler(SoulMemorySearchRequestSchema.parse({
       query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
       supports_source_evidence: false
-    }, context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
-    await expect(handler({
+    }), context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    await expect(handler(SoulMemorySearchRequestSchema.parse({
       query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
       supported_result_kinds: ["memory_entry"]
-    }, context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
-    await expect(handler({
+    }), context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    await expect(handler(SoulMemorySearchRequestSchema.parse({
       query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
       protocol_version: 2
-    }, context)).rejects.toThrow(RECALL_PROTOCOL_VERSION_INCOMPATIBLE_MESSAGE);
+    }), context)).rejects.toThrow(RECALL_PROTOCOL_VERSION_INCOMPATIBLE_MESSAGE);
     expect(deps.recallService.recall).not.toHaveBeenCalled();
   });
 
@@ -287,14 +288,14 @@ describe("conditional-field result encoding", () => {
       generateId: () => "00000000-0000-4000-8000-000000000001",
       warn: () => undefined
     });
-    const response = await handler({
+    const response = await handler(SoulMemorySearchRequestSchema.parse({
       query: "needle",
       max_results: 5,
       scope_class: null,
       dimension: null,
       domain_tags: null,
       ...capableRecallConsumerDeclaration()
-    }, context);
+    }), context);
     expect(deps.recallService.recall).toHaveBeenCalled();
     expect(response.results.every((row) => row.object_kind === "memory_entry" || row.object_kind === "source_evidence"))
       .toBe(true);
@@ -308,14 +309,14 @@ describe("conditional-field result encoding", () => {
       generateId: () => "00000000-0000-4000-8000-000000000001",
       warn: () => undefined
     });
-    await handler({
+    await handler(SoulMemorySearchRequestSchema.parse({
       query: "needle",
       max_results: 5,
       scope_class: null,
       dimension: null,
       domain_tags: null,
       result_kind_view: "memory_only"
-    }, context);
+    }), context);
     expect(deps.recallService.recall).toHaveBeenCalledWith(
       expect.objectContaining({ result_kind_view: "memory_only" })
     );

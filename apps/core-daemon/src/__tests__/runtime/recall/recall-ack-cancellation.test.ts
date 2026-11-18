@@ -14,6 +14,7 @@ import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-han
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { conditionalRecallPayload } from "../field/query-only-hydration-fixture.js";
 import { RecallService, capableRecallConsumerDeclaration } from "@do-soul/alaya-core";
+import { SoulMemorySearchRequestSchema } from "@do-soul/alaya-protocol";
 import { createDependencies, createTaskSurface } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { CLOCK, WS, deferred, queryClient, queryDatabase } from "./source-semantic-query-preparation-fixture.js";
 
@@ -139,8 +140,8 @@ it("cancels the handler's deferred ACK queue without persisting or exposing a de
   const handler = createRecallHandler({ deps, now: () => CLOCK, warn: vi.fn(), generateId: () => "aaaaaaaa-aaaa-4aaa-8aaa-999999999999" });
   const posts = vi.spyOn(Worker.prototype, "postMessage");
   try {
-    const running = handler({ query: "Alice tools", scope_class: "project", dimension: null,
-      domain_tags: null, max_results: 5, ...capableRecallConsumerDeclaration() },
+    const running = handler(SoulMemorySearchRequestSchema.parse({
+      query: "Alice tools", scope_class: "project", max_results: 5, ...capableRecallConsumerDeclaration() }),
     { workspaceId: WS, runId: "run-1", agentTarget: "codex", sessionId: "cancel-ack", abortSignal: controller.signal });
     const rejected = expect(running).rejects.toBe(reason);
     await ackEntered.promise; await turn(); posts.mockClear(); controller.abort(reason); await turn();

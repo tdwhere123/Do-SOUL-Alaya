@@ -1170,8 +1170,8 @@
     {
       "specifier": "@do-soul/alaya-engine-gateway",
       "path": "packages/engine-gateway/src/index.ts",
-      "expected_count": 56,
-      "expected_sha256": "e432ecf5f301be62f3080b772b791efe0b00873fede46803d3eb417e2bf8729a"
+      "expected_count": 57,
+      "expected_sha256": "8a0f803d11b0875927402142b8ab614692bce6cf4f080b3009a05f86159b0973"
     },
     {
       "specifier": "@do-soul/alaya-eval",

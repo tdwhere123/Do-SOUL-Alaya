@@ -16,9 +16,10 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { TEXT_MCP_ACTION_SCHEMA_NAME } from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
 import { consumeTextMcpProviderSession } from "../../../runs/recall-measurement/text-mcp-consumer/session-execute.js";
+import type { TextMcpProviderSessionGrant } from "../../../runs/recall-measurement/text-mcp-consumer/session-authority.js";
 import {
   PAIRED_MCP_SLICE_ARMS, PAIRED_MCP_SLICE_REQUEST_PROFILE, pairedMcpSliceArmProfile,
-  pairedMcpSliceManifest, pairedMcpSliceQuestionIds, pairedMcpSliceStratumCounts, pairedMcpSliceSessionGrantFields,
+  pairedMcpSliceGrantLimits, pairedMcpSliceManifest, pairedMcpSliceQuestionIds, pairedMcpSliceStratumCounts, pairedMcpSliceSessionGrantFields,
   aggregatePairedMcpSliceSessions, buildPairedMcpSliceConsumerInput, quotePairedMcpSliceBudget,
   verifyPairedMcpSliceDataset, type PairedMcpSliceArm
 } from "../../../runs/recall-measurement/text-mcp-consumer/paired-mcp-slice.js";
@@ -26,7 +27,8 @@ import { estimatedSemanticProviderUpperUsd } from "../../../runs/provider-reques
 import { STEP_OPENAPI_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { mapOrdinaryRecallScope } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
-import { issueTextMcpProviderSession, sessionProviderConfig } from "../../support/text-mcp-provider-session-fixture.js";
+import { hashBytes, issueTextMcpProviderSession, sessionProviderConfig } from "../../support/text-mcp-provider-session-fixture.js";
+import { providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { withHistoricalGraph } from "./paired-mcp-graph.test-support.js";
 import { attemptInputByteUpperBound } from "../../../runs/extraction/authority/receipt-limits.js";
 
@@ -92,6 +94,9 @@ it("freezes the 30-item paired slice and quotes a finite OpenAPI grant inside it
   expect(pairedMcpSliceArmProfile("agent_q_conditional_field")).toBe("caller_coordinates");
   const budget = quotePairedMcpSliceBudget();
   expect(budget.paid_execution).toBe(false);
+  expect(budget.limits).toMatchObject({ max_output_tokens: 4096, wall_ms: 180_000, max_model_turns: 4, maximum_attempts: 4 });
+  expect(pairedMcpSliceGrantLimits({ sharedInitialTurn1: true }).limits)
+    .toMatchObject({ max_output_tokens: 4096, wall_ms: 180_000, max_model_turns: 3, maximum_attempts: 3 });
   expect(budget.request_profile).toBe(PAIRED_MCP_SLICE_REQUEST_PROFILE);
   expect(budget.quote_basis.contract).toBe(STEP_OPENAPI_QUOTE_BASIS.contract);
   expect(budget.quote_basis.selected_provider_url).toBe(STEP_OPENAPI_QUOTE_BASIS.selected_provider_url);
@@ -137,13 +142,19 @@ it("isolates three MCP arms over loopback HTTP and live SQLite MCP", async () =>
   const graph = await withHistoricalGraph(base.config, base.root, "Project Aster was mentioned.", NEIGHBOR_BODY);
   const plain = await runArm("plain_query", graph.control, body => nextAgentAction(body, recall));
   const control = await runArm("agent_q_no_graph", graph.control, body => nextAgentAction(body, agentRecall));
+  const shared = pinFirstTurn(control.session);
   const treated = await runArm("agent_q_conditional_field", graph.graph,
-    body => nextAgentAction(body, agentRecall, graph.neighborRoot));
+    body => nextAgentAction(body, agentRecall, graph.neighborRoot), shared);
 
   expect(plain.result.turns[0]?.key).not.toBe(control.result.turns[0]?.key);
   expect(plain.result.turns[0]?.request_digest).not.toBe(control.result.turns[0]?.request_digest);
-  expect(treated.result.turns[0]?.request_digest).toBe(control.result.turns[0]?.request_digest);
-  expect(requestSystem(plain.wire[0]!)).not.toContain("query_coordinates");
+  expect(treated.recall).toMatchObject({
+    generated_by: "shared_initial_turn1", source_request_digest: control.result.turns[0]?.request_digest
+  });
+  expect(treated.result.turns.every(turn => turn.request_digest !== shared.request_digest)).toBe(true);
+  expect(existsSync(providerRawAttemptPath(treated.session.fixture.grant.execution_root, control.result.turns[0]!.key, 1)))
+    .toBe(false);
+  expect(requestSystem(plain.wire[0]!)).not.toMatch(/query_coordinates|question_time|evidence_conditions|interpretation_proposal/u);
   expect(requestSystem(control.wire[0]!)).toContain("query_coordinates");
   for (const arm of [plain, control, treated]) assertDatedRecall(arm, query);
   expect(control.recall.arguments).toMatchObject({ query_coordinates: coordinates });
@@ -159,29 +170,83 @@ it("isolates three MCP arms over loopback HTTP and live SQLite MCP", async () =>
   const neighbor = memberFor(treated.first, graph.neighborRoot);
   expect(neighbor).toMatchObject({ root_id: graph.neighborRoot, in_pool: false, source_target: expect.any(Object) });
   const opened = treated.calls.find(event => event.tool === "soul.open_pointer");
+  expect(treated.calls[1]).toEqual(opened);
+  expect(requestUser(treated.wire[0]!)).toContain("tool=soul.recall");
   expect(opened?.arguments).toEqual({ source_target: neighbor?.source_target });
   expect(mcpOutput(opened?.envelope)).toMatchObject({
     object_kind: "source_evidence", content: { content: expect.stringContaining(NEIGHBOR_BODY) }
   });
-  expect(treated.wire).toHaveLength(4);
+  expect(treated.result.attempts_this_invocation).toBe(3);
+  expect(treated.result.turns.map(turn => turn.status)).toEqual(["admitted", "admitted", "admitted"]);
+  expect(treated.wire).toHaveLength(3);
 }, 240000);
+
+it("refuses misplaced top-level coordinates before dispatching a Plain-Query call", async () => {
+  const session = await consumeArm("plain_query", base.config, () => JSON.stringify({
+    action: "read", tool: "soul.recall", arguments: {
+      query: base.queries[0]!.original_query, question_time: { intervals: [] }
+    }
+  }), undefined, { name: "misplaced-coordinates" });
+  expect(session.result.failure).toBeNull();
+  expect(session.result.attempts_this_invocation).toBe(1);
+  expect(session.result.mcp_dispatches).toBe(0);
+  expect(session.result.events).toContainEqual(expect.objectContaining({ kind: "host_policy_refusal", tool: "soul.recall" }));
+});
+
+it("settles a shared initial answer without provider work and refuses pin or prompt drift", async () => {
+  const control = await consumeArm("agent_q_no_graph", base.config,
+    () => JSON.stringify({ action: "answer", text: "Aster" }), undefined, { name: "initial-answer" });
+  const shared = pinFirstTurn(control);
+  const unexpected = vi.fn(() => JSON.stringify({ action: "answer", text: "unexpected" }));
+  const treated = await consumeArm("agent_q_conditional_field", base.config, unexpected, shared, { name: "initial-answer" });
+  expect(treated.result).toMatchObject({ failure: null, attempts_this_invocation: 0, invocations_this_invocation: 0,
+    mcp_dispatches: 0, turns: [], events: [{
+      kind: "shared_initial_answer", generated_by: "shared_initial_turn1", text: "Aster", source_request_digest: shared.request_digest
+    }]
+  });
+  expect(unexpected).not.toHaveBeenCalled();
+  await expect(consumeArm("agent_q_conditional_field", base.config, unexpected, {
+    ...shared, turn_pin: { ...shared.turn_pin, sha256: "a".repeat(64) }
+  }, { name: "bad-pin" })).rejects.toThrow(/shared initial turn pin mismatch/u);
+  const drifted = await consumeArm("agent_q_conditional_field", base.config, unexpected, shared,
+    { name: "different-prompt", questionDate: "2023/09/14" });
+  expect(drifted.result).toMatchObject({ failure: "shared initial turn request digest mismatch",
+    attempts_this_invocation: 0, mcp_dispatches: 0, turns: [] });
+  expect(unexpected).not.toHaveBeenCalled();
+});
 
 async function runArm(
   arm: PairedMcpSliceArm,
   config: typeof base.config,
-  action: (body: string) => string
+  action: (body: string) => string,
+  shared?: TextMcpProviderSessionGrant["shared_initial_turn1"]
 ) {
+  const session = await consumeArm(arm, config, action, shared);
+  const { result, wire } = session;
+  expect(result.failure).toBeNull();
+  const calls = result.events.filter(event => event.kind === "mcp_call");
+  const recall = calls.find(isRecall), first = mcpOutput(recall?.envelope);
+  if (recall === undefined || first === undefined) throw new Error(`${arm} did not deliver its first recall`);
+  expect(wire.every(body => attemptInputByteUpperBound(body) <= session.fixture.grant.limits.maximum_input_tokens_per_attempt)).toBe(true);
+  return { result, calls, recall, first, wire, session };
+}
+
+async function consumeArm(arm: PairedMcpSliceArm, config: typeof base.config, action: (body: string) => string,
+  shared?: TextMcpProviderSessionGrant["shared_initial_turn1"], options: { name?: string; questionDate?: string } = {}) {
   currentAction = action;
   currentWire = [];
-  const home = join(base.root, arm);
+  const home = join(base.root, options.name ?? "paired", arm);
   mkdirSync(home, { recursive: true });
   const query = { query_key: base.queries[0]!.query_key, original_query: base.queries[0]!.original_query };
-  const scenario = { arm, question_date: QUESTION_DATE, interpretation_clock: config.interpretation_clock };
+  const scenario = {
+    arm, question_date: options.questionDate ?? QUESTION_DATE,
+    interpretation_clock: config.interpretation_clock, shared_initial_turn1: shared
+  };
   const grant = pairedMcpSliceSessionGrantFields(scenario);
   const fixture = issueTextMcpProviderSession({
     home, config, query, limits: grant.limits,
     prompt: { caller_capability_profile: grant.caller_capability_profile, question_date: grant.question_date,
-      recall_dispatch_defaults: grant.recall_dispatch_defaults }
+      recall_dispatch_defaults: grant.recall_dispatch_defaults, shared_initial_turn1: grant.shared_initial_turn1 }
   });
   const consumer = buildPairedMcpSliceConsumerInput({ ...scenario, config, query, root: fixture.consumerRoot });
   const selected = { ...sessionProviderConfig(), apiKey: "loopback-only" };
@@ -189,12 +254,14 @@ async function runArm(
     loadConfig: (): CompileSeedExtractionConfig => selected,
     createExtractor: config => createSemanticProviderHttpExtractor(config, TEXT_MCP_ACTION_SCHEMA_NAME, fetchImpl)
   });
-  expect(result.failure).toBeNull();
-  const calls = result.events.filter(event => event.kind === "mcp_call");
-  const recall = calls.find(isRecall), first = mcpOutput(recall?.envelope);
-  if (recall === undefined || first === undefined) throw new Error(`${arm} did not deliver its first recall`);
-  expect(currentWire.every(body => attemptInputByteUpperBound(body) <= grant.limits.maximum_input_tokens_per_attempt)).toBe(true);
-  return { result, calls, recall, first, wire: currentWire };
+  return { result, fixture, wire: currentWire };
+}
+
+function pinFirstTurn(session: Awaited<ReturnType<typeof consumeArm>>) {
+  const turn = session.result.turns[0]!;
+  expect(turn.status).toBe("admitted");
+  const path = join(session.fixture.grant.execution_root, `${turn.key}.turn.json`);
+  return { turn_pin: { path, sha256: hashBytes(readFileSync(path)) }, request_digest: turn.request_digest };
 }
 
 function assertDatedRecall(arm: Awaited<ReturnType<typeof runArm>>, query: string) {
@@ -239,6 +306,12 @@ function nextAgentAction(
     });
   }
   const first = mcpOutput(envelopes[0]);
+  const member = neighborRoot === undefined ? undefined : memberFor(first, neighborRoot);
+  if (member?.source_target !== undefined && !user.includes("tool=soul.open_pointer")) {
+    return JSON.stringify({
+      action: "read", tool: "soul.open_pointer", arguments: { source_target: member.source_target }
+    });
+  }
   const cut = cutTarget(first);
   if (cut !== undefined && !user.includes("payload_expansion")) {
     const index = asRecord(first?.index);
@@ -251,12 +324,6 @@ function nextAgentAction(
           schema_version: 1, purpose: "payload_expansion", target: cut.target, start_offset: cut.span.content_end
         }
       }
-    });
-  }
-  const member = neighborRoot === undefined ? undefined : memberFor(first, neighborRoot);
-  if (member?.source_target !== undefined && !user.includes("tool=soul.open_pointer")) {
-    return JSON.stringify({
-      action: "read", tool: "soul.open_pointer", arguments: { source_target: member.source_target }
     });
   }
   return JSON.stringify({ action: "answer", text: "Aster" });

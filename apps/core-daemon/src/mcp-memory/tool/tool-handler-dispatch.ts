@@ -2,6 +2,9 @@ import {
   GardenClaimTaskResponseSchema,
   GardenCompleteTaskResponseSchema,
   GardenListPendingTasksResponseSchema,
+  isZodValidationError,
+  soulToolJsonSchemas,
+  toPublicToolError,
   type GardenClaimTaskRequest,
   type GardenCompleteTaskRequest,
   type GardenListPendingTasksRequest,
@@ -158,7 +161,46 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
         throw new Error(`Missing soul tool spec: ${toolName}`);
       }
       const invoke = invokeByName[toolName];
-      return await invoke(spec.parametersSchema.parse(rawArguments), context);
+      let parsed: unknown;
+      try {
+        parsed = spec.parametersSchema.parse(rawArguments);
+      } catch (error) {
+        if (!isZodValidationError(error)) throw error;
+        return {
+          ok: false,
+          tool_name: toolName,
+          error: {
+            ...toPublicToolError("VALIDATION"),
+            details: error.issues.slice(0, 8).map(issue => ({
+              path: declaredIssuePath(soulToolJsonSchemas[toolName], issue.path),
+              code: issue.code
+            }))
+          }
+        };
+      }
+      return await invoke(parsed, context);
     }
   };
+}
+
+function declaredIssuePath(schema: object, path: readonly PropertyKey[]): readonly (string | number)[] {
+  const declared: (string | number)[] = [];
+  let current: object = schema;
+  for (const segment of path.slice(0, 8)) {
+    // Record keys and unrecognized keys may contain caller data. Follow only
+    // declared properties and array indices from the tool's input schema.
+    const next = typeof segment === "number"
+      ? ownSchemaProperty(current, "items")
+      : ownSchemaProperty(ownSchemaProperty(current, "properties"), segment);
+    if (next === undefined || typeof segment === "symbol") break;
+    declared.push(segment);
+    current = next;
+  }
+  return declared;
+}
+
+function ownSchemaProperty(schema: object | undefined, key: PropertyKey): object | undefined {
+  if (schema === undefined || !Object.hasOwn(schema, key)) return undefined;
+  const value: unknown = Reflect.get(schema, key);
+  return value !== null && typeof value === "object" ? value : undefined;
 }

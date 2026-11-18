@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { EventPublisher } from "@do-soul/alaya-core";
-import { SoulMemorySearchResponseSchema, type Derivation, type FieldSnapshot, type InformationIndex, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, type Derivation, type FieldSnapshot, type InformationIndex, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { SqliteEventLogRepo, SqliteTrustStateRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { projectAcceptingIndex, indexEntryRevision } from "../../../../../../packages/core/src/recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../../../packages/core/src/recall/conditional-field/reference/bind-max-min.js";
@@ -74,10 +74,11 @@ describe("bounded explanation continuation delivery", () => {
     const responses: SoulMemorySearchResponse[] = [];
     for (const page of [first, proof]) {
       current = page;
-      const response = SoulMemorySearchResponseSchema.parse(await handler({ query: "needle", max_results: 1,
+      const request = SoulMemorySearchRequestSchema.parse({ query: "needle", max_results: 1,
         scope_class: null, dimension: null, domain_tags: null,
         protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
-        supported_result_kinds: ["memory_entry", "source_evidence"] }, context));
+        supported_result_kinds: ["memory_entry", "source_evidence"] });
+      const response = SoulMemorySearchResponseSchema.parse(await handler(request, context));
       expect(response.results).toHaveLength(page.entries.length);
       expect(response.index?.page_purpose).toBe(page.page_purpose);
       responses.push(response);

@@ -3,6 +3,7 @@ import { expect, vi } from "vitest";
 import {
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   ScopeClass,
+  SoulMemorySearchRequestSchema,
   hashContentDigest,
   hashSourceRecordId,
   type InformationIndex,
@@ -119,7 +120,7 @@ export async function recallThroughHandler(
     generateId: () => "00000000-0000-4000-8000-000000000001"
   });
   const proposal = request.interpretation_proposal ?? authoredProposals.get(request.query);
-  const response = await handler({
+  const response = await handler(SoulMemorySearchRequestSchema.parse({
     claim_demands: deploymentClaimDemands,
     ...capableRecallConsumerDeclaration(),
     query: request.query,
@@ -133,7 +134,7 @@ export async function recallThroughHandler(
     ...(request.enumeration_policy === undefined ? {} : { enumeration_policy: request.enumeration_policy }),
     ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
     ...(proposal === undefined ? {} : { interpretation_proposal: proposal })
-  }, {
+  }), {
     workspaceId: WS,
     runId: null,
     agentTarget: "codex",

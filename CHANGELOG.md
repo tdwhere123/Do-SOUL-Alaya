@@ -19,13 +19,18 @@ versions can move independently of the app semver.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
 
 Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under invariant §25:
+- **Minimal recall call:** MCP and CLI accept `{"query":"..."}` with a ten-result page
+  budget and null scope, dimension, and domain-tag filters. A non-null dimension
+  or non-empty tag list filters curated memory entries and excludes source evidence.
 - **Caller-ergonomic `query_coordinates` on `soul.recall`:** adds optional `query_coordinates`
   (`question_time.intervals`, `1..4` `evidence_conditions`, `evidence_relation: "derived"`),
   mutually exclusive with `interpretation_proposal`. The core coordinate binder
   (`bindCallerQueryCoordinates`) binds `original_query_digest` and `interpretation_clock`
   server-side into `alaya.query.question-time.v1` before `admitQueryProposal` and
-  `withPreparedExecution` local ONNX preparation, while safely dropping invalid date
-  intervals or non-verbatim condition anchors without revoking raw recall. Pre-sealed
+  `withPreparedExecution` local ONNX preparation. Ingress keeps valid bounded interval
+  and condition items and ignores misplaced top-level coordinate hints. Binding keeps
+  each verbatim anchor that matches the query and drops a previously anchored condition
+  only when no anchor survives. Pre-sealed
   `interpretation_proposal` packets retain strict `original_query_digest` and clock
   verification.
 - **Default `mixed` v1 compatibility:** `assertRecallConsumerCompatibility` treats omitted
@@ -43,9 +48,14 @@ Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under inva
   owner using only `context.workspaceId`, enforcing currentness, `source_version`,
   `content_digest`, and privacy-erase/quarantine refusal without minting a memory ID.
 - **Tool guidance (`@do-soul/alaya-engine-gateway` `4.0.0`):** updates `soul.recall` and
-  `soul.open_pointer` specs and daemon catalog descriptions for `query_coordinates`,
+  `soul.open_pointer` specs and daemon catalog descriptions for minimal source recall,
+  nested `query_coordinates`, host-only replay,
   `member_index` `source_target` openability, default `mixed` compatibility, and selective
   `payload_continuation` on relevant `content_complete === false` ranked results.
+- **Paired text MCP benchmark sessions:** authorized grants can pin an admitted Turn 1
+  from the control arm and verify the identical request digest before applying that
+  action against the comparison arm. The paired slice allows 4,096 output tokens
+  per attempt and 180 seconds, with three remaining model attempts when sharing Turn 1.
 - **Atomic condition-witness unit deferral in `encodeIndexResults`:** requires
   non-first-slot condition-witnessed entries (`evidence_variant.condition` present) to fit
   their full witness span on a shared page whenever a fresh page fits the full witness unit

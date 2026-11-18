@@ -486,6 +486,7 @@ function readObjectShape(schema: z.ZodTypeAny): Record<string, z.ZodTypeAny> {
 }
 
 function readWrappedInnerSchema(def: Record<string, unknown>): unknown {
+  if (isZodSchema(def.in) && readDef(def.in).type === "transform") return def.out;
   return def.innerType ?? def.schema ?? def.in ?? def.out;
 }
 

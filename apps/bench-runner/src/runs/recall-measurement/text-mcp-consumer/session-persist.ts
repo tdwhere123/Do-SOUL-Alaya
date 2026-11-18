@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
 import { inspectExtractionAttemptLedger, openExtractionAttemptLedger, classifyRetainedExtractionAttemptState,
@@ -15,12 +14,8 @@ import type { ProviderRequestDecoded, ProviderRequestPhysicalContext } from "../
 import { decodeTextMcpAction } from "./codec.js";
 import { textMcpProviderSessionCacheIdentity, type TextMcpProviderSessionGrant } from "./session-authority.js";
 import { type TextMcpProviderSessionLine } from "./session-request.js";
+import { TEXT_MCP_SESSION_TERMINAL_MAX_BYTES, TextMcpSessionTerminalSchema } from "./session-turn-artifact.js";
 
-const Terminal = z.object({
-  key: z.string(), request_digest: z.string(), lineage: z.string(), ordinal: z.number().int().positive(),
-  raw_json: z.string(), admitted: z.boolean(), outcome: z.unknown(), finish_reason: z.string().nullable(),
-  usage: z.object({ inputTokens: z.number(), outputTokens: z.number(), totalTokens: z.number() }).optional()
-}).strict();
 const terminalPath = (root: string, key: string) => join(root, `${key}.turn.json`);
 
 export function interpretTextMcpProviderSession(line: TextMcpProviderSessionLine, decoded: ProviderRequestDecoded,
@@ -59,8 +54,8 @@ export function readTextMcpProviderSessionResult(root: string, grant: TextMcpPro
   const raws = listProviderRawAttempts(root, line.key);
   for (const raw of raws) assertSessionRaw(raw, grant, line, ledger);
   const path = terminalPath(root, line.key);
-  const terminal = !boundedArtifactEntryExists(path) ? undefined : Terminal.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path, maxBytes: 8 * 1024 * 1024, label: "provider session terminal"
+  const terminal = !boundedArtifactEntryExists(path) ? undefined : TextMcpSessionTerminalSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path, maxBytes: TEXT_MCP_SESSION_TERMINAL_MAX_BYTES, label: "provider session terminal"
   })));
   const raw = terminal && raws.find(item => item.attempt_ordinal === terminal.ordinal);
   if (terminal && !raw) return { status: "incomplete", ledger, terminal };

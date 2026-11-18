@@ -94,4 +94,27 @@ describe("bindCallerQueryCoordinates", () => {
     });
     expect(plainFallback).toBeUndefined();
   });
+
+  it.each([
+    ["Which family did I visit?", ["Chaudhary"], []],
+    ["Which tablet did I buy?", ["iPad", "ipad"], []],
+    ["What did we cook for the gathering?", ["dinner party", "Dinner party"], []],
+    ["What did I say about the trip, travel plans, and journey?", ["Trip", "journey", "trip", " travel ", "travel", "trip"],
+      ["journey", "trip", "travel"]]
+  ])("keeps only ordered, case-sensitive anchors for %s", (queryText, anchors, retained) => {
+    const statement = "What the user said.";
+    const unanchored = { statement: "An unanchored condition.", speaker: "assistant", anchors: [] };
+    const proposal = bindCallerQueryCoordinates({
+      queryText, interpretationClock: INTERPRETATION_CLOCK,
+      coordinates: {
+        evidence_conditions: [{ statement, speaker: "user", anchors }, { ...unanchored, speaker: "assistant" }],
+        evidence_relation: "derived"
+      }
+    });
+    expect(proposal?.evidence_conditions).toEqual([
+      ...(retained.length === 0 ? [] : [{ statement, speaker: "user", anchors: retained }]),
+      unanchored
+    ]);
+    expect(proposal?.evidence_relation).toBe("derived");
+  });
 });

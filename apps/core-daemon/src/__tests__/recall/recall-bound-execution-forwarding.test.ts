@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   RetentionPolicy,
+  SoulMemorySearchRequestSchema,
   TaskObjectSurfaceSchema,
   type RecallPolicy,
   type SoulMemorySearchRequest
@@ -50,7 +51,7 @@ function makeTaskSurface(policy: RecallPolicy) {
 function makeSearchRequest(
   overrides: Partial<SoulMemorySearchRequest> = {}
 ): SoulMemorySearchRequest {
-  return {
+  return SoulMemorySearchRequestSchema.parse({
     protocol_version: 1,
     supported_result_kinds: ["memory_entry", "source_evidence"],
     supports_source_evidence: true,
@@ -61,7 +62,7 @@ function makeSearchRequest(
     dimension: null,
     domain_tags: null,
     ...overrides
-  };
+  });
 }
 
 describe("invokeBoundRecall request forwarding", () => {

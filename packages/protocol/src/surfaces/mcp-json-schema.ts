@@ -1,7 +1,8 @@
 /**
  * Derives MCP JSON Schema from Zod. This catalog is a lossy projection of
- * representable Zod constraints (maxLength, enums, required keys). Runtime
- * `superRefine` / custom refinements do not appear here; the Zod parse at
+ * representable Zod constraints (maxLength, enums, required keys). Input
+ * projection keeps defaults optional and describes the schema behind ingress
+ * preprocessing. Runtime recovery and refinements stay in the Zod parse at
  * the tool handler is the authority. Do not hand-write a second MCP schema
  * dialect. See invariant §25.
  */

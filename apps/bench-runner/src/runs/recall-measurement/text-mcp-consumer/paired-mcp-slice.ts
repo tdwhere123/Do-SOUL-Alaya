@@ -82,12 +82,13 @@ export function pairedMcpSliceArmProfile(arm: PairedMcpSliceArm): TextMcpCallerC
   return arm === "plain_query" ? "plain_query" : "caller_coordinates";
 }
 
-export function pairedMcpSliceGrantLimits(): PairedMcpSliceGrantLimits {
+export function pairedMcpSliceGrantLimits(input: Readonly<{ sharedInitialTurn1?: boolean }> = {}): PairedMcpSliceGrantLimits {
   const quote = stepQuoteBasis(STEP_OPENAPI_QUOTE_BASIS.selected_model, STEP_OPENAPI_QUOTE_BASIS.selected_provider_url);
+  const modelTurns = input.sharedInitialTurn1 ? 3 : 4;
   const limits = {
-    max_model_turns: 4, max_tool_calls: 3, max_input_bytes: PAIRED_SLICE_INPUT_BYTE_UPPER, max_output_bytes: 64_000,
-    wall_ms: 120_000, max_output_tokens: 1_536, maximum_input_tokens_per_attempt: PAIRED_SLICE_INPUT_BYTE_UPPER,
-    maximum_attempts: 4, maximum_attempts_per_key: 1 as const, concurrency: 1 as const, spend_ceiling_usd: 0
+    max_model_turns: modelTurns, max_tool_calls: 3, max_input_bytes: PAIRED_SLICE_INPUT_BYTE_UPPER, max_output_bytes: 64_000,
+    wall_ms: 180_000, max_output_tokens: 4_096, maximum_input_tokens_per_attempt: PAIRED_SLICE_INPUT_BYTE_UPPER,
+    maximum_attempts: modelTurns, maximum_attempts_per_key: 1 as const, concurrency: 1 as const, spend_ceiling_usd: 0
   };
   const per_session_upper_usd = estimatedSemanticProviderUpperUsd(limits,
     quote.input_usd_equivalent_per_million, quote.output_usd_equivalent_per_million);
@@ -125,31 +126,29 @@ export function quotePairedMcpSliceBudget(): PairedMcpSliceBudget {
 
 export function buildPairedMcpSliceConsumerInput(input: Readonly<{
   config: unknown; root: string; query: { query_key: string; original_query: string };
-  arm: PairedMcpSliceArm; question_date: string; interpretation_clock: string;
-}>): PairedMcpSliceConsumerInput {
-  const granted = pairedMcpSliceGrantLimits();
+}> & PairedMcpSliceScenario): PairedMcpSliceConsumerInput {
+  const grant = pairedMcpSliceSessionGrantFields(input);
   const ceilings: TextMcpCeilings = {
-    max_model_turns: granted.limits.max_model_turns, max_tool_calls: granted.limits.max_tool_calls,
-    max_input_bytes: granted.limits.max_input_bytes, max_output_bytes: granted.limits.max_output_bytes,
-    wall_ms: granted.limits.wall_ms
-  };
-  const defaults: TextMcpRecallDispatchDefaults = {
-    result_kind_view: "source_only", source_observed_at: input.interpretation_clock
+    max_model_turns: grant.limits.max_model_turns, max_tool_calls: grant.limits.max_tool_calls,
+    max_input_bytes: grant.limits.max_input_bytes, max_output_bytes: grant.limits.max_output_bytes,
+    wall_ms: grant.limits.wall_ms
   };
   return {
     config: input.config, root: input.root, query: input.query, host_issued_initial_recall: false,
-    ceilings, ...textMcpPromptOptions({
-      caller_capability_profile: pairedMcpSliceArmProfile(input.arm),
-      question_date: input.question_date, recall_dispatch_defaults: defaults
-    })
+    ceilings, ...textMcpPromptOptions(grant),
+    ...(grant.shared_initial_turn1 === undefined ? {} : { shared_initial_turn1: grant.shared_initial_turn1 })
   };
 }
 
-export function pairedMcpSliceSessionGrantFields(input: Readonly<{
+type PairedMcpSliceScenario = Readonly<{
   arm: PairedMcpSliceArm; question_date: string; interpretation_clock: string;
-}>): Pick<TextMcpProviderSessionGrant, "contract" | "host_issued_initial_recall" | "caller_capability_profile"
-  | "question_date" | "recall_dispatch_defaults" | "limits" | "price" | "request_profile" | "model" | "provider_url"> {
-  const granted = pairedMcpSliceGrantLimits();
+}> & Pick<TextMcpProviderSessionGrant, "shared_initial_turn1">;
+
+export function pairedMcpSliceSessionGrantFields(input: PairedMcpSliceScenario):
+  Pick<TextMcpProviderSessionGrant, "contract" | "host_issued_initial_recall" | "caller_capability_profile"
+  | "question_date" | "recall_dispatch_defaults" | "limits" | "price" | "request_profile" | "model" | "provider_url"
+  | "shared_initial_turn1"> {
+  const granted = pairedMcpSliceGrantLimits({ sharedInitialTurn1: input.shared_initial_turn1 !== undefined });
   const quote = granted.quote_basis;
   return {
     contract: TEXT_MCP_PROVIDER_SESSION_CONTRACT, host_issued_initial_recall: false,
@@ -157,6 +156,7 @@ export function pairedMcpSliceSessionGrantFields(input: Readonly<{
     recall_dispatch_defaults: {
       result_kind_view: "source_only", source_observed_at: input.interpretation_clock
     },
+    ...(input.shared_initial_turn1 === undefined ? {} : { shared_initial_turn1: input.shared_initial_turn1 }),
     limits: granted.limits, request_profile: PAIRED_MCP_SLICE_REQUEST_PROFILE,
     model: quote.selected_model, provider_url: quote.selected_provider_url,
     price: {
@@ -229,7 +229,7 @@ export type PairedMcpSliceConsumerInput = Readonly<{
   host_issued_initial_recall: false; ceilings: TextMcpCeilings;
   caller_capability_profile?: TextMcpCallerCapabilityProfile; question_date?: string;
   recall_dispatch_defaults?: TextMcpRecallDispatchDefaults;
-}>;
+}> & Pick<TextMcpProviderSessionGrant, "shared_initial_turn1">;
 export type PairedMcpSliceSessionObservation = Readonly<{
   question_id: string; arm: PairedMcpSliceArm; correct: boolean | null; terminal: string;
   coordinate_admitted: boolean; payload_continuation_count: number; open_pointer_count: number;

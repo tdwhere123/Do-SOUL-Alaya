@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SOURCE_SEMANTIC_PROOF_OBJECT_KIND } from "../recall/conditional-field/index-view.js";
+import { QuestionTimeIntervalSchema } from "../recall/conditional-field/question-time.js";
 import { CaptureExecutionSchema } from "../recall/selection/capture/capture-execution.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
@@ -34,6 +35,7 @@ import {
   AssociationCapContractSchema,
   ClaimDemandSchema,
   EVIDENCE_CONDITION_LIMITS,
+  EvidenceConditionSchema,
   EnumerationPolicySchema,
   QueryInterpretationProposalSchema,
   ResultKindViewSchema
@@ -230,14 +232,14 @@ export const SourceOpenTargetSchema = z
   .readonly();
 export type SourceOpenTarget = z.infer<typeof SourceOpenTargetSchema>;
 
-export const SoulMemorySearchRequestSchema = z
+const SoulMemorySearchRequestShape = z
   .object({
     query: BoundedQuerySchema,
-    scope_class: ScopeClassSchema.nullable(),
-    dimension: MemoryDimensionSchema.nullable(),
-    domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable(),
+    scope_class: ScopeClassSchema.nullable().default(null),
+    dimension: MemoryDimensionSchema.nullable().default(null),
+    domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().default(null),
     // Page budget for the information index, not a ranking tau.
-    max_results: NonNegativeIntSchema.max(1000),
+    max_results: NonNegativeIntSchema.max(1000).default(10),
     // Compiler hints for the ordinary-language query; not global associated-item predicates.
     since: IsoDatetimeStringSchema.nullable().optional(),
     until: IsoDatetimeStringSchema.nullable().optional(),
@@ -266,13 +268,6 @@ export const SoulMemorySearchRequestSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.query_coordinates !== undefined && value.interpretation_proposal !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["query_coordinates"],
-        message: "query_coordinates and interpretation_proposal cannot both be provided."
-      });
-    }
     if (
       value.since !== null &&
       value.since !== undefined &&
@@ -300,6 +295,66 @@ export const SoulMemorySearchRequestSchema = z
     }
   })
   .readonly();
+
+type SoulMemorySearchInput = z.input<typeof SoulMemorySearchRequestShape>;
+export const SoulMemorySearchRequestSchema = z.preprocess<unknown, typeof SoulMemorySearchRequestShape, SoulMemorySearchInput>((raw: unknown, context) => {
+  if (!isPlainRecord(raw)) return raw;
+  if (raw.interpretation_proposal !== undefined) {
+    if (raw.query_coordinates !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["query_coordinates"],
+        message: "query_coordinates and interpretation_proposal cannot both be provided."
+      });
+      return z.NEVER;
+    }
+    return raw;
+  }
+  const { question_time, evidence_conditions, evidence_relation, query_coordinates, ...request } = raw;
+  const coordinates = recoverCallerCoordinates(query_coordinates);
+  return coordinates === undefined ? request : { ...request, query_coordinates: coordinates };
+}, SoulMemorySearchRequestShape);
+
+function recoverCallerCoordinates(raw: unknown): CallerQueryCoordinates | undefined {
+  if (!isPlainRecord(raw)) return undefined;
+  const intervals = isPlainRecord(raw.question_time)
+    ? recoverBoundedItems(raw.question_time.intervals, QuestionTimeIntervalSchema, 32) : [];
+  const conditions = recoverBoundedItems(raw.evidence_conditions, callerEvidenceConditionIngress,
+    EVIDENCE_CONDITION_LIMITS.max_conditions);
+  const relation = raw.evidence_relation === "derived" ? raw.evidence_relation : undefined;
+  if (intervals.length === 0 && conditions.length === 0 && relation === undefined) return undefined;
+  return {
+    ...(intervals.length === 0 ? {} : { question_time: { intervals } }),
+    ...(conditions.length === 0 ? {} : { evidence_conditions: conditions }),
+    ...(relation === undefined ? {} : { evidence_relation: relation })
+  };
+}
+
+const callerEvidenceConditionIngress = z.preprocess((raw: unknown) => {
+  if (!isPlainRecord(raw) || !Array.isArray(raw.anchors)) return undefined;
+  const anchors = recoverBoundedItems(raw.anchors, EvidenceConditionSchema.unwrap().shape.anchors.unwrap().element,
+    EVIDENCE_CONDITION_LIMITS.max_anchors);
+  // Only an explicit empty array denotes an intentionally unanchored condition.
+  if (raw.anchors.length > 0 && anchors.length === 0) return undefined;
+  return { statement: raw.statement, speaker: raw.speaker, anchors };
+}, CallerEvidenceConditionSchema);
+
+function recoverBoundedItems<T>(raw: unknown, schema: z.ZodType<T>, limit: number): T[] {
+  if (!Array.isArray(raw)) return [];
+  const retained: T[] = [];
+  for (const item of raw) {
+    const parsed = schema.safeParse(item);
+    if (parsed.success) retained.push(parsed.data);
+    if (retained.length === limit) break;
+  }
+  return retained;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
 
 /** First page only: one source-bound line per further member after the ranked results (pool members
  * not on this page, then roots refused only by the nomination limit). A line is an interpretation of the
@@ -357,5 +412,5 @@ export type SoulActiveConstraint = z.infer<typeof SoulActiveConstraintSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
 export type SoulRecallHostContext = z.infer<typeof SoulRecallHostContextSchema>;
-export type SoulMemorySearchRequest = z.input<typeof SoulMemorySearchRequestSchema>;
+export type SoulMemorySearchRequest = z.output<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;

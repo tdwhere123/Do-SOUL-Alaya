@@ -6,6 +6,7 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => isolation.restore());
 import { RecallService, capableRecallConsumerDeclaration } from "@do-soul/alaya-core";
+import { SoulMemorySearchRequestSchema } from "@do-soul/alaya-protocol";
 import { Worker } from "node:worker_threads";
 import { existsSync } from "node:fs";
 import { once } from "node:events";
@@ -22,8 +23,8 @@ function ordinary(h: { client: NonNullable<ReturnType<typeof createRecallReadWor
     activeConstraintsPort: h.client.activeConstraintsPort });
   const recall = createRecallHandler({ deps: { ...createDeps(), recallService: service },
     now: () => CLOCK, warn: vi.fn(), generateId: () => "aaaaaaaa-aaaa-4aaa-8aaa-999999999999" });
-  return (signal: AbortSignal) => recall({ ...capableRecallConsumerDeclaration(), query: "Alice tools",
-    scope_class: "project", dimension: null, domain_tags: null, max_results: 5 },
+  return (signal: AbortSignal) => recall(SoulMemorySearchRequestSchema.parse({
+    ...capableRecallConsumerDeclaration(), query: "Alice tools", scope_class: "project", max_results: 5 }),
   { workspaceId: WS, runId: "run-1", agentTarget: "codex", sessionId: "cancel-test", abortSignal: signal });
 }
 

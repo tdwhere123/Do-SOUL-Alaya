@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SoulMemorySearchRequestSchema } from "@do-soul/alaya-protocol";
 import {
   createRecallHandler,
   createReportContextUsageHandler,
@@ -27,7 +28,7 @@ describe("recall usage causal receipts", () => {
       generateId: () => "00000000-0000-4000-8000-000000000001"
     });
 
-    await recall({
+    await recall(SoulMemorySearchRequestSchema.parse({
       protocol_version: 1,
       supported_result_kinds: ["memory_entry", "source_evidence"],
       supports_source_evidence: true,
@@ -37,7 +38,7 @@ describe("recall usage causal receipts", () => {
       dimension: null,
       domain_tags: null,
       max_results: 5
-    }, context);
+    }), context);
 
     expect(recorder.list()).toEqual([]);
   });

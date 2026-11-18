@@ -65,10 +65,14 @@ function normalizeEvidenceConditions(
 ): readonly EvidenceCondition[] {
   if (conditions === undefined) return [];
   const valid: EvidenceCondition[] = [];
+  const anchorSchema = EvidenceConditionSchema.unwrap().shape.anchors.unwrap().element;
   for (const condition of conditions) {
-    const parsed = EvidenceConditionSchema.safeParse(condition);
+    const anchors = [...new Set(condition.anchors.filter(anchor =>
+      anchorSchema.safeParse(anchor).success && queryText.includes(anchor)
+    ))];
+    if (condition.anchors.length > 0 && anchors.length === 0) continue;
+    const parsed = EvidenceConditionSchema.safeParse({ ...condition, anchors });
     if (!parsed.success) continue;
-    if (parsed.data.anchors.some((anchor) => !queryText.includes(anchor))) continue;
     valid.push(parsed.data);
   }
   return valid;

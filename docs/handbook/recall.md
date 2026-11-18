@@ -109,11 +109,26 @@ keep `SourceIndex` separate from ordinary query execution.
 
 ## Question-Time Preference and Caller Coordinates
 
-Callers may supply `query_coordinates` (`question_time.intervals`,
-`evidence_conditions`, `evidence_relation: "derived"`), mutually exclusive with
-pre-sealed `interpretation_proposal`: `bindCallerQueryCoordinates` binds the
-query digest and clock server-side and safely degrades invalid intervals or
-non-verbatim anchors without dropping raw recall. `question_time` (up to 32
+MCP and CLI callers can start with `{"query": "..."}`. The page budget
+(`max_results`) defaults to 10. For conversation passages (`source_evidence`),
+omit `dimension` and `domain_tags` or pass null. A non-null dimension or
+non-empty tag list filters curated `memory_entry` metadata and excludes all
+source-evidence rows. Omit `scope_class`
+or pass null unless deliberately restricting to `project`, `global_domain`, or
+`global_core`.
+
+Optional caller coordinates sit under `query_coordinates`, for example
+`{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}}}`.
+Keep `query` close to the original question when supplying `evidence_conditions`
+so anchors remain verbatim substrings. `interpretation_proposal` is host replay
+only and mutually exclusive with caller coordinates. Callers must omit replay
+packets and `interpretation_clock` and nest `question_time` under `query_coordinates`.
+Ingress retains valid bounded items and discards misplaced top-level coordinate
+hints. `bindCallerQueryCoordinates` binds the query digest and clock server-side.
+Conditions keep their matching anchors in order, or remain intentionally
+unanchored when `anchors: []` is explicit. If every anchor on an anchored
+condition fails, that condition is dropped and raw recall remains available.
+`question_time` (up to 32
 closed UTC calendar-day intervals on source `event_time`) softly prioritizes
 in-window roots without altering hard `since`/`until` filters or authorization.
 Optional `source_template` (`alaya.query.source-template.v1`) and

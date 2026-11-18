@@ -32,11 +32,23 @@ export interface SoulToolSpec {
 const emitCandidateSignalDescription =
   "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. Use first-class source_memory_refs, supersedes_refs, exception_to_refs, contradicts_refs, and incompatible_with_refs when the signal should propose graph edges; do not put those graph hints only in raw_payload. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)";
 
+export const SOUL_RECALL_CALLER_GUIDANCE = Object.freeze([
+  'Start with soul.recall `{"query": "..."}`.',
+  "For conversation passages (`source_evidence`), you must omit `dimension` and `domain_tags` or pass null. A non-null dimension or non-empty tag list filters curated `memory_entry` metadata and excludes all `source_evidence` rows. Omit `scope_class` or pass null unless deliberately restricting to one scope (`project`, `global_domain`, `global_core`).",
+  [
+    'Optional caller coordinates on soul.recall use `{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}}}`.',
+    "Use up to 32 closed UTC date intervals as soft preferences on source event time. When supplying `query_coordinates.evidence_conditions` (1–4 statements with `speaker` set to `user` or `assistant` and up to 8 `anchors` each), keep `query` close to the user's original wording so each anchor is a verbatim substring. Use `evidence_relation: \"derived\"` when aggregating across stated facts.",
+    "`interpretation_proposal` is host replay only. Callers must never pass `interpretation_proposal`, place `question_time` at top level, or place `interpretation_clock` inside `query_coordinates`. The daemon binds the query digest and clock."
+  ].join(" ")
+]);
+
 export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.recall",
-    description:
-      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall a structured information index for the current task: association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. Optionally supply `query_coordinates` (`question_time.intervals`, `evidence_conditions`, `evidence_relation`) directly in one call without hashing or clock duplication. `max_results` is the page budget, not a ranking cutoff. When the index cannot fit one packet, the response `index.continuation` can be sent back as request `continuation` to fetch the next page. Optional `since` / `until` are compiler hints. `recent_turn` is ignored for extraction; ordinary recall does not enqueue Garden work or call a missing embedding provider. Additive `index` carries the target view; older agents can keep using `results` in the same order. The first page may add `member_index`: one short line per further member after the ranked results (an interpretation, not ranking evidence); `in_pool` members arrive on later pages through `continuation`, and listed `statement_ids` or `source_target` open with soul.open_pointer.",
+    description: [
+      ...SOUL_RECALL_CALLER_GUIDANCE,
+      "Use at the start of any turn that may benefit from prior memory. Recall a structured information index with association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. `max_results` defaults to 10 and sets the page budget. Send `index.continuation` back as `continuation` for the next page. Optional `since` / `until` remain hard time filters. `recent_turn` is ignored for extraction. The first page may add `member_index` summaries of further members. `in_pool` members arrive on later pages, and listed `statement_ids` or `source_target` open with soul.open_pointer."
+    ].join("\n"),
     parametersSchema: SoulMemorySearchRequestSchema
   },
   {

@@ -2,6 +2,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
+  SoulMemorySearchRequestSchema,
   type InformationIndex,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
@@ -381,7 +382,7 @@ async function invokeRecallHandler(
   }
 ) {
   const proposal = request.interpretation_proposal ?? authoredProposals.get(request.query);
-  const response = await handler({
+  const response = await handler(SoulMemorySearchRequestSchema.parse({
     claim_demands: deploymentClaimDemands,
     protocol_version: 1,
     supported_result_kinds: ["memory_entry", "source_evidence"],
@@ -399,7 +400,7 @@ async function invokeRecallHandler(
     ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
     ...(proposal === undefined ? {} : { interpretation_proposal: proposal }),
     ...(request.cap_contracts === undefined ? {} : { cap_contracts: request.cap_contracts })
-  }, {
+  }), {
     workspaceId: WS,
     runId: null,
     agentTarget: "codex",

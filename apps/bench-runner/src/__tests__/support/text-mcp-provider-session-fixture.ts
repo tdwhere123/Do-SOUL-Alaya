@@ -35,7 +35,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
   spendCeilingUsd?: number;
   closedSessions?: readonly string[];
   closedKeys?: readonly string[];
-  prompt?: Pick<TextMcpProviderSessionGrant, "caller_capability_profile" | "question_date" | "recall_dispatch_defaults">;
+  prompt?: Pick<TextMcpProviderSessionGrant, "caller_capability_profile" | "question_date" | "recall_dispatch_defaults" | "shared_initial_turn1">;
   limits?: TextMcpProviderSessionGrant["limits"];
 }>) {
   mkdirSync(input.home, { recursive: true });

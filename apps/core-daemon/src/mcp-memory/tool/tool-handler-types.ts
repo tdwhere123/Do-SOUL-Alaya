@@ -355,6 +355,7 @@ export type McpMemoryToolCallResult =
       readonly error: Readonly<{
         readonly code: "UNKNOWN_TOOL" | "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "CONFLICT" | "INTERNAL";
         readonly message: string;
+        readonly details?: readonly { readonly path: readonly (string | number)[]; readonly code: string }[];
       }>;
     }>;
 

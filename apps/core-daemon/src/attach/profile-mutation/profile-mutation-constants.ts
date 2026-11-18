@@ -1,4 +1,4 @@
-import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
+import { SOUL_RECALL_CALLER_GUIDANCE, soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import { ATTACHED_AGENT_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
 
 export const SUPPORTED_PROFILE_TARGETS = Object.freeze(["codex", "claude-code"] as const);
@@ -14,12 +14,13 @@ export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "This server is tools-only for soul.* memory operations; do not expect MCP prompts/resources.",
   `Use only these public SOUL memory tools: ${ATTACHED_AGENT_MEMORY_TOOL_NAMES.join(", ")}.`,
   "START every memory-sensitive turn by calling soul.recall BEFORE answering.",
+  ...SOUL_RECALL_CALLER_GUIDANCE,
   "You SHOULD call soul.recall when the user message touches: personal preferences, working style, or past corrections; prior decisions, architecture choices, or project context; or any \"do you remember / last time / we agreed\" reference.",
   "Workflow: soul.recall -> continue cut sources (payload_continuation) -> soul.open_pointer (only if the preview is insufficient) -> answer -> soul.report_context_usage -> soul.capture_host_session.",
-  "On soul.recall, optionally pass query_coordinates (question_time, evidence_conditions, evidence_relation) when temporal or factual coordinates help. Before answering, selectively read only relevant cut sources (do not blindly fetch every cut result): when a relevant source result has target.span.content_complete is false, call soul.recall again with the same request, the returned index.continuation and payload_continuation {schema_version:1, purpose:\"payload_expansion\", target: that source's index.entries target, start_offset: span.content_end}, repeating from the new content_end until content_complete is true; if a relevant member_index line lies outside page 1, open its statement_ids or source_target via soul.open_pointer.",
+  "Before answering, selectively read only relevant cut sources. For a relevant result with target.span.content_complete false, repeat soul.recall with the returned index.continuation and payload_continuation {schema_version:1, purpose:\"payload_expansion\", target: that source's index entry target, start_offset: span.content_end}. For a relevant member_index line outside page 1, open its statement_ids or source_target via soul.open_pointer.",
   "After each turn, call soul.capture_host_session with the turn's messages so Alaya retains the conversation as source; captured messages are input, not claims of truth.",
   "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
   "For durable edits, call soul.propose_memory_update then soul.list_pending_proposals. Review and apply are human-only (Inspector or alaya review); attached agents cannot review.",
   "When the operator has set Garden compute provider_kind=host_worker and you have spare capacity, optionally call garden.list_pending_tasks, then garden.claim_task, then garden.complete_task. If provider_kind is not host_worker, do not claim Garden work.",
   "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
-].join(" ");
+].join("\n");

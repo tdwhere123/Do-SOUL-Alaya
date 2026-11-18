@@ -10,6 +10,7 @@ import { NativeChatQuoteBasisSchema, assertNativeChatQuoteBasis, assertNativeCha
 import { estimatedSemanticProviderUpperUsd } from "../../provider-request/request-binding.js";
 import { isExtractionRequestProfile } from "../../extraction/request-profile.js";
 import type { ExtractionCacheWriteLease } from "../../extraction/fill/manifest/fill-root-guard.js";
+import { readSharedInitialTurn } from "./session-turn-artifact.js";
 import {
   TextMcpCallerCapabilityProfileSchema, TextMcpCeilingsSchema, TextMcpConsumerQuerySchema,
   TextMcpRecallDispatchDefaultsSchema
@@ -24,6 +25,7 @@ export const TEXT_MCP_PROVIDER_SESSION_ROOT_MARKER = Object.freeze({
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const FilePin = z.object({ path: z.string().min(1), sha256: Digest }).strict();
 export type TextMcpProviderSessionPin = z.infer<typeof FilePin>;
+export const SharedInitialTurnSchema = z.object({ turn_pin: FilePin, request_digest: Digest }).strict().optional();
 
 const SessionQuery = TextMcpConsumerQuerySchema.pick({ query_key: true, original_query: true });
 const Limits = TextMcpCeilingsSchema.extend({
@@ -53,6 +55,7 @@ const Grant = z.object({
   caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
   question_date: z.string().min(1).optional(),
   recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional(),
+  shared_initial_turn1: SharedInitialTurnSchema,
   limits: Limits,
   price: z.object({
     input_usd_per_million: z.number().finite().nonnegative(),
@@ -86,6 +89,10 @@ export function readTextMcpProviderSessionGrant(pin: TextMcpProviderSessionPin):
     grant.price.output_usd_per_million) <= grant.limits.spend_ceiling_usd, "session grant exceeds finite spend ceiling");
   check(grant.limits.max_model_turns === grant.limits.maximum_attempts, "session grant must bind one attempt per model turn");
   check(!grant.history.closed_sessions.includes(grant.session_id), "known closed provider session");
+  if (grant.shared_initial_turn1 !== undefined) {
+    check(grant.limits.max_model_turns === 3, "shared initial turn grants require three remaining model turns");
+    readSharedInitialTurn(grant.shared_initial_turn1);
+  }
   return grant;
 }
 
@@ -119,6 +126,7 @@ export function assertTextMcpProviderSessionConsumer(grant: TextMcpProviderSessi
   caller_capability_profile?: z.infer<typeof TextMcpCallerCapabilityProfileSchema>;
   question_date?: string;
   recall_dispatch_defaults?: z.infer<typeof TextMcpRecallDispatchDefaultsSchema>;
+  shared_initial_turn1?: z.infer<typeof SharedInitialTurnSchema>;
 }>) {
   check(consumer.snapshot_sha256 === grant.snapshot_sha256, "session snapshot identity mismatch");
   check(canonicalJson(consumer.query) === canonicalJson(grant.query), "session query identity mismatch");
@@ -132,6 +140,8 @@ export function assertTextMcpProviderSessionConsumer(grant: TextMcpProviderSessi
   check(consumer.question_date === grant.question_date, "session question date mismatch");
   check(canonicalJson(consumer.recall_dispatch_defaults ?? null) ===
     canonicalJson(grant.recall_dispatch_defaults ?? null), "session recall dispatch defaults mismatch");
+  check(canonicalJson(consumer.shared_initial_turn1 ?? null) ===
+    canonicalJson(grant.shared_initial_turn1 ?? null), "session shared initial turn mismatch");
 }
 
 export function textMcpProviderSessionCacheIdentity(grant: TextMcpProviderSessionGrant) {

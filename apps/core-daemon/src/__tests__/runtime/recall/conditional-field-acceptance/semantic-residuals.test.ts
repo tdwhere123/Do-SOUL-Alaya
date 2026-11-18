@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InformationIndexSchema, MemoryDimension, type InformationIndex, type QueryProgram } from "@do-soul/alaya-protocol";
+import { InformationIndexSchema, MemoryDimension, SoulMemorySearchRequestSchema, type InformationIndex, type QueryProgram } from "@do-soul/alaya-protocol";
 import { capableRecallConsumerDeclaration, RecallService, type ObserverReaders } from "@do-soul/alaya-core";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -38,12 +38,12 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
     memoryService: { findByIdScoped: async () => null } }, now: () => clock,
     warn: () => undefined, generateId: () => "00000000-0000-4000-8000-000000000001" });
   return async (width = 800, continuation?: InformationIndex["continuation"]) => {
-    const result = await handler({ query: "yesterday failed deployment", scope_class: null, dimension: null,
+    const result = await handler(SoulMemorySearchRequestSchema.parse({ query: "yesterday failed deployment", scope_class: null, dimension: null,
       interpretation_proposal: deploymentProposal("yesterday failed deployment"), claim_demands: deploymentClaimDemands,
       domain_tags: null, max_results: width,
       protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
       supported_result_kinds: ["memory_entry", "source_evidence"],
-      ...(continuation == null ? {} : { continuation }) },
+      ...(continuation == null ? {} : { continuation }) }),
     { workspaceId: WS, runId: null, agentTarget: "codex", sessionId: "semantic-residual" });
     return InformationIndexSchema.parse(result.index);
   };

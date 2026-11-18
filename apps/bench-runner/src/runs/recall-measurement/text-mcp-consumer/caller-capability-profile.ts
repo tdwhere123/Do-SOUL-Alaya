@@ -4,6 +4,7 @@ import type {
 } from "./contract.js";
 
 const COORDINATE_FIELDS = ["query_coordinates", "interpretation_proposal"] as const;
+const MISPLACED_COORDINATE_FIELDS = ["question_time", "evidence_conditions", "evidence_relation"] as const;
 
 export type TextMcpPromptOptions = Readonly<{
   caller_capability_profile?: TextMcpCallerCapabilityProfile;
@@ -43,20 +44,8 @@ export function projectLiveSurfaceForCaller(
   return projected;
 }
 
-export function stripCallerCoordinateGuidance(text: string): string {
-  return text
-    .replace(/On soul\.recall, optionally pass query_coordinates[^.]*\.\s*/gu, "")
-    .replace(/For single-call coordinates,[^\n]*?\.(?:\s+|$)/gu, "")
-    .replace(/The daemon binds digest and clock automatically[^\n]*?\.(?:\s+|$)/gu, "")
-    .replace(/`question_time` is a soft preference on source event_time under the existing root\/attempt limits; /gu, "")
-    .replace(/Pre-sealed `interpretation_proposal` packets[^.]*\.\s*/gu, "")
-    .replace(/`?query_coordinates`?,?\s*/gu, "")
-    .replace(/`?interpretation_proposal`?,?\s*/gu, "")
-    .replace(/\(\s+/gu, "(")
-    .replace(/,\s*\)/gu, ")")
-    .replace(/,\s*,/gu, ",")
-    .replace(/\s{2,}/gu, " ")
-    .trim();
+function stripCallerCoordinateGuidance(text: string): string {
+  return text.split("\n").filter(line => !line.startsWith("Optional caller coordinates on soul.recall ")).join("\n");
 }
 
 export function resolveTextMcpRecallDispatch(input: Readonly<{
@@ -69,7 +58,7 @@ export function resolveTextMcpRecallDispatch(input: Readonly<{
   if (input.profile === "plain_query" && input.tool === "soul.recall" && carriesCallerCoordinates(raw)) {
     return {
       kind: "refuse", tool: input.tool,
-      reason: "plain_query forbids query_coordinates and interpretation_proposal"
+      reason: "plain_query forbids caller coordinates and host replay proposals"
     };
   }
   return {
@@ -120,7 +109,8 @@ function stripCoordinateProperties(schema: Record<string, unknown>): void {
 }
 
 function carriesCallerCoordinates(args: Record<string, unknown>): boolean {
-  return COORDINATE_FIELDS.some(field => Object.hasOwn(args, field) && args[field] !== undefined);
+  return [...COORDINATE_FIELDS, ...MISPLACED_COORDINATE_FIELDS]
+    .some(field => Object.hasOwn(args, field) && args[field] !== undefined);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

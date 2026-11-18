@@ -12,7 +12,7 @@ import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } fr
 import type { BenchDaemonHandle } from "../../../harness/daemon.js";
 import { SemanticChainConfigSchema, withSemanticChainDaemon, type SemanticChainConfig } from "../contract.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope } from "../ordinary/ordinary-entry-contract.js";
-import { TEXT_MCP_ACTION_SCHEMA_NAME } from "./codec.js";
+import { decodeTextMcpAction, TEXT_MCP_ACTION_SCHEMA_NAME } from "./codec.js";
 import {
   TextMcpCallerCapabilityProfileSchema, TextMcpCeilingsSchema, TextMcpConsumerQuerySchema, TextMcpLiveSurfaceSchema,
   TextMcpRecallDispatchDefaultsSchema, isUnresolvedTextMcpDelivery
@@ -22,7 +22,7 @@ import {
 } from "./caller-capability-profile.js";
 import { assertTextMcpOutputRoot, dispatchTextMcpRead, snapshotLiveMcpSurface } from "./live-mcp.js";
 import {
-  TEXT_MCP_PROVIDER_BOUND_KIND, TEXT_MCP_PROVIDER_SESSION_CONTRACT,
+  SharedInitialTurnSchema, TEXT_MCP_PROVIDER_BOUND_KIND, TEXT_MCP_PROVIDER_SESSION_CONTRACT,
   assertTextMcpProviderSessionConsumer, assertTextMcpProviderSessionScope, check, readTextMcpProviderSessionGrant,
   type TextMcpProviderSessionGrant, type TextMcpProviderSessionPin
 } from "./session-authority.js";
@@ -34,6 +34,7 @@ import {
   interpretTextMcpProviderSession, openTextMcpProviderSessionLedger, publishTextMcpProviderSessionTurn,
   readTextMcpProviderSessionResult, assertSessionRaw
 } from "./session-persist.js";
+import { readSharedInitialTurn } from "./session-turn-artifact.js";
 
 export type TextMcpProviderSessionDependencies = Readonly<{
   loadConfig: () => CompileSeedExtractionConfig;
@@ -85,6 +86,7 @@ type SessionConsumer = Readonly<{
   query: z.infer<typeof TextMcpConsumerQuerySchema>;
   host_issued_initial_recall: boolean;
   ceilings: z.infer<typeof TextMcpCeilingsSchema>;
+  shared_initial_turn1?: z.infer<typeof SharedInitialTurnSchema>;
 } & TextMcpPromptOptions>;
 
 /** Provider-bound session. Scripted complete() is not an argument and cannot gain remote authority. */
@@ -168,7 +170,8 @@ function parseConsumer(value: unknown, grant: TextMcpProviderSessionGrant): Sess
     host_issued_initial_recall: z.boolean(), ceilings: TextMcpCeilingsSchema,
     caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
     question_date: z.string().min(1).optional(),
-    recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional()
+    recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional(),
+    shared_initial_turn1: SharedInitialTurnSchema
   }).strict().parse(structuredClone(value));
   const config = SemanticChainConfigSchema.parse(structuredClone(raw.config));
   assertTextMcpOutputRoot(raw.root, config);
@@ -177,7 +180,7 @@ function parseConsumer(value: unknown, grant: TextMcpProviderSessionGrant): Sess
     snapshot_sha256: config.snapshot_sha256,
     query: { query_key: raw.query.query_key, original_query: raw.query.original_query },
     host_issued_initial_recall: raw.host_issued_initial_recall,
-    ceilings: raw.ceilings, ...prompt
+    ceilings: raw.ceilings, shared_initial_turn1: raw.shared_initial_turn1, ...prompt
   });
   return { ...raw, ...prompt, config };
 }
@@ -218,6 +221,7 @@ async function runProviderSessionExecute(input: Readonly<{
       if (unresolvedEvent(work.events, "host_setup") || work.events.some(event => event.kind === "host_policy_refusal")) return;
       throwIfSessionCancelled(input.abortSignal);
       const phaseDeadlineMs = performance.now() + input.grant.limits.wall_ms;
+      if (!await applySharedInitialTurn(input, daemon, work, persist)) return;
       for (const line of input.lines.slice()) {
         if (await settleSessionTurn(input, daemon, line, work, persist, phaseDeadlineMs) !== "continue") return;
       }
@@ -226,11 +230,7 @@ async function runProviderSessionExecute(input: Readonly<{
         const snapshot = input.context.ledger.snapshot();
         if (snapshot.telemetry.usageUnknownAttempts > 0 || snapshot.unresolvedAttempts.length > 0) break;
         if (performance.now() >= phaseDeadlineMs) break;
-        const derived = materializeTextMcpProviderSessionRequest({
-          grant: input.grant, config: input.config, surface: work.surface!,
-          query: input.grant.query.original_query, events: work.events,
-          ...textMcpPromptOptions(input.consumer)
-        });
+        const derived = materializeSessionRequest(input, work.surface!, work.events);
         const admitted = admitTextMcpProviderSessionRequest(input.grant.execution_root, input.grant, input.lines.length + 1, derived);
         if (!input.lines.some(line => line.turn === admitted.turn)) input.lines.push(admitted);
         input.byKey.set(admitted.key, admitted);
@@ -239,6 +239,55 @@ async function runProviderSessionExecute(input: Readonly<{
     });
   };
   return scope === undefined ? operation() : trackBenchOperation(scope, operation);
+}
+
+function materializeSessionRequest(input: Parameters<typeof runProviderSessionExecute>[0],
+  surface: NonNullable<SessionWork["surface"]>, events: readonly Record<string, unknown>[]) {
+  return materializeTextMcpProviderSessionRequest({
+    grant: input.grant, config: input.config, surface, query: input.grant.query.original_query,
+    events, ...textMcpPromptOptions(input.consumer)
+  });
+}
+
+async function applySharedInitialTurn(input: Parameters<typeof runProviderSessionExecute>[0], daemon: BenchDaemonHandle,
+  work: SessionWork, persist: () => void): Promise<boolean> {
+  const shared = input.grant.shared_initial_turn1;
+  if (shared === undefined) return true;
+  const index = work.events.findIndex(event => event.generated_by === "shared_initial_turn1");
+  const prior = work.events[index];
+  const initial = prior === undefined ? work.events : work.events.slice(0, index);
+  check(initial.every(event => event.kind === "host_setup") && (prior !== undefined || input.lines.length === 0),
+    "shared initial turn must precede local model work");
+  const derived = materializeSessionRequest(input, work.surface!, initial);
+  check(derived.request_digest === shared.request_digest, "shared initial turn request digest mismatch");
+  const action = decodeTextMcpAction(readSharedInitialTurn(shared).raw_json);
+  const provenance = { generated_by: "shared_initial_turn1", source_request_digest: derived.request_digest };
+  if (action.kind === "answer") {
+    const answer = { kind: "shared_initial_answer", ...provenance, text: action.text };
+    if (prior === undefined) {
+      work.events.push(answer);
+      persist();
+    } else {
+      check(canonicalJson(prior) === canonicalJson(answer), "shared initial answer drifted");
+    }
+    return false;
+  }
+  check(action.kind === "read", "shared initial turn does not contain an admissible action");
+  const resolved = resolveTextMcpRecallDispatch({
+    profile: input.consumer.caller_capability_profile, tool: action.tool,
+    rawArguments: action.arguments, defaults: input.consumer.recall_dispatch_defaults
+  });
+  if (recordPolicyRefusal(resolved, work, persist)) return false;
+  const call = { kind: "mcp_call", ...provenance, tool: resolved.tool, arguments: resolved.arguments,
+    ...recallDispatchEventFields(resolved) };
+  if (prior !== undefined) {
+    const { response_state, envelope, ...reserved } = prior;
+    check(canonicalJson(reserved) === canonicalJson(call), "shared initial dispatch drifted");
+    return response_state === "received" || response_state === "public_error";
+  }
+  if (input.priorMcp + work.mcpDispatches >= input.grant.limits.max_tool_calls) return false;
+  throwIfSessionCancelled(input.abortSignal);
+  return dispatchSessionRead(daemon, work, persist, call);
 }
 
 async function ensureHostSetup(grant: TextMcpProviderSessionGrant, consumer: SessionConsumer, daemon: BenchDaemonHandle,
@@ -308,17 +357,27 @@ async function settleSessionTurn(input: Parameters<typeof runProviderSessionExec
     profile: input.consumer.caller_capability_profile, tool: action.tool,
     rawArguments: structuredClone(action.arguments), defaults: input.consumer.recall_dispatch_defaults
   });
-  if (resolved.kind === "refuse") {
-    work.events.push({ kind: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason });
-    persist();
-    return "stop";
-  }
-  reserveMcpDelivery(work, persist, {
+  if (recordPolicyRefusal(resolved, work, persist)) return "stop";
+  const delivered = await dispatchSessionRead(daemon, work, persist, {
     kind: "mcp_call", origin: "model_selected", tool: resolved.tool, arguments: resolved.arguments,
     ...recallDispatchEventFields(resolved)
   });
-  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, resolved.tool, resolved.arguments));
-  return isUnresolvedTextMcpDelivery(dispatched.response_state) ? "stop" : "continue";
+  return delivered ? "continue" : "stop";
+}
+
+function recordPolicyRefusal(resolved: ReturnType<typeof resolveTextMcpRecallDispatch>, work: SessionWork,
+  persist: () => void): resolved is Extract<typeof resolved, { kind: "refuse" }> {
+  if (resolved.kind !== "refuse") return false;
+  work.events.push({ kind: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason });
+  persist();
+  return true;
+}
+
+async function dispatchSessionRead(daemon: BenchDaemonHandle, work: SessionWork, persist: () => void,
+  call: Record<string, unknown> & { tool: string; arguments: Record<string, unknown> }): Promise<boolean> {
+  reserveMcpDelivery(work, persist, call);
+  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, call.tool, call.arguments));
+  return !isUnresolvedTextMcpDelivery(dispatched.response_state);
 }
 
 function assertSessionDispatch(input: Parameters<typeof runProviderSessionExecute>[0], line: TextMcpProviderSessionLine) {
