@@ -260,6 +260,7 @@ export type ObserverReaders = Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;
     readonly limit?: number;
+    readonly asOf?: string;
   }>) => readonly string[];
   readonly snapshotPin?: (workspaceId: string) => Readonly<{
     readonly source_revision: string;

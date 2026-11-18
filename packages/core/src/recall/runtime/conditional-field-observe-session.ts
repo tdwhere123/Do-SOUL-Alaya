@@ -108,9 +108,10 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
     if (memoryBox.remaining === 0 && session.state.residuals.some(row => row.status === "open" || row.status === "interrupted")) {
       return { ...interruptObservedField(session.state), memory_exhausted: true };
     }
-    const seedFirst = session.state.pending_path_effects === undefined && session.state.pair_demands.size === 0
-      && session.state.residuals.some((region) => region.kind === "seed"
-        && (region.status === "open" || region.status === "interrupted"));
+    const seedOpen = session.state.residuals.some((region) => region.kind === "seed"
+      && (region.status === "open" || region.status === "interrupted"));
+    // Open seed (sourceRoots + memory.lexical) settles before optional structural pair-demands.
+    const seedFirst = session.state.pending_path_effects === undefined && seedOpen;
     if (!seedFirst && refreshPathFrontier(session)) return session.state;
     if (consumeBoundSourceFact(session)) {
       if (session.state.last_observer_status === "interrupted" || terminalObserver(session.state.last_observer_status)) return session.state;
@@ -212,10 +213,12 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const priorCursor = before.resume_cursors[action.region_id] ?? null;
   if (input.readers.sourceRoots === undefined ? observed.page.cursor.committed_through !== priorCursor
     : sourceSeedCursorAdvanced(priorCursor, observed.page.cursor.committed_through)) input.on_retained_progress?.();
-  if (pairProgress.hasOpenDemand()) {
-    session.state = reopenAdjacency(session.state);
+  const seedStillOpen = session.state.residuals.some((region) => region.kind === "seed"
+    && (region.status === "open" || region.status === "interrupted"));
+  if (!seedStillOpen) {
+    if (pairProgress.hasOpenDemand()) session.state = reopenAdjacency(session.state);
+    if (refreshPathFrontier(session)) return true;
   }
-  if (refreshPathFrontier(session)) return true;
   if (observed.page.outcome.status !== "interrupted") return false;
   if (observed.page.cursor.committed_through === (before.resume_cursors[action.region_id] ?? null)) return true;
   session.state = { ...session.state, last_observer_status: "open" };
@@ -582,7 +585,8 @@ export function loadStoredRelationKinds(
   program: QueryInterpretation["program"],
   readers: ObserverReaders,
   workspaceId: string,
-  remainingExploration: number
+  remainingExploration: number,
+  asOf?: string
 ): Readonly<{ readonly kinds: readonly string[]; readonly charged: number; readonly open: boolean }> {
   if (!programRelationKinds(program).includes(STORED_RELATION_KIND)) {
     return { kinds: [], charged: 0, open: false };
@@ -591,7 +595,7 @@ export function loadStoredRelationKinds(
   if (listed === undefined) return { kinds: [], charged: 0, open: true };
   if (remainingExploration < 1) return { kinds: [], charged: 0, open: true };
   const limit = Math.min(32, remainingExploration);
-  const kinds = listed({ workspaceId, subject: null, limit });
+  const kinds = listed({ workspaceId, subject: null, limit, ...(asOf === undefined ? {} : { asOf }) });
   return { kinds, charged: Math.min(limit, kinds.length + 1), open: kinds.length === limit };
 }
 

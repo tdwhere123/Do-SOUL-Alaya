@@ -25,3 +25,13 @@ it("omits an unknown member but ends the list at the first budget refusal", () =
   expect(lines.map(line => [line.label, line.root_id, line.line])).toEqual([["R06", "root-a", "first"], ["R07", "root-c", "third"]]);
   expect(read).toEqual(["root-a", "root-b", "root-c", "root-d"]);
 });
+
+it("places Soft neighbors after pool members and before overflow", () => {
+  const lines = renderMemberIndex({ readMemberListing: source => ready(source.target.root_id) }, {
+    pool: ["pool-a"].map(member), neighbors: ["graph-b"].map(member), overflow: ["overflow-c"].map(member),
+    conditions: [], vectors: null
+  }, new Set(["delivered"]), 1);
+  expect(lines.map(line => [line.root_id, line.in_pool])).toEqual([
+    ["pool-a", true], ["graph-b", false], ["overflow-c", false]
+  ]);
+});

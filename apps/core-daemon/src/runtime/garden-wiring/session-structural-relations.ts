@@ -60,6 +60,7 @@ export type MaterializeWorkspaceStructuralRelationsInput = Readonly<{
   readonly containerKey?: string;
   readonly includeStatements?: boolean;
   readonly admittedAt?: string;
+  readonly useSourceRecordedTime?: boolean;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }>;
 
@@ -88,7 +89,8 @@ export async function materializeWorkspaceSessionStructuralRelations(
     causedBy: input.causedBy ?? "session_structural_materializer",
     rounds,
     statements,
-    ...(input.admittedAt === undefined ? {} : { admittedAt: input.admittedAt })
+    ...(input.admittedAt === undefined ? {} : { admittedAt: input.admittedAt }),
+    ...(input.useSourceRecordedTime === true ? { useSourceRecordedTime: true as const } : {})
   });
 }
 

@@ -40,6 +40,8 @@ import {
 import {
   retargetRelationProduct,
   observedTargetRevision,
+  admitSessionStructuralDemand,
+  sessionStructuralKindsOnly,
   relationMatches,
   relationPhysicalCandidates,
   type AdjacencyRow,
@@ -103,6 +105,8 @@ type HyperedgeInput = Readonly<{
   readonly coldPrograms?: Set<string>;
   /** A nested premise still returns proofs this row delta did not touch. */
   readonly retainPopulation?: boolean;
+  /** Shared cap for ordinary session-structural source_evidence endpoints. */
+  readonly structuralEndpoints?: Set<string>;
 }>;
 
 export function tryCompleteHyperedge(
@@ -143,10 +147,13 @@ export function* hyperedgeEffectSteps(
   }
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
   if (input.promotedIds === undefined) input = { ...input, promotedIds: new Set() };
+  if (input.structuralEndpoints === undefined) input = { ...input, structuralEndpoints: new Set() };
+  const structuralOnly = sessionStructuralKindsOnly(input.physicalKindSet ?? input.physicalKinds ?? []);
   const deltaIds = input.joinRows === undefined ? undefined : new Set(input.joinRows.map((row) => row.assertionId));
   const emitted = new Set<string>();
   for (const from of input.liveStates) {
     yield { kind: "work" };
+    if (structuralOnly && from.target.kind !== "source_evidence") continue;
     const roles: { readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }[] = [];
     for (const premise of program.premises) {
       roles.push(yield* premiseJoinRoles(premise, from, rows, input, deltaIds));
@@ -280,6 +287,7 @@ function* premiseRelationDemands(
     if (!physicalKinds.has(predicate) || !relationMatches(relation.relation_kind, predicate)) continue;
     const subject = productEndpointId(from);
     if (pairDemandRegistered(input.registeredDemands, subject, predicate)) continue;
+    if (!admitSessionStructuralDemand(predicate, from, input.structuralEndpoints)) continue;
     yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
       relation_demand: { subject, predicate } } };
   }
