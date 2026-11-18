@@ -4,424 +4,242 @@ These rules always win over lower-level docs and task-card convenience.
 
 ## Architecture
 
-1. `packages/protocol` is the domain leaf package and depends only on
-   `zod`.
+1. `packages/protocol` is the domain leaf package and depends only on `zod`.
 1a. `packages/graph-algorithms` is a dependency-free pure algorithm helper
-    package. It may not define domain types, EventLog payloads, runtime
+    package; it defines no domain types, EventLog payloads, runtime
     transitions, or storage contracts.
-1b. `packages/cjk-segmentation` is the Node-only CJK word-segmenter
-    owner (`@node-rs/jieba`). It may depend on protocol (shared atoms and
-    the bind seam) and `@node-rs/jieba` only. Protocol, Inspector, and
-    browser barrels must not depend on it. Core and storage must not
-    keep a second copy of the native segmenter.
+1b. `packages/cjk-segmentation` is the Node-only CJK word-segmenter owner
+    (`@node-rs/jieba`), depending only on protocol and `@node-rs/jieba`.
+    Protocol, Inspector, browser barrels, core, and storage must not bundle or
+    duplicate it.
 2. All domain types come from `@do-soul/alaya-protocol`; do not redefine
-   business types in app or package-local code.
-3. `apps/core-daemon` is the wiring layer. Packages must not import
-   from `apps/*`.
+   business types locally.
+3. `apps/core-daemon` is the wiring layer. Packages must not import from
+   `apps/*`.
 4. `packages/core` owns business transitions and must not depend on
    `packages/engine-gateway`.
-5. `packages/engine-gateway` is the AI SDK Core boundary for the
-   provider path. Provider-edge SDK types stay inside this package and
-   must be normalized to protocol types before exit. Routing and MCP
-   bridge only; it must not contain memory governance or run truth
-   logic.
-6. `packages/soul` owns SOUL kernel and Garden logic through
-   protocol-facing contracts and ports. Garden must not import from
-   `packages/core`; communication is via protocol-defined ports.
+5. `packages/engine-gateway` is the AI SDK Core boundary for provider paths;
+   provider-edge SDK types normalize to protocol types before exit. Routing and
+   MCP bridge only—no memory governance or run-truth logic.
+6. `packages/soul` owns SOUL kernel and Garden logic through protocol-defined
+   contracts and ports; Garden must not import from `packages/core`.
 
 ## Event And State
 
-7. EventPublisher-owned state transitions commit their EventLog rows and
-   state mutation atomically on the same SQLite connection, then notify
-   (per §10 below — there is no SSE). EventLog-first describes audit ownership,
-   not a universal SQL statement order: mutation-derived events may be appended
-   after the mutation inside that transaction. Callbacks must be synchronous.
-   Projection-generation activation and causal-usage recording also pair state
-   and audit in one transaction. Independently committed source-admission
-   receipts use a distinct receipt-first contract with explicit identity,
-   retry/recovery ownership and operation-specific readiness; do not generalize
-   that exception to all formation writes.
-8. Only `packages/core` and `apps/core-daemon` may author
-   EventLog-producing runtime transitions or mutate run truth.
-   `packages/storage` may provide mechanical persistence helpers behind
-   those owners, but it must not decide or originate business / runtime
-   transitions.
-   An authorized source erase may replace proven source-derived claim
-   canonicalization and slot-creation payload fields with explicitly marked
-   unavailable values. Preserve the event envelope and independent erase
-   receipt; never replay a redacted value as the original fact. Independent
-   review and resolution text is not inferred to be source-derived.
-   When a legacy object directly or transitively names an unavailable
-   dependency but the original source cannot be identified, persist an
-   unavailable-dependency quarantine for the affected identity. This is not
-   an erase receipt and does not identify an erased source. Removing a reference
-   alone does not clear it. Plain read APIs fail with a conflict when their
-   result includes unavailable data; bounded reads report incompleteness.
-   Independently addressed, available objects and explicitly redacted audit
-   envelopes remain readable. Only a validated owning repair can release an
-   affected identity.
-9. New event names use dot notation, for example `memory.created` and
-   `garden.audit_pass.completed`. Existing frozen underscore names
-   require coordinated contract migration before renaming.
-10. Audit precedes runtime notification and the owning audited operation's
-    ready acknowledgement. An atomic transition exposes state and audit together.
-    Receipt-first retention may be readable before its separate audit succeeds;
-    that proves retention, not completed admission or notification. Consumers
-    must honor the applicable readiness contract. A postcommit notification
-    failure does not undo durable state or authorize repeating its mutation.
-11. **Alaya does not run an SSE event stream.** Upstream do-what-new
-    used SSE because it had GUI / TUI consumers; Alaya does not.
-    Daemon-internal eventing is via in-process audit log +
-    `RuntimeNotifier` notification only (interface in
-    `packages/core/src/runtime/event-publisher.ts`). Any new daemon code paths
-    (e.g. `apps/core-daemon/src/sse/`, route streaming TransformStream,
-    background bootstrap, event-publisher chain) must keep the SSE
-    transport stripped while preserving the EventLog → audit ordering.
+7. `EventPublisher`-owned transitions commit EventLog rows and state mutations
+   atomically on the same synchronous SQLite connection, then notify (§10).
+   `EventLog-first` describes audit ownership, not universal SQL statement
+   order; mutation-derived events may append after mutation inside that
+   transaction. Callbacks must be synchronous. Projection-generation activation
+   and causal-usage recording also pair state and audit in one transaction.
+   Receipt-first source admission uses a distinct recovery contract; do not
+   generalize it to all formation writes.
+8. Only `packages/core` and `apps/core-daemon` may author EventLog-producing
+   runtime transitions or mutate run truth; `packages/storage` provides
+   mechanical persistence only. Authorized source erasure may redact proven
+   source-derived claim canonicalization and slot-creation payload fields to
+   explicitly marked unavailable values while preserving the envelope and erase
+   receipt; independent review/resolution text is not inferred to be
+   source-derived. Unattributable unavailable dependencies persist a quarantine
+   for the affected identity (not an erase receipt). Plain reads fail with
+   conflict on unavailable data; bounded reads report incompleteness; only a
+   validated owning repair releases quarantine.
+9. New event names use dot notation (e.g. `memory.created`,
+   `garden.audit_pass.completed`). Frozen underscore names require coordinated
+   migration before renaming.
+10. Audit precedes runtime notification and ready acknowledgement. Receipt-first
+    retention proves retention, not completed admission or notification.
+    Post-commit notification failure never rolls back durable state or
+    authorizes repeating the mutation.
+11. **Alaya runs no SSE event stream.** Daemon-internal eventing uses the
+    EventLog plus in-process `RuntimeNotifier`
+    (`packages/core/src/runtime/event-publisher.ts`); any new daemon paths must
+    keep SSE stripped while preserving EventLog → audit ordering.
 
 ## SOUL
 
-12. Memory objects are faceted stable semantic units and form the
-    ontology. Surfaces, scopes, and projections are routing or
-    visibility structures. The Path axis represents learnable
-    conditional relation structures; recall, prediction, and reminder
-    are runtime manifestations of paths, not paths themselves. A
-    `RelationAssertion` is the immutable, evidence-grounded relation
-    truth. A `PathRelation` is its rebuildable current/as-of routing
-    projection, never a second memory ontology or durable truth. A
-    query-time transfer along one of its directed edges and the
-    resulting conditional association are runtime decisions and projections.
-    Typed path transfer and accepting-index delivery must be proved by
-    their source-to-consumer path, not inferred from this ontology constraint.
-    Historical flood and SliceKey projections do not authorize a second
-    live recall route; see
-    `docs/handbook/recall.md`.
-12a. **Temporal relation authority.** Evidence owns the source
-    observation/event time. Storage or ingestion timestamps, including
-    `created_at`, must not be substituted for source time. Each active
-    `RelationAssertion` has exactly one typed validity form: bounded
-    `[from,to)`, open `[from,+infinity)`, or an explicitly
-    governance-permitted `timeless` form. Unknown validity belongs only
-    to proposal, deferred, or quarantine state and is never active.
+12. **Three-tier epistemic & relation boundary.** Memory objects
+    (`EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm`) form the
+    durable ontology; surfaces, scopes, and projections route or filter them:
+    - *Governed world claims (`ClaimForm` / durable `MemoryEntry` world truth):*
+      require user signal or approved `Proposal` / inline `soul.resolve` (§19,
+      §35–§36).
+    - *Deterministic source-structural relations:* recorded time/author,
+      container round succession (`next_round_in_session`),
+      `semantic_dependencies`, and `source_statement_dependencies` are objective
+      source facts requiring zero human approval.
+    - *Provenance-backed conditional relations (`H_s`, `C`):* immutable
+      source-anchored assertions (`relation_assertions` +
+      `relation_assertion_evidence` + rebuildable `relation_path_projections`)
+      carry explicit `RelationValidity` and are consumable under
+      `conditional_support` without claiming world-truth approval. Historical
+      flood and SliceKey projections never authorize a second recall route
+      (`docs/handbook/recall.md`).
+12a. **Temporal relation authority.** Evidence owns source observation/event
+     time; `created_at` must never substitute for source time. Active
+     `RelationAssertion`s hold exactly one typed validity: `bounded`
+     (`[from,to)`), `open` (`[from,+infinity)`), or governance-permitted
+     `timeless`. Unknown validity belongs only to proposal, deferred, or
+     quarantine state.
 12b. **Assertion history and projection.** `RelationAssertion` rows are
-    immutable. An accepted assertion admission and every later typed
-    resolution — `contradicted`, `retracted`, `expired`, `superseded`,
-    and governance retirement — append an EventLog entry that owns the
-    transaction and revision history. An accepted admission atomically
-    appends its EventLog entry, applies its immutable assertion, and
-    applies the derived projection or an explicit no-active-projection
-    outcome before audit; a resolution atomically appends history and
-    rederives or invalidates the affected projection before audit.
-    Broadcast follows the audit. The EventLog is the one history ledger,
-    not a second relation ledger. These entries never overwrite or
-    delete assertion history. `PathRelation` is derived for current or
-    as-of recall, with an omitted `as_of` meaning now. A deterministic
-    replay of the same accepted admissions and resolutions must produce
-    the same projection; duplicate input is idempotent and concurrent
-    resolution attempts preserve one ordered EventLog history.
-12c. **Formation boundary.** An LLM or connected agent may nominate a
-    candidate only. Deterministic normalization and governance decide
-    whether it becomes evidence-grounded assertion state, stays
-    deferred, or enters quarantine; no model output can mutate truth or
-    a projection directly.
-    An explicitly selected, source-bound interpretation packet may instead
-    supply premises to conditional computation under its own hypothesis.
-    This does not admit a RelationAssertion or certify source faithfulness:
-    every conclusion retains the source, complete interpretation, hypothesis,
-    and unreviewed status. It cannot use the ordinary world-claim result
-    projection, and source authorization, currentness, validity, and erasure
-    still apply. Temporal assertion governance is unchanged.
+     immutable. Accepted admissions and typed resolutions (`contradicted`,
+     `retracted`, `expired`, `superseded`, `governance_retired`) atomically
+     append EventLog history and derive or invalidate `PathRelation`
+     projections before audit and notification. Deterministic replay of
+     identical history must produce the same projection.
+12c. **Formation boundary.** LLMs/agents nominate candidates only; deterministic
+     normalization and governance decide admission, deferral, or quarantine.
+     Selected source-bound interpretation packets (`Q`/`H`/`C`) supply
+     conditional computation premises retaining source, hypothesis, and
+     unreviewed status, never promoting a world-claim `RelationAssertion`.
 12d. **Fallible interpretation and scoped use.** Source records, model
-    interpretations, exploration clues, conditional conclusions and admitted
-    assertions have different authority. Structural admission, literal source
-    binding and successful derivation do not certify semantic fidelity or
-    world truth. Missing or partial interpretation is not source absence.
-    An unresolved premise limits the conclusion that depends on it; it does
-    not by itself revoke independent authorized source access or support.
-    Repetition and derived reuse do not create independent confirmation.
-    Source permissions, currentness, erasure and proof-dependency checks
-    remain mandatory. These distinctions do not guarantee that a bounded
-    query observes every useful source or repairs every model error.
-13. Evidence and governance changes must be explicit, structured, and
-    auditable, including path plasticity changes (reinforcement,
-    weakening, redirection, retirement).
-14. Control-plane outputs — including ActivationCandidate,
-    manifestation hints, and stance bias effects — do not silently
-    become durable memory.
-15. Synthesis organizes understanding; it does not directly legislate
-    durable claims.
-16. ContextLens projects memory into the current turn; it does not
-    form a second memory layer. ActivationCandidate is runtime control,
-    not ontology truth.
-17. Garden, Auditor, Janitor, Librarian, and other maintenance work
-    are fire-and-forget relative to the main consumer-agent path.
-    Librarian does not create merge, template, or path-compression proposals
-    without a supported effect; textual resemblance alone does not establish
-    identity. Historical tasks of those kinds terminate as failed. Historical
-    proposals remain visible and rejectable but cannot be accepted. Synthesis
-    remains an organizing operation, subject to evidence and review.
-18. **Embedding is recall supplement only.** Embedding signals can
-    influence ranking and recall, but never decide whether a memory is
-    durable truth.
-19. **LLMs and connected agents propose, Alaya decides.** Any agent
-    output enters the system through the proposal route; durable
-    promotion requires explicit evidence, governance, and audit.
-    Host messages an agent forwards through `soul.capture_host_session`
-    are *input*, not an agent claim of truth. Ordinary `soul.recall` does
-    not enqueue ingestion; `recent_turn` is ignored. `soul.report_context_usage`
-    is usage feedback only and captures nothing. Captured messages form
-    rounds per container; closed container chunks of those rounds become
-    `SOURCE_STATEMENT_SESSION` work. A-track emission remains.
-    Garden candidates still pass deterministic triage, evidence
-    synthesis, and EventLog audit before any durable write — that
-    triage step is the "Alaya decides". When an attached MCP session has
-    no `ALAYA_RUN_ID`, the attach boundary first creates a canonical
-    session run whose `run_id` equals the process-stable MCP `session_id`,
-    so the non-null signal and memory-entry run contract still holds.
-20. **Delivered ≠ used.** Context delivery to a consumer agent is not
-    proof of usage. Trust state distinguishes installed / configured /
-    delivered / used / skipped / unverifiable / mixed. A reported
-    `used` receipt is a soft read-side signal: repeated used receipts
-    decay for path-strength reinforcement, `trust_mode = automatic`
-    carries reduced weight, and durable truth still requires the
-    proposal/governance path. The live used-report producer records a
-    `CausalUsageReceipt` only. That port is constructed at the daemon
-    composition root; delivery, inspection, and top-k membership have
-    weight 0.
-20a. **Source write persist-first.** A valid evidence create persists
-    the root capsule, then optionally admits source spans and F0-F2
-    incidences. Optional formation failure does not delete or
-    invalidate that capsule. Soul materialization does not compensate
-    a later memory-create failure by deleting the evidence.
-20b. **One query as-of and one pinned generation.** Ordinary Recall pins
-    one snapshot (`observablePin` / worker snapshot lease) and one
-    interpretation clock. The live owner is the conditional field
-    (`compileConditionalFieldQuery` → `observeField` →
-    `projectAcceptingIndex`). Historical `prefixSK` / `selectGammaWalk` /
-    budget-aware-q are not the admission-order owner. There is no all-K
-    prefix promise and no runtime self-replay. Later consensus does not
-    reorder the delivered set. Missing generation or condition pins fail
-    closed. Product identity is a tagged memory or native source-evidence
-    target; source-record-only delivery must not mint a memory or capsule id.
-20c. **Mechanism and measurement stay separate.** Finite-model and planted
-    integration checks do not establish live provider/cache availability,
-    production Clock-A, dataset KPI, or prepare-time snapshot compatibility.
-    Missing evidence remains `NOT_REPLAYABLE`; do not replace it with zeros.
+     interpretations, exploration clues, conditional conclusions, and admitted
+     assertions hold distinct authority. Structural admission and derivation
+     never certify semantic fidelity or world truth; unresolved premises limit
+     dependent conclusions without revoking independent authorized source access.
+13. Evidence and governance changes—including path plasticity (reinforcement,
+    weakening, redirection, retirement)—must be explicit, structured, and
+    auditable.
+14. Control-plane outputs (`ActivationCandidate`, manifestation hints, stance
+    bias) never silently become durable memory.
+15. Synthesis organizes understanding; it does not directly legislate durable
+    claims.
+16. `ContextLens` projects memory into the current turn; it does not form a
+    second memory layer.
+17. Garden, Auditor, Janitor, and Librarian work are fire-and-forget relative to
+    the main consumer-agent path. Librarian never creates merge, template, or
+    path-compression proposals from textual resemblance alone; legacy
+    tasks/proposals of those kinds fail/remain unaccepted.
+18. **Embedding is recall supplement only.** Vector scores may influence
+    ranking/measurement, never durable-truth admission.
+19. **LLMs and connected agents propose, Alaya decides.** Agent outputs enter
+    through the proposal route or governed signal triage
+    (`SignalService.evaluateTriage` + `MaterializationRouter`). Host messages
+    via `soul.capture_host_session` are *input*, not truth claims; ordinary
+    `soul.recall` ignores `recent_turn` and `soul.report_context_usage`
+    captures nothing. Closed host-session container chunks enqueue
+    `SOURCE_STATEMENT_SESSION` work. Deterministic source-structural relations
+    require no human approval; durable world claims and provenance-backed
+    conditional assertions follow §12 and §35–§36. When an attached MCP session
+    lacks `ALAYA_RUN_ID`, attach creates a canonical session run keyed by the
+    process-stable MCP `session_id`.
+20. **Delivered ≠ used.** Trust state distinguishes `installed`, `configured`,
+    `delivered`, `used`, `skipped`, `unverifiable`, and `mixed`. Repeated `used`
+    receipts decay; `trust_mode = automatic` carries reduced weight; durable
+    truth still requires governance. Delivery, inspection, and top-k membership
+    carry weight `0`.
+20a. **Source write persist-first.** Evidence creation persists its root capsule
+     before optional span/formation work; optional formation or later
+     memory-create failure never deletes or invalidates the committed capsule.
+20b. **One query as-of and one pinned generation.** Ordinary Recall pins one
+     snapshot (`observablePin` / worker lease) and one interpretation clock
+     through `compileConditionalFieldQuery` → `observeField` →
+     `projectAcceptingIndex`. Missing generation or condition pins fail closed;
+     source-record-only delivery never mints a memory or capsule ID.
+20c. **Mechanism and measurement stay separate.** Finite-model or planted
+     checks do not prove provider/cache availability, natural-data KPI, or
+     snapshot compatibility; missing evidence stays `NOT_REPLAYABLE`.
 
-### Temporal Relation Contract
+### Temporal Relation and Cutover Contract
 
 | Record | Authority | Active-state rule |
-| --- | --- | --- |
-| Evidence | Source observation/event time and supporting material | Time is captured as source evidence, never invented from storage metadata. |
-| RelationAssertion | Immutable relation truth | Evidence-grounded and exactly one typed validity form is required. |
-| EventLog admission or resolution | Ordered transaction and revision history | Accepted admission and a typed resolution append history; neither rewrites an assertion. |
-| PathRelation | Current/as-of recall routing projection | Rebuildable from accepted assertions and EventLog history; it is not truth. |
-| Nomination, deferred record, or quarantine row | Work awaiting proof or governance | Never eligible for active recall or projection formation. |
+|---|---|---|
+| Evidence | Source observation/event time and material | Never invented from `created_at` or storage metadata. |
+| `RelationAssertion` | Immutable relation truth | Evidence-grounded + single typed `RelationValidity` (`bounded`, `open`, `timeless`). |
+| EventLog admission / resolution | Ordered transaction and revision history | Appended atomically; never rewrites assertions. |
+| `PathRelation` | Rebuildable current/as-of routing projection | Derived deterministically from accepted history; not truth. |
+| Proposal / deferred / quarantine | Work awaiting proof or governance | Never active in recall or projection formation. |
 
-| Validity state | Meaning | May be active |
-| --- | --- | --- |
-| `bounded [from,to)` | Relation is valid from `from` and before `to`. | Yes, only while `as_of` is in the interval and governance permits it. |
-| `open [from,+infinity)` | Relation is valid from `from` without a known end. | Yes, only from `from` and while governance permits it. |
-| `timeless` | Explicit policy exception with no temporal interval. | Yes, only when the governing policy explicitly permits it. |
-| Unknown | Time proof is absent, ambiguous, or invalid. | No; proposal, deferred, or quarantine only. |
-
-### Temporal Major-Cutover Contract
-
-| Stage | Required behavior |
-| --- | --- |
-| Migration | Work on a database copy and retain the original. Convert a legacy row only when its evidence and typed validity are provable; record input/output counts and digests. |
-| Quarantine | Move every unprovable legacy row to a reasoned, auditable quarantine record. Never manufacture `valid_from = created_at`; quarantine cannot form an active projection. |
-| Rebuild | Recreate each `PathRelation` deterministically from accepted EventLog admissions and appended resolutions for a named `as_of`; prove replay, idempotency, interval, and concurrent-resolution behavior. |
-| Cutover | Atomically select the new schema and derived projections only after reconciliation. Startup must fail closed when assertion, EventLog, or projection schema revisions are old, unknown, or mixed. |
-| Rollback | Atomically return to the retained original database or a verified assertion/EventLog/projection schema-and-data tuple. If that tuple has no retained projection, rebuild it from the selected history for a named `as_of` before service starts; otherwise fail closed. Do not mutate history, promote quarantine, or silently bridge mixed schemas. |
+- **Migration & Cutover:** Run offline on a database copy retaining the
+  original; move unprovable legacy rows to reasoned quarantine (never
+  `valid_from = created_at`). Atomically cut over only after count/digest
+  reconciliation; startup fails closed on old, unknown, or mixed
+  assertion/EventLog/projection revisions.
+- **Rollback:** Atomically revert to the retained original DB or a verified
+  schema-and-data tuple (rebuilding missing projections for a named `as_of`
+  before serving, else fail closed).
 
 ## Surface
 
-21. Alaya has **no agent-frontend GUI and no conversation TUI**.
-    Memory-tooling surfaces (Memory Inspector, daemon-config panel)
-    are permitted and MUST stay strictly within memory-domain
-    operations: provider/runtime config, memory ontology inspection,
-    trust-state reporting. Agent-flow UIs (chat turns, coding turns,
-    conversation orchestration, in-app slash dispatch beyond Alaya
-    boot triggers) remain forbidden. The agent-attach surfaces are
-    MCP (for agent attach) and the `alaya` CLI; the Memory Inspector
-    is an additional memory-management surface, not an agent surface,
-    and never participates in agent control flow. Inspector writes
-    are limited to daemon runtime parameters; durable memory writes
-    must still go through the proposal / governance path per §19.
-21a. Public-facing copy (README, marketing surfaces, leaderboard
-    disclosure, blog posts) must describe Alaya as a memory plane for
-    CLI agents (Codex / Claude Code / similar) and must not invite
-    non-engineering users to install or operate Alaya. Surfaces that
-    reach a non-engineering audience (e.g. xiaohongshu) require either
-    a separate consumer-facing product or a charter amendment to §21
-    before publication.
-21b. `reviewer_identity` on review records (`proposals.reviewer_identity`
-    column, `caused_by` field on `SOUL_REVIEW_*` /
-    `SOUL_PROPOSAL_RESOLVED` event_log rows, `reviewer_identity`
-    request field on `soul.review_memory_proposal`) has two v0.1
-    trust modes. When `ALAYA_REVIEWER_TOKEN` and
-    `ALAYA_REVIEWER_IDENTITY` are configured, the daemon binds review
-    identity server-side and rejects missing, bad, or mismatched
-    reviewer tokens; payload identity cannot override the configured
-    identity. When local binding is not configured, the field remains
-    an agent-asserted attestation and operators MUST treat it as "the
-    agent / human attested to this identity" rather than "the runtime
-    verified this identity".
-22. MCP tool surface and CLI fallback share one runtime contract. CLI
-    fallback parity with MCP is enforced by tests.
-23. Attach / Profile changes write only after preview + explicit
-    confirm. Silent profile mutation is forbidden.
-24. Alaya-original CLI and memory-tooling surfaces
-    (`attach` / `backup` / `detach` / `doctor` / `export` / `import` /
-    `inspect` / `install` / `mcp` / `review` /
-    `source-grounding-defers` / `source-index-lexical` / `status` / `temporal-cutover` /
-    `tools` / `update`) are Alaya-original (no upstream equivalent)
-    and any new work in these areas MUST cite the relevant Surface
-    invariant (§21-§23) and `docs/handbook/architecture.md` §Surface
-    Shape for design authority.
-
-25. **MCP and Protocol SemVer Contract.** Alaya publishes three
-    concentric public contracts that downstream consumers (sibling
-    agents, MCP clients, SDK pinning) may rely on:
-
-    - **MCP tool surface:** tool names and descriptions in
-      `packages/engine-gateway/src/provider/soul-tool-specs.ts`, and
-      every Zod schema transitively reachable from an MCP request or
-      response type in `packages/protocol/src/surfaces/mcp-types.ts`.
-      The authoritative definition is transitive reachability, not a
-      hand-maintained file list. `semver-tool-surface.test.ts` pins
-      the tool names/descriptions; `semver-surface.test.ts` computes
-      and pins the reachable schema set.
-    - **EventLog payload surface:** payload schemas under
-      `packages/protocol/src/events/*`.
-    - **Runtime control-plane config surface:** config schemas under
+21. Alaya has **no agent-frontend GUI and no conversation TUI**. Memory
+    Inspector and daemon-config panels must remain strictly memory-domain
+    tooling (config, ontology inspection, trust-state reporting) and never
+    agent-flow/chat UIs or direct durable write paths.
+21a. Public copy must describe Alaya as a **memory plane** for CLI agents
+     (`Codex` / `Claude Code` / similar) and must not target non-engineering
+     audiences without a charter amendment.
+21b. `reviewer_identity` binds server-side when `ALAYA_REVIEWER_TOKEN` and
+     `ALAYA_REVIEWER_IDENTITY` are configured (rejecting missing/mismatched
+     tokens); otherwise it is an operator-attested field.
+22. MCP tool surface and CLI fallback share one runtime contract, enforced by
+    parity tests.
+23. Attach / Profile changes write only after preview and explicit confirmation;
+    silent profile mutation is forbidden.
+24. Alaya-original CLI and memory-tooling surfaces (`attach` / `backup` /
+    `detach` / `doctor` / `export` / `import` / `inspect` / `install` / `mcp` /
+    `review` / `source-grounding-defers` / `source-index-lexical` / `status` /
+    `temporal-cutover` / `tools` / `update`) must cite §21–§23 and
+    `docs/handbook/architecture.md` `## Surface Classification` for design
+    authority.
+25. **MCP and Protocol SemVer Contract.** Three concentric public contracts
+    carry SemVer obligations:
+    - **MCP tool surface:** names/descriptions in
+      `packages/engine-gateway/src/provider/soul-tool-specs.ts` and every Zod
+      schema transitively reachable from
+      `packages/protocol/src/surfaces/mcp-types.ts` (pinned by
+      `semver-tool-surface.test.ts` and `semver-surface.test.ts`).
+    - **EventLog payload surface:** `packages/protocol/src/events/*`.
+    - **Runtime control-plane config surface:**
       `packages/protocol/src/config/app-config.ts`.
+    - *Patch (`x.y.Z`):* bug/perf/internal refactor with no public schema change.
+      *Minor (`x.Y.z`):* strictly additive fields, event types, tool names, or
+      non-discriminator enum values. *Major (`X.y.z`):* removals, renames,
+      narrowed nullability, newly-required fields, removed enum values, semantic
+      redefinitions (including changing ordinary Recall ranking/delivery,
+      rejecting legacy `delivery_path`/`ranking_authority`, or temporal assertion
+      cutover).
+    - Removals require `@deprecated` JSDoc at least one minor ahead, a
+      `CHANGELOG.md` entry, and a sibling-compat smoke test. PRs touching
+      covered files must cite §25 and declare the SemVer step.
 
-    Workspace-internal TypeScript interfaces with no MCP, EventLog,
-    config, or production-consumer surface are out of SemVer scope
-    until they gain a real consumer.
+## Scope and Concurrency
 
-    SemVer step meanings:
-
-    - Patch (`x.y.Z`): bug fixes, performance work, or internal
-      refactors with no public schema change.
-    - Minor (`x.Y.z`): additive only, including new optional
-      payload/result fields, new event types, new tool names, and new
-      enum values that are not discriminator keys.
-    - Major (`X.y.z`): any removal, rename, narrowed nullable,
-      newly-required field, removed enum value, renamed tool, or
-      semantic redefinition on any covered layer.
-
-    The temporal assertion cutover is an intentional **major** change:
-    covered protocol/EventLog schemas that introduce immutable
-    `RelationAssertion` authority, required typed validity, typed
-    resolution history, or redefine `PathRelation` from durable
-    structure to a derived projection cannot be shipped as a minor
-    compatibility shim. Runtime startup must identify the assertion,
-    EventLog, and projection schema revisions together and fail closed
-    for an old, unknown, or mixed combination. Any compatibility reader
-    belongs to an offline migration and must not make mixed-schema
-    formation or recall operational.
-
-    Changing ordinary Recall ranking or delivery semantics, rejecting
-    explicit legacy `delivery_path` / `ranking_authority` values, or
-    treating `soul.recall` as a passive-extraction enqueue path is a
-    **major** under this section even when some Zod shapes stay
-    additive. Historical EventLog/`ranking_authority` readers may remain
-    for old rows; they must not execute an alternate algorithm.
-    Deleting a still-parseable ignored MCP response field is a later
-    protocol major.
-
-    Removing a public symbol requires `@deprecated` JSDoc on the
-    schema at least one minor release before removal, a
-    `CHANGELOG.md` entry naming the symbol and target removal version, and a
-    sibling-compat smoke test asserting the old shape still parses. Earliest removal is the next minor after the
-    deprecation minor.
-
-    Sibling consumers pin `@do-soul/alaya-protocol` to the minor, for
-    example `^0.2.0`. Cross-major upgrades require reading the
-    relevant maintenance migration entry.
-
-    PRs touching `packages/protocol/src/events/`,
-    `packages/protocol/src/config/app-config.ts`,
-    `packages/engine-gateway/src/provider/soul-tool-specs.ts`, or any
-    Zod schema transitively reachable from MCP request/response types
-    in `mcp-types.ts` must cite §25 and declare the SemVer step. If
-    either SemVer snapshot moves, the PR is touching the MCP contract.
-
-## Scope and concurrency
-
-29. **Default Scope Invariant.** All Alaya-redesign / clean-room
-    storage paths, MCP tool inputs, HTTP routes, and resource access
-    code MUST be workspace-scoped and caller-context-bound by default.
-    Code that exposes object access without a workspace check, or that
-    accepts payload-supplied scope overriding the trusted call context,
-    is **Blocking by default** at review. Patches must fix at the
-    service or storage layer, not at the handler boundary.
-30. **Fix at Source.** When a security or scoping defect is discovered
-    in code reachable from multiple surfaces (MCP, HTTP, CLI), the fix
-    MUST land at the deepest shared point — typically a service or
-    repo method — not at one handler. Symptom-fix at a single handler
-    boundary while another surface still calls the unsafe primitive is
-    **Blocking by default**.
-31. **Single-Source Concurrency.** Any read-modify-write that needs
-    serialization MUST be performed inside a single SQLite
-    `connection.transaction(...)` (or equivalent storage-owned atomic
-    primitive). In-process locks (`Map<string, Promise<void>>`,
-    semaphores) are not acceptable substitutes for correctness; they
-    may exist as defense-in-depth only with explicit comments and a
-    test that runs without them. Multi-process correctness must come
-    from storage-level CAS.
+29. **Default Scope Invariant.** All storage paths, MCP inputs, HTTP routes, and
+    resource access must be workspace-scoped and caller-context-bound by
+    default; payload-supplied scope cannot override trusted call context.
+    Violations are blocking.
+30. **Fix at Source.** Security, erasure, or scoping fixes for multi-surface
+    code (MCP, HTTP, CLI) must land at the deepest shared service or repository
+    layer, never only at one handler boundary.
+31. **Single-Source Concurrency.** Serialized read-modify-write transitions must
+    execute inside a single SQLite `connection.transaction(...)` with
+    storage-level CAS; in-process maps/semaphores are defense-in-depth only.
 
 ## Docs
 
-32. Track ordinary engineering debt in PR descriptions, not a parallel
-    handbook issue list. The in-repo authority for live recall is
-    `docs/handbook/recall.md`. Gitignored `.do-it/` execution artifacts are
-    not handbook or invariant truth. Bench KPI results and degradations belong
-    in ignored `.bench-artifacts/history/`; `docs/bench-history/` owns
-    reproduction policy, pinned datasets, and sampling definitions.
+32. Track ordinary engineering debt in PR descriptions, not a handbook issue
+    list. `docs/handbook/recall.md` is the in-repo live recall authority;
+    gitignored `.do-it/` and `.bench-artifacts/history/` are not handbook truth.
+    `docs/bench-history/` owns reproduction policy and dataset pins.
 33. `docs/handbook/` is the maintained implementation handbook.
-34. `docs/archive/` holds retired-but-preserved documents. Archive
-    readability does not authorize current execution or override the
-    handbook.
+34. `docs/archive/` holds retired documents; archive readability never
+    authorizes execution or overrides the handbook.
 
 ## Governance (two-route promotion)
 
-35. **Garden's only legal claim output is `draft`.** The deterministic
-    `SignalService.evaluateTriage` + `MaterializationRouter` chain is
-    the **low-trust durable producer**. It may write `MemoryEntry`
-    rows whose triage outcome admits durable storage, but the only
-    legal `ClaimForm` it may emit carries `claim_status = draft`.
-    Producer-side "high-confidence + evidence_refs auto-active" is
-    not a legal shape; syntactic presence of `evidence_refs` is not a
-    verification fact about the referenced capsule.
-    `SoulToolGovernanceAdapter` continues to gate active runtime
-    governance on `claim_status ∈ {active, contested, winner}`, so a
-    draft claim does not enter runtime governance until a typed
-    resolution promotes it.
-
-36. **Active promotion requires a typed resolution recorded in
-    EventLog through one of two reviewer-bound routes.** Both routes
-    share the same audit shape and reviewer-identity binding:
-
-    - **Inline typed resolution** via the `soul.resolve` MCP verb.
-      Six resolutions (`confirm` / `reject` / `correct` / `stale` /
-      `defer` / `not_relevant`). The claim lifecycle transition is a
-      storage-CAS mutation paired with its EventLog row through the
-      EventPublisher transaction path; optimistic concurrency at the
-      SQL boundary (`AND claim_status = ?`) ensures a concurrent
-      confirm / reject race resolves to a single winner.
-    - **Out-of-band Proposal** via `soul.propose_memory_update` plus
-      `soul.review_memory_proposal`. Unchanged from v0.3.8; this is
-      the explicit host-assertion or operator-review path. Inspector
-      writes that appear to "promote" or "retire" route through this
-      path by posting a typed Proposal.
-
-    Inspector is the **origination surface**, never the persistence
-    surface — it cannot directly mutate durable state (consistent
-    with §21 and §21b). The two-route language replaces any prior
-    "single proposal route" wording in lower-level docs.
-
-    For the broader governance route map, see
-    `docs/handbook/architecture.md` §Governance Route Families.
+35. **Garden's only legal world-claim output is `draft`.** Deterministic
+    `SignalService.evaluateTriage` + `MaterializationRouter` may admit
+    `MemoryEntry` rows, but any emitted `ClaimForm` must carry
+    `claim_status = draft`. Syntactic `evidence_refs` do not auto-activate
+    claims; `SoulToolGovernanceAdapter` gates active runtime governance on
+    `claim_status ∈ {active, contested, winner}`. Deterministic
+    source-structural relations (§12 tier 2) require no claim promotion.
+36. **Active world-claim promotion requires a typed EventLog resolution via one
+    of two reviewer-bound routes** (both sharing §21b reviewer-identity binding):
+    - **Inline `soul.resolve`:** six resolutions (`confirm` / `reject` /
+      `correct` / `stale` / `defer` / `not_relevant`) via EventPublisher +
+      SQLite CAS (`AND claim_status = ?`).
+    - **Out-of-band Proposal:** `soul.propose_memory_update` +
+      `soul.review_memory_proposal`. Inspector originates proposals here and
+      never directly mutates durable state (§21, §21b). See
+      `docs/handbook/architecture.md` `## Governance Route Families`.

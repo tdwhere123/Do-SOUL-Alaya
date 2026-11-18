@@ -1,540 +1,200 @@
 # Architecture Handbook
 
-Alaya is a local-first memory plane for CLI agents. This file owns packages,
-surfaces, writers and recovery boundaries. The numbered
-[invariants](invariants.md) take precedence; [Recall](recall.md) owns live
-query, observation, conditional proof and delivery mechanics.
+Alaya is a local-first memory plane for CLI agents. This file owns package
+boundaries, surfaces, the three-tier epistemic/relation boundary, storage table
+classification, write models, and governance route families.
+[Invariants](invariants.md) take precedence; [Recall](recall.md) owns live query
+and conditional-field execution.
 
-## SOUL Model
+## SOUL Model and Three-Tier Relation Boundary
 
 | Layer | Authority | Examples |
-| --- | --- | --- |
+|---|---|---|
 | Memory ontology | Governed durable records | `EvidenceCapsule`, `MemoryEntry`, `ClaimForm`, immutable `RelationAssertion` |
-| Structure registry | Rebuildable routing, arbitration and visibility | `PathRelation`, conflict and manifestation projections |
+| Structure registry | Rebuildable routing, arbitration, and visibility | `PathRelation`, conflict and manifestation projections |
 | Runtime control | Per-turn assembly and effects | `RecallQuery`, `ActivationCandidate`, `ContextPack`, trust summaries |
 
-Objects are faceted stable semantic units. Paths are learnable conditional
-relations; recall, prediction and reminder are their runtime manifestations,
-not independent durable truth. Source evidence owns observation time;
-`RelationAssertion` owns immutable relation truth; `PathRelation` projects its
-current/as-of eligible edges. Durable authority means governed records and
-resolution history, not infallible interpretation or world knowledge.
-Authorized source access does not require a completed Q/H/C interpretation;
-conditional use remains explicitly fallible. See
-[Recall's interpretation boundary](recall.md#fallible-interpretation-and-task-use)
-and invariant §12.
+Four orthogonal axes govern authority; no derived view silently replaces an axis
+owner:
 
-## Four Axes
-
-- **Object:** faceted semantic units, not bare atoms.
+- **Object:** faceted semantic units (`EvidenceCapsule`, `MemoryEntry`,
+  `SynthesisCapsule`, `ClaimForm`), not bare atoms.
 - **Path:** conditional relation structures and learnable transfer.
-- **Evidence:** support, provenance and plasticity evidence.
-- **Governance:** conflict, eligibility and maximum per-turn effects.
+- **Evidence:** support, provenance, and plasticity evidence.
+- **Governance:** conflict, eligibility, and maximum per-turn effects.
 
-An object or state is authoritative on only its own axis; a derived view may
-reference it but must not silently replace it.
+Across relation and claim formation, Alaya enforces a **Three-Tier Epistemic &
+Relation Boundary**:
+
+1. **Governed world claims (`ClaimForm` / durable `MemoryEntry` world truth):**
+   require user signal or an approved `Proposal` / inline `soul.resolve`
+   ([invariants §12, §35–§36](invariants.md)).
+2. **Deterministic source-structural relations:** recorded time/author,
+   container round succession (`next_round_in_session`),
+   `semantic_dependencies`, and `source_statement_dependencies` are objective
+   source facts requiring zero human approval.
+3. **Provenance-backed conditional relations (`H_s`, `C`):** source-anchored
+   assertions in `relation_assertions` + `relation_assertion_evidence` +
+   `relation_path_projections` carry explicit `RelationValidity` (`bounded`,
+   `open`, or governance-permitted `timeless`) and are consumable under explicit
+   provenance qualifiers (`conditional_support`) without claiming world-truth
+   approval.
+
+See [Recall's interpretation boundary](recall.md#fallible-interpretation-and-task-use)
+and [conditional meaning](recall.md#conditional-meaning).
+
+## Storage Table Classification
+
+| Tier / Status | Tables | Role |
+|---|---|---|
+| Active online relation backbone | `relation_assertions`, `relation_assertion_evidence`, `relation_path_projections` | Provenance-backed relation assertions, evidence links, and rebuildable as-of path projections. |
+| Active source-statement bridge | `source_statement_memory_bindings`, `source_statement_dependencies` | Witness-to-source-root bridging and erasure/invalidation closure. |
+| Library enrichment | `garden_semantic_artifacts` (and `garden_semantic_*` tables) | Offline/Library semantic artifact enrichment, outside core online truth. |
+| Retired / migration-only | `factor_descriptors`, `factor_incidences`, `evidence_semantic_factor_formations`, `evidence_fact_frame_formations` | Unreferenced by live recall or relation formation; retained solely for legacy schema and erase-migration compatibility. |
 
 ## Temporal Relation Contract
 
-Evidence provides source observation/event time, never `created_at` as a
-surrogate. Memory `created_at` is storage existence time: it is not assertion
-validity, not source observation time, and not an authorization coordinate.
-Ordinary recall `time_field=created_at` is a listing filter. Query `as_of` /
-`referenceTime` is the interpretation clock. Inspector search windows parse
-local-timezone UI text; Recall and SQLite event-time windows compare UTC
-instants. Active assertions require one typed interval: bounded `[from,to)`,
-open `[from,+infinity)` or explicitly permitted timeless. Unknown validity
-stays in proposal, deferred or quarantine state. A nomination is a candidate;
-deterministic normalization and governance decide admission.
-
-Accepted admission atomically appends EventLog history, applies the immutable
-assertion and derives its projection or an explicit no-active-projection
-outcome. Typed contradiction, retraction, expiry, supersession and retirement
-append resolution history and rederive/invalidate projection in the same
-transaction, before audit and notification. Replay of identical accepted
-history is deterministic and idempotent; concurrent resolutions must preserve
-one ordered history. `PathRelation` has no independent truth ledger.
+Evidence owns source observation/event time; `created_at` is storage existence
+time only (never assertion validity, source time, or authorization). Query
+`as_of` is the interpretation clock; Recall compares UTC instants while
+Inspector search parses local-timezone UI text. Active assertions require one
+typed validity (`bounded`, `open`, or `timeless`); unknown validity stays in
+proposal, deferred, or quarantine state. Accepted admissions and typed
+resolutions (`contradicted`, `retracted`, `expired`, `superseded`,
+`governance_retired`) atomically append EventLog history and derive/invalidate
+`PathRelation` projections before audit and notification.
 
 ### Temporal Migration, Cutover, and Rollback
 
-Offline migration works on a copy, retaining the original and reconciling
-counts/digests. Unprovable rows enter reasoned quarantine, not active recall.
-Rebuild for named `as_of` uses the accepted EventLog history. Cutover selects
-only a reconciled assertion/EventLog/projection schema-and-data tuple;
-startup rejects old, unknown or mixed revisions. Rollback selects a verified
-retained tuple or rebuilds its missing projection before serving, otherwise
-fails closed. Neither migration nor rollback manufactures time, rewrites
-assertion history or activates quarantine. This is a protocol/EventLog major
-under invariant §25, not an online mixed-schema reader.
-
-Offline preparation is the public `@do-soul/alaya-storage` library API
-`prepareTemporalCandidate`: it copies a live legacy schema, initializes a
-candidate, reconciles quarantine, and publishes the candidate file plus an
-unselected receipt (`kind: temporal_offline_candidate`, `selected: false`).
-It never changes the source path or selects the candidate. `alaya temporal-cutover`
-consumes those filesystem artifacts and owns selection, rollback, and recovery.
-There is no second preparation CLI.
-The offline CLI dispatches before normal database bootstrap and holds maintenance
-leases on physical resource paths. A journal-owned durable selection is the
-recovery commit point: recovery verifies that exact selected tuple and completes
-the journal forward, preserving writes accepted after a restart. Interruptions
-before selection compensate instead. Explicit rollback verifies the retained
-source witness before publishing its pointer. Selected database filenames have
-a durable establishment marker; it never grants selection or readiness, and a
-missing established database cannot silently become a fresh initialization.
-Candidate, receipt, pointer and journal publication syncs file contents and
-their containing directory; a sync failure is an error, not durable success.
-
-## Recall algorithm
-
-The ordinary path is the conditional field entered by `RecallService.recall`
-(or its worker and MCP/CLI adapters): `compileConditionalFieldQuery` →
-`observeField` → `projectAcceptingIndex`. SourceRecord and retained-capsule
-root kinds are native SourceIndex discovery targets, not alternative selectors.
-Historic prefix, flood, SliceKey, family-max, Gamma and comparison readers are
-not a second live execution mode. Association and qualification are described
-in [Recall](recall.md#conditional-meaning); connectivity alone proves neither
-relevance nor a source-grounded result.
+Offline preparation (`prepareTemporalCandidate` in `@do-soul/alaya-storage`)
+copies a live legacy schema, reconciles counts/digests, quarantines unprovable
+rows without inventing `valid_from = created_at`, and emits an unselected
+candidate receipt (`selected: false`). `alaya temporal-cutover` owns
+pre-bootstrap maintenance leases, journal-backed selection, forward recovery on
+interrupted selected tuples, pre-selection compensation, and explicit rollback
+to the retained original DB or a verified assertion/EventLog/projection tuple
+(rebuilding missing projections for a named `as_of` before serving, else failing
+closed). Startup rejects old, unknown, or mixed schema tuples (invariant §25
+major).
 
 ## Package Shape
 
 ```text
 packages/protocol          Zod domain, EventLog, public contracts (zod only)
-packages/graph-algorithms  dependency-free pure helpers
-packages/cjk-segmentation  Node-only native segmenter (protocol, @node-rs/jieba)
+packages/graph-algorithms  Dependency-free pure max-min and graph helpers
+packages/cjk-segmentation  Node-only native segmenter (@node-rs/jieba)
 packages/storage           SQLite migrations, mechanical repositories/readers
-packages/core              business transitions, Recall, governance, EventPublisher
+packages/core              Business transitions, Recall, governance, EventPublisher
 packages/soul              SOUL kernel, Garden, heuristics through protocol ports
-packages/engine-gateway    provider attempt/transport and MCP bridge
-packages/eval              evaluation schemas and metric helpers
-apps/core-daemon           composition root, workers, stdio MCP, daemon HTTP/CLI
-apps/inspector             local memory-management UI
-apps/bench-runner          offline measurement and artifact readers
+packages/engine-gateway    Provider attempt/transport and MCP bridge
+packages/eval              Evaluation schemas and metric helpers
+apps/core-daemon           Composition root, workers, stdio MCP, daemon HTTP/CLI
+apps/inspector             Local memory-management UI
+apps/bench-runner          Offline measurement and artifact readers
 ```
 
-Packages never import `apps/*`. Core must not import engine-gateway, and
-provider-edge SDK types do not leave that gateway without protocol
-normalization. Protocol has no workspace-package dependencies. The daemon
-wires the services, private SourceIndex producer, snapshots and worker
-lifetimes; storage supplies mechanical transactions, not business decisions.
-Provider consumers request operations but the gateway owns transport retry,
-response consumption, completion and usage classification. A parseable cache
-shard is not a completed attempt: exact request/route, raw response,
-reservation and settled witness must agree before readmission. Cache-only
-replay does not infer a new grant from credentials or a model name.
+Packages never import `apps/*`; `core` never imports `engine-gateway`; provider
+SDK types normalize inside `engine-gateway`. `engine-gateway` owns provider
+transport retry, completion, and settled-attempt witnesses (cache hits or raw
+shards alone never infer a grant).
 
-## Surface Shape
+## Surface Classification
 
-- **MCP:** stdio agent attach. Daemon HTTP serves its API and Inspector;
-  outbound loopback MCP client activity is not an Alaya HTTP MCP server.
-- **CLI:** `bin/alaya.mjs` command surface, including `alaya tools call`
-  fallback, shares the memory-tool contract with MCP. `import` dispatches before
-  normal runtime bootstrap and owns exclusive config/database maintenance leases.
-  Payload imports restore only the current target resolved from captured TOML,
-  then process `DATA_DIR`, then the config-directory default (relative paths use
-  the captured launch directory); bundled database paths cannot redirect payloads.
-  Config-only imports may select the bundled TOML pointer but require both current
-  and selected databases to be inactive. Configuration changes before lease
-  acquisition reject the import. Restore failures retain partial-state audit;
-  they do not claim that an already restored database was rolled back.
-  `doctor` and `status` observe readiness without an eager embedding provider
-  probe; help also omits that probe. Tools/MCP retain normal recall-capable bootstrap. These are internal
-  lifecycle fixes under invariants §21–§25, not new tools or schema changes.
-- **Memory Inspector:** local memory-management and runtime-parameter UI,
-  not a chat or agent-turn frontend. Managed `alaya inspect` listens on
-  `127.0.0.1:5174` and uses daemon `127.0.0.1:5173` (or `ALAYA_DAEMON_URL`).
-  Manual Vite SPA (`pnpm --dir apps/inspector/web dev`) listens on
-  `127.0.0.1:5175` with `strictPort` and proxies `/api` to Inspector 5174; the
-  daemon on 5173 remains required for that API. Port 3000 is not a product
-  default. Auto-session cookies mint for `127.0.0.1` / `::1` / `localhost`,
-  including IPv4-mapped `::ffff:127.0.0.1`, or when conninfo is missing on that
-  127.0.0.1-only listener. An explicit non-loopback client, including
-  `127.0.0.2`, is refused. This is not daemon request-token trust and not the
-  daemon 127/8 listen classifier. Durable writes still pass through governance.
-- **Host slash boot trigger:** a host-native launcher for
-  `alaya inspect --open` if supported by that host/version, not an MCP tool
-  or agent flow.
+- **MCP (`stdio`):** Primary agent-attach surface; daemon HTTP is not an MCP
+  server.
+- **CLI (`bin/alaya.mjs`):** Shares the runtime contract with MCP (`alaya tools
+  call`); `import` and `temporal-cutover` dispatch pre-bootstrap under exclusive
+  maintenance leases, while `doctor` and `status` skip eager embedding-provider
+  probes.
+- **Memory Inspector:** Local memory-management and runtime-parameter UI only
+  (`127.0.0.1:5174` talking to daemon `127.0.0.1:5173`; manual Vite SPA `5175`;
+  port `3000` is not a product default). Auto-session trusts loopback
+  `127.0.0.1` / `::1` / `localhost` on the `127.0.0.1`-only listener (refusing
+  `127.0.0.2`), distinct from daemon `ALAYA_REQUEST_TOKEN` auth. Never a chat UI
+  or direct durable write path.
+- **Host slash boot trigger:** Host-native launcher for `alaya inspect --open`,
+  not an MCP tool or agent flow.
 
-There is no daemon SSE/WebSocket event stream. Persistent HTTP request tokens
-are operator-owned: changing `ALAYA_REQUEST_TOKEN` and restarting rotates the
-credential; when absent, normal HTTP startup fails closed and managed temporary
-startup passes a process-local token to its Inspector child. Remote non-loopback
-bind is break-glass, not secured by a desktop header or a single token for
-multi-host deployment. Unknown-peer rate-limit refusal defaults on when
-`DAEMON_HOST` is a non-loopback TCP name, using the same loopback classifier
-as listen policy, including IPv4-mapped loopback. Unix `SO_PEERCRED` remains
-the peer identity when present. A unix socket plus default loopback
-`DAEMON_HOST` does not by itself enable that refusal. Provider configuration and secrets use the install
-route, not Inspector direct durable-memory writes. Startup validates a captured
-effective environment: process values override config-directory `.env` values
-per key, including explicit empty process values. Auth, listen/socket policy and
-reviewer binding consume that same snapshot without mutating process environment.
-Database selection remains separately owned by configured-paths (TOML, process
-`DATA_DIR`, default); file `.env` cannot redirect maintenance or runtime storage.
-Installer updates only its embedding/provider keys and explicit Garden mode,
-preserving unrelated operator lines. Install, keychain and runtime config writers
-share the exclusive config-file lock through publication and rollback. Conflicting
-installs reject without writing; an interrupted lock is not stolen automatically.
-Reconcile an interrupted install's audit/files before removing its orphaned lock
-and retrying with `--force`. File-secret admission reuses the runtime containment
-rule; installation never copies an external secret implicitly. Review identity is
-server-bound only with configured reviewer token and identity; otherwise it
-is an attestation (invariant §21b).
-
-Source-bearing responses use current Protocol `SourceDisclosure` compact
-encoding with the qualification projected at read time; archive named-object
-readers are not current ingress. See [disclosure](recall.md#source-disclosure).
-Public MCP, EventLog and runtime config surfaces have the SemVer obligations
-in invariant §25. No internal adapter alone publishes a new public API.
+No SSE/WebSocket event stream exists. Normal HTTP startup fails closed without
+`ALAYA_REQUEST_TOKEN`; remote non-loopback `DAEMON_HOST` enables unknown-peer
+rate-limit refusal (loopback/IPv4-mapped loopback and `SO_PEERCRED` peer
+identity remain distinct). Process environment overrides config-directory
+`.env` per key for auth, listen policy, and reviewer binding (`§21b`), while
+configured-paths (`TOML`, `DATA_DIR`, default) own DB selection.
+Installer/keychain/config writers share an exclusive config lock and never
+auto-steal interrupted locks. Source-bearing responses use Protocol
+`SourceDisclosure` compact encoding ([disclosure](recall.md#source-disclosure));
+public MCP, EventLog, and config schemas carry invariant §25 SemVer obligations.
 
 ## Runtime Write Model
 
-Storage owns transaction/CAS mechanics; Core and daemon own runtime truth,
-audit obligations and effects. Statement order, commit boundary and business
-visibility are separate properties:
+Storage owns transaction/CAS mechanics; Core and daemon own runtime truth, audit
+obligations, and effects (companion: [runtime
+transactions](runtime-transactions.md)):
 
 | Write model | Commit and visibility contract |
-| --- | --- |
-| Atomic state + audit | `EventPublisher` mutation methods pair state and EventLog in one synchronous SQLite transaction on the same connection. Append-before-mutate supplies event identities; `mutateThenAppendMany` derives events from the guarded mutation. Either order rolls back together on failure. |
-| Atomic receipt + audit | Projection generation/pointer activation and causal-usage recording also commit their rows and audit together. Calling these receipts does not imply a separate audit transaction. |
-| Independently retained source + audit | Source admission may retain its source receipt before a separate audit. Retention survives audit failure, but successful retention alone is not the audited operation's ready acknowledgement. Its specific retry/recovery owner must preserve identity and unfinished work. |
-| Event-only publication | `publish` commits an event before propagation. A propagation error carries its committed identity; it is not evidence that append failed. |
+|---|---|
+| Atomic state + audit | `EventPublisher` pairs state and EventLog in one synchronous SQLite transaction (`appendManyWithMutation`, `mutateThenAppendMany`, `decideAppendThenApply`). |
+| Atomic receipt + audit | Projection-generation activation and causal-usage recording commit rows and audit together. |
+| Independently retained source + audit | Native source admission (`at-least-once` audit) and host-session capture retain receipts first; dedicated recovery owners reconcile unfinished audit without equating raw retention to ready admission. |
+| Event-only publication | `publish` commits an EventLog row before in-process `RuntimeNotifier` fan-out; post-commit notify failure never rolls back durable state. |
 
-Notifications run after commit via in-process `RuntimeNotifier`; audit precedes
-notification. A committed mutation is not rolled back by notification failure:
-keep its durable result and report propagation diagnostics rather than repeat
-its effects. Notification delivery itself is not durable exactly-once delivery.
-A failed or ambiguous append must not be reported as proof that no row exists.
-Raw retained-source reads and audited admission acknowledgements have distinct
-meanings; there is no universal ready flag covering both.
-
-Source/incidence, evidence creation/health and governing effect writes commit
-their durable projection repair intent with the state they change. Rebuild, activation audit and intent
-acknowledgement share a serialized transaction; interruption leaves unfinished
-intent for restart/checkpoint. Nested projection work may safely share an outer
-transaction, but a savepoint is not an independent commit or ready acknowledgement.
-
-Native source admission uses importer-owned exact replay and at-least-once audit;
-host-session capture has its own durable ledger and audit deduplication. Optional
-evidence formation does not promise eventual source-admission audit: the capsule
-and its creation audit already committed together. See
-[runtime transactions](runtime-transactions.md) for owner-specific outcomes,
-recovery obligations, consumers and boundary tests.
-
-In-process Garden scheduler claim and `soul.garden.task_dispatched` share an
-atomic state/audit transaction.
-Host-worker MCP claim is task-row CAS without that event: claim transfers
-ownership, it is not proof that work was dispatched. Statement-session
-in-process work commits the claim first, then publishes the dispatch audit;
-interruption leaves CAS/TTL reclaim to pending without fabricating
-`soul.garden.task_dispatched`. Those paths are not one state machine.
-
-An authorized source erase may redact proven source-derived claim
-canonicalization and slot-creation payload fields in the same transaction as
-the erase barrier and projection cleanup. The original EventLog envelope,
-including event identity, type, revision and time, remains unchanged. Redacted
-fields are null and carry a typed source-erase marker identifying the barrier;
-they are unavailable history, not original values. Independent review and
-resolution text is retained. An independent current slot winner keeps its own
-subject and support; an erased winner is removed from the current projection.
-Startup completes indexed, versioned source-barrier repair obligations before
-serving. Each transaction repairs at most 32 receipts and commits their checked
-data revisions together with cleanup; interruption preserves completed receipts.
-Direct source attribution changes dirty only the affected receipts. Clean
-restarts and unrelated workspace activity do not replay historical closures;
-replay preserves generations rebuilt after the original erase. Older unindexed interpretation capsules whose source link was
-destroyed by a prior erase cannot be attributed to a particular barrier from
-their tombstone alone; current consumers must fail closed on invalid dependencies.
-
-Predecessor-bound source replacement is a Core audited capability, not MCP,
-CLI or Inspector ingress. It captures request authority once and compares
-workspace, logical source, predecessor identity/version/digest inside the
-owning top-level transaction; the new revision has later `recorded_at`.
-Precommit rejection makes no write; ambiguous commit cannot be represented as
-rollback. Postcommit projection-unready, deferred checkpoint, incomplete audit
-or notification failure remain different outcomes. A deferred checkpoint is
-not a failed projection. A durable predecessor/replacement pair is a source
-revision, not reconciliation of independent contradictory reports or semantic
-truth. Erasure uses the governed effect and source-closure barrier; source,
-interpretation and index projections cannot bypass that transaction.
-
-### Independent historical memory retention
-
-Autonomous `compressed` disposition is lossless historical relocation, not semantic
-compression, storage savings, or promotion to active truth. Protocol's
-`historical-memory-capture.ts` owns the versioned material, digest inputs and the
-five permitted terminal-field substitutions. V1 admits only strictly parsed,
-source-statement-bound observations: exact statement content, typed artifact,
-evidence identity, complete input/context dependencies and explicitly declared
-canonical-projection origins must agree with current, available sources in the
-same workspace and scope. Unsupported or incomplete provenance is ineligible;
-legacy capsule membership and summaries are not preservation proof. An ineligible
-compressed nomination stays dormant and is reported as a Janitor skip; it never
-falls through to judged-useless deletion.
-
-Core validates the native nomination; storage re-reads it inside the guarded
-terminal transaction. Capture, durable source lineage, tombstone, privacy effects
-and transition audit commit together. The temporary unsealed capture is usable
-only inside adoption for the privacy trigger; the workflow cannot commit without
-sealing it to its actual audit. Notification follows commit. The optional
-`soul.memory.state_changed.preservation` commitment contains identities/digest,
-not copied material: additive EventLog **minor**, protocol **41.2.0**, per
-invariant §25. MCP tools, app/gateway versions and external dependencies do not
-change; this is not release publication.
-
-Only the exact captured memory-to-owning-capsule privacy edge is substituted.
-The memory stays unavailable to other dependents. Existing quarantine is never
-automatically cleared. Capsule membership/revision is a real adoption gate and
-continues to bind the live capsule's substituted privacy edge, but is not a lease
-on the independently retained member. Historical payloads include the member and
-its own source roots, never capsule summaries, membership lists or sibling bytes.
-Erasing one member's sources can erase the shared live capsule without revoking
-another member's independent history. Its own source/evidence/dependency, member
-and audit invalidations remain irreversible. Child captures do not rewrite the
-capsule. Physical GC checks historical proof again at DELETE, including the exact
-terminal member; grace and default production GC deferral are unchanged.
-
-With physical GC explicitly enabled, Core records a failed preservation/value
-verdict as an audited, revision-bound deferral. Storage atomically compares the
-inspected member and persists that deferral once with its audit. Later sweeps
-omit that unchanged deferred revision, so unsupported oldest rows cannot starve
-newer eligible work or emit repeated no-transition audits. Member mutation
-withdraws the deferral for reevaluation; irreversible erased/invalidated capture
-states already prohibit GC and remain safely retained. No refusal authorizes
-unsafe deletion.
-
-`SynthesisService.readHistoricalMember` and the existing daemon synthesis surface
-`GET /workspaces/:wsId/syntheses/:id/historical-members/:memoryId` return a typed
-historical result (`ready`, `missing`, `unavailable`, `invalidated`, `erased`),
-never a revived MemoryEntry. Workspace containment applies at storage as well as
-the route. Ordinary/bounded capsule readers retain their privacy checks. This is
-memory-domain tooling under invariants §21–§24, not a new MCP operation.
-
-Capture lineage outlives both the memory row and its live indexes. Source erase
-uses every retained input/context/projection-origin identity to scrub archival
-payloads and the existing downstream claim, slot and source-derived audit-copy
-closure, while retaining independent controls and immutable receipts. Erased
-identities cannot be reinserted with stripped references; capture invalidation
-cannot be undone. Versioned startup closure repair reuses the existing 32-receipt
-batches and exact-source dirty checkpoints. A clean reopen does not replay clean
-history or restore unavailable material.
+- **Projection repair & erase closure:** Source/incidence, evidence, and effect
+  writes commit durable `field_projection_rebuild_requests` intent with their
+  mutation. Authorized source erasure redacts proven source-derived claim
+  canonicalization and slot-creation fields to null + `source_erase` barrier
+  markers in the same transaction as projection cleanup, leaving envelopes and
+  independent reviews intact; startup drains indexed closure repairs in
+  32-receipt batches.
+- **Predecessor-bound source replacement:** Core-only audited capability (never
+  MCP/CLI/Inspector) verifying workspace, logical source, and predecessor
+  identity/version/digest atomically; distinguishes precommit rejection from
+  post-commit unready/deferred/audit-incomplete states.
+- **Independent historical memory retention (`compressed`):** Lossless archival
+  relocation for strictly verified `source-statements-v1` observations
+  (`historical-memory-capture.ts`), never semantic compression or promotion.
+  Capture, lineage, tombstone, privacy substitution, and audit commit
+  atomically; erasure scrubs archival payloads and invalidates captures
+  irreversibly, while `SynthesisService.readHistoricalMember` returns typed
+  historical states without reviving a `MemoryEntry`.
 
 ## Daemon Startup Ordering
 
-1. Open SQLite and migrate before serving; confidential DB and credentials
-   stay local. A copied encrypted credential is not portable across users or
-   machines without its originating key.
-2. Construct Protocol/Core services and a fully wired `EventPublisher` /
-   `RuntimeNotifier`; connect governed source readers and Recall. Missing
-   notifier is a wiring error, not an implicit no-op.
-3. Start Garden only after its services; construct gateway and private
-   SourceIndex producer with its local binding and owned lifecycle.
-4. Start stdio MCP and daemon HTTP only after dependencies are ready; wire
-   CLI fallback. Early tool calls fail closed.
+1. Open SQLite, run migrations, and verify temporal schema/EventLog/projection
+   tuple before serving; acquire runtime lease and complete startup recovery
+   before handing DB to writers.
+2. Construct Core services, `EventPublisher`, and wired `RuntimeNotifier`
+   (missing notifier is a wiring error); connect governed readers and Recall.
+3. Start Garden only after its services; bind local-only private `SourceIndex`
+   producer (pre-provisioned ONNX artifacts; no implicit downloads).
+4. Start stdio MCP and daemon HTTP; read workers run query-only snapshots (no
+   EventLog append or materialization). Shutdown refuses new requests, drains
+   active handlers and background work, and confirms storage close before
+   release.
 
-The parent prepares the temporal projection before query-only worker reads;
-workers cannot append EventLog or materialize it. Query embedding preparation
-runs before the snapshot and stays private to the worker, never caller-supplied
-MCP/CLI vectors. SourceIndex producer binding is local-only; absent or API
-provider configuration is unbound. It performs bounded capture/backfill and
-activation against the selected generation; `root_complete` alone is not
-ready. Unbind retires generations and fences old writes. ONNX model artifacts
-must already be provisioned, with no implicit network download. Stopping a
-background pass or timing out local waiting does not cancel shared inference;
-occupancy and cleanup are owned until actual settlement/close. A failed cleanup
-cannot advertise a clean retirement or ready index. No mechanism check proves
-natural-data benefit.
+## Signal Ingestion and Draft Resolution
 
-Shutdown first refuses new requests and drains in-flight handlers. HTTP close
-must actually complete; a deadline may close the transport but does not
-cancel tracked handlers or release SQLite before they finish. A close error or
-timeout is not a successful teardown. Background work and storage release in
-reverse dependency order after live handlers settle.
-
-## Signal Ingestion
-
-A-track explicit `soul.emit_*` signals and B-track Garden statement extraction
-produce candidates, not active truth. `soul.recall` does not enqueue
-extraction; its `recent_turn` is ignored. `soul.report_context_usage` is usage
-feedback only; its deprecated `turn_index`, `turn_digest` and `source_observed_at`
-capture nothing. Host conversation enters through one contract,
-`soul.capture_host_session` (Protocol `conversation/host-session.ts`): every
-producer, including the bench LongMemEval import, admits messages through the
-daemon's host-session capture owner, idempotently by workspace, container and host
-message id, with position, role, completeness, honest fidelity and optional
-host-reported time. A request conflicts as a whole (changed body, occupied or
-earlier position, another producer's container) and then admits nothing. The
-owner pairs a user message with the next consecutive reply into a round and persists
-its immutable member and source identity before admitting the root receipt-first.
-The retained intent carries unfinished audit and binding work across retries; an
-authorized source erase also clears attributable pending message bodies while
-retaining their idempotency identities and any committed receipt's unfinished audit.
-Recovery of an erased receipt appends its audit without publishing it as an available source.
-Each capture or idle-container recovery pass reads at most 16 pending rounds,
-with at most two messages of 16 KiB each per round. Pending states retain the
-durable retry position; a failed round blocks its successors. The optional
-`pending_round_count` response separates accepted messages from unfinished source
-publication or audit. Publication consumers replay their idempotent window until
-that count is zero before checkpointing. Idle recovery yields between containers
-and backs off unfinished pages. At most one trailing message per container
-waits until the host closes the tail or the idle sweep does. Failed idle work remains
-eligible for retry, and the issuer comes from composition, never request JSON.
-Statement generation runs as `SOURCE_STATEMENT_SESSION` chunks over a container's
-ordered rounds, enqueued when a later message closes a chunk or the container is idle
-for the host-worker fallback interval; a chunk payload names its container, member
-roots and occurrence ranges only. A tail closure fixes its round boundary before
-source admission, even if later captures overtake its audit. Incremental planning
-commits its logical cursor, reference-only pending state and queued chunks together;
-each pass reads at most one pending and one prior-context page, leaving unfinished
-work eligible for another pass. Source publication binds current source, scope and
-audit before notifying; a failed later optional
-memory formation does not delete the source capsule (invariant §20a).
-Producer text, extraction cache and normalization never certify source or
-model fidelity. Exact source and request identities, complete source corpus,
-role attribution, receipts and resource limits belong to their respective
-Protocol/SOUL/Core owners. Explicit revisions need fresh authority; failed or
-unknown provider attempts stay distinct from unattempted work.
-
-Statement session chunks are eligible for listing,
-claiming, compilation and completion only while every admitted member source and
-its projection dependencies remain retained and current in the same workspace. The shared SQLite queue
-checks those facts; the daemon owns the unsuccessful completion audit and
-quarantine transition. Historical `POST_TURN_EXTRACT` work always fails this way
-("post-turn capture retired"); it retains its private payload and failure history,
-but exposes no turn text and cannot call an extraction provider. Maintenance checks at most 100 active tasks per pass
-with a workspace-scoped cursor, so quarantine may take multiple calls or
-ticks; exact-task claim and completion checks always fail closed. Canonical
-source rendering lives in Protocol; SOUL retains its public renderer export
-for its grounding and daemon source-publication consumers.
-
-## Low-Trust Draft and Typed-Resolution Chain
-
-Garden's `SignalService.evaluateTriage` and `MaterializationRouter` can create
-an eligible `MemoryEntry`, but may only emit a `draft` `ClaimForm`. Merely
-carrying evidence refs does not verify them. Runtime governance admits only
-`active`, `contested` or `winner` claims. Two reviewer-bound routes can resolve
-this state, both audited with the configured reviewer-identity trust mode:
-
-1. **Inline `soul.resolve`:** `confirm`, `reject`, `correct`, `stale`,
-   `defer`, `not_relevant`. The claim lifecycle decision and EventLog row share
-   a storage CAS transaction; concurrent conflicting decisions cannot both
-   win. Slot election follows the committed activation. A confirm reports
-   `election_status: failed` if that later election fails, or `pending` while
-   another process owns it or its completion audit cannot be recorded. SQLite
-   lease ownership and the claim's live state are checked inside each election
-   mutation and the completion-audit transaction; expired owners are fenced.
-   Repeating the same delivery, reviewer
-   and resolution can resume it without another activation audit; a completed
-   election audit returns the existing outcome without rerunning election.
-   `usage_recording_status` separately reports the post-commit causal
-   usage batch. Only an applied allowed confirm can record positive causal usage.
-2. **Out-of-band Proposal:** `soul.propose_memory_update` plus
-   `soul.review_memory_proposal`; accepted memory updates and privacy erasure
-   pass their typed governance and proof/effect barriers. Rejection is not an
-   erase or a durable memory change.
-
-Completion of source-statement and candidate-signal extraction tasks reports
-extraction and emission, not successful memory creation. Other Garden tasks report
-the outcome of their own maintenance work. A measured `outcome` distinguishes
-`completed`, `skipped`, and `failed`; its absence on historical or unmeasured
-records is unknown. The legacy `success` field remains true for both completed
-and intentionally skipped work for pre-34.1 consumers; it must not be read as
-proof that work was performed.
-
-Embedding backfill records each committed memory and its content identity in the
-same SQLite transaction as its vector. The Garden scheduler owns the supported
-`answers_with` handoff: an audited workspace-fenced claim pins the witnessed
-formation plan before governed assertion admission and checks that plan and its
-source inputs inside each admission transaction. A failed follow-up remains
-retryable without rerunning completed backfill; changed, erased or unauthorized
-inputs block instead of being replayed. The runtime lease fences startup recovery.
-A live executor relinquishes a failed attempt only after its accepted writers
-settle; an atomic recovery audit requeues a still-claimed parent and releases
-its checkpoint fence without changing terminal outcomes. Failed recovery audits
-retain that known-quiescent owner for a later pass, rather than inferring safety
-from claim age. A later follow-up does not rewrite the parent's historical outcome.
-The MCP pending-task response reports pending and blocked follow-ups separately
-from claimable tasks; a truncation flag prevents a bounded page from implying
-complete absence. Retired coherence mutation is not part of this handoff.
-
-HTTP/MCP `emitted` is candidate admission. Materialization audit
-and state commit atomically, including generic and source-grounding deferrals.
-A concurrent same-id receiver cannot re-triage or replay a claimed COMPILED signal.
-At daemon startup, one owner acquires the OS-released runtime lease, opens its
-matching database and completes recovery before handing either to any writer.
-Interrupted COMPILED, historically ambiguous TRIAGED, and historical write-path
-DEFERRED states with missing or ambiguous historical evidence of an attempt,
-and grounding redrives without a completion witness, become
-`materialization_unknown` with an inspection-required audit. Expiry alone cannot
-release a live grounding claim; an explicit reconciliation requires a later
-outcome audit. The durable lineage
-is established only by the atomic pre-effect transition; migration never invents
-it for existing rows. New proven deferrals remain retryable. The bounded
-source-grounding FIFO queue may evict only unclaimed entries, not active or
-unfinished claims. An unqueued deferral is not a claimable queue entry. Operators
-can discover proven quiescent deferrals with
-`alaya source-grounding-defers list-recoverable --workspace <id>`; a non-null
-`next_after_signal_id` requires another page using `--after-signal`, even when
-that page has no eligible entries. `--limit` bounds inspected candidates (maximum
-1000), not just successful matches. `alaya source-grounding-defers recover
---workspace <id> --signal <id>` explicitly re-admits and claims a retained
-obligation before using the existing fail-closed redrive materializer. It does
-not patch the retained payload or automatically replay on listing/startup.
-Recovery requires proven atomic lineage, a matching adjacent successful-deferred
-outcome (with no recorded created objects) and source-grounding triage pair as the
-latest entity audit, current
-DEFERRED state and no queue row. The transition rechecks these facts inside the
-same transaction as the recovery audit, FIFO admission and exclusive claim;
-capacity refusal or a concurrent claim rolls the transaction back. Historical,
-malformed, erased, later-audited or unfinished attempts cannot use this route.
-Historical success-shaped audits do not prove quiescence or the current attempt. Unknown
-effects cannot be automatically replayed. This inspection-required disposition
-closes the safety boundary; it does not automatically recover missing memories.
-Signal-reference replay waits for a
-known MATERIALIZED disposition while independent memory enrichment continues;
-its unfinished obligation remains durable and does not starve later work.
-Shutdown refuses new Garden passes, drains accepted writers and retains the lease
-until background drains and storage close are confirmed, including across retries.
-
-MCP completion checks its current completion claim before each candidate signal
-admission, including generic and source-statement candidates. A receive already
-dispatched can still settle after reclaim; losing the claim fences later siblings,
-not earlier effects. Deterministic envelope-bound IDs preserve completed signals
-and their audits on successor retry; final completion and claim release remain
-owner-checked.
-
-When a candidate fails materialization, completion audit and response expose
-`failed_candidate_signals_count`; `unknown_candidate_signals_count` separately
-exposes inspection-required effects; `inflight_candidate_signals_count` counts
-live claimed attempts. Fresh measured completions include zero counts, while
-absent counts on older or unmeasured records remain unknown. Unknown is neither
-failed nor retryable DEFERRED. The signal audit retains the detailed outcome.
-
-Inspector originates a review request, never directly persists a promotion.
-A warning names its target; agents should not infer it from array position.
-`soul.interpretation` invalidation is also inline typed resolution, but only
-for one exact unreviewed H and authorized current source. Its EventLog/CAS
-archives H without erasing source/history or promoting another interpretation.
+A-track `soul.emit_*` and B-track `soul.capture_host_session` (idempotent by
+workspace, container, host message ID; rounds capped at 16 KiB/message, 16
+pending rounds/pass) produce candidates, never active truth. Closed chunks
+enqueue `SOURCE_STATEMENT_SESSION` work (`POST_TURN_EXTRACT` is retired and
+fails closed). `SignalService.evaluateTriage` + `MaterializationRouter` emit
+`draft` `ClaimForm`s only; active world-claim promotion requires inline
+`soul.resolve` (`confirm` / `reject` / `correct` / `stale` / `defer` /
+`not_relevant`) or out-of-band `soul.propose_memory_update` +
+`soul.review_memory_proposal`.
 
 ## Governance Route Families
 
 | Need | Route | Effect |
-| --- | --- | --- |
+|---|---|---|
 | Risk before decision | Scoring pressure | Candidate metadata, not a durable decision |
 | Must warn during answer | Recall-time `staged_warnings[]` | Warning only |
-| Can wait for reviewer | Health/Proposal queue | Review request |
-| Typed decision now | Inline resolution | Guarded EventLog and CAS mutation |
+| Can wait for reviewer | Health / Proposal queue | Review request |
+| Typed decision now | Inline resolution (`soul.resolve`, `H` invalidation) | Guarded EventLog and CAS mutation |
 
-Use an existing family before proposing a new MCP verb, storage table or
-EventLog family. Agent `GovernancePolicy` classification can mark warnings
-`ask_now`, `apply_silently`, `track_only` or `inspect_later`; it does not
-create an alternative durable write path. Control-plane objects may bias
-execution but cannot silently become MemoryEntry or assertion truth.
-
-## Trust Model
-
-Installed and configured establish setup, not delivery. Delivered means
-Alaya returned context; used/skipped require a usage report, and unverifiable
-means neither can be proved. Mixed evidence remains mixed. A usage report is a
-soft signal, not automatic governance promotion. See invariant §20 and the
-[Recall feedback boundary](recall.md#governance-accounting-and-recovery).
+Reuse an existing family before adding an MCP verb, table, or EventLog family.
+`GovernancePolicy` warning classification never creates an alternate durable
+write path. Trust state distinguishes `installed` / `configured` from
+`delivered` / `used` / `skipped` / `unverifiable` / `mixed` (see invariant §20
+and [Recall feedback boundary](recall.md#governance-accounting-and-recovery)).

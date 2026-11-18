@@ -1,164 +1,100 @@
 # Glossary
 
 Stable terms only. [Invariants](invariants.md) own rules;
-[architecture](architecture.md) owns package/effect boundaries and
+[architecture](architecture.md) owns package and effect boundaries;
 [Recall](recall.md) owns live query mechanics.
 
 ## Core SOUL Vocabulary
 
-**SOUL** — Governed memory kernel with durable ontology, routing structures
-and per-turn runtime control. Governed stored state is not infallible world
-truth.
+- **SOUL** — Governed memory kernel with durable ontology, routing structures,
+  and per-turn runtime control. Governed stored state is not infallible world
+  truth.
+- **Memory Object** — Faceted stable semantic unit: `EvidenceCapsule`,
+  `MemoryEntry`, `SynthesisCapsule`, or `ClaimForm`.
+- **EvidenceCapsule** — First-class evidence object with semantic/event/physical
+  anchors and health; retained excerpt/gist is not complete original text.
+- **MemoryEntry** — Durable memory record referencing evidence; not itself a
+  certificate of model or source fidelity.
+- **SynthesisCapsule** — Multi-memory organization; does not directly legislate
+  durable claims.
+- **ClaimForm** — Governed claim lifecycle record. Garden emits `draft` only;
+  active promotion requires a typed resolution.
+- **RelationAssertion / PathRelation** — Immutable, evidence-grounded relation
+  assertion (`RelationAssertion`) and its rebuildable current/as-of routing
+  projection (`PathRelation`). Neither query-time transfer nor conditional
+  support is another assertion.
+- **ActivationCandidate** — Per-turn relevance control, not persisted truth.
+- **ManifestationDecision** — Per-turn visibility decision: `hidden`, `hint`,
+  `excerpt`, or `full_eligible`.
+- **ContextLens / ContextPack** — Per-turn projection of memory / assembled
+  deliverable; neither creates a second ontology.
+- **RecallQuery** — Scoped, budgeted request to RecallService.
+- **Time coordinates** — Distinct clocks: source observation/event time,
+  assertion validity, memory `created_at` (storage existence, never validity or
+  authorization), query `as_of` (interpretation clock), and lease lifetime.
+  Recall compares UTC instants; Inspector search parses local-timezone UI text.
+- **Preference** — Question-time soft reordering of native nomination; cannot
+  override hard `since`/`until` or authorization. Distinct from
+  `preference_profile` claim content and per-turn manifestation preference.
 
-**Memory Object** — Faceted stable semantic unit, including
-`EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule` and `ClaimForm`.
+## Garden, Governance, and Trust
 
-**EvidenceCapsule** — First-class evidence object with semantic/event/physical
-anchors and health. Retained excerpt and gist are not automatically complete
-original bodies.
+- **Garden** — Fire-and-forget background maintenance (`Auditor`, `Janitor`,
+  `Librarian`, `Scheduler`) relative to the consuming agent turn.
+- **Current-directory workspace** — Default local workspace for CLI fallback and
+  attached MCP when no explicit workspace is supplied, keyed stably by `cwd`.
+- **Promotion Gate / Green Status** — Evidence/governance admission decision
+  (never supplied by producer confidence) and `ELIGIBLE` / `GRACE` / `REVOKED`
+  eligibility owned by GreenService.
+- **GovernanceLease / SessionOverride** — Scoped mutation lease / per-session
+  runtime correction; neither substitutes for persistent truth.
+- **Candidate Signal** — Agent-emitted relevance input, not durable memory.
+- **Proposal / Accepted Proposal** — Typed review request / approved governed
+  mutation requiring audited application; inline `soul.resolve` is the sibling
+  typed-resolution route.
+- **Reviewer identity** — Server-bound principal when `ALAYA_REVIEWER_TOKEN` and
+  `ALAYA_REVIEWER_IDENTITY` are configured; otherwise an agent/human
+  attestation. `agent_target` is routing metadata only.
+- **Trust State & Receipts** — Setup (`installed`, `configured`), `delivered`,
+  reported `used`/`skipped`, or `unverifiable`/mixed evidence. Delivery or usage
+  receipts are neither world-truth certificates nor automatic promotion.
 
-**MemoryEntry** — Durable memory record referencing evidence; not itself a
-certificate of model or source fidelity.
+## Surface, Recall, and Provider
 
-**SynthesisCapsule** — Multi-memory organization, not direct legislation of
-durable claims.
-
-**ClaimForm** — Governed claim lifecycle record. Garden produces `draft`;
-active promotion requires a typed resolution.
-
-**RelationAssertion / PathRelation** — Immutable, evidence-grounded relation
-truth / its rebuildable current-or-as-of routing projection. Neither
-query-time transfer nor a conditional result is another assertion.
-
-**ActivationCandidate** — Per-turn relevance control, not persisted truth.
-
-**ManifestationDecision** — Per-turn visibility decision:
-`hidden`, `hint`, `excerpt` or `full_eligible`.
-
-**ContextLens / ContextPack** — Projection of memory into a turn / assembled
-deliverable. Neither creates a second ontology.
-
-**RecallQuery** — Scoped, budgeted request to RecallService.
-
-**Time coordinates** — Distinct clocks: source observation/event time,
-assertion validity, memory `created_at` (storage existence), query `as_of`
-(interpretation clock), and lease lifetime. Authorization uses principal and
-scope, not `created_at`. Inspector search windows parse local-timezone UI text;
-Recall and SQLite event-time windows compare UTC instants.
-
-**Preference** — Question-time preference softly reorders native nomination and
-cannot override hard `since`/`until` or authorization. Garden
-`preference_profile` is claim content. Manifestation preference is per-turn
-visibility. These are not one priority table. EventLog replay is deterministic
-and does not re-apply a later preference.
-
-## Garden / Maintenance
-
-**Garden** — Fire-and-forget background maintenance relative to the consuming
-agent's main turn. Auditor checks stale evidence and pointer health; Janitor
-manages retention/control-plane cleanup; Librarian maintains path
-consolidation; Scheduler dispatches those tasks.
-
-**Current-directory workspace** — Default local workspace for CLI fallback
-and attached MCP when no explicit workspace is supplied; a stable ID is
-derived from process cwd and registered before memory tools/Garden start.
-
-## Governance
-
-**Promotion Gate** — Evidence/governance decision for a candidate; it is not
-supplied by a producer's confidence field.
-
-**Green Status** — `ELIGIBLE`, `GRACE` or `REVOKED` eligibility, owned by
-GreenService.
-
-**GovernanceLease / SessionOverride** — Lease for sensitive mutation /
-per-session runtime correction; neither substitutes for persistent truth.
-
-**Candidate Signal** — Agent-emitted relevance input, not durable memory.
-
-**Proposal / Accepted Proposal** — Typed review request / approved governed
-mutation. An accepted proposal still needs its owned audited application.
-Inline `soul.resolve` is the other typed-resolution route.
-
-**Reviewer identity** — Server-bound principal only when reviewer token and
-identity are configured; otherwise review fields are agent/human attestations.
-`agent_target` is transport routing metadata, not reviewer authentication.
-
-## Trust And Session
-
-**Trust State** — Setup (`installed`, `configured`), delivered, reported
-`used`/`skipped`, or `unverifiable`/mixed evidence; delivery is not usage.
-
-**Delivery / Usage Receipt** — Evidence that Alaya returned a context page /
-that an agent subsequently reported using or skipping it. Neither is a
-world-truth certificate or automatic memory promotion.
-
-## Surface
-
-**MCP Surface / CLI Fallback** — Stdio agent attach / command-line memory-tool
-fallback sharing one runtime contract. Daemon HTTP is not an MCP server.
-
-**Attach / Profile** — Host integration configured only after preview and
-explicit confirmation.
-
-**Memory Inspector** — Local memory-management UI, not an agent chat frontend
-or alternate durable write path. Managed inspect is daemon 5173 plus Inspector
-5174; manual Vite SPA is loopback 5175 proxying `/api` to 5174. Port 3000 is
-not a product default. Auto-session trusts `127.0.0.1` / `::1` / `localhost`
-on that 127.0.0.1-only listener, not daemon request-token auth.
-
-## Recall
-
-**Fallible interpretation (Q/H/C)** — Q reads query meaning, H reads source
-meaning, C proposes explicit correspondence between them. Admission validates
-the contract, not every natural-language choice. Q/H/C keep separate
-identities and unreviewed status.
-
-**Conditional use / exploration hypothesis** — A result under stated,
-traceable premises / a tentative connection useful for further observation.
-Search usefulness alone never proves identity or a world claim. A failed
-dependent condition need not revoke independent source access.
-
-**Whole-chain utility** — Task benefit after source observation, reasoning,
-delivery, agent use and possible revision, including errors and cost. Hits,
-proof counts and producer admission alone do not establish it.
-
-**SourceIndex** — Derived native source discovery over current SourceRecord
-and standalone retained EvidenceCapsule roots; a capsule target is not a
-source-record mirror and preserves its own root identity.
-
-**Conditional field** — The single ordinary Recall decision route:
-`compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`.
-UGAF (Unified Governed Associative Field) names its governed associative
-model, not a separately executable stack or proved attractor dynamic.
-
-**Navigation witness / association grade** — Native ordinal discovery
-coordinate / declared conditional-strength domain value. A lexical or
-vector rank is not proof or an association grade.
-
-**Source evidence / semantic proof** — An authorized source-root delivery /
-a verified, explicitly qualified result under selected Q/H/C premises.
-Neither is ground truth; proof may remain unreviewed and world-unknown.
-
-**Logical-index completeness** — Query-relative certificate that no
-remaining counterfactual influence changes the index, not a reader's
-`exhausted` flag, complete language understanding or complete payload.
-
-**Source disclosure** — Read-time qualification of original/reduced material,
-clock, checked temporal relation and proof use. It does not change
-eligibility or source identity.
-
-**Embedding supplement** — Optional discovery/measurement infrastructure;
-not a durable-truth decision or permission for provider calls. Ordinary
-Recall does not generate embeddings on demand.
-
-## Provider
-
-**ProviderRegistry / Provider Status** — Gateway capability registry and
-its configured, enabled or unavailable operational state; these are not
-per-request attempt settlement.
-
-**Settled attempt** — Exact, witnessed terminal provider request with its
-recorded outcome and usage certainty. A cache hit, raw shard, preflight,
-reserved attempt or unknown transport result alone is not settlement or
-authority to dispatch.
+- **MCP Surface / CLI Fallback** — Stdio agent attach and CLI memory-tool
+  fallback sharing one runtime contract; daemon HTTP is not an MCP server.
+- **Attach / Profile** — Host integration written only after preview and
+  explicit confirmation.
+- **Memory Inspector** — Local memory-management UI (`127.0.0.1:5174` talking to
+  daemon `5173`; manual Vite SPA `5175`), never an agent chat frontend or direct
+  durable write path.
+- **Fallible interpretation (`Q` / `H` / `C`)** — `Q` (query meaning), `H`
+  (source meaning), `C` (explicit correspondence) retain separate identities and
+  unreviewed status; structural admission does not certify semantic fidelity.
+- **Conditional use / exploration hypothesis** — Traceable result under stated
+  premises (`conditional_support`); search usefulness never proves identity or a
+  world claim.
+- **Whole-chain utility** — End-to-end task benefit after observation,
+  reasoning, delivery, agent use, and revision under cost/error bounds.
+- **SourceIndex** — Derived native discovery over current `SourceRecord` and
+  standalone retained `EvidenceCapsule` roots (`source_id: null`).
+- **Conditional field** — The single live Recall route:
+  `compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`.
+- **Navigation witness / association grade** — Native ordinal discovery
+  coordinate vs declared conditional-strength domain value
+  (`assoc.bottleneck.milligrade.v1`). Lexical/vector rank is neither proof nor
+  association grade.
+- **Source evidence / semantic proof** — Authorized source-root delivery vs
+  verified result explicitly qualified under selected `Q`/`H`/`C` premises.
+- **Logical-index completeness** — Query-relative certificate that no remaining
+  counterfactual influence alters the index, distinct from reader `exhausted`,
+  full language understanding, or complete payload.
+- **Source disclosure** — Read-time qualification (`original_body` /
+  `retained_excerpt` / `retained_gist` / `interpretation`, clock, checked
+  interval, `not_current_proof` vs `conditional_support`); never alters
+  eligibility or source identity.
+- **Embedding supplement** — Optional discovery/measurement infrastructure;
+  never durable truth or query-time provider permission.
+- **ProviderRegistry / Settled attempt** — Capability/operational state vs an
+  exact witnessed terminal provider request with recorded outcome and usage
+  certainty.
