@@ -62,6 +62,31 @@ export const RELATION_ROUTING = Object.freeze({
   unrelated: { applicable: false, role: "associated" }
 });
 
+/** Soft bottleneck milligrades for explicit structural relations compiled into query programs. */
+const STRUCTURAL_RELATION_OVERLAY = Object.freeze({
+  next_round_in_session: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
+  prev_round_in_session: { applicable: true, role: "associated", milligrades: 700, soft_structural: true as const },
+  restates: { applicable: true, role: "associated", milligrades: 650, soft_structural: true as const },
+  supersedes: { applicable: true, role: "associated", milligrades: 800, soft_structural: true as const },
+  supports: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
+  elaborates: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
+  derives_from: { applicable: true, role: "associated", milligrades: 780, soft_structural: true as const },
+  answers_with: { applicable: true, role: "associated", milligrades: 800, soft_structural: true as const },
+  coheres_with: { applicable: true, role: "associated", milligrades: 720, soft_structural: true as const },
+  contradicts: { applicable: true, role: "associated", milligrades: 600, soft_structural: true as const }
+});
+
+const OBSERVE_RELATION_OVERLAY = Object.freeze({
+  ...RELATION_ROUTING,
+  ...STRUCTURAL_RELATION_OVERLAY
+});
+
+function overlayForPredicates(predicates: readonly string[]) {
+  return predicates.some((kind) => Object.prototype.hasOwnProperty.call(STRUCTURAL_RELATION_OVERLAY, kind))
+    ? OBSERVE_RELATION_OVERLAY
+    : RELATION_ROUTING;
+}
+
 type ObservationAction = ReturnType<typeof proposeFieldWork>["actions"][number];
 export type ObservationSession = {
   state: FieldEngineState; interpretation: QueryInterpretation; input: ObserveFieldInput; lease: SnapshotReadLease;
@@ -217,7 +242,7 @@ function refreshPathFrontier(session: ObservationSession): boolean {
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets
       || frontier.sourceFacts !== state.source_facts
       || (state.observation_gaps?.guards === true && state.seen_identities.length > frontier.identities) ? 0 : frontier.identities,
-    overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, facetIndex: facetIdentityIndexOf(state), discoveries: state.discoveries,
+    overlay: overlayForPredicates(session.predicates), sourceFacts: sourceFacts.snapshot, facets: state.facets, facetIndex: facetIdentityIndexOf(state), discoveries: state.discoveries,
     bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
     compiledAutomaton: state.compiled_automaton } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
@@ -348,7 +373,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   const before = session.state;
   session.state = { ...session.state, remaining_exploration: Math.max(0, session.state.remaining_exploration - observed.work.work_units),
     pending_path_effects: { input: { rows: session.relationRows, options: {
-      interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
+      interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: overlayForPredicates(session.predicates),
       sourceFacts: sourceFacts.snapshot, facets: session.state.facets, facetIndex: facetIdentityIndexOf(session.state),
       discoveries: session.state.discoveries,
       physicalKinds: session.predicates, compiledAutomaton: session.state.compiled_automaton,

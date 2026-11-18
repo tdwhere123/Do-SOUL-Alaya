@@ -46,6 +46,7 @@ export * from "./dynamics/dynamics-constants-runtime.js";
 export * from "./dynamics/dynamics-service.js";
 export * from "./relations/producers/edge-auto-producer-llm-port.js";
 export * from "./relations/producers/edge-auto-producer-service.js";
+export * from "./relations/producers/session-structural-relation-service.js";
 export * from "./embedding-recall/embedding-backfill-handler.js";
 export * from "./relations/edge-proposals/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";

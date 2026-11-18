@@ -67,6 +67,7 @@ export function createGardenRuntimeCore(
     readonly officialApiGardenProvider?: CreateGardenRuntimeInput["officialApiGardenProvider"];
     readonly signalReceiver?: CreateGardenRuntimeInput["signalReceiver"];
     readonly hostSessionCapture?: HostSessionCapture;
+    readonly onStatementSessionSettled?: CreateGardenRuntimeInput["onStatementSessionSettled"];
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
   }>) => HostWorkerTaskRuntimeSupport
 ): GardenRuntimeCore {
@@ -84,6 +85,8 @@ export function createGardenRuntimeCore(
     signalReceiver: input.signalReceiver,
     ...(gardenTaskRepo === undefined || input.hostSessionCaptureFor === undefined ? {}
       : { hostSessionCapture: input.hostSessionCaptureFor(gardenTaskRepo) }),
+    ...(input.onStatementSessionSettled === undefined ? {}
+      : { onStatementSessionSettled: input.onStatementSessionSettled }),
     warn
   });
   const gardenScheduler = createGardenScheduler(

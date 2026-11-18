@@ -7,12 +7,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   appendSourceRecordAdmitted, createSourceAdmissionPort, deriveAddressableSpanViews, fieldContractSha256,
-  retainedSourceSpeaker, type FieldFormationStores
+  retainedSourceSpeaker, type FieldFormationStores, type RelationAssertionService
 } from "@do-soul/alaya-core";
 import type { HostSessionLedger, HostSessionLedgerMessage, SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import {
   STATEMENT_SESSION_IDLE_MS, closeStatementSessionChunks, type StatementSessionClosurePort
 } from "../statement-session/statement-session-closure.js";
+import { materializeWorkspaceSessionStructuralRelations } from "../../runtime/garden-wiring/session-structural-relations.js";
 
 /** Who asserts a container's host facts. The composition supplies it; request JSON never does. */
 export type HostSessionIssuer = Readonly<{
@@ -31,6 +32,7 @@ export type HostSessionCapturePorts = Readonly<{
   admission: SourceAdmissionPort;
   ledger: HostSessionLedger;
   statementSessions: StatementSessionClosurePort;
+  onRoundsCompleted?: (input: Readonly<{ workspaceId: string; containerKey: string }>) => Promise<void>;
   now: () => string;
   warn: (message: string, meta: Record<string, unknown>) => void;
 }>;
@@ -48,13 +50,30 @@ export function createDaemonHostSessionCapture(input: Readonly<{
   eventLogRepo: SqliteEventLogRepo;
   runtimeNotifier: Parameters<typeof appendSourceRecordAdmitted>[2];
   gardenTaskRepo: SqliteGardenTaskRepo;
+  relationAssertionService?: Pick<RelationAssertionService, "admitDeferredProjection" | "refreshProjection">;
   now: () => string;
   warn: (message: string, meta: Record<string, unknown>) => void;
 }>): HostSessionCapture {
+  const assertionService = input.relationAssertionService;
   return createHostSessionCapture({
     admission: createSourceAdmissionPort({ sha256: fieldContractSha256, stores: input.stores,
       audit: createHostSessionSourceAudit(input.eventLogRepo, input.runtimeNotifier) }),
-    ledger: input.gardenTaskRepo.hostSessions, statementSessions: input.gardenTaskRepo, now: input.now, warn: input.warn
+    ledger: input.gardenTaskRepo.hostSessions,
+    statementSessions: input.gardenTaskRepo,
+    ...(assertionService === undefined ? {} : {
+      onRoundsCompleted: async (evt) => {
+        await materializeWorkspaceSessionStructuralRelations({
+          database: input.eventLogRepo.getStorageConnectionIdentity(),
+          assertionService,
+          workspaceId: evt.workspaceId,
+          containerKey: evt.containerKey,
+          includeStatements: false,
+          warn: input.warn
+        });
+      }
+    }),
+    now: input.now,
+    warn: input.warn
   });
 }
 
@@ -224,6 +243,17 @@ async function formRounds(ports: HostSessionCapturePorts, input: Readonly<{
       if (record.identity !== intent.root_id) throw new AlayaError("CONFLICT", "host session round identity changed");
     }
     if (ports.ledger.completeRound(input.workspaceId, input.key, intent.round_index, intent.root_id) === "done") completed++;
+  }
+  if (completed > 0 && ports.onRoundsCompleted !== undefined) {
+    try {
+      await ports.onRoundsCompleted({ workspaceId: input.workspaceId, containerKey: input.key });
+    } catch (error) {
+      ports.warn("session structural relation admission after round completion failed", {
+        workspace_id: input.workspaceId,
+        container_key: input.key,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
   return completed;
 }

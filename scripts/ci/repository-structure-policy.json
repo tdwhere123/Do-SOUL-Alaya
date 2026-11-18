@@ -1164,8 +1164,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1031,
-      "expected_sha256": "3b8fa2f3f13cd08011f4dcece4e0a3076f78eddae294c80004079374634040f9"
+      "expected_count": 1039,
+      "expected_sha256": "49daf184ca658cc33a6883f8a14833445035eccffbbe364e9215f737928f7fe2"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",

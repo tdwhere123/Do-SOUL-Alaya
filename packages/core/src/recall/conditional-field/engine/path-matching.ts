@@ -5,6 +5,7 @@ import {
   MILLIGRADE_TOP,
   retargetInterpretationProduct,
   memoryProductStateKey,
+  sourceProductStateKey,
   type AdmittedTransfer,
   type ProductStateKey,
   type InterpretationNodeCoordinate,
@@ -17,9 +18,12 @@ import {
 } from "../query/ordinary-language.js";
 import {
   HARD_IDENTITY_CAP_CONTRACT,
-  hardIdentityCapContractId
+  STRUCTURAL_RELATION_CAP_CONTRACT,
+  hardIdentityCapContractId,
+  structuralRelationCapContractId
 } from "../cap-contract.js";
 import {
+  boundSourceEvidenceTargetOf,
   decideGuards,
   guardSourceFactDependency,
   encodeBindingContext,
@@ -45,6 +49,7 @@ export type NamedKindOverlay = Readonly<Record<string, Readonly<{
   readonly milligrades?: number;
   readonly applicable: boolean;
   readonly role?: string;
+  readonly soft_structural?: true;
 }>>>;
 
 export type RelationTransferAdmission = Readonly<{
@@ -95,6 +100,23 @@ export function relationStrength(
   if (overlayBlocksTransfer(overlay, storedPredicate, relation.relation_kind)) return undefined;
   if (admission.revision_id === undefined || admission.revision_id.length === 0) return undefined;
   if (admission.instance_id.length === 0) return undefined;
+  const declared = overlay[storedPredicate] ?? overlay[relation.relation_kind];
+  if (
+    declared?.soft_structural === true
+    && declared.milligrades !== undefined
+    && declared.milligrades >= 0
+    && declared.milligrades < MILLIGRADE_TOP
+  ) {
+    return {
+      milligrades: declared.milligrades,
+      applicable: true,
+      transfer_id: STRUCTURAL_RELATION_CAP_CONTRACT.transfer_id,
+      transfer_version: STRUCTURAL_RELATION_CAP_CONTRACT.transfer_version,
+      cap_contract_id: structuralRelationCapContractId(),
+      instance_id: admission.instance_id,
+      revision_id: admission.revision_id
+    };
+  }
   const transfer = admitHardIdentityTransfer(admission);
   return {
     milligrades: transfer.milligrades,
@@ -168,6 +190,21 @@ export function retargetRelationProduct(from: ProductStateKey, targetId: string,
     const node = facts?.get(targetId)?.interpretation_node;
     if (node === undefined) throw new AlayaError("CONFLICT", "interpretation target has no admitted node identity");
     return retargetInterpretationProduct(from, node, { program_state: patch.program_state, binding_context: patch.binding_context });
+  }
+  const sourceTarget = boundSourceEvidenceTargetOf(facts?.get(targetId));
+  if (sourceTarget !== undefined) {
+    return sourceProductStateKey({
+      workspace_id: sourceTarget.workspace_id,
+      root_kind: sourceTarget.root_kind,
+      root_id: sourceTarget.root_id,
+      source_version: sourceTarget.source_version,
+      content_digest: sourceTarget.content_digest,
+      evidence_object_id: sourceTarget.evidence_object_id,
+      ...(sourceTarget.span === undefined ? {} : { span: sourceTarget.span }),
+      hypothesis_id: from.hypothesis_id,
+      time_state: from.time_state,
+      ...patch
+    });
   }
   return memoryProductStateKey({ workspace_id: from.target.workspace_id, object_id: targetId,
     source_revision: sourceRevision, hypothesis_id: from.hypothesis_id, time_state: from.time_state, ...patch });

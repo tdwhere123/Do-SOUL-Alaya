@@ -84,6 +84,10 @@ export interface GardenTaskHandlerDependencies {
     }>>;
   };
   readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
+  readonly onStatementSessionSettled?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly runId: string | null;
+  }>) => Promise<void>;
   readonly edgeVerdictApplier?: {
     applyVerdict(input: {
       readonly workspaceId: string;

@@ -20,6 +20,13 @@ export const HARD_IDENTITY_CAP_CONTRACT: AssociationCapContract = Object.freeze(
   transfer_version: HARD_IDENTITY_TRANSFER_VERSION
 });
 
+export const STRUCTURAL_RELATION_CAP_CONTRACT: AssociationCapContract = Object.freeze({
+  domain_id: ASSOCIATION_DOMAIN_ID,
+  normalization: "relation.structural.v1",
+  transfer_id: "policy.relation.bottleneck.milligrade.v1",
+  transfer_version: "1"
+});
+
 export function capContractId(contract: AssociationCapContract): string {
   return protocolCapContractId(contract, fieldContractSha256);
 }
@@ -35,6 +42,10 @@ export function capContractKey(contract: AssociationCapContract): string {
 
 export function hardIdentityCapContractId(): string {
   return capContractId(HARD_IDENTITY_CAP_CONTRACT);
+}
+
+export function structuralRelationCapContractId(): string {
+  return capContractId(STRUCTURAL_RELATION_CAP_CONTRACT);
 }
 
 export function isHardIdentityContractId(id: string | undefined): boolean {

@@ -27,6 +27,7 @@ export function createHostWorkerTaskRuntimeSupport(input: Readonly<{
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly signalReceiver?: PostTurnSignalReceiver;
   readonly hostSessionCapture?: HostSessionCapture;
+  readonly onStatementSessionSettled?: (input: Readonly<{ workspaceId: string; runId: string | null }>) => Promise<void>;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>): HostWorkerTaskRuntimeSupport {
   const processStatementSessionTask = createStatementSessionTaskProcessor(input);

@@ -242,6 +242,98 @@ describe("SqliteRelationAssertionRepo", () => {
       .resolves.toBeNull();
   });
 
+  it("verifies admitted non-erased source_records receipts and rejects erased or mismatched anchors", async () => {
+    const { database } = await createEvidenceCapsuleRepo();
+    trackedDatabases.add(database);
+    const repo = new SqliteRelationAssertionRepo(database);
+    const recordId = `sha256:${"d".repeat(64)}`;
+    const foreignRecordId = `sha256:${"e".repeat(64)}`;
+    const eventTime = "2026-05-01T08:00:00.000Z";
+    const recordedAt = "2026-05-02T08:00:00.000Z";
+    const admissionEvent = await new SqliteEventLogRepo(database).append({
+      event_type: "soul.field.source_record.admitted",
+      entity_type: "source_record",
+      entity_id: recordId,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      caused_by: "test",
+      payload_json: { record_id: recordId }
+    });
+    const foreignAdmissionEvent = await new SqliteEventLogRepo(database).append({
+      event_type: "soul.field.source_record.admitted",
+      entity_type: "source_record",
+      entity_id: foreignRecordId,
+      workspace_id: "workspace-2",
+      run_id: "run-2",
+      caused_by: "test",
+      payload_json: { record_id: foreignRecordId }
+    });
+    database.connection.prepare(`
+      INSERT INTO source_records (
+        workspace_id, record_id, source_id, source_version, content_digest,
+        recorded_at, event_time, operator_id
+      ) VALUES (?, ?, 'host-session:s1:r0', 'host-session-v1', ?, ?, ?, 'source_span_identity_v1')
+    `).run("workspace-1", recordId, `sha256:${"1".repeat(64)}`, recordedAt, eventTime);
+    database.connection.prepare(`
+      INSERT INTO source_records (
+        workspace_id, record_id, source_id, source_version, content_digest,
+        recorded_at, event_time, operator_id
+      ) VALUES (?, ?, 'host-session:s2:r0', 'host-session-v1', ?, ?, ?, 'source_span_identity_v1')
+    `).run("workspace-2", foreignRecordId, `sha256:${"2".repeat(64)}`, recordedAt, eventTime);
+
+    const validReceipt = {
+      evidence_id: recordId,
+      source_event_anchor: {
+        event_type: "soul.field.source_record.admitted" as const,
+        event_id: admissionEvent.event_id,
+        occurred_at: eventTime
+      }
+    };
+    expect(() => repo.assertFormationInputsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceReceipts: [validReceipt],
+      formationReceipt: formationReceipt([admissionEvent])
+    })).not.toThrow();
+
+    expect(() => repo.assertFormationInputsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceReceipts: [{
+        evidence_id: recordId,
+        source_event_anchor: {
+          event_type: "soul.field.source_record.admitted",
+          event_id: admissionEvent.event_id,
+          occurred_at: recordedAt
+        }
+      }],
+      formationReceipt: formationReceipt([admissionEvent])
+    })).toThrow(/is not anchored to its admitted source EventLog observation\./);
+
+    expect(() => repo.assertFormationInputsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceReceipts: [{
+        evidence_id: foreignRecordId,
+        source_event_anchor: {
+          event_type: "soul.field.source_record.admitted",
+          event_id: foreignAdmissionEvent.event_id,
+          occurred_at: eventTime
+        }
+      }],
+      formationReceipt: formationReceipt([admissionEvent])
+    })).toThrow(/is not available in the assertion workspace\./);
+
+    database.connection.prepare(`
+      INSERT INTO projection_erase_barriers (
+        workspace_id, barrier_id, receipt_identity, generation_id, subject_kind, subject_id, erased_at
+      ) VALUES ('workspace-1', 'barrier-1', 'erase-1', NULL, 'source_record', ?, ?)
+    `).run(recordId, recordedAt);
+
+    expect(() => repo.assertFormationInputsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceReceipts: [validReceipt],
+      formationReceipt: formationReceipt([admissionEvent])
+    })).toThrow(/is not available in the assertion workspace\./);
+  });
+
 });
 
 function insertAssertion(

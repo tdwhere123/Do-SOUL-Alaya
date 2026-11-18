@@ -1,6 +1,7 @@
 import { RelationFormationSourceObservationSchema, RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import { StorageError } from "../../../../shared/errors.js";
+import { CURRENT_STATEMENT_MEMORY_FILTER_SQL, UNAVAILABLE_BOUND_STATEMENT_SQL } from "../../../source-index/statement-dependencies.js";
 
 export interface RecallAssertionObservation {
   readonly assertionId: string;
@@ -35,7 +36,136 @@ JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
 WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?
   AND a.relation_kind = ?
+  AND NOT EXISTS (
+    SELECT 1 FROM projection_erase_barriers barrier
+    WHERE barrier.workspace_id = a.workspace_id
+      AND barrier.subject_kind = 'source_record'
+      AND lower(barrier.subject_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM memory_entries target_me
+    WHERE target_me.workspace_id = a.workspace_id
+      AND lower(target_me.object_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+      AND (
+        target_me.lifecycle_state != 'active'
+        OR EXISTS (
+          SELECT 1 FROM privacy_current_quarantine q
+          WHERE q.workspace_id = target_me.workspace_id
+            AND q.object_kind = 'memory_entry'
+            AND q.object_id = target_me.object_id
+        )
+      )
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM source_statement_memory_bindings binding
+    WHERE binding.workspace_id = a.workspace_id
+      AND lower(binding.memory_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+      AND (${UNAVAILABLE_BOUND_STATEMENT_SQL})
+  )
   AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)
+ORDER BY a.assertion_id, e.evidence_id
+LIMIT ?`;
+
+const BRIDGED_READ_SQL = `
+SELECT a.assertion_id, a.workspace_id, a.relation_kind,
+       ? AS source_id,
+       COALESCE(
+         (
+           SELECT tgt_ssa.record_id
+           FROM source_statement_memory_bindings tgt_ssmb
+           JOIN source_statement_artifacts tgt_ssa
+             ON tgt_ssa.workspace_id = tgt_ssmb.workspace_id
+            AND tgt_ssa.artifact_id = tgt_ssmb.artifact_id
+           JOIN evidence_capsules tgt_ec
+             ON tgt_ec.object_id = tgt_ssa.artifact_id
+            AND tgt_ec.workspace_id = tgt_ssa.workspace_id
+            AND tgt_ec.lifecycle_state = 'active'
+           JOIN memory_entries tgt_me
+             ON tgt_me.workspace_id = tgt_ssmb.workspace_id
+            AND tgt_me.object_id = tgt_ssmb.memory_id
+            AND tgt_me.lifecycle_state = 'active'
+           WHERE tgt_ssmb.workspace_id = a.workspace_id
+             AND lower(tgt_ssmb.memory_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+             AND NOT EXISTS (
+               SELECT 1 FROM privacy_current_quarantine q
+               WHERE q.workspace_id = tgt_me.workspace_id
+                 AND q.object_kind = 'memory_entry'
+                 AND q.object_id = tgt_me.object_id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM projection_erase_barriers b
+               WHERE b.workspace_id = tgt_ssa.workspace_id
+                 AND b.subject_kind = 'source_record'
+                 AND b.subject_id = tgt_ssa.record_id
+             )
+           ORDER BY tgt_ssa.record_id ASC
+           LIMIT 1
+         ),
+         json_extract(a.anchors_json, '$.target_anchor.object_id')
+       ) AS target_id,
+       json_extract(a.formation_receipt_json, '$.parameters.result_object_id') AS result_id,
+       a.formation_receipt_json, a.validity_json, e.evidence_id, e.source_event_id, e.source_event_type, e.source_occurred_at, r.resolved_at, r.resolution_kind
+FROM relation_assertions a
+JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
+JOIN source_statement_artifacts ssa
+  ON ssa.workspace_id = a.workspace_id
+ AND lower(ssa.record_id) = ?
+JOIN evidence_capsules ec
+  ON ec.object_id = ssa.artifact_id
+ AND ec.workspace_id = ssa.workspace_id
+ AND ec.lifecycle_state = 'active'
+JOIN source_statement_memory_bindings ssmb
+  ON ssmb.workspace_id = ssa.workspace_id
+ AND ssmb.artifact_id = ssa.artifact_id
+ AND lower(ssmb.memory_id) = lower(json_extract(a.anchors_json, '$.source_anchor.object_id'))
+JOIN memory_entries
+  ON memory_entries.workspace_id = ssmb.workspace_id
+ AND memory_entries.object_id = ssmb.memory_id
+ AND memory_entries.lifecycle_state = 'active'
+LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
+WHERE a.workspace_id = ?
+  AND a.relation_kind = ?
+  AND NOT EXISTS (
+    SELECT 1 FROM privacy_current_quarantine q
+    WHERE q.workspace_id = memory_entries.workspace_id
+      AND q.object_kind = 'memory_entry'
+      AND q.object_id = memory_entries.object_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM projection_erase_barriers b
+    WHERE b.workspace_id = ssa.workspace_id
+      AND b.subject_kind = 'source_record'
+      AND b.subject_id = ssa.record_id
+  )
+  ${CURRENT_STATEMENT_MEMORY_FILTER_SQL}
+  AND NOT EXISTS (
+    SELECT 1 FROM projection_erase_barriers barrier
+    WHERE barrier.workspace_id = a.workspace_id
+      AND barrier.subject_kind = 'source_record'
+      AND lower(barrier.subject_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM memory_entries target_me
+    WHERE target_me.workspace_id = a.workspace_id
+      AND lower(target_me.object_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+      AND (
+        target_me.lifecycle_state != 'active'
+        OR EXISTS (
+          SELECT 1 FROM privacy_current_quarantine q
+          WHERE q.workspace_id = target_me.workspace_id
+            AND q.object_kind = 'memory_entry'
+            AND q.object_id = target_me.object_id
+        )
+      )
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM source_statement_memory_bindings binding
+    WHERE binding.workspace_id = a.workspace_id
+      AND lower(binding.memory_id) = lower(json_extract(a.anchors_json, '$.target_anchor.object_id'))
+      AND (${UNAVAILABLE_BOUND_STATEMENT_SQL})
+  )
+  AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)
+GROUP BY a.assertion_id, e.evidence_id
 ORDER BY a.assertion_id, e.evidence_id
 LIMIT ?`;
 
@@ -69,30 +199,22 @@ export class SqliteRelationRecallReader {
         committedThrough: afterAssertionId
       });
     }
-    const sql = subject === null ? READ_SQL
-      .replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL;
     const cursor = relationResumeParams(afterAssertionId);
-    let boundedSql = sql.replace(
-      "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
-      cursor.sql
+    const boundedSql = applyAsOfSql(
+      (subject === null ? READ_SQL.replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL)
+        .replace("AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)", cursor.sql),
+      asOf
     );
-    if (asOf !== undefined) {
-      boundedSql = boundedSql.replace("LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id", `
-LEFT JOIN event_log resolution_event ON resolution_event.event_id = (
-  SELECT event_id FROM event_log
-  WHERE workspace_id = a.workspace_id AND entity_id = a.assertion_id
-    AND event_type = 'relation.assertion_resolved'
-    AND alaya_utc_compare(json_extract(payload_json, '$.resolved_at'), @asOf) <= 0
-  ORDER BY revision DESC LIMIT 1
-)
-LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id
-  AND r.workspace_id = a.workspace_id AND alaya_utc_compare(r.resolved_at, @asOf) <= 0`)
-        .replace("r.resolved_at, r.resolution_kind", "COALESCE(json_extract(resolution_event.payload_json, '$.resolved_at'), r.resolved_at) AS resolved_at, COALESCE(json_extract(resolution_event.payload_json, '$.resolution_kind'), r.resolution_kind) AS resolution_kind")
-        .replace("AND a.relation_kind = ?", "AND a.relation_kind = ? AND alaya_utc_compare(a.admitted_at, @asOf) <= 0");
-    }
     const tail = [...cursor.params, fetchLimit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
-    const fetched = this.db.connection.prepare(boundedSql).all(...(asOf === undefined ? parameters : [{ asOf }, ...parameters])) as readonly Record<string, unknown>[];
+    const directFetched = this.db.connection.prepare(boundedSql).all(...(asOf === undefined ? parameters : [{ asOf }, ...parameters])) as readonly Record<string, unknown>[];
+    const fetched = subject === null || !this.hasBoundStatements(workspaceId, subject)
+      ? directFetched
+      : mergeRelationPages(
+          directFetched,
+          this.readBridged(workspaceId, subject, predicate, cursor, fetchLimit, asOf),
+          fetchLimit
+        );
     // A full page retains an open cursor; exhaustion needs its own bounded read.
     const truncated = fetched.length === fetchLimit;
     const pageRows = fetched;
@@ -141,6 +263,66 @@ LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertio
     return Object.freeze([...grouped.values()]);
   }
 
+  private hasBoundStatements(workspaceId: string, subject: string): boolean {
+    return this.db.connection.prepare(`
+      SELECT 1 FROM source_statement_artifacts
+      WHERE workspace_id = ? AND lower(record_id) = ?
+      LIMIT 1
+    `).get(workspaceId, subject.toLowerCase()) !== undefined;
+  }
+
+  private readBridged(
+    workspaceId: string,
+    subject: string,
+    predicate: string,
+    cursor: Readonly<{ readonly sql: string; readonly params: readonly string[] }>,
+    fetchLimit: number,
+    asOf: string | undefined
+  ): readonly Record<string, unknown>[] {
+    const bridgedSql = applyAsOfSql(
+      BRIDGED_READ_SQL.replace("AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)", cursor.sql),
+      asOf
+    );
+    const params = [subject, subject.toLowerCase(), workspaceId, predicate, ...cursor.params, fetchLimit];
+    return this.db.connection.prepare(bridgedSql).all(...(asOf === undefined ? params : [{ asOf }, ...params])) as readonly Record<string, unknown>[];
+  }
+}
+
+function applyAsOfSql(sql: string, asOf: string | undefined): string {
+  if (asOf === undefined) return sql;
+  return sql.replace("LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id", `
+LEFT JOIN event_log resolution_event ON resolution_event.event_id = (
+  SELECT event_id FROM event_log
+  WHERE workspace_id = a.workspace_id AND entity_id = a.assertion_id
+    AND event_type = 'relation.assertion_resolved'
+    AND alaya_utc_compare(json_extract(payload_json, '$.resolved_at'), @asOf) <= 0
+  ORDER BY revision DESC LIMIT 1
+)
+LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id
+  AND r.workspace_id = a.workspace_id AND alaya_utc_compare(r.resolved_at, @asOf) <= 0`)
+    .replace("r.resolved_at, r.resolution_kind", "COALESCE(json_extract(resolution_event.payload_json, '$.resolved_at'), r.resolved_at) AS resolved_at, COALESCE(json_extract(resolution_event.payload_json, '$.resolution_kind'), r.resolution_kind) AS resolution_kind")
+    .replace("AND a.relation_kind = ?", "AND a.relation_kind = ? AND alaya_utc_compare(a.admitted_at, @asOf) <= 0");
+}
+
+function mergeRelationPages(
+  direct: readonly Record<string, unknown>[],
+  bridged: readonly Record<string, unknown>[],
+  limit: number
+): readonly Record<string, unknown>[] {
+  if (bridged.length === 0) return direct;
+  if (direct.length === 0) return bridged.slice(0, limit);
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of direct) byKey.set(`${String(row.assertion_id)}\u0000${String(row.evidence_id)}`, row);
+  for (const row of bridged) {
+    const key = `${String(row.assertion_id)}\u0000${String(row.evidence_id)}`;
+    if (!byKey.has(key)) byKey.set(key, row);
+  }
+  return [...byKey.values()]
+    .sort((left, right) => {
+      const a = String(left.assertion_id).localeCompare(String(right.assertion_id));
+      return a !== 0 ? a : String(left.evidence_id).localeCompare(String(right.evidence_id));
+    })
+    .slice(0, limit);
 }
 
 function sourceObservationsFrom(raw: unknown): readonly Readonly<{ source_id: string; source_sha256: string }>[] {
