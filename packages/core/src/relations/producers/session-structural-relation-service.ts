@@ -54,6 +54,8 @@ export type SessionStructuralMaterializeInput = Readonly<{
   readonly rounds: readonly RoundStructuralNode[];
   readonly statements: readonly StatementStructuralNode[];
   readonly admittedAt?: string;
+  /** When true, each assertion admits at MAX(source, target) observation time, not ingest now. */
+  readonly useSourceRecordedTime?: boolean;
 }>;
 
 export type SessionStructuralMaterializeResult = Readonly<{
@@ -139,7 +141,7 @@ export class SessionStructuralRelationService {
 export function buildSessionRoundRequests(
   input: Pick<
     SessionStructuralMaterializeInput,
-    "workspaceId" | "runId" | "causedBy" | "rounds" | "admittedAt"
+    "workspaceId" | "runId" | "causedBy" | "rounds" | "admittedAt" | "useSourceRecordedTime"
   >
 ): readonly RelationAssertionAdmissionRequest[] {
   const byContainer = new Map<string, RoundStructuralNode[]>();
@@ -162,6 +164,7 @@ export function buildSessionRoundRequests(
         runId: input.runId,
         causedBy: input.causedBy,
         admittedAt: input.admittedAt,
+        ...(input.useSourceRecordedTime === true ? { useSourceRecordedTime: true as const } : {}),
         validFrom,
         left: prev,
         right: next,
@@ -179,7 +182,7 @@ export function buildSessionRoundRequests(
 export function buildStatementRequests(
   input: Pick<
     SessionStructuralMaterializeInput,
-    "workspaceId" | "runId" | "causedBy" | "statements" | "admittedAt"
+    "workspaceId" | "runId" | "causedBy" | "statements" | "admittedAt" | "useSourceRecordedTime"
   >
 ): readonly RelationAssertionAdmissionRequest[] {
   const tokenized = input.statements
@@ -209,7 +212,7 @@ export function buildStatementRequests(
 }
 
 function classifyStatementPair(
-  input: Pick<SessionStructuralMaterializeInput, "workspaceId" | "runId" | "causedBy" | "admittedAt">,
+  input: Pick<SessionStructuralMaterializeInput, "workspaceId" | "runId" | "causedBy" | "admittedAt" | "useSourceRecordedTime">,
   left: TokenizedStatement,
   right: TokenizedStatement
 ): AssertionCandidate | null {
@@ -239,6 +242,7 @@ function classifyStatementPair(
     runId: input.runId,
     causedBy: input.causedBy,
     admittedAt: input.admittedAt,
+    ...(input.useSourceRecordedTime === true ? { useSourceRecordedTime: true as const } : {}),
     relationKind,
     sourceObjectId: newer.node.targetObjectId,
     targetObjectId: older.node.targetObjectId,
@@ -250,11 +254,21 @@ function classifyStatementPair(
   return { score: jaccard * 100 + overlap, request };
 }
 
+function admittedAtFor(
+  input: Readonly<{ readonly admittedAt?: string; readonly useSourceRecordedTime?: boolean }>,
+  left: StructuralEvidenceSide,
+  right: StructuralEvidenceSide
+): string | undefined {
+  if (input.useSourceRecordedTime === true) return maxInstant(left.sourceOccurredAt, right.sourceOccurredAt);
+  return input.admittedAt;
+}
+
 function buildStructuralRequest(input: Readonly<{
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly causedBy: string;
   readonly admittedAt?: string;
+  readonly useSourceRecordedTime?: boolean;
   readonly relationKind: string;
   readonly sourceObjectId: string;
   readonly targetObjectId: string;
@@ -270,11 +284,12 @@ function buildStructuralRequest(input: Readonly<{
     source_object_id: input.sourceObjectId,
     target_object_id: input.targetObjectId
   };
+  const admittedAt = admittedAtFor(input, input.left, input.right);
   return {
     workspaceId: input.workspaceId,
     runId: input.runId,
     causedBy: input.causedBy,
-    ...(input.admittedAt === undefined ? {} : { admittedAt: input.admittedAt }),
+    ...(admittedAt === undefined ? {} : { admittedAt }),
     evidenceReceipts: receipts,
     formationReceipt: {
       operator_id: OPERATOR_ID,

@@ -283,7 +283,8 @@ function observeWithinMemory(
     interpretation.program,
     observedInput.readers,
     observedInput.workspace_id,
-    state.remaining_exploration
+    state.remaining_exploration,
+    observedInput.as_of
   );
   if (storedKinds.charged > 0) {
     input.cost?.add("observe", { native_visits: storedKinds.charged });

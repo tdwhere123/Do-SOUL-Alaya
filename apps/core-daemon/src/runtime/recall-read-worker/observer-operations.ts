@@ -35,7 +35,7 @@ import { sourceRootReaders } from "./source-root-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { prepareWorkerDelivery } from "./prepared-delivery.js";
-import { MEMBER_INDEX_OVERFLOW, renderMemberIndex, type MemberIndexInputs } from "./member-index.js";
+import { MEMBER_INDEX_OVERFLOW, renderPageMemberIndex, type MemberIndexInputs } from "./member-index.js";
 import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquisition.js";
 import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
@@ -46,6 +46,32 @@ const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>()
 export const NATIVE_SOURCE_NOMINATION_ALLOWANCE = Object.freeze({
   max_attempts: 128, max_roots: 16, max_vector_windows: 4096
 } as const);
+
+const RELATION_KINDS_SQL = `SELECT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ? AND relation_kind > ?
+       AND NOT EXISTS (
+         SELECT 1 FROM relation_assertion_resolution_current r
+         WHERE r.assertion_id = relation_assertions.assertion_id
+           AND r.workspace_id = relation_assertions.workspace_id
+       )
+     ORDER BY relation_kind LIMIT 1`;
+const RELATION_KINDS_AS_OF_SQL = `SELECT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ? AND relation_kind > ?
+       AND alaya_utc_compare(admitted_at, @asOf) <= 0
+       AND NOT EXISTS (
+         SELECT 1 FROM relation_assertion_resolution_current r
+         WHERE r.assertion_id = relation_assertions.assertion_id
+           AND r.workspace_id = relation_assertions.workspace_id
+           AND alaya_utc_compare(r.resolved_at, @asOf) <= 0
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM event_log e
+         WHERE e.workspace_id = relation_assertions.workspace_id
+           AND e.entity_id = relation_assertions.assertion_id
+           AND e.event_type = 'relation.assertion_resolved'
+           AND alaya_utc_compare(json_extract(e.payload_json, '$.resolved_at'), @asOf) <= 0
+       )
+     ORDER BY relation_kind LIMIT 1`;
 
 export function runConditionalFieldWorkerRecall(
   runtime: RecallReadWorkerRuntime,
@@ -147,9 +173,11 @@ export function runConditionalFieldWorkerRecall(
   const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
   const memberInputs = firstPage ? assembled?.memberInputs() : undefined;
   const member_index = memberInputs === undefined ? undefined
-    : renderMemberIndex(new SqliteSourceIndexRepository(runtime.database, fieldContractSha256), memberInputs,
-      new Set(index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])),
-      index.entries.length);
+    : renderPageMemberIndex(new SqliteSourceIndexRepository(runtime.database, fieldContractSha256), runtime.database, {
+      workspaceId, asOf: payload.as_of,
+      delivered: new Set(index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])),
+      shown: index.entries.length, memberInputs
+    });
   return {
     execution_receipt: executed.execution_receipt,
     index,
@@ -380,16 +408,8 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
-  const kindsSql = database.connection.prepare(
-    `SELECT relation_kind AS kind FROM relation_assertions
-     WHERE workspace_id = ? AND relation_kind > ?
-       AND NOT EXISTS (
-         SELECT 1 FROM relation_assertion_resolution_current r
-         WHERE r.assertion_id = relation_assertions.assertion_id
-           AND r.workspace_id = relation_assertions.workspace_id
-       )
-     ORDER BY relation_kind LIMIT 1`
-  );
+  const kindsSql = database.connection.prepare(RELATION_KINDS_SQL);
+  const kindsAsOfSql = database.connection.prepare(RELATION_KINDS_AS_OF_SQL);
   const sourceRecordSql = database.connection.prepare(`
     SELECT record_id, source_id, source_version, content_digest, evidence_object_id,
            recorded_at, event_time, valid_from, valid_to
@@ -485,15 +505,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
       input.afterAssertionId,
       input.asOf
     ),
-    relationKinds: (input) => {
-      const kinds: string[] = [];
-      for (let i = 0; i < Math.min(512, input.limit ?? 32); i += 1) {
-        const row = kindsSql.get(input.workspaceId, kinds.at(-1) ?? "") as { readonly kind: string } | undefined;
-        if (row === undefined) break;
-        kinds.push(row.kind);
-      }
-      return kinds;
-    },
+    relationKinds: (input) => listRelationKinds(kindsSql, kindsAsOfSql, input),
     snapshotPin: (workspaceId) => projection.observablePin(workspaceId),
     ...storedMeasurementReaders(database)
   };
@@ -505,4 +517,21 @@ function readersFor(runtime: RecallReadWorkerRuntime): ObserverReaders {
   const created = createConditionalFieldObserverReaders(runtime.database);
   readersByRuntime.set(runtime, created);
   return created;
+}
+
+function listRelationKinds(
+  currentSql: ReturnType<StorageDatabase["connection"]["prepare"]>,
+  asOfSql: ReturnType<StorageDatabase["connection"]["prepare"]>,
+  input: Readonly<{ workspaceId: string; limit?: number; asOf?: string }>
+): string[] {
+  const kinds: string[] = [];
+  const stmt = input.asOf === undefined ? currentSql : asOfSql;
+  for (let i = 0; i < Math.min(512, input.limit ?? 32); i += 1) {
+    const last = kinds.at(-1) ?? "";
+    const row = (input.asOf === undefined ? stmt.get(input.workspaceId, last)
+      : stmt.get({ asOf: input.asOf }, input.workspaceId, last)) as { readonly kind: string } | undefined;
+    if (row === undefined) break;
+    kinds.push(row.kind);
+  }
+  return kinds;
 }

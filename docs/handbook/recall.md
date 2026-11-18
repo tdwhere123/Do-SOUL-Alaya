@@ -158,7 +158,8 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   (`content_complete: false`) via `payload_continuation` (`purpose:
   "payload_expansion"` from `content_end`, or `payload_continuation.dependency`
   for partial `semantic_dependencies`). First-page `member_index` lists up to 32
-  further pool/overflow roots with `statement_ids` and workspace-omitted
+  further roots (remaining pool, then up to six Soft-grade 1-hop session-structural
+  `source_evidence` neighbors, then overflow) with `statement_ids` and workspace-omitted
   `source_target` handles openable via `soul.open_pointer` (`start_offset`,
   `byte_budget <= 65536`), enforcing currentness, digest, and erasure without
   minting a memory ID.

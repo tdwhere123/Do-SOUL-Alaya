@@ -269,7 +269,9 @@ export function runConditionalFieldRecallWithReceipt(
   const hasEvidenceConditions =
     (input.interpretation_proposal?.evidence_conditions?.length ?? 0) >= 1;
   const availableRelationKinds = hasEvidenceConditions && input.readers.relationKinds !== undefined
-    ? input.readers.relationKinds({ workspaceId: input.workspace_id, subject: null, limit: 32 })
+    ? input.readers.relationKinds({
+      workspaceId: input.workspace_id, subject: null, limit: 32, asOf: input.as_of
+    })
     : undefined;
   const compileInput = {
     source: "ordinary" as const,
