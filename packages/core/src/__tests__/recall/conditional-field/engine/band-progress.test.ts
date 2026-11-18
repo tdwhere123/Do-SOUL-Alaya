@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
-import { FieldValueSchema, InformationIndexSchema, sharedProductIdentity, type QueryInterpretation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
+import { FieldValueSchema, InformationIndexSchema, sharedProductIdentity, sourceProductStateKey, type QueryInterpretation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField, type BindableState, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
+import { appendFieldGraph, nextFieldGraphAtom, stepFieldGraph } from "../../../../recall/conditional-field/engine/field-graph-preparation.js";
 import { bindChargedField, orderedProjectionValues } from "../../../../recall/conditional-field/engine/field-solve.js";
 import { bindMaxMinField, productIndexOrderKey, productStateNodeId, type BindMaxMinSuccess } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { indexEntryRevision, resumeIndexProjection } from "../../../../recall/runtime/index-continuation.js";
@@ -348,5 +349,42 @@ describe("finite budget service for guaranteed and possible fields", () => {
     const resumed = bind({ ...base, proven_binding: rebuilt, remaining_exploration: 100 });
     expect(resumed.snapshot.has_incomparable_activations).toBe(true);
     expect(resumed.solver_complete).toBe(true);
+  });
+
+  it("retains under 250 KB for 16 source_evidence seeds with SHA-256 digests and long binding_context without charging empty relax steps", () => {
+    const longContext = JSON.stringify({ scope: "project", branch: "source-evidence", trace: "ctx-".repeat(45) });
+    const seeds: SeedActivation[] = Array.from({ length: 16 }, (_, index) => {
+      const hex = index.toString(16).padStart(64, "a");
+      return {
+        schema_version: 1,
+        milligrades: 1000,
+        cap_contract_id: `sha256:${hex}`,
+        state: sourceProductStateKey({
+          workspace_id: "ws-source-evidence",
+          root_kind: "source_record",
+          root_id: `sha256:${index.toString(16).padStart(64, "b")}`,
+          source_version: "host-session-v1",
+          content_digest: `sha256:${index.toString(16).padStart(64, "c")}`,
+          evidence_object_id: null,
+          program_state: "accepting",
+          hypothesis_id: "h0",
+          binding_context: longContext,
+          time_state: "2026-01-01T00:00:00.000Z"
+        })
+      };
+    });
+    const result = bindChargedField(input(seeds, seeds, 10_000), []);
+    expect(result.complete).toBe(true);
+    expect(result.memory_exhausted).toBe(false);
+    expect(result.solver_retained_bytes).toBeGreaterThan(0);
+    expect(result.solver_retained_bytes).toBeLessThan(250_000);
+    const single = appendFieldGraph(undefined, { seeds: [seeds[0]!], transitions: [] });
+    const prepared = stepFieldGraph(single, 1_000_000, nextFieldGraphAtom(single));
+    expect(prepared.retainedBytes).toBeGreaterThan(0);
+    const relaxAtom = nextFieldGraphAtom(prepared);
+    expect(relaxAtom.seed).toBeUndefined();
+    expect(relaxAtom.transition).toBeUndefined();
+    const relaxed = stepFieldGraph(prepared, 1_000_000, relaxAtom);
+    expect(relaxed.retainedBytes).toBe(prepared.retainedBytes);
   });
 });

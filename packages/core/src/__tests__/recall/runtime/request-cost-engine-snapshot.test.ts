@@ -181,10 +181,10 @@ describe("request-cost engine work snapshot", () => {
     expect(thisRequestObservedWork(first, solved, 1_000_000).charged_retained_bytes)
       .toBeGreaterThanOrEqual(solverGrowth);
     const reduced = observeField(interpretation, { ...request, resume_field: first, cancelled: true,
-      budget: defaultBudget({ work_units: 100, memory_bytes: 20_000 }) });
+      budget: defaultBudget({ work_units: 100, memory_bytes: 18_000 }) });
     expect(reduced.memory_exhausted).toBe(true);
-    expect(retainedFieldLevels(reduced, 20_000).retained_bytes_current)
+    expect(retainedFieldLevels(reduced, 18_000).retained_bytes_current)
       .toBe(retainedFieldLevels(first, 1_000_000).retained_bytes_current);
-    expect(thisRequestObservedWork(first, reduced, 20_000).charged_retained_bytes).toBe(0);
+    expect(thisRequestObservedWork(first, reduced, 18_000).charged_retained_bytes).toBe(0);
   });
 });

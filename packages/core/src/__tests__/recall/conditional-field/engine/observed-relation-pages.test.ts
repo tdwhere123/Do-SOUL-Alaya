@@ -189,7 +189,7 @@ describe("observed relation pages", () => {
     const guarded = edge("p", "a", "b", "p-row");
     const plain = Array.from({ length: 20 }, (_, index) => edge("q", "a", `q-${String(index).padStart(2, "0")}`, `q-${String(index).padStart(2, "0")}`));
     const cost = new RequestCostLedger();
-    const interrupted = run([guarded, ...plain], { unavailable: new Set(["x"]), cost });
+    const interrupted = run([guarded, ...plain], { unavailable: new Set(["x"]), cost, memory: 550_000 });
     expect(interrupted.state.memory_exhausted).toBe(true);
     expect(interrupted.accepted.length).toBeGreaterThan(0);
     expect(interrupted.accepted.length).toBeLessThan(plain.length);

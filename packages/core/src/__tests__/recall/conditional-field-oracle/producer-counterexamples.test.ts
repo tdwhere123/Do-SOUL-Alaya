@@ -190,7 +190,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
       lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
         inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
     };
-    // Forty coordinate-aware seeds retain ~1.3 MB including numeric bands and proofs.
+    // Forty coordinate-aware seeds retain ~750 KB including numeric bands and proofs.
     const memoryBytes = 2_000_000;
     const full = runRecall(slice, {
       query_text: "needle",
@@ -238,7 +238,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     const slice = await openBoundSlice(database => databases.add(database));
     const planted = await plantNeedles(slice, 40, 501);
     let continuation: ReturnType<typeof runRecall>["continuation"] = null;
-    let memory = 1_050_000;
+    let memory = 600_000;
     let refused = false;
     const entries: ReturnType<typeof runRecall>["entries"][number][] = [];
     let last: ReturnType<typeof runRecall> | undefined;

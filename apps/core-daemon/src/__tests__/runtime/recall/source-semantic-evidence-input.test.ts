@@ -46,9 +46,18 @@ it.each([
 
 it("keeps an unfinished evidence phase partial even when the direct-answer phase exhausted empty", () => {
   const interpretation = authoredSource("forum-notebook"), query = evidenceQuery("count"), correspondence = authoredAlignment(interpretation, query, COUNT);
+  const admitted = admitSourceSemanticCorrespondence({ source_interpretation: interpretation, query_semantics: query,
+    semantic_correspondence: correspondence, original_query: COUNT });
+  if (admitted.kind !== "admitted") throw new Error("expected admitted correspondence");
   const executed = executeSourceSemanticInterpretation({ source_interpretation: interpretation, query_semantics: query,
     semantic_correspondence: correspondence, original_query: COUNT, workspaceId: "ws", scope: "project", authorizedScopes: ["project"],
-    asOf: "2026-09-18T00:00:00.000Z" });
+    asOf: "2026-09-18T00:00:00.000Z",
+    request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
+      semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: COUNT,
+      budget: { ...BASE_BUDGET, work_units: 200_000, memory_bytes: 12_000_000,
+        page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 },
+      output_byte_limit: 1_000_000 } });
   expect(executed.result.outcome.status).toBe("resource_exhausted");
   expect(executed.result.completeness?.logical_index).toBe("partial");
   expect(executed.index?.completeness.logical_index).toBe("partial");

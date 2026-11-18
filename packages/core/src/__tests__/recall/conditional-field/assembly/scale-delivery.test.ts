@@ -24,7 +24,7 @@ describe("native lexical delivery at corpus scale", () => {
         result_kind_view: "memory_only", snapshot_id: SNAPSHOT_ID, interpretation_clock: INTERPRETATION_CLOCK,
         as_of: INTERPRETATION_CLOCK, expires_at: "2099-01-01T00:00:00.000Z", readers, continuation,
         authorized_scopes: null });
-    const small = defaultBudget({ page_budget: 5 });
+    const small = defaultBudget({ page_budget: 5, memory_bytes: 250_000 });
     let page = run(small);
     const ids = page.entries.map((entry) => entry.object_id);
     for (let attempt = 0; attempt < 40 && !restoreField(page.continuation)?.memory_exhausted; attempt += 1) {

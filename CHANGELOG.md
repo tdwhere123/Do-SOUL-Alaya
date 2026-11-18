@@ -46,6 +46,17 @@ Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under inva
   `soul.open_pointer` specs and daemon catalog descriptions for `query_coordinates`,
   `member_index` `source_target` openability, default `mixed` compatibility, and selective
   `payload_continuation` on relevant `content_complete === false` ranked results.
+- **Atomic condition-witness unit deferral in `encodeIndexResults`:** requires
+  non-first-slot condition-witnessed entries (`evidence_variant.condition` present) to fit
+  their full witness span on a shared page whenever a fresh page fits the full witness unit
+  with structural boundary alignment, deferring multi-message openings such as
+  `[prompt, reply]` intact to the next page and falling back to structural message
+  boundaries when the full witness exceeds a fresh page.
+- **Persistent field-graph retention accounting (`field-graph-preparation.ts`):**
+  charges `PreparedFieldGraph.retainedBytes` only for persistent tree updates,
+  newly admitted coordinate/transition partition metadata, and non-empty
+  relaxation changes rather than accumulating per-atom transient scratch bytes
+  or duplicated `FieldEngineState` seed keys.
 
 Protocol 42.0.0 records a **semantic major** under invariant §25, without changing
 MCP JSON shapes: conditional-field Hard identity is a Boolean polymorphic unit

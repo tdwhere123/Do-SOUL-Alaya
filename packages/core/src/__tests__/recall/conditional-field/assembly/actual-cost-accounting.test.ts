@@ -117,7 +117,7 @@ describe("conditional-field actual request cost", () => {
         }) }) }));
     expect(lexical).not.toHaveBeenCalled();
     const budget = defaultBudget({
-      work_units: 400, finalization_reserve: 40, min_envelope: 1, page_budget: 4
+      work_units: 400, finalization_reserve: 40, min_envelope: 1, page_budget: 4, memory_bytes: 500_000
     });
     const pages = collect(readers, budget, 40, recall(readers, budget).index);
     expect(pages.at(-1)!.continuation).toBeNull();

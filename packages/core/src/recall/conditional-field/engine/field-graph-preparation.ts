@@ -109,9 +109,7 @@ export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0
   const encodedBytes = seed === undefined ? transition === undefined ? 0
     : escapedTextBytes(transition.from) + escapedTextBytes(transition.to) + (transition.cap_contract_id?.length ?? 0)
     : escapedTextBytes(seed.state) + (seed.cap_contract_id?.length ?? 0);
-  const size = state.nodes.size + state.admittedEdges + state.queue.size + state.allocatedPendingSlots
-    + state.coordinates.coordinates.size + state.coordinates.hard.length + auxiliaryNodes + 2;
-  const depth = 2 * Math.ceil(Math.log2(size + 2)) + 4;
+  const depth = treeDepth(state, auxiliaryNodes);
   const preparing = seed !== undefined || transition !== undefined;
   // Seed: three registration maps, numeric/product/cross values, queue and pending.
   // Edge: two registrations, outgoing list/map, queue and pending. Relax:
@@ -119,6 +117,32 @@ export function nextFieldGraphAtom(state: PreparedFieldGraph, auxiliaryNodes = 0
   const updates = transition !== undefined ? 15 : seed !== undefined ? 12 : 7;
   const bytes = 1024 + 32 * depth * updates + (preparing ? 4 * encodedBytes : 0);
   return { seed, transition, coordinate: lifted?.coordinate, bytes };
+}
+
+function treeDepth(state: PreparedFieldGraph, auxiliaryNodes = 0): number {
+  const size = state.nodes.size + state.admittedEdges + state.queue.size + state.allocatedPendingSlots
+    + state.coordinates.coordinates.size + state.coordinates.hard.length + auxiliaryNodes + 2;
+  return 2 * Math.ceil(Math.log2(size + 2)) + 4;
+}
+
+function transitionPartitionMetadataBytes(key: ProductStateKey): number {
+  return key.program_state.length + key.hypothesis_id.length + key.time_state.length
+    + (key.interpretation_node === undefined ? 0 : escapedTextBytes(key.interpretation_node));
+}
+
+function prepareRetainedDelta(state: PreparedFieldGraph, atom: FieldGraphAtom): number {
+  const depth = treeDepth(state);
+  const updates = atom.transition !== undefined ? 15 : 12;
+  const coordinate = atom.coordinate ?? (atom.transition ?? atom.seed)!.cap_contract_id;
+  // Seed states live in FieldEngineState already; charge only persistent tree
+  // updates and newly retained coordinate / transition partition metadata.
+  const partitionKeyBytes = atom.transition === undefined
+    ? (coordinate?.length ?? 0)
+    : (coordinate?.length ?? 0) + escapedTextBytes(atom.transition.relation_kind)
+      + (atom.transition.instance_id?.length ?? 0)
+      + transitionPartitionMetadataBytes(atom.transition.from)
+      + transitionPartitionMetadataBytes(atom.transition.to);
+  return 32 * depth * updates + 4 * partitionKeyBytes;
 }
 
 function escapedTextBytes(value: unknown): number {
@@ -142,17 +166,18 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
   if (atom.bytes > availableBytes) return state;
   if (atom.seed !== undefined || atom.transition !== undefined) {
     const current = { ...state, changedProduct: undefined };
+    const prepareDelta = prepareRetainedDelta(state, atom);
     if (atom.coordinate !== undefined) {
       const expanded = { ...current, coordinates: advanceContractCoordinates(state.coordinates) };
       const prepared = atom.seed === undefined ? admitTransition(expanded, atom.transition!, atom.coordinate)
         : admitSeed(expanded, atom.seed, atom.coordinate);
-      return { ...prepared, retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
+      return { ...prepared, retainedBytes: state.retainedBytes + prepareDelta, next: "relax" };
     }
     const admitted = state.deferred === undefined ? current : { ...current, deferred: undefined,
       pending: state.pending.append(state.deferred), allocatedPendingSlots: state.allocatedPendingSlots + 1 };
-    // Live version includes every admitted atom; a peak-atom stamp hides the rest of the tree.
-    return { ...prepareRow(admitted, atom), retainedBytes: state.retainedBytes + atom.bytes, next: "relax" };
+    return { ...prepareRow(admitted, atom), retainedBytes: state.retainedBytes + prepareDelta, next: "relax" };
   }
+  const depth = treeDepth(state);
   const result = solveMaxMinField({ nodeIds: [], seeds: new Map(), transitions: [], bottom: 0, top: 1000,
     preparedGraph: state.graph, priorValues: state.numericValues, workQueue: state.queue, workLimit: 1 });
   let values = state.values;
@@ -162,8 +187,9 @@ export function stepFieldGraph(state: PreparedFieldGraph, availableBytes: number
     values = values.with(node, grade);
     changedProduct = node.product;
   }
+  const relaxDelta = result.changedValues.size === 0 ? 0 : 32 * depth * 3 * result.changedValues.size;
   return { ...state, numericValues: result.values, queue: result.workQueue, values,
-    retainedBytes: state.retainedBytes + atom.bytes, changedProduct, next: "prepare" };
+    retainedBytes: state.retainedBytes + relaxDelta, changedProduct, next: "prepare" };
 }
 
 function prepareRow(state: PreparedFieldGraph, atom: FieldGraphAtom): PreparedFieldGraph {

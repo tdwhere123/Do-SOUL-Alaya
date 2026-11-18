@@ -39,10 +39,11 @@ function configuration(providerKind: string) {
 }
 
 /** Rounds rank by their message vectors in round order; each round has one statement key. */
-async function publishedRounds(providerKind = "local_onnx", keyRole: "user" | "assistant" = "user", unkeyedRound = -1, suffix = "") {
+async function publishedRounds(providerKind = "local_onnx", keyRole: "user" | "assistant" = "user", unkeyedRound = -1, suffix = "",
+  assistantSuffix = "") {
   const env = await createStatementSessionEnvironment(); environments.push(env);
   const turns = Array.from({ length: ROUNDS }, (_, k) => [{ role: "user" as const, content: `Round ${k}: I planted bed ${k}.${suffix}` },
-    { role: "assistant" as const, content: keyRole === "user" ? "Noted." : `Noted. Round ${k}.` }]);
+    { role: "assistant" as const, content: keyRole === "user" ? "Noted." : `Noted. Round ${k}.${assistantSuffix}` }]);
   // The host reports when the session happened; it is each root's recorded event time.
   await env.capture({ container: CONTAINER, messages: hostMessages(turns, 0, START) });
   env.advance(STATEMENT_SESSION_IDLE_MS);
@@ -385,3 +386,49 @@ it("delivers the same permutation through the built worker under the production 
     expect(limitedFacts.some(event => event.kind === "field_access_order")).toBe(false);
   } finally { await client.close(); }
 }, 60_000);
+
+it("defers a partially fitting assistant witness opening intact to page two through the built worker", async () => {
+  assertBuiltWorker();
+  const { env, roots, prepare } = await publishedRounds("local_onnx", "assistant", 0, " user-pad".repeat(40), " assistant-pad".repeat(40));
+  const covered = await prepare(STATEMENTS);
+  const conditions = CONDITIONS.map(condition => ({ ...condition, speaker: "assistant" as const }));
+  const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
+  const messages = (root: string) => JSON.parse((env.database.connection
+    .prepare("SELECT canonical_inventory FROM source_host_inventories WHERE record_id=?")
+    .get(root) as { canonical_inventory: string }).canonical_inventory).occurrences as { utf8_span: [number, number] }[];
+  const body = (root: string) => (env.database.connection.prepare("SELECT source_body FROM source_records WHERE record_id=?")
+    .get(root) as { source_body: string }).source_body;
+  const slot1Occurrences = messages(roots[0]!), slot2Occurrences = messages(roots[1]!);
+
+  process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
+  let client;
+  try { client = createRecallReadWorkerClient({ databaseFilename: env.filename, workerUrl: builtWorkerUrl, workerCount: 1 })!; }
+  finally { process.execArgv.splice(process.execArgv.lastIndexOf(PROVIDER_FREE_WORKER_IMPORT), 1); }
+  try {
+    await client.ready();
+    const { readers: _readers, ...base } = request(env, readers, conditions);
+    const initial = { ...base, prepared_query: covered,
+      delivery_budget: { max_total_tokens: 1400, max_encoded_bytes: 1_000_000 } };
+    const page1 = await client.conditionalFieldPort.recall(initial);
+    expect(page1.index.continuation).not.toBeNull();
+    expect(page1.index.entries).toHaveLength(1);
+    expect(page1.index.entries[0]!.target).toMatchObject({
+      kind: "source_evidence", root_id: roots[0],
+      span: { content_start: 0, content_end: slot1Occurrences[0]!.utf8_span[1], content_complete: false }
+    });
+
+    await client.conditionalFieldPort.acknowledge!(page1.preparation_id!, page1.index, new Map(Object.entries(page1.previews)));
+    const page2 = await client.conditionalFieldPort.recall({ ...initial, continuation: page1.index.continuation! });
+    const slot2 = page2.index.entries[0]!;
+    expect(slot2.navigation?.evidence_variant?.condition).toBeTypeOf("number");
+    expect(slot2.target).toMatchObject({
+      kind: "source_evidence", root_id: roots[1],
+      span: { content_start: slot2Occurrences[0]!.utf8_span[0], content_end: slot2Occurrences[1]!.utf8_span[1], content_complete: true }
+    });
+    const slot2Preview = page2.previews[indexEntryCacheKey(slot2)];
+    expect(slot2Preview).toBe(Buffer.from(body(roots[1]!))
+      .subarray(slot2Occurrences[0]!.utf8_span[0], slot2Occurrences[1]!.utf8_span[1]).toString("utf8"));
+    expect(slot2Preview).toContain("Round 1: I planted bed 1.");
+    expect(slot2Preview).toContain("Noted. Round 1.");
+  } finally { await client.close(); }
+}, 30_000);

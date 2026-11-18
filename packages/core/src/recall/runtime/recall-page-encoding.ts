@@ -97,13 +97,11 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       break;
     }
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedBytes, boundaryEnds);
-    if (encoded.length > 0 && boundaryEnds !== undefined
-      && completeSourceDeliveryEnd(fitted?.preview ?? "", boundaryEnds) === undefined) {
-      const fresh = fitEncodedPreview(preview, metadataBytes, maxTotalTokens, boundaryEnds);
-      // Refuse this wider membership fit before issuance; the projector retries
-      // a shorter prefix without advancing the deferred source. Oversized first
-      // units still make UTF-8 progress instead of indefinitely deferring.
-      if (fresh !== null && completeSourceDeliveryEnd(fresh.preview, boundaryEnds) !== undefined) break;
+    // Refuse a wider membership fit before issuance when a deferred tail can fit intact on a
+    // fresh page; the projector retries a shorter prefix without advancing the deferred source.
+    // Oversized first units still make UTF-8 progress instead of indefinitely deferring.
+    if (encoded.length > 0 && shouldDeferTailSource(entry, preview, fitted?.preview, metadataBytes, maxTotalTokens, boundaryEnds)) {
+      break;
     }
     const content = fitted?.preview ?? "[payload omitted]";
     const target = deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined);
@@ -194,4 +192,19 @@ function fitEncodedPreview(preview: string, metadataBytes: number, remaining: nu
   const truncated = sourceDeliveryPrefix(preview, text => cost(text) <= remaining, boundaryEnds);
   if (truncated.length < 1) return null;
   return { preview: truncated, encodedBytes: cost(truncated) };
+}
+
+function shouldDeferTailSource(entry: InformationIndex["entries"][number], preview: string,
+  fittedPreview: string | undefined, metadataBytes: number, maxTotalTokens: number,
+  boundaryEnds?: readonly number[]): boolean {
+  if (boundaryEnds === undefined) return false;
+  const messageIncomplete = completeSourceDeliveryEnd(fittedPreview ?? "", boundaryEnds) === undefined;
+  const witnessIncomplete = entry.navigation?.evidence_variant?.condition !== undefined
+    && (fittedPreview !== preview || messageIncomplete);
+  if (!witnessIncomplete && !messageIncomplete) return false;
+  const fresh = fitEncodedPreview(preview, metadataBytes, maxTotalTokens, boundaryEnds);
+  if (fresh === null) return false;
+  const messageFitsFresh = completeSourceDeliveryEnd(fresh.preview, boundaryEnds) !== undefined;
+  if (witnessIncomplete && fresh.preview === preview && messageFitsFresh) return true;
+  return messageIncomplete && messageFitsFresh;
 }

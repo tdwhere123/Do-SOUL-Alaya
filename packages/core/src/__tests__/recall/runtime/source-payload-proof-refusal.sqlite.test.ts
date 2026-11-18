@@ -29,7 +29,7 @@ it("keeps rejected source proofs terminal while their body-only capability deliv
   expect(prepared.index.continuation).not.toBeNull();
   // Fund the membership ledger without funding its retained proof at the current coordinate sizes.
   const rejected = runConditionalFieldRecallWithReceipt({ ...request, continuation: prepared.index.continuation,
-    budget: defaultBudget({ memory_bytes: 25_100, page_budget: 1, min_envelope: 1 }) });
+    budget: defaultBudget({ memory_bytes: 13_600, page_budget: 1, min_envelope: 1 }) });
   expect(rejected.index.entries, JSON.stringify(rejected.index.completeness)).toHaveLength(1);
   expect(rejected.index.entries[0]?.target.kind).toBe("source_evidence");
   expect(rejected.index.completeness.payload).toBe("resource_rejected");

@@ -574,7 +574,10 @@ anchor ordinary payload bytes. Explicit semantic proof-support ranges and payloa
 continuation offsets remain authoritative for their respective reads. Source
 previews keep the same root order and declared budgets. Within the fitted allowance,
 they end at the largest recorded boundary of the coarsest available unit: an admitted
-`message` span where recorded, otherwise a `line` span. When a later member would
+`message` span where recorded, otherwise a `line` span. Condition-witnessed entries
+(`evidence_variant.condition` present) additionally require the full witness span to fit
+before emitting on a shared page whenever a fresh page fits the full witness unit, falling
+back to structural message boundaries otherwise. When a later member would
 expose only a fragment but a complete unit fits a fresh page, the codec refuses that
 wider membership fit. The projection owner pays for the attempt, refits a shorter
 prefix and leaves the deferred member pending. This may increase page count and

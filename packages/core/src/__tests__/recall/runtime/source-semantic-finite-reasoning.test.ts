@@ -167,9 +167,9 @@ it("caps grouped and shared-withdrawal index memory at the live ledger, includin
   try {
     // These fixtures separate one admitted binding, both bindings, and a funded
     // base with an unfunded withdrawal. Retained cap coordinates are part of each allocation.
-    const prefixBudget = 4_100_000;
-    const groupedBudget = 4_400_000;
-    const withdrawalBudget = 5_400_000;
+    const prefixBudget = 2_725_000;
+    const groupedBudget = 3_200_000;
+    const withdrawalBudget = 4_200_000;
     const partial = execute(prefixBudget);
     assertAdmitted(partial.result.resource_usage);
     expect(projections.some((row, index) => index > 0 && row.historical > attempts[index]!.bytes

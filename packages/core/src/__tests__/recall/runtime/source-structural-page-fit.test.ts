@@ -105,4 +105,84 @@ describe("source structural membership fitting", () => {
       expect(fitted.some(row => row.semantic_dependencies?.status === "complete")).toBe(false);
     }
   });
+
+  it("defers a condition-witnessed tail unit intact when only its leading message fits the page residual", () => {
+    const prompt = "p".repeat(300), reply = "r".repeat(300), witness = `${prompt}${reply}`;
+    const { index, previews, metadata } = sourcePage([first, witness]);
+    metadata[indexEntryCacheKey(index.entries[1]!)] = {
+      delivery_boundaries: { status: "available", spans: [
+        { purpose: "message", end_offset: Buffer.byteLength(prompt) },
+        { purpose: "message", end_offset: Buffer.byteLength(witness) }
+      ] }
+    };
+    const unwitnessed = encodeIndexResults(index, previews, 1200, metadata);
+    expect(unwitnessed.map(row => row.content_preview)).toEqual([first, prompt]);
+
+    const witnessedIndex: InformationIndex = {
+      ...index,
+      entries: [index.entries[0]!, {
+        ...index.entries[1]!,
+        navigation: {
+          contract: "native-query-navigation.v1",
+          query_digest: index.query_id,
+          view: "original",
+          operator: "source_vector",
+          ordinal: 1,
+          reference: "source-1",
+          evidence_variant: {
+            condition: 0,
+            support_span: { start_byte: 0, end_byte: Buffer.byteLength(witness) }
+          }
+        }
+      }]
+    };
+    const page1 = encodeIndexResults(witnessedIndex, previews, 1200, metadata);
+    expect(page1).toHaveLength(1);
+    expect(page1[0]!.content_preview).toBe(first);
+
+    const page2 = encodeIndexResults({
+      ...witnessedIndex,
+      entries: witnessedIndex.entries.slice(1),
+      representation: { ...witnessedIndex.representation, page_budget: 1 }
+    }, previews, 1200, metadata);
+    expect(page2).toHaveLength(1);
+    expect(page2[0]!.content_preview).toBe(witness);
+    expect(page2[0]!.target).toEqual(witnessedIndex.entries[1]!.target);
+  });
+
+  it("falls back to complete structural message boundaries when a condition-witnessed span exceeds a fresh page", () => {
+    const prompt = "p".repeat(300), oversizedReply = "r".repeat(900), witness = `${prompt}${oversizedReply}`;
+    const { index, previews, metadata } = sourcePage([first, witness]);
+    metadata[indexEntryCacheKey(index.entries[1]!)] = {
+      delivery_boundaries: { status: "available", spans: [
+        { purpose: "message", end_offset: Buffer.byteLength(prompt) },
+        { purpose: "message", end_offset: Buffer.byteLength(witness) }
+      ] }
+    };
+    const witnessedIndex: InformationIndex = {
+      ...index,
+      entries: [index.entries[0]!, {
+        ...index.entries[1]!,
+        navigation: {
+          contract: "native-query-navigation.v1",
+          query_digest: index.query_id,
+          view: "original",
+          operator: "source_vector",
+          ordinal: 1,
+          reference: "source-1",
+          evidence_variant: {
+            condition: 0,
+            support_span: { start_byte: 0, end_byte: Buffer.byteLength(witness) }
+          }
+        }
+      }]
+    };
+    const encoded = encodeIndexResults(witnessedIndex, previews, 1200, metadata);
+    expect(encoded).toHaveLength(2);
+    expect(encoded[0]!.content_preview).toBe(first);
+    expect(encoded[1]!.content_preview).toBe(prompt);
+    expect(encoded[1]!.target).toMatchObject({
+      span: { content_start: 0, content_end: Buffer.byteLength(prompt), content_complete: false }
+    });
+  });
 });
