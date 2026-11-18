@@ -374,6 +374,16 @@ function buildStandardJudgeUser(
   );
 }
 
+/** LongMemEval anscheck prompt: per-type rubric plus the one-word judge system. */
+export function buildJudgePrompt(input: Readonly<{
+  questionType: string; isAbstention: boolean; question: string; goldAnswer: string; modelAnswer: string;
+}>): Readonly<{ system: string; user: string }> {
+  return {
+    system: JUDGE_SYSTEM,
+    user: buildJudgeUser(input.questionType, input.isAbstention, input.question, input.goldAnswer, input.modelAnswer)
+  };
+}
+
 function buildStandardJudgeInstruction(questionType: string): string {
   const base =
     "I will give you a question, a correct answer, and a response from a model. " +

@@ -32,6 +32,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
   maxModelTurns?: number;
   maxToolCalls?: number;
   wallMs?: number;
+  spendCeilingUsd?: number;
   closedSessions?: readonly string[];
   closedKeys?: readonly string[];
 }>) {
@@ -72,7 +73,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
       maximum_attempts_per_key: 1,
       concurrency: 1,
       wall_ms: input.wallMs ?? 60_000,
-      spend_ceiling_usd: 1,
+      spend_ceiling_usd: input.spendCeilingUsd ?? 1,
       max_model_turns: maxModelTurns,
       max_tool_calls: input.maxToolCalls ?? 4,
       max_input_bytes: 1_500_000,

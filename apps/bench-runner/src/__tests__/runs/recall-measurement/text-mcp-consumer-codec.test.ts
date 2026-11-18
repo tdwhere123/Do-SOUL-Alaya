@@ -122,3 +122,33 @@ it("accepts intended text actions and rejects invalid shapes on the transmitted 
   expect(validate({ action: "write", tool: "soul.recall", arguments: {} })).toBe(false);
   expect(validate({})).toBe(false);
 });
+
+it("projects a plain-query surface and dates the user prompt without changing omitted encoding", () => {
+  const tools = [{
+    name: "soul.recall",
+    description: "On soul.recall, optionally pass query_coordinates when temporal help. Keep payload_continuation.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, query_coordinates: { type: "object" }, interpretation_proposal: { type: "object" } },
+      required: ["query"]
+    }
+  }];
+  const coordinateSurface = { ...surface, tools, instructions: ALAYA_MCP_SERVER_INSTRUCTIONS };
+  const omitted = encodeTextMcpRequest({ surface: coordinateSurface, query: "Which project was mentioned?", events: [] });
+  const coordinates = encodeTextMcpRequest({
+    surface: coordinateSurface, query: "Which project was mentioned?", events: [],
+    caller_capability_profile: "caller_coordinates"
+  });
+  const plain = encodeTextMcpRequest({
+    surface: coordinateSurface, query: "Which project was mentioned?", events: [],
+    caller_capability_profile: "plain_query", question_date: "2023/09/13"
+  });
+  expect(omitted.systemPrompt).toBe(coordinates.systemPrompt);
+  expect(omitted.userPrompt).toBe(coordinates.userPrompt);
+  expect(omitted.systemPrompt).toContain("query_coordinates");
+  expect(plain.systemPrompt).not.toContain("query_coordinates");
+  expect(plain.systemPrompt).not.toContain("interpretation_proposal");
+  expect(plain.systemPrompt).toContain("payload_continuation");
+  expect(plain.userPrompt.startsWith("Current date: 2023/09/13\nCALLER_QUERY:")).toBe(true);
+  expect(omitted.userPrompt.startsWith("CALLER_QUERY:")).toBe(true);
+});

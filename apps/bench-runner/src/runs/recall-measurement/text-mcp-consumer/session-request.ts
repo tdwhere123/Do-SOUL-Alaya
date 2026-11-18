@@ -8,7 +8,11 @@ import { publishBytesExclusiveDurable, replaceBytesDurable } from "../../extract
 import { ExtractionTransportProvenanceSchema } from "../../extraction/transport-route.js";
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "../../provider-request/request-binding.js";
 import { TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA, TEXT_MCP_ACTION_SCHEMA_NAME, encodeTextMcpRequest, textMcpUtf8Bytes } from "./codec.js";
-import { TextMcpLiveSurfaceSchema, type TextMcpLiveSurface } from "./contract.js";
+import {
+  TextMcpCallerCapabilityProfileSchema, TextMcpLiveSurfaceSchema, TextMcpRecallDispatchDefaultsSchema,
+  type TextMcpLiveSurface
+} from "./contract.js";
+import { textMcpPromptOptions, type TextMcpPromptOptions } from "./caller-capability-profile.js";
 import {
   TEXT_MCP_PROVIDER_SESSION_CONTRACT, check, type TextMcpProviderSessionGrant
 } from "./session-authority.js";
@@ -35,7 +39,10 @@ const Transcript = z.object({
   live_surface: TextMcpLiveSurfaceSchema,
   query: z.string().min(1),
   host_setup: z.boolean(),
-  events: z.array(z.record(z.string(), z.unknown()))
+  events: z.array(z.record(z.string(), z.unknown())),
+  caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
+  question_date: z.string().min(1).optional(),
+  recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional()
 }).strict();
 export type TextMcpProviderSessionTranscript = z.infer<typeof Transcript>;
 
@@ -46,9 +53,9 @@ export function sessionTranscriptDigest(input: Readonly<{
   surface: TextMcpLiveSurface;
   query: string;
   events: readonly Record<string, unknown>[];
-}>): string {
+} & TextMcpPromptOptions>): string {
   return createHash("sha256").update(canonicalJson({
-    surface: input.surface, query: input.query, events: input.events
+    surface: input.surface, query: input.query, events: input.events, ...textMcpPromptOptions(input)
   }), "utf8").digest("hex");
 }
 
@@ -58,8 +65,11 @@ export function materializeTextMcpProviderSessionRequest(input: Readonly<{
   surface: TextMcpLiveSurface;
   query: string;
   events: readonly Record<string, unknown>[];
-}>): Omit<TextMcpProviderSessionLine, "turn"> {
-  const encoded = encodeTextMcpRequest({ surface: input.surface, query: input.query, events: input.events });
+} & TextMcpPromptOptions>): Omit<TextMcpProviderSessionLine, "turn"> {
+  const prompt = textMcpPromptOptions(input);
+  const encoded = encodeTextMcpRequest({
+    surface: input.surface, query: input.query, events: input.events, ...prompt
+  });
   if (textMcpUtf8Bytes(encoded) > input.grant.limits.max_input_bytes) {
     throw new AlayaError("CONFLICT", "session request exceeds granted input byte ceiling");
   }
@@ -85,7 +95,9 @@ export function materializeTextMcpProviderSessionRequest(input: Readonly<{
     request_digest: bound.requestDigest,
     inputByteUpper: bound.inputByteUpper,
     transportProvenance: bound.transportProvenance,
-    transcript_digest: sessionTranscriptDigest({ surface: input.surface, query: input.query, events: input.events })
+    transcript_digest: sessionTranscriptDigest({
+      surface: input.surface, query: input.query, events: input.events, ...prompt
+    })
   });
 }
 

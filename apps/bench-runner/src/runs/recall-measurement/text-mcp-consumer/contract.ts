@@ -68,10 +68,20 @@ export const TextMcpCeilingsSchema = z.object({
 }).strict();
 /** Ordinary query authority, including an optional admitted frozen interpretation proposal. */
 export const TextMcpConsumerQuerySchema = OrdinaryRecallEntryQuerySchema;
+export const TextMcpCallerCapabilityProfileSchema = z.enum(["plain_query", "caller_coordinates"]);
+export type TextMcpCallerCapabilityProfile = z.infer<typeof TextMcpCallerCapabilityProfileSchema>;
+export const TextMcpRecallDispatchDefaultsSchema = z.object({
+  result_kind_view: z.literal("source_only").optional(),
+  source_observed_at: z.string().min(1).optional()
+}).strict();
+export type TextMcpRecallDispatchDefaults = z.infer<typeof TextMcpRecallDispatchDefaultsSchema>;
 export const TextMcpConsumerInputSchema = z.object({
   config: z.unknown(), root: z.string().min(1), query: TextMcpConsumerQuerySchema,
   host_issued_initial_recall: z.boolean(), model_kind: z.enum(["scripted", "remote"]),
-  ceilings: TextMcpCeilingsSchema
+  ceilings: TextMcpCeilingsSchema,
+  caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
+  question_date: z.string().min(1).optional(),
+  recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional()
 }).strict();
 export type TextMcpConsumerInput = z.infer<typeof TextMcpConsumerInputSchema>;
 export type TextMcpCeilings = z.infer<typeof TextMcpCeilingsSchema>;
@@ -138,7 +148,8 @@ export const TextMcpConsumerExecutionSchema = z.object({
   }).strict(),
   events: z.array(z.record(z.string(), z.unknown())),
   terminal: TextMcpConsumerTerminalSchema,
-  original_snapshot_sha256: Digest
+  original_snapshot_sha256: Digest,
+  caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional()
 }).strict();
 export type TextMcpConsumerExecution = z.infer<typeof TextMcpConsumerExecutionSchema>;
 

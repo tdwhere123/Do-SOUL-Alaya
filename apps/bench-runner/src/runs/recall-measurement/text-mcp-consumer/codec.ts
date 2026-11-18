@@ -2,9 +2,10 @@ import { canonicalJson } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody } from "@do-soul/alaya-engine-gateway";
 import {
   TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
-  TEXT_MCP_SCRIPTED_MODEL, isAllowedTextMcpReadTool, type TextMcpDecodedAction, type TextMcpEncodedRequest,
-  type TextMcpLiveSurface
+  TEXT_MCP_SCRIPTED_MODEL, isAllowedTextMcpReadTool, type TextMcpCallerCapabilityProfile, type TextMcpDecodedAction,
+  type TextMcpEncodedRequest, type TextMcpLiveSurface
 } from "./contract.js";
+import { projectLiveSurfaceForCaller } from "./caller-capability-profile.js";
 
 /** Named schema for the provider-bound sender. Not the scripted jsonObject fixture. */
 export const TEXT_MCP_ACTION_SCHEMA_NAME = "text_mcp_action" as const;
@@ -37,21 +38,25 @@ export function encodeTextMcpRequest(input: Readonly<{
   surface: TextMcpLiveSurface;
   query: string;
   events: readonly Record<string, unknown>[];
+  caller_capability_profile?: TextMcpCallerCapabilityProfile;
+  question_date?: string;
 }>): TextMcpEncodedRequest {
+  const surface = projectLiveSurfaceForCaller(input.surface, input.caller_capability_profile);
   const systemPrompt = [
-    formatLiveInstructions(input.surface),
+    formatLiveInstructions(surface),
     "LIVE_MCP_SERVER:",
-    canonicalJson({ version: input.surface.version, capabilities: input.surface.capabilities }),
+    canonicalJson({ version: surface.version, capabilities: surface.capabilities }),
     "LIVE_TOOLS:",
-    canonicalJson(input.surface.tools),
+    canonicalJson(surface.tools),
     "DIAGNOSTIC_RESTRICTION:",
     TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
     "TEXT_ACTION_PROTOCOL:",
     TEXT_MCP_ACTION_PROTOCOL
   ].join("\n");
+  const dated = input.question_date === undefined ? [] : [`Current date: ${input.question_date}`];
   return {
     systemPrompt,
-    userPrompt: ["CALLER_QUERY:", input.query, "EVENTS:", formatEvents(input.events)].join("\n")
+    userPrompt: [...dated, "CALLER_QUERY:", input.query, "EVENTS:", formatEvents(input.events)].join("\n")
   };
 }
 

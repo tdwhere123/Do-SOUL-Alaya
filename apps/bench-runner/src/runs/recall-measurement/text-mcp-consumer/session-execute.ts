@@ -13,8 +13,13 @@ import type { BenchDaemonHandle } from "../../../harness/daemon.js";
 import { SemanticChainConfigSchema, withSemanticChainDaemon, type SemanticChainConfig } from "../contract.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope } from "../ordinary/ordinary-entry-contract.js";
 import { TEXT_MCP_ACTION_SCHEMA_NAME } from "./codec.js";
-import { TextMcpCeilingsSchema, TextMcpConsumerQuerySchema, TextMcpLiveSurfaceSchema,
-  isUnresolvedTextMcpDelivery } from "./contract.js";
+import {
+  TextMcpCallerCapabilityProfileSchema, TextMcpCeilingsSchema, TextMcpConsumerQuerySchema, TextMcpLiveSurfaceSchema,
+  TextMcpRecallDispatchDefaultsSchema, isUnresolvedTextMcpDelivery
+} from "./contract.js";
+import {
+  recallDispatchEventFields, resolveTextMcpRecallDispatch, textMcpPromptOptions, type TextMcpPromptOptions
+} from "./caller-capability-profile.js";
 import { assertTextMcpOutputRoot, dispatchTextMcpRead, snapshotLiveMcpSurface } from "./live-mcp.js";
 import {
   TEXT_MCP_PROVIDER_BOUND_KIND, TEXT_MCP_PROVIDER_SESSION_CONTRACT,
@@ -69,7 +74,8 @@ const Result = z.object({
   cost: z.object({
     reported_input_tokens: z.number(), reported_output_tokens: z.number(), unknown_usage_attempts: z.number(),
     reserved_upper_usd: z.number(), invoice_usd: z.null()
-  }).strict()
+  }).strict(),
+  caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional()
 }).strict();
 export type TextMcpProviderSessionResult = z.infer<typeof Result>;
 
@@ -79,7 +85,7 @@ type SessionConsumer = Readonly<{
   query: z.infer<typeof TextMcpConsumerQuerySchema>;
   host_issued_initial_recall: boolean;
   ceilings: z.infer<typeof TextMcpCeilingsSchema>;
-}>;
+} & TextMcpPromptOptions>;
 
 /** Provider-bound session. Scripted complete() is not an argument and cannot gain remote authority. */
 export async function consumeTextMcpProviderSession(input: Readonly<{
@@ -150,7 +156,8 @@ export async function consumeTextMcpProviderSession(input: Readonly<{
       ledger: snapshot,
       cost: { reported_input_tokens: snapshot.telemetry.inputTokens, reported_output_tokens: snapshot.telemetry.outputTokens,
         unknown_usage_attempts: snapshot.telemetry.usageUnknownAttempts, reserved_upper_usd: grant.limits.spend_ceiling_usd,
-        invoice_usd: null }
+        invoice_usd: null },
+      ...textMcpPromptOptions({ caller_capability_profile: consumer?.caller_capability_profile })
     });
   } finally { lease.release(); }
 }
@@ -158,17 +165,21 @@ export async function consumeTextMcpProviderSession(input: Readonly<{
 function parseConsumer(value: unknown, grant: TextMcpProviderSessionGrant): SessionConsumer {
   const raw = z.object({
     config: z.unknown(), root: z.string().min(1), query: TextMcpConsumerQuerySchema,
-    host_issued_initial_recall: z.boolean(), ceilings: TextMcpCeilingsSchema
+    host_issued_initial_recall: z.boolean(), ceilings: TextMcpCeilingsSchema,
+    caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
+    question_date: z.string().min(1).optional(),
+    recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional()
   }).strict().parse(structuredClone(value));
   const config = SemanticChainConfigSchema.parse(structuredClone(raw.config));
   assertTextMcpOutputRoot(raw.root, config);
+  const prompt = textMcpPromptOptions(raw);
   assertTextMcpProviderSessionConsumer(grant, {
     snapshot_sha256: config.snapshot_sha256,
     query: { query_key: raw.query.query_key, original_query: raw.query.original_query },
     host_issued_initial_recall: raw.host_issued_initial_recall,
-    ceilings: raw.ceilings
+    ceilings: raw.ceilings, ...prompt
   });
-  return { ...raw, config };
+  return { ...raw, ...prompt, config };
 }
 
 async function runProviderSessionExecute(input: Readonly<{
@@ -198,7 +209,8 @@ async function runProviderSessionExecute(input: Readonly<{
       }
       const persist = () => persistSessionTranscript(input.grant.execution_root, input.grant, {
         contract: "text-mcp-provider-session-transcript-v1", live_surface: work.surface!,
-        query: input.grant.query.original_query, host_setup: work.hostSetup, events: work.events
+        query: input.grant.query.original_query, host_setup: work.hostSetup, events: work.events,
+        ...textMcpPromptOptions(input.consumer)
       });
       persist();
       if (unresolvedEvent(work.events, "host_setup")) return;
@@ -216,7 +228,8 @@ async function runProviderSessionExecute(input: Readonly<{
         if (performance.now() >= phaseDeadlineMs) break;
         const derived = materializeTextMcpProviderSessionRequest({
           grant: input.grant, config: input.config, surface: work.surface!,
-          query: input.grant.query.original_query, events: work.events
+          query: input.grant.query.original_query, events: work.events,
+          ...textMcpPromptOptions(input.consumer)
         });
         const admitted = admitTextMcpProviderSessionRequest(input.grant.execution_root, input.grant, input.lines.length + 1, derived);
         if (!input.lines.some(line => line.turn === admitted.turn)) input.lines.push(admitted);
@@ -234,17 +247,27 @@ async function ensureHostSetup(grant: TextMcpProviderSessionGrant, consumer: Ses
   if (!grant.host_issued_initial_recall || work.events.some(event => event.kind === "host_setup")) return;
   const mapping = mapOrdinaryRecallScope(consumer.config.authorized_scopes);
   if (mapping.status !== "mapped" || priorMcp + work.mcpDispatches >= grant.limits.max_tool_calls) return;
-  const args = structuredClone(buildOrdinaryRecallRequest({
-    query: consumer.query.original_query, scope_class: mapping.scope_class,
-    source_observed_at: consumer.config.interpretation_clock,
-    ...(consumer.query.interpretation_proposal === undefined
-      ? {} : { interpretation_proposal: consumer.query.interpretation_proposal })
-  }));
+  const resolved = resolveTextMcpRecallDispatch({
+    profile: consumer.caller_capability_profile, tool: "soul.recall",
+    rawArguments: structuredClone(buildOrdinaryRecallRequest({
+      query: consumer.query.original_query, scope_class: mapping.scope_class,
+      source_observed_at: consumer.config.interpretation_clock,
+      ...(consumer.query.interpretation_proposal === undefined
+        ? {} : { interpretation_proposal: consumer.query.interpretation_proposal })
+    })),
+    defaults: consumer.recall_dispatch_defaults
+  });
+  if (resolved.kind === "refuse") {
+    work.events.push({ kind: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason });
+    persist();
+    return;
+  }
   throwIfSessionCancelled(abortSignal);
   reserveMcpDelivery(work, persist, {
-    kind: "host_setup", generated_by: "host_controlled_setup", tool: "soul.recall", arguments: args
+    kind: "host_setup", generated_by: "host_controlled_setup", tool: "soul.recall", arguments: resolved.arguments,
+    ...recallDispatchEventFields(resolved)
   });
-  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, "soul.recall", args));
+  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, "soul.recall", resolved.arguments));
   if (isUnresolvedTextMcpDelivery(dispatched.response_state)) return;
 }
 
@@ -281,11 +304,20 @@ async function settleSessionTurn(input: Parameters<typeof runProviderSessionExec
   if (input.priorMcp + work.mcpDispatches >= input.grant.limits.max_tool_calls) return "stop";
   throwIfSessionCancelled(input.abortSignal);
   if (performance.now() >= phaseDeadlineMs) return "stop";
-  const args = structuredClone(action.arguments);
-  reserveMcpDelivery(work, persist, {
-    kind: "mcp_call", origin: "model_selected", tool: action.tool, arguments: args
+  const resolved = resolveTextMcpRecallDispatch({
+    profile: input.consumer.caller_capability_profile, tool: action.tool,
+    rawArguments: structuredClone(action.arguments), defaults: input.consumer.recall_dispatch_defaults
   });
-  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, action.tool, args));
+  if (resolved.kind === "refuse") {
+    work.events.push({ kind: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason });
+    persist();
+    return "stop";
+  }
+  reserveMcpDelivery(work, persist, {
+    kind: "mcp_call", origin: "model_selected", tool: resolved.tool, arguments: resolved.arguments,
+    ...recallDispatchEventFields(resolved)
+  });
+  const dispatched = await dispatchReservedMcp(work, persist, () => dispatchTextMcpRead(daemon.mcpClient, resolved.tool, resolved.arguments));
   return isUnresolvedTextMcpDelivery(dispatched.response_state) ? "stop" : "continue";
 }
 

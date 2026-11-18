@@ -10,7 +10,10 @@ import { NativeChatQuoteBasisSchema, assertNativeChatQuoteBasis, assertNativeCha
 import { estimatedSemanticProviderUpperUsd } from "../../provider-request/request-binding.js";
 import { isExtractionRequestProfile } from "../../extraction/request-profile.js";
 import type { ExtractionCacheWriteLease } from "../../extraction/fill/manifest/fill-root-guard.js";
-import { TextMcpCeilingsSchema, TextMcpConsumerQuerySchema } from "./contract.js";
+import {
+  TextMcpCallerCapabilityProfileSchema, TextMcpCeilingsSchema, TextMcpConsumerQuerySchema,
+  TextMcpRecallDispatchDefaultsSchema
+} from "./contract.js";
 
 export const TEXT_MCP_PROVIDER_SESSION_CONTRACT = "text-mcp-provider-session-v1" as const;
 export const TEXT_MCP_PROVIDER_BOUND_KIND = "provider_bound" as const;
@@ -47,6 +50,9 @@ const Grant = z.object({
   query: SessionQuery,
   snapshot_sha256: Digest,
   host_issued_initial_recall: z.boolean(),
+  caller_capability_profile: TextMcpCallerCapabilityProfileSchema.optional(),
+  question_date: z.string().min(1).optional(),
+  recall_dispatch_defaults: TextMcpRecallDispatchDefaultsSchema.optional(),
   limits: Limits,
   price: z.object({
     input_usd_per_million: z.number().finite().nonnegative(),
@@ -110,6 +116,9 @@ export function assertTextMcpProviderSessionConsumer(grant: TextMcpProviderSessi
   query: { query_key: string; original_query: string };
   host_issued_initial_recall: boolean;
   ceilings: { max_model_turns: number; max_tool_calls: number; max_input_bytes: number; max_output_bytes: number; wall_ms: number };
+  caller_capability_profile?: z.infer<typeof TextMcpCallerCapabilityProfileSchema>;
+  question_date?: string;
+  recall_dispatch_defaults?: z.infer<typeof TextMcpRecallDispatchDefaultsSchema>;
 }>) {
   check(consumer.snapshot_sha256 === grant.snapshot_sha256, "session snapshot identity mismatch");
   check(canonicalJson(consumer.query) === canonicalJson(grant.query), "session query identity mismatch");
@@ -119,6 +128,17 @@ export function assertTextMcpProviderSessionConsumer(grant: TextMcpProviderSessi
     consumer.ceilings.max_input_bytes === grant.limits.max_input_bytes &&
     consumer.ceilings.max_output_bytes === grant.limits.max_output_bytes &&
     consumer.ceilings.wall_ms === grant.limits.wall_ms, "session consumer ceilings differ from grant");
+  if (grant.caller_capability_profile !== undefined) {
+    check(consumer.caller_capability_profile === grant.caller_capability_profile,
+      "session caller capability profile mismatch");
+  }
+  if (grant.question_date !== undefined) {
+    check(consumer.question_date === grant.question_date, "session question date mismatch");
+  }
+  if (grant.recall_dispatch_defaults !== undefined) {
+    check(canonicalJson(consumer.recall_dispatch_defaults ?? null) ===
+      canonicalJson(grant.recall_dispatch_defaults), "session recall dispatch defaults mismatch");
+  }
 }
 
 export function textMcpProviderSessionCacheIdentity(grant: TextMcpProviderSessionGrant) {

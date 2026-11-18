@@ -14,6 +14,9 @@ import {
 } from "./contract.js";
 import { bindTextMcpGatewayBody, decodeTextMcpAction, encodeTextMcpRequest, textMcpUtf8Bytes } from "./codec.js";
 import { assertTextMcpOutputRoot, dispatchTextMcpRead, snapshotLiveMcpSurface } from "./live-mcp.js";
+import {
+  recallDispatchEventFields, resolveTextMcpRecallDispatch, textMcpPromptOptions
+} from "./caller-capability-profile.js";
 
 type TextMcpComplete = TextMcpScriptedPort["complete"];
 
@@ -52,7 +55,8 @@ async function runTextMcpConsumer(
   assertTextMcpOutputRoot(input.root, config);
   const mapping = mapOrdinaryRecallScope(config.authorized_scopes);
   if (input.host_issued_initial_recall && mapping.status === "not_run") {
-    return freezeExecution(emptyExecution(config, { outcome: "not_run", reason: mapping.reason }, false, "idle"));
+    return freezeExecution(emptyExecution(config, { outcome: "not_run", reason: mapping.reason }, false, "idle",
+      input.caller_capability_profile));
   }
   const started = performance.now();
   return withSemanticChainDaemon(config, input.root, async daemon => {
@@ -68,7 +72,7 @@ async function runTextMcpConsumer(
           ? { outcome: "time_ceiling" as const, model_work: "idle" as const } : blocked;
         return freezeExecution(completeExecution(config, surface, false, {
           events, modelCalls: 0, mcpDispatches, terminal, modelWork: "idle"
-        }));
+        }, input.caller_capability_profile));
       }
       const args = structuredClone(buildOrdinaryRecallRequest({
         query: input.query.original_query, scope_class: mapping.scope_class,
@@ -76,12 +80,23 @@ async function runTextMcpConsumer(
         ...(input.query.interpretation_proposal === undefined
           ? {} : { interpretation_proposal: input.query.interpretation_proposal })
       }));
-      const dispatched = await dispatchTextMcpRead(daemon.mcpClient, "soul.recall", args);
+      const resolved = resolveTextMcpRecallDispatch({
+        profile: input.caller_capability_profile, tool: "soul.recall", rawArguments: args,
+        defaults: input.recall_dispatch_defaults
+      });
+      if (resolved.kind === "refuse") {
+        return freezeExecution(completeExecution(config, surface, false, {
+          events, modelCalls: 0, mcpDispatches, modelWork: "idle",
+          terminal: { outcome: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason }
+        }, input.caller_capability_profile));
+      }
+      const dispatched = await dispatchTextMcpRead(daemon.mcpClient, "soul.recall", resolved.arguments);
       mcpDispatches += 1;
       hostSetup = true;
       events.push({
         kind: "host_setup", generated_by: "host_controlled_setup", tool: dispatched.tool,
-        arguments: dispatched.arguments, response_state: dispatched.response_state, envelope: dispatched.envelope
+        arguments: dispatched.arguments, response_state: dispatched.response_state, envelope: dispatched.envelope,
+        ...recallDispatchEventFields(resolved)
       });
       if (isUnresolvedTextMcpDelivery(dispatched.response_state)) {
         return freezeExecution(completeExecution(config, surface, true, {
@@ -93,7 +108,7 @@ async function runTextMcpConsumer(
     const loop = await runTextMcpLoop({
       daemon, complete, input, surface, events, started, mcpDispatches
     });
-    return freezeExecution(completeExecution(config, surface, hostSetup, loop));
+    return freezeExecution(completeExecution(config, surface, hostSetup, loop, input.caller_capability_profile));
   });
 }
 
@@ -114,7 +129,9 @@ async function runTextMcpLoop(input: Readonly<{
       terminal = { outcome: "time_ceiling", model_work: modelWork }; break;
     }
     if (modelCalls >= ceilings.max_model_turns) { terminal = { outcome: "model_turn_ceiling" }; break; }
-    const encoded = encodeTextMcpRequest({ surface, query, events });
+    const encoded = encodeTextMcpRequest({
+      surface, query, events, ...textMcpPromptOptions(input.input)
+    });
     if (textMcpUtf8Bytes(encoded) > ceilings.max_input_bytes) { terminal = { outcome: "input_ceiling" }; break; }
     const gatewayBody = bindTextMcpGatewayBody(encoded);
     const request = {
@@ -153,23 +170,50 @@ async function runTextMcpLoop(input: Readonly<{
     if (decoded.kind === "host_policy_refusal") {
       terminal = { outcome: "host_policy_refusal", tool: decoded.tool, reason: decoded.reason }; break;
     }
-    const blocked = textMcpDispatchBudget(input.started, ceilings, mcpDispatches);
-    if (blocked !== null) {
-      terminal = blocked.outcome === "time_ceiling"
-        ? { outcome: "time_ceiling", model_work: "settled" } : blocked;
-      break;
-    }
-    const dispatched = await dispatchTextMcpRead(daemon.mcpClient, decoded.tool, structuredClone(decoded.arguments));
-    mcpDispatches += 1;
-    events.push({
-      kind: "mcp_call", origin: "model_selected", tool: dispatched.tool, arguments: dispatched.arguments,
-      response_state: dispatched.response_state, envelope: dispatched.envelope
-    });
-    if (isUnresolvedTextMcpDelivery(dispatched.response_state)) {
-      terminal = { outcome: "unresolved_delivery", response_state: dispatched.response_state }; break;
-    }
+    const follow = await followDecodedRead(input, decoded, events, mcpDispatches);
+    mcpDispatches = follow.mcpDispatches;
+    if (follow.terminal !== null) { terminal = follow.terminal; break; }
   }
   return { events, modelCalls, mcpDispatches, modelWork, terminal: terminal ?? { outcome: "model_turn_ceiling" } };
+}
+
+async function followDecodedRead(
+  input: Readonly<{
+    daemon: BenchDaemonHandle; input: TextMcpConsumerInput; started: number;
+  }>,
+  decoded: Extract<ReturnType<typeof decodeTextMcpAction>, { kind: "read" }>,
+  events: Record<string, unknown>[], mcpDispatches: number
+): Promise<{ terminal: TextMcpConsumerTerminal | null; mcpDispatches: number }> {
+  const blocked = textMcpDispatchBudget(input.started, input.input.ceilings, mcpDispatches);
+  if (blocked !== null) {
+    return {
+      mcpDispatches,
+      terminal: blocked.outcome === "time_ceiling" ? { outcome: "time_ceiling", model_work: "settled" } : blocked
+    };
+  }
+  const resolved = resolveTextMcpRecallDispatch({
+    profile: input.input.caller_capability_profile, tool: decoded.tool,
+    rawArguments: structuredClone(decoded.arguments), defaults: input.input.recall_dispatch_defaults
+  });
+  if (resolved.kind === "refuse") {
+    return {
+      mcpDispatches,
+      terminal: { outcome: "host_policy_refusal", tool: resolved.tool, reason: resolved.reason }
+    };
+  }
+  const dispatched = await dispatchTextMcpRead(input.daemon.mcpClient, resolved.tool, resolved.arguments);
+  events.push({
+    kind: "mcp_call", origin: "model_selected", tool: dispatched.tool, arguments: dispatched.arguments,
+    response_state: dispatched.response_state, envelope: dispatched.envelope,
+    ...recallDispatchEventFields(resolved)
+  });
+  if (isUnresolvedTextMcpDelivery(dispatched.response_state)) {
+    return {
+      mcpDispatches: mcpDispatches + 1,
+      terminal: { outcome: "unresolved_delivery", response_state: dispatched.response_state }
+    };
+  }
+  return { mcpDispatches: mcpDispatches + 1, terminal: null };
 }
 
 /** Default gateway chat-completions body completes only on `stop`. length/null/unknown are not ready. */
@@ -313,10 +357,11 @@ function completeExecution(
   loop: {
     events: Record<string, unknown>[]; modelCalls: number; mcpDispatches: number;
     terminal: TextMcpConsumerTerminal; modelWork: TextMcpModelWorkStatus;
-  }
+  },
+  profile?: TextMcpConsumerInput["caller_capability_profile"]
 ): TextMcpConsumerExecution {
   return {
-    ...baseExecution(config, hostSetup, loop.modelWork), live_surface: surface,
+    ...baseExecution(config, hostSetup, loop.modelWork, profile), live_surface: surface,
     consumer_model_calls: loop.modelCalls, mcp_dispatches: loop.mcpDispatches,
     events: loop.events, terminal: loop.terminal
   };
@@ -324,15 +369,19 @@ function completeExecution(
 
 function emptyExecution(
   config: SemanticChainConfig, terminal: TextMcpConsumerTerminal, hostSetup: boolean,
-  modelWork: TextMcpModelWorkStatus
+  modelWork: TextMcpModelWorkStatus,
+  profile?: TextMcpConsumerInput["caller_capability_profile"]
 ): TextMcpConsumerExecution {
   return {
-    ...baseExecution(config, hostSetup, modelWork), live_surface: null, consumer_model_calls: 0,
+    ...baseExecution(config, hostSetup, modelWork, profile), live_surface: null, consumer_model_calls: 0,
     mcp_dispatches: 0, events: [], terminal
   };
 }
 
-function baseExecution(config: SemanticChainConfig, hostSetup: boolean, modelWork: TextMcpModelWorkStatus) {
+function baseExecution(
+  config: SemanticChainConfig, hostSetup: boolean, modelWork: TextMcpModelWorkStatus,
+  profile?: TextMcpConsumerInput["caller_capability_profile"]
+) {
   return {
     contract: TEXT_MCP_CONSUMER_CONTRACT, consumer_kind: "text_mediated_mcp" as const, model_kind: "scripted" as const,
     claims: {
@@ -342,7 +391,8 @@ function baseExecution(config: SemanticChainConfig, hostSetup: boolean, modelWor
     paid_readiness: { ...TEXT_MCP_CONSUMER_PAID_READINESS },
     diagnostic_restriction: TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
     host_setup: hostSetup, original_snapshot_sha256: config.snapshot_sha256,
-    model_work: { status: modelWork, wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING }
+    model_work: { status: modelWork, wall_ms_meaning: TEXT_MCP_WALL_MS_MEANING },
+    ...(profile === undefined ? {} : { caller_capability_profile: profile })
   };
 }
 

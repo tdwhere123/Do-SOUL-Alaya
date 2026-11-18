@@ -142,6 +142,23 @@ it("dispatches model-selected soul.recall through live MCP and preserves the lit
     .toEqual([]);
 }, 120000);
 
+it("refuses coordinate-bearing soul.recall on a plain-query profile without calling MCP", async () => {
+  const port = answerThen({
+    action: "read", tool: "soul.recall",
+    arguments: { ...recallArgs, query_coordinates: { question_time: { intervals: [{ start: "2023-09-01", end: "2023-09-13" }] } } }
+  });
+  const execution = await executeTextMcpConsumer(input("plain-query-refusal", {
+    caller_capability_profile: "plain_query"
+  }), port);
+  expect(execution.terminal).toEqual({
+    outcome: "host_policy_refusal", tool: "soul.recall",
+    reason: "plain_query forbids query_coordinates and interpretation_proposal"
+  });
+  expect(execution.mcp_dispatches).toBe(0);
+  expect(execution.caller_capability_profile).toBe("plain_query");
+  expect(execution.live_surface?.instructions).toBe(ALAYA_MCP_SERVER_INSTRUCTIONS);
+}, 120000);
+
 it("records host-issued initial recall as controlled setup and does not require a model fetch-first", async () => {
   let turns = 0;
   const execution = await executeTextMcpConsumer(input("host-setup", { host_issued_initial_recall: true }), {
