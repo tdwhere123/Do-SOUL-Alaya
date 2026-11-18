@@ -38,6 +38,9 @@ const EXPECTED_TURNS = 3;
 const EXPECTED_INPUT_TOKENS_PER_TURN = 3_000;
 const EXPECTED_OUTPUT_TOKENS_PER_TURN = 400;
 const MILLION = 1_000_000;
+// Four-turn live transcripts with a ranked page, payload expansion, and pointer
+// read exceeded 256 KiB once nested MCP JSON was serialized into the provider body.
+const PAIRED_SLICE_INPUT_BYTE_UPPER = 320 * 1024;
 
 export function pairedMcpSliceManifest(): readonly PairedMcpSliceItem[] {
   return PAIRED_MCP_SLICE_STRATA.flatMap(stratum =>
@@ -65,7 +68,10 @@ export function verifyPairedMcpSliceDataset(
   const present = new Set(questions.map(question => question.question_id));
   const ids = pairedMcpSliceQuestionIds();
   const missing = ids.filter(id => !present.has(id));
-  if (ids.length !== 30) throw new AlayaError("CONFLICT", "paired MCP slice must freeze exactly 30 items");
+  if (ids.length !== 30 || new Set(ids).size !== 30) {
+    throw new AlayaError("CONFLICT", "paired MCP slice must freeze exactly 30 unique items");
+  }
+  if (present.size !== questions.length) throw new AlayaError("CONFLICT", "paired MCP dataset contains duplicate question IDs");
   const extra_prefix_collisions = ids.flatMap(id =>
     questions.filter(question => question.question_id !== id && question.question_id.startsWith(id))
       .map(question => question.question_id));
@@ -79,8 +85,8 @@ export function pairedMcpSliceArmProfile(arm: PairedMcpSliceArm): TextMcpCallerC
 export function pairedMcpSliceGrantLimits(): PairedMcpSliceGrantLimits {
   const quote = stepQuoteBasis(STEP_OPENAPI_QUOTE_BASIS.selected_model, STEP_OPENAPI_QUOTE_BASIS.selected_provider_url);
   const limits = {
-    max_model_turns: 4, max_tool_calls: 3, max_input_bytes: 1_500_000, max_output_bytes: 64_000,
-    wall_ms: 120_000, max_output_tokens: 1_536, maximum_input_tokens_per_attempt: 262_144,
+    max_model_turns: 4, max_tool_calls: 3, max_input_bytes: PAIRED_SLICE_INPUT_BYTE_UPPER, max_output_bytes: 64_000,
+    wall_ms: 120_000, max_output_tokens: 1_536, maximum_input_tokens_per_attempt: PAIRED_SLICE_INPUT_BYTE_UPPER,
     maximum_attempts: 4, maximum_attempts_per_key: 1 as const, concurrency: 1 as const, spend_ceiling_usd: 0
   };
   const per_session_upper_usd = estimatedSemanticProviderUpperUsd(limits,
@@ -176,10 +182,19 @@ export function pairedMcpSliceJudgeCorrect(verdict: string): boolean {
 export function aggregatePairedMcpSliceSessions(
   sessions: readonly PairedMcpSliceSessionObservation[]
 ): PairedMcpSliceAggregate {
+  const items = new Set(pairedMcpSliceQuestionIds());
+  const observed = new Set<string>();
+  for (const session of sessions) {
+    const key = `${session.arm}:${session.question_id}`;
+    if (!items.has(session.question_id) || !PAIRED_MCP_SLICE_ARMS.includes(session.arm) || observed.has(key)) {
+      throw new AlayaError("CONFLICT", "paired MCP slice requires one observation per frozen item and arm");
+    }
+    observed.add(key);
+  }
   const byArm = Object.fromEntries(PAIRED_MCP_SLICE_ARMS.map(arm => [arm, tallyArm(sessions, arm)])) as
     Record<PairedMcpSliceArm, PairedMcpSliceArmTally>;
   return {
-    items: pairedMcpSliceQuestionIds().length, sessions: sessions.length, by_arm: byArm,
+    items: items.size, sessions: sessions.length, by_arm: byArm,
     signs: {
       plain_query_vs_agent_q_no_graph: signPair(sessions, "plain_query", "agent_q_no_graph"),
       plain_query_vs_agent_q_conditional_field: signPair(sessions, "plain_query", "agent_q_conditional_field"),
@@ -239,15 +254,15 @@ function tallyArm(
   sessions: readonly PairedMcpSliceSessionObservation[], arm: PairedMcpSliceArm
 ): PairedMcpSliceArmTally {
   const rows = sessions.filter(session => session.arm === arm);
-  const terminals: Record<string, number> = {};
-  for (const row of rows) terminals[row.terminal] = (terminals[row.terminal] ?? 0) + 1;
+  const terminals = new Map<string, number>();
+  for (const row of rows) terminals.set(row.terminal, (terminals.get(row.terminal) ?? 0) + 1);
   return {
     sessions: rows.length, correct: rows.filter(row => row.correct === true).length,
     coordinate_admitted: rows.filter(row => row.coordinate_admitted).length,
     payload_continuation_count: sum(rows, row => row.payload_continuation_count),
     open_pointer_count: sum(rows, row => row.open_pointer_count),
     input_tokens: sum(rows, row => row.input_tokens), output_tokens: sum(rows, row => row.output_tokens),
-    wall_ms: sum(rows, row => row.wall_ms), terminals
+    wall_ms: sum(rows, row => row.wall_ms), terminals: Object.fromEntries(terminals)
   };
 }
 

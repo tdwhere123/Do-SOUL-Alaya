@@ -52,37 +52,6 @@ export type NamedKindOverlay = Readonly<Record<string, Readonly<{
   readonly soft_structural?: true;
 }>>>;
 
-const SESSION_STRUCTURAL_PAIR_KINDS: ReadonlySet<string> = new Set([
-  "next_round_in_session", "prev_round_in_session", "restates", "supersedes"
-]);
-const SESSION_STRUCTURAL_ENDPOINT_CAP = 16;
-
-/** True when every listed physical kind is an ordinary session-structural pair. */
-export function sessionStructuralKindsOnly(kinds: Iterable<string>): boolean {
-  let count = 0;
-  for (const kind of kinds) {
-    if (!SESSION_STRUCTURAL_PAIR_KINDS.has(kind)) return false;
-    count += 1;
-  }
-  return count > 0;
-}
-
-/** Ordinary session-structural pair demands stay on source_evidence seeds, never memory_entry fan-out. */
-export function admitSessionStructuralDemand(
-  predicate: string,
-  from: ProductStateKey,
-  endpoints?: Set<string>
-): boolean {
-  if (!SESSION_STRUCTURAL_PAIR_KINDS.has(predicate)) return true;
-  if (from.target.kind !== "source_evidence") return false;
-  if (endpoints === undefined) return true;
-  const endpoint = from.target.root_id;
-  if (endpoints.has(endpoint)) return true;
-  if (endpoints.size >= SESSION_STRUCTURAL_ENDPOINT_CAP) return false;
-  endpoints.add(endpoint);
-  return true;
-}
-
 export type RelationTransferAdmission = Readonly<{
   readonly query_id: string;
   readonly instance_id: string;

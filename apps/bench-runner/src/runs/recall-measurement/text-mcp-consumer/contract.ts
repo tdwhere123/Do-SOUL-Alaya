@@ -7,10 +7,17 @@ export const TEXT_MCP_SCRIPTED_MODEL = "text-mcp-consumer-scripted" as const;
 export const TEXT_MCP_ALLOWED_READ_TOOLS = ["soul.recall", "soul.open_pointer"] as const;
 export type TextMcpAllowedReadTool = (typeof TEXT_MCP_ALLOWED_READ_TOOLS)[number];
 
-export const TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION = [
+const READ_TOOL_RESTRICTIONS = [
   "This diagnostic consumer may dispatch only soul.recall and soul.open_pointer through the live MCP client.",
-  "Writes, garden, and generation tools are refused by host policy without calling MCP.",
+  "Writes, garden, and generation tools are refused by host policy without calling MCP."
+];
+export const TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION = [
+  ...READ_TOOL_RESTRICTIONS,
   "Published server instructions and tool definitions above are unmodified; this restriction is host diagnostic policy, not a rewrite of guidance."
+].join(" ");
+export const TEXT_MCP_PLAIN_QUERY_RESTRICTION = [
+  ...READ_TOOL_RESTRICTIONS,
+  "The displayed Recall instructions and schema reflect the plain-query capability profile."
 ].join(" ");
 
 export const TEXT_MCP_ACTION_PROTOCOL = [

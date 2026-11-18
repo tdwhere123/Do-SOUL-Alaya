@@ -31,8 +31,6 @@ import {
   relationMatches,
   relationPhysicalCandidates,
   admitRelationRow,
-  admitSessionStructuralDemand,
-  sessionStructuralKindsOnly,
   type AdjacencyRow,
   type AdmittedRelationStrength,
   type NamedKindOverlay
@@ -181,8 +179,6 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     physicalKinds.add(kind);
   }
   const statesByEndpoint = new Map<string, ProductStateKey[]>();
-  const structuralEndpoints = new Set<string>();
-  const structuralOnly = sessionStructuralKindsOnly(physicalKinds);
   // New states keep the live-state suffix against the full population.
   // A row delta joins every state in range with joinRows only.
   const joinedRows = input.joinRows ?? rows;
@@ -191,7 +187,6 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
-    if (structuralOnly && from.target.kind !== "source_evidence") continue;
     const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
     for (const advance of automaton.advancesByState.get(from.program_state) ?? []) {
       yield { kind: "work" };
@@ -199,7 +194,6 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         yield { kind: "work" };
         if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
         if (pairDemandRegistered(input.registeredDemands, endpoint, predicate)) continue;
-        if (!admitSessionStructuralDemand(predicate, from, structuralEndpoints)) continue;
         yield { kind: "effect", effect: { observation_id: `demand:${endpoint}:${predicate}`,
           relation_demand: { subject: endpoint, predicate } } };
       }
@@ -231,7 +225,6 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
         coldPrograms,
         registeredDemands: input.registeredDemands,
-        structuralEndpoints,
         // The compiled automaton stays shared. A branch writes only its own frontier.
         reachOwner: input.sequenceReachOwner ?? input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })

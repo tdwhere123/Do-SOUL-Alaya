@@ -105,7 +105,7 @@ export function compileOrdinary(input: OrdinaryLanguageCompileInput, snapshotId:
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return finishOrdinary(input, snapshotId, view, queryId, proposal, relations, interpretationOf({
       query_id: fallbackQueryId(queryId, "ordinary"), status: "partial", snapshot_id: snapshotId,
-      program, view, holes: [...(program.kind === "epsilon" ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(timeHints)],
+      program, view, holes: [...(relations.length === 0 ? [uninterpretedQueryHole()] : []), ...openEndpointHoles(timeHints)],
       source_guard: sourceGuard, interpretation_clock: input.interpretation_clock, time_window: window
     }));
   } catch (error) {

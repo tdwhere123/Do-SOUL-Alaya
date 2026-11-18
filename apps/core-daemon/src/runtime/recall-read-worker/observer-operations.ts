@@ -80,6 +80,7 @@ export function runConditionalFieldWorkerRecall(
     observe_page_fit?: ConditionalFieldRecallRequest["observe_page_fit"];
     observe_navigation?: ConditionalFieldRecallRequest["observe_navigation"];
     observe_source_association?: ConditionalFieldRecallRequest["observe_source_association"];
+    structural_discovery?: "member_index";
     observer?: SourceSemanticObserver;
     capture_budget_work?: (work: number | undefined) => void }> = {}
 ): ConditionalFieldRecallPortResult {
@@ -163,7 +164,8 @@ export function runConditionalFieldWorkerRecall(
     ...(payload.supports_product_updates === undefined
       ? {}
       : { supports_product_updates: payload.supports_product_updates })
-  }, { issue: "defer", capture_budget_work: adapters.capture_budget_work }));
+  }, { issue: "defer", capture_budget_work: adapters.capture_budget_work,
+    structural_discovery: adapters.structural_discovery }));
   const index = executed.index;
   const previews = captureIndexPreviews(executed.index, readers, workspaceId);
   const source_metadata = captureIndexSourceMetadata(executed.index);
@@ -174,7 +176,8 @@ export function runConditionalFieldWorkerRecall(
   const memberInputs = firstPage ? assembled?.memberInputs() : undefined;
   const member_index = memberInputs === undefined ? undefined
     : renderPageMemberIndex(new SqliteSourceIndexRepository(runtime.database, fieldContractSha256), runtime.database, {
-      workspaceId, asOf: payload.as_of,
+      workspaceId, asOf: payload.as_of, sourceId: payload.source_id,
+      authorizedScopes: authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes,
       delivered: new Set(index.entries.flatMap(entry => entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])),
       shown: index.entries.length, memberInputs
     });
@@ -331,7 +334,8 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
       resource_refusals: association !== undefined && retainedAssociation === undefined
         ? [...result.resource_refusals, { stage: "admission", phase: "source retained statement association" }] : result.resource_refusals } };
   const binding = original.result.vector.state !== null && "binding" in original.result.vector.state ? original.result.vector.state.binding : null;
-  onMemberIndex?.({ pool: result.nominations.map(row => row.source), overflow: original.index_members ?? [],
+  onMemberIndex?.({ pool: result.nominations.map(row => row.source),
+    overflow: (original.index_members ?? []).filter(source => input.sourceId === undefined || source.source_id === input.sourceId),
     conditions: demands.status === "ready" ? demands.vectors : [],
     vectors: binding === null ? null : { generation_id: binding.generation_id, dimensions: binding.dimensions } });
   return nomination;

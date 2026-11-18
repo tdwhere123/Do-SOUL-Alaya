@@ -126,7 +126,8 @@ it("accepts intended text actions and rejects invalid shapes on the transmitted 
 it("projects a plain-query surface and dates the user prompt without changing omitted encoding", () => {
   const tools = [{
     name: "soul.recall",
-    description: "On soul.recall, optionally pass query_coordinates when temporal help. Keep payload_continuation.",
+    description: "On soul.recall, optionally pass query_coordinates when temporal help. "
+      + "For single-call coordinates, pass query_coordinates and evidence_conditions (1..4 anchors). Keep payload_continuation.",
     inputSchema: {
       type: "object",
       properties: { query: { type: "string" }, query_coordinates: { type: "object" }, interpretation_proposal: { type: "object" } },
@@ -148,6 +149,8 @@ it("projects a plain-query surface and dates the user prompt without changing om
   expect(omitted.systemPrompt).toContain("query_coordinates");
   expect(plain.systemPrompt).not.toContain("query_coordinates");
   expect(plain.systemPrompt).not.toContain("interpretation_proposal");
+  expect(plain.systemPrompt).not.toContain("evidence_conditions");
+  expect(plain.systemPrompt).not.toContain("definitions above are unmodified");
   expect(plain.systemPrompt).toContain("payload_continuation");
   expect(plain.userPrompt.startsWith("Current date: 2023/09/13\nCALLER_QUERY:")).toBe(true);
   expect(omitted.userPrompt.startsWith("CALLER_QUERY:")).toBe(true);

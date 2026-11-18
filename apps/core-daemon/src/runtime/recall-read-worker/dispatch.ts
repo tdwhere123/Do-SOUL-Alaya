@@ -66,7 +66,7 @@ export async function runOperation(
     observer?.context(runtime, () => ({ ...context, snapshot_revision: null, index: null }));
     try {
       return parseWorkerOperationResult(parsed.operation,
-        runConditionalFieldWorkerRecall(runtime, payload, observer === undefined ? {} : { observer }));
+        runConditionalFieldWorkerRecall(runtime, payload, { structural_discovery: "member_index", observer }));
     } finally {
       // Observe the already pinned snapshot only after the native operation has read it.
       if (runtime.database.connection.inTransaction) observer?.context(runtime, () => ({ ...context,

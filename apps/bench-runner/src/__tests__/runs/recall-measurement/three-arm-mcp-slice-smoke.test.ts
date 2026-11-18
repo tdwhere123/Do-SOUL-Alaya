@@ -14,18 +14,21 @@ import type { AddressInfo } from "node:net";
 import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
-import { TEXT_MCP_ACTION_SCHEMA_NAME, encodeTextMcpRequest } from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
+import { TEXT_MCP_ACTION_SCHEMA_NAME } from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
 import { consumeTextMcpProviderSession } from "../../../runs/recall-measurement/text-mcp-consumer/session-execute.js";
 import {
   PAIRED_MCP_SLICE_ARMS, PAIRED_MCP_SLICE_REQUEST_PROFILE, pairedMcpSliceArmProfile,
-  pairedMcpSliceManifest, pairedMcpSliceQuestionIds, pairedMcpSliceStratumCounts,
-  quotePairedMcpSliceBudget, verifyPairedMcpSliceDataset
+  pairedMcpSliceManifest, pairedMcpSliceQuestionIds, pairedMcpSliceStratumCounts, pairedMcpSliceSessionGrantFields,
+  aggregatePairedMcpSliceSessions, buildPairedMcpSliceConsumerInput, quotePairedMcpSliceBudget,
+  verifyPairedMcpSliceDataset, type PairedMcpSliceArm
 } from "../../../runs/recall-measurement/text-mcp-consumer/paired-mcp-slice.js";
 import { estimatedSemanticProviderUpperUsd } from "../../../runs/provider-request/request-binding.js";
 import { STEP_OPENAPI_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { mapOrdinaryRecallScope } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { issueTextMcpProviderSession, sessionProviderConfig } from "../../support/text-mcp-provider-session-fixture.js";
+import { withHistoricalGraph } from "./paired-mcp-graph.test-support.js";
+import { attemptInputByteUpperBound } from "../../../runs/extraction/authority/receipt-limits.js";
 
 const NAMES = [
   "Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory",
@@ -33,6 +36,7 @@ const NAMES = [
 ] as const;
 const QUESTION_DATE = "2023/09/13 (Wed) 00:00";
 const DATASET = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../data/longmemeval/longmemeval_s.json");
+const NEIGHBOR_BODY = "The archive's third vault locks at midnight.";
 
 let base: Awaited<ReturnType<typeof ordinaryIndexedSnapshot>>;
 let preparation: ReturnType<typeof simulateIndexedQueryPreparation>;
@@ -51,8 +55,9 @@ const server = createServer(async (req, res) => {
 
 beforeAll(async () => {
   preparation = simulateIndexedQueryPreparation();
-  base = await ordinaryIndexedSnapshot(NAMES.map(name =>
-    `Project ${name} was mentioned. ${`${name} context continues here. `.repeat(80)}${name} closing line.`));
+  const sources = NAMES.map(name =>
+    `Project ${name} was mentioned. ${`${name} context continues here. `.repeat(80)}${name} closing line.`);
+  base = await ordinaryIndexedSnapshot(sources);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address() as AddressInfo;
   origin = `http://127.0.0.1:${address.port}`;
@@ -104,116 +109,115 @@ it("freezes the 30-item paired slice and quotes a finite OpenAPI grant inside it
   }
 });
 
+it("pairs only unique observations from the frozen slice and preserves ungraded arms", () => {
+  const row = { question_id: pairedMcpSliceQuestionIds()[0]!, arm: "plain_query" as const,
+    correct: true, terminal: "answered", coordinate_admitted: false, payload_continuation_count: 0,
+    open_pointer_count: 0, input_tokens: 1, output_tokens: 1, wall_ms: 1 };
+  const aggregate = aggregatePairedMcpSliceSessions([row,
+    { ...row, arm: "agent_q_no_graph", correct: false },
+    { ...row, arm: "agent_q_conditional_field", correct: null, terminal: "unknown" }
+  ]);
+  expect(aggregate.signs.plain_query_vs_agent_q_no_graph).toEqual({ wins: 1, losses: 0, ties: 0, compared: 1 });
+  expect(aggregate.signs.plain_query_vs_agent_q_conditional_field.compared).toBe(0);
+  expect(aggregate.by_arm.agent_q_conditional_field.terminals).toEqual({ unknown: 1 });
+  expect(() => aggregatePairedMcpSliceSessions([row, row])).toThrow(/one observation/);
+  expect(() => aggregatePairedMcpSliceSessions([{ ...row, question_id: "outside-slice" }])).toThrow(/frozen item/);
+});
+
 it("isolates three MCP arms over loopback HTTP and live SQLite MCP", async () => {
   const mapped = mapOrdinaryRecallScope(base.config.authorized_scopes);
   if (mapped.status !== "mapped") throw new Error(mapped.reason);
-  const query = { query_key: base.queries[0]!.query_key, original_query: base.queries[0]!.original_query };
-  const defaults = {
-    result_kind_view: "source_only" as const, source_observed_at: base.config.interpretation_clock
-  };
+  const query = base.queries[0]!.original_query;
   const coordinates = {
     question_time: { intervals: [{ start: "2023-09-01", end: "2023-09-13" }] },
-    evidence_conditions: [{ statement: query.original_query, speaker: "user" as const, anchors: ["project"] }]
+    evidence_conditions: [{ statement: query, speaker: "user" as const, anchors: ["project"] }]
   };
-  const recallBase = {
-    query: query.original_query, scope_class: mapped.scope_class, dimension: null, domain_tags: null, max_results: 5
-  };
+  const recall = { query, scope_class: mapped.scope_class, dimension: null, domain_tags: null, max_results: 5 };
+  const agentRecall = { ...recall, query_coordinates: coordinates };
+  const graph = await withHistoricalGraph(base.config, base.root, "Project Aster was mentioned.", NEIGHBOR_BODY);
+  const plain = await runArm("plain_query", graph.control, body => nextAgentAction(body, recall));
+  const control = await runArm("agent_q_no_graph", graph.control, body => nextAgentAction(body, agentRecall));
+  const treated = await runArm("agent_q_conditional_field", graph.graph,
+    body => nextAgentAction(body, agentRecall, graph.neighborRoot));
 
-  const agent = await runArm("agent-q", {
-    caller_capability_profile: "caller_coordinates" as const, question_date: QUESTION_DATE,
-    recall_dispatch_defaults: defaults
-  }, body => nextAgentAction(body, recallBase, coordinates));
-  expect(agent.failure).toBeNull();
-  expect(agent.turns[0]?.key).toMatch(/^[a-f0-9]{64}$/u);
-  const surface = agent.live_surface!;
-  const dated = encodeTextMcpRequest({
-    surface, query: query.original_query, events: [], caller_capability_profile: "caller_coordinates",
-    question_date: QUESTION_DATE
-  });
-  const noGraph = encodeTextMcpRequest({
-    surface, query: query.original_query, events: [], caller_capability_profile: "caller_coordinates",
-    question_date: QUESTION_DATE
-  });
-  const conditional = encodeTextMcpRequest({
-    surface, query: query.original_query, events: [], caller_capability_profile: "caller_coordinates",
-    question_date: QUESTION_DATE
-  });
-  const plainPrompt = encodeTextMcpRequest({
-    surface, query: query.original_query, events: [], caller_capability_profile: "plain_query",
-    question_date: QUESTION_DATE
-  });
-  expect(noGraph.systemPrompt).toBe(conditional.systemPrompt);
-  expect(noGraph.userPrompt).toBe(conditional.userPrompt);
-  expect(noGraph.systemPrompt).toContain("query_coordinates");
-  expect(plainPrompt.systemPrompt).not.toContain("query_coordinates");
-  expect(plainPrompt.systemPrompt).not.toBe(noGraph.systemPrompt);
-  expect(dated.userPrompt.startsWith(`Current date: ${QUESTION_DATE}\nCALLER_QUERY:`)).toBe(true);
+  expect(plain.result.turns[0]?.key).not.toBe(control.result.turns[0]?.key);
+  expect(plain.result.turns[0]?.request_digest).not.toBe(control.result.turns[0]?.request_digest);
+  expect(treated.result.turns[0]?.request_digest).toBe(control.result.turns[0]?.request_digest);
+  expect(requestSystem(plain.wire[0]!)).not.toContain("query_coordinates");
+  expect(requestSystem(control.wire[0]!)).toContain("query_coordinates");
+  for (const arm of [plain, control, treated]) assertDatedRecall(arm, query);
+  expect(control.recall.arguments).toMatchObject({ query_coordinates: coordinates });
+  expect(treated.recall.arguments).toEqual(control.recall.arguments);
+  expect(plain.recall.arguments).not.toHaveProperty("query_coordinates");
 
-  const recall = agent.events.find(event => event.kind === "mcp_call" && isRecall(event));
-  if (recall === undefined) throw new Error("agent arm did not dispatch soul.recall");
-  expect(recall).toBeDefined();
-  const args = recall.arguments as Record<string, unknown>;
-  expect(args.query_coordinates).toEqual(coordinates);
-  expect(JSON.stringify(args)).not.toMatch(/original_query_digest|sha256/iu);
-  expect(args.result_kind_view).toBe("source_only");
-  expect(args.source_observed_at).toBe(base.config.interpretation_clock);
-  expect(recall.raw_arguments).toMatchObject({ query: query.original_query });
-  expect((recall.raw_arguments as Record<string, unknown>).result_kind_view).toBeUndefined();
-
-  const continued = agent.events.filter(event => event.kind === "mcp_call" && hasPayloadContinuation(event));
-  expect(continued.length).toBeGreaterThan(0);
-  const opened = agent.events.filter(event => event.kind === "mcp_call" && event.tool === "soul.open_pointer");
-  expect(opened.length).toBeGreaterThan(0);
-  expect(opened[0]).toMatchObject({ arguments: { source_target: expect.any(Object) } });
-  const firstOut = mcpOutput(recall.envelope);
-  expect(cutTarget(firstOut)?.span?.content_complete).toBe(false);
-  const continuedOut = mcpOutput(continued[0]!.envelope);
-  const continuedSpan = cutTarget(continuedOut)?.span ?? spanOf(continuedOut);
-  expect(continuedSpan?.content_complete).toBe(true);
-
-  const plain = await runArm("plain-query", {
-    caller_capability_profile: "plain_query" as const, question_date: QUESTION_DATE,
-    recall_dispatch_defaults: defaults
-  }, () => JSON.stringify({
-    action: "read", tool: "soul.recall", arguments: { ...recallBase, query_coordinates: coordinates }
-  }));
-  expect(plain.turns[0]?.key).not.toBe(agent.turns[0]?.key);
-  expect(plain.turns[0]?.request_digest).not.toBe(agent.turns[0]?.request_digest);
-  expect(plain.events.some(event => event.kind === "host_policy_refusal")).toBe(true);
-  expect(plain.events.filter(event => event.kind === "mcp_call")).toEqual([]);
+  expect(treated.first.results).toEqual(control.first.results);
+  const ranked = asArray(treated.first.results).map(asRecord);
+  expect(ranked.length).toBeGreaterThan(0);
+  expect(ranked.every(row => typeof row?.content_preview === "string" && row.content_preview.length > 0)).toBe(true);
+  expect(asRecord(asRecord(treated.first.index)?.completeness)?.interpretation_coverage).toBe("open");
+  expect(memberFor(control.first, graph.neighborRoot)).toBeUndefined();
+  const neighbor = memberFor(treated.first, graph.neighborRoot);
+  expect(neighbor).toMatchObject({ root_id: graph.neighborRoot, in_pool: false, source_target: expect.any(Object) });
+  const opened = treated.calls.find(event => event.tool === "soul.open_pointer");
+  expect(opened?.arguments).toEqual({ source_target: neighbor?.source_target });
+  expect(mcpOutput(opened?.envelope)).toMatchObject({
+    object_kind: "source_evidence", content: { content: expect.stringContaining(NEIGHBOR_BODY) }
+  });
+  expect(treated.wire).toHaveLength(4);
 }, 240000);
 
-function runArm(
-  name: string,
-  extra: Record<string, unknown>,
+async function runArm(
+  arm: PairedMcpSliceArm,
+  config: typeof base.config,
   action: (body: string) => string
 ) {
   currentAction = action;
-  const home = join(base.root, name);
+  currentWire = [];
+  const home = join(base.root, arm);
   mkdirSync(home, { recursive: true });
+  const query = { query_key: base.queries[0]!.query_key, original_query: base.queries[0]!.original_query };
+  const scenario = { arm, question_date: QUESTION_DATE, interpretation_clock: config.interpretation_clock };
+  const grant = pairedMcpSliceSessionGrantFields(scenario);
   const fixture = issueTextMcpProviderSession({
-    home, config: base.config,
-    query: { query_key: base.queries[0]!.query_key, original_query: base.queries[0]!.original_query },
-    maxModelTurns: 4, maxToolCalls: 3, wallMs: 120_000, spendCeilingUsd: 2
+    home, config, query, limits: grant.limits,
+    prompt: { caller_capability_profile: grant.caller_capability_profile, question_date: grant.question_date,
+      recall_dispatch_defaults: grant.recall_dispatch_defaults }
   });
-  const consumer = {
-    config: base.config, root: fixture.consumerRoot,
-    query: { query_key: base.queries[0]!.query_key, original_query: base.queries[0]!.original_query },
-    host_issued_initial_recall: false,
-    ceilings: {
-      max_model_turns: 4, max_tool_calls: 3, max_input_bytes: 1_500_000, max_output_bytes: 64_000, wall_ms: 120_000
-    },
-    ...extra
-  };
+  const consumer = buildPairedMcpSliceConsumerInput({ ...scenario, config, query, root: fixture.consumerRoot });
   const selected = { ...sessionProviderConfig(), apiKey: "loopback-only" };
-  return consumeTextMcpProviderSession({ grantPin: fixture.pin, mode: "execute", consumer }, {
+  const result = await consumeTextMcpProviderSession({ grantPin: fixture.pin, mode: "execute", consumer }, {
     loadConfig: (): CompileSeedExtractionConfig => selected,
     createExtractor: config => createSemanticProviderHttpExtractor(config, TEXT_MCP_ACTION_SCHEMA_NAME, fetchImpl)
   });
+  expect(result.failure).toBeNull();
+  const calls = result.events.filter(event => event.kind === "mcp_call");
+  const recall = calls.find(isRecall), first = mcpOutput(recall?.envelope);
+  if (recall === undefined || first === undefined) throw new Error(`${arm} did not deliver its first recall`);
+  expect(currentWire.every(body => attemptInputByteUpperBound(body) <= grant.limits.maximum_input_tokens_per_attempt)).toBe(true);
+  return { result, calls, recall, first, wire: currentWire };
+}
+
+function assertDatedRecall(arm: Awaited<ReturnType<typeof runArm>>, query: string) {
+  expect(arm.wire).toHaveLength(arm.result.turns.length);
+  expect(arm.wire.length).toBeGreaterThanOrEqual(3);
+  expect(arm.wire.every(body => requestUser(body).startsWith(`Current date: ${QUESTION_DATE}\nCALLER_QUERY:`))).toBe(true);
+  expect(arm.recall.arguments).toMatchObject({ query, result_kind_view: "source_only", source_observed_at: base.config.interpretation_clock });
+  expect(arm.recall.raw_arguments).toMatchObject({ query });
+  expect(arm.recall.raw_arguments).not.toHaveProperty("result_kind_view");
+  expect(arm.recall.raw_arguments).not.toHaveProperty("source_observed_at");
+  const cut = cutTarget(arm.first);
+  expect(cut?.span.content_complete).toBe(false);
+  const continued = arm.calls.find(hasPayloadContinuation);
+  expect(continued?.arguments).toMatchObject({
+    payload_continuation: { purpose: "payload_expansion", start_offset: cut?.span.content_end }
+  });
+  expect(spanOf(mcpOutput(continued?.envelope))?.content_complete).toBe(true);
 }
 
 let currentAction: (body: string) => string = () => JSON.stringify({ action: "answer", text: "default" });
+let currentWire: string[] = [];
 function nextModelAction(body: string): string {
+  currentWire.push(body);
   return currentAction(body);
 }
 
@@ -225,13 +229,13 @@ const fetchImpl: typeof fetch = (url, init) => {
 };
 
 function nextAgentAction(
-  body: string, recallBase: Record<string, unknown>, coordinates: Record<string, unknown>
+  body: string, recallBase: Record<string, unknown>, neighborRoot?: string
 ): string {
   const user = requestUser(body);
   const envelopes = envelopesFrom(user);
   if (envelopes.length === 0) {
     return JSON.stringify({
-      action: "read", tool: "soul.recall", arguments: { ...recallBase, query_coordinates: coordinates }
+      action: "read", tool: "soul.recall", arguments: recallBase
     });
   }
   const first = mcpOutput(envelopes[0]);
@@ -241,7 +245,7 @@ function nextAgentAction(
     return JSON.stringify({
       action: "read", tool: "soul.recall",
       arguments: {
-        ...recallBase, query_coordinates: coordinates,
+        ...recallBase,
         ...(index?.continuation === undefined ? {} : { continuation: index.continuation }),
         payload_continuation: {
           schema_version: 1, purpose: "payload_expansion", target: cut.target, start_offset: cut.span.content_end
@@ -249,7 +253,7 @@ function nextAgentAction(
       }
     });
   }
-  const member = firstMember(first);
+  const member = neighborRoot === undefined ? undefined : memberFor(first, neighborRoot);
   if (member?.source_target !== undefined && !user.includes("tool=soul.open_pointer")) {
     return JSON.stringify({
       action: "read", tool: "soul.open_pointer", arguments: { source_target: member.source_target }
@@ -259,10 +263,14 @@ function nextAgentAction(
 }
 
 function requestUser(body: string): string {
-  const parsed = JSON.parse(body) as { messages?: { role?: string; content?: string }[] };
-  return parsed.messages?.find(message => message.role === "user")?.content ?? "";
+  return requestMessage(body, "user");
 }
 
+function requestSystem(body: string): string { return requestMessage(body, "system"); }
+function requestMessage(body: string, role: string): string {
+  const parsed = JSON.parse(body) as { messages?: { role?: string; content?: string }[] };
+  return parsed.messages?.find(message => message.role === role)?.content ?? "";
+}
 function envelopesFrom(userPrompt: string): unknown[] {
   const envelopes: unknown[] = [];
   const marker = "mcp_envelope:";
@@ -310,10 +318,9 @@ function spanOf(output: Record<string, unknown> | undefined) {
   return undefined;
 }
 
-function firstMember(output: Record<string, unknown> | undefined) {
+function memberFor(output: Record<string, unknown> | undefined, root: string) {
   const lines = asArray(output?.member_index).map(asRecord).filter((line): line is Record<string, unknown> => line !== undefined);
-  return lines.find(line => line.in_pool === false && line.source_target !== undefined)
-    ?? lines.find(line => line.source_target !== undefined);
+  return lines.find(line => line.root_id === root);
 }
 
 function isRecall(event: Record<string, unknown>): boolean {

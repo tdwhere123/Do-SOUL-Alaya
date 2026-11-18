@@ -128,17 +128,10 @@ export function assertTextMcpProviderSessionConsumer(grant: TextMcpProviderSessi
     consumer.ceilings.max_input_bytes === grant.limits.max_input_bytes &&
     consumer.ceilings.max_output_bytes === grant.limits.max_output_bytes &&
     consumer.ceilings.wall_ms === grant.limits.wall_ms, "session consumer ceilings differ from grant");
-  if (grant.caller_capability_profile !== undefined) {
-    check(consumer.caller_capability_profile === grant.caller_capability_profile,
-      "session caller capability profile mismatch");
-  }
-  if (grant.question_date !== undefined) {
-    check(consumer.question_date === grant.question_date, "session question date mismatch");
-  }
-  if (grant.recall_dispatch_defaults !== undefined) {
-    check(canonicalJson(consumer.recall_dispatch_defaults ?? null) ===
-      canonicalJson(grant.recall_dispatch_defaults), "session recall dispatch defaults mismatch");
-  }
+  check(consumer.caller_capability_profile === grant.caller_capability_profile, "session caller capability profile mismatch");
+  check(consumer.question_date === grant.question_date, "session question date mismatch");
+  check(canonicalJson(consumer.recall_dispatch_defaults ?? null) ===
+    canonicalJson(grant.recall_dispatch_defaults ?? null), "session recall dispatch defaults mismatch");
 }
 
 export function textMcpProviderSessionCacheIdentity(grant: TextMcpProviderSessionGrant) {

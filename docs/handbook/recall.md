@@ -162,7 +162,9 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   `source_evidence` neighbors, then overflow) with `statement_ids` and workspace-omitted
   `source_target` handles openable via `soul.open_pointer` (`start_offset`,
   `byte_budget <= 65536`), enforcing currentness, digest, and erasure without
-  minting a memory ID.
+  minting a memory ID. The worker reads structural neighbors from up to sixteen
+  delivered or pool anchors at the pinned clock. This bounded listing runs
+  after page fit and has its own work and memory allowance.
 - **Consumer protocol compatibility:** `RECALL_CONSUMER_PROTOCOL_VERSION` (`1`)
   accepts default `mixed` calls directly; callers unable to parse
   `source_evidence` must pass `result_kind_view: "memory_only"`.

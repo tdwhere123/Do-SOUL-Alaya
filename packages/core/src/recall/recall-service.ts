@@ -27,6 +27,7 @@ import {
   type RecallExecutionParams
 } from "./runtime/recall-service-runner.js";
 import type { ObserverReaders } from "./conditional-field/observers/observe.js";
+import { SESSION_STRUCTURAL_GRADES } from "./runtime/conditional-field-observe-session.js";
 
 export type RecallServiceFieldDeps = Readonly<{
   readonly observerReaders?: ObserverReaders;
@@ -137,6 +138,8 @@ export {
 } from "./runtime/recall-read-snapshot.js";
 
 export class RecallService {
+  public static readonly sessionStructuralGrades = SESSION_STRUCTURAL_GRADES;
+
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
 

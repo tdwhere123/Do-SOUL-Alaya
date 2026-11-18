@@ -213,9 +213,9 @@ async function runProviderSessionExecute(input: Readonly<{
         ...textMcpPromptOptions(input.consumer)
       });
       persist();
-      if (unresolvedEvent(work.events, "host_setup")) return;
+      if (unresolvedEvent(work.events, "host_setup") || work.events.some(event => event.kind === "host_policy_refusal")) return;
       await ensureHostSetup(input.grant, input.consumer, daemon, work, persist, input.abortSignal, input.priorMcp);
-      if (unresolvedEvent(work.events, "host_setup")) return;
+      if (unresolvedEvent(work.events, "host_setup") || work.events.some(event => event.kind === "host_policy_refusal")) return;
       throwIfSessionCancelled(input.abortSignal);
       const phaseDeadlineMs = performance.now() + input.grant.limits.wall_ms;
       for (const line of input.lines.slice()) {

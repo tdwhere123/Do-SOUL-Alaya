@@ -8,7 +8,7 @@ import { canonicalExtractionTargetRoot, initializeExtractionTargetRoot } from ".
 import { openExtractionAttemptLedger } from "../../runs/extraction/authority/attempt-ledger.js";
 import { STEP_OPENAPI_QUOTE_BASIS } from "../../runs/extraction/authority/step-quote.js";
 import {
-  TEXT_MCP_PROVIDER_SESSION_CONTRACT, TEXT_MCP_PROVIDER_SESSION_ROOT_MARKER
+  TEXT_MCP_PROVIDER_SESSION_CONTRACT, TEXT_MCP_PROVIDER_SESSION_ROOT_MARKER, type TextMcpProviderSessionGrant
 } from "../../runs/recall-measurement/text-mcp-consumer/session-authority.js";
 import type { SemanticChainConfig } from "../../runs/recall-measurement/contract.js";
 
@@ -35,6 +35,8 @@ export function issueTextMcpProviderSession(input: Readonly<{
   spendCeilingUsd?: number;
   closedSessions?: readonly string[];
   closedKeys?: readonly string[];
+  prompt?: Pick<TextMcpProviderSessionGrant, "caller_capability_profile" | "question_date" | "recall_dispatch_defaults">;
+  limits?: TextMcpProviderSessionGrant["limits"];
 }>) {
   mkdirSync(input.home, { recursive: true });
   const executionRoot = canonicalExtractionTargetRoot(join(input.home, "ledger"));
@@ -43,7 +45,7 @@ export function issueTextMcpProviderSession(input: Readonly<{
   });
   const selected = sessionProviderConfig();
   const lineage = hashBytes(input.home);
-  const maxModelTurns = input.maxModelTurns ?? 2;
+  const maxModelTurns = input.limits?.max_model_turns ?? input.maxModelTurns ?? 2;
   openExtractionAttemptLedger({
     cacheRoot: executionRoot, lineageDigest: lineage,
     cacheIdentity: { model: selected.model, requestProfile: selected.requestProfile },
@@ -66,7 +68,8 @@ export function issueTextMcpProviderSession(input: Readonly<{
     query: { query_key: input.query.query_key, original_query: input.query.original_query },
     snapshot_sha256: input.config.snapshot_sha256,
     host_issued_initial_recall: input.hostIssuedInitialRecall ?? false,
-    limits: {
+    ...input.prompt,
+    limits: input.limits ?? {
       max_output_tokens: 128,
       maximum_input_tokens_per_attempt: 2_000_000,
       maximum_attempts: maxModelTurns,

@@ -230,6 +230,8 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
 export function runConditionalFieldRecallWithReceipt(
   input: ConditionalFieldRecallRequest,
   options?: Readonly<{ readonly issue?: "now" | "defer";
+    /** The native worker projects inferred structural neighbors after ranked delivery. */
+    readonly structural_discovery?: "member_index";
     /** Internal debit transfer before result publication; not a wire receipt field. */
     readonly capture_budget_work?: (work: number | undefined) => void }>
 ): Readonly<{
@@ -268,7 +270,8 @@ export function runConditionalFieldRecallWithReceipt(
   });
   const hasEvidenceConditions =
     (input.interpretation_proposal?.evidence_conditions?.length ?? 0) >= 1;
-  const availableRelationKinds = hasEvidenceConditions && input.readers.relationKinds !== undefined
+  const availableRelationKinds = options?.structural_discovery !== "member_index"
+    && hasEvidenceConditions && input.readers.relationKinds !== undefined
     ? input.readers.relationKinds({
       workspaceId: input.workspace_id, subject: null, limit: 32, asOf: input.as_of
     })

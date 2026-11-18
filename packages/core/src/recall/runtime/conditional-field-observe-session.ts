@@ -62,12 +62,16 @@ export const RELATION_ROUTING = Object.freeze({
   unrelated: { applicable: false, role: "associated" }
 });
 
+export const SESSION_STRUCTURAL_GRADES = Object.freeze({
+  next_round_in_session: 750, prev_round_in_session: 700, restates: 650, supersedes: 800
+});
+
 /** Soft bottleneck milligrades for explicit structural relations compiled into query programs. */
 const STRUCTURAL_RELATION_OVERLAY = Object.freeze({
-  next_round_in_session: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
-  prev_round_in_session: { applicable: true, role: "associated", milligrades: 700, soft_structural: true as const },
-  restates: { applicable: true, role: "associated", milligrades: 650, soft_structural: true as const },
-  supersedes: { applicable: true, role: "associated", milligrades: 800, soft_structural: true as const },
+  next_round_in_session: { applicable: true, role: "associated", milligrades: SESSION_STRUCTURAL_GRADES.next_round_in_session, soft_structural: true as const },
+  prev_round_in_session: { applicable: true, role: "associated", milligrades: SESSION_STRUCTURAL_GRADES.prev_round_in_session, soft_structural: true as const },
+  restates: { applicable: true, role: "associated", milligrades: SESSION_STRUCTURAL_GRADES.restates, soft_structural: true as const },
+  supersedes: { applicable: true, role: "associated", milligrades: SESSION_STRUCTURAL_GRADES.supersedes, soft_structural: true as const },
   supports: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
   elaborates: { applicable: true, role: "associated", milligrades: 750, soft_structural: true as const },
   derives_from: { applicable: true, role: "associated", milligrades: 780, soft_structural: true as const },
@@ -108,10 +112,9 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
     if (memoryBox.remaining === 0 && session.state.residuals.some(row => row.status === "open" || row.status === "interrupted")) {
       return { ...interruptObservedField(session.state), memory_exhausted: true };
     }
-    const seedOpen = session.state.residuals.some((region) => region.kind === "seed"
-      && (region.status === "open" || region.status === "interrupted"));
-    // Open seed (sourceRoots + memory.lexical) settles before optional structural pair-demands.
-    const seedFirst = session.state.pending_path_effects === undefined && seedOpen;
+    const seedFirst = session.state.pending_path_effects === undefined && session.state.pair_demands.size === 0
+      && session.state.residuals.some((region) => region.kind === "seed"
+        && (region.status === "open" || region.status === "interrupted"));
     if (!seedFirst && refreshPathFrontier(session)) return session.state;
     if (consumeBoundSourceFact(session)) {
       if (session.state.last_observer_status === "interrupted" || terminalObserver(session.state.last_observer_status)) return session.state;
@@ -213,12 +216,10 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const priorCursor = before.resume_cursors[action.region_id] ?? null;
   if (input.readers.sourceRoots === undefined ? observed.page.cursor.committed_through !== priorCursor
     : sourceSeedCursorAdvanced(priorCursor, observed.page.cursor.committed_through)) input.on_retained_progress?.();
-  const seedStillOpen = session.state.residuals.some((region) => region.kind === "seed"
-    && (region.status === "open" || region.status === "interrupted"));
-  if (!seedStillOpen) {
-    if (pairProgress.hasOpenDemand()) session.state = reopenAdjacency(session.state);
-    if (refreshPathFrontier(session)) return true;
+  if (pairProgress.hasOpenDemand()) {
+    session.state = reopenAdjacency(session.state);
   }
+  if (refreshPathFrontier(session)) return true;
   if (observed.page.outcome.status !== "interrupted") return false;
   if (observed.page.cursor.committed_through === (before.resume_cursors[action.region_id] ?? null)) return true;
   session.state = { ...session.state, last_observer_status: "open" };

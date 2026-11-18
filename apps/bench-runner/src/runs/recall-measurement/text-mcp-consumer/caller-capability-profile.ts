@@ -46,7 +46,9 @@ export function projectLiveSurfaceForCaller(
 export function stripCallerCoordinateGuidance(text: string): string {
   return text
     .replace(/On soul\.recall, optionally pass query_coordinates[^.]*\.\s*/gu, "")
-    .replace(/For single-call coordinates,[^.]*\.\s*/gu, "")
+    .replace(/For single-call coordinates,[^\n]*?\.(?:\s+|$)/gu, "")
+    .replace(/The daemon binds digest and clock automatically[^\n]*?\.(?:\s+|$)/gu, "")
+    .replace(/`question_time` is a soft preference on source event_time under the existing root\/attempt limits; /gu, "")
     .replace(/Pre-sealed `interpretation_proposal` packets[^.]*\.\s*/gu, "")
     .replace(/`?query_coordinates`?,?\s*/gu, "")
     .replace(/`?interpretation_proposal`?,?\s*/gu, "")
