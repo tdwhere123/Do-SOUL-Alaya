@@ -160,6 +160,8 @@ export type NativeSourceNomination = Readonly<{
   witness: readonly SourceSemanticNominationOccurrence[];
   /** Bounded source permutation, separate from factual capture ranks. */
   question_time_order?: readonly string[];
+  /** Contiguous original-head keys jointly prefixed by unrestricted lexical and vector lanes. */
+  question_time_agreed_prefix?: readonly string[];
   /** Current source-bound, unreviewed observations used by the bounded preference. */
   task_observations?: readonly import("@do-soul/alaya-protocol").QualifiedTaskObservation[];
   /** Evidence statement coverage over admitted roots from original-query statement keys; navigation only. */

@@ -294,7 +294,10 @@ export function nominateNativeSources(database: StorageDatabase, input: Nominati
     capacity === undefined ? undefined : { charged_by_caller: true }) : {
     ...prepaidCapture, result: { ...original.result, nominations: prepaidCapture.result!.nominations },
     ...(original.association === undefined ? {} : { association: restrictStatementAssociation(original.association,
-      key => prepaidCapture!.result!.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) })
+      key => prepaidCapture!.result!.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
+    ...(original.question_time_agreed_prefix === undefined ? {} : { question_time_agreed_prefix:
+      original.question_time_agreed_prefix.filter(key => prepaidCapture!.result!.nominations.some(row =>
+        sourceIndexNativeRootKey(row.source) === key)) })
   };
   // Library requests already have an explicit outer resource ledger; their field
   // must continue paying acquisition from that request, without an ordinary allowance.
@@ -393,6 +396,8 @@ export function nominationFromCaptures(captures: readonly NominationCapture[], s
     witness: membership.witness,
     ...(captures[0]?.question_time_order === undefined ? {} : { question_time_order:
       captures[0].question_time_order.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
+    ...(captures[0]?.question_time_agreed_prefix === undefined ? {} : { question_time_agreed_prefix:
+      captures[0].question_time_agreed_prefix.filter(key => membership.nominations.some(row => sourceIndexNativeRootKey(row.source) === key)) }),
     ...(captures[0]?.task_observations === undefined ? {} : { task_observations: captures[0].task_observations.filter(
       observation => membership.nominations.some(row => sourceGoldRootIdentity(row.source.target)
         === sourceGoldRootIdentity(observation.observation.source))) }),

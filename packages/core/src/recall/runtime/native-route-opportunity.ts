@@ -240,52 +240,67 @@ export function orderNativeRouteAccess(input: AccessInput<NativeRouteLane>) {
  */
 export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   memory: NativeMemoryLane;
-  question_time?: Readonly<{ capture: NativeTimeCapture; root_order: readonly string[] }>;
+  question_time?: Readonly<{ capture: NativeTimeCapture; root_order: readonly string[];
+    agreed_head_prefix?: readonly string[] }>;
   association?: StatementAssociation;
 }, meter?: SourceSemanticResourceLedger, mandatoryReserve: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 }) {
   const ordered = orderTimedFieldAccess(input);
   const association = input.association;
-  if (association === undefined) return ordered;
-  requireFact(meter !== undefined, "evidence coverage requires a navigation resource ledger");
-  const optional = new SourceSemanticResourceLedger({
-    work_units: Math.max(0, meter!.work - mandatoryReserve.work_units),
-    memory_bytes: Math.max(0, meter!.bytes - mandatoryReserve.memory_bytes) });
-  // Coverage permutes source slots only; memory keeps its observed positions.
+  const agreedPrefix = input.question_time?.agreed_head_prefix;
+  if (association === undefined && !agreedPrefix?.length) return ordered;
+  // Coverage and prefix exchange permute source slots only; memory keeps its observed positions.
   const memoryIds = new Set(ordered.trace.filter(row => row.lane === "memory-lexical").map(row => row.record_id));
   const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
     : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
   const originalSources = current.filter(id => !memoryIds.has(id));
   let decided: ReturnType<typeof selectEvidenceWitnesses> | undefined;
-  if (association.decision.refused === null) {
-    try {
-      optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
-      validateAssociation(association);
-      decided = selectEvidenceWitnesses(originalSources, association, optional);
-      if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0) association.decision.applied = true;
-    } catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      // A later small page must not replace an already applied permutation with base order.
-      if (association.decision.applied) throw new SourceSemanticResourceExhausted(error.phase,
-        error.constraints === undefined ? undefined : {
-          ...(error.constraints.work === undefined ? {} : { work: {
-            required: error.constraints.work.required + mandatoryReserve.work_units,
-            available: meter!.work - optional.spentWork } }),
-          ...(error.constraints.memory === undefined ? {} : { memory: {
-            required: error.constraints.memory.required + mandatoryReserve.memory_bytes,
-            available: meter!.bytes - optional.spentBytes } })
-        });
-      association.decision.refused = error.phase;
-      decided = undefined;
-    } finally {
-      // The child limits optional work; it does not forgive work already performed on refusal.
-      meter!.charge(optional.spentWork, optional.spentBytes, "evidence statement coverage executed");
+  if (association !== undefined) {
+    requireFact(meter !== undefined, "evidence coverage requires a navigation resource ledger");
+    const optional = new SourceSemanticResourceLedger({
+      work_units: Math.max(0, meter!.work - mandatoryReserve.work_units),
+      memory_bytes: Math.max(0, meter!.bytes - mandatoryReserve.memory_bytes) });
+    if (association.decision.refused === null) {
+      try {
+        optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
+        validateAssociation(association);
+        decided = selectEvidenceWitnesses(originalSources, association, optional);
+        if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0) association.decision.applied = true;
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        // A later small page must not replace an already applied permutation with base order.
+        if (association.decision.applied) throw new SourceSemanticResourceExhausted(error.phase,
+          error.constraints === undefined ? undefined : {
+            ...(error.constraints.work === undefined ? {} : { work: {
+              required: error.constraints.work.required + mandatoryReserve.work_units,
+              available: meter!.work - optional.spentWork } }),
+            ...(error.constraints.memory === undefined ? {} : { memory: {
+              required: error.constraints.memory.required + mandatoryReserve.memory_bytes,
+              available: meter!.bytes - optional.spentBytes } })
+          });
+        association.decision.refused = error.phase;
+        decided = undefined;
+      } finally {
+        // The child limits optional work; it does not forgive work already performed on refusal.
+        meter!.charge(optional.spentWork, optional.spentBytes, "evidence statement coverage executed");
+      }
     }
   }
-  const sources = decided?.order ?? originalSources;
+  const byRoot = new Map(ordered.trace.filter(row => row.lane !== "memory-lexical")
+    .map(row => [row.occurrence.root_key, row.record_id]));
+  const originalSet = new Set(originalSources);
+  const agreedIds = (agreedPrefix ?? []).flatMap(key => {
+    const id = byRoot.get(key);
+    return id !== undefined && originalSet.has(id) ? [id] : [];
+  });
+  const exchanged = exchangeAgreedHead(decided?.order ?? originalSources, agreedIds, association, decided);
   let cursor = 0;
-  const recordIds = current.map(id => memoryIds.has(id) ? id : sources[cursor++]!);
+  const recordIds = current.map(id => memoryIds.has(id) ? id : exchanged.sources[cursor++]!);
+  if (association === undefined) {
+    return { ...ordered, preferred_record_ids: recordIds,
+      ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
+  }
   const injected = decided?.injections.some(row => row.status === "injected") === true;
-  const variants = decided?.variants ?? [];
+  const variants = exchanged.variants;
   const evidence_coverage = { status: association.decision.refused !== null ? "resource_refused" as const
     : injected || variants.length > 0 ? "permuted" as const : "unchanged" as const, statements: association.statements,
     top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
@@ -298,6 +313,42 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
         support_span: { start_byte: opening.span[0], end_byte: opening.span[1] } }]; });
   return { ...ordered, evidence_coverage, evidence_variants: variants, evidence_openings: openings, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
+}
+
+function exchangeAgreedHead(
+  sources: readonly string[], agreedIds: readonly string[],
+  association: StatementAssociation | undefined,
+  decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
+): { sources: string[]; variants: ReturnType<typeof selectEvidenceWitnesses>["variants"] } {
+  const variants = decided?.variants ?? [];
+  if (agreedIds.length === 0) return { sources: [...sources], variants: [...variants] };
+  const nextSources = [...sources], headLen = Math.min(5, nextSources.length), agreedSet = new Set(agreedIds);
+  const witnessProtects = association !== undefined && association.decision.refused === null && decided !== undefined
+    ? (id: string) => {
+      const row = association.roots.indexOf(id);
+      if (row < 0) return false;
+      for (let statement = 0; statement < association.statements; statement++) {
+        if (association.coverage[row]![statement] !== null) return true;
+      }
+      return false;
+    } : (_id: string) => false;
+  for (const agreedId of agreedIds) {
+    if (nextSources.slice(0, headLen).includes(agreedId)) continue;
+    let z = -1;
+    for (let slot = headLen - 1; slot >= 1; slot--) {
+      const occupant = nextSources[slot]!;
+      if (agreedSet.has(occupant) || witnessProtects(occupant)) continue;
+      z = slot; break;
+    }
+    if (z < 1) break;
+    const tailPos = nextSources.indexOf(agreedId);
+    if (tailPos < headLen) continue;
+    const displaced = nextSources[z]!;
+    nextSources[z] = agreedId;
+    nextSources[tailPos] = displaced;
+  }
+  const head = new Set(nextSources.slice(0, Math.min(5, nextSources.length)));
+  return { sources: nextSources, variants: variants.filter(row => !head.has(row.root)) };
 }
 
 function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision }: StatementAssociation): void {

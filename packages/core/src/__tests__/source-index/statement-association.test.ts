@@ -425,3 +425,54 @@ describe("field access with evidence coverage", () => {
       coverage: roots.map(() => Array<null>(5).fill(null)) } }, meter())).toThrow(/one to four/u);
   });
 });
+
+describe("contiguous joint-lane original prefix head exchange", () => {
+  const occurrences = roots.map((root, i) => ({ reference: `o-${root}`, root_key: root, native_rank: i + 1 }));
+  const memory = [{ reference: "memory", root_key: "m", native_rank: 1 }];
+  const lanes: NativeRouteLane[] = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"].map((lane, i) => ({
+    lane: lane as NativeRouteLane["lane"], scope: "q",
+    ...(i === 0 ? { state: "exact-captured" as const, occurrences } : { state: "measured-empty" as const }) }));
+  const input = { lanes, memory: { lane: "memory-lexical" as const, scope: "q", state: "exact-captured" as const, occurrences: memory },
+    pool: [...roots, "m"].map(record_id => ({ record_id, catalog_position: null })), acquired_root_keys: [...roots, "m"],
+    associations: [...occurrences, ...memory].map(row => ({ occurrence_reference: row.reference, root_key: row.root_key, record_id: row.root_key })),
+    unvisited_sources: true };
+  const timed = (root_order: readonly string[], prefix: readonly string[], association?: StatementAssociation) => ({
+    ...input, ...(association === undefined ? {} : { association }),
+    question_time: { capture: { lane: "question-time-lexical" as const, scope: "q", state: "measured-empty" as const },
+      root_order, ...(prefix.length === 0 ? {} : { agreed_head_prefix: prefix }) }
+  });
+  const displaced = ["c", "d", "e", "f", "g", "a", "b", "h"] as const;
+
+  it("exchanges agreed orig[0..1] into the last unprotected head slots without moving slot 1", () => {
+    const result = orderNativeFieldAccess(timed(displaced, ["a", "b"]));
+    expect(result).toMatchObject({ status: "ordered", record_ids: ["c", "m", "d", "e", "b", "a", "g", "f", "h"] });
+  });
+
+  it("stops at a gap so an empty agreed prefix leaves the timed order unchanged", () => {
+    expect(orderNativeFieldAccess(timed(displaced, []))).toMatchObject({
+      status: "ordered", record_ids: ["c", "m", "d", "e", "f", "g", "a", "b", "h"] });
+  });
+
+  it("never displaces a necessary-witness head slot, while possible-only occupancy stays exchangeable", () => {
+    const prefix = ["a", "b", "e", "f", "g"];
+    expect(orderNativeFieldAccess(timed(displaced, prefix))).toMatchObject({
+      record_ids: ["c", "m", "a", "e", "f", "g", "d", "b", "h"] });
+    expect(orderNativeFieldAccess(timed(displaced, prefix, coverage(1, { d: [0.9] })), meter())).toMatchObject({
+      record_ids: ["c", "m", "d", "e", "f", "g", "a", "b", "h"] });
+    expect(orderNativeFieldAccess(timed(displaced, prefix, coverage(1, {}, { d: [true] })), meter())).toMatchObject({
+      record_ids: ["c", "m", "a", "e", "f", "g", "d", "b", "h"] });
+  });
+
+  it("applies the same source exchange when association is absent or has no witnesses", () => {
+    const expected = ["c", "m", "d", "e", "b", "a", "g", "f", "h"];
+    expect(orderNativeFieldAccess(timed(displaced, ["a", "b"]))).toMatchObject({ record_ids: expected });
+    expect(orderNativeFieldAccess(timed(displaced, ["a", "b"], coverage(1, {})), meter())).toMatchObject({ record_ids: expected });
+  });
+
+  it("drops a variant once its root is exchanged into the first five", () => {
+    const value = { ...coverage(1, { b: [0.9], h: [0.8] }), spans: roots.map((_, i) => [[i, i + 5] as const]) };
+    const result = orderNativeFieldAccess(timed(roots, ["h"], value), meter());
+    expect(result).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "h", "e", "f", "g"],
+      evidence_variants: [] });
+  });
+});

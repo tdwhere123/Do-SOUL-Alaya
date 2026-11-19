@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { prepareSourceIndexDocument, type QuestionTimePreference } from "@do-soul/alaya-protocol";
+import { prepareSourceIndexDocument, sourceIndexNativeRootKey, type QuestionTimePreference, type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
-import { recordedQuestionTime } from "../../source-index/question-time-preference.js";
+import { agreedQuestionTimeHeadPrefix, recordedQuestionTime } from "../../source-index/question-time-preference.js";
 import { fixture, configuration, fieldSha256, WORKSPACE, BUDGET, type Fixture } from
   "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { publishMessages, publishStatement } from
@@ -205,5 +205,37 @@ describe("question time bounded preference through SQLite acquisition", () => {
     expect(ids(result)).toHaveLength(16);
     expect(ids(result)).not.toContain("time-only");
     expect(result.resource_refusals).toContainEqual({ stage: "admission", phase: "injected_time_admission_refusal" });
+  });
+
+  it("exposes the contiguous joint-lane original prefix computed from unrestricted native lanes", () => {
+    const { env, input } = setup();
+    const acquisition = new SourceIndexAcquisition(env.index, fieldSha256);
+    const unrestricted = env.database.connection.transaction(() =>
+      acquisition.captureNative(input, admitScope, "original", false, "dual"))();
+    const expected = agreedQuestionTimeHeadPrefix(
+      unrestricted.result.nominations.map(row => [sourceIndexNativeRootKey(row.source), row] as const),
+      unrestricted.lexical, unrestricted.vector);
+    const capture = env.database.connection.transaction(() =>
+      acquisition.nominateWithWitness({ ...input, question_time: preference }, admitScope))();
+    expect(capture.question_time_order).toEqual(capture.result.nominations.map(row => row.source.root_key));
+    if (expected.length === 0) expect(capture).not.toHaveProperty("question_time_agreed_prefix");
+    else expect(capture.question_time_agreed_prefix).toEqual(expected);
+  });
+});
+
+describe("contiguous joint-lane original prefix", () => {
+  const cand = (key: string) => ({ source: { root_key: key } as SourceIndexTarget });
+  const original = (...keys: string[]) => keys.map(key => [key, {}] as const);
+  it("protects orig[0..1] when both lexical and vector prefixes stay inside H_0", () => {
+    expect(agreedQuestionTimeHeadPrefix(original("o0", "o1", "o2", "o3", "o4"),
+      ["o0", "o1", "out", "o2"].map(cand), ["o1", "o0", "o2", "out"].map(cand))).toEqual(["o0", "o1"]);
+  });
+  it("stops at a gap so lexical #1 / vector #17 leaves the prefix empty", () => {
+    const lexical = ["o0", "out", "o1"].map(cand);
+    const vector = ["o1", ...Array.from({ length: 15 }, (_, i) => `v${i}`), "o0"].map(cand);
+    expect(agreedQuestionTimeHeadPrefix(original("o0", "o1", "o2", "o3", "o4"), lexical, vector)).toEqual([]);
+  });
+  it("is empty when the vector lane is unavailable", () => {
+    expect(agreedQuestionTimeHeadPrefix(original("o0", "o1"), ["o0", "o1"].map(cand), [])).toEqual([]);
   });
 });

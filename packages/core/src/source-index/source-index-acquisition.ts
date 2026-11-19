@@ -11,7 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { collectQuestionTimeIndexMembers, preferQuestionTime, recordedQuestionTime,
+import { agreedQuestionTimeHeadPrefix, collectQuestionTimeIndexMembers, preferQuestionTime, recordedQuestionTime,
   type QuestionTimeIndexMemberPrefix, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { collapseStatementCandidates, evidenceWindow, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
@@ -109,7 +109,9 @@ export class SourceIndexAcquisition {
     const result = query.run();
     return { result, witness: retained, ...(indexMembers > 0 && view === "original" ? { index_members: query.indexMembers } : {}),
       ...(query.questionTimeOrder === undefined ? {}
-      : { question_time_order: query.questionTimeOrder }), ...(query.association === undefined ? {} : { association: query.association }),
+      : { question_time_order: query.questionTimeOrder }),
+      ...(query.agreedHeadPrefix === undefined ? {} : { question_time_agreed_prefix: query.agreedHeadPrefix }),
+      ...(query.association === undefined ? {} : { association: query.association }),
       ...(query.prepaidBaseBytes === undefined ? {} : { prepaid_base_bytes: query.prepaidBaseBytes }) };
   }
 
@@ -153,6 +155,7 @@ class AcquisitionQuery {
   private limited = false;
   private priorOriginalNominations: ReadonlyMap<string, RetainedNomination> | undefined;
   public questionTimeOrder?: readonly string[];
+  public agreedHeadPrefix?: readonly string[];
   public association?: StatementAssociation;
   public prepaidBaseBytes?: number;
   /** Admitted overflow in native order, including roots displaced by question-time preference. */
@@ -262,11 +265,14 @@ class AcquisitionQuery {
         : domain?.status === "unavailable" ? domain.reason : domain === undefined ? "question_time_reader_unavailable" : "question_time_domain_empty",
       restrictedComplete: true, original: [...this.nominations.entries()], nominations: this.nominations, result: this.result() }));
     if (!active) return undefined;
+    const originalEntries = [...this.nominations.entries()];
     const listing = targetCount > 0 ? {
       unrestrictedLexical: this.lexicalCandidates, unrestrictedVector: this.vectorCandidates, cursor: { ...cursor },
-      originalPrefix: [...this.nominations.entries()].map(([key, row]) => [key, row.source] as const)
+      originalPrefix: originalEntries.map(([key, row]) => [key, row.source] as const)
     } : undefined;
+    const agreedHeadPrefix = agreedQuestionTimeHeadPrefix(originalEntries, this.lexicalCandidates, this.vectorCandidates);
     this.preferActiveQuestionTime(preference!, nativePending);
+    if (agreedHeadPrefix.length > 0) this.agreedHeadPrefix = agreedHeadPrefix;
     return listing;
   }
 

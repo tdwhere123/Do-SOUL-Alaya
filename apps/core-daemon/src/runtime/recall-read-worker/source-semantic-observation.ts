@@ -218,6 +218,7 @@ export class SourceSemanticObserver {
   nomination(value: NativeSourceNomination): void {
     this.event("field_nomination", "observe", () => ({ result: value.result, witness: value.witness,
       admitted_roots: value.admitted_roots, question_time_order: value.question_time_order,
+      question_time_agreed_prefix: value.question_time_agreed_prefix,
       association: value.association === undefined ? undefined : {
         representation: "retained-evidence-coverage.v1", roots: value.association.roots,
         statements: value.association.statements, coverage: value.association.coverage, decision: value.association.decision

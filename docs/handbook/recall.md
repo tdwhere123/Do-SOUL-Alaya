@@ -133,6 +133,7 @@ condition fails, that condition is dropped and raw recall remains available.
 in the 16-root pool so the original five-slot head is not evicted out of
 `in_pool` by date-restricted lexical fills, without altering hard
 `since`/`until` filters or authorization.
+Navigation then protects the contiguous original-head prefix that both unrestricted lexical and vector lanes still place inside that original five, exchanging those roots into unprotected head slots after slot 1 without moving slot 1, witness-protected heads, or evidence openings.
 Optional `source_template` (`alaya.query.source-template.v1`) and
 `source-task-observation` phases share the remaining optional allowance without
 displacing the paid incumbent on refusal.

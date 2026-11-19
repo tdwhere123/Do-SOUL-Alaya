@@ -16,6 +16,33 @@ export function recordedQuestionTime(preference: QuestionTimePreference): Questi
     : { interpretation_clock: preference.interpretation_clock, intervals: [{ start: starts[0]!, end: clock }] };
 }
 
+/** Contiguous original-head keys that both unrestricted lanes still prefix inside H_0. Empty when a lane is absent. */
+export function agreedQuestionTimeHeadPrefix(
+  originalEntries: readonly (readonly [string, unknown])[],
+  lexical: readonly { source: SourceIndexTarget }[],
+  vector: readonly { source: SourceIndexTarget }[]): readonly string[] {
+  const headKeys = originalEntries.slice(0, Math.min(5, originalEntries.length)).map(([key]) => key);
+  const head = new Set(headKeys);
+  const lanePrefix = (rows: readonly { source: SourceIndexTarget }[]) => {
+    const prefix = new Set<string>(), seen = new Set<string>();
+    for (const row of rows) {
+      const key = sourceIndexNativeRootKey(row.source);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!head.has(key)) break;
+      prefix.add(key);
+    }
+    return prefix;
+  };
+  const lexicalPrefix = lanePrefix(lexical), vectorPrefix = lanePrefix(vector);
+  const agreed: string[] = [];
+  for (const key of headKeys) {
+    if (!lexicalPrefix.has(key) || !vectorPrefix.has(key)) break;
+    agreed.push(key);
+  }
+  return agreed;
+}
+
 /** Fund the incumbent before optional preference inspection; a changed capture is separately charged. */
 export type SourcePreferenceRetention = Readonly<{
   retain: (capture: Readonly<{ result: SourceIndexAcquisitionResult; witness: readonly SourceSemanticNominationOccurrence[];
