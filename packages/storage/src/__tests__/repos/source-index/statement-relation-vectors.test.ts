@@ -1,8 +1,8 @@
 import { afterEach, expect, it } from "vitest";
 import { hashContentDigest, prepareSourceIndexDocument } from "@do-soul/alaya-protocol";
 import { encodeEmbeddingBlob } from "../../../repos/memory/embedding-vector-validity.js";
-import { BUDGET, WORKSPACE, configuration, fieldSha256, fixture, type Fixture } from "./source-index-fixture.js";
-import { publishMessages, publishStatement } from "./source-template-fixture.js";
+import { BUDGET, CLOCK, WORKSPACE, configuration, fieldSha256, fixture, type Fixture } from "./source-index-fixture.js";
+import { contextOf, publishMessages, publishStatement } from "./source-template-fixture.js";
 
 const opened: Fixture[] = [];
 afterEach(() => { for (const environment of opened.splice(0)) environment.database.close(); });
@@ -82,6 +82,70 @@ it("returns nulls when the overlay was never written and unknown when the blob i
     WHERE root_key=?`).run(encodeEmbeddingBlob(new Float32Array([0.6, 0.8])), source.root_key);
   expect(environment.index.readStatementRelationVectors(WORKSPACE, [source.root_key], QUERY))
     .toMatchObject({ status: "unknown", reason: "statement_relation_incompatible_dimensions" });
+});
+
+it("returns unknown for a populated overlay when the query budget is exhausted", () => {
+  const { environment, generation, source, digest } = setupStatement();
+  expect(environment.index.writeStatementRelationVector(WORKSPACE, generation.generation_id, {
+    root_key: source.root_key, input_digest: digest, embedding: VECTOR, token_count: 2
+  })).toEqual({ status: "accepted" });
+  expect(environment.index.activate(WORKSPACE, generation.generation_id)).toEqual({ status: "accepted" });
+  expect(environment.index.readStatementRelationVectors(WORKSPACE, [source.root_key], { work_units: 0, memory_bytes: 10_000 }))
+    .toMatchObject({ status: "unknown", reason: "read_budget" });
+});
+
+it("rejects a non-blob overlay value and returns unknown for a non-finite blob without throwing", () => {
+  const { environment, generation, source, digest } = setupStatement();
+  expect(environment.index.writeStatementRelationVector(WORKSPACE, generation.generation_id, {
+    root_key: source.root_key, input_digest: digest, embedding: VECTOR, token_count: 2
+  })).toEqual({ status: "accepted" });
+  expect(() => environment.database.connection.prepare(`INSERT INTO source_statement_relation_vectors
+    (workspace_id,generation_id,root_key,input_digest,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
+    .run(WORKSPACE, generation.generation_id, "text-key", "d".repeat(64), 3, "abcdefghijkl", 2)).toThrow();
+  expect(environment.index.activate(WORKSPACE, generation.generation_id)).toEqual({ status: "accepted" });
+  const nan = Buffer.alloc(12);
+  nan.writeFloatLE(Number.NaN, 0);
+  nan.writeFloatLE(0, 4);
+  nan.writeFloatLE(0, 8);
+  environment.database.connection.prepare(`UPDATE source_statement_relation_vectors SET embedding_blob=? WHERE root_key=?`)
+    .run(nan, source.root_key);
+  expect(environment.index.readStatementRelationVectors(WORKSPACE, [source.root_key], QUERY))
+    .toMatchObject({ status: "unknown", reason: "statement_relation_invalid_vector" });
+});
+
+it("does not return ready relation text across a pre-scrub source_context erase barrier", () => {
+  const environment = fixture(); opened.push(environment);
+  const context = publishMessages(environment, [{ role: "user", text: "context source." }], "context-source");
+  const published = publishMessages(environment);
+  publishStatement(environment, published, "relation-overlay-context", 0, {}, [contextOf(context.record)]);
+  const generation = environment.index.begin(environment.index.select(WORKSPACE, configuration()));
+  environment.index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET);
+  const targets = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8);
+  const source = targets.find(row => row.auxiliary !== undefined);
+  if (source === undefined) throw new Error("expected statement key target");
+  for (const target of targets) {
+    const read = environment.index.readDocument(WORKSPACE, generation.generation_id, target.root_key, 65_536, BUDGET);
+    if (read.status !== "ready") throw new Error(read.reason);
+    const document = prepareSourceIndexDocument({ source: target, body: read.body, profile: configuration().profile }, fieldSha256);
+    expect(environment.index.writeDocument(WORKSPACE, generation.generation_id, document, BUDGET).status).toBe("accepted");
+    for (const window of document.windows) {
+      expect(environment.index.writeVector(WORKSPACE, generation.generation_id, {
+        window_id: window.window_id, input_digest: window.content_digest, embedding: VECTOR, token_count: 2, truncated: false
+      })).toEqual({ status: "accepted" });
+    }
+  }
+  environment.database.connection.prepare(`INSERT INTO projection_erase_barriers
+    (workspace_id,barrier_id,receipt_identity,generation_id,subject_kind,subject_id,erased_at)
+    VALUES(?,?,?,NULL,'source_record',?,?)`)
+    .run(WORKSPACE, "barrier-context", "receipt-context", context.record.record_id, CLOCK);
+  expect(environment.index.readStatementRelationText(WORKSPACE, generation.generation_id, source.root_key, BUDGET).status)
+    .not.toBe("ready");
+});
+
+it("returns unknown when statement relation text costs more work than the remaining budget", () => {
+  const { environment, generation, source } = setupStatement();
+  expect(environment.index.readStatementRelationText(WORKSPACE, generation.generation_id, source.root_key,
+    { work: 2, native_bytes: 10_000 })).toMatchObject({ status: "unknown", reason: "statement_relation_text_read_budget" });
 });
 
 it("reclaims overlay rows with the retired generation", () => {

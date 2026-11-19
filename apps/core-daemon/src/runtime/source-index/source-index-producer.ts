@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   SourceIndexBackfill,
+  SOURCE_INDEX_RELATION_EMBED_MAX_MS,
   SourceIndexLifecycle,
   fieldContractSha256,
   type SourceEmbeddingBindingOptions,
@@ -367,7 +368,10 @@ export class SourceIndexProducer {
     return { ...binding, embedInputs: (inputs, options) => this.trackNative(() =>
       // Producer deadlines stop local waiting, not the shared runtime. Its close owner retains
       // termination authority. Ordinary query/memory IPC timeout semantics are unchanged.
-      binding.embedInputs(inputs, { profile_id: options.profile_id, timeoutMs: 0 })) };
+      // Optional overlay isolation may supply a child signal; never forward one for key windows.
+      binding.embedInputs(inputs, { profile_id: options.profile_id, timeoutMs: 0,
+        ...(options.signal !== undefined && options.timeoutMs <= SOURCE_INDEX_RELATION_EMBED_MAX_MS
+          ? { signal: options.signal } : {}) })) };
   }
 
   private async reconcileWorkspace(workspaceId: string, binding: ReadyBinding, pass: Pass): Promise<PassOutcome | null> {

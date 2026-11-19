@@ -325,6 +325,9 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
     : association.roots.flatMap((root, i) => { const opening = association.openings![i];
       return opening == null ? [] : [{ root, ...(opening.statement === null ? {} : { statement: opening.statement }),
         support_span: { start_byte: opening.span[0], end_byte: opening.span[1] } }]; });
+  if (decided !== undefined && association.decision.refused === null && openings.length > 0) {
+    association.decision.applied = true;
+  }
   return { ...ordered, evidence_coverage, evidence_variants: variants, evidence_openings: openings, preferred_record_ids: recordIds,
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }

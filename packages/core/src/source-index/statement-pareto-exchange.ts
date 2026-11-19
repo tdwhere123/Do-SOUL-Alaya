@@ -1,4 +1,4 @@
-import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import type { StatementAssociation } from "./statement-association.js";
 
 type Assignment = Readonly<{ roots: readonly (string | null)[]; count: number; weight: number }>;
@@ -58,17 +58,27 @@ export function injectiveConditionWitnessAssignment(pool: readonly string[],
   return best === undefined ? undefined : { ...best, marginal, identity: "root" };
 }
 
+/** Conservative upper bound: rank sorting, DP transitions/allocations/tie-breaks, tail dominance.
+ * Zero when the caller has already established that relations are absent. */
+export function quoteStatementParetoExchange(roots: number, statements: number): SourceSemanticResourceBudget {
+  if (roots < 1 || statements < 1) return { work_units: 0, memory_bytes: 0 };
+  const n = Math.min(statements, 5);
+  return {
+    work_units: roots * n + (1 << n) * n * roots + 4 * n * roots,
+    memory_bytes: roots * n * 16 + (1 << n) * n * roots
+  };
+}
+
 export function exchangeStatementParetoSecondary(input: Readonly<{
   association: StatementAssociation; pool: readonly string[]; head: string[]; tail: string[];
   agreed: readonly string[]; meter: SourceSemanticResourceLedger;
 }>): boolean {
   const { association, pool, head, tail, agreed, meter } = input;
   const relations = association.relations;
-  if (relations === undefined) return false;
+  if (relations === undefined || relations.every(row => row.every(value => value === null))) return false;
   const n = association.statements;
-  meter.charge(pool.length * (n + 4) + (1 << Math.min(n, 5)) * pool.length * n, pool.length * n * 16,
-    "statement relation witness exchange");
-  if (relations.every(row => row.every(value => value === null))) return false;
+  const quote = quoteStatementParetoExchange(pool.length, n);
+  meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
   const index = new Map(association.roots.map((id, row) => [id, row]));
   const coverage = (id: string, column: number) => {
     const row = index.get(id); return row === undefined ? null : association.coverage[row]![column]!;

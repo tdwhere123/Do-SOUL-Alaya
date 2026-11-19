@@ -43,23 +43,46 @@ function relationFromGist(database: StorageDatabase, workspaceId: string, artifa
   return { relation, digest: hashContentDigest(relation, sha256) };
 }
 
-export function readStatementRelationText(database: StorageDatabase, workspaceId: string, generationId: string,
-  rootKey: string, budget: SourceIndexBudget, sha256: FieldContractSha256): SourceIndexStatementRelationTextRead {
+export function readStatementRelationText(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
+  workspaceId: string, generationId: string, rootKey: string, budget: SourceIndexBudget,
+  sha256: FieldContractSha256): SourceIndexStatementRelationTextRead {
   BoundedIdSchema.parse(workspaceId);
   assertIndexBudget(budget);
   const resources = { work: 0, native_bytes: 0 };
+  const unknown = (reason: string): SourceIndexStatementRelationTextRead => ({ status: "unknown", reason, resources });
   const unavailable = (reason: string): SourceIndexStatementRelationTextRead => ({ status: "unavailable", reason, resources });
-  if (budget.work < 2 || budget.native_bytes < 32) return unavailable("read_budget");
+  const need = (work: number, bytes: number) => {
+    if (resources.work + work > budget.work || resources.native_bytes + bytes > budget.native_bytes) {
+      return unknown("statement_relation_text_read_budget");
+    }
+    return null;
+  };
+  const blocked = need(1, 0);
+  if (blocked !== null) return blocked;
   const generation = readSourceIndexGeneration(database, workspaceId, generationId);
   resources.work++;
   if (generation === null) return unavailable("missing_generation");
+  const targetBudget = need(1, 0);
+  if (targetBudget !== null) return targetBudget;
   const source = statementTarget(database, workspaceId, generationId, rootKey);
   resources.work++;
   if (source === null || source.auxiliary === undefined) return unavailable("missing_target");
+  const guard = guardSourceIndexTarget(database, records, source, {
+    work: budget.work - resources.work, native_bytes: budget.native_bytes - resources.native_bytes });
+  resources.work += guard.resources.work;
+  resources.native_bytes += guard.resources.native_bytes;
+  if (guard.status !== "ready") {
+    return guard.reason === "read_budget" ? unknown("statement_relation_text_read_budget") : unavailable(guard.reason);
+  }
+  const gistBudget = need(1, 0);
+  if (gistBudget !== null) return gistBudget;
   const gist = relationFromGist(database, source.target.workspace_id, source.auxiliary.artifact_id, sha256);
   resources.work++;
   if (gist === null) return unavailable("statement_relation_unavailable");
-  resources.native_bytes += Buffer.byteLength(gist.relation);
+  const bytes = Buffer.byteLength(gist.relation);
+  const readyBudget = need(0, bytes);
+  if (readyBudget !== null) return readyBudget;
+  resources.native_bytes += bytes;
   return { status: "ready", relation: gist.relation, resources };
 }
 
@@ -128,7 +151,12 @@ export function readStatementRelationVectors(database: StorageDatabase, workspac
   try {
     const state = readSourceIndexQueryState(database, workspaceId, meter.remaining());
     meter.absorb(state.resources);
-    if (!("binding" in state.state)) return ready(captured.keys.map(() => null));
+    if (!("binding" in state.state)) {
+      if (state.state.status === "unbound" || state.state.reason === "missing_selection") {
+        return ready(captured.keys.map(() => null));
+      }
+      return unknown(state.state.reason);
+    }
     const dims = state.state.binding.dimensions, generationId = state.state.binding.generation_id;
     const lookup = cachedReadStatement(database, `SELECT dimensions,embedding_blob FROM ${RELATION_TABLE}
       WHERE workspace_id=? AND generation_id=? AND root_key=?`);
@@ -140,18 +168,20 @@ export function readStatementRelationVectors(database: StorageDatabase, workspac
       const raw = lookup.get(workspaceId, generationId, key);
       if (raw === undefined) { vectors.push(null); continue; }
       const row = readRecord(raw, "statement relation vector");
-      const blob = readBufferField(row, "embedding_blob");
+      const blob = row.embedding_blob;
+      if (!Buffer.isBuffer(blob)) return unknown("statement_relation_invalid_vector");
       meter.read(1, blob.length);
       if (readIntegerField(row, "dimensions") !== dims) return unknown("statement_relation_incompatible_dimensions");
+      meter.ledger.charge(dims, dims * 4, "statement relation vector decode");
       const embedding = decodeValidEmbeddingBlob(blob, dims);
       if (embedding === null) return unknown("statement_relation_invalid_vector");
-      meter.ledger.charge(dims, dims * 4, "statement relation vector decode");
       vectors.push(embedding);
     }
     return ready(vectors);
   } catch (error) {
     if (overlayTableMissing(error)) return ready(captured.keys.map(() => null));
     if (error instanceof SourceSemanticResourceExhausted) return unknown("read_budget");
+    if (error instanceof StorageError) return unknown("statement_relation_invalid_vector");
     throw error instanceof SourceIndexOperationError ? error : new SourceIndexOperationError(error, meter.resources());
   }
 }

@@ -32,6 +32,7 @@ import {
   defaultLocalOnnxCacheDir,
   fieldContractSha256,
   type SourceEmbeddingInput,
+  type SourceEmbeddingOptions,
   type SourceEmbeddingResult
 } from "@do-soul/alaya-core";
 import {
@@ -53,6 +54,7 @@ import {
   publishSource,
   type Fixture
 } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { publishMessages, publishStatement } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-template-fixture.js";
 import {
   createSourceIndexProducer,
   sourceIndexWindowBytes,
@@ -130,7 +132,7 @@ function labeledProfile(options: { window_bytes: number; max_input_tokens?: numb
 
 function labeledBind(changes: Partial<SourceIndexProfile> = {},
   embed?: (inputs: readonly SourceEmbeddingInput[]) => Promise<readonly SourceEmbeddingResult[]>) {
-  const embedInputs = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
+  const embedInputs = vi.fn(async (inputs: readonly SourceEmbeddingInput[], _options?: SourceEmbeddingOptions) => {
     if (embed !== undefined) return embed(inputs);
     return inputs.map(input => ({
       status: "embedded" as const,
@@ -211,6 +213,45 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       receipt: { status: "ready" }
     });
     expect(environment.database.connection.inTransaction).toBe(false);
+  });
+
+  it("activates after key windows complete when optional relation embedding times out", async () => {
+    const environment = fixture(); environments.push(environment);
+    const published = publishMessages(environment);
+    const statement = publishStatement(environment, published, "relation-timeout");
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    embedInputs.mockImplementation(async (inputs: readonly SourceEmbeddingInput[], options?: SourceEmbeddingOptions) => {
+      if (inputs[0]?.text === statement.bound.statement.relation) {
+        if (options?.signal === undefined) throw new Error("expected isolated relation abort signal");
+        await new Promise<never>((_, reject) => {
+          const signal = options.signal!;
+          const abort = () => reject(signal.reason ?? new Error("relation_aborted"));
+          if (signal.aborted) return abort();
+          signal.addEventListener("abort", abort, { once: true });
+        });
+      }
+      return inputs.map((input: SourceEmbeddingInput) => ({
+        status: "embedded" as const,
+        input_id: input.input_id,
+        input_digest: hashContentDigest(input.text, fieldContractSha256),
+        vector: new Float32Array([0.6, 0.8, 0]),
+        token_count: 2,
+        truncated: false as const
+      }));
+    });
+    const producer = producerFor(environment, bind, {
+      stepDeadlineMs: 250, maxRootsPerPass: 16, maxCapturePages: 8, modelInputs: 32, inputBytes: 256_000
+    });
+    const receipt = await producer.runPass();
+    expect(receipt).toMatchObject({ status: "settled", reason: "pass_complete" });
+    const state = environment.index.state(WORKSPACE);
+    expect(state).toMatchObject({ status: "ready", active_generation_id: expect.any(String) });
+    if (state.status === "unknown" || state.active_generation_id === null) throw new Error("expected active generation");
+    const generation = environment.index.generation(WORKSPACE, state.active_generation_id)!;
+    expect(generation.completed_count).toBe(generation.target_count);
+    expect(generation.target_count).toBeGreaterThan(1);
+    const next = await producer.runPass();
+    expect(next.status).not.toBe("busy");
   });
 
   it("fails observable state after inference throws past an accepted vector and resumes without re-inferring it", async () => {

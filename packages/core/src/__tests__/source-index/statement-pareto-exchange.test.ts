@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { SourceSemanticResourceLedger, type EvidenceCondition, type SourceIndexTarget } from "@do-soul/alaya-protocol";
-import { StatementKeyRetention, selectEvidenceWitnesses, type EvidenceDemands, type StatementAssociation,
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, type EvidenceCondition, type SourceIndexQueryCapacity,
+  type SourceIndexTarget } from "@do-soul/alaya-protocol";
+import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
+import { StatementKeyRetention, selectEvidenceWitnesses, quoteStatementAssociation, type EvidenceDemands, type StatementAssociation,
   type StatementWitnessReader } from "../../source-index/statement-association.js";
-import { exchangeStatementParetoSecondary, injectiveConditionWitnessAssignment } from "../../source-index/statement-pareto-exchange.js";
+import { exchangeStatementParetoSecondary, injectiveConditionWitnessAssignment, quoteStatementParetoExchange } from "../../source-index/statement-pareto-exchange.js";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
 
 const roots = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -42,22 +44,26 @@ function fieldInput(association?: StatementAssociation) {
 
 describe("winning-key relation scoring", () => {
   it("scores the relation vector of the key that won coverage and never coerces missing cells to 0", () => {
-    const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
-    retained.consider("a", 0.9, Float32Array.of(1, 0), key("k-high"));
-    retained.consider("a", 0.8, Float32Array.of(0.2, 0.1), key("k-low"));
+    const demand = Float32Array.of(1, 0);
+    const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
+    retained.consider("a", 0.85, Float32Array.of(0.85, Math.sqrt(1 - 0.85 ** 2)), key("k-a"));
+    retained.consider("a", 0.60, Float32Array.of(0.60, 0.8), key("k-b"));
     const value = retained.associate(["a"], witnesses, undefined, keys => ({
-      status: "ready", vectors: keys.map(id => id === "k-high" ? Float32Array.of(1, 0) : Float32Array.of(0, 1))
+      status: "ready", vectors: keys.map(id => id === "k-a"
+        ? Float32Array.of(0.15, Math.sqrt(1 - 0.15 ** 2))
+        : Float32Array.of(0.95, Math.sqrt(1 - 0.95 ** 2)))
     }))!;
-    expect(value.coverage[0]![0]).toBeGreaterThan(value.coverage[0]![1]!);
-    expect(value.relations![0]![0]).toBeCloseTo(1, 6);
-    expect(value.relations![0]![1]).toBeCloseTo(1, 6);
+    expect(value.coverage[0]![0]).toBeCloseTo(0.85, 5);
+    expect(value.relations![0]![0]).toBeCloseTo(0.15, 5);
+    expect(value.relations![0]![0]).not.toBeCloseTo(0.95, 5);
+    expect(demand[0]).toBe(1);
   });
 
   it("keeps a missing overlay as null and abandons incompatible relation dimensions", () => {
     const missing = new StatementKeyRetention(meter(), noRefusal, ready([1, 0]));
     missing.consider("a", 1, Float32Array.of(1, 0), key("k0"));
     expect(missing.associate(["a"], witnesses, undefined, () => ({ status: "ready", vectors: [null] }))!.relations)
-      .toEqual([[null]]);
+      .toBeUndefined();
     const refused: string[] = [];
     const bad = new StatementKeyRetention(meter(), phase => refused.push(phase), ready([1, 0]));
     bad.consider("a", 1, Float32Array.of(1, 0), key("k0"));
@@ -114,10 +120,76 @@ describe("injective condition assignment and secondary exchange", () => {
     const result = orderNativeFieldAccess(fieldInput(association), meter());
     expect(association.decision.applied).toBe(true);
     const ids = (result as { record_ids: string[] }).record_ids.filter(id => id !== "m");
-    expect(ids.slice(0, 5).includes("h") || ids.includes("h")).toBe(true);
-    const firstFive = ids.slice(0, 5);
-    const rest = ids.slice(5);
-    if (!firstFive.includes("f") && rest.includes("f")) expect(rest.indexOf("f")).toBe(0);
+    expect(ids.slice(0, 5)).toContain("h");
+    expect(ids[5]).toBe("f");
+    expect(ids.indexOf("e")).toBeGreaterThan(5);
     expect(() => orderNativeFieldAccess(fieldInput(association), meter(0))).toThrow(/budget exhausted/u);
+  });
+
+  it("matches no-overlay promotion on a 60-work-unit all-null overlay", () => {
+    const none = coverage(1, { g: [0.9] });
+    const allNull = coverage(1, { g: [0.9] }, {
+      relations: roots.map(() => [null]) });
+    const without = orderNativeFieldAccess(fieldInput(none), meter(60));
+    const withNulls = orderNativeFieldAccess(fieldInput(allNull), meter(60));
+    expect(withNulls).toMatchObject({ record_ids: (without as { record_ids: string[] }).record_ids });
+    expect(allNull.decision.refused).toBeNull();
+  });
+
+  it("treats a funded witness opening as applied so an unfunded continuation cannot drop it", () => {
+    const association = coverage(1, { b: [0.9] }, {
+      openings: roots.map((root, i) => root === "b" ? { statement: 0, span: [i, i + 4] as const } : null) });
+    const first = orderNativeFieldAccess(fieldInput(association), meter());
+    expect(first).toMatchObject({
+      record_ids: ["a", "m", "b", "c", "d", "e", "f", "g", "h"],
+      evidence_openings: [{ root: "b", statement: 0, support_span: { start_byte: 1, end_byte: 5 } }] });
+    expect(association.decision.applied).toBe(true);
+    expect(() => orderNativeFieldAccess(fieldInput(association), meter(0))).toThrow(SourceSemanticResourceExhausted);
+  });
+
+  it("covers worst-case relation-populated association and navigation within quotes", () => {
+    const identities = Array.from({ length: 16 }, (_, index) => `r${index}`);
+    const dims = 384, statements = 4;
+    const demands = ready(...Array.from({ length: statements }, () => Array<number>(dims).fill(1)));
+    const budget = meter();
+    const retained = new StatementKeyRetention(budget, noRefusal, demands);
+    const embedding = new Float32Array(dims).fill(1);
+    for (const root of identities) for (let index = 0; index < 16; index++) {
+      retained.consider(root, 1, embedding, key(`${root}:${index}`));
+    }
+    const protection = retained.finalizationProtection(identities.length, identities.reduce((sum, root) => sum + root.length, 0));
+    const work = budget.spentWork, bytes = budget.spentBytes;
+    const value = retained.associate(identities, witnesses, undefined, keys => ({
+      status: "ready" as const, vectors: keys.map(() => embedding)
+    }))!;
+    expect(budget.spentWork - work).toBeLessThanOrEqual(protection.work_units);
+    expect(budget.spentBytes - bytes).toBeLessThanOrEqual(protection.memory_bytes);
+    expect(value.relations).toBeDefined();
+    const native: SourceIndexQueryCapacity = {
+      budget: { work_units: 2_000_000, memory_bytes: 64 * 1024 * 1024 },
+      resources: { work: 0, native_bytes: 0, memory_bytes: 0, sql_internal_work: "unknown" },
+      vector_windows: 256, dimensions: dims, root_key_bytes: 8
+    };
+    const quoted = SourceIndexAcquisition.quoteAllowanceBudget({
+      workspace_id: "workspace-1", navigation_text: "q",
+      allowance: { max_attempts: 16, max_roots: 16, max_vector_windows: 256 },
+      vector: { status: "unavailable", reason: "fixture" }
+    }, native);
+    expect(quoted.work_units).toBeGreaterThanOrEqual(protection.work_units);
+    expect(quoted.work_units).toBeGreaterThanOrEqual(quoteStatementAssociation(16, 256, dims).work_units
+      + quoteStatementParetoExchange(16, statements).work_units);
+    const occurrences = identities.map((root, i) => ({ reference: `o-${root}`, root_key: root, native_rank: i + 1 }));
+    const memory = [{ reference: "memory", root_key: "m", native_rank: 1 }];
+    const lanes: NativeRouteLane[] = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"].map((lane, i) => ({
+      lane: lane as NativeRouteLane["lane"], scope: "q",
+      ...(i === 0 ? { state: "exact-captured" as const, occurrences } : { state: "measured-empty" as const }) }));
+    const navigation = new SourceSemanticResourceLedger(quoted);
+    expect(() => orderNativeFieldAccess({
+      lanes, memory: { lane: "memory-lexical", scope: "q", state: "exact-captured", occurrences: memory },
+      pool: [...identities, "m"].map(record_id => ({ record_id, catalog_position: null })),
+      acquired_root_keys: [...identities, "m"],
+      associations: [...occurrences, ...memory].map(row => ({ occurrence_reference: row.reference, root_key: row.root_key, record_id: row.root_key })),
+      unvisited_sources: true, association: value
+    }, navigation)).not.toThrow();
   });
 });

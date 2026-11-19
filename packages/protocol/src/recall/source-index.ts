@@ -114,7 +114,8 @@ export type SourceIndexStatementRelationVector = Readonly<{
   root_key: string; input_digest: string; embedding: Float32Array; token_count: number;
 }>;
 export type SourceIndexStatementRelationTextRead = Readonly<{ resources: SourceIndexResources }> &
-  (Readonly<{ status: "ready"; relation: string }> | Readonly<{ status: "unavailable"; reason: string }>);
+  (Readonly<{ status: "ready"; relation: string }> |
+    Readonly<{ status: "unavailable" | "unknown"; reason: string }>);
 export type SourceIndexBudget = Readonly<{ work: number; native_bytes: number }>;
 /** Retired-only maintenance; complete means the queue was observed empty. */
 export type SourceIndexVectorReclamationResult = Readonly<{

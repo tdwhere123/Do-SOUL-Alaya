@@ -10,7 +10,7 @@ CREATE TABLE source_statement_relation_vectors (
   embedding_blob BLOB NOT NULL,
   token_count INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, generation_id, root_key),
-  CHECK (dimensions > 0 AND length(embedding_blob) = dimensions * 4)
+  CHECK (typeof(embedding_blob) = 'blob' AND dimensions > 0 AND octet_length(embedding_blob) = dimensions * 4)
 );
 
 CREATE TRIGGER source_statement_relation_vector_generation_delete

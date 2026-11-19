@@ -63,3 +63,37 @@ it("embeds the published relation after statement-key windows complete and still
     deadline_ms: Date.now() + 60_000, signal: new AbortController().signal });
   expect(second.status).toBe("root_complete");
 });
+
+it("returns root_complete when optional relation embedding times out without aborting the caller", async () => {
+  const environment = fixture(); environments.push(environment);
+  const published = publishMessages(environment);
+  const statement = publishStatement(environment, published, "relation-timeout");
+  const lifecycle = new SourceIndexLifecycle(environment.index, fieldSha256);
+  const selection = lifecycle.select(WORKSPACE, configuration({ window_bytes: 4096, max_input_tokens: 4096 }));
+  const generation = lifecycle.begin(selection);
+  lifecycle.capture(WORKSPACE, generation.generation_id, 8, BUDGET);
+  const target = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8)
+    .find(row => row.auxiliary !== undefined);
+  if (target === undefined) throw new Error("expected statement key");
+  const parent = new AbortController();
+  const binding = { status: "ready" as const, profile: { ...selection.configuration.profile }, profile_id: selection.profile_id,
+    embedInputs: vi.fn(async (inputs: readonly SourceEmbeddingInput[], options: { signal?: AbortSignal }) => {
+      if (inputs[0]!.text === statement.bound.statement.relation) {
+        await new Promise<never>((_, reject) => {
+          const signal = options.signal;
+          const abort = () => reject(signal?.reason ?? new Error("relation_aborted"));
+          if (signal?.aborted) return abort();
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+      }
+      return embedded(inputs);
+    }) };
+  const result = await new SourceIndexBackfill(lifecycle).step({
+    selection, generation_id: generation.generation_id, root_key: target.root_key, binding,
+    budget: { ...BUDGET, model_inputs: 10, input_bytes: 4096, max_body_bytes: 4096 },
+    deadline_ms: Date.now() + 200, signal: parent.signal });
+  expect(result.status).toBe("root_complete");
+  expect(parent.signal.aborted).toBe(false);
+  expect(environment.index.pendingWindows(WORKSPACE, generation.generation_id, target.root_key, 1, BUDGET))
+    .toMatchObject({ status: "ready", ordinals: [] });
+});

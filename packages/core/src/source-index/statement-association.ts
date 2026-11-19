@@ -1,5 +1,5 @@
 import { statementEventIntervals } from "@do-soul/alaya-graph-algorithms";
-import { hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type HostOccurrence,
+import { EVIDENCE_CONDITION_LIMITS, hostOccurrenceIsMessage, sourceIndexNativeRootKey, SourceSemanticResourceExhausted, type EvidenceCondition, type HostOccurrence,
   type QuestionTimePreference, type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead,
   type SourceIndexTarget, type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
@@ -91,9 +91,11 @@ const retentionBytes = (dimensions: number) => dimensions * 4 + 48;
  * charged on the same acquisition ledger when evidence statements are supplied. */
 export function quoteStatementAssociation(roots: number, windows: number, dimensions: number): SourceSemanticResourceBudget {
   const retainedKeys = Math.min(windows, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT);
-  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots,
+  const statements = EVIDENCE_CONDITION_LIMITS.max_conditions;
+  const relationWork = retainedKeys * dimensions * (statements + 1);
+  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots + relationWork,
     memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 84 + 1088)
-      + roots * roots * 128 + 4096 };
+      + roots * roots * 128 + 4096 + retainedKeys * dimensions * 4 };
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
@@ -101,9 +103,11 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
 function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number,
   spans = false, relations = false): SourceSemanticResourceBudget {
   const cells = statements * ((spans ? 2 : 1) + (relations ? 1 : 0)) + 1;
-  return { work_units: keyDimensions * statements + demandDimensions + roots * cells,
+  const finiteness = keyDimensions + demandDimensions;
+  const relationDots = relations ? keyDimensions * statements : 0;
+  return { work_units: keyDimensions * statements + demandDimensions + roots * cells + finiteness + relationDots,
     memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72)
-      + (relations ? statements * 72 : 0) + (spans ? 64 : 0)) };
+      + (relations ? statements * 72 : 0) + (spans ? 64 : 0)) + (relations ? keyDimensions * 4 : 0) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
@@ -314,8 +318,9 @@ export class StatementKeyRetention {
     if (relations === "unavailable") return undefined;
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
+    const hasFiniteRelation = Array.isArray(relations) && relations.some(row => row.some(value => value !== null));
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
-      ...(relations === undefined ? {} : { relations }),
+      ...(hasFiniteRelation ? { relations } : {}),
       ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
   }
 

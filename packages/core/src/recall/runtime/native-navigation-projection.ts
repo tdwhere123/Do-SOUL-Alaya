@@ -4,6 +4,7 @@ import { sourceFactKey } from "../conditional-field/engine/binding-environment.j
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { orderNativeFieldAccess, type NativeRouteLane, type NativeRouteOccurrence } from "./native-route-opportunity.js";
+import { quoteStatementParetoExchange } from "../../source-index/statement-pareto-exchange.js";
 import type { EvidenceCoverageInjection } from "../../source-index/statement-association.js";
 import { compareFieldValues } from "./index-continuation.js";
 import { CoreError } from "../../shared/errors.js";
@@ -140,9 +141,12 @@ export function nativeNavigationProjection(state: FieldEngineState, values: read
     const coordinates = input.lanes.reduce((sum, lane) => sum + (lane.state === "exact-captured" ? lane.occurrences.length : 0), 0)
       + (input.memory.state === "exact-captured" ? input.memory.occurrences.length : 0)
       + (input.question_time?.capture.state === "exact-captured" ? input.question_time.capture.occurrences.length : 0) + catalog.size;
+    const pareto = input.association?.relations === undefined
+      ? { work_units: 0, memory_bytes: 0 }
+      : quoteStatementParetoExchange(input.association.roots.length, input.association.statements);
     const ordered = orderNativeFieldAccess(input, meter, {
-      work_units: coordinates + values.length + values.length * values.length,
-      memory_bytes: values.length * 8 });
+      work_units: coordinates + values.length + values.length * values.length + pareto.work_units,
+      memory_bytes: values.length * 8 + pareto.memory_bytes });
     // A bound source without a captured catalog position may still be returned,
     // but cannot manufacture a total navigation order or a native hit witness.
     const recordIds = "preferred_record_ids" in ordered ? ordered.preferred_record_ids

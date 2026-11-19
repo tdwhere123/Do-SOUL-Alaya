@@ -1,5 +1,5 @@
 import {
-  QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  EVIDENCE_CONDITION_LIMITS, QuestionTimePreferenceSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceIndexProfileId, sourceIndexNativeRootKey,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceSemanticResourceBudget, type SourceIndexQueryCapacity,
@@ -16,6 +16,7 @@ import { agreedQuestionTimeHeadPrefix, collectQuestionTimeIndexMembers, preferQu
 import { validateInput } from "./source-index-acquisition-input.js";
 import { collapseStatementCandidates, evidenceWindow, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
   type StatementAssociation } from "./statement-association.js";
+import { quoteStatementParetoExchange } from "./statement-pareto-exchange.js";
 import { restoreSourceTemplate } from "./source-template-restoration.js";
 import { preferTaskObservations } from "./task-observation-preference.js";
 import { VECTOR_COST, acquisitionResultEnvelopeCost, acquisitionNavigationDigestCost,
@@ -68,15 +69,16 @@ export class SourceIndexAcquisition {
       vector: input.vector, max_roots: input.allowance.max_roots }, native.budget);
     const windows = native.vector_windows;
     const association = quoteStatementAssociation(input.allowance.max_roots, windows, native.dimensions);
+    const pareto = quoteStatementParetoExchange(input.allowance.max_roots, EVIDENCE_CONDITION_LIMITS.max_conditions);
     return {
       work_units: native.budget.work_units + captured.work_units + native.resources.work
         + VECTOR_COST.ordering_work + windows * (VECTOR_COST.validation_per_dimension * native.dimensions
           + VECTOR_COST.lookup_work + VECTOR_COST.replacement_work + VECTOR_COST.rank_work)
-        + windows * windows * VECTOR_COST.comparison_work + association.work_units,
+        + windows * windows * VECTOR_COST.comparison_work + association.work_units + pareto.work_units,
       memory_bytes: native.budget.memory_bytes + captured.memory_bytes + native.resources.memory_bytes
         + VECTOR_COST.ordering_bytes + windows * (VECTOR_COST.replacement_bytes
           + VECTOR_COST.key_bytes_per_character * native.root_key_bytes + VECTOR_COST.rank_bytes + VECTOR_COST.ordering_reference_bytes)
-        + association.memory_bytes
+        + association.memory_bytes + pareto.memory_bytes
     };
   }
 

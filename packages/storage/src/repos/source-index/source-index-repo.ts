@@ -89,7 +89,7 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   }
 
   public readStatementRelationText(workspaceId: string, generationId: string, rootKey: string, budget: SourceIndexBudget) {
-    return this.atomic(() => readStatementRelationText(this.database, workspaceId, generationId, rootKey, budget, this.sha256), "read");
+    return this.atomic(() => readStatementRelationText(this.database, this.records, workspaceId, generationId, rootKey, budget, this.sha256), "read");
   }
 
 
