@@ -56,11 +56,11 @@ it("caps the list, skips repeated roots and lists nothing for the hint view", ()
 });
 
 it.each([
-  { maxAttempts: 128, tailLength: 1, tailOverBudget: false },
-  { maxAttempts: 32, tailLength: 0, tailOverBudget: false },
-  { maxAttempts: 128, tailLength: 0, tailOverBudget: true }
+  { maxAttempts: 128, extraTail: 5, tailOverBudget: false },
+  { maxAttempts: 27, extraTail: 0, tailOverBudget: false },
+  { maxAttempts: 128, extraTail: 0, tailOverBudget: true }
 ])("lists displaced originals before the unrestricted tail (attempts=$maxAttempts, listing exhausted=$tailOverBudget)",
-  ({ maxAttempts, tailLength, tailOverBudget }) => {
+  ({ maxAttempts, extraTail, tailOverBudget }) => {
     const original = Array.from({ length: 24 }, (_, i) => templateStatement(`original-${i}`));
     const preferred = Array.from({ length: 16 }, (_, i) => templateStatement(`preferred-${i}`));
     const base = fixture(original);
@@ -92,16 +92,16 @@ it.each([
       return { capture, observed };
     };
     const unlisted = run(0);
-    expect(admit).toHaveBeenCalledTimes(32);
+    expect(admit).toHaveBeenCalledTimes(27);
     admit.mockClear();
     const listed = run(16);
     const { index_members, ...ranked } = listed.capture;
     expect(ranked).toEqual(unlisted.capture);
     expect(listed.observed).toEqual(unlisted.observed);
     expect(ranked.result.nominations.map(row => row.source)).toEqual([
-      original[0]!.source, ...preferred.slice(0, 15).map(row => row.source)
+      ...preferred.slice(0, 11).map(row => row.source), ...original.slice(0, 5).map(row => row.source)
     ]);
-    expect(index_members).toEqual(original.slice(1, 16 + tailLength).map(row => row.source));
-    expect(admit.mock.calls.slice(32).map(([source]) => source)).toEqual(
-      maxAttempts === 32 ? [] : [original[16]!.source]);
+    expect(index_members).toEqual(original.slice(5, 16 + extraTail).map(row => row.source));
+    expect(admit.mock.calls.slice(27).map(([source]) => source)).toEqual(tailOverBudget
+      ? [original[16]!.source] : original.slice(16, 16 + extraTail).map(row => row.source));
   });

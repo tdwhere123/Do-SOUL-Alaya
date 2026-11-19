@@ -13,7 +13,7 @@ function fixture() {
   const original = Array.from({ length: 16 }, (_, i) => templateStatement(`original-${i}`));
   const preferred = Array.from({ length: 16 }, (_, i) => templateStatement(`preferred-${i}`));
   const readTemplateStatements = vi.fn<(source: SourceIndexTarget) => SourceIndexTemplateRead>(source => ({
-    status: "complete", statements: source.root_key === original[0]!.source.root_key ? [original[0]!.statement] : [], resources: readResources
+    status: "complete", statements: source.root_key === original[5]!.source.root_key ? [original[5]!.statement] : [], resources: readResources
   }));
   const lexical = (rows: typeof original): SourceIndexLexicalRead => ({ completion: "complete", reason: null,
     candidates: rows.map((row, i) => ({ source: row.source, lexical: { lane: "unicode61", rank: i + 1,
@@ -45,9 +45,13 @@ function fixture() {
 describe("funded source-template restoration", () => {
   it("restores only a unique original displaced root, keeps the cap and finalizes association once over the chosen roots", () => {
     const env = fixture(), result = env.run(), ids = result.result.nominations.map(row => row.source.source_id);
-    expect(ids).toEqual(["original-0", ...Array.from({ length: 15 }, (_, i) => `preferred-${i}`)]);
-    expect(result.result.accounting).toMatchObject({ attempted: 32, admitted: 16 });
-    expect(result.witness.map(row => row.source.source_id)).toEqual(ids);
+    expect(ids).toEqual(["original-5", ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      "original-0", "original-1", "original-2", "original-3"]);
+    expect(result.result.accounting).toMatchObject({ attempted: 27, admitted: 16 });
+    expect(result.witness.map(row => row.source.source_id)).toEqual([
+      "original-0", "original-1", "original-2", "original-3", "original-5",
+      ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`)]);
+    expect(new Set(result.witness.map(row => row.source.source_id))).toEqual(new Set(ids));
     expect(result.question_time_order).toEqual(result.result.nominations.map(row => sourceIndexNativeRootKey(row.source)));
     expect(result.association?.roots).toEqual(result.question_time_order);
     expect(env.readTemplateStatements).toHaveBeenCalledTimes(16);
@@ -64,7 +68,9 @@ describe("funded source-template restoration", () => {
       : { status: "complete", statements: source.root_key === env.original[0]!.source.root_key
         ? [env.original[0]!.statement] : [], resources: readResources });
     const result = env.run();
-    expect(result.result.nominations.map(row => row.source.source_id)).toEqual(env.preferred.map(row => row.source.source_id));
+    expect(result.result.nominations.map(row => row.source.source_id)).toEqual([
+      ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      ...Array.from({ length: 5 }, (_, i) => `original-${i}`)]);
     expect(env.retain).toHaveBeenCalledTimes(1);
     expect(env.readTemplateStatements).toHaveBeenCalledTimes(16);
     expect(result.result.resources.native_bytes).toBe(16 * readResources.native_bytes);
@@ -83,7 +89,9 @@ describe("funded source-template restoration", () => {
     });
     const result = env.run();
     expect(env.retain).toHaveBeenCalledTimes(2);
-    expect(result.result.nominations.map(row => row.source.source_id)).toEqual(env.preferred.map(row => row.source.source_id));
+    expect(result.result.nominations.map(row => row.source.source_id)).toEqual([
+      ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      ...Array.from({ length: 5 }, (_, i) => `original-${i}`)]);
     expect(result.association?.roots).toHaveLength(16);
     expect(result.result.resources.work).toBeGreaterThan(11);
     expect(env.observed).toContainEqual(expect.objectContaining({ kind: "source_template_restoration",

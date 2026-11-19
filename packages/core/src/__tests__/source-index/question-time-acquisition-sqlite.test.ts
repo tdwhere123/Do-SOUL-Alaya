@@ -132,6 +132,34 @@ describe("question time bounded preference through SQLite acquisition", () => {
       intervals: [{ start: "not-a-day", end: "2020-01-02" }] } }, admitScope)).toThrow();
   });
 
+  it("keeps the original five-slot head in the question-time pool when in-window lexical fills the cap", () => {
+    const env = fixture(); opened.push(env);
+    const specs = [
+      ...Array.from({ length: 16 }, (_, i) => ({ id: `out-${i}`, body: `${"needle ".repeat(20)}a`,
+        vectors: [[1, 0, 0]], eventTime: "2020-01-01T12:00:00.000Z" })),
+      ...Array.from({ length: 16 }, (_, i) => ({ id: `win-${i}`, body: `needle a ${"noise ".repeat(20)}`,
+        vectors: [[0, 1, 0]], eventTime: "2020-01-02T12:00:00.000Z" }))
+    ];
+    const { config } = publishIndex(env, specs, configuration({ window_bytes: 4096, max_input_tokens: 4096 }));
+    const input = queryInput(config, { allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 4096 } });
+    const baseline = query(env, input, admitScope);
+    const originalHead = ids(baseline).slice(0, 5);
+    expect(originalHead).toHaveLength(5);
+    expect(originalHead.every(id => id.startsWith("out-"))).toBe(true);
+    const timed = env.index.readLexicalCandidates(WORKSPACE, "needle", 128, input.budget, preference);
+    expect(timed.candidates.length).toBeGreaterThanOrEqual(16);
+    const preferred = query(env, { ...input, question_time: preference }, admitScope);
+    expectBounded(preferred, input);
+    expect(preferred.nominations).toHaveLength(16);
+    const preferredIds = ids(preferred);
+    expect(preferredIds.slice(0, 11).every(id => id.startsWith("win-"))).toBe(true);
+    expect(preferredIds.slice(11)).toEqual(originalHead);
+    const capture = env.database.connection.transaction(() => new SourceIndexAcquisition(env.index, fieldSha256)
+      .nominateWithWitness({ ...input, question_time: preference }, admitScope))();
+    expect(capture.question_time_order).toEqual(capture.result.nominations.map(row => row.source.root_key));
+    expect(ids(capture.result)).toEqual(preferredIds);
+  });
+
   it("retains fallback when time lexical admission runs out of resources", () => {
     const { env, input } = setup();
     const admit = env.index.admitQueryCandidate.bind(env.index);

@@ -56,9 +56,11 @@ it("records the pre-observation eligibility union without a proposal and preserv
   const env = fixture(), baseline = env.run(false);
   const fact = env.observed.find(row => row.kind === "source_task_inventory");
   expect(fact).toMatchObject({ kind: "source_task_inventory", state: "active", coverage: "partial",
-    original: env.originals.map(row => row.source), incumbent: env.preferred.map(row => row.source),
-    eligible: [...env.originals, ...env.preferred].map(row => row.source) });
-  expect(baseline.result.nominations.map(row => row.source)).toEqual(env.preferred.map(row => row.source));
+    original: env.originals.map(row => row.source),
+    incumbent: [...env.preferred.slice(0, 11), ...env.originals.slice(0, 5)].map(row => row.source),
+    eligible: [...env.originals, ...env.preferred.slice(0, 11)].map(row => row.source) });
+  expect(baseline.result.nominations.map(row => row.source))
+    .toEqual([...env.preferred.slice(0, 11), ...env.originals.slice(0, 5)].map(row => row.source));
   expect(env.read).not.toHaveBeenCalled();
 });
 
@@ -66,7 +68,8 @@ it("narrows only task eligibility for a source-bound query without a proposal", 
   const env = fixture();
   env.run(false, env.proposal, "original-0");
   expect(env.observed.find(row => row.kind === "source_task_inventory")).toMatchObject({ state: "active",
-    original: env.originals.map(row => row.source), incumbent: env.preferred.map(row => row.source),
+    original: env.originals.map(row => row.source),
+    incumbent: [...env.preferred.slice(0, 11), ...env.originals.slice(0, 5)].map(row => row.source),
     eligible: [env.originals[0]!.source] });
 });
 

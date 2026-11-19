@@ -350,9 +350,11 @@ export type EvidenceCoverageInjection = Readonly<{ statement: number; root_posit
  * (best-scoring necessary witness; ties to the earlier position) is in the first five, then the conditions
  * with any necessary or possible witness there, then source order. Each condition in order whose top lies
  * outside the first five replaces the slot 5..2 that maximizes that pair (ties: the lowest slot), only if it
- * strictly improves. Slot 1 and membership are fixed; displaced roots follow the first five in source order.
+ * strictly improves. Slot 1 and membership are fixed; each promoted tail root exchanges with the displaced head root in
+ * source order, so unaffected intermediate tail slots stay unshifted.
  * Under a derived relation, each placed top's condition then brings its rank 2-5 witnesses from roots outside the first
- * five, in condition and rank order, delivered as their witness messages; nothing in the first five moves.
+ * five, in condition and rank order, delivered as their witness messages immediately after the first five; nothing in the
+ * first five moves. Remaining tail slots still use that exchange.
  * A selection over observed witnesses, not proof that the injected root answers the condition. */
 export function selectEvidenceWitnesses(order: readonly string[], association: StatementAssociation,
   meter: SourceSemanticResourceLedger) {
@@ -411,7 +413,13 @@ export function selectEvidenceWitnesses(order: readonly string[], association: S
       }
     });
   }
+  const origHead = order.slice(0, head);
+  const bySource = (a: string, b: string) => order.indexOf(a) - order.indexOf(b);
+  const promoted = out.filter(root => !origHead.includes(root)).sort(bySource);
+  const evicted = origHead.filter(root => !out.includes(root)).sort(bySource);
+  const tail = order.slice(head);
+  for (let k = 0; k < promoted.length; k++) tail[tail.indexOf(promoted[k]!)] = evicted[k]!;
   const moved = variants.map(row => row.root);
-  return { order: [...out, ...moved, ...order.filter(root => !chosen.has(root))],
+  return { order: [...out, ...moved, ...tail.filter(root => !chosen.has(root))],
     top_positions: tops.map(top => top === null ? null : top + 1), injections, variants };
 }

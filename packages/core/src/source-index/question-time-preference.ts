@@ -35,7 +35,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   preference: QuestionTimePreference; nominations: Map<string, N>; counts: MutableAccounting;
   maxRoots: number; maxAttempts: number; meter: SourceSemanticResourceLedger;
   absorb: (resources: SourceIndexQueryResources) => void;
-  nominate: (candidates: readonly SourceIndexLexicalCandidate[]) => void;
+  nominate: (candidates: readonly SourceIndexLexicalCandidate[], protectedHeadKeys: readonly string[]) => void;
   refusals: SourceIndexAcquisitionResult["resource_refusals"][number][];
   occurrences?: SourceSemanticNominationOccurrence[];
   ordered: (rootKeys: readonly string[]) => void;
@@ -44,6 +44,8 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
 }>): boolean {
   const { meter, absorb, nominations, counts } = input;
   const original = [...nominations.entries()];
+  // Matching and this head are both subsets of original, so their union always fits maxRoots.
+  const protectedHeadKeys = original.slice(0, Math.min(5, Math.floor(input.maxRoots / 3))).map(([key]) => key);
   meter.charge(original.length * 3, original.length * 24, "question time ordering and fallback");
   const domain = input.repository.readQuestionTimeDomain!(input.workspace, input.preference,
     original.map(([key]) => key), meter.remaining());
@@ -65,7 +67,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   for (const [key, row] of original) if (matching.has(key)) nominations.set(key, row);
   let completed = false;
   try {
-    input.nominate(lexical?.candidates ?? []);
+    input.nominate(lexical?.candidates ?? [], protectedHeadKeys);
     completed = true;
   } finally {
     for (const [key, row] of original) {

@@ -40,7 +40,8 @@ function coverage(statements: number, values: Record<string, (number | null)[]>,
 }
 
 /** Independent oracle: for each condition in order whose top is outside the first five, try every slot 2-5
- * and keep the lexicographically best (tops present, conditions witnessed) strict improvement, lowest slot on ties. */
+ * and keep the lexicographically best (tops present, conditions witnessed) strict improvement, lowest slot on ties.
+ * Promoted tail roots then exchange with displaced head roots in source order; intermediate tail slots stay. */
 function declaredRule(order: readonly string[], value: StatementAssociation): string[] {
   const at = (root: string) => value.roots.indexOf(root);
   const score = (root: string, d: number) => at(root) < 0 ? null : value.coverage[at(root)]![d]!;
@@ -67,7 +68,14 @@ function declaredRule(order: readonly string[], value: StatementAssociation): st
     }
     if (pick >= 0) first[pick] = top;
   }
-  return [...first, ...order.filter(root => !first.includes(root))];
+  const origHead = order.slice(0, Math.min(5, order.length));
+  const bySource = (a: string, b: string) => order.indexOf(a) - order.indexOf(b);
+  const promoted = first.filter(root => !origHead.includes(root)).sort(bySource);
+  const evicted = origHead.filter(root => !first.includes(root)).sort(bySource);
+  const tail = order.slice(origHead.length);
+  for (let k = 0; k < promoted.length; k++) tail[tail.indexOf(promoted[k]!)] = evicted[k]!;
+  const chosen = new Set(first);
+  return [...first, ...tail.filter(root => !chosen.has(root))];
 }
 
 describe("statement key retention and evidence coverage", () => {
@@ -272,8 +280,8 @@ describe("evidence coverage permutation of the source first five", () => {
   it("injects a late top root into the last non-serving slot and protects serving roots", () => {
     const value = coverage(3, { g: [0.9, 0.1, 0.1], d: [0.2, 0.2, 0.2], c: [0.1, 0.8, 0.1], h: [0.1, 0.1, 0.7] });
     const decided = selectEvidenceWitnesses(roots, value, meter());
-    // c serves statement 1 and stays; e (slot 5) then d (slot 4) are replaced and follow in base order.
-    expect(decided.order).toEqual(["a", "b", "c", "h", "g", "d", "e", "f"]);
+    // c serves statement 1 and stays; g and h enter slots 5 then 4 and exchange into those former tail seats.
+    expect(decided.order).toEqual(["a", "b", "c", "h", "g", "f", "d", "e"]);
     expect(decided.top_positions).toEqual([7, 3, 8]);
     expect(decided.injections).toEqual([{ statement: 0, root_position: 7, status: "injected", slot: 5 },
       { statement: 2, root_position: 8, status: "injected", slot: 4 }]);
@@ -282,10 +290,10 @@ describe("evidence coverage permutation of the source first five", () => {
   it("keeps a condition's only witness in the first five and displaces roots no condition sees", () => {
     // g tops statement 0; e (slot 5) is statement 1's only witness, possible under the window; d witnesses nothing.
     const value = coverage(2, { g: [0.9, null], b: [null, null] }, { e: [false, true], b: [true, false] });
-    expect(selectEvidenceWitnesses(roots, value, meter()).order).toEqual(["a", "b", "c", "g", "e", "d", "f", "h"]);
+    expect(selectEvidenceWitnesses(roots, value, meter()).order).toEqual(["a", "b", "c", "g", "e", "f", "d", "h"]);
     // A root possible only for the condition whose top enters is not protected: the lowest slot goes.
     const single = coverage(1, { g: [0.9] }, { b: [true], c: [true], d: [true], e: [true] });
-    expect(selectEvidenceWitnesses(roots, single, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
+    expect(selectEvidenceWitnesses(roots, single, meter()).order).toEqual(["a", "b", "c", "d", "g", "f", "e", "h"]);
     // Replacing another condition's top never improves the pair, so a fully topped first five stays.
     const topped = coverage(2, { b: [0.9, null], c: [null, 0.9], g: [0.95, null] });
     expect(selectEvidenceWitnesses(roots, topped, meter()).order.slice(0, 5)).toEqual(["a", "b", "c", "d", "g"]);
@@ -300,7 +308,25 @@ describe("evidence coverage permutation of the source first five", () => {
     const firstServes = coverage(1, { a: [0.9], h: [0.5] });
     expect(selectEvidenceWitnesses(roots, firstServes, meter()).order).toEqual(roots);
     const tie = coverage(1, { g: [0.5], h: [0.5] });
-    expect(selectEvidenceWitnesses(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "e", "f", "h"]);
+    expect(selectEvidenceWitnesses(roots, tie, meter()).order).toEqual(["a", "b", "c", "d", "g", "f", "e", "h"]);
+  });
+
+  it("exchanges two injected head slots into their former tail positions without shifting intermediate tail roots", () => {
+    const value = coverage(3, { g: [0.9, 0.1, 0.1], d: [0.2, 0.2, 0.2], c: [0.1, 0.8, 0.1], h: [0.1, 0.1, 0.7] });
+    const decided = selectEvidenceWitnesses(roots, value, meter());
+    expect(decided.order.slice(0, 5)).toEqual(["a", "b", "c", "h", "g"]);
+    expect(decided.order[5]).toBe("f");
+    expect(decided.order.slice(6)).toEqual(["d", "e"]);
+  });
+
+  it("keeps derived variants immediately after the first five while exchanging the remaining tail", () => {
+    const span = (s: number) => [s, s + 10] as const;
+    const value = { ...coverage(1, { g: [0.9], h: [0.8] }),
+      spans: roots.map((root, i) => root === "h" ? [span(10 * i)] : [null]) };
+    const decided = selectEvidenceWitnesses(roots, value, meter());
+    expect(decided.order).toEqual(["a", "b", "c", "d", "g", "h", "f", "e"]);
+    expect(decided.variants).toEqual([
+      { root: "h", statement: 0, root_position: 8, support_span: { start_byte: 70, end_byte: 80 } }]);
   });
 
   it("moves each placed top's rank 2-5 witnesses from outside the first five after it, as witness variants", () => {
@@ -349,7 +375,7 @@ describe("field access with evidence coverage", () => {
     expect(orderNativeFieldAccess(input, meter())).toEqual(orderNativeFieldAccess(input));
     expect(orderNativeFieldAccess(input)).toMatchObject({ status: "ordered", record_ids: base });
     const result = orderNativeFieldAccess({ ...input, association: coverage(1, { g: [0.9] }) }, meter());
-    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "g", "e", "f", "h"],
+    expect(result).toMatchObject({ status: "ordered", record_ids: ["a", "m", "b", "c", "d", "g", "f", "e", "h"],
       evidence_coverage: { status: "permuted", statements: 1, top_source_positions: [7],
         injections: [{ statement: 0, root_position: 7, status: "injected", slot: 5 }], reason: null } });
     const unchanged = orderNativeFieldAccess({ ...input, association: coverage(1, { b: [0.9] }) }, meter());

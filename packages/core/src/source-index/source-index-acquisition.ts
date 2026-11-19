@@ -283,10 +283,10 @@ class AcquisitionQuery {
         sourceId: this.capture?.observationSourceId, original, nominations: this.nominations, result: this.result() })),
       ...this.preferredRetentionHook(),
       ...(this.capture === undefined ? {} : { occurrences: this.capture.retained }),
-      nominate: candidates => {
+      nominate: (candidates, protectedHeadKeys) => {
         this.timeRoute = true; this.lexicalCandidates = collapseStatementCandidates(candidates, this.meter); this.vectorCandidates = [];
         observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact), "question_time");
-        const pending = this.nominatePrefix(true); this.limited ||= pending;
+        const pending = this.nominatePrefix(true, undefined, protectedHeadKeys); this.limited ||= pending;
       }
     });
     this.limited ||= partial;
@@ -529,9 +529,12 @@ class AcquisitionQuery {
   }
 
   private nominatePrefix(stopAtRootLimit = false,
-    cursor = { lexicalIndex: 0, vectorIndex: 0, takeLexical: true }): boolean {
+    cursor = { lexicalIndex: 0, vectorIndex: 0, takeLexical: true },
+    protectedHeadKeys: readonly string[] = []): boolean {
     let { lexicalIndex, vectorIndex, takeLexical } = cursor;
-    while ((!stopAtRootLimit || this.nominations.size < this.input.allowance.max_roots)
+    // Question-time lexical leaves tail room for unplaced original head roots; an admitted head shrinks that reservation.
+    while ((!stopAtRootLimit || this.nominations.size
+        + protectedHeadKeys.filter(key => !this.nominations.has(key)).length < this.input.allowance.max_roots)
       && this.counts.attempted < this.input.allowance.max_attempts &&
         (lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length)) {
       const lexicalTurn: boolean = lexicalIndex < this.lexicalCandidates.length &&
