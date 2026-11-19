@@ -69,8 +69,9 @@ export type StatementAssociation = Readonly<{
   /** Per root, its delivery unit: the byte range of its necessary witness messages (with the prompt an
    * assistant witness answers) and its best condition, or its first admitted message (null: unavailable). */
   openings?: readonly (EvidenceOpening | null)[];
-  /** A refused permutation never retries for free; an applied one is never silently undone on a later page. */
-  decision: { refused: string | null; applied: boolean };
+  /** A refused permutation never retries for free; an applied one is never silently undone on a later page.
+   * Pareto is latched separately so a funded 1D page cannot be rewritten or rejected by a later budget. */
+  decision: { refused: string | null; applied: boolean; pareto?: "not_run" | "applied" | "refused" };
 }>;
 
 /** `statement: null`: no witness; the root's first unit. */
@@ -321,7 +322,8 @@ export class StatementKeyRetention {
     const hasFiniteRelation = Array.isArray(relations) && relations.some(row => row.some(value => value !== null));
     return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
       ...(hasFiniteRelation ? { relations } : {}),
-      ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
+      ...(demands.derived === true ? { spans } : {}), openings,
+      decision: { refused: null, applied: false, pareto: "not_run" } };
   }
 
   private scoreWinningRelations(vectors: readonly Float32Array[], coverage: readonly (readonly (number | null)[])[],

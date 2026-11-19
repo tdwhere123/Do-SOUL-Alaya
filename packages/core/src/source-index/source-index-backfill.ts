@@ -21,9 +21,12 @@ export interface SourceIndexBackfillInput {
   /** Absolute wall-clock deadline, within the native timer range (at most 2^31-1 ms away). */
   readonly deadline_ms: number;
   readonly signal: AbortSignal;
+  /** Default true so standalone step() still overlays after key windows. Producer passes false. */
+  readonly include_relation_overlay?: boolean;
 }
 
-type CapturedInput = Omit<SourceIndexBackfillInput, "binding"> & {
+type CapturedInput = Omit<SourceIndexBackfillInput, "binding" | "include_relation_overlay"> & {
+  include_relation_overlay: boolean;
   binding: Readonly<{ status: "unsupported"; reason: string }> | Readonly<{
     status: "ready"; profile: SourceEmbeddingBinding["profile"]; profile_id: string;
     embed: SourceEmbeddingBinding["embedInputs"];
@@ -47,6 +50,11 @@ export class SourceIndexBackfill {
   public async step(input: SourceIndexBackfillInput): Promise<SourceIndexBackfillResult> {
     const captured = captureInput(input);
     return new CapturedRootStep(this.lifecycle, captured).run();
+  }
+
+  public async stepRelationOverlay(input: SourceIndexBackfillInput): Promise<SourceIndexBackfillResult> {
+    const captured = captureInput({ ...input, include_relation_overlay: true });
+    return new CapturedRootStep(this.lifecycle, captured).runRelationOverlay();
   }
 }
 
@@ -78,6 +86,26 @@ class CapturedRootStep {
     }
   }
 
+  public async runRelationOverlay(): Promise<SourceIndexBackfillResult> {
+    const stopped = this.stop();
+    if (stopped !== null) return stopped;
+    const binding = this.input.binding;
+    if (binding.status !== "ready") return this.result("unsupported", binding.reason);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), Math.max(1, this.input.deadline_ms - Date.now()));
+    const signal = AbortSignal.any([this.input.signal, deadline.signal]);
+    try {
+      await this.embedStatementRelation(binding, undefined, signal);
+      return this.stop() ?? this.result("root_complete", "relation_overlay");
+    } catch (error) {
+      this.resources.native_accounting = "partial";
+      return this.stop() ?? (deadline.signal.aborted ? this.result("deadline", "deadline_exceeded")
+        : this.result("failed", error instanceof Error ? error.message : "backfill_failed"));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async embedRoot(binding: Extract<CapturedInput["binding"], { status: "ready" }>,
     signal: AbortSignal): Promise<SourceIndexBackfillResult> {
     const { selection, generation_id: generationId, root_key: rootKey, budget } = this.input;
@@ -95,7 +123,9 @@ class CapturedRootStep {
       if (afterPending !== null) return afterPending;
       const ordinal = pending.ordinals[0];
       if (ordinal === undefined) {
-        await this.embedStatementRelation(binding, prepared.document.source, signal);
+        if (this.input.include_relation_overlay) {
+          await this.embedStatementRelation(binding, prepared.document.source, signal);
+        }
         return this.result("root_complete", "no_pending_windows");
       }
       const window = prepared.document.windows[ordinal];
@@ -151,8 +181,8 @@ class CapturedRootStep {
    * Optional inference starts only with >250 ms left and waits locally until remaining-100 ms; it
    * never aborts the producer/ONNX signal (a child abort would SIGTERM the shared isolate). */
   private async embedStatementRelation(binding: Extract<CapturedInput["binding"], { status: "ready" }>,
-    source: SourceIndexTarget, signal: AbortSignal): Promise<void> {
-    if (source.auxiliary === undefined) return;
+    source: SourceIndexTarget | undefined, signal: AbortSignal): Promise<void> {
+    if (source !== undefined && source.auxiliary === undefined) return;
     const remainingMs = this.input.deadline_ms - Date.now();
     if (remainingMs <= 250) return;
     const timeoutMs = Math.max(1, remainingMs - 100);
@@ -239,19 +269,21 @@ function captureInput(input: SourceIndexBackfillInput): CapturedInput {
       [budget.work, budget.native_bytes, budget.model_inputs, budget.input_bytes, budget.max_body_bytes]
         .some(value => !Number.isSafeInteger(value) || value < 0) ||
       budget.max_body_bytes > SOURCE_INDEX_MAX_BODY_BYTES || !Number.isSafeInteger(deadline_ms) ||
-      deadline_ms - Date.now() > 2147483647 || !(input.signal instanceof AbortSignal)) {
+      deadline_ms - Date.now() > 2147483647 || !(input.signal instanceof AbortSignal) ||
+      input.include_relation_overlay !== undefined && typeof input.include_relation_overlay !== "boolean") {
     throw new CoreError("VALIDATION", "Invalid Source backfill target or execution limits");
   }
+  const include_relation_overlay = input.include_relation_overlay !== false;
   const supplied = input.binding;
   if (supplied.status === "unsupported") return { selection, generation_id, root_key, budget, deadline_ms,
-    signal: input.signal, binding: Object.freeze({ ...supplied }) };
+    include_relation_overlay, signal: input.signal, binding: Object.freeze({ ...supplied }) };
   const profileId = supplied.profile_id;
   const profile = captureSourceEmbeddingProfile(supplied.profile, profileId);
   if (sourceIndexProfileId(configuration.profile, sourceEmbeddingSha256) !== profileId || selection.profile_id !== profileId ||
       sourceIndexConfigurationId(configuration, sourceEmbeddingSha256) !== selection.config_id) {
     throw new CoreError("VALIDATION", "Source backfill selection and runtime profile differ");
   }
-  return { selection, generation_id, root_key, budget, deadline_ms, signal: input.signal,
+  return { selection, generation_id, root_key, budget, deadline_ms, include_relation_overlay, signal: input.signal,
     binding: Object.freeze({ status: "ready", profile, profile_id: profileId, embed: supplied.embedInputs.bind(supplied) }) };
 }
 

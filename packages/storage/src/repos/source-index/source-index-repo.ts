@@ -28,7 +28,8 @@ import { readMemberListing, readStatementWitnesses, readTemplateStatements } fro
 import { readTaskObservation } from "./task-observation.js";
 import { readHostDependency } from "./host-dependency.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
-import { readStatementRelationText, readStatementRelationVectors, writeStatementRelationVector } from "./statement-relation-vectors.js";
+import { nextStatementRelationOverlayTarget, readStatementRelationText, readStatementRelationVectors,
+  writeStatementRelationVector } from "./statement-relation-vectors.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
 // Both source and installed consumers discover this on the same existing package constructor.
@@ -90,6 +91,11 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
 
   public readStatementRelationText(workspaceId: string, generationId: string, rootKey: string, budget: SourceIndexBudget) {
     return this.atomic(() => readStatementRelationText(this.database, this.records, workspaceId, generationId, rootKey, budget, this.sha256), "read");
+  }
+
+  public nextStatementRelationOverlayTarget(workspaceId: string, generationId: string, afterRootKey: string | null,
+    budget: SourceIndexBudget) {
+    return this.atomic(() => nextStatementRelationOverlayTarget(this.database, workspaceId, generationId, afterRootKey, budget), "read");
   }
 
 

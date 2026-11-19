@@ -79,10 +79,12 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
 }>): boolean {
   const { association, pool, head, tail, agreed, meter } = input;
   const relations = association.relations;
-  if (relations === undefined || relations.every(row => row.every(value => value === null))) return false;
-  const n = association.statements;
-  const quote = quoteStatementParetoExchange(pool.length, n);
+  if (relations === undefined || pool.length === 0 || association.statements < 1) return false;
+  const sizedRoots = Math.max(pool.length, association.roots.length);
+  const quote = quoteStatementParetoExchange(sizedRoots, association.statements);
   meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
+  if (relations.every(row => row.every(value => value === null))) return false;
+  const n = association.statements;
   const posMap = new Map(pool.map((id, i) => [id, i]));
   const index = new Map(association.roots.map((id, row) => [id, row]));
   const coverage = (id: string, column: number) => {

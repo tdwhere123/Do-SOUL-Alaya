@@ -227,4 +227,69 @@ describe("injective condition assignment and secondary exchange", () => {
       unvisited_sources: true, association: value
     }, navigation)).not.toThrow();
   });
+
+  it("latches a refused Pareto so continuation cannot flip or reject the funded 1D order", () => {
+    const association = coverage(1, { b: [0.9], h: [0.8], e: [0.1] }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const]),
+      relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
+    const oneD = roots.length * (1 + 1) + roots.length * (1 + 2) + 4 * 1 * 1 * 5 + 1 * roots.length * 4;
+    const page1 = orderNativeFieldAccess(fieldInput(association), meter(oneD));
+    expect(association.decision.applied).toBe(true);
+    expect(association.decision.pareto).toBe("refused");
+    const page1Ids = (page1 as { record_ids: string[] }).record_ids;
+    expect(() => orderNativeFieldAccess(fieldInput(association), meter(oneD))).not.toThrow();
+    expect((orderNativeFieldAccess(fieldInput(association), meter(oneD)) as { record_ids: string[] }).record_ids)
+      .toEqual(page1Ids);
+    expect((orderNativeFieldAccess(fieldInput(association), meter(oneD * 10)) as { record_ids: string[] }).record_ids)
+      .toEqual(page1Ids);
+  });
+
+  it("rejects a tighter continuation once Pareto has been applied", () => {
+    const association = coverage(1, { b: [0.9], h: [0.8], e: [0.1] }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const]),
+      relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
+    const oneD = roots.length * (1 + 1) + roots.length * (1 + 2) + 4 * 1 * 1 * 5 + 1 * roots.length * 4;
+    orderNativeFieldAccess(fieldInput(association), meter());
+    expect(association.decision.pareto).toBe("applied");
+    expect(() => orderNativeFieldAccess(fieldInput(association), meter(oneD))).toThrow(SourceSemanticResourceExhausted);
+  });
+
+  it("returns false without scanning when the positioned pool is empty", () => {
+    let scanned = false;
+    const relations = roots.map(() => new Proxy([0.5], {
+      get(target, prop, receiver) {
+        scanned = true;
+        return Reflect.get(target, prop, receiver);
+      }
+    }));
+    const association = coverage(1, { a: [0.9] }, { relations });
+    expect(exchangeStatementParetoSecondary({
+      association, pool: [], head: [], tail: [], agreed: [], meter: meter(0) })).toBe(false);
+    expect(scanned).toBe(false);
+  });
+
+  it("charges the association-root quote before indexing a partial pool", () => {
+    let indexed = false;
+    const identities = new Proxy([...roots], {
+      get(target, prop, receiver) {
+        if (prop === "map") indexed = true;
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const association: StatementAssociation = {
+      roots: identities, statements: 1,
+      coverage: roots.map(() => [0.5]),
+      relations: roots.map(() => [0.5]),
+      decision: { refused: null, applied: false }
+    };
+    const quote = quoteStatementParetoExchange(8, 1);
+    expect(() => exchangeStatementParetoSecondary({
+      association, pool: ["a", "b"], head: ["a", "b"], tail: [], agreed: [], meter: meter(0) }))
+      .toThrow(SourceSemanticResourceExhausted);
+    expect(indexed).toBe(false);
+    const ledger = meter();
+    exchangeStatementParetoSecondary({
+      association, pool: ["a", "b"], head: ["a", "b"], tail: [], agreed: [], meter: ledger });
+    expect(ledger.spentWork).toBe(quote.work_units);
+  });
 });

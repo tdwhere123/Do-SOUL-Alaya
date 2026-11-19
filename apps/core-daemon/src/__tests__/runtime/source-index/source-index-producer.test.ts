@@ -249,6 +249,42 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(next.status).not.toBe("busy");
   });
 
+  it("activates both statement key windows on the first pass while relation embeddings hang", async () => {
+    const environment = fixture(); environments.push(environment);
+    const published = publishMessages(environment, [
+      { role: "user", text: "first statement body" },
+      { role: "user", text: "second statement body" }
+    ]);
+    const first = publishStatement(environment, published, "relation-hang-t1", 0);
+    const second = publishStatement(environment, published, "relation-hang-t2", 1);
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    embedInputs.mockImplementation(async (inputs: readonly SourceEmbeddingInput[]) => {
+      const text = inputs[0]?.text;
+      if (text === first.bound.statement.relation || text === second.bound.statement.relation) {
+        await new Promise<never>(() => undefined);
+      }
+      return inputs.map((input: SourceEmbeddingInput) => ({
+        status: "embedded" as const,
+        input_id: input.input_id,
+        input_digest: hashContentDigest(input.text, fieldContractSha256),
+        vector: new Float32Array([0.6, 0.8, 0]),
+        token_count: 2,
+        truncated: false as const
+      }));
+    });
+    const producer = producerFor(environment, bind, {
+      stepDeadlineMs: 200, maxRootsPerPass: 16, maxCapturePages: 8, modelInputs: 32, inputBytes: 256_000
+    });
+    const receipt = await producer.runPass();
+    expect(receipt).toMatchObject({ status: "settled" });
+    const state = environment.index.state(WORKSPACE);
+    expect(state).toMatchObject({ status: "ready", active_generation_id: expect.any(String) });
+    if (state.status === "unknown" || state.active_generation_id === null) throw new Error("expected active generation");
+    const generation = environment.index.generation(WORKSPACE, state.active_generation_id)!;
+    expect(generation.completed_count).toBe(generation.target_count);
+    expect(generation.target_count).toBeGreaterThanOrEqual(3);
+  });
+
   it("fails observable state after inference throws past an accepted vector and resumes without re-inferring it", async () => {
     const environment = fileEnvironment();
     publishSource(environment, "first source body", "source-a");
@@ -567,7 +603,8 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       vi.spyOn(SqliteSourceIndexRepository.prototype, "pendingWindows"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "readDocument"),
       vi.spyOn(SqliteSourceIndexRepository.prototype, "writeDocument"),
-      vi.spyOn(SqliteSourceIndexRepository.prototype, "writeVector")
+      vi.spyOn(SqliteSourceIndexRepository.prototype, "writeVector"),
+      vi.spyOn(SqliteSourceIndexRepository.prototype, "nextStatementRelationOverlayTarget")
     ];
     const lexical = vi.spyOn(SourceIndexLifecycle.prototype, "prepareLexical");
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });

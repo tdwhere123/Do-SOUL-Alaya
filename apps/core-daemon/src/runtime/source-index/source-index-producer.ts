@@ -377,6 +377,9 @@ export class SourceIndexProducer {
     const selection = this.lifecycle.select(workspaceId, configuration);
     const generation = this.lifecycle.begin(selection);
     if (generation.status === "ready" || generation.status === "valid_empty") {
+      if (generation.status === "ready") {
+        await this.overlayActiveRelations(selection, generation.generation_id, binding, pass);
+      }
       this.targetCursors.delete(workspaceId);
       return { status: "settled", reason: "pass_complete" };
     }
@@ -390,7 +393,12 @@ export class SourceIndexProducer {
     }
     const outcome = await this.backfillTargets(selection, captured.generation_id, binding, pass);
     if (outcome !== null) return outcome;
-    return pass.signal.aborted ? null : this.publishIfReady(workspaceId, captured.generation_id);
+    if (pass.signal.aborted) return null;
+    const published = this.publishIfReady(workspaceId, captured.generation_id);
+    if (published.status === "settled") {
+      await this.overlayActiveRelations(selection, captured.generation_id, binding, pass);
+    }
+    return published;
   }
 
   private captureUntilComplete(workspaceId: string, initial: SourceIndexGeneration, pass: Pass): SourceIndexGeneration {
@@ -431,7 +439,7 @@ export class SourceIndexProducer {
       if (pending.status === "ready" && pending.ordinals.length === 0) continue;
       const result = await this.backfill.step({ selection, generation_id: generationId,
         root_key: target.root_key, binding, budget: remainingBudget(pass.limits, pass.spent),
-        deadline_ms: pass.deadline, signal: pass.signal });
+        deadline_ms: pass.deadline, signal: pass.signal, include_relation_overlay: false });
       pass.chargeNative(result.resources);
       pass.spent.model_inputs += result.resources.model_inputs_submitted;
       pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
@@ -445,6 +453,29 @@ export class SourceIndexProducer {
       return { status: result.status, reason };
     }
     return null;
+  }
+
+  /** Optional relation overlay runs only after the generation is already active. */
+  private async overlayActiveRelations(selection: SourceIndexSelection, generationId: string,
+    binding: ReadyBinding, pass: Pass): Promise<void> {
+    for (let after: string | null = null; this.hasBudget(pass) && pass.visitedRoots < pass.limits.maxRootsPerPass;) {
+      const pending = this.lifecycle.nextStatementRelationOverlayTarget(
+        selection.workspace_id, generationId, after, remainingBudget(pass.limits, pass.spent));
+      pass.chargeNative(pending.resources);
+      if (pending.status !== "ready" || pending.root_key === null) return;
+      after = pending.root_key;
+      pass.visitedRoots++;
+      try {
+        const result = await this.backfill.stepRelationOverlay({
+          selection, generation_id: generationId, root_key: pending.root_key, binding,
+          budget: remainingBudget(pass.limits, pass.spent), deadline_ms: pass.deadline, signal: pass.signal
+        });
+        pass.chargeNative(result.resources);
+        pass.spent.model_inputs += result.resources.model_inputs_submitted;
+        pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
+        if (result.status !== "root_complete") return;
+      } catch { return; }
+    }
   }
 
   private hasBudget(pass: Pass): boolean {

@@ -252,6 +252,15 @@ export class SourceIndexLifecycle {
     return this.repository.readStatementRelationText(workspaceId, generationId, rootKey, structuredClone(budget));
   }
 
+  public nextStatementRelationOverlayTarget(workspaceId: string, generationId: string, afterRootKey: string | null,
+    budget: SourceIndexBudget) {
+    if (this.repository.nextStatementRelationOverlayTarget === undefined) {
+      return { status: "ready" as const, root_key: null, resources: { work: 0, native_bytes: 0 } };
+    }
+    return this.repository.nextStatementRelationOverlayTarget(workspaceId, generationId, afterRootKey,
+      structuredClone(budget));
+  }
+
   public acceptRelationVector(workspaceId: string, generationId: string, vector: SourceIndexStatementRelationVector): SourceIndexWriteResult;
   public acceptRelationVector(workspaceId: string, generationId: string, vector: SourceIndexStatementRelationVector,
     budget: SourceIndexBudget): SourceIndexGuardedWriteResult;

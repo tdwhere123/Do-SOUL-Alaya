@@ -2,8 +2,9 @@ import {
   BoundSourceStatementSchema, BoundedIdSchema, hashContentDigest, SourceIndexOperationError, SourceIndexTargetSchema,
   SourceSemanticResourceExhausted,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexGuardedWriteResult,
-  type SourceIndexStatementRelationTextRead, type SourceIndexStatementRelationVector,
-  type SourceIndexStatementRelationVectorRead, type SourceSemanticResourceBudget
+  type SourceIndexReadResult, type SourceIndexResources, type SourceIndexStatementRelationTextRead,
+  type SourceIndexStatementRelationVector, type SourceIndexStatementRelationVectorRead,
+  type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cache.js";
@@ -136,6 +137,32 @@ export function writeStatementRelationVector(database: StorageDatabase, records:
 
 function overlayTableMissing(error: unknown): boolean {
   return error instanceof Error && /no such table: source_statement_relation_vectors/u.test(error.message);
+}
+
+export function nextStatementRelationOverlayTarget(database: StorageDatabase, workspaceId: string, generationId: string,
+  afterRootKey: string | null, budget: SourceIndexBudget): Readonly<{ status: "ready"; root_key: string | null;
+    resources: SourceIndexResources }> | Exclude<SourceIndexReadResult, { status: "ready" }> {
+  BoundedIdSchema.parse(workspaceId);
+  assertIndexBudget(budget);
+  const resources = { work: 0, native_bytes: 0 };
+  if (budget.work < 1 || budget.native_bytes < 1) return { status: "partial", reason: "read_budget", resources };
+  try {
+    const generation = readSourceIndexGeneration(database, workspaceId, generationId);
+    resources.work++;
+    if (generation === null) return { status: "unbound", reason: "missing_generation", resources };
+    const raw = cachedReadStatement(database, `SELECT t.root_key FROM source_index_targets t
+      WHERE t.workspace_id = ? AND t.generation_id = ? AND t.root_key > ? AND t.root_key LIKE '%:statement:%'
+      AND NOT EXISTS (SELECT 1 FROM source_statement_relation_vectors r
+        WHERE r.workspace_id = t.workspace_id AND r.generation_id = t.generation_id AND r.root_key = t.root_key)
+      ORDER BY t.root_key LIMIT 1`).get(workspaceId, generationId, afterRootKey ?? "");
+    const root_key = raw === undefined ? null
+      : readStringField(readRecord(raw, "statement relation overlay target"), "root_key");
+    if (root_key !== null) resources.native_bytes += Buffer.byteLength(root_key);
+    return { status: "ready", root_key, resources };
+  } catch (error) {
+    if (overlayTableMissing(error)) return { status: "ready", root_key: null, resources };
+    throw error instanceof SourceIndexOperationError ? error : new SourceIndexOperationError(error, resources);
+  }
 }
 
 export function readStatementRelationVectors(database: StorageDatabase, workspaceId: string, keys: readonly string[],
