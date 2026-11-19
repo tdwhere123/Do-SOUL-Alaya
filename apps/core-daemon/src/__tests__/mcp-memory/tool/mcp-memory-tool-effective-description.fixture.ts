@@ -9,7 +9,7 @@ export const EXPECTED_LOOP_SUFFIX_BY_NAME = Object.freeze({
   "soul.recall":
     "Use `result_kind_view: \"memory_only\"` if the consumer cannot parse `source_evidence`. The default `mixed` view supports both result kinds. Selectively continue a relevant ranked result when its `target.span.content_complete === false`. Repeat the request with the returned `index.continuation` and `payload_continuation` {schema_version:1, purpose:\"payload_expansion\", target: its index entry target, start_offset: span.content_end} until `content_complete` is true. Retry the same continuation to replay its `delivery_id`. Use the returned `delivery_id` in soul.report_context_usage.",
   "soul.open_pointer":
-    "Pass `member_index[i].source_target` directly. For a ranked `source_evidence` result, construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from its target and omit `workspace_id`, `kind`, and `span`. If `target.span.content_complete === false`, set top-level `start_offset` to `target.span.content_end`. Never put a source `root_id` in `object_id`.",
+    "Pass `member_index[i].source_target` directly. For a ranked `source_evidence` result, construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from its target and omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset` instead of rereading from `0`; do not reopen a ranked result whose `target.span.content_complete === true`. Never put a source `root_id` in `object_id`.",
   "soul.emit_candidate_signal":
     "This records candidate intent only; it does not create or mutate durable memory entries.",
   "soul.propose_memory_update":

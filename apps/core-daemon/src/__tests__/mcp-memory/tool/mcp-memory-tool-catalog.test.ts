@@ -47,12 +47,16 @@ describe("mcp memory tool catalog", () => {
 
   it("advertises minimal recall and how to open listed or ranked source results", () => {
     const tools = new Map(listAlayaMemoryTools().map(tool => [tool.name, tool]));
-    expect(tools.get("soul.recall")?.description).toContain('Start with soul.recall `{"query": "..."}`.');
+    const recallDescription = tools.get("soul.recall")?.description;
+    expect(recallDescription).toContain('Start with soul.recall `{"query": "..."}`.');
+    expect(recallDescription).toContain('"evidence_conditions": [{"statement":');
+    expect(recallDescription).toContain('"evidence_relation": "derived"');
     const description = tools.get("soul.open_pointer")?.description;
     expect(description).toContain("`member_index[i].source_target` directly");
     expect(description).toContain("`source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }`");
     expect(description).toContain("`workspace_id`, `kind`, and `span`");
-    expect(description).toContain("`target.span.content_end` as top-level `start_offset`");
+    expect(description).toContain("`target.span.content_end` as top-level `start_offset` instead of rereading from `0`");
+    expect(description).toContain("do not reopen a ranked result whose `target.span.content_complete === true`");
     expect(description).toContain("Never put a source `root_id` in `object_id`");
   });
 

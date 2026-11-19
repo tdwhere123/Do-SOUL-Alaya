@@ -118,7 +118,7 @@ or pass null unless deliberately restricting to `project`, `global_domain`, or
 `global_core`.
 
 Optional caller coordinates sit under `query_coordinates`, for example
-`{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}}}`.
+`{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}, "evidence_conditions": [{"statement": "...", "speaker": "user", "anchors": ["..."]}], "evidence_relation": "derived"}}`.
 Keep `query` close to the original question when supplying `evidence_conditions`
 so anchors remain verbatim substrings. `interpretation_proposal` is host replay
 only and mutually exclusive with caller coordinates. Callers must omit replay
@@ -128,9 +128,11 @@ hints. `bindCallerQueryCoordinates` binds the query digest and clock server-side
 Conditions keep their matching anchors in order, or remain intentionally
 unanchored when `anchors: []` is explicit. If every anchor on an anchored
 condition fails, that condition is dropped and raw recall remains available.
-`question_time` (up to 32
-closed UTC calendar-day intervals on source `event_time`) softly prioritizes
-in-window roots without altering hard `since`/`until` filters or authorization.
+`question_time` (up to 32 closed UTC calendar-day intervals on source
+`event_time`) softly prioritizes in-window roots while reserving tail capacity
+in the 16-root pool so the original five-slot head is not evicted out of
+`in_pool` by date-restricted lexical fills, without altering hard
+`since`/`until` filters or authorization.
 Optional `source_template` (`alaya.query.source-template.v1`) and
 `source-task-observation` phases share the remaining optional allowance without
 displacing the paid incumbent on refusal.
@@ -144,8 +146,9 @@ per-root/message speaker, segmented v2 anchor tokens, and optional
 `statementEventIntervals` against `question_time` (distinguishing `necessary`
 vs `possible` witnesses). Navigation fixes slot 1 and injects out-of-top-5
 condition tops into slots `5..2` only when doing so strictly improves
-`(covered_tops, covered_any_witnesses)`; `evidence_relation: "derived"` appends
-rank `2–5` complementary witness roots directly after slot 5 as
+`(covered_tops, covered_any_witnesses)`, exchanging positions with their
+displaced head slots in the non-variant tail; `evidence_relation: "derived"`
+still appends rank `2–5` complementary witness roots directly after slot 5 as
 `evidence_variant` message-span deliveries. Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for
 assistant witnesses) or its first message/line unit (`payload_continuation`
@@ -187,7 +190,9 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   `root_id`, `source_version`, `content_digest`, and `evidence_object_id`.
   Omit `workspace_id`, `kind`, and `span`. An echoed `kind: "source_evidence"`
   is accepted and stripped at ingress. When `target.span.content_complete` is
-  false, pass `target.span.content_end` as top-level `start_offset`. Reserve
+  false, `soul.open_pointer` resumes at `target.span.content_end` (as top-level
+  `start_offset`) rather than offset `0`, and skips already-complete
+  (`content_complete: true`) ranked results. Reserve
   `object_id` for memory or evidence objects.
 - **Consumer protocol compatibility:** `RECALL_CONSUMER_PROTOCOL_VERSION` (`1`)
   accepts default `mixed` calls directly; callers unable to parse

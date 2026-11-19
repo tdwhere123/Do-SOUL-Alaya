@@ -6,8 +6,9 @@ const isolation = await vi.hoisted(async () => {
 afterAll(() => { expect(isolation.violations).toEqual([]); isolation.restore(); });
 
 import { ALAYA_MCP_SERVER_INSTRUCTIONS } from "@do-soul/alaya/mcp-server";
-import { SOUL_RECALL_CALLER_GUIDANCE } from "@do-soul/alaya-engine-gateway";
+import { SOUL_RECALL_CALLER_GUIDANCE, soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import { canonicalJson } from "@do-soul/alaya-protocol";
+import { projectLiveSurfaceForCaller } from "../../../runs/recall-measurement/text-mcp-consumer/caller-capability-profile.js";
 import {
   TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
   TEXT_MCP_CONSUMER_REMOTE_BLOCKED_MESSAGE, TextMcpConsumerInputSchema
@@ -170,4 +171,36 @@ it("projects a plain-query surface and dates the user prompt without changing om
   expect(plain.systemPrompt).toContain("payload_continuation");
   expect(plain.userPrompt.startsWith("Current date: 2023/09/13\nCALLER_QUERY:")).toBe(true);
   expect(omitted.userPrompt.startsWith("CALLER_QUERY:")).toBe(true);
+});
+
+it("strips evidence_conditions and query_coordinates for plain_query while retaining the concrete example for caller_coordinates", () => {
+  const recallDef = soulToolDefs.find(tool => tool.name === "soul.recall");
+  expect(recallDef).toBeDefined();
+  const liveSurface = {
+    ...surface,
+    instructions: ALAYA_MCP_SERVER_INSTRUCTIONS,
+    tools: [{
+      name: "soul.recall",
+      description: recallDef!.description,
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" }, query_coordinates: { type: "object" }, interpretation_proposal: { type: "object" } },
+        required: ["query"]
+      }
+    }]
+  };
+
+  const callerCoordinates = projectLiveSurfaceForCaller(liveSurface, "caller_coordinates");
+  const callerRecall = callerCoordinates.tools[0] as { description: string };
+  expect(callerCoordinates.instructions).toContain('"evidence_conditions": [{"statement":');
+  expect(callerCoordinates.instructions).toContain('"evidence_relation": "derived"');
+  expect(callerRecall.description).toContain('"evidence_conditions": [{"statement":');
+  expect(callerRecall.description).toContain('"evidence_relation": "derived"');
+
+  const plainQuery = projectLiveSurfaceForCaller(liveSurface, "plain_query");
+  const plainRecall = plainQuery.tools[0] as { description: string };
+  expect(plainQuery.instructions).not.toMatch(/query_coordinates|evidence_conditions|evidence_relation|question_time|interpretation_proposal/u);
+  expect(plainRecall.description).not.toMatch(/query_coordinates|evidence_conditions|evidence_relation|question_time|interpretation_proposal/u);
+  expect(plainQuery.instructions).toContain("For conversation passages");
+  expect(plainRecall.description).toContain("For conversation passages");
 });

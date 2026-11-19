@@ -8,15 +8,21 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 43.0.0, engine gateway 4.0.0
+## Unreleased — protocol 43.0.0, engine gateway 4.0.1
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
-`@do-soul/alaya-engine-gateway` is `4.0.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `4.0.1`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Engine Gateway `4.0.1` records a **SemVer patch** under invariant §25 (no MCP JSON schema change):
+- **Caller-coordinate & pointer-resume guidance (`@do-soul/alaya-engine-gateway` `4.0.1`):**
+  updates `SOUL_RECALL_CALLER_GUIDANCE[2]` (preserving the single-line `Optional caller coordinates on soul.recall ` prefix for `plain_query` stripping) with a concrete `query_coordinates` JSON example showing `evidence_conditions` and `evidence_relation: "derived"` alongside `question_time`, and tightens `soul.open_pointer` descriptions across gateway specs and the daemon tool catalog to resume truncated (`target.span.content_complete === false`) results at `target.span.content_end` instead of offset `0` and avoid reopening already-complete (`content_complete === true`) ranked results.
+- **`preferQuestionTime` pool-tail retention & `selectEvidenceWitnesses` literal slot exchange:**
+  `preferQuestionTime` softly prioritizes in-window roots while reserving tail capacity in the 16-root pool so the original five-slot head is not evicted out of `in_pool` by date-restricted lexical fills, and `selectEvidenceWitnesses` exchanges injected out-of-top-5 condition tops with their displaced head slots in the non-variant tail while keeping `evidence_relation: "derived"` rank `2–5` complementary witnesses directly after slot 5.
 
 Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under invariant §25:
 - **Minimal recall call:** MCP and CLI accept `{"query":"..."}` with a ten-result page

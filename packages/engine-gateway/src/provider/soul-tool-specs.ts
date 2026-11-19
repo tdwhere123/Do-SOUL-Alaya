@@ -36,8 +36,8 @@ export const SOUL_RECALL_CALLER_GUIDANCE = Object.freeze([
   'Start with soul.recall `{"query": "..."}`.',
   "For conversation passages (`source_evidence`), you must omit `dimension` and `domain_tags` or pass null. A non-null dimension or non-empty tag list filters curated `memory_entry` metadata and excludes all `source_evidence` rows. Omit `scope_class` or pass null unless deliberately restricting to one scope (`project`, `global_domain`, `global_core`).",
   [
-    'Optional caller coordinates on soul.recall use `{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}}}`.',
-    "Use up to 32 closed UTC date intervals as soft preferences on source event time. When supplying `query_coordinates.evidence_conditions` (1–4 statements with `speaker` set to `user` or `assistant` and up to 8 `anchors` each), keep `query` close to the user's original wording so each anchor is a verbatim substring. Use `evidence_relation: \"derived\"` when aggregating across stated facts.",
+    'Optional caller coordinates on soul.recall use `{"query": "...", "query_coordinates": {"question_time": {"intervals": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}]}, "evidence_conditions": [{"statement": "...", "speaker": "user", "anchors": ["..."]}], "evidence_relation": "derived"}}`.',
+    "Include `question_time` (up to 32 closed UTC date intervals as soft preferences on source event time) when dated, and `evidence_conditions` (1–4 independent fact demands with `speaker` `\"user\"` or `\"assistant\"` and up to 8 verbatim substring `anchors` from `query`, adding `\"evidence_relation\": \"derived\"` when combining multiple facts for multi-fact, comparison, or aggregation questions) when the question depends on specific facts; keep `query` close to the user's original wording so anchors match verbatim.",
     "`interpretation_proposal` is host replay only. Callers must never pass `interpretation_proposal`, place `question_time` at top level, or place `interpretation_clock` inside `query_coordinates`. The daemon binds the query digest and clock."
   ].join(" ")
 ]);
@@ -54,7 +54,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.open_pointer",
     description:
-      "Open a recalled memory or evidence object by `object_id` before citing it. For a source root, pass `member_index[i].source_target` directly or construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from a ranked `source_evidence` target. Omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset`. Never put a source `root_id` in `object_id`. Optional `byte_budget` is at most 65536 bytes. Read-only.",
+      "Open a recalled memory or evidence object by `object_id` before citing it. For a source root, pass `member_index[i].source_target` directly or construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from a ranked `source_evidence` target. Omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset` instead of rereading from `0`; do not reopen a ranked result whose `target.span.content_complete === true`. Never put a source `root_id` in `object_id`. Optional `byte_budget` is at most 65536 bytes. Read-only.",
     parametersSchema: SoulOpenPointerRequestSchema
   },
   {
