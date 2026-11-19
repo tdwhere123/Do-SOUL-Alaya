@@ -335,18 +335,20 @@ export class StatementKeyRetention {
       this.abandon(read.status === "unknown" ? read.reason : "statement_relation_read_misaligned"); return "unavailable";
     }
     const byKey = new Map(keys.map((key, index) => [key, read.vectors[index]!]));
+    const expected = this.dimensions ?? vectors[0]?.length;
+    for (const embedding of byKey.values()) {
+      if (embedding == null) continue;
+      if (expected === undefined || embedding.length !== expected || embedding.some(value => !Number.isFinite(value))) {
+        this.abandon("statement relation association incompatible dimensions"); return "unavailable";
+      }
+    }
     const relations: (number | null)[][] = [];
     for (let row = 0; row < coverage.length; row++) {
       const cells: (number | null)[] = [];
       for (let column = 0; column < vectors.length; column++) {
         if (coverage[row]![column] === null) { cells.push(null); continue; }
         const winner = winners[row]?.[column] ?? null, embedding = winner === null ? null : byKey.get(winner.root_key) ?? null;
-        if (embedding == null) { cells.push(null); continue; }
-        const demand = vectors[column]!;
-        if (embedding.length !== demand.length || embedding.some(value => !Number.isFinite(value))) {
-          this.abandon("statement relation association incompatible dimensions"); return "unavailable";
-        }
-        cells.push(statementKeyCosine(embedding, demand));
+        cells.push(embedding == null ? null : statementKeyCosine(embedding, vectors[column]!));
       }
       relations.push(cells);
     }
@@ -383,9 +385,10 @@ export class StatementKeyRetention {
 export function restrictStatementAssociation(association: StatementAssociation,
   keep: (root: string) => boolean): StatementAssociation {
   const indices = association.roots.flatMap((root, index) => keep(root) ? [index] : []);
+  const slicedRelations = association.relations === undefined ? undefined : indices.map(i => association.relations![i]!);
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
     coverage: indices.map(i => association.coverage[i]!),
-    ...(association.relations === undefined ? {} : { relations: indices.map(i => association.relations![i]!) }),
+    ...(slicedRelations?.some(row => row.some(value => value !== null)) === true ? { relations: slicedRelations } : {}),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
     ...(association.spans === undefined ? {} : { spans: indices.map(i => association.spans![i]!) }),
     ...(association.openings === undefined ? {} : { openings: indices.map(i => association.openings![i]!) }),

@@ -158,21 +158,25 @@ export function readStatementRelationVectors(database: StorageDatabase, workspac
       return unknown(state.state.reason);
     }
     const dims = state.state.binding.dimensions, generationId = state.state.binding.generation_id;
-    const lookup = cachedReadStatement(database, `SELECT dimensions,embedding_blob FROM ${RELATION_TABLE}
-      WHERE workspace_id=? AND generation_id=? AND root_key=?`);
+    const expectedBytes = dims * 4;
+    const lookup = cachedReadStatement(database, `SELECT dimensions, octet_length(embedding_blob) AS blob_bytes,
+      CASE WHEN dimensions = ? AND octet_length(embedding_blob) = ? THEN embedding_blob ELSE NULL END AS embedding_blob
+      FROM ${RELATION_TABLE} WHERE workspace_id=? AND generation_id=? AND root_key=?`);
     const vectors: (Float32Array | null)[] = [];
     for (const key of captured.keys) {
       if (typeof key !== "string" || key.length < 1 || key.length > 2048) return unknown("invalid_relation_key");
-      meter.ledger.reserve(1, 32 + dims * 4);
+      meter.ledger.reserve(1, 32 + expectedBytes);
       meter.read(1, 0);
-      const raw = lookup.get(workspaceId, generationId, key);
+      const raw = lookup.get(dims, expectedBytes, workspaceId, generationId, key);
       if (raw === undefined) { vectors.push(null); continue; }
       const row = readRecord(raw, "statement relation vector");
       const blob = row.embedding_blob;
-      if (!Buffer.isBuffer(blob)) return unknown("statement_relation_invalid_vector");
-      meter.read(1, blob.length);
-      if (readIntegerField(row, "dimensions") !== dims) return unknown("statement_relation_incompatible_dimensions");
-      meter.ledger.charge(dims, dims * 4, "statement relation vector decode");
+      if (readIntegerField(row, "dimensions") !== dims || readIntegerField(row, "blob_bytes") !== expectedBytes
+          || !Buffer.isBuffer(blob)) {
+        return unknown("statement_relation_vector_dimension_mismatch");
+      }
+      meter.read(1, expectedBytes);
+      meter.ledger.charge(dims, expectedBytes, "statement relation vector decode");
       const embedding = decodeValidEmbeddingBlob(blob, dims);
       if (embedding === null) return unknown("statement_relation_invalid_vector");
       vectors.push(embedding);

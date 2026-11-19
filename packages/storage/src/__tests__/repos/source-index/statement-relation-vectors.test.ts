@@ -81,7 +81,21 @@ it("returns nulls when the overlay was never written and unknown when the blob i
   environment.database.connection.prepare(`UPDATE source_statement_relation_vectors SET dimensions=2, embedding_blob=?
     WHERE root_key=?`).run(encodeEmbeddingBlob(new Float32Array([0.6, 0.8])), source.root_key);
   expect(environment.index.readStatementRelationVectors(WORKSPACE, [source.root_key], QUERY))
-    .toMatchObject({ status: "unknown", reason: "statement_relation_incompatible_dimensions" });
+    .toMatchObject({ status: "unknown", reason: "statement_relation_vector_dimension_mismatch" });
+});
+
+it("returns unknown for an oversized overlay blob without transferring it", () => {
+  const { environment, generation, source } = setupStatement();
+  expect(environment.index.activate(WORKSPACE, generation.generation_id)).toEqual({ status: "accepted" });
+  const blob = encodeEmbeddingBlob(new Float32Array(1024).fill(0.01));
+  expect(blob.length).toBe(4096);
+  environment.database.connection.prepare(`INSERT INTO source_statement_relation_vectors
+    (workspace_id,generation_id,root_key,input_digest,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
+    .run(WORKSPACE, generation.generation_id, source.root_key, "d".repeat(64), 1024, blob, 2);
+  const read = environment.index.readStatementRelationVectors(WORKSPACE, [source.root_key], QUERY);
+  expect(read).toMatchObject({ status: "unknown", reason: "statement_relation_vector_dimension_mismatch" });
+  expect(read.resources.native_bytes).toBeLessThan(4096);
+  expect(read.resources.memory_bytes).toBeLessThan(4096);
 });
 
 it("returns unknown for a populated overlay when the query budget is exhausted", () => {

@@ -3,19 +3,20 @@ import type { StatementAssociation } from "./statement-association.js";
 
 type Assignment = Readonly<{ roots: readonly (string | null)[]; count: number; weight: number }>;
 
-function sourceEarlier(pool: readonly string[], left: readonly (string | null)[], right: readonly (string | null)[]): boolean {
+function sourceEarlier(pos: ReadonlyMap<string, number>, size: number,
+  left: readonly (string | null)[], right: readonly (string | null)[]): boolean {
   for (let column = 0; column < left.length; column++) {
-    const a = left[column] === null ? pool.length : pool.indexOf(left[column]!);
-    const b = right[column] === null ? pool.length : pool.indexOf(right[column]!);
+    const a = left[column] === null ? size : pos.get(left[column]!)!;
+    const b = right[column] === null ? size : pos.get(right[column]!)!;
     if (a !== b) return a < b;
   }
   return false;
 }
 
-function better(pool: readonly string[], candidate: Assignment, incumbent: Assignment | undefined): boolean {
+function better(pos: ReadonlyMap<string, number>, size: number, candidate: Assignment, incumbent: Assignment | undefined): boolean {
   return incumbent === undefined || candidate.count > incumbent.count || candidate.count === incumbent.count
     && (candidate.weight > incumbent.weight || candidate.weight === incumbent.weight
-      && sourceEarlier(pool, candidate.roots, incumbent.roots));
+      && sourceEarlier(pos, size, candidate.roots, incumbent.roots));
 }
 
 /** Exact bitmask assignment of distinct pool roots to conditions; n is at most 5. */
@@ -25,6 +26,7 @@ export function injectiveConditionWitnessAssignment(pool: readonly string[],
 } | undefined {
   const n = ranks.length;
   if (n > 5) return undefined;
+  const posMap = new Map(pool.map((id, i) => [id, i])), size = pool.length;
   const marginal = ranks.map(row => row[0] ?? null);
   const present = marginal.filter((id): id is string => id !== null);
   if (new Set(present).size === present.length) return undefined;
@@ -47,14 +49,14 @@ export function injectiveConditionWitnessAssignment(pool: readonly string[],
           roots[column] = id;
           const candidate: Assignment = { roots, count: row.count + 1, weight: row.weight + weight };
           const nextMask = mask | (1 << column);
-          if (better(pool, candidate, next.get(nextMask))) next.set(nextMask, candidate);
+          if (better(posMap, size, candidate, next.get(nextMask))) next.set(nextMask, candidate);
         }
       }
     }
     dp = next;
   }
   let best: Assignment | undefined;
-  for (const row of dp.values()) if (better(pool, row, best)) best = row;
+  for (const row of dp.values()) if (better(posMap, size, row, best)) best = row;
   return best === undefined ? undefined : { ...best, marginal, identity: "root" };
 }
 
@@ -62,10 +64,12 @@ export function injectiveConditionWitnessAssignment(pool: readonly string[],
  * Zero when the caller has already established that relations are absent. */
 export function quoteStatementParetoExchange(roots: number, statements: number): SourceSemanticResourceBudget {
   if (roots < 1 || statements < 1) return { work_units: 0, memory_bytes: 0 };
-  const n = Math.min(statements, 5);
+  const n = Math.min(statements, 5), masks = 1 << n;
+  // Rank sort comparisons, DP transitions with n-step sourceEarlier plus n-slot copies,
+  // and tryPlace tail dominance scans. Strictly an upper bound, including 16 roots / 5 ties.
   return {
-    work_units: roots * n + (1 << n) * n * roots + 4 * n * roots,
-    memory_bytes: roots * n * 16 + (1 << n) * n * roots
+    work_units: roots * n * roots + masks * n * roots * (2 * n + 4) + 8 * n * n * roots,
+    memory_bytes: roots * n * 32 + masks * n * roots * (n * 8 + 64)
   };
 }
 
@@ -79,6 +83,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   const n = association.statements;
   const quote = quoteStatementParetoExchange(pool.length, n);
   meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
+  const posMap = new Map(pool.map((id, i) => [id, i]));
   const index = new Map(association.roots.map((id, row) => [id, row]));
   const coverage = (id: string, column: number) => {
     const row = index.get(id); return row === undefined ? null : association.coverage[row]![column]!;
@@ -88,7 +93,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   };
   const possible = (id: string, column: number) => association.possible?.[index.get(id) ?? -1]?.[column] === true;
   const ranks = Array.from({ length: n }, (_, column) => pool.filter(id => coverage(id, column) !== null)
-    .sort((left, right) => coverage(right, column)! - coverage(left, column)! || pool.indexOf(left) - pool.indexOf(right)));
+    .sort((left, right) => coverage(right, column)! - coverage(left, column)! || posMap.get(left)! - posMap.get(right)!));
   const marginal = ranks.map(row => row[0] ?? null);
   const match = n >= 2 ? injectiveConditionWitnessAssignment(pool, ranks, coverage) ?? {
     roots: marginal, count: marginal.filter(Boolean).length,

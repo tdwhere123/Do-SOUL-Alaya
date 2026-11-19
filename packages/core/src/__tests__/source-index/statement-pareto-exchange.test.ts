@@ -126,6 +126,41 @@ describe("injective condition assignment and secondary exchange", () => {
     expect(() => orderNativeFieldAccess(fieldInput(association), meter(0))).toThrow(/budget exhausted/u);
   });
 
+  it("funds one Pareto exchange from the optional ledger without double-withholding", () => {
+    const association = coverage(1, { g: [0.9] }, {
+      relations: roots.map(root => [root === "g" ? 0.8 : null]) });
+    const oneD = roots.length * (1 + 1) + roots.length * (1 + 2) + 4 * 1 * 1 * 5;
+    const pareto = quoteStatementParetoExchange(roots.length, 1);
+    const mandatory = { work_units: 12, memory_bytes: 0 };
+    const ledger = meter(mandatory.work_units + oneD + pareto.work_units, 1e9);
+    expect(() => orderNativeFieldAccess(fieldInput(association), ledger, mandatory)).not.toThrow();
+    expect(association.decision.refused).toBeNull();
+    expect(ledger.spentWork).toBe(oneD + pareto.work_units);
+  });
+
+  it("quotes at least the elementary steps of a 16-root 4-condition exchange", () => {
+    const identities = Array.from({ length: 16 }, (_, index) => `r${index}`);
+    const statements = 4;
+    const association: StatementAssociation = {
+      roots: identities, statements,
+      coverage: identities.map(() => Array<number>(statements).fill(0.5)),
+      relations: identities.map(() => Array<number>(statements).fill(0.5)),
+      decision: { refused: null, applied: false }
+    };
+    const head = identities.slice(0, 5), tail = identities.slice(5);
+    const ledger = meter();
+    exchangeStatementParetoSecondary({
+      association, pool: identities, head, tail, agreed: [], meter: ledger });
+    const quote = quoteStatementParetoExchange(16, statements);
+    const n = statements, roots = 16, masks = 1 << n;
+    // Rank sort comparisons, DP transitions with n-step sourceEarlier plus n-slot copies,
+    // and tryPlace tail dominance scans.
+    const elementary = roots * n * roots + masks * n * roots * (2 * n) + 4 * n * n * roots;
+    expect(quote.work_units).toBeGreaterThanOrEqual(elementary);
+    expect(ledger.spentWork).toBe(quote.work_units);
+    expect(quote.memory_bytes).toBeGreaterThanOrEqual(masks * n * roots * n);
+  });
+
   it("matches no-overlay promotion on a 60-work-unit all-null overlay", () => {
     const none = coverage(1, { g: [0.9] });
     const allNull = coverage(1, { g: [0.9] }, {

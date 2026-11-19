@@ -1,6 +1,6 @@
 export * from "./runtime/config/index.js";
 export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
-export { SourceIndexBackfill, SOURCE_INDEX_RELATION_EMBED_MAX_MS, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
+export { SourceIndexBackfill, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
 export { orderNativeRouteAccess } from "./recall/runtime/native-route-opportunity.js";
 export { recallExecutionRetention, recallRetentionBytes, RECALL_RETENTION_TTL_MS } from "./recall/runtime/recall-execution-retention.js";
 export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.js";

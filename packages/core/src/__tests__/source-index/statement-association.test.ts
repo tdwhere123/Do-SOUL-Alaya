@@ -99,6 +99,8 @@ describe("statement key retention and evidence coverage", () => {
       coverage: [value.coverage[1], value.coverage[2]],
       openings: [value.openings![1], value.openings![2]], decision: value.decision });
     expect(restricted.decision).toBe(value.decision);
+    const withRelations = { ...value, relations: value.roots.map(root => root === "b" ? [0.4, 0.1] : [null, null]) };
+    expect(restrictStatementAssociation(withRelations, root => root !== "b").relations).toBeUndefined();
   });
 
   it("drops keys without coverage when statements are absent or unprepared, and refuses incompatible demands", () => {

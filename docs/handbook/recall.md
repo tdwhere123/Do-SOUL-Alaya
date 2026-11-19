@@ -160,7 +160,8 @@ marginal tops collide, then a derived rank-2 witness of a distinct physical sour
 unlocking only a later head slot whose necessary columns are strictly dominated
 in both key cosine and winning-key relation cosine by some current tail root.
 Missing overlay rows stay `null` (never coerced to `0`); an all-null overlay is
-a deterministic no-op and reproduces the prefix-only order. Unwitnessed original
+a deterministic no-op and reproduces the prefix-only order. Membership filtering
+omits `relations` when every remaining cell is null. Unwitnessed original
 head roots, agreed prefix members, and assigned marginal tops are not evicted.
 Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for

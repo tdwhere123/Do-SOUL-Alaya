@@ -379,8 +379,15 @@ function exchangeAgreedHead(
   const exchanged = applyAgreedHeadPrefix(base, agreedIds, protectedHeadIds);
   const headLen = Math.min(5, exchanged.length);
   const head = exchanged.slice(0, headLen), tail = exchanged.slice(headLen);
-  if (shouldPareto) exchangeStatementParetoSecondary({
-    association, pool: originalSources, head, tail, agreed: agreedIds, meter });
+  if (shouldPareto && association !== undefined && meter !== undefined) {
+    try {
+      exchangeStatementParetoSecondary({
+        association, pool: originalSources, head, tail, agreed: agreedIds, meter });
+    } catch (error) {
+      // Optional refinement: keep 1D promotion when this page has not already locked Pareto.
+      if (!(error instanceof SourceSemanticResourceExhausted) || association.decision.applied) throw error;
+    }
+  }
   const finalHead = head, finalHeadSet = new Set(finalHead);
   const survivingVariants = variants.filter(row => !finalHeadSet.has(row.root));
   const survivingMoved = survivingVariants.map(row => row.root);

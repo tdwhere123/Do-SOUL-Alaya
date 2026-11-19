@@ -76,24 +76,70 @@ it("returns root_complete when optional relation embedding times out without abo
     .find(row => row.auxiliary !== undefined);
   if (target === undefined) throw new Error("expected statement key");
   const parent = new AbortController();
+  const relationSignals: AbortSignal[] = [];
+  let relationAborted = false;
   const binding = { status: "ready" as const, profile: { ...selection.configuration.profile }, profile_id: selection.profile_id,
-    embedInputs: vi.fn(async (inputs: readonly SourceEmbeddingInput[], options: { signal?: AbortSignal }) => {
+    embedInputs: vi.fn(async (inputs: readonly SourceEmbeddingInput[], options?: { signal?: AbortSignal }) => {
       if (inputs[0]!.text === statement.bound.statement.relation) {
-        await new Promise<never>((_, reject) => {
-          const signal = options.signal;
-          const abort = () => reject(signal?.reason ?? new Error("relation_aborted"));
-          if (signal?.aborted) return abort();
-          signal?.addEventListener("abort", abort, { once: true });
-        });
+        if (options?.signal !== undefined) {
+          relationSignals.push(options.signal);
+          options.signal.addEventListener("abort", () => { relationAborted = true; }, { once: true });
+        }
+        await new Promise<never>(() => undefined);
+      }
+      if (relationAborted) {
+        return inputs.map(input => ({ status: "not_embedded" as const, reason: "stale_child",
+          input_id: input.input_id, input_digest: sourceEmbeddingInputDigest(input.text), token_count: null }));
+      }
+      return embedded(inputs);
+    }) };
+  const started = Date.now();
+  const deadlineMs = started + 400;
+  const result = await new SourceIndexBackfill(lifecycle).step({
+    selection, generation_id: generation.generation_id, root_key: target.root_key, binding,
+    budget: { ...BUDGET, model_inputs: 10, input_bytes: 4096, max_body_bytes: 4096 },
+    deadline_ms: deadlineMs, signal: parent.signal });
+  expect(result.status).toBe("root_complete");
+  expect(Date.now()).toBeLessThan(deadlineMs);
+  expect(parent.signal.aborted).toBe(false);
+  expect(relationAborted).toBe(false);
+  expect(relationSignals.every(signal => signal.aborted === false)).toBe(true);
+  expect(environment.index.pendingWindows(WORKSPACE, generation.generation_id, target.root_key, 1, BUDGET))
+    .toMatchObject({ status: "ready", ordinals: [] });
+  const other = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8)
+    .find(row => row.root_key !== target.root_key);
+  if (other === undefined) throw new Error("expected a second root");
+  const next = await new SourceIndexBackfill(lifecycle).step({
+    selection, generation_id: generation.generation_id, root_key: other.root_key, binding,
+    budget: { ...BUDGET, model_inputs: 10, input_bytes: 4096, max_body_bytes: 4096 },
+    deadline_ms: Date.now() + 5_000, signal: parent.signal });
+  expect(next.status).toBe("root_complete");
+  expect(next.reason).not.toBe("stale_child");
+});
+
+it("writes the relation vector when overlay inference takes 80 ms under a 5000 ms deadline", async () => {
+  const environment = fixture(); environments.push(environment);
+  const published = publishMessages(environment);
+  const statement = publishStatement(environment, published, "relation-minilm");
+  const lifecycle = new SourceIndexLifecycle(environment.index, fieldSha256);
+  const selection = lifecycle.select(WORKSPACE, configuration({ window_bytes: 4096, max_input_tokens: 4096 }));
+  const generation = lifecycle.begin(selection);
+  lifecycle.capture(WORKSPACE, generation.generation_id, 8, BUDGET);
+  const target = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8)
+    .find(row => row.auxiliary !== undefined);
+  if (target === undefined) throw new Error("expected statement key");
+  const binding = { status: "ready" as const, profile: { ...selection.configuration.profile }, profile_id: selection.profile_id,
+    embedInputs: vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
+      if (inputs[0]!.text === statement.bound.statement.relation) {
+        await new Promise(resolve => { setTimeout(resolve, 80); });
       }
       return embedded(inputs);
     }) };
   const result = await new SourceIndexBackfill(lifecycle).step({
     selection, generation_id: generation.generation_id, root_key: target.root_key, binding,
     budget: { ...BUDGET, model_inputs: 10, input_bytes: 4096, max_body_bytes: 4096 },
-    deadline_ms: Date.now() + 200, signal: parent.signal });
+    deadline_ms: Date.now() + 5_000, signal: new AbortController().signal });
   expect(result.status).toBe("root_complete");
-  expect(parent.signal.aborted).toBe(false);
-  expect(environment.index.pendingWindows(WORKSPACE, generation.generation_id, target.root_key, 1, BUDGET))
-    .toMatchObject({ status: "ready", ordinals: [] });
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_vectors").get()).toEqual({ n: 1 });
 });

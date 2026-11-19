@@ -222,13 +222,8 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
     embedInputs.mockImplementation(async (inputs: readonly SourceEmbeddingInput[], options?: SourceEmbeddingOptions) => {
       if (inputs[0]?.text === statement.bound.statement.relation) {
-        if (options?.signal === undefined) throw new Error("expected isolated relation abort signal");
-        await new Promise<never>((_, reject) => {
-          const signal = options.signal!;
-          const abort = () => reject(signal.reason ?? new Error("relation_aborted"));
-          if (signal.aborted) return abort();
-          signal.addEventListener("abort", abort, { once: true });
-        });
+        expect(options?.signal).toBeUndefined();
+        await new Promise<never>(() => undefined);
       }
       return inputs.map((input: SourceEmbeddingInput) => ({
         status: "embedded" as const,

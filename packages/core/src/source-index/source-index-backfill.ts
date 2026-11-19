@@ -41,9 +41,6 @@ type CapturedInput = Omit<SourceIndexBackfillInput, "binding"> & {
  * synchronously before inference. Deadline interruption of synchronous native SQL needs daemon
  * integration; SQLite internal CPU and actual model execution work are explicitly unknown.
  */
-/** Child wait strictly below the producer deadline so overlay abort cannot skip activation. */
-export const SOURCE_INDEX_RELATION_EMBED_MAX_MS = 50;
-
 export class SourceIndexBackfill {
   public constructor(private readonly lifecycle: SourceIndexLifecycle) {}
 
@@ -123,21 +120,25 @@ class CapturedRootStep {
   }
 
   private async infer(binding: Extract<CapturedInput["binding"], { status: "ready" }>, window: SourceIndexWindow,
-    bytes: number, signal: AbortSignal, embed?: Readonly<{ signal: AbortSignal; timeoutMs: number; settle: boolean }>): Promise<SourceEmbeddingResult> {
+    bytes: number, signal: AbortSignal, overlayTimeoutMs?: number): Promise<SourceEmbeddingResult> {
     const inputs = captureSourceEmbeddingInputs([{ input_id: window.window_id, text: window.text, role: "passage" }]);
     // Submitted costs are retained even on synchronous throw, invalid evidence, timeout or lost transport.
     // Tokenization/inference may already have happened; lack of runtime evidence is never zero work.
-    const results = await interruptible(() => {
+    const timeoutMs = overlayTimeoutMs ?? Math.max(1, this.input.deadline_ms - Date.now());
+    const run = () => {
       this.resources.model_execution_work = "unknown";
       this.resources.model_inputs_submitted++;
       this.resources.model_input_bytes_submitted += bytes;
       this.resources.inputs_without_token_count++;
       return binding.embed(inputs, {
         profile_id: binding.profile_id,
-        signal: embed?.signal ?? signal,
-        timeoutMs: embed?.timeoutMs ?? Math.max(1, this.input.deadline_ms - Date.now())
+        timeoutMs,
+        // Overlay uses the same caller/deadline signal as window inference; it must not receive a
+        // child AbortSignal. Local raceTimeout unblocks a hang without aborting this signal.
+        signal
       });
-    }, signal, embed?.settle === true);
+    };
+    const results = overlayTimeoutMs === undefined ? await interruptible(run, signal) : await raceTimeout(run, overlayTimeoutMs);
     const observed = validateSourceEmbeddingResults(inputs, results, binding.profile)[0]!;
     if (observed.token_count !== null) {
       this.resources.token_count_observed += observed.token_count;
@@ -146,16 +147,15 @@ class CapturedRootStep {
     return observed;
   }
 
-  /** Overlay must not change window completeness: any timeout, budget, or write failure is dropped. */
+  /** Overlay must not change window completeness: any timeout, budget, or write failure is dropped.
+   * Optional inference starts only with >250 ms left and waits locally until remaining-100 ms; it
+   * never aborts the producer/ONNX signal (a child abort would SIGTERM the shared isolate). */
   private async embedStatementRelation(binding: Extract<CapturedInput["binding"], { status: "ready" }>,
     source: SourceIndexTarget, signal: AbortSignal): Promise<void> {
     if (source.auxiliary === undefined) return;
     const remainingMs = this.input.deadline_ms - Date.now();
-    if (remainingMs <= 1) return;
-    const childMs = Math.max(1, Math.min(remainingMs - 1, SOURCE_INDEX_RELATION_EMBED_MAX_MS));
-    const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), childMs);
-    const child = AbortSignal.any([signal, timeout.signal]);
+    if (remainingMs <= 250) return;
+    const timeoutMs = Math.max(1, remainingMs - 100);
     try {
       if (this.stop() !== null) return;
       const { selection, generation_id: generationId, root_key: rootKey, budget } = this.input;
@@ -168,15 +168,13 @@ class CapturedRootStep {
       const observed = await this.infer(binding, {
         window_id: rootKey, ordinal: 0, start_byte: 0, end_byte: Math.max(1, bytes), content_digest: "",
         text: text.relation
-      }, bytes, child, { signal: child, timeoutMs: childMs, settle: true });
+      }, bytes, signal, timeoutMs);
       if (this.stop() !== null || observed.status !== "embedded") return;
       this.native(() => this.lifecycle.acceptRelationVector(selection.workspace_id, generationId, {
         root_key: rootKey, input_digest: observed.input_digest, embedding: observed.vector, token_count: observed.token_count
       }, this.remaining()));
     } catch {
       this.resources.native_accounting = "partial";
-    } finally {
-      clearTimeout(timer);
     }
   }
 
@@ -260,25 +258,36 @@ function captureInput(input: SourceIndexBackfillInput): CapturedInput {
 /** Stop waiting on a non-cooperative runtime without ever persisting its late result.
  * Actual work may continue there; submitted inputs and unknown execution accounting remain visible.
  */
-async function interruptible(operation: () => Promise<readonly SourceEmbeddingResult[]>, signal: AbortSignal,
-  settle = false) {
+async function interruptible(operation: () => Promise<readonly SourceEmbeddingResult[]>, signal: AbortSignal) {
   let rejectAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
     rejectAbort = () => reject(signal.reason);
     signal.addEventListener("abort", rejectAbort, { once: true });
   });
-  let running: Promise<readonly SourceEmbeddingResult[]> | undefined;
   try {
     if (signal.aborted) throw signal.reason;
     // Preserve existing promise/race ordering; convert only synchronous throws so
     // cancellation cannot leave a rejected promise outside the race.
+    let running: Promise<readonly SourceEmbeddingResult[]>;
     try { running = operation(); }
     catch (error) { running = Promise.reject(error); }
     return await Promise.race([running, aborted]);
-  } catch (error) {
-    if (settle && running !== undefined) await running.then(() => undefined, () => undefined);
-    throw error;
   } finally {
     if (rejectAbort !== undefined) signal.removeEventListener("abort", rejectAbort);
+  }
+}
+
+/** Local wait for optional overlay. Does not abort any shared signal or ONNX child. */
+async function raceTimeout<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("statement_relation_embed_timeout")), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
