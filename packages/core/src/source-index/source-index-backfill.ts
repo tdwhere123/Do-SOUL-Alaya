@@ -2,7 +2,7 @@ import {
   BoundedIdSchema, SOURCE_INDEX_MAX_BODY_BYTES, SourceIndexConfigurationSchema, SourceIndexOperationError,
   sourceIndexConfigurationId, sourceIndexProfileId,
   type SourceIndexBackfillBudget, type SourceIndexBackfillResult, type SourceIndexBudget,
-  type SourceIndexResources, type SourceIndexSelection, type SourceIndexWindow
+  type SourceIndexResources, type SourceIndexSelection, type SourceIndexTarget, type SourceIndexWindow
 } from "@do-soul/alaya-protocol";
 import {
   captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, sourceEmbeddingSha256, validateSourceEmbeddingResults,
@@ -94,7 +94,10 @@ class CapturedRootStep {
       const afterPending = this.stop();
       if (afterPending !== null) return afterPending;
       const ordinal = pending.ordinals[0];
-      if (ordinal === undefined) return this.result("root_complete", "no_pending_windows");
+      if (ordinal === undefined) {
+        await this.embedStatementRelation(binding, prepared.document.source, signal);
+        return this.result("root_complete", "no_pending_windows");
+      }
       const window = prepared.document.windows[ordinal];
       if (window === undefined || window.ordinal !== ordinal) throw new CoreError("OBLIGATION_VIOLATION", "Pending Source window is outside prepared manifest");
       if (this.resources.model_inputs_submitted >= budget.model_inputs) return this.result("resource_exhausted", "model_input_budget");
@@ -136,6 +139,32 @@ class CapturedRootStep {
       this.resources.inputs_without_token_count--;
     }
     return observed;
+  }
+
+  /** Overlay must not change window completeness: any timeout, budget, or write failure is dropped. */
+  private async embedStatementRelation(binding: Extract<CapturedInput["binding"], { status: "ready" }>,
+    source: SourceIndexTarget, signal: AbortSignal): Promise<void> {
+    if (source.auxiliary === undefined) return;
+    try {
+      if (this.stop() !== null) return;
+      const { selection, generation_id: generationId, root_key: rootKey, budget } = this.input;
+      const text = this.native(() => this.lifecycle.statementRelationText(selection.workspace_id, generationId, rootKey, this.remaining()));
+      if (text.status !== "ready") return;
+      if (this.resources.model_inputs_submitted >= budget.model_inputs) return;
+      const bytes = Buffer.byteLength(text.relation, "utf8");
+      if (bytes > budget.input_bytes - this.resources.model_input_bytes_submitted) return;
+      if (this.stop() !== null) return;
+      const observed = await this.infer(binding, {
+        window_id: rootKey, ordinal: 0, start_byte: 0, end_byte: Math.max(1, bytes), content_digest: "",
+        text: text.relation
+      }, bytes, signal);
+      if (this.stop() !== null || observed.status !== "embedded") return;
+      this.native(() => this.lifecycle.acceptRelationVector(selection.workspace_id, generationId, {
+        root_key: rootKey, input_digest: observed.input_digest, embedding: observed.vector, token_count: observed.token_count
+      }, this.remaining()));
+    } catch {
+      this.resources.native_accounting = "partial";
+    }
   }
 
   private modelRefusal(reason: string): SourceIndexBackfillResult {

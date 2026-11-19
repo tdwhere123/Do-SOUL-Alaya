@@ -25,6 +25,13 @@ export type EvidenceDemands = Readonly<{ status: "ready"; vectors: readonly Floa
 
 /** Reads the host role and anchor tokens of one root's retained keys, charging the acquisition ledger. */
 export type StatementWitnessReader = (root: string, keys: readonly SourceIndexTarget[], anchors: readonly string[]) => SourceIndexStatementWitnessRead | undefined;
+/** Aligned overlay embeddings for statement-key roots. Undefined means the overlay port is absent. */
+export type StatementRelationReader = (keys: readonly string[]) =>
+  { status: "ready"; vectors: readonly (Float32Array | null)[] } | { status: "unknown"; reason: string } | undefined;
+
+function hostSessionIdentity(sourceId: string | null | undefined): string | null {
+  return typeof sourceId === "string" && sourceId.length > 0 ? sourceId.replace(/:r\d+$/u, "") : null;
+}
 
 /** Question window as UTC civil-day bounds: alternatives starting on or before the question clock. */
 export type EvidenceWindow = Readonly<{ intervals: readonly (readonly [number, number])[]; earliest: number }>;
@@ -58,6 +65,10 @@ export type StatementAssociation = Readonly<{
   statements: number;
   coverage: readonly (readonly (number | null)[])[];
   possible?: readonly (readonly boolean[])[];
+  /** Same [root][condition] shape as coverage: cosine of the winning key's relation vector, or null. */
+  relations?: readonly (readonly (number | null)[])[];
+  /** Host-session identity aligned with `roots`; null when the root has no source id. */
+  sessions?: readonly (string | null)[];
   /** Derived relation only: per cell, the host-message span of the key behind the necessary value
    * (with the prompt an assistant witness answers). */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
@@ -86,17 +97,19 @@ const retentionBytes = (dimensions: number) => dimensions * 4 + 48;
  * charged on the same acquisition ledger when evidence statements are supplied. */
 export function quoteStatementAssociation(roots: number, windows: number, dimensions: number): SourceSemanticResourceBudget {
   const retainedKeys = Math.min(windows, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT);
-  return { work_units: windows * dimensions + retainedKeys * (dimensions * 2 + 16) + roots * roots,
-    memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 80 + 1024)
-      + roots * roots * 128 + 4096 };
+  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots + roots * 8,
+    memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 84 + 1088)
+      + roots * roots * 128 + 4096 + roots * 48 };
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
 // A retained span cell is one array node and two integers; each root keeps one opening.
 function coverageCost(keyDimensions: number, demandDimensions: number, roots: number, statements: number,
-  spans = false): SourceSemanticResourceBudget {
-  return { work_units: keyDimensions * statements + demandDimensions + roots * (statements * (spans ? 2 : 1) + 1),
-    memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72) + (spans ? 64 : 0)) };
+  spans = false, relations = false): SourceSemanticResourceBudget {
+  const cells = statements * ((spans ? 2 : 1) + (relations ? 1 : 0)) + 1;
+  return { work_units: keyDimensions * statements + demandDimensions + roots * cells,
+    memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72)
+      + (relations ? statements * 72 : 0) + (spans ? 64 : 0) + 48) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
@@ -147,13 +160,16 @@ function scoreRootStatements(
   demands: Extract<EvidenceDemands, { status: "ready" }>,
   anchorIndex: ReadonlyMap<string, number>, messages: readonly Pick<HostOccurrence, "role" | "utf8_span">[],
   windowActive: boolean
-): { coverage: (number | null)[]; possible: boolean[]; cells: ((readonly [number, number]) | null)[] } {
+): { coverage: (number | null)[]; possible: boolean[]; cells: ((readonly [number, number]) | null)[];
+  winners: (SourceIndexTarget | null)[] } {
   const open = Array<boolean>(demands.vectors.length).fill(windowActive && kept.length === 0);
   const cells: ((readonly [number, number]) | null)[] = [];
+  const winners: (SourceIndexTarget | null)[] = [];
   const coverage = demands.vectors.map((vector, index) => {
     const condition = demands.conditions[index]!;
     let best: number | null = null;
     let span: readonly [number, number] | null = null;
+    let winner: SourceIndexTarget | null = null;
     for (let position = 0; position < kept.length; position++) {
       const key = kept[position]!;
       const fact = facts[position]!;
@@ -166,9 +182,11 @@ function scoreRootStatements(
       const value = statementKeyCosine(key.embedding, vector);
       if (value > (best ?? -Infinity)) {
         best = value;
+        winner = key.key;
         span = key.key.auxiliary === undefined ? null : [...key.key.auxiliary.source_span];
       }
     }
+    winners.push(best === null ? null : winner);
     if (span !== null && condition.speaker === "assistant") {
       const asked = assistantPromptSpan(messages, span[0]);
       cells.push(asked === null ? span : [asked[0], span[1]]);
@@ -177,7 +195,7 @@ function scoreRootStatements(
     }
     return best;
   });
-  return { coverage, possible: open, cells };
+  return { coverage, possible: open, cells, winners };
 }
 
 /** The opening covers every necessary witness message of the root. Keys nominate witnesses;
@@ -239,7 +257,7 @@ export class StatementKeyRetention {
     const cost = quoteStatementAssociation(roots, keys, dimensions);
     const vectors = this.demands.status === "ready" ? this.demands.vectors : [];
     const scoring = coverageCost(keys * dimensions, vectors.reduce((sum, vector) => sum + vector.length, 0), roots, vectors.length,
-      this.demands.status === "ready" && this.demands.derived === true);
+      this.demands.status === "ready" && this.demands.derived === true, true);
     return { work_units: cost.work_units + scoring.work_units, memory_bytes: cost.memory_bytes + scoring.memory_bytes + rootCharacters * 4 };
   }
 
@@ -263,7 +281,7 @@ export class StatementKeyRetention {
    * tokens all occur in it; under a window its time dimension must hold (unknown: possible). Any
    * unknown witness read leaves the whole association unavailable. */
   public associate(roots: readonly string[], witnesses: StatementWitnessReader | undefined,
-    window?: EvidenceWindow): StatementAssociation | undefined {
+    window?: EvidenceWindow, relationReader?: StatementRelationReader): StatementAssociation | undefined {
     if (this.abandoned) return undefined;
     let dimensions = 0, keyCount = 0;
     for (const root of roots) for (const row of this.byRoot.get(root) ?? []) { dimensions += row.embedding.length; keyCount++; }
@@ -276,7 +294,8 @@ export class StatementKeyRetention {
     }
     const statements = demands.vectors.length;
     const demandDimensions = demands.vectors.reduce((sum, vector) => sum + vector.length, 0);
-    const cost = coverageCost(dimensions, demandDimensions, roots.length, statements, demands.derived === true);
+    const cost = coverageCost(dimensions, demandDimensions, roots.length, statements, demands.derived === true,
+      relationReader !== undefined);
     if (!this.fund(cost.work_units, cost.memory_bytes, "statement key evidence coverage")) return undefined;
     if (demands.vectors.some(vector => vector.length !== (this.dimensions ?? vector.length) || vector.some(v => !Number.isFinite(v)))) {
       this.abandon("statement key association incompatible dimensions"); return undefined;
@@ -284,7 +303,8 @@ export class StatementKeyRetention {
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
     const coverage: (number | null)[][] = [], possible: boolean[][] = [], spans: ((readonly [number, number]) | null)[][] = [];
-    const openings: (EvidenceOpening | null)[] = [];
+    const openings: (EvidenceOpening | null)[] = [], sessions: (string | null)[] = [];
+    const winners: (SourceIndexTarget | null)[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
       const loaded = this.loadRootWitness(root, kept, anchors, statements, witnesses, window);
@@ -294,11 +314,47 @@ export class StatementKeyRetention {
       possible.push(scored.possible);
       spans.push(scored.cells);
       openings.push(evidenceOpening(scored.coverage, scored.cells, loaded.messages));
+      winners.push(scored.winners);
+      let session: string | null = null;
+      for (const row of kept) { session = hostSessionIdentity(row.key.source_id); if (session !== null) break; }
+      sessions.push(session);
     }
+    const relations = this.scoreWinningRelations(demands.vectors, coverage, winners, relationReader);
+    if (relations === "unavailable") return undefined;
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
-    return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
+    return { roots: [...roots], statements, coverage, sessions, ...(window === undefined ? {} : { possible }),
+      ...(relations === undefined ? {} : { relations }),
       ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
+  }
+
+  private scoreWinningRelations(vectors: readonly Float32Array[], coverage: readonly (readonly (number | null)[])[],
+    winners: readonly (readonly (SourceIndexTarget | null)[])[], relationReader: StatementRelationReader | undefined):
+    (number | null)[][] | undefined | "unavailable" {
+    if (relationReader === undefined) return undefined;
+    const keys = [...new Set(winners.flatMap(row => row.flatMap(key => key === null ? [] : [key.root_key])))];
+    const read = keys.length === 0 ? { status: "ready" as const, vectors: [] as const } : relationReader(keys);
+    if (read === undefined) return undefined;
+    if (read.status !== "ready" || read.vectors.length !== keys.length) {
+      this.abandon(read.status === "unknown" ? read.reason : "statement_relation_read_misaligned"); return "unavailable";
+    }
+    const byKey = new Map(keys.map((key, index) => [key, read.vectors[index]!]));
+    const relations: (number | null)[][] = [];
+    for (let row = 0; row < coverage.length; row++) {
+      const cells: (number | null)[] = [];
+      for (let column = 0; column < vectors.length; column++) {
+        if (coverage[row]![column] === null) { cells.push(null); continue; }
+        const winner = winners[row]?.[column] ?? null, embedding = winner === null ? null : byKey.get(winner.root_key) ?? null;
+        if (embedding == null) { cells.push(null); continue; }
+        const demand = vectors[column]!;
+        if (embedding.length !== demand.length || embedding.some(value => !Number.isFinite(value))) {
+          this.abandon("statement relation association incompatible dimensions"); return "unavailable";
+        }
+        cells.push(statementKeyCosine(embedding, demand));
+      }
+      relations.push(cells);
+    }
+    return relations;
   }
 
   private loadRootWitness(
@@ -333,6 +389,8 @@ export function restrictStatementAssociation(association: StatementAssociation,
   const indices = association.roots.flatMap((root, index) => keep(root) ? [index] : []);
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
     coverage: indices.map(i => association.coverage[i]!),
+    ...(association.relations === undefined ? {} : { relations: indices.map(i => association.relations![i]!) }),
+    ...(association.sessions === undefined ? {} : { sessions: indices.map(i => association.sessions![i]!) }),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
     ...(association.spans === undefined ? {} : { spans: indices.map(i => association.spans![i]!) }),
     ...(association.openings === undefined ? {} : { openings: indices.map(i => association.openings![i]!) }),
@@ -420,6 +478,7 @@ export function selectEvidenceWitnesses(order: readonly string[], association: S
   const tail = order.slice(head);
   for (let k = 0; k < promoted.length; k++) tail[tail.indexOf(promoted[k]!)] = evicted[k]!;
   const moved = variants.map(row => row.root);
-  return { order: [...out, ...moved, ...tail.filter(root => !chosen.has(root))],
+  const base_order = [...out, ...tail];
+  return { order: [...out, ...moved, ...tail.filter(root => !chosen.has(root))], base_order,
     top_positions: tops.map(top => top === null ? null : top + 1), injections, variants };
 }

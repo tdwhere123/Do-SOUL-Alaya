@@ -153,7 +153,16 @@ displaced head slots (paired by original source order) in the non-variant tail;
 still appends rank `2–5` complementary witness roots directly after slot 5 as
 `evidence_variant` message-span deliveries. Prefix exchange runs on that
 un-varianted order so surviving derived variants remain a contiguous block
-immediately after slot 5. Every root under active conditions
+immediately after slot 5. When statement-relation overlay vectors are present,
+navigation then runs a fibered two-coordinate secondary exchange on the same
+un-varianted head and tail: an injective condition-to-root assignment when
+marginal tops collide, then a derived distinct-session rank-2 witness, each
+unlocking only a later head slot whose necessary columns are strictly dominated
+in both key cosine and winning-key relation cosine by some current tail root.
+Missing overlay rows stay `null` (never coerced to `0`); an all-null overlay is
+a deterministic no-op and reproduces the prefix-only order. Unwitnessed original
+head roots, agreed prefix members, and assigned marginal tops are not evicted.
+Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for
 assistant witnesses) or its first message/line unit (`payload_continuation`
 reaches the prefix and tail).

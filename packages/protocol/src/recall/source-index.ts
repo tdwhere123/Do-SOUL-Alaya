@@ -109,10 +109,16 @@ export type SourceIndexVector = Readonly<{
   window_id: string; input_digest: string; embedding: Float32Array;
   token_count: number; truncated: false;
 }>;
+/** Overlay keyed by statement-key root; never a window vector or generation-complete flag. */
+export type SourceIndexStatementRelationVector = Readonly<{
+  root_key: string; input_digest: string; embedding: Float32Array; token_count: number;
+}>;
+export type SourceIndexStatementRelationTextRead = Readonly<{ resources: SourceIndexResources }> &
+  (Readonly<{ status: "ready"; relation: string }> | Readonly<{ status: "unavailable"; reason: string }>);
 export type SourceIndexBudget = Readonly<{ work: number; native_bytes: number }>;
 /** Retired-only maintenance; complete means the queue was observed empty. */
 export type SourceIndexVectorReclamationResult = Readonly<{
-  vectors: number; windows: number; targets: number; generations: number;
+  vectors: number; relation_vectors: number; windows: number; targets: number; generations: number;
   resources: SourceIndexResources; complete: boolean;
 }>;
 /** Ordinals address the deterministic prepared manifest, never a caller-owned resume cursor. */
@@ -186,6 +192,13 @@ export interface SourceIndexRepository {
   writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector): SourceIndexWriteResult;
   writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector,
     budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  /** Best-effort statement-relation overlay; absence must not block window completeness. */
+  writeStatementRelationVector?(workspaceId: string, generationId: string,
+    vector: SourceIndexStatementRelationVector): SourceIndexWriteResult;
+  writeStatementRelationVector?(workspaceId: string, generationId: string,
+    vector: SourceIndexStatementRelationVector, budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  readStatementRelationText?(workspaceId: string, generationId: string, rootKey: string,
+    budget: SourceIndexBudget): SourceIndexStatementRelationTextRead;
   activate(workspaceId: string, generationId: string): SourceIndexWriteResult;
   fail(workspaceId: string, generationId: string, reason: string): void;
 }

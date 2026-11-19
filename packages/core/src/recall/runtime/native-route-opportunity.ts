@@ -2,6 +2,7 @@ import { CoreError } from "../../shared/errors.js";
 import { EVIDENCE_CONDITION_LIMITS, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { selectEvidenceWitnesses, type StatementAssociation } from "../../source-index/statement-association.js";
+import { exchangeStatementParetoSecondary } from "../../source-index/statement-pareto-exchange.js";
 
 // One demand, four views/operators. This is not a caller-configurable strategy registry.
 const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"] as const;
@@ -253,7 +254,15 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   const current = "preferred_record_ids" in ordered ? ordered.preferred_record_ids
     : ordered.status === "ordered" ? ordered.record_ids : ordered.trace.filter(row => row.decision === "placed").map(row => row.record_id);
   const originalSources = current.filter(id => !memoryIds.has(id));
+  const byRoot = new Map(ordered.trace.filter(row => row.lane !== "memory-lexical")
+    .map(row => [row.occurrence.root_key, row.record_id]));
+  const originalSet = new Set(originalSources);
+  const agreedIds = (agreedPrefix ?? []).flatMap(key => {
+    const id = byRoot.get(key);
+    return id !== undefined && originalSet.has(id) ? [id] : [];
+  });
   let decided: ReturnType<typeof selectEvidenceWitnesses> | undefined;
+  let exchanged = { sources: [...originalSources], variants: [] as ReturnType<typeof selectEvidenceWitnesses>["variants"] };
   if (association !== undefined) {
     requireFact(meter !== undefined, "evidence coverage requires a navigation resource ledger");
     const optional = new SourceSemanticResourceLedger({
@@ -264,7 +273,9 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
         optional.charge(association.roots.length * (association.statements + 1), 0, "evidence statement coverage validation");
         validateAssociation(association);
         decided = selectEvidenceWitnesses(originalSources, association, optional);
-        if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0) association.decision.applied = true;
+        exchanged = exchangeAgreedHead(originalSources, decided.order, agreedIds, association, decided, optional);
+        if (decided.order.some((id, i) => id !== originalSources[i]) || decided.variants.length > 0
+          || exchanged.sources.some((id, i) => id !== originalSources[i])) association.decision.applied = true;
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
         // A later small page must not replace an already applied permutation with base order.
@@ -279,20 +290,17 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
           });
         association.decision.refused = error.phase;
         decided = undefined;
+        exchanged = exchangeAgreedHead(originalSources, originalSources, agreedIds, association, undefined);
       } finally {
         // The child limits optional work; it does not forgive work already performed on refusal.
         meter!.charge(optional.spentWork, optional.spentBytes, "evidence statement coverage executed");
       }
+    } else {
+      exchanged = exchangeAgreedHead(originalSources, originalSources, agreedIds, association, undefined);
     }
+  } else {
+    exchanged = exchangeAgreedHead(originalSources, originalSources, agreedIds, undefined, undefined);
   }
-  const byRoot = new Map(ordered.trace.filter(row => row.lane !== "memory-lexical")
-    .map(row => [row.occurrence.root_key, row.record_id]));
-  const originalSet = new Set(originalSources);
-  const agreedIds = (agreedPrefix ?? []).flatMap(key => {
-    const id = byRoot.get(key);
-    return id !== undefined && originalSet.has(id) ? [id] : [];
-  });
-  const exchanged = exchangeAgreedHead(originalSources, decided?.order ?? originalSources, agreedIds, association, decided);
   // Witness protection can change the prefix exchange without permuting coverage order.
   if (decided !== undefined && association !== undefined) {
     const unprotected = applyAgreedHeadPrefix(originalSources, agreedIds);
@@ -307,7 +315,8 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
   const injected = decided?.injections.some(row => row.status === "injected") === true;
   const variants = exchanged.variants;
   const evidence_coverage = { status: association.decision.refused !== null ? "resource_refused" as const
-    : injected || variants.length > 0 ? "permuted" as const : "unchanged" as const, statements: association.statements,
+    : injected || variants.length > 0 || exchanged.sources.some((id, i) => id !== originalSources[i])
+      ? "permuted" as const : "unchanged" as const, statements: association.statements,
     top_source_positions: decided?.top_positions ?? null, injections: decided?.injections ?? [],
     variants: variants.map(row => ({ statement: row.statement, root_position: row.root_position })),
     reason: association.decision.refused };
@@ -351,48 +360,36 @@ function necessaryWitnessIds(association: StatementAssociation): Set<string> {
   return ids;
 }
 
-function unvariantedSources(
-  original: readonly string[], sources: readonly string[],
-  decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
-): string[] {
-  const variants = decided?.variants ?? [];
-  if (decided === undefined || variants.length === 0) return [...sources];
-  const head = Math.min(5, original.length);
-  const out = decided.order.slice(0, head);
-  const origHead = original.slice(0, head);
-  const bySource = (a: string, b: string) => original.indexOf(a) - original.indexOf(b);
-  const promoted = out.filter(root => !origHead.includes(root)).sort(bySource);
-  const evicted = origHead.filter(root => !out.includes(root)).sort(bySource);
-  const tail = original.slice(head);
-  for (let k = 0; k < promoted.length; k++) tail[tail.indexOf(promoted[k]!)] = evicted[k]!;
-  return [...out, ...tail];
-}
-
 function exchangeAgreedHead(
   originalSources: readonly string[], sources: readonly string[], agreedIds: readonly string[],
   association: StatementAssociation | undefined,
   decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
+  meter?: SourceSemanticResourceLedger,
 ): { sources: string[]; variants: ReturnType<typeof selectEvidenceWitnesses>["variants"] } {
   const variants = decided?.variants ?? [];
-  if (agreedIds.length === 0) return { sources: [...sources], variants: [...variants] };
+  const shouldPareto = association?.relations !== undefined && association.decision.refused === null
+    && decided !== undefined && meter !== undefined;
+  if (agreedIds.length === 0 && !shouldPareto) return { sources: [...sources], variants: [...variants] };
   const protectedHeadIds = association !== undefined && association.decision.refused === null && decided !== undefined
     ? necessaryWitnessIds(association) : undefined;
-  // Exchange on the un-varianted slot-exchanged order so surviving derived variants stay contiguous after slot 5.
-  const exchanged = applyAgreedHeadPrefix(unvariantedSources(originalSources, sources, decided), agreedIds, protectedHeadIds);
+  const base = decided?.base_order ?? [...originalSources];
+  const exchanged = applyAgreedHeadPrefix(base, agreedIds, protectedHeadIds);
   const headLen = Math.min(5, exchanged.length);
-  const finalHead = exchanged.slice(0, headLen);
-  const finalHeadSet = new Set(finalHead);
+  const head = exchanged.slice(0, headLen), tail = exchanged.slice(headLen);
+  if (shouldPareto) exchangeStatementParetoSecondary({
+    association, pool: originalSources, head, tail, agreed: agreedIds, meter });
+  const finalHead = head, finalHeadSet = new Set(finalHead);
   const survivingVariants = variants.filter(row => !finalHeadSet.has(row.root));
   const survivingMoved = survivingVariants.map(row => row.root);
   const survivingMovedSet = new Set(survivingMoved);
   return {
     sources: [...finalHead, ...survivingMoved,
-      ...exchanged.slice(headLen).filter(root => !finalHeadSet.has(root) && !survivingMovedSet.has(root))],
+      ...tail.filter(root => !finalHeadSet.has(root) && !survivingMovedSet.has(root))],
     variants: survivingVariants
   };
 }
 
-function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision }: StatementAssociation): void {
+function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision, relations, sessions }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
   requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
@@ -414,6 +411,13 @@ function validateAssociation({ roots, statements, coverage, possible, spans, ope
     && openings.every(cell => cell === null || (cell.statement === null || integer(cell.statement) && cell.statement < statements) && Array.isArray(cell.span)
       && cell.span.length === 2 && integer(cell.span[0]!) && integer(cell.span[1]!, 1) && cell.span[1]! > cell.span[0]!),
   "witness openings must hold one statement or none and a byte range, or null, per root");
+  requireFact(relations === undefined || Array.isArray(relations) && relations.length === roots.length
+    && relations.every(row => Array.isArray(row) && row.length === statements
+      && row.every((value, j) => Object.hasOwn(row, j) && (value === null || Number.isFinite(value)))),
+  "relation coverage must hold one finite value or null per statement");
+  requireFact(sessions === undefined || Array.isArray(sessions) && sessions.length === roots.length
+    && sessions.every(value => value === null || nonempty(value)),
+  "host sessions must hold one identity or null per root");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

@@ -6,7 +6,8 @@ import {
   type SourceIndexReadResult, type SourceIndexQueryRepository, type SourceIndexVectorBinding,
   type SourceIndexVectorCursor, type SourceSemanticResourceBudget, type SourceIndexNominationAllowance,
   type SourceIndexRepository, type SourceIndexSelection, type SourceIndexState, type SourceIndexTarget,
-  type QuestionTimePreference, type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult
+  type QuestionTimePreference, type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult,
+  type SourceIndexStatementRelationVector
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
@@ -27,6 +28,7 @@ import { readMemberListing, readStatementWitnesses, readTemplateStatements } fro
 import { readTaskObservation } from "./task-observation.js";
 import { readHostDependency } from "./host-dependency.js";
 import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
+import { readStatementRelationText, readStatementRelationVectors, writeStatementRelationVector } from "./statement-relation-vectors.js";
 
 // Private Node measurement friend. No package-root export, public operation or persisted state.
 // Both source and installed consumers discover this on the same existing package constructor.
@@ -79,6 +81,15 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   }
   public readStatementWitnesses(source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[], budget: SourceSemanticResourceBudget) {
     return this.atomic(() => readStatementWitnesses(this.database, this.records, source, keys, anchors, budget, this.sha256), "read");
+  }
+
+  public readStatementRelationVectors(workspaceId: string, keys: readonly string[], budget: SourceSemanticResourceBudget) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.atomic(() => readStatementRelationVectors(this.database, workspaceId, keys, budget), "read");
+  }
+
+  public readStatementRelationText(workspaceId: string, generationId: string, rootKey: string, budget: SourceIndexBudget) {
+    return this.atomic(() => readStatementRelationText(this.database, workspaceId, generationId, rootKey, budget, this.sha256), "read");
   }
 
 
@@ -339,6 +350,25 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
         resources.work = Math.max(1, rows.length); resources.native_bytes = 8 * rows.length;
         return { status: "ready", ordinals: rows.map(row => readIntegerField(readRecord(row, "pending window"), "ordinal")), resources };
       }, "read");
+    } catch (error) {
+      throw new SourceIndexOperationError(error, resources);
+    }
+  }
+
+  public writeStatementRelationVector(workspaceId: string, generationId: string,
+    vector: SourceIndexStatementRelationVector): SourceIndexWriteResult;
+  public writeStatementRelationVector(workspaceId: string, generationId: string,
+    vector: SourceIndexStatementRelationVector, budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  public writeStatementRelationVector(workspaceId: string, generationId: string,
+    vector: SourceIndexStatementRelationVector, budget?: SourceIndexBudget): SourceIndexWriteResult | SourceIndexGuardedWriteResult {
+    let resources = { work: 0, native_bytes: 0 };
+    try {
+      const result = this.atomic(() => writeStatementRelationVector(this.database, this.records, this.sha256,
+        workspaceId, generationId, vector, budget ?? SOURCE_INDEX_STANDALONE_BUDGET));
+      resources = result.resources;
+      if (budget !== undefined) return result;
+      return result.status === "accepted" ? { status: "accepted" } : rejected(
+        result.reason === "read_budget" || result.reason === "native_source_unavailable" ? "incomplete" : result.reason);
     } catch (error) {
       throw new SourceIndexOperationError(error, resources);
     }

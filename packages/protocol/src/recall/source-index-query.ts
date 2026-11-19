@@ -112,6 +112,11 @@ export type SourceIndexStatementWitnessRead = Readonly<{ resources: SourceIndexQ
   Readonly<{ status: "unknown"; reason: string }>
 );
 
+/** Aligned overlay embeddings for statement keys. Null is absence, never a zero vector. */
+export type SourceIndexStatementRelationVectorRead = Readonly<{ resources: SourceIndexQueryResources }> &
+  (Readonly<{ status: "ready"; vectors: readonly (Float32Array | null)[] }> |
+    Readonly<{ status: "unknown"; reason: string }>);
+
 /** Complete source-owned physical inventory. Captured-empty is authoritative; other states are not absence. */
 type SourceIndexHostInventoryRead = Readonly<
   | { status: "captured"; inventory: HostOccurrenceInventory }
@@ -133,6 +138,9 @@ export interface SourceIndexQueryRepository {
     budget: SourceSemanticResourceBudget): SourceIndexTaskObservationRead;
   readStatementWitnesses?(source: SourceIndexTarget, keys: readonly SourceIndexTarget[], anchors: readonly string[],
     budget: SourceSemanticResourceBudget): SourceIndexStatementWitnessRead;
+  /** Aligned with `keys`. Missing overlay rows are null; corrupt or exhausted reads are unknown. */
+  readStatementRelationVectors?(workspaceId: string, keys: readonly string[],
+    budget: SourceSemanticResourceBudget): SourceIndexStatementRelationVectorRead;
   readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
     budget: SourceSemanticResourceBudget): SourceIndexVectorRead;
   /** A vector binding is only a comparison against the actual selected active pointer, never a read selector. */

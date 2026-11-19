@@ -366,7 +366,11 @@ class AcquisitionQuery {
       const read = this.repository.readStatementWitnesses?.(this.nominations.get(root)!.source, keys, anchors, this.meter.remaining());
       if (read !== undefined) this.absorb(read.resources);
       return read;
-    }, evidenceWindow(this.originalQuestionTime));
+    }, evidenceWindow(this.originalQuestionTime), this.repository.readStatementRelationVectors === undefined ? undefined : keys => {
+      const read = this.repository.readStatementRelationVectors!(this.input.workspace_id, keys, this.meter.remaining());
+      this.absorb(read.resources);
+      return read.status === "ready" ? { status: "ready", vectors: read.vectors } : { status: "unknown", reason: read.reason };
+    });
   }
 
   private result(): SourceIndexAcquisitionResult {

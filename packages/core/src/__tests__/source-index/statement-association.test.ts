@@ -96,7 +96,8 @@ describe("statement key retention and evidence coverage", () => {
     expect(retained.availability()).toEqual({ status: "ready", reason: null, roots: 3, keys: 17 - 1 + 1, statements: 2 });
     const restricted = restrictStatementAssociation(value, root => root !== "b");
     expect(restricted).toEqual({ roots: ["a", "c"], statements: 2,
-      coverage: [value.coverage[1], value.coverage[2]], openings: [value.openings![1], value.openings![2]], decision: value.decision });
+      coverage: [value.coverage[1], value.coverage[2]], sessions: [null, null],
+      openings: [value.openings![1], value.openings![2]], decision: value.decision });
     expect(restricted.decision).toBe(value.decision);
   });
 

@@ -7,7 +7,8 @@ import {
   prepareSourceIndexDocument,
   type FieldContractSha256, type SourceIndexBudget, type SourceIndexConfiguration, type SourceIndexDocument,
   type SourceIndexGuardedWriteResult, type SourceIndexReadResult, type SourceIndexRepository, type SourceIndexResources,
-  type SourceIndexSelection, type SourceIndexVector, type SourceIndexWriteResult
+  type SourceIndexSelection, type SourceIndexVector, type SourceIndexWriteResult,
+  type SourceIndexStatementRelationVector
 } from "@do-soul/alaya-protocol";
 
 import { readSourceIndexLexicalAnalysisStatus, warmCjkSegmentation } from "@do-soul/alaya-cjk-segmentation";
@@ -242,6 +243,28 @@ export class SourceIndexLifecycle {
     return captured.budget === undefined
       ? this.repository.writeVector(captured.workspaceId, captured.generationId, captured.vector)
       : this.repository.writeVector(captured.workspaceId, captured.generationId, captured.vector, captured.budget);
+  }
+
+  public statementRelationText(workspaceId: string, generationId: string, rootKey: string, budget: SourceIndexBudget) {
+    if (this.repository.readStatementRelationText === undefined) {
+      return { status: "unavailable" as const, reason: "statement_relation_overlay_unsupported", resources: { work: 0, native_bytes: 0 } };
+    }
+    return this.repository.readStatementRelationText(workspaceId, generationId, rootKey, structuredClone(budget));
+  }
+
+  public acceptRelationVector(workspaceId: string, generationId: string, vector: SourceIndexStatementRelationVector): SourceIndexWriteResult;
+  public acceptRelationVector(workspaceId: string, generationId: string, vector: SourceIndexStatementRelationVector,
+    budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  public acceptRelationVector(workspaceId: string, generationId: string, vector: SourceIndexStatementRelationVector,
+    budget?: SourceIndexBudget): SourceIndexWriteResult | SourceIndexGuardedWriteResult {
+    const captured = structuredClone({ workspaceId, generationId, vector, budget });
+    if (this.repository.writeStatementRelationVector === undefined) {
+      return captured.budget === undefined ? { status: "rejected", reason: "incomplete" }
+        : { status: "rejected", reason: "incomplete", resources: { work: 0, native_bytes: 0 } };
+    }
+    return captured.budget === undefined
+      ? this.repository.writeStatementRelationVector(captured.workspaceId, captured.generationId, captured.vector)
+      : this.repository.writeStatementRelationVector(captured.workspaceId, captured.generationId, captured.vector, captured.budget);
   }
 
   /** No caller-provided ready/count flag: storage verifies captured coverage under selection/epoch CAS. */
