@@ -13,9 +13,8 @@ describe("mcp memory tool catalog", () => {
 
     expect(byName.get("soul.recall")?.annotations.readOnlyHint).toBe(false);
     expect(byName.get("soul.recall")?.description).toContain("information index");
-    expect(byName.get("soul.recall")?.description).toContain("not a ranking cutoff");
+    expect(byName.get("soul.recall")?.description).toContain("`max_results` defaults to 10 and sets the page budget");
     expect(byName.get("soul.recall")?.description).toContain("`recent_turn` is ignored for extraction");
-    expect(byName.get("soul.recall")?.description).toContain("does not enqueue Garden work");
     expect(byName.get("soul.recall")?.description).not.toContain("POST_TURN_EXTRACT");
     expect(byName.get("soul.recall")?.description).not.toContain("ranked candidates");
     expect(byName.get("soul.open_pointer")?.annotations.readOnlyHint).toBe(true);
@@ -46,13 +45,15 @@ describe("mcp memory tool catalog", () => {
     expect(byName.has("soul.recall")).toBe(true);
   });
 
-  it("names cap_contracts as required for associative soul.recall", () => {
-    const description = listAlayaMemoryTools().find((tool) => tool.name === "soul.recall")?.description ?? "";
-
-    expect(description).toContain("`cap_contracts`");
-    expect(description).toMatch(/`associative` also requires declared `cap_contracts`/i);
-    expect(description).toMatch(/`native_query` default/);
-    expect(description).toMatch(/absence is incompatible/i);
+  it("advertises minimal recall and how to open listed or ranked source results", () => {
+    const tools = new Map(listAlayaMemoryTools().map(tool => [tool.name, tool]));
+    expect(tools.get("soul.recall")?.description).toContain('Start with soul.recall `{"query": "..."}`.');
+    const description = tools.get("soul.open_pointer")?.description;
+    expect(description).toContain("`member_index[i].source_target` directly");
+    expect(description).toContain("`source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }`");
+    expect(description).toContain("`workspace_id`, `kind`, and `span`");
+    expect(description).toContain("`target.span.content_end` as top-level `start_offset`");
+    expect(description).toContain("Never put a source `root_id` in `object_id`");
   });
 
   it("guards supported tool names", () => {

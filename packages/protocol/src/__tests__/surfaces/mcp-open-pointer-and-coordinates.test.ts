@@ -5,6 +5,7 @@ import {
   SoulMemorySearchRequestSchema,
   SoulOpenPointerRequestSchema,
   SoulOpenPointerResponseSchema,
+  SourceOpenTargetSchema,
   soulToolJsonSchemas
 } from "../../surfaces/mcp-types.js";
 import { deriveJsonSchema } from "../../surfaces/mcp-json-schema.js";
@@ -197,6 +198,27 @@ describe("caller query_coordinates and open_pointer schemas", () => {
     expect(
       SoulOpenPointerRequestSchema.parse({ source_target: sourceTarget, start_offset: 128, byte_budget: 4096 })
     ).toEqual({ source_target: sourceTarget, start_offset: 128, byte_budget: 4096 });
+  });
+
+  it("strips only an echoed source_evidence discriminator and advertises the strict handle", () => {
+    const sourceTarget = { root_kind: "source_record", root_id: "rec-1", source_version: "v1", content_digest: DIGEST };
+    const echoed = { ...sourceTarget, kind: "source_evidence" };
+    const nullPrototype = Object.assign(Object.create(null), echoed);
+    for (const source_target of [echoed, nullPrototype]) {
+      expect(SoulOpenPointerRequestSchema.parse({ source_target })).toEqual({ source_target: sourceTarget });
+    }
+    expect(echoed.kind).toBe("source_evidence");
+    for (const source_target of [
+      { ...echoed, workspace_id: "ws-foreign" },
+      { ...echoed, span: {} },
+      { ...echoed, unexpected: true },
+      { ...echoed, kind: "memory_entry" },
+      Object.assign(Object.create({ inherited: true }), echoed)
+    ]) {
+      expect(SoulOpenPointerRequestSchema.safeParse({ source_target }).success).toBe(false);
+    }
+    expect(SoulOpenPointerRequestSchema.safeParse({ object_id: "mem-1", source_target: echoed }).success).toBe(false);
+    expect(soulToolJsonSchemas["soul.open_pointer"].properties).toHaveProperty("source_target", deriveJsonSchema(SourceOpenTargetSchema));
   });
 
   it("forbids minted object_id on source_evidence open_pointer responses", () => {

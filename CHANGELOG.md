@@ -52,10 +52,17 @@ Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under inva
   nested `query_coordinates`, host-only replay,
   `member_index` `source_target` openability, default `mixed` compatibility, and selective
   `payload_continuation` on relevant `content_complete === false` ranked results.
+- Active `question_time` recall lists displaced and unrestricted overflow roots
+  in first-page `member_index` under a separate allowance. `soul.open_pointer`
+  accepts and strips an echoed `kind: "source_evidence"` in `source_target`.
+  Gateway and daemon guidance show how to pass a listed source handle or build
+  one from a ranked result and continue at its byte offset.
 - **Paired text MCP benchmark sessions:** authorized grants can pin an admitted Turn 1
   from the control arm and verify the identical request digest before applying that
   action against the comparison arm. The paired slice allows 4,096 output tokens
   per attempt and 180 seconds, with three remaining model attempts when sharing Turn 1.
+- Text MCP benchmark prompts ask the consumer to answer from returned evidence
+  once the tool-call budget is exhausted.
 - **Atomic condition-witness unit deferral in `encodeIndexResults`:** requires
   non-first-slot condition-witnessed entries (`evidence_variant.condition` present) to fit
   their full witness span on a shared page whenever a fresh page fits the full witness unit

@@ -184,7 +184,7 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
     expect(cliOutput).toEqual(mcpOutput);
   });
 
-  it("returns the same soul.open_pointer source_target output through MCP and CLI without minting object_id", async () => {
+  it("accepts an echoed source_evidence kind and enforces strict source targets through MCP and CLI", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
     const {
       SqliteEvidenceCapsuleRepo,
@@ -230,6 +230,7 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
       const deps = { ...createDeps(), fieldSource };
       const args = {
         source_target: {
+          kind: "source_evidence",
           root_kind: "source_record",
           root_id: record.record_id,
           source_version: "v1",
@@ -265,6 +266,19 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
         }
       });
       expect(mcpOutput).not.toHaveProperty("object_id");
+      for (const invalid of [{ workspace_id: realHandlerContext.workspaceId }, { span: {} }, { kind: "memory_entry" }]) {
+        const rejectedArgs = { source_target: { ...args.source_target, ...invalid } };
+        const rejectedMcp = await callAlayaMcpMemoryTool(
+          { memoryToolHandler: createMcpMemoryToolHandler(deps), contextProvider: () => realHandlerContext },
+          "soul.open_pointer", rejectedArgs
+        );
+        const invalidTarget = command.argsSchema.safeParse(["call", "soul.open_pointer", JSON.stringify(rejectedArgs)]);
+        if (!invalidTarget.success) throw new Error("CLI args parse failed");
+        const rejectedCli = await command.handler(createContext(), invalidTarget.data);
+        expect(rejectedMcp).toMatchObject({ isError: true, structuredContent: { error: { code: "VALIDATION" } } });
+        expect(rejectedCli.exitCode).toBe(ALAYA_SYSEXITS.DATAERR);
+        expect(rejectedCli.json).toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+      }
     } finally {
       db.close({ optimize: false });
       rmSync(directory, { recursive: true, force: true });

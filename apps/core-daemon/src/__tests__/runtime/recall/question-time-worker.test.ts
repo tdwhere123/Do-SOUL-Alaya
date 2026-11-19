@@ -147,9 +147,10 @@ it("displaces a generation-scoped native prefix with a time root and retains mix
       }
       expect(continuation).toBeNull();
       expect(fixture.prepareQuery.mock.calls).toHaveLength(preparations);
-      return entries;
+      return { first, entries };
     };
-    const baseline = await collect(false), preferred = await collect(true);
+    const { entries: baseline } = await collect(false);
+    const { first: preferredFirst, entries: preferred } = await collect(true);
     const sourceIds = (entries: typeof baseline) => entries.flatMap(entry =>
       entry.target.kind === "source_evidence" ? [entry.target.root_id] : []);
     const original = sourceIds(baseline);
@@ -165,6 +166,22 @@ it("displaces a generation-scoped native prefix with a time root and retains mix
     expect(acquired.navigation).toMatchObject({ domain: "question_time", operator: "source_lexical", native_rank: 2 });
     expect(preferred.filter(entry => entry.target.kind === "source_evidence" && entry.target.root_id !== root("time-only"))
       .every(entry => entry.navigation?.domain === undefined)).toBe(true);
-    expect(original.filter(id => !sourceIds(preferred).includes(id))).toHaveLength(1);
+    const displaced = original.filter(id => !sourceIds(preferred).includes(id));
+    expect(displaced).toHaveLength(1);
+    const widerArgs = { ...request, max_results: 5, interpretation_proposal: proposal };
+    const wider = await call(widerArgs);
+    for (const first of [preferredFirst, wider]) {
+      const rankedRoots = first.results.flatMap(row => row.target.kind === "source_evidence" ? [row.target.root_id] : []);
+      const listedRoots = (first.member_index ?? []).flatMap(line => line.source_target ? [line.source_target.root_id] : []);
+      expect(listedRoots).toEqual(expect.arrayContaining(displaced));
+      expect([...rankedRoots, ...listedRoots].sort()).toEqual(fixture.targets.map(target => target.target.root_id).sort());
+      expect(first.index!.entries).toEqual(preferred.slice(0, first.results.length));
+    }
+    expect(wider.results).toHaveLength(5);
+    const continuation = wider.index!.continuation;
+    expect(continuation).not.toBeNull();
+    const next = await call({ ...widerArgs, continuation });
+    expect(next.index!.entries).toEqual(preferred.slice(5, 5 + next.results.length));
+    expect(next.member_index).toBeUndefined();
   });
 }, 20_000);

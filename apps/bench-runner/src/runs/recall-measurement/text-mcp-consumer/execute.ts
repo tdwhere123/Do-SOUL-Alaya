@@ -129,8 +129,10 @@ async function runTextMcpLoop(input: Readonly<{
       terminal = { outcome: "time_ceiling", model_work: modelWork }; break;
     }
     if (modelCalls >= ceilings.max_model_turns) { terminal = { outcome: "model_turn_ceiling" }; break; }
+    const remainingToolCalls = Math.max(0, ceilings.max_tool_calls - mcpDispatches);
     const encoded = encodeTextMcpRequest({
-      surface, query, events, ...textMcpPromptOptions(input.input)
+      surface, query, events, ...textMcpPromptOptions(input.input),
+      ...(remainingToolCalls === 0 ? { remaining_tool_calls: 0 } : {})
     });
     if (textMcpUtf8Bytes(encoded) > ceilings.max_input_bytes) { terminal = { outcome: "input_ceiling" }; break; }
     const gatewayBody = bindTextMcpGatewayBody(encoded);

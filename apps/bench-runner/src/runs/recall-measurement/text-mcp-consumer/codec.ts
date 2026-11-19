@@ -41,6 +41,7 @@ export function encodeTextMcpRequest(input: Readonly<{
   events: readonly Record<string, unknown>[];
   caller_capability_profile?: TextMcpCallerCapabilityProfile;
   question_date?: string;
+  remaining_tool_calls?: number;
 }>): TextMcpEncodedRequest {
   const surface = projectLiveSurfaceForCaller(input.surface, input.caller_capability_profile);
   const systemPrompt = [
@@ -56,9 +57,12 @@ export function encodeTextMcpRequest(input: Readonly<{
     TEXT_MCP_ACTION_PROTOCOL
   ].join("\n");
   const dated = input.question_date === undefined ? [] : [`Current date: ${input.question_date}`];
+  const toolBudget = input.remaining_tool_calls === 0
+    ? ['TOOL_BUDGET_STATUS: No tool calls remain (0 remaining). Answer now from the evidence already returned using {"action":"answer","text":"..."}; state uncertainty if needed.']
+    : [];
   return {
     systemPrompt,
-    userPrompt: [...dated, "CALLER_QUERY:", input.query, "EVENTS:", formatEvents(input.events)].join("\n")
+    userPrompt: [...dated, "CALLER_QUERY:", input.query, ...toolBudget, "EVENTS:", formatEvents(input.events)].join("\n")
   };
 }
 

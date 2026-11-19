@@ -255,6 +255,28 @@ it("two-turn read then answer binds exact transcript wire, two reservations, and
   expect(received).toHaveLength(2);
 }, 180000);
 
+it.each([false, true])("discloses the exhausted tool grant on the provider wire (host setup=%s)", async hostSetup => {
+  const fixture = issue(`exhausted-${hostSetup}`, { hostIssuedInitialRecall: hostSetup, maxToolCalls: 1 });
+  if (!hostSetup) answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));
+  answers.push(JSON.stringify({ action: "answer", text: "from-returned-evidence" }));
+  const result = await consumeTextMcpProviderSession({
+    grantPin: fixture.pin, mode: "execute", consumer: consumerOf(fixture)
+  }, dependencies(fixture.selected));
+  expect(result.failure).toBeNull();
+  expect(result.turns.at(-1)?.terminal).toMatchObject({
+    outcome: { status: "answer", action: { kind: "answer", text: "from-returned-evidence" } }
+  });
+  expect(result.mcp_dispatches).toBe(1);
+  expect(received).toHaveLength(hostSetup ? 1 : 2);
+  if (!hostSetup) expect(received[0]!.body).toBe(expectedBody([], result.live_surface!, fixture.selected));
+  const call = result.events.find(event => event.kind === (hostSetup ? "host_setup" : "mcp_call"))!;
+  expect(call.response_state).toBe("received");
+  const exhaustedRequest = JSON.parse(received.at(-1)!.body);
+  const userPrompt = exhaustedRequest.messages.find((message: { role: string }) => message.role === "user").content;
+  expect(userPrompt).toContain('TOOL_BUDGET_STATUS: No tool calls remain (0 remaining). Answer now from the evidence already returned using {"action":"answer","text":"..."}; state uncertainty if needed.\nEVENTS:');
+  expect(userPrompt).toContain(canonicalJson(call.envelope));
+}, 180000);
+
 it("unknown usage and caller cancellation prevent the second turn", async () => {
   const unknown = issue("unknown-usage");
   answers.push(JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }));

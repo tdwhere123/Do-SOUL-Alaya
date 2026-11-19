@@ -118,7 +118,7 @@ describe("soul.open_pointer source_target boundary", () => {
     const nextOffset = firstParsed.content.span!.content_end;
     const second = await handler.call({
       toolName: "soul.open_pointer",
-      arguments: { source_target: target, start_offset: nextOffset, byte_budget: 65536 },
+      arguments: { source_target: { ...target, kind: "source_evidence" }, start_offset: nextOffset, byte_budget: 65536 },
       context: ctx
     });
     expect(second.ok).toBe(true);
@@ -155,12 +155,14 @@ describe("soul.open_pointer source_target boundary", () => {
     });
     expect(foreignDenied).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
 
-    const spoofRejected = await handler.call({
-      toolName: "soul.open_pointer",
-      arguments: { source_target: { ...currentTarget, workspace_id: WORKSPACE_A } },
-      context: { workspaceId: WORKSPACE_B, runId: "run-b", agentTarget: "codex", sessionId: "s-b" }
-    });
-    expect(spoofRejected).toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    for (const invalid of [{ workspace_id: WORKSPACE_A }, { span: {} }, { kind: "memory_entry" }]) {
+      const rejected = await handler.call({
+        toolName: "soul.open_pointer",
+        arguments: { source_target: { ...currentTarget, kind: "source_evidence", ...invalid } },
+        context: { workspaceId: WORKSPACE_B, runId: "run-b", agentTarget: "codex", sessionId: "s-b" }
+      });
+      expect(rejected).toMatchObject({ ok: false, error: { code: "VALIDATION" } });
+    }
 
     const ctxA = { workspaceId: WORKSPACE_A, runId: "run-a", agentTarget: "codex", sessionId: "s-a" };
     const staleDenied = await handler.call({

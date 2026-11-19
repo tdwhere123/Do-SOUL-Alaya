@@ -67,8 +67,11 @@ export function materializeTextMcpProviderSessionRequest(input: Readonly<{
   events: readonly Record<string, unknown>[];
 } & TextMcpPromptOptions>): Omit<TextMcpProviderSessionLine, "turn"> {
   const prompt = textMcpPromptOptions(input);
+  const usedToolCalls = input.events.filter(event => event.kind === "host_setup" || event.kind === "mcp_call").length;
+  const remainingToolCalls = Math.max(0, input.grant.limits.max_tool_calls - usedToolCalls);
   const encoded = encodeTextMcpRequest({
-    surface: input.surface, query: input.query, events: input.events, ...prompt
+    surface: input.surface, query: input.query, events: input.events, ...prompt,
+    ...(remainingToolCalls === 0 ? { remaining_tool_calls: 0 } : {})
   });
   if (textMcpUtf8Bytes(encoded) > input.grant.limits.max_input_bytes) {
     throw new AlayaError("CONFLICT", "session request exceeds granted input byte ceiling");

@@ -142,7 +142,15 @@ export {
 export const SoulOpenPointerRequestSchema = z
   .object({
     object_id: BoundedIdSchema.optional(),
-    source_target: SourceOpenTargetSchema.optional(),
+    source_target: z.preprocess((raw: unknown) => {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+      const prototype: unknown = Object.getPrototypeOf(raw);
+      if (prototype !== Object.prototype && prototype !== null) return raw;
+      const record = raw as Record<string, unknown>;
+      if (!Object.hasOwn(record, "kind") || record.kind !== "source_evidence") return raw;
+      const { kind, ...target } = record;
+      return target;
+    }, SourceOpenTargetSchema).optional(),
     start_offset: NonNegativeIntSchema.optional(),
     byte_budget: z.number().int().min(1).max(65536).optional()
   })

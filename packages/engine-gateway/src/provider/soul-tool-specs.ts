@@ -54,7 +54,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.open_pointer",
     description:
-      "WHEN: a recall result preview or `member_index` entry is insufficient and you need the full content before citing it. Open a recalled memory/evidence pointer by `object_id`, or open a `member_index` source root by `source_target` with optional `start_offset` and `byte_budget` (`<= 65536` bytes). Read-only.",
+      "Open a recalled memory or evidence object by `object_id` before citing it. For a source root, pass `member_index[i].source_target` directly or construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from a ranked `source_evidence` target. Omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset`. Never put a source `root_id` in `object_id`. Optional `byte_budget` is at most 65536 bytes. Read-only.",
     parametersSchema: SoulOpenPointerRequestSchema
   },
   {

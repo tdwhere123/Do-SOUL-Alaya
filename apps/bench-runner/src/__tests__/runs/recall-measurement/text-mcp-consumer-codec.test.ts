@@ -77,6 +77,20 @@ it("encodes live instructions and the diagnostic restriction without clipping en
   );
 });
 
+it("discloses zero remaining tool calls immediately before events and preserves other prompt bytes", () => {
+  const input = { surface, query: "Which project?", events: [] };
+  const initial = encodeTextMcpRequest(input);
+  expect(initial.userPrompt).toBe("CALLER_QUERY:\nWhich project?\nEVENTS:\n(none)");
+  expect(encodeTextMcpRequest({ ...input, remaining_tool_calls: 1 })).toEqual(initial);
+  const exhausted = encodeTextMcpRequest({ ...input, remaining_tool_calls: 0 });
+  expect(exhausted.systemPrompt).toBe(initial.systemPrompt);
+  expect(exhausted.userPrompt).toBe([
+    "CALLER_QUERY:", input.query,
+    'TOOL_BUDGET_STATUS: No tool calls remain (0 remaining). Answer now from the evidence already returned using {"action":"answer","text":"..."}; state uncertainty if needed.',
+    "EVENTS:", "(none)"
+  ].join("\n"));
+});
+
 it("refuses gold fields on the consumer input and remote model execution without a grant", async () => {
   const ceilings = { max_model_turns: 1, max_tool_calls: 0, max_input_bytes: 100, max_output_bytes: 100, wall_ms: 1000 };
   expect(TextMcpConsumerInputSchema.safeParse({

@@ -179,7 +179,16 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   `byte_budget <= 65536`), enforcing currentness, digest, and erasure without
   minting a memory ID. The worker reads structural neighbors from up to sixteen
   delivered or pool anchors at the pinned clock. This bounded listing runs
-  after page fit and has its own work and memory allowance.
+  after page fit and has its own work and memory allowance. With active
+  `question_time`, the overflow lists displaced original roots before resuming
+  the unrestricted candidate lanes.
+  Pass `member_index[i].source_target` directly to `soul.open_pointer`. For a
+  ranked `source_evidence` result, build `source_target` from `root_kind`,
+  `root_id`, `source_version`, `content_digest`, and `evidence_object_id`.
+  Omit `workspace_id`, `kind`, and `span`. An echoed `kind: "source_evidence"`
+  is accepted and stripped at ingress. When `target.span.content_complete` is
+  false, pass `target.span.content_end` as top-level `start_offset`. Reserve
+  `object_id` for memory or evidence objects.
 - **Consumer protocol compatibility:** `RECALL_CONSUMER_PROTOCOL_VERSION` (`1`)
   accepts default `mixed` calls directly; callers unable to parse
   `source_evidence` must pass `result_kind_view: "memory_only"`.

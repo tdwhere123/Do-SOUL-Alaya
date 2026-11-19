@@ -1,7 +1,10 @@
-import type { QuestionTimePreference, SourceIndexAcquisitionResult, SourceIndexLexicalCandidate,
-  SourceIndexNominationAccounting, SourceIndexQueryRepository, SourceIndexQueryResources, SourceIndexTarget,
-  SourceSemanticNominationOccurrence, SourceSemanticResourceLedger, QualifiedTaskObservation } from "@do-soul/alaya-protocol";
-import { sourceIndexNativeRootKey } from "@do-soul/alaya-protocol";
+import {
+  SourceSemanticResourceExhausted, SourceSemanticResourceLedger, sourceIndexNativeRootKey,
+  type QuestionTimePreference, type SourceIndexAcquisitionResult, type SourceIndexLexicalCandidate,
+  type SourceIndexNominationAccounting, type SourceIndexQueryAdmission, type SourceIndexQueryRepository,
+  type SourceIndexQueryResources, type SourceIndexScopeAdmission, type SourceIndexTarget,
+  type SourceIndexVectorBinding, type SourceSemanticNominationOccurrence, type QualifiedTaskObservation
+} from "@do-soul/alaya-protocol";
 
 /** The window dates the asked event. A past event is recorded at or after its start and never after the
  * question clock, so the recorded-time domain is [earliest start, clock date]; a window wholly after the
@@ -81,4 +84,66 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
       ...input.occurrences.filter(row => nominations.has(sourceIndexNativeRootKey(row.source))));
   }
   return lexical !== undefined && lexical.completion !== "complete";
+}
+
+export type QuestionTimeIndexMemberPrefix = Readonly<{
+  unrestrictedLexical: readonly { source: SourceIndexTarget }[];
+  unrestrictedVector: readonly { source: SourceIndexTarget }[];
+  cursor: Readonly<{ lexicalIndex: number; vectorIndex: number; takeLexical: boolean }>;
+  originalPrefix: readonly (readonly [string, SourceIndexTarget])[];
+}>;
+
+/** Use the saved native order and the final ranked set. Tail reads share the pinned snapshot
+ * but only spend the listing allowance. */
+export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberPrefix & Readonly<{
+  targetCount: number;
+  maxExtraAttempts: number;
+  nominationKeys: Iterable<string>;
+  indexMemberKeys: ReadonlySet<string>;
+  indexMembers: readonly SourceIndexTarget[];
+  retainIndexMember: (key: string, source: SourceIndexTarget) => void;
+  repository: SourceIndexQueryRepository;
+  vectorBinding: SourceIndexVectorBinding | null;
+  unboundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
+  boundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
+  admitScope: SourceIndexScopeAdmission;
+}>): void {
+  const { unrestrictedLexical, unrestrictedVector, indexMembers, targetCount, retainIndexMember } = input;
+  const seen = new Set([...input.nominationKeys, ...input.indexMemberKeys]);
+  for (const [key, source] of input.originalPrefix) {
+    if (indexMembers.length >= targetCount) return;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    retainIndexMember(key, source);
+  }
+  if (indexMembers.length >= targetCount || input.maxExtraAttempts === 0) return;
+  const listingMeter = new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
+  let { lexicalIndex, vectorIndex, takeLexical } = input.cursor;
+  try {
+    for (let extraAttempts = 0; extraAttempts < input.maxExtraAttempts && indexMembers.length < targetCount
+      && (lexicalIndex < unrestrictedLexical.length || vectorIndex < unrestrictedVector.length); extraAttempts++) {
+      const lexicalTurn: boolean = lexicalIndex < unrestrictedLexical.length && (takeLexical || vectorIndex >= unrestrictedVector.length);
+      takeLexical = !lexicalTurn;
+      const { source } = lexicalTurn ? unrestrictedLexical[lexicalIndex++]! : unrestrictedVector[vectorIndex++]!;
+      listingMeter.charge(1, 0, "index member tail attempt");
+      const key = sourceIndexNativeRootKey(source);
+      if (seen.has(key)) continue;
+      const admissions = lexicalTurn ? input.unboundAdmissions : input.boundAdmissions;
+      let admission = admissions.get(source.root_key);
+      if (admission !== undefined) {
+        listingMeter.charge(1, 0, "index member admission reuse");
+      } else {
+        admission = input.repository.admitQueryCandidate(source, lexicalTurn ? null : input.vectorBinding, listingMeter.remaining());
+        listingMeter.charge(admission.resources.work, admission.resources.memory_bytes, "index member candidate admission");
+      }
+      if (admission.status === "resource_limited") break;
+      if (admission.status !== "ready") continue;
+      listingMeter.charge(1 + (admission.scope_class?.length ?? 0), 0, "index member scope admission");
+      if (input.admitScope(admission.scope_class, source) !== "admitted") continue;
+      seen.add(key);
+      retainIndexMember(key, source);
+    }
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+  }
 }

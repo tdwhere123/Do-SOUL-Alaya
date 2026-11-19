@@ -11,7 +11,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { preferQuestionTime, recordedQuestionTime, type SourcePreferenceRetention } from "./question-time-preference.js";
+import { collectQuestionTimeIndexMembers, preferQuestionTime, recordedQuestionTime,
+  type QuestionTimeIndexMemberPrefix, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { collapseStatementCandidates, evidenceWindow, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
   type StatementAssociation } from "./statement-association.js";
@@ -154,7 +155,7 @@ class AcquisitionQuery {
   public questionTimeOrder?: readonly string[];
   public association?: StatementAssociation;
   public prepaidBaseBytes?: number;
-  /** Admitted roots refused only by the root limit, in attempt order; listed, never nominated. */
+  /** Admitted overflow in native order, including roots displaced by question-time preference. */
   public readonly indexMembers: SourceIndexTarget[] = [];
   private readonly indexMemberKeys = new Set<string>();
   private readonly statements?: StatementKeyRetention;
@@ -183,6 +184,8 @@ class AcquisitionQuery {
   capturedNative() { return { lexical: this.lexicalCandidates, vector: this.vectorCandidates, binding: this.vectorBinding }; }
 
   run(captureOnly = false): SourceIndexAcquisitionResult {
+    const targetCount = this.capture?.indexMembers ?? 0;
+    let listing: QuestionTimeIndexMemberPrefix | undefined;
     try {
       // Result envelope and per-nomination output references are admitted before discovery can exhaust the ledger.
       const envelope = acquisitionResultEnvelopeCost(this.input.allowance.max_roots);
@@ -194,8 +197,9 @@ class AcquisitionQuery {
       if (this.control !== "lexical") this.scanVectors();
       this.stage = "nomination";
       if (!captureOnly) {
-        this.nominateRetainedRoots();
+        const prefix = this.nominateRetainedRoots(targetCount);
         this.associateStatementWitnesses();
+        listing = prefix;
       }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -207,6 +211,14 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
+    if (this.timeRoute && listing !== undefined) collectQuestionTimeIndexMembers({
+      ...listing, targetCount,
+      maxExtraAttempts: Math.max(0, this.input.allowance.max_attempts - this.counts.attempted),
+      nominationKeys: this.nominations.keys(), indexMembers: this.indexMembers, indexMemberKeys: this.indexMemberKeys,
+      retainIndexMember: (key, source) => this.retainIndexMember(key, source),
+      repository: this.repository, vectorBinding: this.vectorBinding, admitScope: this.admitScope,
+      unboundAdmissions: this.unboundAdmissions, boundAdmissions: this.boundAdmissions
+    });
     const result = this.result();
     this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
       lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
@@ -230,7 +242,7 @@ class AcquisitionQuery {
     observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact));
   }
 
-  private nominateRetainedRoots(): void {
+  private nominateRetainedRoots(targetCount: number): QuestionTimeIndexMemberPrefix | undefined {
     const preference = this.input.question_time;
     const cursor = { lexicalIndex: 0, vectorIndex: 0, takeLexical: true };
     // Secure the original prefix before optional time reads can exhaust resources.
@@ -249,7 +261,13 @@ class AcquisitionQuery {
       reason: preference === undefined ? this.originalQuestionTime === undefined ? "question_time_not_proposed" : "question_time_no_recorded_domain"
         : domain?.status === "unavailable" ? domain.reason : domain === undefined ? "question_time_reader_unavailable" : "question_time_domain_empty",
       restrictedComplete: true, original: [...this.nominations.entries()], nominations: this.nominations, result: this.result() }));
-    if (active) this.preferActiveQuestionTime(preference!, nativePending);
+    if (!active) return undefined;
+    const listing = targetCount > 0 ? {
+      unrestrictedLexical: this.lexicalCandidates, unrestrictedVector: this.vectorCandidates, cursor: { ...cursor },
+      originalPrefix: [...this.nominations.entries()].map(([key, row]) => [key, row.source] as const)
+    } : undefined;
+    this.preferActiveQuestionTime(preference!, nativePending);
+    return listing;
   }
 
   private preferActiveQuestionTime(preference: QuestionTimePreference, nativePending: boolean): void {

@@ -221,9 +221,12 @@ it("stops at input, output, and tool ceilings without extra model or MCP dispatc
   const toolCeiling = await executeTextMcpConsumer(input("tool-ceiling", {
     ceilings: { ...CEILINGS, max_tool_calls: 0 }
   }), {
-    complete: () => ({
-      text: JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }), finishReason: "stop"
-    })
+    complete: request => {
+      expect(request.userPrompt).toContain("TOOL_BUDGET_STATUS: No tool calls remain (0 remaining).");
+      return {
+        text: JSON.stringify({ action: "read", tool: "soul.recall", arguments: recallArgs }), finishReason: "stop"
+      };
+    }
   });
   expect(toolCeiling.terminal).toEqual({ outcome: "tool_call_ceiling" });
   expect(toolCeiling.consumer_model_calls).toBe(1);
