@@ -18,13 +18,13 @@ versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `4.0.1`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
 
-Engine Gateway `4.0.1` records a **SemVer patch** under invariant §25 (no MCP JSON schema change):
+Engine Gateway `4.0.1` records a **SemVer patch** under invariant §25 (description-only MCP surface update, no JSON schema change):
 - **Caller-coordinate & pointer-resume guidance (`@do-soul/alaya-engine-gateway` `4.0.1`):**
-  updates `SOUL_RECALL_CALLER_GUIDANCE[2]` (preserving the single-line `Optional caller coordinates on soul.recall ` prefix for `plain_query` stripping) with a concrete `query_coordinates` JSON example showing `evidence_conditions` and `evidence_relation: "derived"` alongside `question_time`, and tightens `soul.open_pointer` descriptions across gateway specs and the daemon tool catalog to resume truncated (`target.span.content_complete === false`) results at `target.span.content_end` instead of offset `0` and avoid reopening already-complete (`content_complete === true`) ranked results.
-- **`preferQuestionTime` pool-tail retention & `selectEvidenceWitnesses` literal slot exchange:**
-  `preferQuestionTime` softly prioritizes in-window roots while reserving tail capacity in the 16-root pool so the original five-slot head is not evicted out of `in_pool` by date-restricted lexical fills, and `selectEvidenceWitnesses` exchanges injected out-of-top-5 condition tops with their displaced head slots in the non-variant tail while keeping `evidence_relation: "derived"` rank `2–5` complementary witnesses directly after slot 5.
+  updates `SOUL_RECALL_CALLER_GUIDANCE[2]` (preserving the single-line `Optional caller coordinates on soul.recall ` prefix for `plain_query` stripping) with a concrete `query_coordinates` JSON example showing `evidence_conditions` and `evidence_relation: "derived"` alongside `question_time`, and tightens `soul.open_pointer` descriptions across gateway specs and the daemon tool catalog to resume truncated (`target.span.content_complete === false`) results at `target.span.content_end` instead of offset `0` and avoid reopening already-read ranges or fully delivered (`content_start === 0` and `content_complete === true`) ranked results.
 
-Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under invariant §25:
+Protocol `43.0.0` and Engine Gateway `4.0.0` record **SemVer majors** under invariant §25 (`ORDINARY_NATIVE_FIELD_RESULT_VERSION` remains `"ordinary-native-field.v16"`):
+- **`preferQuestionTime` pool-tail retention & `selectEvidenceWitnesses` literal slot exchange (Protocol `43.0.0`):**
+  `preferQuestionTime` checks domain membership by indexed `source.root_key`, preserves original rank provenance without double-counting re-admitted original roots, and reserves tail capacity in the 16-root pool so the original five-slot head is not evicted out of `in_pool` by date-restricted lexical fills; `selectEvidenceWitnesses` exchanges injected out-of-top-5 condition tops with their displaced head slots (paired by original source order) in the non-variant tail while keeping `evidence_relation: "derived"` rank `2–5` complementary witnesses directly after slot 5.
 - **Minimal recall call:** MCP and CLI accept `{"query":"..."}` with a ten-result page
   budget and null scope, dimension, and domain-tag filters. A non-null dimension
   or non-empty tag list filters curated memory entries and excludes source evidence.

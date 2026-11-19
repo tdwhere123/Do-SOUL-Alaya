@@ -31,9 +31,9 @@ const userText = `${"earlier detail ".repeat(3)}${excerpt} ${"later detail ".rep
 const assistantText = "needle repair tool";
 const body = `user: ${userText}\nassistant: ${assistantText}\n`;
 const originals = Array.from({ length: 16 }, (_, index) => ({ id: `original-${index}`,
-  message: index === 0 ? userText : `${query} ordinary memory ${index}.`,
-  text: index === 0 ? body : `user: ${query} ordinary memory ${index}.\n`,
-  eventTime: "2026-09-08T00:00:00.000Z", vector: [1, 0, 0] }));
+  message: index === 15 ? userText : index < 5 ? `${`${query} `.repeat(4)}ordinary memory ${index}.` : `${query} ordinary memory ${index}.`,
+  text: index === 15 ? body : index < 5 ? `user: ${`${query} `.repeat(4)}ordinary memory ${index}.\n` : `user: ${query} ordinary memory ${index}.\n`,
+  eventTime: "2026-09-08T00:00:00.000Z", vector: index === 15 ? [-1, 0, 0] : [1, 0, 0] }));
 const preferred = Array.from({ length: 16 }, (_, index) => ({ id: `preferred-${index}`,
   message: `${query} dated event ${index}. ${"noise ".repeat(100)}`,
   text: `user: ${query} dated event ${index}. ${"noise ".repeat(100)}\n`,
@@ -115,7 +115,7 @@ async function checkBudgetFallback(fixture: IndexFixture, source: SourceIndexTar
 
 it("binds a raw observation outside the nominated statement and delivers it through the real Worker and MCP", async () => {
   await withIndexedSources(sources, async fixture => {
-    const selected = await selectedTaskSource(fixture, { sourceId: "original-0", body, observedAt: originals[0]!.eventTime,
+    const selected = await selectedTaskSource(fixture, { sourceId: "original-15", body, observedAt: originals[15]!.eventTime,
       query, selectedFrame: "repair", evidence: true,
       frames: [{ id: "repair", text: excerpt, predicate: "repaired", roles: [{ id: "tool", text: "silver wrench" }] }],
       roles: [{ id: "tool", queryExcerpt: "tool" }] });
@@ -132,7 +132,7 @@ it("binds a raw observation outside the nominated statement and delivers it thro
       if (!output.ok) throw new Error(JSON.stringify(output.error));
       return SoulMemorySearchResponseSchema.parse(output.output);
     };
-    const source = fixture.targets.find(row => row.source_id === "original-0" && row.auxiliary === undefined)!;
+    const source = fixture.targets.find(row => row.source_id === "original-15" && row.auxiliary === undefined)!;
     const input = { query, interpretation_clock: CLOCK, question_time: questionTime, ...selected.selection, sources: [selected.source] };
     const formed = interpretSourceTaskObservationSourceLocalDecoded(input,
     { rawJson: JSON.stringify({ observations: [{ source_ref: "source1", source_excerpt: excerpt, query_excerpt: query,
@@ -169,7 +169,7 @@ it("binds a raw observation outside the nominated statement and delivers it thro
     expect(ids(delivered).slice(1)).toEqual(ids(baseline).slice(0, 4));
     expect(delivered.index!.entries[0]!.navigation?.task_observation).toMatchObject({ semantic_status: "unreviewed",
       world_claim: "unknown", temporal_relation: "unavailable", observation: { source: source.target,
-        source_observed_at: originals[0]!.eventTime, source_excerpt: observation.source_excerpt } });
+        source_observed_at: originals[15]!.eventTime, source_excerpt: observation.source_excerpt } });
     const visible = delivered.results[0]!;
     expect(delivered.index!.entries[0]!.navigation?.location).toEqual({
       start_byte: nominated!.auxiliary!.source_span[0], end_byte: nominated!.auxiliary!.source_span[1] });
@@ -212,10 +212,10 @@ it("binds a raw observation outside the nominated statement and delivers it thro
     const environment = storageFixture(join(directory, "alaya.db"));
     try {
       for (const source of sources) {
-        const messages = source.id === "original-0" ? [{ role: "user", text: source.message },
+        const messages = source.id === "original-15" ? [{ role: "user", text: source.message },
           { role: "assistant", text: assistantText }] : [{ role: "user", text: source.message }];
         const input = publishMessages(environment, messages, source.id, WS, source.eventTime, "project");
-        if (source.id === "original-0") publishStatement(environment, input, "assistant-discovery", 1,
+        if (source.id === "original-15") publishStatement(environment, input, "assistant-discovery", 1,
           { statement: { text: assistantText, relation: "reported event" } });
       }
     } finally { environment.database.close({ optimize: false }); }

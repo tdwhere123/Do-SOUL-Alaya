@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { QuestionTimePreference } from "@do-soul/alaya-protocol";
+import { prepareSourceIndexDocument, type QuestionTimePreference } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import { recordedQuestionTime } from "../../source-index/question-time-preference.js";
-import { fixture, configuration, fieldSha256, WORKSPACE, type Fixture } from
+import { fixture, configuration, fieldSha256, WORKSPACE, BUDGET, type Fixture } from
   "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { publishMessages, publishStatement } from
+  "../../../../storage/src/__tests__/repos/source-index/source-template-fixture.js";
 import { publishIndex, queryInput, query, admitScope, expectBounded } from "./source-index-acquisition-fixture.js";
 
 const opened: Fixture[] = [];
@@ -145,19 +147,50 @@ describe("question time bounded preference through SQLite acquisition", () => {
     const baseline = query(env, input, admitScope);
     const originalHead = ids(baseline).slice(0, 5);
     expect(originalHead).toHaveLength(5);
-    expect(originalHead.every(id => id.startsWith("out-"))).toBe(true);
+    expect(originalHead.every(id => id?.startsWith("out-") === true)).toBe(true);
     const timed = env.index.readLexicalCandidates(WORKSPACE, "needle", 128, input.budget, preference);
     expect(timed.candidates.length).toBeGreaterThanOrEqual(16);
     const preferred = query(env, { ...input, question_time: preference }, admitScope);
     expectBounded(preferred, input);
     expect(preferred.nominations).toHaveLength(16);
     const preferredIds = ids(preferred);
-    expect(preferredIds.slice(0, 11).every(id => id.startsWith("win-"))).toBe(true);
+    expect(preferredIds.slice(0, 11).every(id => id?.startsWith("win-") === true)).toBe(true);
     expect(preferredIds.slice(11)).toEqual(originalHead);
     const capture = env.database.connection.transaction(() => new SourceIndexAcquisition(env.index, fieldSha256)
       .nominateWithWitness({ ...input, question_time: preference }, admitScope))();
     expect(capture.question_time_order).toEqual(capture.result.nominations.map(row => row.source.root_key));
     expect(ids(capture.result)).toEqual(preferredIds);
+  });
+
+  it("matches auxiliary statement root keys in question-time domain without double-counting admissions or dropping provenance", () => {
+    const env = fixture(); opened.push(env);
+    const published = publishMessages(env, [{ role: "user", text: "unrelated body" }], "aux-only", WORKSPACE,
+      "2020-01-02T12:00:00.000Z", "project");
+    publishStatement(env, published, "stmt-1", 0, { statement: { text: "needle a", relation: "fact" } });
+    const config = configuration({ window_bytes: 4096, max_input_tokens: 4096 });
+    const generation = env.index.begin(env.index.select(WORKSPACE, config));
+    env.index.capturePage(WORKSPACE, generation.generation_id, 128, BUDGET);
+    for (const source of env.index.listTargets(WORKSPACE, generation.generation_id, null, 128)) {
+      if (source.auxiliary === undefined) continue;
+      const read = env.index.readDocument(WORKSPACE, generation.generation_id, source.root_key, 65_536, BUDGET);
+      if (read.status !== "ready") throw new Error(read.reason);
+      const doc = prepareSourceIndexDocument({ source, body: read.body, profile: config.profile }, fieldSha256);
+      expect(env.index.writeDocument(WORKSPACE, generation.generation_id, doc, BUDGET).status).toBe("accepted");
+      for (const window of doc.windows) {
+        env.index.writeVector(WORKSPACE, generation.generation_id, {
+          window_id: window.window_id, input_digest: window.content_digest,
+          embedding: new Float32Array([-1, 0, 0]), token_count: 2, truncated: false
+        });
+      }
+    }
+    env.index.activate(WORKSPACE, generation.generation_id);
+    const input = queryInput(config, { allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 4096 } });
+    const capture = env.database.connection.transaction(() => new SourceIndexAcquisition(env.index, fieldSha256)
+      .nominateWithWitness({ ...input, question_time: preference }, admitScope))();
+    expect(capture.result.nominations).toHaveLength(1);
+    expect(capture.result.accounting).toMatchObject({ attempted: 2, admitted: 1, duplicate: 1 });
+    expect(capture.result.nominations[0]!.lexical).toHaveLength(2);
+    expect(capture.result.nominations[0]!.lexical[1]).toMatchObject({ domain: "question_time", rank: 1 });
   });
 
   it("retains fallback when time lexical admission runs out of resources", () => {

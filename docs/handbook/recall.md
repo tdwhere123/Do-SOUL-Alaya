@@ -147,7 +147,8 @@ per-root/message speaker, segmented v2 anchor tokens, and optional
 vs `possible` witnesses). Navigation fixes slot 1 and injects out-of-top-5
 condition tops into slots `5..2` only when doing so strictly improves
 `(covered_tops, covered_any_witnesses)`, exchanging positions with their
-displaced head slots in the non-variant tail; `evidence_relation: "derived"`
+displaced head slots (paired by original source order) in the non-variant tail;
+`evidence_relation: "derived"`
 still appends rank `2–5` complementary witness roots directly after slot 5 as
 `evidence_variant` message-span deliveries. Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for
@@ -190,9 +191,11 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   `root_id`, `source_version`, `content_digest`, and `evidence_object_id`.
   Omit `workspace_id`, `kind`, and `span`. An echoed `kind: "source_evidence"`
   is accepted and stripped at ingress. When `target.span.content_complete` is
-  false, `soul.open_pointer` resumes at `target.span.content_end` (as top-level
-  `start_offset`) rather than offset `0`, and skips already-complete
-  (`content_complete: true`) ranked results. Reserve
+  false, callers pass `target.span.content_end` as top-level `start_offset`
+  rather than rereading from `0`, and avoid reopening already-read ranges or
+  ranked results with `content_start === 0` and `content_complete === true` (a
+  prefix before `content_start > 0` remains openable from offset `0` when
+  context requires it). Reserve
   `object_id` for memory or evidence objects.
 - **Consumer protocol compatibility:** `RECALL_CONSUMER_PROTOCOL_VERSION` (`1`)
   accepts default `mixed` calls directly; callers unable to parse

@@ -124,8 +124,8 @@ it("keeps today's order without conditions and injects a late typed witness whil
   expect(sourceOrder(env, plain, CONDITIONS)).toEqual(baseline);
   const prepared = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   expect(sourceOrder(env, prepared)).toEqual(baseline);
-  // Round 4 tops statement two at slot 5 and is protected; round 6 replaces round 3, which follows at slot 6.
-  const expected = [roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]];
+  // Round 4 tops statement two at slot 5 and is protected; round 6 replaces round 3 and exchanges into its former tail slot.
+  const expected = [roots[0], roots[1], roots[2], roots[6], roots[4], roots[5], roots[3]];
   expect(sourceOrder(env, prepared, CONDITIONS)).toEqual(expected);
   // Membership is unchanged: no root leaves the order.
   expect(new Set(expected)).toEqual(new Set(roots));
@@ -137,7 +137,11 @@ it("keeps today's order without conditions and injects a late typed witness whil
   // stays a necessary witness; round 4 is undated, so condition two has only possible witnesses and no top.
   const timed = sourceOrder(env, prepared, undefined, true);
   expect(timed.slice(0, 5)).not.toContain(roots[6]);
-  expect(sourceOrder(env, prepared, CONDITIONS, true)).toEqual([...timed.slice(0, 4), roots[6], ...timed.slice(4).filter(root => root !== roots[6])]);
+  const timedExpected = [...timed];
+  const r6At = timed.indexOf(roots[6]!);
+  timedExpected[4] = roots[6]!;
+  timedExpected[r6At] = timed[4]!;
+  expect(sourceOrder(env, prepared, CONDITIONS, true)).toEqual(timedExpected);
   expect(sourceOrder(env, prepared, [CONDITIONS[1]!], true)).toEqual(timed);
 
   const nominated = env.database.connection.transaction(() => nominateNativeSources(env.database,
@@ -168,8 +172,10 @@ it("opens every witnessing root at its witness message and keeps its prefix reac
     expect(text).toContain(`Round ${roots.indexOf(root)}: I planted bed ${roots.indexOf(root)}.`);
     expect(text).not.toContain("Noted.");
   }
-  // The derived relation moves no further root here; its variants open at the same messages.
-  expect(derived).toEqual(opened);
+  // Derived places rank 2-5 complementary variants immediately after slot 5; every root opens at the same witness message.
+  expect(derived.slice(0, 5)).toEqual(opened.slice(0, 5));
+  expect(derived.map(row => row.root)).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]]);
+  expect(new Map(derived.map(row => [row.root, row.span]))).toEqual(new Map(opened.map(row => [row.root, row.span])));
   // The prefix before an opening is one explicit range away.
   const initial = request(env, readers, CONDITIONS), first = env.database.connection.transaction(() => runConditionalFieldRecallWithReceipt(initial))();
   const target = first.index.entries.find(row => row.target.kind === "source_evidence")!.target;
@@ -318,7 +324,7 @@ it("delivers the same permutation through the built worker under the production 
   const covered = await prepare(STATEMENTS);
   const readers = createConditionalFieldObserverReaders(env.database, [], covered.vector, undefined, "allowance", covered.evidence);
   const expected = sourceOrder(env, readers, CONDITIONS);
-  expect(expected).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[3], roots[5]]);
+  expect(expected).toEqual([roots[0], roots[1], roots[2], roots[6], roots[4], roots[5], roots[3]]);
 
   process.execArgv.push(PROVIDER_FREE_WORKER_IMPORT);
   let client;

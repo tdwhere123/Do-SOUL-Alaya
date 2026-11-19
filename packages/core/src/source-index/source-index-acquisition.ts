@@ -151,7 +151,7 @@ class AcquisitionQuery {
   };
   private vector: SourceIndexAcquisitionResult["vector"];
   private limited = false;
-  private timeRoute = false;
+  private priorOriginalNominations: ReadonlyMap<string, RetainedNomination> | undefined;
   public questionTimeOrder?: readonly string[];
   public association?: StatementAssociation;
   public prepaidBaseBytes?: number;
@@ -270,6 +270,7 @@ class AcquisitionQuery {
     return listing;
   }
 
+  private timeRoute = false;
   private preferActiveQuestionTime(preference: QuestionTimePreference, nativePending: boolean): void {
     this.limited ||= nativePending;
     const partial = preferQuestionTime({
@@ -283,10 +284,15 @@ class AcquisitionQuery {
         sourceId: this.capture?.observationSourceId, original, nominations: this.nominations, result: this.result() })),
       ...this.preferredRetentionHook(),
       ...(this.capture === undefined ? {} : { occurrences: this.capture.retained }),
-      nominate: (candidates, protectedHeadKeys) => {
+      nominate: (candidates, protectedHeadKeys, originalByKey) => {
         this.timeRoute = true; this.lexicalCandidates = collapseStatementCandidates(candidates, this.meter); this.vectorCandidates = [];
         observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact), "question_time");
-        const pending = this.nominatePrefix(true, undefined, protectedHeadKeys); this.limited ||= pending;
+        this.priorOriginalNominations = originalByKey;
+        try {
+          const pending = this.nominatePrefix(true, undefined, protectedHeadKeys); this.limited ||= pending;
+        } finally {
+          this.priorOriginalNominations = undefined;
+        }
       }
     });
     this.limited ||= partial;
@@ -641,6 +647,16 @@ class AcquisitionQuery {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
       this.observeNomination(channel, source, "nomination_limit");
       this.retainIndexMember(key, source); return;
+    }
+    const priorOriginal = this.priorOriginalNominations?.get(key);
+    if (priorOriginal !== undefined) {
+      this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
+      this.retainOccurrence(source, lexical, vector);
+      if (lexical !== null) priorOriginal.lexical.push(lexical);
+      if (vector !== null && priorOriginal.source.root_key === source.root_key) priorOriginal.vector = vector;
+      this.nominations.set(key, priorOriginal);
+      this.counts.duplicate++;
+      this.observeNomination(channel, source, "duplicate", undefined, priorOriginal.source.target); return;
     }
     this.meter.charge(1, 192, "source nomination reference retention");
     this.retainOccurrence(source, lexical, vector);

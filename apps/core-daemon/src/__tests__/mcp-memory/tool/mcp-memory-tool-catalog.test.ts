@@ -56,7 +56,7 @@ describe("mcp memory tool catalog", () => {
     expect(description).toContain("`source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }`");
     expect(description).toContain("`workspace_id`, `kind`, and `span`");
     expect(description).toContain("`target.span.content_end` as top-level `start_offset` instead of rereading from `0`");
-    expect(description).toContain("do not reopen a ranked result whose `target.span.content_complete === true`");
+    expect(description).toContain("do not reopen an already-read range or a ranked result whose `target.span.content_start === 0` and `target.span.content_complete === true`");
     expect(description).toContain("Never put a source `root_id` in `object_id`");
   });
 

@@ -54,7 +54,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.open_pointer",
     description:
-      "Open a recalled memory or evidence object by `object_id` before citing it. For a source root, pass `member_index[i].source_target` directly or construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from a ranked `source_evidence` target. Omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset` instead of rereading from `0`; do not reopen a ranked result whose `target.span.content_complete === true`. Never put a source `root_id` in `object_id`. Optional `byte_budget` is at most 65536 bytes. Read-only.",
+      "Open a recalled memory or evidence object by `object_id` before citing it. For a source root, pass `member_index[i].source_target` directly or construct `source_target: { root_kind, root_id, source_version, content_digest, evidence_object_id }` from a ranked `source_evidence` target. Omit `workspace_id`, `kind`, and `span`. When `target.span.content_complete === false`, pass `target.span.content_end` as top-level `start_offset` instead of rereading from `0`; do not reopen an already-read range or a ranked result whose `target.span.content_start === 0` and `target.span.content_complete === true`. Never put a source `root_id` in `object_id`. Optional `byte_budget` is at most 65536 bytes. Read-only.",
     parametersSchema: SoulOpenPointerRequestSchema
   },
   {

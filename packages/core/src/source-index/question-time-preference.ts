@@ -35,7 +35,8 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   preference: QuestionTimePreference; nominations: Map<string, N>; counts: MutableAccounting;
   maxRoots: number; maxAttempts: number; meter: SourceSemanticResourceLedger;
   absorb: (resources: SourceIndexQueryResources) => void;
-  nominate: (candidates: readonly SourceIndexLexicalCandidate[], protectedHeadKeys: readonly string[]) => void;
+  nominate: (candidates: readonly SourceIndexLexicalCandidate[], protectedHeadKeys: readonly string[],
+    originalByKey: ReadonlyMap<string, N>) => void;
   refusals: SourceIndexAcquisitionResult["resource_refusals"][number][];
   occurrences?: SourceSemanticNominationOccurrence[];
   ordered: (rootKeys: readonly string[]) => void;
@@ -48,7 +49,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   const protectedHeadKeys = original.slice(0, Math.min(5, Math.floor(input.maxRoots / 3))).map(([key]) => key);
   meter.charge(original.length * 3, original.length * 24, "question time ordering and fallback");
   const domain = input.repository.readQuestionTimeDomain!(input.workspace, input.preference,
-    original.map(([key]) => key), meter.remaining());
+    [...new Set(original.map(([, row]) => row.source.root_key))], meter.remaining());
   absorb(domain.resources);
   if (domain.status !== "ready") {
     input.refusals.push({ stage: "nomination", phase: domain.reason });
@@ -63,11 +64,12 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     absorb(lexical.resources);
     if (lexical.resource_refusal !== null) input.refusals.push(lexical.resource_refusal);
   }
+  const originalByKey = new Map(original);
   nominations.clear();
-  for (const [key, row] of original) if (matching.has(key)) nominations.set(key, row);
+  for (const [key, row] of original) if (matching.has(row.source.root_key)) nominations.set(key, row);
   let completed = false;
   try {
-    input.nominate(lexical?.candidates ?? [], protectedHeadKeys);
+    input.nominate(lexical?.candidates ?? [], protectedHeadKeys, originalByKey);
     completed = true;
   } finally {
     for (const [key, row] of original) {
