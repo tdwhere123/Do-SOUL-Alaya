@@ -270,9 +270,13 @@ class AcquisitionQuery {
       unrestrictedLexical: this.lexicalCandidates, unrestrictedVector: this.vectorCandidates, cursor: { ...cursor },
       originalPrefix: originalEntries.map(([key, row]) => [key, row.source] as const)
     } : undefined;
-    const agreedHeadPrefix = agreedQuestionTimeHeadPrefix(originalEntries, this.lexicalCandidates, this.vectorCandidates);
-    this.preferActiveQuestionTime(preference!, nativePending);
+    // Mid-scan unavailable lanes may still hold partial candidates; those are not a joint unrestricted prefix.
+    const agreedHeadPrefix = this.lexical.completion !== "unavailable" && this.vector.completion !== "unavailable"
+      && this.vector.input.status === "available"
+      ? agreedQuestionTimeHeadPrefix(originalEntries, this.lexicalCandidates, this.vectorCandidates) : [];
+    // Attach the prefix before optional retention so prepaid base bytes include it.
     if (agreedHeadPrefix.length > 0) this.agreedHeadPrefix = agreedHeadPrefix;
+    this.preferActiveQuestionTime(preference!, nativePending);
     return listing;
   }
 
@@ -316,7 +320,8 @@ class AcquisitionQuery {
       original, nominations: this.nominations, occurrences,
       max_roots: this.input.allowance.max_roots, repository: this.repository, meter: this.meter,
       retention, association: this.associationProtection(original),
-      result: () => this.result(), nativeBytes: (bytes: number) => { this.nativeBytes += bytes; }
+      result: () => this.result(), nativeBytes: (bytes: number) => { this.nativeBytes += bytes; },
+      ...(this.agreedHeadPrefix === undefined ? {} : { questionTimeAgreedPrefix: this.agreedHeadPrefix })
     });
     const template = this.input.source_template;
     if (template !== undefined) {

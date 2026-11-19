@@ -292,7 +292,12 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
     const id = byRoot.get(key);
     return id !== undefined && originalSet.has(id) ? [id] : [];
   });
-  const exchanged = exchangeAgreedHead(decided?.order ?? originalSources, agreedIds, association, decided);
+  const exchanged = exchangeAgreedHead(originalSources, decided?.order ?? originalSources, agreedIds, association, decided);
+  // Witness protection can change the prefix exchange without permuting coverage order.
+  if (decided !== undefined && association !== undefined) {
+    const unprotected = applyAgreedHeadPrefix(originalSources, agreedIds);
+    if (exchanged.sources.some((id, i) => id !== unprotected[i])) association.decision.applied = true;
+  }
   let cursor = 0;
   const recordIds = current.map(id => memoryIds.has(id) ? id : exchanged.sources[cursor++]!);
   if (association === undefined) {
@@ -315,29 +320,17 @@ export function orderNativeFieldAccess(input: AccessInput<NativeRouteLane> & {
     ...(ordered.status === "ordered" ? { record_ids: recordIds } : {}) };
 }
 
-function exchangeAgreedHead(
-  sources: readonly string[], agreedIds: readonly string[],
-  association: StatementAssociation | undefined,
-  decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
-): { sources: string[]; variants: ReturnType<typeof selectEvidenceWitnesses>["variants"] } {
-  const variants = decided?.variants ?? [];
-  if (agreedIds.length === 0) return { sources: [...sources], variants: [...variants] };
+function applyAgreedHeadPrefix(
+  sources: readonly string[], agreedIds: readonly string[], protectedHeadIds?: ReadonlySet<string>,
+): string[] {
+  if (agreedIds.length === 0) return [...sources];
   const nextSources = [...sources], headLen = Math.min(5, nextSources.length), agreedSet = new Set(agreedIds);
-  const witnessProtects = association !== undefined && association.decision.refused === null && decided !== undefined
-    ? (id: string) => {
-      const row = association.roots.indexOf(id);
-      if (row < 0) return false;
-      for (let statement = 0; statement < association.statements; statement++) {
-        if (association.coverage[row]![statement] !== null) return true;
-      }
-      return false;
-    } : (_id: string) => false;
   for (const agreedId of agreedIds) {
     if (nextSources.slice(0, headLen).includes(agreedId)) continue;
     let z = -1;
     for (let slot = headLen - 1; slot >= 1; slot--) {
       const occupant = nextSources[slot]!;
-      if (agreedSet.has(occupant) || witnessProtects(occupant)) continue;
+      if (agreedSet.has(occupant) || protectedHeadIds?.has(occupant) === true) continue;
       z = slot; break;
     }
     if (z < 1) break;
@@ -347,8 +340,56 @@ function exchangeAgreedHead(
     nextSources[z] = agreedId;
     nextSources[tailPos] = displaced;
   }
-  const head = new Set(nextSources.slice(0, Math.min(5, nextSources.length)));
-  return { sources: nextSources, variants: variants.filter(row => !head.has(row.root)) };
+  return nextSources;
+}
+
+function necessaryWitnessIds(association: StatementAssociation): Set<string> {
+  const ids = new Set<string>();
+  association.roots.forEach((id, row) => {
+    if (association.coverage[row]!.some(value => value !== null)) ids.add(id);
+  });
+  return ids;
+}
+
+function unvariantedSources(
+  original: readonly string[], sources: readonly string[],
+  decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
+): string[] {
+  const variants = decided?.variants ?? [];
+  if (decided === undefined || variants.length === 0) return [...sources];
+  const head = Math.min(5, original.length);
+  const out = decided.order.slice(0, head);
+  const origHead = original.slice(0, head);
+  const bySource = (a: string, b: string) => original.indexOf(a) - original.indexOf(b);
+  const promoted = out.filter(root => !origHead.includes(root)).sort(bySource);
+  const evicted = origHead.filter(root => !out.includes(root)).sort(bySource);
+  const tail = original.slice(head);
+  for (let k = 0; k < promoted.length; k++) tail[tail.indexOf(promoted[k]!)] = evicted[k]!;
+  return [...out, ...tail];
+}
+
+function exchangeAgreedHead(
+  originalSources: readonly string[], sources: readonly string[], agreedIds: readonly string[],
+  association: StatementAssociation | undefined,
+  decided: ReturnType<typeof selectEvidenceWitnesses> | undefined,
+): { sources: string[]; variants: ReturnType<typeof selectEvidenceWitnesses>["variants"] } {
+  const variants = decided?.variants ?? [];
+  if (agreedIds.length === 0) return { sources: [...sources], variants: [...variants] };
+  const protectedHeadIds = association !== undefined && association.decision.refused === null && decided !== undefined
+    ? necessaryWitnessIds(association) : undefined;
+  // Exchange on the un-varianted slot-exchanged order so surviving derived variants stay contiguous after slot 5.
+  const exchanged = applyAgreedHeadPrefix(unvariantedSources(originalSources, sources, decided), agreedIds, protectedHeadIds);
+  const headLen = Math.min(5, exchanged.length);
+  const finalHead = exchanged.slice(0, headLen);
+  const finalHeadSet = new Set(finalHead);
+  const survivingVariants = variants.filter(row => !finalHeadSet.has(row.root));
+  const survivingMoved = survivingVariants.map(row => row.root);
+  const survivingMovedSet = new Set(survivingMoved);
+  return {
+    sources: [...finalHead, ...survivingMoved,
+      ...exchanged.slice(headLen).filter(root => !finalHeadSet.has(root) && !survivingMovedSet.has(root))],
+    variants: survivingVariants
+  };
 }
 
 function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision }: StatementAssociation): void {

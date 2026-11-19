@@ -472,7 +472,23 @@ describe("contiguous joint-lane original prefix head exchange", () => {
   it("drops a variant once its root is exchanged into the first five", () => {
     const value = { ...coverage(1, { b: [0.9], h: [0.8] }), spans: roots.map((_, i) => [[i, i + 5] as const]) };
     const result = orderNativeFieldAccess(timed(roots, ["h"], value), meter());
-    expect(result).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "h", "e", "f", "g"],
+    expect(result).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "h", "f", "g", "e"],
       evidence_variants: [] });
+  });
+
+  it("keeps a witness-protected prefix exchange on a later unfunded continuation page", () => {
+    const value = coverage(1, { e: [0.9] });
+    const page = timed(roots, ["g"], value);
+    expect(orderNativeFieldAccess(page, meter())).toMatchObject({
+      record_ids: ["a", "m", "b", "c", "g", "e", "f", "d", "h"] });
+    expect(value.decision).toEqual({ refused: null, applied: true });
+    expect(() => orderNativeFieldAccess(page, meter(0))).toThrow(/budget exhausted/u);
+  });
+
+  it("keeps surviving derived variants contiguous after slot 5 when the agreed prefix promotes a variant", () => {
+    const value = { ...coverage(1, { b: [0.9], h: [0.8], f: [0.7] }), spans: roots.map((_, i) => [[i, i + 5] as const]) };
+    const result = orderNativeFieldAccess(timed(roots, ["h"], value), meter());
+    expect(result).toMatchObject({ record_ids: ["a", "m", "b", "c", "d", "h", "f", "g", "e"],
+      evidence_variants: [{ root: "f", statement: 0 }] });
   });
 });

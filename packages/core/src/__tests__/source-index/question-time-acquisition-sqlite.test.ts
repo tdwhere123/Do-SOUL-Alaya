@@ -239,3 +239,24 @@ describe("contiguous joint-lane original prefix", () => {
     expect(agreedQuestionTimeHeadPrefix(original("o0", "o1"), ["o0", "o1"].map(cand), [])).toEqual([]);
   });
 });
+
+describe("agreed prefix requires unrestricted lane availability", () => {
+  it.each(["lexical", "vector"] as const)(
+    "omits question_time_agreed_prefix when %s completion is unavailable", lane => {
+      const { env, input } = setup();
+      const lexical = env.index.readLexicalCandidates.bind(env.index);
+      const vector = env.index.readVectorCandidates.bind(env.index);
+      vi.spyOn(env.index, "readLexicalCandidates").mockImplementation((...args) => {
+        const page = lexical(...args);
+        return lane === "lexical" ? { ...page, completion: "unavailable", reason: "native_query_failed" } : page;
+      });
+      vi.spyOn(env.index, "readVectorCandidates").mockImplementation((...args) => {
+        const page = vector(...args);
+        return lane === "vector" ? { ...page, completion: "unavailable", reason: "native_query_failed" } : page;
+      });
+      const capture = env.database.connection.transaction(() => new SourceIndexAcquisition(env.index, fieldSha256)
+        .nominateWithWitness({ ...input, question_time: preference }, admitScope))();
+      expect(capture.result[lane].completion).toBe("unavailable");
+      expect(capture).not.toHaveProperty("question_time_agreed_prefix");
+    });
+});

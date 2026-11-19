@@ -18,6 +18,7 @@ export function restoreSourceTemplate<N extends SourceIndexRootNomination>(input
   result: () => SourceIndexAcquisitionResult; nativeBytes: (bytes: number) => void;
   observe: (observation: SourceTemplateRestorationObservation) => void;
   fallbackRestoredKeys: ReadonlySet<string>;
+  questionTimeAgreedPrefix?: readonly string[];
 }>): number | undefined {
   const restorable = (key: string) => !input.nominations.has(key) || input.fallbackRestoredKeys.has(key);
   if (input.nominations.size !== input.max_roots || !input.original.some(([key]) => restorable(key))) return;
@@ -25,7 +26,9 @@ export function restoreSourceTemplate<N extends SourceIndexRootNomination>(input
     const keys = new Set(rows.map(row => sourceIndexNativeRootKey(row.source)));
     return input.retention.retain({ result: { ...input.result(), nominations: rows },
       witness: input.occurrences.filter(row => keys.has(sourceIndexNativeRootKey(row.source))),
-      question_time_order: [...keys] }, meter);
+      question_time_order: [...keys],
+      ...(input.questionTimeAgreedPrefix === undefined || input.questionTimeAgreedPrefix.length === 0 ? {}
+        : { question_time_agreed_prefix: input.questionTimeAgreedPrefix }) }, meter);
   };
   let retainedBytes = capture([...input.nominations.values()], input.meter);
   const child = new SourceSemanticResourceLedger({

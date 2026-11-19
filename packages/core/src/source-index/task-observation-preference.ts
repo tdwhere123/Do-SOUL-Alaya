@@ -32,12 +32,16 @@ export function preferTaskObservations<N extends SourceIndexRootNomination>(inpu
   association: SourceSemanticResourceBudget; retention: SourcePreferenceRetention;
   result: () => SourceIndexAcquisitionResult; nativeBytes: (bytes: number) => void;
   observe: (observation: TaskObservationInspection) => void;
+  questionTimeAgreedPrefix?: readonly string[];
 }>): number | undefined {
   const capture = (rows: readonly N[], qualified: readonly QualifiedTaskObservation[], meter: SourceSemanticResourceLedger) => {
     const keys = new Set(rows.map(row => sourceIndexNativeRootKey(row.source)));
     return input.retention.retain({ result: { ...input.result(), nominations: rows },
       witness: input.occurrences.filter(row => keys.has(sourceIndexNativeRootKey(row.source))),
-      question_time_order: [...keys], ...(qualified.length === 0 ? {} : { task_observations: qualified }) }, meter);
+      question_time_order: [...keys],
+      ...(input.questionTimeAgreedPrefix === undefined || input.questionTimeAgreedPrefix.length === 0 ? {}
+        : { question_time_agreed_prefix: input.questionTimeAgreedPrefix }),
+      ...(qualified.length === 0 ? {} : { task_observations: qualified }) }, meter);
   };
   let retained = capture([...input.nominations.values()], [], input.meter);
   const child = new SourceSemanticResourceLedger({ work_units: Math.max(0, input.meter.work - input.association.work_units),

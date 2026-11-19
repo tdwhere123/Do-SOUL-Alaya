@@ -46,7 +46,8 @@ export function agreedQuestionTimeHeadPrefix(
 /** Fund the incumbent before optional preference inspection; a changed capture is separately charged. */
 export type SourcePreferenceRetention = Readonly<{
   retain: (capture: Readonly<{ result: SourceIndexAcquisitionResult; witness: readonly SourceSemanticNominationOccurrence[];
-    question_time_order: readonly string[]; task_observations?: readonly QualifiedTaskObservation[] }>,
+    question_time_order: readonly string[]; question_time_agreed_prefix?: readonly string[];
+    task_observations?: readonly QualifiedTaskObservation[] }>,
     meter: SourceSemanticResourceLedger) => number;
   source_id?: string;
   readInterpretation?: import("./task-observation-binding.js").TaskInterpretationReader;

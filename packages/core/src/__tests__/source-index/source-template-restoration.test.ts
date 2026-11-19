@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { SourceSemanticResourceExhausted, sourceIndexNativeRootKey,
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, sourceIndexNativeRootKey,
   type SourceIndexAcquisitionInput, type SourceIndexLexicalRead, type SourceIndexQueryRepository,
-  type SourceIndexTarget, type SourceIndexTemplateRead } from "@do-soul/alaya-protocol";
+  type SourceIndexTarget, type SourceIndexTemplateRead, type SourceIndexVectorBinding } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
 import type { SourcePreferenceRetention } from "../../source-index/question-time-preference.js";
-import { fieldSha256 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { configuration, fieldSha256 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { queryInput } from "./source-index-acquisition-fixture.js";
 import { readResources, template, templateBudget, templateStatement } from "./source-template-fixture.js";
 
 const emptyResources = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" as const };
@@ -150,5 +151,51 @@ describe("funded source-template restoration", () => {
       baseline.result.resources.memory_bytes + measured.prepaid_base_bytes! + 1024);
     expect(env.observed.at(-2)).toMatchObject({ kind: "source_template_restoration",
       observation: { status: "unknown", restored: false } });
+  });
+
+  it("includes question_time_agreed_prefix in prepaid base retention bytes", () => {
+    const originals = Array.from({ length: 16 }, (_, i) => templateStatement(`original-${i}`));
+    const preferred = Array.from({ length: 16 }, (_, i) => templateStatement(`preferred-${i}`));
+    const input = queryInput(configuration(), {
+      workspace_id: "workspace-template",
+      allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 16 }, budget: templateBudget,
+      question_time: { interpretation_clock: template.interpretation_clock,
+        intervals: [{ start: "2026-09-01", end: "2026-09-06" }] }, source_template: template });
+    if (input.vector.status !== "available") throw new Error("expected available query vector");
+    const binding: SourceIndexVectorBinding = {
+      workspace_id: input.workspace_id, selection_revision: 1, config_id: "cfg",
+      profile_id: input.vector.profile_id, generation_id: "gen", source_epoch: 1, dimensions: 3 };
+    const retain = vi.fn<SourcePreferenceRetention["retain"]>((capture, meter) => {
+      const before = meter.spentBytes; meter.retain(capture, "fixture actual nomination retention");
+      return meter.spentBytes - before;
+    });
+    const result = new SourceIndexAcquisition({
+      readLexicalCandidates: (_workspace, _query, _limit, _budget, preference) => ({
+        completion: "complete", reason: null,
+        candidates: (preference === undefined ? originals : preferred).map((row, i) => ({ source: row.source,
+          lexical: { lane: "unicode61", rank: i + 1, lane_rank: i + 1, bm25: -1 } })),
+        resources: emptyResources, resource_refusal: null, index_coverage: "partial", limitations: [], tokenization: null }),
+      readQuestionTimeDomain: () => ({ status: "ready", exists: true, matched_root_keys: [], resources: emptyResources }),
+      readTemplateStatements: source => ({ status: "complete",
+        statements: source.root_key === originals[0]!.source.root_key ? [originals[0]!.statement] : [],
+        resources: readResources }),
+      readVectorCandidates: () => ({ completion: "complete", reason: null,
+        candidates: originals.map((row, i) => ({ source: row.source,
+          window: { window_id: `w-${i}`, start_byte: 0, end_byte: 8, content_digest: "sha256:w" },
+          embedding: Float32Array.of(1, i, 0) })),
+        resources: emptyResources, state: { status: "ready", binding }, resource_refusal: null,
+        cursor: null, inspected: 16, invalid: 0 }),
+      admitQueryCandidate: () => ({ status: "ready", scope_class: "project", resources: emptyResources })
+    }, fieldSha256).nominateWithWitness(input, () => "admitted", "original", undefined, {
+      status: "ready", vectors: [Float32Array.of(1)], conditions: [{ statement: "s", speaker: "user", anchors: [] }]
+    }, { retain });
+    expect(result.question_time_agreed_prefix?.length).toBeGreaterThan(0);
+    const paid = retain.mock.calls[0]![0];
+    expect(paid.question_time_agreed_prefix).toEqual(result.question_time_agreed_prefix);
+    const ample = { work_units: 1_000_000_000, memory_bytes: 64_000_000 };
+    const { question_time_agreed_prefix: _, ...withoutPrefix } = paid;
+    expect(SourceSemanticResourceLedger.measureRetain(paid, ample).memory_bytes)
+      .toBeGreaterThan(SourceSemanticResourceLedger.measureRetain(withoutPrefix, ample).memory_bytes);
+    expect(result.prepaid_base_bytes).toBeGreaterThan(0);
   });
 });

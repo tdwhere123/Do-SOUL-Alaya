@@ -133,7 +133,7 @@ condition fails, that condition is dropped and raw recall remains available.
 in the 16-root pool so the original five-slot head is not evicted out of
 `in_pool` by date-restricted lexical fills, without altering hard
 `since`/`until` filters or authorization.
-Navigation then protects the contiguous original-head prefix that both unrestricted lexical and vector lanes still place inside that original five, exchanging those roots into unprotected head slots after slot 1 without moving slot 1, witness-protected heads, or evidence openings.
+Navigation then protects the contiguous original-head prefix that both unrestricted lexical and vector lanes still place inside that original five, exchanging those roots into unprotected head slots after slot 1 without moving slot 1, witness-protected heads, or evidence openings. An unavailable unrestricted lane does not contribute a prefix; a later continuation page cannot undo a prefix exchange that witness protection already altered.
 Optional `source_template` (`alaya.query.source-template.v1`) and
 `source-task-observation` phases share the remaining optional allowance without
 displacing the paid incumbent on refusal.
@@ -151,7 +151,9 @@ condition tops into slots `5..2` only when doing so strictly improves
 displaced head slots (paired by original source order) in the non-variant tail;
 `evidence_relation: "derived"`
 still appends rank `2–5` complementary witness roots directly after slot 5 as
-`evidence_variant` message-span deliveries. Every root under active conditions
+`evidence_variant` message-span deliveries. Prefix exchange runs on that
+un-varianted order so surviving derived variants remain a contiguous block
+immediately after slot 5. Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for
 assistant witnesses) or its first message/line unit (`payload_continuation`
 reaches the prefix and tail).
