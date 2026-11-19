@@ -156,7 +156,7 @@ un-varianted order so surviving derived variants remain a contiguous block
 immediately after slot 5. When statement-relation overlay vectors are present,
 navigation then runs a fibered two-coordinate secondary exchange on the same
 un-varianted head and tail: an injective condition-to-root assignment when
-marginal tops collide, then a derived distinct-session rank-2 witness, each
+marginal tops collide, then a derived rank-2 witness of a distinct physical source root, each
 unlocking only a later head slot whose necessary columns are strictly dominated
 in both key cosine and winning-key relation cosine by some current tail root.
 Missing overlay rows stay `null` (never coerced to `0`); an all-null overlay is

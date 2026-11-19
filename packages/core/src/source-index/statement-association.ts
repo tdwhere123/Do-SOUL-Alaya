@@ -29,10 +29,6 @@ export type StatementWitnessReader = (root: string, keys: readonly SourceIndexTa
 export type StatementRelationReader = (keys: readonly string[]) =>
   { status: "ready"; vectors: readonly (Float32Array | null)[] } | { status: "unknown"; reason: string } | undefined;
 
-function hostSessionIdentity(sourceId: string | null | undefined): string | null {
-  return typeof sourceId === "string" && sourceId.length > 0 ? sourceId.replace(/:r\d+$/u, "") : null;
-}
-
 /** Question window as UTC civil-day bounds: alternatives starting on or before the question clock. */
 export type EvidenceWindow = Readonly<{ intervals: readonly (readonly [number, number])[]; earliest: number }>;
 
@@ -67,8 +63,6 @@ export type StatementAssociation = Readonly<{
   possible?: readonly (readonly boolean[])[];
   /** Same [root][condition] shape as coverage: cosine of the winning key's relation vector, or null. */
   relations?: readonly (readonly (number | null)[])[];
-  /** Host-session identity aligned with `roots`; null when the root has no source id. */
-  sessions?: readonly (string | null)[];
   /** Derived relation only: per cell, the host-message span of the key behind the necessary value
    * (with the prompt an assistant witness answers). */
   spans?: readonly (readonly (readonly [number, number] | null)[])[];
@@ -97,9 +91,9 @@ const retentionBytes = (dimensions: number) => dimensions * 4 + 48;
  * charged on the same acquisition ledger when evidence statements are supplied. */
 export function quoteStatementAssociation(roots: number, windows: number, dimensions: number): SourceSemanticResourceBudget {
   const retainedKeys = Math.min(windows, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT);
-  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots + roots * 8,
+  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots,
     memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 84 + 1088)
-      + roots * roots * 128 + 4096 + roots * 48 };
+      + roots * roots * 128 + 4096 };
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
@@ -109,7 +103,7 @@ function coverageCost(keyDimensions: number, demandDimensions: number, roots: nu
   const cells = statements * ((spans ? 2 : 1) + (relations ? 1 : 0)) + 1;
   return { work_units: keyDimensions * statements + demandDimensions + roots * cells,
     memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72)
-      + (relations ? statements * 72 : 0) + (spans ? 64 : 0) + 48) };
+      + (relations ? statements * 72 : 0) + (spans ? 64 : 0)) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
@@ -303,7 +297,7 @@ export class StatementKeyRetention {
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
     const coverage: (number | null)[][] = [], possible: boolean[][] = [], spans: ((readonly [number, number]) | null)[][] = [];
-    const openings: (EvidenceOpening | null)[] = [], sessions: (string | null)[] = [];
+    const openings: (EvidenceOpening | null)[] = [];
     const winners: (SourceIndexTarget | null)[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
@@ -315,15 +309,12 @@ export class StatementKeyRetention {
       spans.push(scored.cells);
       openings.push(evidenceOpening(scored.coverage, scored.cells, loaded.messages));
       winners.push(scored.winners);
-      let session: string | null = null;
-      for (const row of kept) { session = hostSessionIdentity(row.key.source_id); if (session !== null) break; }
-      sessions.push(session);
     }
     const relations = this.scoreWinningRelations(demands.vectors, coverage, winners, relationReader);
     if (relations === "unavailable") return undefined;
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
-    return { roots: [...roots], statements, coverage, sessions, ...(window === undefined ? {} : { possible }),
+    return { roots: [...roots], statements, coverage, ...(window === undefined ? {} : { possible }),
       ...(relations === undefined ? {} : { relations }),
       ...(demands.derived === true ? { spans } : {}), openings, decision: { refused: null, applied: false } };
   }
@@ -390,7 +381,6 @@ export function restrictStatementAssociation(association: StatementAssociation,
   return { roots: indices.map(i => association.roots[i]!), statements: association.statements,
     coverage: indices.map(i => association.coverage[i]!),
     ...(association.relations === undefined ? {} : { relations: indices.map(i => association.relations![i]!) }),
-    ...(association.sessions === undefined ? {} : { sessions: indices.map(i => association.sessions![i]!) }),
     ...(association.possible === undefined ? {} : { possible: indices.map(i => association.possible![i]!) }),
     ...(association.spans === undefined ? {} : { spans: indices.map(i => association.spans![i]!) }),
     ...(association.openings === undefined ? {} : { openings: indices.map(i => association.openings![i]!) }),

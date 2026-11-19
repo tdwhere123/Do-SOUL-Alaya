@@ -77,8 +77,6 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     const row = index.get(id); return row === undefined ? null : relations[row]![column]!;
   };
   const possible = (id: string, column: number) => association.possible?.[index.get(id) ?? -1]?.[column] === true;
-  const sessionOf = (id: string) => association.sessions?.[index.get(id) ?? -1] ?? null;
-  const witnessed = (id: string, column: number) => coverage(id, column) !== null || possible(id, column);
   const ranks = Array.from({ length: n }, (_, column) => pool.filter(id => coverage(id, column) !== null)
     .sort((left, right) => coverage(right, column)! - coverage(left, column)! || pool.indexOf(left) - pool.indexOf(right)));
   const marginal = ranks.map(row => row[0] ?? null);
@@ -127,7 +125,6 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     for (const [column, ranked] of ranks.entries()) {
       const top = ranked[0], candidate = ranked[1];
       if (top === undefined || candidate === undefined || !head.includes(top) || head.includes(candidate)) continue;
-      if (head.some(id => sessionOf(id) !== null && sessionOf(id) === sessionOf(candidate) && witnessed(id, column))) continue;
       tryPlace(candidate, column);
     }
   }

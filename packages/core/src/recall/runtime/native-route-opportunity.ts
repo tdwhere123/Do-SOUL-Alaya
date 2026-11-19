@@ -389,7 +389,7 @@ function exchangeAgreedHead(
   };
 }
 
-function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision, relations, sessions }: StatementAssociation): void {
+function validateAssociation({ roots, statements, coverage, possible, spans, openings, decision, relations }: StatementAssociation): void {
   requireFact(Array.isArray(roots) && Array.isArray(coverage) && new Set(roots).size === roots.length
     && roots.every(nonempty) && coverage.length === roots.length, "evidence coverage roots must be distinct identities");
   requireFact(integer(statements, 1) && statements <= EVIDENCE_CONDITION_LIMITS.max_conditions && decision !== null && typeof decision === "object",
@@ -415,9 +415,6 @@ function validateAssociation({ roots, statements, coverage, possible, spans, ope
     && relations.every(row => Array.isArray(row) && row.length === statements
       && row.every((value, j) => Object.hasOwn(row, j) && (value === null || Number.isFinite(value)))),
   "relation coverage must hold one finite value or null per statement");
-  requireFact(sessions === undefined || Array.isArray(sessions) && sessions.length === roots.length
-    && sessions.every(value => value === null || nonempty(value)),
-  "host sessions must hold one identity or null per root");
 }
 
 function orderTimedFieldAccess(input: Parameters<typeof orderNativeFieldAccess>[0]) {

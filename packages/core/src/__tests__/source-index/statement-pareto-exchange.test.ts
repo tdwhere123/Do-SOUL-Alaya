@@ -12,8 +12,7 @@ const condition = (statement: string, speaker: EvidenceCondition["speaker"] = "u
 const ready = (...vectors: number[][]): EvidenceDemands => ({ status: "ready", vectors: vectors.map(v => Float32Array.from(v)),
   conditions: vectors.map((_, index) => condition(`s${index}`)) });
 const noRefusal = () => { throw new Error("unexpected refusal"); };
-const key = (id: string, source_id: string | null = `${id}-session:r1`) =>
-  ({ root_key: id, source_id, target: { root_id: id } } as unknown as SourceIndexTarget);
+const key = (id: string) => ({ root_key: id, target: { root_id: id } } as unknown as SourceIndexTarget);
 const zero = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" } as const;
 const witnesses: StatementWitnessReader = (_root, keys, anchors) => ({ status: "ready", resources: zero, session_time: null,
   inventory: { status: "captured", inventory: { contract: "host-occurrence-v1",
@@ -49,7 +48,6 @@ describe("winning-key relation scoring", () => {
     const value = retained.associate(["a"], witnesses, undefined, keys => ({
       status: "ready", vectors: keys.map(id => id === "k-high" ? Float32Array.of(1, 0) : Float32Array.of(0, 1))
     }))!;
-    expect(value.sessions).toEqual(["k-high-session"]);
     expect(value.coverage[0]![0]).toBeGreaterThan(value.coverage[0]![1]!);
     expect(value.relations![0]![0]).toBeCloseTo(1, 6);
     expect(value.relations![0]![1]).toBeCloseTo(1, 6);
@@ -81,42 +79,38 @@ describe("injective condition assignment and secondary exchange", () => {
 
   it("is a no-op when every relation cell is null and never evicts an unwitnessed original head", () => {
     const association = coverage(2, { g: [0.9, 0.1], f: [0.2, 0.8] }, {
-      relations: roots.map(() => [null, null]), sessions: roots.map(() => null) });
+      relations: roots.map(() => [null, null]) });
     const baseline = selectEvidenceWitnesses(roots, association, meter());
     expect(orderNativeFieldAccess(fieldInput(association), meter())).toMatchObject({
       record_ids: ["a", "m", ...baseline.base_order.slice(1)] });
     const guarded = coverage(1, { b: [0.9], f: [0.8], d: [0.5], c: [0.5] }, {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
-      relations: roots.map(root => [root === "f" ? 0.4 : root === "d" || root === "c" ? 0.9 : root === "b" ? 0.5 : null]),
-      sessions: roots.map(root => root === "f" ? "other" : "same") });
+      relations: roots.map(root => [root === "f" ? 0.4 : root === "d" || root === "c" ? 0.9 : root === "b" ? 0.5 : null]) });
     const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
     expect(exchangeStatementParetoSecondary({ association: guarded, pool: roots, head, tail, agreed: [], meter: meter() })).toBe(false);
     expect(head).toEqual(["a", "b", "c", "d", "e"]);
   });
 
-  it("places a derived distinct-session rank-2 witness and keeps same-session candidates out", () => {
+  it("places a derived rank-2 witness of a distinct physical source root", () => {
     const association = coverage(1, { b: [0.9], h: [0.8], e: [0.1] }, {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
-      relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]),
-      sessions: roots.map(root => root === "h" ? "other" : "same") });
+      relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
     const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
     expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() })).toBe(true);
     expect(head.includes("h")).toBe(true);
     expect(head.includes("e")).toBe(false);
-    const blocked = coverage(1, { b: [0.9], h: [0.8], e: [0.1] }, {
+    const alreadyHead = coverage(1, { b: [0.9], d: [0.8], e: [0.1] }, {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
-      relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]),
-      sessions: roots.map(() => "same") });
+      relations: roots.map(root => [root === "d" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
     const head2 = ["a", "b", "c", "d", "e"], tail2 = ["f", "g", "h"];
-    expect(exchangeStatementParetoSecondary({ association: blocked, pool: roots, head: head2, tail: tail2, agreed: [], meter: meter() }))
-      .toBe(false);
+    expect(exchangeStatementParetoSecondary({
+      association: alreadyHead, pool: roots, head: head2, tail: tail2, agreed: [], meter: meter() })).toBe(false);
   });
 
   it("keeps surviving derived variants contiguous after slot 5 when a secondary swap enters the head", () => {
     const association = coverage(1, { b: [0.9], h: [0.8], f: [0.7], e: [0.1] }, {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
-      relations: roots.map(root => [root === "h" ? 0.9 : root === "e" ? 0.1 : root === "b" ? 0.4 : null]),
-      sessions: roots.map(root => root === "h" ? "other" : "same") });
+      relations: roots.map(root => [root === "h" ? 0.9 : root === "e" ? 0.1 : root === "b" ? 0.4 : null]) });
     const result = orderNativeFieldAccess(fieldInput(association), meter());
     expect(association.decision.applied).toBe(true);
     const ids = (result as { record_ids: string[] }).record_ids.filter(id => id !== "m");

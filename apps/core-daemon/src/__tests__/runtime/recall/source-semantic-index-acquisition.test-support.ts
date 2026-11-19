@@ -120,8 +120,9 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
           model_inputs: 128, input_bytes: 1_000_000, max_body_bytes: 1_000_000 },
         deadline_ms: Date.now() + 60_000, signal: new AbortController().signal });
       const windows = Math.ceil(target.body_bytes / configuration.profile.window_bytes);
+      const relationInputs = target.auxiliary === undefined ? 0 : 1;
       expect(result).toMatchObject({ status: "root_complete", accepted_vectors: windows,
-        resources: { model_inputs_submitted: windows, model_execution_work: "unknown", native_accounting: "complete" } });
+        resources: { model_inputs_submitted: windows + relationInputs, model_execution_work: "unknown", native_accounting: "complete" } });
     }
     expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
     expect(repository.generation(WS, generation.generation_id)).toMatchObject({ status: "ready",

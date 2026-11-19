@@ -27,7 +27,7 @@ it("reinstalls the exact preservation schema on reopen and admits historical GC 
   const { database } = await createRepo({ filename });
   const currentSchema = schema(database);
   removeHistoricalPreservationMigration(database);
-  expect(database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()).toEqual({ version: 45 });
+  expect(database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()).toEqual({ version: 47 });
   expect(database.connection.prepare("SELECT name FROM sqlite_master WHERE name='historical_memory_captures'").get()).toBeUndefined();
   // The restored old view is executable, not an unresolved reference to removed tables.
   expect(database.connection.prepare("SELECT * FROM privacy_dependency_candidates").all()).toEqual([]);
