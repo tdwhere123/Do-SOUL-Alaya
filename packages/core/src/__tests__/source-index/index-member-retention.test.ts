@@ -99,7 +99,7 @@ it.each([
     expect(ranked).toEqual(unlisted.capture);
     expect(listed.observed).toEqual(unlisted.observed);
     expect(ranked.result.nominations.map(row => row.source)).toEqual([
-      ...preferred.slice(0, 11).map(row => row.source), ...original.slice(0, 5).map(row => row.source)
+      original[0]!.source, ...preferred.slice(0, 11).map(row => row.source), ...original.slice(1, 5).map(row => row.source)
     ]);
     expect(index_members).toEqual(original.slice(5, 16 + extraTail).map(row => row.source));
     expect(admit.mock.calls.slice(27).map(([source]) => source)).toEqual(tailOverBudget

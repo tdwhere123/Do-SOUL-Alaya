@@ -41,7 +41,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
   occurrences?: SourceSemanticNominationOccurrence[];
   ordered: (rootKeys: readonly string[]) => void;
   observeInventory?: (original: readonly (readonly [string, N])[], restrictedComplete: boolean, reason?: string) => void;
-  beforeFinalRetention?: (original: readonly (readonly [string, N])[]) => void;
+  beforeFinalRetention?: (original: readonly (readonly [string, N])[], fallbackRestoredKeys: ReadonlySet<string>) => void;
 }>): boolean {
   const { meter, absorb, nominations, counts } = input;
   const original = [...nominations.entries()];
@@ -72,9 +72,14 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     input.nominate(lexical?.candidates ?? [], protectedHeadKeys, originalByKey);
     completed = true;
   } finally {
+    // Keys added only here were neither date-matched nor admitted by question-time lexical.
+    const fallbackRestoredKeys = new Set<string>();
     for (const [key, row] of original) {
       if (nominations.size >= input.maxRoots) break;
-      if (!nominations.has(key)) nominations.set(key, row);
+      if (!nominations.has(key)) {
+        nominations.set(key, row);
+        fallbackRestoredKeys.add(key);
+      }
     }
     // Counts describe final retained outcomes; paid attempts are never refunded.
     const displaced = original.filter(([key]) => !nominations.has(key)).length;
@@ -82,7 +87,7 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
     counts.rejected += displaced;
     counts.nomination_limit += displaced;
     input.observeInventory?.(original, completed && (lexical === undefined || lexical.completion === "complete"));
-    input.beforeFinalRetention?.(original);
+    input.beforeFinalRetention?.(original, fallbackRestoredKeys);
     input.ordered([...nominations.keys()]);
     if (input.occurrences !== undefined) input.occurrences.splice(0, input.occurrences.length,
       ...input.occurrences.filter(row => nominations.has(sourceIndexNativeRootKey(row.source))));

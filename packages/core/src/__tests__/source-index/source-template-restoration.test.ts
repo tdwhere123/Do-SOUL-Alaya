@@ -13,7 +13,7 @@ function fixture() {
   const original = Array.from({ length: 16 }, (_, i) => templateStatement(`original-${i}`));
   const preferred = Array.from({ length: 16 }, (_, i) => templateStatement(`preferred-${i}`));
   const readTemplateStatements = vi.fn<(source: SourceIndexTarget) => SourceIndexTemplateRead>(source => ({
-    status: "complete", statements: source.root_key === original[5]!.source.root_key ? [original[5]!.statement] : [], resources: readResources
+    status: "complete", statements: source.root_key === original[0]!.source.root_key ? [original[0]!.statement] : [], resources: readResources
   }));
   const lexical = (rows: typeof original): SourceIndexLexicalRead => ({ completion: "complete", reason: null,
     candidates: rows.map((row, i) => ({ source: row.source, lexical: { lane: "unicode61", rank: i + 1,
@@ -43,13 +43,14 @@ function fixture() {
 }
 
 describe("funded source-template restoration", () => {
-  it("restores only a unique original displaced root, keeps the cap and finalizes association once over the chosen roots", () => {
+  it("restores a unique original template root to slot 1, keeps the cap and finalizes association once over the chosen roots", () => {
     const env = fixture(), result = env.run(), ids = result.result.nominations.map(row => row.source.source_id);
-    expect(ids).toEqual(["original-5", ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
-      "original-0", "original-1", "original-2", "original-3"]);
+    expect(ids).toEqual(["original-0", ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      "original-1", "original-2", "original-3", "original-4"]);
+    expect(ids).toHaveLength(16);
     expect(result.result.accounting).toMatchObject({ attempted: 27, admitted: 16 });
     expect(result.witness.map(row => row.source.source_id)).toEqual([
-      "original-0", "original-1", "original-2", "original-3", "original-5",
+      "original-0", "original-1", "original-2", "original-3", "original-4",
       ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`)]);
     expect(new Set(result.witness.map(row => row.source.source_id))).toEqual(new Set(ids));
     expect(result.question_time_order).toEqual(result.result.nominations.map(row => sourceIndexNativeRootKey(row.source)));
@@ -59,6 +60,33 @@ describe("funded source-template restoration", () => {
     expect(result.prepaid_base_bytes).toBeGreaterThan(0);
     expect(env.observed).toContainEqual(expect.objectContaining({ kind: "source_template_restoration",
       observation: expect.objectContaining({ status: "unique", inspected_roots: 16, restored: true }) }));
+  });
+
+  it("promotes an out-of-window original head kept only at the tail without shrinking the pool", () => {
+    const env = fixture();
+    const incumbent = env.run({ proposed: false }).result.nominations.map(row => row.source.source_id);
+    expect(incumbent).toEqual([
+      ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      ...Array.from({ length: 5 }, (_, i) => `original-${i}`)]);
+    expect(incumbent[11]).toBe("original-0");
+    const ids = env.run().result.nominations.map(row => row.source.source_id);
+    expect(ids).toHaveLength(16);
+    expect(ids[0]).toBe("original-0");
+    expect(ids).toEqual(["original-0", ...incumbent.filter(id => id !== "original-0")]);
+    expect(new Set(ids)).toEqual(new Set(incumbent));
+  });
+
+  it("still restores a unique original that was fully displaced from the incumbent", () => {
+    const env = fixture();
+    env.readTemplateStatements.mockImplementation(source => ({
+      status: "complete",
+      statements: source.root_key === env.original[5]!.source.root_key ? [env.original[5]!.statement] : [],
+      resources: readResources
+    }));
+    const ids = env.run().result.nominations.map(row => row.source.source_id);
+    expect(ids).toEqual(["original-5", ...Array.from({ length: 11 }, (_, i) => `preferred-${i}`),
+      "original-0", "original-1", "original-2", "original-3"]);
+    expect(ids).toHaveLength(16);
   });
 
   it("preserves the paid incumbent after a later unknown root and records all native charges", () => {

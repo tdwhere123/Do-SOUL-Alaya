@@ -299,7 +299,8 @@ class AcquisitionQuery {
   }
 
   private preferredRetentionHook(): {
-    beforeFinalRetention?: (original: readonly (readonly [string, RetainedNomination])[]) => void;
+    beforeFinalRetention?: (original: readonly (readonly [string, RetainedNomination])[],
+      fallbackRestoredKeys: ReadonlySet<string>) => void;
   } {
     const capture = this.capture;
     if (capture?.preferenceRetention === undefined) return {};
@@ -314,9 +315,9 @@ class AcquisitionQuery {
     const template = this.input.source_template;
     if (template !== undefined) {
       return {
-        beforeFinalRetention: original => {
+        beforeFinalRetention: (original, fallbackRestoredKeys) => {
           this.prepaidBaseBytes = restoreSourceTemplate({
-            ...shared(original), proposal: template,
+            ...shared(original), proposal: template, fallbackRestoredKeys,
             observe: observation => this.observe("source_template_restoration", () => ({
               kind: "source_template_restoration", observation, index_binding: this.vectorBinding
             }))

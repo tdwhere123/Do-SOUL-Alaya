@@ -17,8 +17,10 @@ export function restoreSourceTemplate<N extends SourceIndexRootNomination>(input
   association: SourceSemanticResourceBudget; retention: SourcePreferenceRetention;
   result: () => SourceIndexAcquisitionResult; nativeBytes: (bytes: number) => void;
   observe: (observation: SourceTemplateRestorationObservation) => void;
+  fallbackRestoredKeys: ReadonlySet<string>;
 }>): number | undefined {
-  if (input.nominations.size !== input.max_roots || !input.original.some(([key]) => !input.nominations.has(key))) return;
+  const restorable = (key: string) => !input.nominations.has(key) || input.fallbackRestoredKeys.has(key);
+  if (input.nominations.size !== input.max_roots || !input.original.some(([key]) => restorable(key))) return;
   const capture = (rows: readonly N[], meter: SourceSemanticResourceLedger): number => {
     const keys = new Set(rows.map(row => sourceIndexNativeRootKey(row.source)));
     return input.retention.retain({ result: { ...input.result(), nominations: rows },
@@ -39,11 +41,15 @@ export function restoreSourceTemplate<N extends SourceIndexRootNomination>(input
     const inspected = inspectSourceTemplate(input.proposal, eligible.map(([, row]) => row.source),
       input.repository, child, input.nativeBytes);
     observation = { ...inspected, restored: false, authorization: "admitted_prefix" };
-    if (inspected.status !== "unique" || inspected.match === undefined
-      || input.nominations.has(inspected.match.root_key)) return retainedBytes;
+    if (inspected.status !== "unique" || inspected.match === undefined || !restorable(inspected.match.root_key))
+      return retainedBytes;
     const restored = eligible.find(([key]) => key === inspected.match!.root_key)!;
     child.charge(input.nominations.size + 1, (input.nominations.size + 1) * 16, "source template restored order");
-    const rows = [restored[1], ...input.nominations.values()].slice(0, input.max_roots);
+    // Fallback-retained matches already occupy a tail slot: move to index 0 without dropping the 16th.
+    const incumbent = [...input.nominations.values()];
+    const rows = input.nominations.has(restored[0])
+      ? [restored[1], ...incumbent.filter(row => sourceIndexNativeRootKey(row.source) !== restored[0])]
+      : [restored[1], ...incumbent].slice(0, input.max_roots);
     const replacementBytes = capture(rows, child);
     // No selection changes until the entire replacement capture has been funded.
     input.nominations.clear();
