@@ -186,8 +186,33 @@ it("refuses overlay target lookup before transferring a root_key when work or na
     status: "resource_exhausted", reason: "overlay_target_read_budget", resources: { work: 0, native_bytes: 0 } });
   const tiny = environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null,
     { work: 10, native_bytes: 1 });
-  expect(tiny).toMatchObject({ status: "resource_exhausted", reason: "overlay_target_read_budget" });
+  expect(tiny).toMatchObject({ status: "resource_exhausted", reason: "overlay_target_read_budget",
+    resources: { work: 0, native_bytes: 0 } });
   expect(tiny).not.toHaveProperty("root_key");
+  const scalarOnly = environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null,
+    { work: 10, native_bytes: 20 });
+  expect(scalarOnly).toMatchObject({ status: "resource_exhausted", reason: "overlay_target_read_budget",
+    resources: { work: 2, native_bytes: 16 } });
+});
+
+it("keeps a pending overlay row on partial source unavailability and seeds pre-047 statement targets", () => {
+  const { environment, generation, source } = setupStatement();
+  environment.database.connection.prepare("UPDATE source_records SET source_body=NULL, retained_content_bytes=8 WHERE workspace_id=?")
+    .run(WORKSPACE);
+  const partialRead = environment.index.readStatementRelationText(WORKSPACE, generation.generation_id, source.root_key, BUDGET);
+  expect(partialRead).toMatchObject({ status: "unknown", reason: "native_source_unavailable" });
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 1 });
+  // Simulate pre-047 state by clearing pending and re-running the 047 seeding INSERT.
+  environment.database.connection.prepare("DELETE FROM source_statement_relation_pending").run();
+  environment.database.connection.prepare(`INSERT OR IGNORE INTO source_statement_relation_pending (workspace_id, generation_id, root_key)
+    SELECT t.workspace_id, t.generation_id, t.root_key
+    FROM source_index_targets t
+    JOIN source_index_roots r ON r.workspace_id = t.workspace_id AND r.root_key = t.root_key
+    JOIN source_index_generations g ON g.workspace_id = t.workspace_id AND g.generation_id = t.generation_id
+    WHERE g.status NOT IN ('retired', 'failed') AND json_type(r.target_json, '$.auxiliary') = 'object'`).run();
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 1 });
 });
 
 it("dequeues a pending overlay row when the vector is accepted", () => {

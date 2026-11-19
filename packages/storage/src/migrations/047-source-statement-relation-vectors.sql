@@ -37,6 +37,16 @@ CREATE TABLE source_statement_relation_pending (
   PRIMARY KEY (workspace_id, generation_id, root_key)
 );
 
+-- Seed existing non-retired statement targets from pre-047 generations so active
+-- reused generations backfill their relation overlay without a generation rebuild.
+INSERT OR IGNORE INTO source_statement_relation_pending (workspace_id, generation_id, root_key)
+SELECT t.workspace_id, t.generation_id, t.root_key
+FROM source_index_targets t
+JOIN source_index_roots r ON r.workspace_id = t.workspace_id AND r.root_key = t.root_key
+JOIN source_index_generations g ON g.workspace_id = t.workspace_id AND g.generation_id = t.generation_id
+WHERE g.status NOT IN ('retired', 'failed')
+  AND json_type(r.target_json, '$.auxiliary') = 'object';
+
 CREATE TRIGGER source_statement_relation_pending_generation_delete
 AFTER DELETE ON source_index_generations BEGIN
   DELETE FROM source_statement_relation_pending

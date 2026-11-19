@@ -83,7 +83,9 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
   resources.work += guard.resources.work;
   resources.native_bytes += guard.resources.native_bytes;
   if (guard.status !== "ready") {
-    return guard.reason === "read_budget" ? unknown("statement_relation_text_read_budget") : unavailable(guard.reason, true);
+    return guard.status === "partial"
+      ? unknown(guard.reason === "read_budget" ? "statement_relation_text_read_budget" : guard.reason)
+      : unavailable(guard.reason, true);
   }
   const gistBudget = need(1, 0);
   if (gistBudget !== null) return gistBudget;
@@ -155,27 +157,34 @@ type OverlayTargetRead = Readonly<{ status: "ready"; root_key: string | null; re
   Readonly<{ status: "resource_exhausted"; reason: string; resources: SourceIndexResources }> |
   Exclude<SourceIndexReadResult, { status: "ready" }>;
 
+const OVERLAY_SEEK_SCALAR_BYTES = 16;
+
 export function nextStatementRelationOverlayTarget(database: StorageDatabase, workspaceId: string, generationId: string,
   afterRootKey: string | null, budget: SourceIndexBudget): OverlayTargetRead {
   BoundedIdSchema.parse(workspaceId);
   assertIndexBudget(budget);
   const resources = { work: 0, native_bytes: 0 };
-  if (budget.work < 2 || budget.native_bytes < 1) {
+  if (budget.work < 2 || budget.native_bytes < OVERLAY_SEEK_SCALAR_BYTES) {
     return { status: "resource_exhausted", reason: "overlay_target_read_budget", resources };
   }
   try {
-    const generation = readSourceIndexGeneration(database, workspaceId, generationId);
+    const genExists = cachedReadStatement(database,
+      "SELECT 1 AS ok FROM source_index_generations WHERE workspace_id=? AND generation_id=?")
+      .get(workspaceId, generationId);
     resources.work++;
-    if (generation === null) return { status: "unbound", reason: "missing_generation", resources };
+    resources.native_bytes += 8;
+    if (genExists === undefined) return { status: "unbound", reason: "missing_generation", resources };
+    const maxKeyBytes = budget.native_bytes - OVERLAY_SEEK_SCALAR_BYTES;
     const raw = cachedReadStatement(database, `SELECT CASE WHEN octet_length(root_key) <= ? THEN root_key ELSE NULL END AS root_key,
       octet_length(root_key) AS key_bytes FROM ${PENDING_TABLE}
       WHERE workspace_id = ? AND generation_id = ? AND root_key > ? ORDER BY root_key LIMIT 1`)
-      .get(budget.native_bytes, workspaceId, generationId, afterRootKey ?? "");
+      .get(maxKeyBytes, workspaceId, generationId, afterRootKey ?? "");
     resources.work++;
     if (raw === undefined) return { status: "ready", root_key: null, resources };
+    resources.native_bytes += 8;
     const row = readRecord(raw, "statement relation overlay target");
     const keyBytes = readIntegerField(row, "key_bytes");
-    if (keyBytes > budget.native_bytes) {
+    if (keyBytes > maxKeyBytes) {
       return { status: "resource_exhausted", reason: "overlay_target_read_budget", resources };
     }
     const root_key = readStringField(row, "root_key");
